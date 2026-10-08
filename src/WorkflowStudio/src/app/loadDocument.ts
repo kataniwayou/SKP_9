@@ -2,7 +2,7 @@ import type { ApiResult, StudioApi } from '../api/client';
 import { graphFromDto, processorFromDto, schemaFromDto, stepFromDto } from '../api/toModel';
 import { parseLayout } from '../layout/layoutDoc';
 import { place, type Placement } from '../layout/placement';
-import { routeWires } from '../layout/wires';
+import { routeWires } from '../layout/circuitRoute';
 import type { Graph, Id } from '../model/graph';
 import { reachableStepIds } from '../model/reachability';
 import type { StudioDocument } from './document';
@@ -73,7 +73,7 @@ async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<StudioDoc
   // routeWires only wires ends that are both placed and known, so every wire end has a position.
   const wires = routeWires({ entryStepIds: graph.workflow.entryStepIds, steps: graph.steps, brokenEdges: new Set<string>() }, placement);
 
-  return { ok: true, value: { graph, parkedIds, placement, wires, loose: [] } };
+  return { ok: true, value: { graph, parkedIds, placement, wires } };
 }
 
 /** GET /schemas/{id} for every processor slot the graph names but does not carry (parked steps only). */

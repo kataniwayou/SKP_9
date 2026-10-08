@@ -18,7 +18,7 @@ test.beforeEach(async ({ page }) => {
 const field = (page: Page, label: string): Locator => inspector(page).getByLabel(label, { exact: true });
 const pill = (page: Page): Locator => inspector(page).locator('.kindpill');
 const node = (panel: Locator, id: string): Locator => panel.locator(`.react-flow__node[data-id="${id}"]`);
-const looseWires = (panel: Locator): Locator => panel.locator('.react-flow__edge[data-id^="loose:"]');
+const newWires = (panel: Locator): Locator => panel.locator('.react-flow__edge[data-id^="w:"]');
 
 async function get<T>(request: APIRequestContext, path: string): Promise<T> {
   const r = await request.get(`/api/v1/${path}`);
@@ -53,7 +53,7 @@ test('an invalid design is stored but not applied: Problems and Output say why, 
   await openWorkflow(page, t.workflow);
   const panel = documentPanel(page, t.workflow);
 
-  // on the canvas: a new wire from B's port, released on empty canvas, is a loose wire
+  // on the canvas: a new wire from B's port, released on empty canvas, is a grey wire open at its head (plan 9)
   const b = node(panel, t.stepBId);
   await b.hover();
   const port = await centreOf(b.locator('.nx-port'));
@@ -62,9 +62,9 @@ test('an invalid design is stored but not applied: Problems and Output say why, 
   await page.mouse.move(port.x, port.y);
   await page.mouse.down();
   await page.mouse.move(empty.x, empty.y, { steps: 12 });
-  await expect(panel.locator('.design-drop-label')).toHaveText('loose wire');
+  await expect(panel.locator('.design-drop-label')).toHaveText('move here');
   await page.mouse.up();
-  await expect(looseWires(panel)).toHaveCount(1);
+  await expect(newWires(panel)).toHaveCount(1);
 
   // in the Inspector: step A gets a description and a version BaseApi refuses
   await selectStep(page, panel, t.stepId);
@@ -89,7 +89,7 @@ test('an invalid design is stored but not applied: Problems and Output say why, 
   await fresh.reload();
   await openWorkflow(fresh, t.workflow);
   const again = documentPanel(fresh, t.workflow);
-  await expect(looseWires(again)).toHaveCount(1);
+  await expect(newWires(again)).toHaveCount(1);
   await selectStep(fresh, again, t.stepId);
   await expect(field(fresh, 'Version')).toHaveValue('abc');
   await expect(field(fresh, 'Description')).toHaveValue('designed');
@@ -98,7 +98,7 @@ test('an invalid design is stored but not applied: Problems and Output say why, 
   await fresh.close();
 });
 
-test('fixed and saved again, the design is applied: BaseApi holds it, the stored design is emptied, the loose wire stays in the layout', async ({ page, request }) => {
+test('fixed and saved again, the design is applied: BaseApi holds it, the stored design is emptied, the new wire stays in the layout', async ({ page, request }) => {
   await openWorkflow(page, t.workflow);
   const panel = documentPanel(page, t.workflow);
   await selectStep(page, panel, t.stepId);
@@ -114,7 +114,7 @@ test('fixed and saved again, the design is applied: BaseApi holds it, the stored
 
   await page.reload();
   const again = documentPanel(page, t.workflow);
-  await expect(looseWires(again)).toHaveCount(1);
+  await expect(newWires(again)).toHaveCount(1);
   await expect(page.getByText('● design draft')).toHaveCount(0);
 });
 
@@ -152,32 +152,34 @@ test('one Save applies changes of every kind: a deleted wire, a removed assignme
   expect(JSON.parse(copy.definition)).toEqual({ type: 'string' });
 });
 
-test('an entry wire whose tail was dragged off the hub is never sent as an entry: Save sends an empty entry list, and the layout keeps the wire loose at its start', async ({ page }) => {
+test('an entry wire whose tail was dragged off the hub is never sent as an entry: Save sends an empty entry list, and the layout keeps the wire open at its tail', async ({ page }) => {
   await openWorkflow(page, t.workflow);
   const panel = documentPanel(page, t.workflow);
   const wireId = `wf->${t.stepId}`;
   const p = await pointOnWire(panel, wireId);
   await page.mouse.click(p.x, p.y);
-  const tail = await centreOf(panel.locator(`.design-wire[data-wire="${wireId}"] .design-handle.end[data-end="source"]`));
+  const tail = await centreOf(panel.locator(`.design-wire[data-wire="${wireId}"] .design-handle.end[data-end="tail"]`));
   const area = (await panel.locator('.studio-canvas').boundingBox())!;
-  const empty = { x: area.x + area.width - 80, y: area.y + area.height - 120 };
+  // not where the first test left its new wire's open head (bottom right): a spot higher up the right side
+  const empty = { x: area.x + area.width - 80, y: area.y + area.height * 0.3 };
   await page.mouse.move(tail.x, tail.y);
   await page.mouse.down();
   await page.mouse.move(empty.x, empty.y, { steps: 12 });
-  await expect(panel.locator('.design-drop-label')).toHaveText('loose wire');
+  await expect(panel.locator('.design-drop-label')).toHaveText('move here');
   await page.mouse.up();
-  await expect(panel.locator(`.react-flow__edge[data-id="${wireId}"]`)).toHaveCount(0);
+  await expect(panel.locator(`.react-flow__edge[data-id="${wireId}"] circle.nx-src`)).toHaveCount(1);
 
   const sent = page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith(`/workflows/${t.workflow.id}/design`));
   await save(page);
-  const body = (await sent).postDataJSON() as { workflow: { entryStepIds: string[] | null }; steps: { nextStepIds: string[] | null }[]; layout: { loose: Record<string, { open?: string; target?: string }> } };
+  const body = (await sent).postDataJSON() as { workflow: { entryStepIds: string[] | null }; steps: { nextStepIds: string[] | null }[]; layout: { v: number; wires: Record<string, { tail: { on: string } }> } };
   expect(body.workflow.entryStepIds).toEqual([]);
   expect(body.steps.flatMap((s) => s.nextStepIds ?? [])).not.toContain(t.stepId);
-  expect(Object.values(body.layout.loose)).toContainEqual(expect.objectContaining({ open: 'start', target: t.stepId }));
+  expect(body.layout.v).toBe(2);
+  expect(body.layout.wires[wireId]!.tail.on).toBe('open');
 
-  // a fresh read keeps the wire loose at its start
+  // a fresh read keeps the wire: open at its tail, its arrow head on its step, in its step's colour, dashed
   await page.reload();
   const again = documentPanel(page, t.workflow);
-  await expect(again.locator(`.react-flow__edge[data-id="${wireId}"]`)).toHaveCount(0);
-  await expect(looseWires(again).locator('.nx-head')).toHaveCount(1);
+  await expect(again.locator(`.react-flow__edge[data-id="${wireId}"] .nx-head`)).toHaveCount(1);
+  await expect(again.locator(`.react-flow__edge[data-id="${wireId}"] path.w`)).toHaveAttribute('stroke', '#2DD4BF');
 });

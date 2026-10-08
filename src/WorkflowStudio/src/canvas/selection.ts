@@ -89,14 +89,14 @@ export function selectionForPicks(picks: readonly Pick[], clicked: { id: string;
   return clicked && clicked.id === id ? clicked.selection : selectionOfNode(id, graph);
 }
 
-/** The block under a dragged wire end: outlined green when the drop attaches, grey when the wire becomes loose there (plan 8 §5), red when it snaps back (spec §4.4). */
+/** The block under a dragged wire end: outlined green when the drop connects, grey when the end is open there (a cache), red when it snaps back (plan 9 §6). */
 export const DROP_OK_CLASS = 'drop-ok';
-export const DROP_LOOSE_CLASS = 'drop-loose';
+export const DROP_MOVE_CLASS = 'drop-move';
 export const DROP_NO_CLASS = 'drop-no';
 
 /** The nodes with the drop outline on the block under a dragged wire end. Pure; with no hint (or none over a block) the same array comes back. */
-export function withHint(nodes: StudioNode[], hint: { id: string | null; tone: 'ok' | 'loose' | 'no' } | null): StudioNode[] {
+export function withHint(nodes: StudioNode[], hint: { id: string | null; tone: 'ok' | 'move' | 'no' } | null): StudioNode[] {
   if (hint === null || hint.id === null) return nodes;
-  const cls = hint.tone === 'ok' ? DROP_OK_CLASS : hint.tone === 'loose' ? DROP_LOOSE_CLASS : DROP_NO_CLASS;
+  const cls = hint.tone === 'ok' ? DROP_OK_CLASS : hint.tone === 'move' ? DROP_MOVE_CLASS : DROP_NO_CLASS;
   return nodes.map((n) => (n.id === hint.id ? { ...n, className: withClass(n.className, cls) } : n));
 }

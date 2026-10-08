@@ -131,7 +131,8 @@ export function nearestSegment(e: Ends, b: Bends, p: { x: number; y: number }): 
   return best;
 }
 
-const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+/** A finite number (what the session and layout readers accept). */
+export const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 /** Bends read back from a session or a stored layout; null when the value is not of their shape. */
 export function parseBends(v: unknown): Bends | null {

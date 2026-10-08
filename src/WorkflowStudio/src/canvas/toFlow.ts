@@ -1,15 +1,14 @@
 import { Position, type NodeHandle } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
 import { CACHE_H, CACHE_W, PMID, SPHERE_R, STEP_H, STEP_W } from '../layout/geometry';
-import { tetherPoints, type Joint } from '../layout/wires';
+import { tetherPoints } from '../layout/wires';
 import { SPHERE_NODE_ID, cacheNodeId } from '../layout/nodeIds';
 import { WORKFLOW_SOURCE } from '../layout/ports';
 import { assignmentByStep, payloadKeyCount } from '../model/assignments';
 import { conditionInfo } from '../model/entryConditions';
 import { entityName } from '../model/entityNames';
 import type { Cache, Graph, Id, Processor, Step } from '../model/graph';
-import { LOOSE_PREFIX } from '../design/draft';
-import { LOOSE_COLOUR, type CableEdgeType } from './edges/CableEdge';
+import { UNDECIDED_COLOUR, type CableEdgeType } from './edges/CableEdge';
 import type { TetherEdgeType } from './edges/TetherEdge';
 import { createTextFitter, FONT, type FittedText, type TextFitter } from './fitText';
 import type { CacheNodeData, CacheNodeType } from './nodes/CacheNode';
@@ -21,9 +20,6 @@ export type StudioEdge = CableEdgeType | TetherEdgeType;
 
 export { SPHERE_NODE_ID, cacheNodeId } from '../layout/nodeIds';
 
-const samePt = (a: readonly number[], b: readonly number[]) => a[0] === b[0] && a[1] === b[1];
-/** A joined wire's branch and dots; a split on the contact is the same mark: one dot (plan 7 §3). */
-const jointMarks = (j: Joint) => ({ branch: j.branch, joints: j.split && !samePt(j.split, j.contact) ? [j.contact, j.split] : [j.contact] });
 const handle = (id: string, type: 'source' | 'target', position: Position, x: number, y: number): NodeHandle =>
   ({ id, type, position, x, y, width: 1, height: 1 });
 
@@ -40,12 +36,10 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
   const ins = new Map<Id, number[]>(), outs = new Map<Id, number[]>();
   for (const w of wires) {
     const last = w.points[w.points.length - 1]!, first = w.points[0]!;
-    const target = placement.steps.get(w.target)!;
-    ins.set(w.target, [...(ins.get(w.target) ?? []), last[1] - target.y]);
-    if (w.source !== WORKFLOW_SOURCE) {
-      const source = placement.steps.get(w.source)!;
-      outs.set(w.source, [...(outs.get(w.source) ?? []), first[1] - source.y]);
-    }
+    const target = w.target === null ? undefined : placement.steps.get(w.target);
+    if (target) ins.set(w.target!, [...(ins.get(w.target!) ?? []), last[1] - target.y]);
+    const source = w.source === null || w.source === WORKFLOW_SOURCE ? undefined : placement.steps.get(w.source);
+    if (source) outs.set(w.source!, [...(outs.get(w.source!) ?? []), first[1] - source.y]);
   }
 
   const nodes: StudioNode[] = [];
@@ -55,7 +49,7 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
     width: 2 * SPHERE_R, height: 2 * SPHERE_R, draggable: false, selectable: false,
     handles: [
       handle('out', 'source', Position.Right, 2 * SPHERE_R, SPHERE_R), handle('down', 'source', Position.Bottom, SPHERE_R, 2 * SPHERE_R),
-      // a loose wire from the hub ends on the hub itself: React Flow needs a target handle (plan 8 §5)
+      // a wire on no terminal hangs on the hub: React Flow needs a target handle (plan 9)
       handle('loose', 'target', Position.Right, 2 * SPHERE_R, SPHERE_R),
     ],
     data: hubData(graph.workflow),
@@ -97,49 +91,27 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
     });
   }
 
-  const edges: StudioEdge[] = wires.map((w, i) => ({
-    id: w.id, type: 'cable', source: w.source === WORKFLOW_SOURCE ? SPHERE_NODE_ID : w.source, target: w.target,
-    sourceHandle: 'out', targetHandle: 'in', selectable: false, focusable: false,
-    // the gallery staggers its pulses by 0.41 s a wire; `|| 0` keeps the first one at +0, not -0
-    data: {
-      points: w.points, colour: conditionInfo(w.condition).colour, broken: w.broken, delay: -Math.round(i * 41) / 100 || 0,
-      ...(w.joint ? jointMarks(w.joint) : {}),
-    },
-  }));
+  // every wire of the circuit (plan 9 §5): React Flow needs a node at each end, so a wire hangs on its tail's
+  // terminal, else its head's step, else the hub (whose `loose` target handle takes it)
+  const edges: StudioEdge[] = wires.map((w, i) => {
+    const tailNode = w.source === null ? null : w.source === WORKFLOW_SOURCE ? SPHERE_NODE_ID : w.source;
+    const node = tailNode ?? w.target ?? SPHERE_NODE_ID;
+    return {
+      id: w.id, type: 'cable', source: node, target: w.target ?? node,
+      sourceHandle: 'out', targetHandle: w.target === null && node === SPHERE_NODE_ID ? 'loose' : 'in', selectable: false, focusable: false,
+      // the gallery staggers its pulses by 0.41 s a wire; `|| 0` keeps the first one at +0, not -0
+      data: {
+        points: w.points, colour: w.condition === null ? UNDECIDED_COLOUR : conditionInfo(w.condition).colour, broken: w.broken,
+        delay: -Math.round(i * 41) / 100 || 0, dashed: !w.solid, tailOn: w.tailOn, headOn: w.headOn, short: w.short,
+      },
+    };
+  });
   for (const [id, position] of placement.caches) {
     if (!graph.caches.has(id)) continue;
     edges.push({
       id: `tether:${id}`, type: 'tether', source: SPHERE_NODE_ID, target: cacheNodeId(id),
       sourceHandle: 'down', targetHandle: 'in', selectable: false, focusable: false,
       data: { points: tetherPoints(placement.sphere, position) },
-    });
-  }
-
-  // loose wires (plan 8 §5): drawn by the cable edge from their source; never part of the wiring
-  for (const l of doc.loose) {
-    // open at both ends: grey, on the hub (React Flow needs a node), an open circle at each end
-    if (l.open === 'both') {
-      edges.push({
-        id: `${LOOSE_PREFIX}${l.id}`, type: 'cable', source: SPHERE_NODE_ID, target: SPHERE_NODE_ID,
-        sourceHandle: 'out', targetHandle: 'loose', selectable: false, focusable: false,
-        data: { points: l.points, colour: LOOSE_COLOUR, broken: false, delay: 0, loose: true, openBoth: true },
-      });
-      continue;
-    }
-    // open at its start: on its target, in its colour, its head and junction as a connected wire's
-    if (l.open === 'start') {
-      edges.push({
-        id: `${LOOSE_PREFIX}${l.id}`, type: 'cable', source: l.target, target: l.target,
-        sourceHandle: 'out', targetHandle: 'in', selectable: false, focusable: false,
-        data: { points: l.points, colour: conditionInfo(l.condition).colour, broken: false, delay: 0, loose: true, openStart: true, ...(l.joint ? jointMarks(l.joint) : {}) },
-      });
-      continue;
-    }
-    const node = l.source === WORKFLOW_SOURCE ? SPHERE_NODE_ID : l.source;
-    edges.push({
-      id: `${LOOSE_PREFIX}${l.id}`, type: 'cable', source: node, target: node,
-      sourceHandle: 'out', targetHandle: l.source === WORKFLOW_SOURCE ? 'loose' : 'in', selectable: false, focusable: false,
-      data: { points: l.points, colour: LOOSE_COLOUR, broken: false, delay: 0, loose: true },
     });
   }
 

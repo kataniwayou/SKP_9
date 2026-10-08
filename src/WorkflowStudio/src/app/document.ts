@@ -1,10 +1,10 @@
 import type { Id, Graph } from '../model/graph';
 import type { Placement } from '../layout/placement';
-import type { LooseRoute, WireRoute } from '../layout/wires';
+import type { WireRoute } from '../layout/circuitRoute';
 
 /**
- * One opened workflow, ready to draw: the graph (unwired steps included), where every block sits, every
- * wire's route, and the loose wires (plan 8 §5). Opening reads with GETs only: nothing is judged on load.
+ * One opened workflow, ready to draw: the graph (unwired steps included), where every block sits, and every wire
+ * of its circuit as drawn (plan 9). Opening reads with GETs only: nothing is judged on load.
  */
 export interface StudioDocument {
   graph: Graph;
@@ -12,5 +12,4 @@ export interface StudioDocument {
   parkedIds: Id[];
   placement: Placement;
   wires: WireRoute[];
-  loose: LooseRoute[];
 }

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { StudioDocument } from '../app/document';
-import { assignmentDto, graphDto, stepDto } from '../api/fixtures';
+import { assignmentDto, graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { EMPTY_INSPECTOR } from './inspector';
-import { addWire, EMPTY_DRAFT, reattach } from '../design/draft';
+import { addCircuitWire, setEnd } from '../circuit/circuit';
+import { circuitOf, EMPTY_DRAFT, withCircuit } from '../design/draft';
 import { EMPTY_EDITS } from '../design/design';
 import { restoredState } from '../app/session';
 import { activeDocument, canSave, designDirty, INITIAL_STATE, inspectorKey, reduce, shownTargetOf, type StudioAction, type StudioState } from './studioState';
@@ -193,29 +194,33 @@ describe('undo, redo and Discard design drop picks the document no longer has', 
   };
   const savedOf = (s: StudioState) => (s.docs[0]!.status as { kind: 'ready'; doc: StudioDocument }).doc;
 
+  const withNew = (s: StudioState) => {
+    const saved = savedOf(s);
+    return withCircuit(EMPTY_DRAFT, saved, addCircuitWire(circuitOf(saved, EMPTY_DRAFT), 'w:n1', { tail: { on: 'step', step: 's2', y: null }, head: { on: 'step', step: 's3', y: null } }));
+  };
+
   it('a new wire picked, then undone: its pick is gone; redo does not bring the pick back, the wire stays pickable', async () => {
     let s = await ready();
-    const draft = addWire(EMPTY_DRAFT, savedOf(s), 's2', 's3');
-    s = reduce(s, { type: 'design', workflowId: 'wf1', draft, picks: [{ kind: 'wire', id: 's2->s3' }, { kind: 'node', id: 's1' }] });
+    s = reduce(s, { type: 'design', workflowId: 'wf1', draft: withNew(s), picks: [{ kind: 'wire', id: 'w:n1' }, { kind: 'node', id: 's1' }] });
     s = reduce(s, { type: 'undo', workflowId: 'wf1' });
     expect(s.docs[0]!.picks).toEqual([{ kind: 'node', id: 's1' }]);
     s = reduce(s, { type: 'redo', workflowId: 'wf1' });
     expect(s.docs[0]!.picks).toEqual([{ kind: 'node', id: 's1' }]);
   });
 
-  it('a re-attached wire picked, then undone: its pick is gone and the saved wire is not picked', async () => {
+  it('a wire whose end moved keeps its pick through undo: a wire never changes its id (plan 9)', async () => {
     let s = await ready();
-    const draft = reattach(EMPTY_DRAFT, savedOf(s), 's1->s3', 'source', 's2');
-    s = reduce(s, { type: 'design', workflowId: 'wf1', draft, picks: [{ kind: 'wire', id: 's2->s3' }] });
+    const saved = savedOf(s);
+    const draft = withCircuit(EMPTY_DRAFT, saved, setEnd(circuitOf(saved, EMPTY_DRAFT), 's1->s3', 'tail', { on: 'step', step: 's2', y: null }));
+    s = reduce(s, { type: 'design', workflowId: 'wf1', draft, picks: [{ kind: 'wire', id: 's1->s3' }] });
     s = reduce(s, { type: 'undo', workflowId: 'wf1' });
-    expect(s.docs[0]!.picks).toEqual([]);
+    expect(s.docs[0]!.picks).toEqual([{ kind: 'wire', id: 's1->s3' }]);
   });
 
   it('Discard design keeps picks that still exist (saved wires, blocks, the hub)', async () => {
     let s = await ready();
     const picks = [{ kind: 'wire', id: 'wf->s1' }, { kind: 'wire', id: 's1->s2' }, { kind: 'node', id: 'wf' }, { kind: 'node', id: 's3' }] as const;
-    const draft = addWire(EMPTY_DRAFT, savedOf(s), 's2', 's3');
-    s = reduce(s, { type: 'design', workflowId: 'wf1', draft, picks: [...picks, { kind: 'wire', id: 's2->s3' }] });
+    s = reduce(s, { type: 'design', workflowId: 'wf1', draft: withNew(s), picks: [...picks, { kind: 'wire', id: 'w:n1' }] });
     s = reduce(s, { type: 'discardDesign', workflowId: 'wf1' });
     expect(s.docs[0]!.picks).toEqual(picks);
   });
@@ -320,5 +325,20 @@ describe('the design (plan 8)', () => {
     expect(s.output.at(-1)!.text).toBe('Saved and applied');
     s = reduce(s, { type: 'saveFailed', workflowId: 'wf1', at: '2026-10-07T12:02:00Z', message: 'Network error: down' });
     expect(s.output.at(-1)!.text).toBe('Not saved: Network error: down');
+  });
+});
+
+describe('opening a design (plan 9 §8)', () => {
+  it('a stored plan 7 junction whose meaning differs from the loaded graph is drawn plain on load, and the design is not dirty', async () => {
+    const doc4 = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's3'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3', { nextStepIds: ['s4'] }), stepDto('s4')],
+      layout: { routes: { 's3->s4': { bends: null, landing: null, contact: { host: 's1->s2', at: 40 } } } },
+    } as never));
+    const s = run(open('wf1'), { type: 'loaded', workflowId: 'wf1', doc: doc4 });
+    const d = s.docs[0]!;
+    expect(d.design.draft.wires!['s3->s4']!.head).toEqual({ on: 'step', step: 's4', y: null });
+    expect(designDirty(d)).toBe(false);
+    expect(canSave(d)).toBe(false);
   });
 });

@@ -71,7 +71,7 @@ describe('Inspector', () => {
     expect(await screen.findByText('2 items selected')).toBeInTheDocument();
 
     act(() => store.dispatch({ type: 'pick', workflowId: 'wf1', picks: [{ kind: 'wire', id: 's1->s2' }] }));
-    expect(screen.getByText('Wire: fetch_1.0.0-s1 → store_1.0.0-s2')).toBeInTheDocument();
+    expect(screen.getByText(/^Wire: fetch_1\.0\.0-s1 → store_1\.0\.0-s2 · /)).toBeInTheDocument();
     // undo or redo can leave a pick naming a wire that is gone
     act(() => store.dispatch({ type: 'pick', workflowId: 'wf1', picks: [{ kind: 'wire', id: 'gone->s9' }] }));
     expect(screen.getByText('Wire: gone → s9')).toBeInTheDocument();

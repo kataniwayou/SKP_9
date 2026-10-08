@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { StudioDocument } from '../app/document';
 import { AUDIT } from '../model/fixtures';
 import type { Graph, Step } from '../model/graph';
+import type { WireRoute } from '../layout/circuitRoute';
+import { UNDECIDED_COLOUR } from './edges/CableEdge';
 import { createTextFitter, FONT, MEASURED_FONTS } from './fitText';
 import { cacheNodeId, SPHERE_NODE_ID, toFlow } from './toFlow';
 
@@ -32,10 +34,9 @@ function doc(over: Partial<Graph> = {}, parkedIds: string[] = []): StudioDocumen
       caches: new Map([['c1', { x: 32, y: 288 }]]),
     },
     wires: [
-      { id: 'wf->a', source: 'wf', target: 'a', points: [[224, 128], [288, 128]], condition: 1, broken: false },
-      { id: 'a->b', source: 'a', target: 'b', points: [[512, 128], [576, 128]], condition: 2, broken: true },
+      { id: 'wf->a', source: 'wf', target: 'a', points: [[224, 128], [288, 128]], core: { ends: { sx: 224, sy: 128, tx: 288, ty: 128 }, points: [[224, 128], [288, 128]] }, condition: 1, solid: true, tailOn: 'terminal', headOn: 'terminal', short: false, broken: false },
+      { id: 'a->b', source: 'a', target: 'b', points: [[512, 128], [576, 128]], core: { ends: { sx: 512, sy: 128, tx: 576, ty: 128 }, points: [[512, 128], [576, 128]] }, condition: 2, solid: true, tailOn: 'terminal', headOn: 'terminal', short: false, broken: true },
     ],
-    loose: [],
   };
 }
 
@@ -62,7 +63,7 @@ describe('toFlow', () => {
     const ab = edges.find((e) => e.id === 'a->b')!;
 
     expect([ab.source, ab.target, ab.type]).toEqual(['a', 'b', 'cable']);
-    expect(ab.data).toEqual({ points: [[512, 128], [576, 128]], colour: '#FF7A66', broken: true, delay: -0.41 });
+    expect(ab.data).toEqual({ points: [[512, 128], [576, 128]], colour: '#FF7A66', broken: true, delay: -0.41, dashed: false, tailOn: 'terminal', headOn: 'terminal', short: false });
     expect(edges.find((e) => e.id === 'wf->a')!.data).toMatchObject({ delay: 0 });
     expect(edges.find((e) => e.id === 'wf->a')!.source).toBe(SPHERE_NODE_ID);
   });
@@ -147,39 +148,24 @@ describe('toFlow', () => {
     expect((p.data as { tip: string }).tip).not.toContain('parked');
   });
 
-  it('draws each loose wire as a loose cable edge on its source node; the hub can hold one (plan 8 §5)', () => {
-    const d: StudioDocument = { ...doc(), loose: [{ id: 'l1', source: 'a', points: [[512, 128], [704, 400]] }, { id: 'l2', source: 'wf', points: [[224, 128], [304, 304]] }] };
-    const { nodes, edges } = toFlow(d, fitter);
-    const l1 = edges.find((e) => e.id === 'loose:l1')!;
-    expect([l1.source, l1.target, l1.targetHandle]).toEqual(['a', 'a', 'in']);
-    expect(l1.data).toMatchObject({ loose: true, points: [[512, 128], [704, 400]] });
-    const l2 = edges.find((e) => e.id === 'loose:l2')!;
-    expect([l2.source, l2.target, l2.targetHandle]).toEqual(['wf', 'wf', 'loose']);
-    expect(nodes.find((n) => n.id === 'wf')!.handles!.some((h) => h.id === 'loose' && h.type === 'target')).toBe(true);
-  });
-
-  it('draws a wire loose at its start in its target colour, on its target node, with its junction marks; a head-open one stays grey', () => {
-    const joint = { host: 'wf->a', contact: [256, 128] as [number, number], split: [256, 128] as [number, number], branch: [[256, 128], [576, 112]] as [number, number][], own: [], ownEnds: { sx: 0, sy: 0, tx: 0, ty: 0 } };
-    const d: StudioDocument = { ...doc(), loose: [
-      { id: 't1', open: 'start', target: 'b', condition: 2, points: [[400, 400], [576, 112]] },
-      { id: 't2', open: 'start', target: 'b', condition: 2, points: [[400, 400], [256, 128]], joint },
-      { id: 'l1', source: 'a', points: [[512, 128], [704, 400]] },
+  it('draws every wire of the circuit as a cable edge with its family, dash and end kinds; a wire on no terminal hangs on the hub (plan 9 §5)', () => {
+    const route = (over: Partial<WireRoute>): WireRoute => ({
+      id: 'x', source: null, target: null, points: [[0, 0], [64, 0]], core: { ends: { sx: 0, sy: 0, tx: 64, ty: 0 }, points: [[0, 0], [64, 0]] },
+      condition: null, solid: false, tailOn: 'open', headOn: 'open', short: false, broken: false, ...over,
+    });
+    const d: StudioDocument = { ...doc(), wires: [
+      route({ id: 'w:1' }),
+      route({ id: 'w:2', source: 'a', tailOn: 'terminal', headOn: 'junction', condition: 2, short: true }),
+      route({ id: 'w:3', target: 'b', tailOn: 'junction', headOn: 'terminal', condition: 2, solid: true }),
     ] };
     const { edges } = toFlow(d, fitter);
-    const colourOf = (id: string) => (edges.find((e) => e.id === id)!.data as { colour: string }).colour;
-    const t1 = edges.find((e) => e.id === 'loose:t1')!;
-    expect([t1.source, t1.target, t1.sourceHandle, t1.targetHandle]).toEqual(['b', 'b', 'out', 'in']);
-    expect(t1.data).toMatchObject({ loose: true, openStart: true, points: [[400, 400], [576, 112]] });
-    expect(colourOf('loose:t1')).toBe(colourOf('a->b'));
-    expect(colourOf('loose:l1')).not.toBe(colourOf('a->b'));
-    expect(edges.find((e) => e.id === 'loose:t2')!.data).toMatchObject({ branch: joint.branch, joints: [joint.contact] });
-  });
-
-  it('draws a wire open at both ends grey, on the hub, open at both ends', () => {
-    const d: StudioDocument = { ...doc(), loose: [{ id: 'b1', open: 'both', points: [[400, 400], [704, 600]] }] };
-    const e = toFlow(d, fitter).edges.find((x) => x.id === 'loose:b1')!;
-    expect([e.source, e.target, e.targetHandle]).toEqual(['wf', 'wf', 'loose']);
-    expect(e.data).toMatchObject({ loose: true, openBoth: true, colour: '#8A97A8', points: [[400, 400], [704, 600]] });
+    const e = (id: string) => edges.find((x) => x.id === id)!;
+    expect([e('w:1').source, e('w:1').target, e('w:1').targetHandle]).toEqual([SPHERE_NODE_ID, SPHERE_NODE_ID, 'loose']);
+    expect(e('w:1').data).toMatchObject({ colour: UNDECIDED_COLOUR, dashed: true, tailOn: 'open', headOn: 'open' });
+    expect([e('w:2').source, e('w:2').target, e('w:2').targetHandle]).toEqual(['a', 'a', 'in']);
+    expect(e('w:2').data).toMatchObject({ colour: '#FF7A66', short: true, headOn: 'junction', dashed: true });
+    expect([e('w:3').source, e('w:3').target, e('w:3').targetHandle]).toEqual(['b', 'b', 'in']);
+    expect(e('w:3').data).toMatchObject({ dashed: false, tailOn: 'junction' });
   });
 
   it('cuts long names to fit and keeps the full text for the tooltip (review focus 5)', () => {

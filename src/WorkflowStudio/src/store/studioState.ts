@@ -5,10 +5,10 @@ import {
   createAssignment, EMPTY_EDITS, hasGraphChanges, removeAssignment, revertEntity, sameDesign, setField, storedDesignOf,
   type Design, type EntityEdits, type FieldValue,
 } from '../design/design';
-import { EMPTY_DRAFT, entriesOf, LOOSE_PREFIX, nextOf, wireEnds, type Draft } from '../design/draft';
+import { circuitOf, EMPTY_DRAFT, type Draft } from '../design/draft';
 import { commit, historyOf, redo, undo, type DesignHistory } from '../design/history';
+import { settleDesign } from '../design/settle';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
-import { WORKFLOW_SOURCE } from '../layout/ports';
 import { EMPTY_INSPECTOR, type InspectorState } from './inspector';
 import { currentTarget, editTargetOf, rootTarget, targetKey, type InspectorTarget } from './inspectorTarget';
 import { picksOf, samePicks, type Pick } from './picks';
@@ -135,21 +135,20 @@ const withPicks = (d: OpenDocument, picks: Pick[]): OpenDocument =>
 
 /**
  * After undo, redo or Discard design: the picks naming what the saved workflow with `draft` over it has.
- * A wire pick stays only while its source still lists its target. A document not ready keeps its picks.
+ * A wire pick stays while the circuit has the wire. A document not ready keeps its picks.
  */
 function prunedPicks(d: OpenDocument, draft: Draft): Pick[] {
   if (d.status.kind !== 'ready') return d.picks;
   const saved = d.status.doc;
+  const wires = circuitOf(saved, draft);
   const exists = (p: Pick): boolean => {
     if (p.kind === 'node') {
       if (p.id === SPHERE_NODE_ID) return true;
       if (p.id.startsWith(CACHE_NODE_PREFIX)) return saved.placement.caches.has(p.id.slice(CACHE_NODE_PREFIX.length));
       return saved.placement.steps.has(p.id);
     }
-    if (p.id.startsWith(LOOSE_PREFIX)) return Object.hasOwn(draft.loose, p.id.slice(LOOSE_PREFIX.length));
-    const { source, target } = wireEnds(p.id);
-    if (!saved.graph.steps.has(target)) return false;
-    return (source === WORKFLOW_SOURCE ? entriesOf(saved, draft) : nextOf(saved, draft, source)).includes(target);
+    // a wire keeps its id for life (plan 9): its pick stays while the circuit has it
+    return Object.hasOwn(wires, p.id);
   };
   const kept = d.picks.filter(exists);
   return kept.length === d.picks.length ? d.picks : kept;
@@ -171,9 +170,12 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
     }
     case 'loaded':
       return update(state, action.workflowId, (d) => {
-        const stored = storedDesignOf(action.doc.graph.design, action.doc.graph.layout);
-        // a refresh's unsaved edits win over the stored design (spec §3.2)
-        const design = d.restored ? {} : { design: historyOf(stored.draft), edits: stored.edits };
+        const stored = settleDesign(storedDesignOf(action.doc.graph.design, action.doc.graph.layout), action.doc);
+        // a refresh's unsaved edits win over the stored design (spec §3.2); a plan 8 session's wires are settled too (plan 9 §8)
+        const settled = d.restored ? settleDesign({ draft: d.design.draft, edits: d.edits }, action.doc).draft : null;
+        const design = settled === null
+          ? { design: historyOf(stored.draft), edits: stored.edits }
+          : settled === d.design.draft ? {} : { design: historyOf(settled) };
         return { ...d, ...design, name: action.doc.graph.workflow.name, version: action.doc.graph.workflow.version, status: { kind: 'ready', doc: action.doc }, stored, restored: false };
       });
     case 'failed':
@@ -266,7 +268,7 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       const text = action.applied ? 'Saved and applied' : `Saved; not applied: ${n} error${n === 1 ? '' : 's'}`;
       const next = update(state, action.workflowId, (d) => {
         // either way the design is now stored on the workflow and the session's edits are cleared (spec §4.1)
-        const stored = action.doc ? storedDesignOf(action.doc.graph.design, action.doc.graph.layout) : designOf(d);
+        const stored = action.doc ? settleDesign(storedDesignOf(action.doc.graph.design, action.doc.graph.layout), action.doc) : designOf(d);
         const status: DocStatus = action.doc ? { kind: 'ready', doc: action.doc } : d.status;
         const out: OpenDocument = {
           ...d, status, stored, restored: false, saving: false, errors: action.applied ? null : action.errors,

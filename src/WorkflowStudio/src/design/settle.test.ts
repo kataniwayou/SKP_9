@@ -3,7 +3,9 @@ import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { plainCircuit, type Circuit, type End } from '../circuit/circuit';
 import { linkKeys, trace } from '../circuit/trace';
-import { expectedLinks, reconcile } from './settle';
+import { EMPTY_EDITS, setField } from './design';
+import { EMPTY_DRAFT, withCircuit } from './draft';
+import { expectedLinks, reconcile, settleDesign, settleDraft } from './settle';
 
 const at = (step: string): End => ({ on: 'step', step, y: null });
 const on = (host: string, d: number): End => ({ on: 'wire', host, at: d });
@@ -157,5 +159,26 @@ describe('reconcile (plan 9 §7, §8; decision 6)', () => {
     const out = reconcile(c, expectedLinks(d, {}, null), d);
     expect(Object.keys(out)).toEqual(['wf->s1', 's1->s3', 's1->s2#2']);
     expect(out['s1->s2#2']).toEqual({ tail: at('s1'), head: at('s2') });
+  });
+});
+
+describe('settleDraft and settleDesign', () => {
+  it('leave a draft with no circuit of its own alone, and settle one against its own lists', async () => {
+    const d = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+    expect(settleDraft(EMPTY_DRAFT, d)).toBe(EMPTY_DRAFT);
+    // a plan 8 session that removed s1 -> s2 and shaped nothing: an empty circuit and its lists
+    const settled = settleDraft({ ...EMPTY_DRAFT, next: { s1: [] }, wires: {} }, d);
+    expect(Object.keys(settled.wires!)).toEqual(['wf->s1']);
+    expect(settled.next).toEqual({ s1: [] });
+  });
+
+  it('settle a design with its own entry-condition edits, so its families are the edited ones', async () => {
+    const d = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')], layout: { parked: ['s3'] } } as never), [stepDto('s3')]);
+    const c = { ...plainOf(d), 'w:x': { tail: on('s1->s2', 40), head: at('s3') } };
+    const draft = withCircuit(EMPTY_DRAFT, d, c);
+    const edits = setField(EMPTY_EDITS, { kind: 'step', id: 's3' }, stepDto('s3'), 'entryCondition', 2, () => 'x');
+    // s3 Failed in the design: the net is shorted, its links are not expected, the junction stays
+    const out = settleDesign({ draft: { ...draft, next: { s1: [] } }, edits }, d);
+    expect(out.draft.wires!['w:x']!.tail).toEqual(on('s1->s2', 40));
   });
 });

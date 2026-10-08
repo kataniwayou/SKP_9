@@ -130,21 +130,33 @@ test('a run drags and Reset route restores the automatic shape', async ({ page }
   await expect.poll(() => pathOf(panel, id)).toBe(before);
 });
 
-test('a wire end dropped where it closes a loop is allowed: green, "re-attach here", and the loop is drawn (plan 8 §5)', async ({ page }) => {
+/** A point in a step's left (input) half or right (output) half, in page coordinates (plan 9 decision 5). */
+async function inputOf(panel: Locator, id: string): Promise<{ x: number; y: number }> {
+  const b = (await node(panel, id).boundingBox())!;
+  return { x: b.x + b.width * 0.25, y: b.y + b.height / 2 };
+}
+async function outputOf(panel: Locator, id: string): Promise<{ x: number; y: number }> {
+  const b = (await node(panel, id).boundingBox())!;
+  return { x: b.x + b.width * 0.75, y: b.y + b.height / 2 };
+}
+const endSquare = (panel: Locator, id: string, side: 'tail' | 'head') => panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="${side}"]`);
+const dashOf = (l: Locator) => l.locator('path.w').first().evaluate((el) => getComputedStyle(el).strokeDasharray);
+
+test('a wire end dropped where it closes a loop is allowed: green, "connect here", and the wire keeps its id (plan 8 §5, plan 9)', async ({ page }) => {
   const { a, b, c } = chain!;
-  test.skip(chain!.wires.has(`${b}->${a}`), 'b -> a is already a wire: the drop would be a duplicate (a loose wire)');
   const panel = await open(page);
-  const p = await pointOnWire(panel, `${b}->${c}`);
+  const id = `${b}->${c}`;
+  const p = await pointOnWire(panel, id);
   await page.mouse.click(p.x, p.y);
-  const head = await centreOf(panel.locator('.design-handle.end[data-end="target"]'));
+  const head = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="head"]`));
   const target = await centreOf(node(panel, a).locator('.nx-sn'));
   await page.mouse.move(head.x, head.y);
   await page.mouse.down();
   await page.mouse.move(target.x, target.y, { steps: 6 });
   await expect(node(panel, a)).toHaveClass(/drop-ok/);
-  await expect(panel.locator('.design-drop-label')).toHaveText('re-attach here');
+  await expect(panel.locator('.design-drop-label')).toHaveText('connect here');
   await page.mouse.up();
-  await expect(wire(panel, `${b}->${a}`)).toHaveCount(1);
+  await expect(wire(panel, id)).toHaveCount(1);
   await expect(page.getByText('● design draft')).toBeVisible();
 });
 
@@ -153,9 +165,8 @@ test('a new entry wire from the hub, Delete, and a step left unreached looks lik
   const { a, b, c } = chain!;
   await node(panel, 'wf').hover();
   const port = await centreOf(node(panel, 'wf').locator('.nx-port'));
-  const target = await centreOf(node(panel, c).locator('.nx-sn'));
-  await drag(page, port, target);
-  await expect(wire(panel, `wf->${c}`)).toHaveCount(1);
+  await drag(page, port, await inputOf(panel, c));
+  await expect(panel.locator('.react-flow__edge[data-id^="w:"]')).toHaveCount(1);
 
   const p = await pointOnWire(panel, `${a}->${b}`);
   await page.mouse.click(p.x, p.y);
@@ -170,7 +181,6 @@ test('a new entry wire from the hub, Delete, and a step left unreached looks lik
   await page.getByRole('button', { name: '↷ Redo' }).click();
   await expect(wire(panel, `${a}->${b}`)).toHaveCount(0);
 });
-
 test('closing a designed workflow asks; Cancel keeps it', async ({ page }) => {
   const panel = await open(page);
   const at = await centreOf(node(panel, chain!.b).locator('.nx-sn'));
@@ -213,21 +223,22 @@ test('dragging the last run of a picked wire up and down slides where its arrow 
   await expect(page.getByText('● design draft')).toBeVisible();
 });
 
-test('the arrow head of a picked wire dropped on an allowed step re-attaches it there', async ({ page }) => {
-  test.skip(!chain!.reattachable, 'no chain where a -> c may be drawn');
+test('the arrow head of a picked wire dropped on another step connects it there; the wire keeps its id (plan 9)', async ({ page }) => {
   const panel = await open(page);
   const { a, b, c } = chain!;
-  const p = await pointOnWire(panel, `${a}->${b}`);
+  const id = `${a}->${b}`;
+  const before = await arrowEndOf(panel, id);
+  const p = await pointOnWire(panel, id);
   await page.mouse.click(p.x, p.y);
-  const head = await centreOf(panel.locator(`.design-wire[data-wire="${a}->${b}"] .design-handle.end[data-end="target"]`));
+  const head = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="head"]`));
   const target = await centreOf(node(panel, c).locator('.nx-sn'));
   await page.mouse.move(head.x, head.y);
   await page.mouse.down();
   await page.mouse.move(target.x, target.y, { steps: 6 });
   await expect(node(panel, c)).toHaveClass(/drop-ok/);
   await page.mouse.up();
-  await expect(wire(panel, `${a}->${c}`)).toHaveCount(1);
-  await expect(wire(panel, `${a}->${b}`)).toHaveCount(0);
+  await expect(wire(panel, id)).toHaveCount(1);
+  await expect.poll(() => arrowEndOf(panel, id)).not.toBe(before);
   await expect(page.getByText('● design draft')).toBeVisible();
 });
 
@@ -284,71 +295,70 @@ test('a run dragged onto a block goes around it, while dragged and after the dro
   }
 });
 
-test('a dragged wire end lands on a step\'s border, never inside; on its own step it moves its contact point; on empty canvas it becomes a loose wire', async ({ page }) => {
+test('a dragged head lands on a step\'s border, never inside; along its own step it slides; on empty canvas it is open there, dashed, its arrow head kept (plan 9)', async ({ page }) => {
   const panel = await open(page);
   const { a, b } = chain!;
   const id = `${a}->${b}`;
   const grab = async () => {
     const p = await pointOnWire(panel, id);
     await page.mouse.click(p.x, p.y);
-    const head = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="target"]`));
+    const head = await centreOf(endSquare(panel, id, 'head'));
     await page.mouse.move(head.x, head.y);
     await page.mouse.down();
     return head;
   };
   const before = await pathOf(panel, id);
 
-  // its own step, higher up: the wire stays outside it, and the contact point moves there
+  // its own step's input, higher up: the wire stays outside it, and its head slides there
   await grab();
   const bb = (await node(panel, b).boundingBox())!;
   await page.mouse.move(bb.x + 6, bb.y + bb.height * 0.3, { steps: 8 });
-  await expect(panel.locator('.design-drop-label')).toHaveText('move contact here');
+  await expect(panel.locator('.design-drop-label')).toHaveText('connect here');
   expect(await blocksCrossed(panel, id)).toEqual([]);
   await page.mouse.up();
   await expect.poll(() => pathOf(panel, id)).not.toBe(before);
   expect(await blocksCrossed(panel, id)).toEqual([]);
 
-  // empty canvas: grey "loose wire"; released, the wire leaves the wiring and stays drawn with an open end
+  // empty canvas: grey "move here"; released, the wire keeps its id, open at its head: dashed, its arrow head kept, no open circle
   const head = await grab();
-  await page.mouse.move(head.x - 40, head.y + 220, { steps: 8 });
-  await expect(panel.locator('.design-drop-label')).toHaveText('loose wire');
+  const empty = await emptySpot(panel, [head]);
+  expect(empty, 'no empty spot on the canvas').not.toBeNull();
+  await page.mouse.move(empty!.x, empty!.y, { steps: 8 });
+  await expect(panel.locator('.design-drop-label')).toHaveText('move here');
   await page.mouse.up();
-  await expect(wire(panel, id)).toHaveCount(0);
-  await expect(panel.locator('.react-flow__edge[data-id^="loose:"] circle.nx-open')).toHaveCount(1);
+  await expect(wire(panel, id)).toHaveCount(1);
+  expect(await dashOf(wire(panel, id))).not.toBe('none');
+  await expect(wire(panel, id).locator('.nx-head')).toHaveCount(1);
+  await expect(wire(panel, id).locator('circle.nx-open')).toHaveCount(0);
   await expect(page.getByText('● design draft')).toBeVisible();
 });
 
-test('a dragged tail over its own step is told "starts here"; a head 5 px short of a step border is already over it', async ({ page }) => {
+test('a dragged tail over its own step\'s output is told "connect here" and Escape puts it back; a head 5 px short of a step border is already over it', async ({ page }) => {
   const panel = await open(page);
   const { a, b, c } = chain!;
   const id = `${a}->${b}`;
   await zoomInOn(page, panel, id);
   let p = await pointOnWire(panel, id);
   await page.mouse.click(p.x, p.y);
-  const tail = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="source"]`));
-  const own = await centreOf(node(panel, a).locator('.nx-sn'));
+  const tail = await centreOf(endSquare(panel, id, 'tail'));
+  const own = await outputOf(panel, a);
   await page.mouse.move(tail.x, tail.y);
   await page.mouse.down();
   await page.mouse.move(own.x, own.y, { steps: 8 });
-  await expect(panel.locator('.design-drop-label')).toHaveText('starts here');
+  await expect(panel.locator('.design-drop-label')).toHaveText('connect here');
   await expect(node(panel, a)).toHaveClass(/drop-ok/);
+  await page.keyboard.press('Escape');
   await page.mouse.up();
   await expect(page.getByText('● design draft')).toHaveCount(0);
   p = await pointOnWire(panel, id);
   await page.mouse.click(p.x, p.y);
-  const head = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="target"]`));
+  const head = await centreOf(endSquare(panel, id, 'head'));
   const cb = (await node(panel, c).boundingBox())!;
   await page.mouse.move(head.x, head.y);
   await page.mouse.down();
   await page.mouse.move(cb.x - 5, cb.y + cb.height / 2, { steps: 8 });
-  if (chain!.reattachable) {
-    await expect(node(panel, c)).toHaveClass(/drop-ok/);
-    await expect(panel.locator('.design-drop-label')).toHaveText('re-attach here');
-  } else {
-    // a already goes to c: a second a -> c is a loose-wire drop (plan 8 §5)
-    await expect(node(panel, c)).toHaveClass(/drop-loose/);
-    await expect(panel.locator('.design-drop-label')).toHaveText('loose wire');
-  }
+  await expect(node(panel, c)).toHaveClass(/drop-ok/);
+  await expect(panel.locator('.design-drop-label')).toHaveText('connect here');
   await page.keyboard.press('Escape');
   await page.mouse.up();
 });
@@ -365,8 +375,10 @@ async function findJoin(request: APIRequestContext): Promise<{ workflow: LiveWor
   }
   return null;
 }
-const mayJoin = (a: LiveWire, b: LiveWire) => a.id !== b.id && a.colour === b.colour && a.target !== b.target;
-const otherColour = (a: LiveWire, b: LiveWire) => a.colour !== b.colour;
+/** `a`'s head may go onto `b`'s line: not its own wire, another target, and not one that leads back into `a`'s own step ("same step"). */
+const mayJoinAny = (a: LiveWire, b: LiveWire) => a.id !== b.id && a.target !== b.target && b.target !== a.id.split('->')[0];
+const mayJoin = (a: LiveWire, b: LiveWire) => mayJoinAny(a, b) && a.colour === b.colour;
+const otherColour = (a: LiveWire, b: LiveWire) => mayJoinAny(a, b) && a.colour !== b.colour;
 
 /**
  * Of the pairs (mover, line) that `ok` allows, the one whose mover's arrow (its target's left side) lies
@@ -394,11 +406,11 @@ async function nearestPair(panel: Locator, wires: LiveWire[], ok: (a: LiveWire, 
   return best;
 }
 
-/** Picks wire `a` and drags its arrow end to a point on `b`'s line clear of every block; the pointer stays down. */
+/** Picks wire `a` and drags its head end to a point on `b`'s line clear of every block; the pointer stays down. */
 async function dragArrowOnto(page: Page, panel: Locator, a: string, b: string): Promise<void> {
   const p = await pointOnWire(panel, a);
   await page.mouse.click(p.x, p.y);
-  const head = await centreOf(panel.locator(`.design-wire[data-wire="${a}"] .design-handle.end[data-end="target"]`));
+  const head = await centreOf(endSquare(panel, a, 'head'));
   const on = await pointOnWire(panel, b, 0.5, 12);
   await page.mouse.move(head.x, head.y);
   await page.mouse.down();
@@ -411,7 +423,15 @@ const cursorAt = (page: Page, q: { x: number; y: number }) => page.evaluate(({ x
   return { cursor: getComputedStyle(el).cursor, cls: el.getAttribute('class') ?? '' };
 }, q);
 
-test('a wire\'s arrow dropped on a same-colour line joins it: a dot on the line, its branch lands on its own step, nothing inside a block; refresh keeps it; undo removes it', async ({ page, request }) => {
+/** The distance on screen from a point to a wire's drawn line. */
+const gapToLine = (panel: Locator, id: string, q: { x: number; y: number }) => wire(panel, id).locator('path.w').first().evaluate((el, at) => {
+  const path = el as SVGPathElement; const m = path.getScreenCTM()!; const len = path.getTotalLength();
+  let best = Infinity;
+  for (let s = 0; s <= len; s += 1) { const pt = path.getPointAtLength(s); best = Math.min(best, Math.hypot(pt.x * m.a + pt.y * m.c + m.e - at.x, pt.x * m.b + pt.y * m.d + m.f - at.y)); }
+  return best;
+}, q);
+
+test('a wire\'s head dropped on a same-colour line joins it: a filled circle on the line, no arrow head there, nothing inside a block; undo, redo; a refresh keeps it (plan 9)', async ({ page, request }) => {
   const j = await findJoin(request);
   test.skip(j === null, 'no two same-colour wires into different steps');
   await openWorkflow(page, j!.workflow);
@@ -423,90 +443,78 @@ test('a wire\'s arrow dropped on a same-colour line joins it: a dot on the line,
   await expect(wire(panel, b).locator('.wire.halo-ok')).toHaveCount(1);
   await page.mouse.up();
   const edge = wire(panel, a);
-  await expect(edge.locator('circle.nx-joint').first()).toBeVisible();
-  // the contact dot lies on the host's line
-  const dot = await centreOf(edge.locator('circle.nx-joint').first());
-  const near = await wire(panel, b).locator('path.w').first().evaluate((el, q) => {
-    const path = el as SVGPathElement; const m = path.getScreenCTM()!; const len = path.getTotalLength();
-    let best = Infinity;
-    for (let s = 0; s <= len; s += 1) { const pt = path.getPointAtLength(s); best = Math.min(best, Math.hypot(pt.x * m.a + pt.y * m.c + m.e - q.x, pt.x * m.b + pt.y * m.d + m.f - q.y)); }
-    return best;
-  }, dot);
-  expect(near).toBeLessThan(3);
-  // its arrow head lands on its own step's left side
-  const target = a.split('->')[1]!;
-  const tb = (await node(panel, target).boundingBox())!;
-  const tip = await edge.locator('.nx-head').boundingBox();
-  expect(tip).not.toBeNull();
-  expect(Math.abs(tip!.x + tip!.width - tb.x)).toBeLessThan(6);
+  await expect(edge.locator('circle.nx-joint')).toHaveCount(1);
+  // a head on a junction is a filled circle on the host's line, with no arrow head (rule 4)
+  await expect(edge.locator('.nx-head')).toHaveCount(0);
+  expect(await gapToLine(panel, b, await centreOf(edge.locator('circle.nx-joint')))).toBeLessThan(3);
   expect(await blocksCrossed(panel, a)).toEqual([]);
   expect(await blocksCrossed(panel, b)).toEqual([]);
   await expect(page.getByText('● design draft')).toBeVisible();
-  await page.screenshot({ path: 'test-results/plan7-joined.png' });
   // undo removes it, redo brings it back (one history step); the history is not kept across a refresh (plan 4 spec)
   await panel.locator('.studio-canvas').click({ position: { x: 5, y: 5 } });
   await page.keyboard.press('Control+z');
   await expect(edge.locator('circle.nx-joint')).toHaveCount(0);
   await expect(page.getByText('● design draft')).toHaveCount(0);
   await page.keyboard.press('Control+y');
-  await expect(edge.locator('circle.nx-joint').first()).toBeVisible();
+  await expect(edge.locator('circle.nx-joint')).toHaveCount(1);
   // a refresh keeps the junction
   await page.reload();
   const again = documentPanel(page, j!.workflow);
-  await expect(wire(again, a).locator('circle.nx-joint').first()).toBeVisible();
+  await expect(wire(again, a).locator('circle.nx-joint')).toHaveCount(1);
   expect(await blocksCrossed(again, a)).toEqual([]);
 });
 
-test('a wire\'s arrow over a line of another colour is a loose-wire drop: grey halo, "loose wire"; released there the wire becomes loose', async ({ page, request }) => {
+test('a wire\'s head over a line of another colour joins it too: its tail on a step decides nothing, so it takes the host\'s colour (plan 9 rules 7, 10)', async ({ page, request }) => {
   const j = await findJoin(request);
   test.skip(j === null || !j.wires.some((x) => j.wires.some((y) => otherColour(x, y))), 'no wire of another colour');
   await openWorkflow(page, j!.workflow);
   const panel = documentPanel(page, j!.workflow);
   const { a: c, b, between } = (await nearestPair(panel, j!.wires, otherColour))!;
   await zoomInOn(page, panel, between);
+  const host = await wire(panel, b).locator('path.w').first().getAttribute('stroke');
   await dragArrowOnto(page, panel, c, b);
-  await expect(panel.locator('.design-drop-label')).toHaveText('loose wire');
-  await expect(wire(panel, b).locator('.wire.halo-loose')).toHaveCount(1);
+  await expect(panel.locator('.design-drop-label')).toHaveText('join here');
+  await expect(wire(panel, b).locator('.wire.halo-ok')).toHaveCount(1);
   await page.mouse.up();
-  await expect(wire(panel, c)).toHaveCount(0);
-  await expect(panel.locator('.react-flow__edge[data-id^="loose:"]')).toHaveCount(1);
+  await expect(wire(panel, c)).toHaveCount(1);
+  await expect(wire(panel, c).locator('circle.nx-joint')).toHaveCount(1);
+  await expect.poll(() => wire(panel, c).locator('path.w').first().getAttribute('stroke')).toBe(host);
   await expect(page.getByText('● design draft')).toBeVisible();
 });
 
-test('a joined wire\'s contact square has the four-way move cursor, a plain end square ew-resize; the contact dropped on its own step makes it plain', async ({ page, request }) => {
+test('every end square has the four-way move cursor, a junction\'s too; a junction head dropped on its own step\'s input makes the wire plain (plan 9 rule 14)', async ({ page, request }) => {
   const j = await findJoin(request);
   test.skip(j === null, 'no two same-colour wires into different steps');
   await openWorkflow(page, j!.workflow);
   const panel = documentPanel(page, j!.workflow);
   const { a, b, between } = (await nearestPair(panel, j!.wires, mayJoin))!;
   await zoomInOn(page, panel, between);
-  // a plain wire's end square: ew-resize under the real pointer
+  // a plain wire's end squares: the four-way move cursor under the real pointer
   const p = await pointOnWire(panel, b);
   await page.mouse.click(p.x, p.y);
-  const plainEnd = panel.locator(`.design-wire[data-wire="${b}"] .design-handle.end[data-end="target"]`);
-  await expect(plainEnd).not.toHaveClass(/contact/);
-  let q = await centreOf(plainEnd);
-  await page.mouse.move(q.x, q.y);
-  expect(await cursorAt(page, q)).toEqual({ cursor: 'ew-resize', cls: expect.stringMatching(/design-handle end/) });
-  // join a onto b; a stays picked: its contact square is the four-way move
+  for (const side of ['tail', 'head'] as const) {
+    const q = await centreOf(endSquare(panel, b, side));
+    await page.mouse.move(q.x, q.y);
+    expect(await cursorAt(page, q)).toEqual({ cursor: 'move', cls: expect.stringMatching(/design-handle end/) });
+  }
+  // join a onto b; a stays picked: its head square (on the junction) is the four-way move too
   await dragArrowOnto(page, panel, a, b);
   await expect(panel.locator('.design-drop-label')).toHaveText('join here');
   await page.mouse.up();
-  await expect(wire(panel, a).locator('circle.nx-joint').first()).toBeVisible();
-  const contact = panel.locator(`.design-wire[data-wire="${a}"] .design-handle.end.contact[data-end="target"]`);
-  await expect(contact).toHaveCount(1);
-  q = await centreOf(contact);
+  await expect(wire(panel, a).locator('circle.nx-joint')).toHaveCount(1);
+  const q = await centreOf(endSquare(panel, a, 'head'));
   await page.mouse.move(q.x, q.y);
-  expect(await cursorAt(page, q)).toEqual({ cursor: 'move', cls: expect.stringMatching(/contact/) });
-  // the contact square dropped on its own step: the wire is plain again
-  const own = node(panel, a.split('->')[1]!);
-  const o = await centreOf(own);
+  expect(await cursorAt(page, q)).toEqual({ cursor: 'move', cls: expect.stringMatching(/design-handle end/) });
+  // held, the canvas keeps the four-way cursor; dropped on its own step's input, the wire is plain again
+  const own = a.split('->')[1]!;
+  const o = await inputOf(panel, own);
   await page.mouse.down();
   await page.mouse.move(o.x, o.y, { steps: 10 });
-  await expect(own).toHaveClass(/drop-ok/);
+  await expect(panel.locator('.studio-canvas')).toHaveClass(/gesture-move/);
+  await expect(node(panel, own)).toHaveClass(/drop-ok/);
   await page.mouse.up();
   await expect(wire(panel, a).locator('circle.nx-joint')).toHaveCount(0);
-  await expect(wire(panel, a).locator('path.w')).toHaveCount(1);
+  await expect(wire(panel, a).locator('.nx-head')).toHaveCount(1);
 });
 
 /** A live workflow with a cache tag on its canvas and at least one step wire, and that workflow's step wires. */
@@ -520,7 +528,7 @@ async function findCache(request: APIRequestContext): Promise<{ workflow: LiveWo
   return null;
 }
 
-test('a wire\'s arrow dragged over a cache tag is a loose-wire drop: grey "loose wire", the cache outlined grey; released there the wire becomes loose', async ({ page, request }) => {
+test('a wire\'s head dragged over a cache tag is a "move here" drop: the cache outlined grey; released there the head is open, the wire dashed (plan 9 §6)', async ({ page, request }) => {
   const k = await findCache(request);
   test.skip(k === null, 'BaseApi has no workflow with a cache and a step wire');
   await openWorkflow(page, k!.workflow);
@@ -534,88 +542,88 @@ test('a wire\'s arrow dragged over a cache tag is a loose-wire drop: grey "loose
   }
   test.skip(id === null, 'every step wire is covered by another wire or a block');
   await page.mouse.click(p!.x, p!.y);
-  const head = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="target"]`));
+  const head = await centreOf(endSquare(panel, id!, 'head'));
   const over = await centreOf(cache);
   await page.mouse.move(head.x, head.y);
   await page.mouse.down();
   await page.mouse.move(over.x, over.y, { steps: 10 });
-  await expect(panel.locator('.design-drop-label')).toHaveText('loose wire');
-  await expect(cache).toHaveClass(/drop-loose/);
+  await expect(panel.locator('.design-drop-label')).toHaveText('move here');
+  await expect(cache).toHaveClass(/drop-move/);
   await page.mouse.up();
   await expect(cache).not.toHaveClass(/drop-/);
-  await expect(wire(panel, id!)).toHaveCount(0);
-  await expect(panel.locator('.react-flow__edge[data-id^="loose:"]')).toHaveCount(1);
+  await expect(wire(panel, id!)).toHaveCount(1);
+  expect(await dashOf(wire(panel, id!))).not.toBe('none');
+  await expect(wire(panel, id!).locator('.nx-head')).toHaveCount(1);
 });
 
-test('a new wire dropped on empty canvas is a loose wire: grey, dashed, an open end; a refresh keeps it; its end dropped on a step wires it (plan 8 §5)', async ({ page }) => {
-  const { c } = chain!;
-  // the open end goes to a step c is not wired to yet (onto one it already goes to, it would stay loose)
-  const a = [chain!.a, chain!.b].find((s) => !chain!.wires.has(`${c}->${s}`));
-  test.skip(a === undefined, 'c already goes to both a and b: no step to wire its loose end to');
+test('a new wire dropped on empty canvas is grey and dashed with a ring and an arrow head; a refresh keeps it; its head dropped on a step connects it, coloured and solid (plan 9 rules 3, 12)', async ({ page }) => {
+  const { a, c } = chain!;
   const panel = await open(page);
   await node(panel, c).hover();
   const port = await centreOf(node(panel, c).locator('.nx-port'));
   const area = (await panel.locator('.studio-canvas').boundingBox())!;
   const empty = { x: area.x + area.width - 80, y: area.y + area.height - 120 };
   await drag(page, port, empty);
-  const loose = panel.locator('.react-flow__edge[data-id^="loose:"]');
-  await expect(loose).toHaveCount(1);
-  const line = loose.locator('path.w');
-  expect(await line.evaluate((el) => getComputedStyle(el).strokeDasharray)).not.toBe('none');
-  expect(await line.getAttribute('stroke')).toBe('#8A97A8');
-  await expect(loose.locator('circle.nx-open')).toHaveCount(1);
-  await expect(loose.locator('.nx-head')).toHaveCount(0);
+  const drawn = panel.locator('.react-flow__edge[data-id^="w:"]');
+  await expect(drawn).toHaveCount(1);
+  const id = (await drawn.getAttribute('data-id'))!;
+  expect(await dashOf(drawn)).not.toBe('none');
+  expect(await drawn.locator('path.w').getAttribute('stroke')).toBe('#8A97A8');
+  await expect(drawn.locator('circle.nx-src')).toHaveCount(1);
+  await expect(drawn.locator('.nx-head')).toHaveCount(1);
+  await expect(drawn.locator('circle.nx-open')).toHaveCount(0);
 
   await page.reload();
   const again = documentPanel(page, chain!.workflow);
-  const kept = again.locator('.react-flow__edge[data-id^="loose:"]');
+  const kept = again.locator(`.react-flow__edge[data-id="${id}"]`);
   await expect(kept).toHaveCount(1);
 
-  // its open end onto a step it may wire to: an ordinary wire
-  const end = await centreOf(kept.locator('.nx-open-hit'));
-  const target = await centreOf(node(again, a!).locator('.nx-sn'));
-  await page.mouse.move(end.x, end.y);
-  await page.mouse.down();
-  await page.mouse.move(target.x, target.y, { steps: 10 });
-  await expect(again.locator('.design-drop-label')).toHaveText('connect here');
-  await page.mouse.up();
-  await expect(wire(again, `${c}->${a!}`)).toHaveCount(1);
-  await expect(again.locator('.react-flow__edge[data-id^="loose:"]')).toHaveCount(0);
-  // the new wire is the pick: the click React Flow reports after the release does not take it away
-  await expect(again.locator(`.design-wire[data-wire="${c}->${a!}"]`)).toHaveCount(1);
+  // picked, its head square onto a's input: connected, the wire keeps its id, a's colour, solid
+  const on = await pointOnWire(again, id);
+  await page.mouse.click(on.x, on.y);
+  const end = await centreOf(endSquare(again, id, 'head'));
+  expect(await dragReading(page, again, end, await inputOf(again, a))).toBe('connect here');
+  await expect(kept).toHaveCount(1);
+  await expect.poll(() => kept.locator('path.w').getAttribute('stroke')).not.toBe('#8A97A8');
+  expect(await dashOf(kept)).toBe('none');
+  // the wire stays the pick: the click React Flow reports after the release does not take it away
+  await expect(again.locator(`.design-wire[data-wire="${id}"]`)).toHaveCount(1);
   await expect(inspector(page).getByText(/^Wire: /)).toBeVisible();
 });
 
-test('a loose wire from the hub: its open end dropped back on the hub is told "same step" and snaps back', async ({ page }) => {
+test('a new wire from the hub: its head dropped back on the hub is told "only a tail on the workflow" and snaps back', async ({ page }) => {
   const panel = await open(page);
   await node(panel, 'wf').hover();
   const port = await centreOf(node(panel, 'wf').locator('.nx-port'));
   const area = (await panel.locator('.studio-canvas').boundingBox())!;
   await drag(page, port, { x: area.x + area.width - 80, y: area.y + area.height - 120 });
-  const loose = panel.locator('.react-flow__edge[data-id^="loose:"]');
-  await expect(loose).toHaveCount(1);
-  const before = await loose.locator('path.w').getAttribute('d');
+  const drawn = panel.locator('.react-flow__edge[data-id^="w:"]');
+  await expect(drawn).toHaveCount(1);
+  const id = (await drawn.getAttribute('data-id'))!;
+  const before = await drawn.locator('path.w').getAttribute('d');
 
-  const end = await centreOf(loose.locator('.nx-open-hit'));
+  // the new wire is the pick: its head square onto the hub
+  const end = await centreOf(endSquare(panel, id, 'head'));
   const hub = await centreOf(node(panel, 'wf'));
   await page.mouse.move(end.x, end.y);
   await page.mouse.down();
   await page.mouse.move(hub.x, hub.y, { steps: 10 });
-  await expect(panel.locator('.design-drop-label')).toHaveText('same step');
+  await expect(panel.locator('.design-drop-label')).toHaveText('only a tail on the workflow');
+  await expect(node(panel, 'wf')).toHaveClass(/drop-no/);
   await page.mouse.up();
   await expect(panel.locator('.design-drop-label')).toHaveCount(0);
-  await expect(loose).toHaveCount(1);
+  await expect(drawn).toHaveCount(1);
   // a stable read, not one a re-render could still change: an end moved onto the hub changes the path
   await page.waitForTimeout(300);
-  await expect.poll(() => loose.locator('path.w').getAttribute('d')).toBe(before);
+  await expect.poll(() => drawn.locator('path.w').getAttribute('d')).toBe(before);
 });
 
-test('the legend shows the loose wire, and nothing broken or parked (plan 8 §5)', async ({ page }) => {
+test('the legend shows the undecided wire and the short circuit; no loose wire, nothing broken or parked (plan 9 §5)', async ({ page }) => {
   const panel = await open(page);
   const items = panel.locator('.legend .lg-item');
-  await expect(items.filter({ hasText: /^loose wire$/ })).toHaveCount(1);
-  await expect(items.filter({ hasText: /broken/i })).toHaveCount(0);
-  await expect(items.filter({ hasText: /parked/i })).toHaveCount(0);
+  await expect(items.filter({ hasText: /^undecided$/ })).toHaveCount(1);
+  await expect(items.filter({ hasText: /^short circuit$/ })).toHaveCount(1);
+  await expect(items.filter({ hasText: /loose|broken|parked/i })).toHaveCount(0);
 });
 
 /** A point on the canvas's empty pane (no block, wire, handle or overlay under it), in page coordinates; null when none is found. */
@@ -636,31 +644,48 @@ async function emptySpot(panel: Locator, avoid: { x: number; y: number }[] = [])
   }, avoid);
 }
 
-test('a picked loose wire has the squares of a wire: a run square reshapes it, a refresh keeps the shape, Reset route undoes it; its start square re-sources it or snaps back; its open-end square wires it', async ({ page }) => {
-  const { a, c, reattachable } = chain!;
-  // re-sourced onto a, its open end then goes to c: a must not already go to c
-  test.skip(!reattachable, 'a already goes to c: the open end dropped on c would stay loose');
+/** Presses `from`, moves to `to` with the real mouse, reads the drop label there, then releases. */
+async function dragReading(page: Page, panel: Locator, from: { x: number; y: number }, to: { x: number; y: number }): Promise<string | null> {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 5 });
+  await page.mouse.move(to.x, to.y, { steps: 5 });
+  const label = panel.locator('.design-drop-label');
+  const text = (await label.count()) > 0 ? await label.textContent() : null;
+  await page.mouse.up();
+  return text;
+}
+
+/** Picks a wire by a click on its line and returns its tail square's centre. */
+async function tailSquare(page: Page, panel: Locator, id: string): Promise<{ x: number; y: number }> {
+  const p = await pointOnWire(panel, id);
+  await page.mouse.click(p.x, p.y);
+  return centreOf(endSquare(panel, id, 'tail'));
+}
+
+test('a picked new wire has squares on its ends and runs: a run square reshapes it, a refresh keeps the shape, Reset route undoes it; its tail square moves it open or onto a step; its head square connects it', async ({ page }) => {
+  const { a, c } = chain!;
   const panel = await open(page);
   await node(panel, c).hover();
   const port = await centreOf(node(panel, c).locator('.nx-port'));
   const area = (await panel.locator('.studio-canvas').boundingBox())!;
   await drag(page, port, { x: area.x + area.width - 80, y: area.y + area.height - 120 });
-  const loose = panel.locator('.react-flow__edge[data-id^="loose:"]');
-  await expect(loose).toHaveCount(1);
-  const id = (await loose.getAttribute('data-id'))!;
+  const drawn = panel.locator('.react-flow__edge[data-id^="w:"]');
+  await expect(drawn).toHaveCount(1);
+  const id = (await drawn.getAttribute('data-id'))!;
   const squares = panel.locator(`.design-wire[data-wire="${id}"]`);
-  const line = () => loose.locator('path.w').getAttribute('d');
+  const line = () => drawn.locator('path.w').getAttribute('d');
 
-  // the new loose wire is the pick: a square on each end and one in the middle of each run, one size on screen
-  await expect(squares.locator('.design-handle.end[data-end="source"]')).toHaveCount(1);
-  await expect(squares.locator('.design-handle.end[data-end="target"]')).toHaveCount(1);
+  // the new wire is the pick: a square on each end and one in the middle of each run, one size on screen
+  await expect(squares.locator('.design-handle.end[data-end="tail"]')).toHaveCount(1);
+  await expect(squares.locator('.design-handle.end[data-end="head"]')).toHaveCount(1);
   const runs = squares.locator('.design-handle.seg');
   expect(await runs.count()).toBeGreaterThan(0);
-  const size = (await squares.locator('.design-handle.end[data-end="source"]').boundingBox())!;
+  const size = (await squares.locator('.design-handle.end[data-end="tail"]').boundingBox())!;
   expect(size.width).toBeGreaterThan(7);
   expect(size.width).toBeLessThan(13);
 
-  // a run square moves its run, as a connected wire's does
+  // a run square moves its run
   const before = await line();
   const handle = runs.first();
   const at = await centreOf(handle);
@@ -682,25 +707,24 @@ test('a picked loose wire has the squares of a wire: a run square reshapes it, a
   const on = await pointOnWire(again, id);
   await page.mouse.click(on.x, on.y);
   const sq = again.locator(`.design-wire[data-wire="${id}"]`);
-  const start = sq.locator('.design-handle.end[data-end="source"]');
+  const start = sq.locator('.design-handle.end[data-end="tail"]');
   await expect(start).toHaveCount(1);
 
-  // its start square on empty canvas: it snaps back
+  // its tail square over empty canvas: "move here" (released, the wire would be open at both ends); Escape puts it back
   const s0 = await centreOf(start);
-  const empty = await emptySpot(again, [s0, await centreOf(sq.locator('.design-handle.end[data-end="target"]'))]);
+  const empty = await emptySpot(again, [s0, await centreOf(sq.locator('.design-handle.end[data-end="head"]'))]);
   expect(empty, 'no empty spot on the canvas').not.toBeNull();
   await page.mouse.move(s0.x, s0.y);
   await page.mouse.down();
   await page.mouse.move(empty!.x, empty!.y, { steps: 10 });
-  // held there: the wire follows the pointer, told "loose wire" (released, it would be open at both ends); Escape puts it back
   await expect.poll(() => kept.locator('path.w').getAttribute('d')).not.toBe(shaped);
-  await expect(again.locator('.design-drop-label')).toHaveText('loose wire');
+  await expect(again.locator('.design-drop-label')).toHaveText('move here');
   await page.keyboard.press('Escape');
   await page.mouse.up();
   await page.waitForTimeout(300);
   await expect.poll(() => kept.locator('path.w').getAttribute('d')).toBe(shaped);
 
-  // right-click → Reset route: the router draws it again, from the same source to the same end; Ctrl+Z brings the shape back
+  // right-click → Reset route: the router draws it again; Ctrl+Z brings the shape back
   const onLine = await pointOnWire(again, id);
   await page.mouse.click(onLine.x, onLine.y, { button: 'right' });
   await page.getByRole('menuitem', { name: 'Reset route' }).click();
@@ -711,118 +735,83 @@ test('a picked loose wire has the squares of a wire: a run square reshapes it, a
   if (await start.count() === 0) { const p = await pointOnWire(again, id); await page.mouse.click(p.x, p.y); }
   await expect(start).toHaveCount(1);
 
-  // its start square onto step a: the loose wire now starts at a's output port
-  const onA = await centreOf(node(again, a).locator('.nx-sn'));
-  await page.mouse.move(s0.x, s0.y);
-  await page.mouse.down();
-  await page.mouse.move(onA.x, onA.y, { steps: 10 });
-  await expect(again.locator('.design-drop-label')).toHaveText('re-attach here');
-  await page.mouse.up();
+  // its tail square onto a's output: the wire now starts at a's right side
+  const s1 = await centreOf(start);
+  expect(await dragReading(page, again, s1, await outputOf(again, a))).toBe('connect here');
   await expect(kept).toHaveCount(1);
   const aBox = (await node(again, a).boundingBox())!;
   await expect.poll(async () => {
-    const p = await centreOf(sq.locator('.design-handle.end[data-end="source"]'));
+    const p = await centreOf(sq.locator('.design-handle.end[data-end="tail"]'));
     return Math.abs(p.x - (aBox.x + aBox.width)) < 8 && p.y > aBox.y && p.y < aBox.y + aBox.height;
   }).toBe(true);
 
-  // its open-end square onto c: an ordinary wire a -> c, the pick
-  const end = await centreOf(sq.locator('.design-handle.end[data-end="target"]'));
-  const onC = await centreOf(node(again, c).locator('.nx-sn'));
-  await page.mouse.move(end.x, end.y);
-  await page.mouse.down();
-  await page.mouse.move(onC.x, onC.y, { steps: 10 });
-  await expect(again.locator('.design-drop-label')).toHaveText('connect here');
-  await page.mouse.up();
-  await expect(wire(again, `${a}->${c}`)).toHaveCount(1);
-  await expect(again.locator('.react-flow__edge[data-id^="loose:"]')).toHaveCount(0);
-  await expect(again.locator(`.design-wire[data-wire="${a}->${c}"]`)).toHaveCount(1);
+  // its head square onto c's input: connected, the same wire, still the pick
+  const end = await centreOf(sq.locator('.design-handle.end[data-end="head"]'));
+  expect(await dragReading(page, again, end, await inputOf(again, c))).toBe('connect here');
+  await expect(kept).toHaveCount(1);
+  expect(await dashOf(kept)).toBe('none');
+  await expect(again.locator(`.design-wire[data-wire="${id}"]`)).toHaveCount(1);
 });
 
-// ---- a wire's tail detached: loose at its start, keeping its head and its colour ----
+// ---- a wire's ends moved open: the wire keeps its id, its marks, and the family its other end decides ----
 
-/** Presses `from`, moves to `to` with the real mouse, reads the drop label there, then releases. */
-async function dragReading(page: Page, panel: Locator, from: { x: number; y: number }, to: { x: number; y: number }): Promise<string | null> {
-  await page.mouse.move(from.x, from.y);
-  await page.mouse.down();
-  await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 5 });
-  await page.mouse.move(to.x, to.y, { steps: 5 });
-  const label = panel.locator('.design-drop-label');
-  const text = (await label.count()) > 0 ? await label.textContent() : null;
-  await page.mouse.up();
-  return text;
-}
-
-/** Picks a wire by a click on its line and returns its tail square's centre. */
-async function tailSquare(page: Page, panel: Locator, id: string): Promise<{ x: number; y: number }> {
-  const p = await pointOnWire(panel, id);
-  await page.mouse.click(p.x, p.y);
-  return centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="source"]`));
-}
-
-test('a wire\'s tail released on empty canvas leaves it loose at its start: dashed in its own colour, an open start, its target loses it; a refresh keeps it; its open start onto its step wires it again', async ({ page }) => {
+test('a wire\'s tail released on empty canvas leaves it open there: dashed in its own colour, its ring where it was released, its arrow head on its step; a refresh keeps it; its tail onto its step connects it again', async ({ page }) => {
   const { a, b } = chain!;
   const id = `${a}->${b}`;
   const panel = await open(page);
   await zoomInOn(page, panel, id);
   const colour = await wire(panel, id).locator('path.w').first().getAttribute('stroke');
   const tail = await tailSquare(page, panel, id);
-  const head = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="target"]`));
+  const head = await centreOf(endSquare(panel, id, 'head'));
   const empty = await emptySpot(panel, [tail, head]);
   expect(empty, 'no empty spot on the canvas').not.toBeNull();
-  expect(await dragReading(page, panel, tail, empty!)).toBe('loose wire');
+  expect(await dragReading(page, panel, tail, empty!)).toBe('move here');
 
-  await expect(wire(panel, id)).toHaveCount(0);
-  const loose = panel.locator('.react-flow__edge[data-id^="loose:"]');
-  await expect(loose).toHaveCount(1);
-  const line = loose.locator('path.w').first();
-  expect(await line.getAttribute('stroke')).toBe(colour);
-  expect(await line.evaluate((el) => getComputedStyle(el).strokeDasharray)).not.toBe('none');
-  // its open circle where the tail was released; its arrow head still on b
-  const circle = await centreOf(loose.locator('circle.nx-open'));
-  expect(Math.hypot(circle.x - empty!.x, circle.y - empty!.y)).toBeLessThan(16);
-  await expect(loose.locator('.nx-head')).toHaveCount(1);
+  const edge = wire(panel, id);
+  await expect(edge).toHaveCount(1);
+  expect(await edge.locator('path.w').first().getAttribute('stroke')).toBe(colour);
+  expect(await dashOf(edge)).not.toBe('none');
+  // its ring where the tail was released; its arrow head still on b
+  const ring = await centreOf(edge.locator('circle.nx-src'));
+  expect(Math.hypot(ring.x - empty!.x, ring.y - empty!.y)).toBeLessThan(16);
+  await expect(edge.locator('.nx-head')).toHaveCount(1);
   const bb = (await node(panel, b).boundingBox())!;
-  const tip = (await loose.locator('.nx-head').boundingBox())!;
+  const tip = (await edge.locator('.nx-head').boundingBox())!;
   expect(Math.abs(tip.x + tip.width - bb.x)).toBeLessThan(6);
-  // picked, it has the squares of a wire
-  const lid = (await loose.getAttribute('data-id'))!;
-  const squares = panel.locator(`.design-wire[data-wire="${lid}"]`);
-  await expect(squares.locator('.design-handle.end')).toHaveCount(2);
-  expect(await squares.locator('.design-handle.seg').count()).toBeGreaterThan(0);
+  // still picked, with the squares of a wire
+  await expect(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end`)).toHaveCount(2);
   await expect(page.getByText('● design draft')).toBeVisible();
-  await panel.screenshot({ path: 'test-results/tail-loose.png' });
 
-  // its head over nothing is told "loose wire" (released, it would be open at both ends); Escape puts it back
-  const before = await line.getAttribute('d');
-  const h = await centreOf(squares.locator('.design-handle.end[data-end="target"]'));
-  const s = await centreOf(squares.locator('.design-handle.end[data-end="source"]'));
+  // its head over nothing is told "move here" (released, it would be open at both ends); Escape puts it back
+  const before = await edge.locator('path.w').first().getAttribute('d');
+  const h = await centreOf(endSquare(panel, id, 'head'));
+  const s = await centreOf(endSquare(panel, id, 'tail'));
   const nowhere = await emptySpot(panel, [h, s]);
   await page.mouse.move(h.x, h.y);
   await page.mouse.down();
   await page.mouse.move(nowhere!.x, nowhere!.y, { steps: 10 });
-  await expect(panel.locator('.design-drop-label')).toHaveText('loose wire');
+  await expect(panel.locator('.design-drop-label')).toHaveText('move here');
   await page.keyboard.press('Escape');
   await page.mouse.up();
   await page.waitForTimeout(300);
-  await expect.poll(() => line.getAttribute('d')).toBe(before);
+  await expect.poll(() => edge.locator('path.w').first().getAttribute('d')).toBe(before);
 
   await page.reload();
   const again = documentPanel(page, chain!.workflow);
-  const kept = again.locator(`.react-flow__edge[data-id="${lid}"]`);
+  const kept = wire(again, id);
   await expect(kept).toHaveCount(1);
   expect(await kept.locator('path.w').first().getAttribute('stroke')).toBe(colour);
-  await expect(wire(again, id)).toHaveCount(0);
+  expect(await dashOf(kept)).not.toBe('none');
 
-  // its open start onto a: an ordinary wire a -> b again, the pick
-  const start = await centreOf(kept.locator('.nx-open-hit'));
-  const onA = await centreOf(node(again, a).locator('.nx-sn'));
-  expect(await dragReading(page, again, start, onA)).toBe('connect here');
-  await expect(wire(again, id)).toHaveCount(1);
-  await expect(again.locator('.react-flow__edge[data-id^="loose:"]')).toHaveCount(0);
+  // its tail onto a's output: connected again, solid
+  const start = await tailSquare(page, again, id);
+  expect(await dragReading(page, again, start, await outputOf(again, a))).toBe('connect here');
+  await expect(kept).toHaveCount(1);
+  expect(await dashOf(kept)).toBe('none');
   await expect(again.locator(`.design-wire[data-wire="${id}"]`)).toHaveCount(1);
 });
 
-test('an entry wire\'s tail dragged off the hub is loose at its start, its step no longer an entry; a refresh keeps it; dropped back on the hub it is an entry wire again', async ({ page, request }) => {
+test('an entry wire\'s tail dragged off the hub is open there, its step no longer an entry; a refresh keeps it; dropped back on the hub it is an entry wire again', async ({ page, request }) => {
   const g = (await (await request.get(`/api/v1/workflows/${chain!.workflow.id}/graph`)).json()) as { workflow: { entryStepIds: string[] } };
   const entry = g.workflow.entryStepIds[0];
   test.skip(entry === undefined, 'the workflow has no entry step');
@@ -832,28 +821,25 @@ test('an entry wire\'s tail dragged off the hub is loose at its start, its step 
   const tail = await tailSquare(page, panel, id);
   const empty = await emptySpot(panel, [tail]);
   expect(empty, 'no empty spot on the canvas').not.toBeNull();
-  expect(await dragReading(page, panel, tail, empty!)).toBe('loose wire');
-  await expect(wire(panel, id)).toHaveCount(0);
-  const loose = panel.locator('.react-flow__edge[data-id^="loose:"]');
-  await expect(loose).toHaveCount(1);
-  expect(await loose.locator('path.w').first().getAttribute('stroke')).toBe(colour);
+  expect(await dragReading(page, panel, tail, empty!)).toBe('move here');
+  await expect(wire(panel, id)).toHaveCount(1);
+  expect(await wire(panel, id).locator('path.w').first().getAttribute('stroke')).toBe(colour);
+  expect(await dashOf(wire(panel, id))).not.toBe('none');
 
   await page.reload();
   const again = documentPanel(page, chain!.workflow);
-  const kept = again.locator('.react-flow__edge[data-id^="loose:"]');
-  await expect(kept).toHaveCount(1);
-  await expect(wire(again, id)).toHaveCount(0);
-
-  const start = await centreOf(kept.locator('.nx-open-hit'));
-  const hub = await centreOf(node(again, 'wf'));
-  expect(await dragReading(page, again, start, hub)).toBe('connect here');
   await expect(wire(again, id)).toHaveCount(1);
-  await expect(again.locator('.react-flow__edge[data-id^="loose:"]')).toHaveCount(0);
-  // the entry list is the saved one again: nothing left to save
-  await expect(page.getByText('● design draft')).toHaveCount(0);
+  expect(await dashOf(wire(again, id))).not.toBe('none');
+
+  const start = await tailSquare(page, again, id);
+  // a point inside the ring above its centre, whatever the zoom (the hub node is the ring's square)
+  const hub = (await node(again, 'wf').boundingBox())!;
+  expect(await dragReading(page, again, start, { x: hub.x + hub.width / 2, y: hub.y + hub.height / 4 })).toBe('connect here');
+  await expect(wire(again, id)).toHaveCount(1);
+  expect(await dashOf(wire(again, id))).toBe('none');
 });
 
-test('a joined wire\'s tail detached keeps its junction and its host\'s colour', async ({ page, request }) => {
+test('a joined wire\'s tail moved open keeps its junction and its host\'s colour', async ({ page, request }) => {
   const j = await findJoin(request);
   test.skip(j === null, 'no two same-colour wires into different steps');
   await openWorkflow(page, j!.workflow);
@@ -863,27 +849,26 @@ test('a joined wire\'s tail detached keeps its junction and its host\'s colour',
   await dragArrowOnto(page, panel, a, b);
   await expect(panel.locator('.design-drop-label')).toHaveText('join here');
   await page.mouse.up();
-  await expect(wire(panel, a).locator('circle.nx-joint').first()).toBeVisible();
+  await expect(wire(panel, a).locator('circle.nx-joint')).toHaveCount(1);
   const host = await wire(panel, b).locator('path.w').first().getAttribute('stroke');
 
   // still picked after the join: its tail square off its step, onto empty canvas
-  const tail = await centreOf(panel.locator(`.design-wire[data-wire="${a}"] .design-handle.end[data-end="source"]`));
+  const tail = await centreOf(endSquare(panel, a, 'tail'));
   const empty = await emptySpot(panel, [tail, between]);
   expect(empty, 'no empty spot on the canvas').not.toBeNull();
-  expect(await dragReading(page, panel, tail, empty!)).toBe('loose wire');
-  await expect(wire(panel, a)).toHaveCount(0);
-  const loose = panel.locator('.react-flow__edge[data-id^="loose:"]');
-  await expect(loose).toHaveCount(1);
-  expect(await loose.locator('path.w').first().getAttribute('stroke')).toBe(host);
-  await expect(loose.locator('circle.nx-joint').first()).toBeVisible();
-  await expect(loose.locator('circle.nx-open')).toHaveCount(1);
-  await panel.screenshot({ path: 'test-results/tail-loose-joined.png' });
+  expect(await dragReading(page, panel, tail, empty!)).toBe('move here');
+  const edge = wire(panel, a);
+  await expect(edge).toHaveCount(1);
+  expect(await edge.locator('path.w').first().getAttribute('stroke')).toBe(host);
+  await expect(edge.locator('circle.nx-joint')).toHaveCount(1);
+  await expect(edge.locator('circle.nx-src')).toHaveCount(1);
+  expect(await dashOf(edge)).not.toBe('none');
   await page.reload();
   const again = documentPanel(page, j!.workflow);
-  await expect(again.locator('.react-flow__edge[data-id^="loose:"] circle.nx-joint').first()).toBeVisible();
+  await expect(wire(again, a).locator('circle.nx-joint')).toHaveCount(1);
 });
 
-test('a host wire detached at its tail and re-attached to a new source keeps the wires joined on it joined (on its new id)', async ({ page, request }) => {
+test('a host wire detached at its tail opens the end joined on it where it was drawn (spec §2.2-6); the host keeps its id and connects again', async ({ page, request }) => {
   const j = await findJoin(request);
   test.skip(j === null, 'no two same-colour wires into different steps: no junction can be made');
   await openWorkflow(page, j!.workflow);
@@ -893,94 +878,71 @@ test('a host wire detached at its tail and re-attached to a new source keeps the
   await dragArrowOnto(page, panel, a, b);
   await expect(panel.locator('.design-drop-label')).toHaveText('join here');
   await page.mouse.up();
-  await expect(wire(panel, a).locator('circle.nx-joint').first()).toBeVisible();
+  await expect(wire(panel, a).locator('circle.nx-joint')).toHaveCount(1);
+  const dot = await centreOf(wire(panel, a).locator('circle.nx-joint'));
 
-  // the host b's tail off its step: b is loose at its start, a (joined on b's old id) is drawn plain meanwhile
-  const [bSource, bTarget] = b.split('->') as [string, string];
+  // the host b's tail off its step: a's head opens where it was drawn, with its arrow head
+  const bSource = b.split('->')[0]!;
   const tail = await tailSquare(page, panel, b);
   const empty = await emptySpot(panel, [tail, between]);
   expect(empty, 'no empty spot on the canvas').not.toBeNull();
-  expect(await dragReading(page, panel, tail, empty!)).toBe('loose wire');
-  const loose = panel.locator('.react-flow__edge[data-id^="loose:"]');
-  await expect(loose).toHaveCount(1);
+  expect(await dragReading(page, panel, tail, empty!)).toBe('move here');
+  await expect(wire(panel, b)).toHaveCount(1);
   await expect(wire(panel, a).locator('circle.nx-joint')).toHaveCount(0);
+  await expect(wire(panel, a).locator('.nx-head')).toHaveCount(1);
+  const tip = (await wire(panel, a).locator('.nx-head').boundingBox())!;
+  expect(Math.hypot(tip.x + tip.width - dot.x, tip.y + tip.height / 2 - dot.y)).toBeLessThan(12);
 
-  // zoomed out again (Ctrl+wheel at the canvas's middle), so other steps are on screen
-  const mid = await centreOf(panel.locator('.studio-canvas'));
-  await page.mouse.move(mid.x, mid.y);
-  await page.keyboard.down('Control');
-  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, 240);
-  await page.keyboard.up('Control');
-  await settledView(page, panel.locator('.react-flow__viewport'));
-  // a new source for b, on screen: a step that is neither end of b and does not already wire to b's target
-  const area = (await panel.locator('.studio-canvas').boundingBox())!;
-  const steps = [...new Set(j!.wires.flatMap((w) => w.id.split('->')))];
-  let source: string | null = null;
-  for (const s of steps) {
-    if (s === bSource || s === bTarget || j!.wires.some((w) => w.id === `${s}->${bTarget}`)) continue;
-    const r = await node(panel, s).boundingBox();
-    if (r && r.x > area.x + 20 && r.y > area.y + 40 && r.x + r.width < area.x + area.width - 20 && r.y + r.height < area.y + area.height - 60) { source = s; break; }
-  }
-  test.skip(source === null, 'no other step on screen that may start b');
-  const start = await centreOf(loose.locator('.nx-open-hit'));
-  expect(await dragReading(page, panel, start, await centreOf(node(panel, source!).locator('.nx-sn')))).toBe('connect here');
-  await expect(wire(panel, `${source!}->${bTarget}`)).toHaveCount(1);
-  await expect(loose).toHaveCount(0);
-  // a is joined again, on b's new id: its dot lies on the new wire's line
-  await expect(wire(panel, a).locator('circle.nx-joint').first()).toBeVisible();
-  await page.reload();
-  const again = documentPanel(page, j!.workflow);
-  await expect(wire(again, a).locator('circle.nx-joint').first()).toBeVisible();
+  // b's tail back onto its step: b connects again (the same wire); a stays open
+  const start = await tailSquare(page, panel, b);
+  expect(await dragReading(page, panel, start, await outputOf(panel, bSource))).toBe('connect here');
+  await expect(wire(panel, b)).toHaveCount(1);
+  expect(await dashOf(wire(panel, b))).toBe('none');
+  await expect(wire(panel, a).locator('circle.nx-joint')).toHaveCount(0);
 });
 
-test('a wire detached at its tail and then its head is open at both ends: grey, dashed, an open circle at each end; a refresh keeps it; each end dropped on a step wires it again, coloured', async ({ page }) => {
+test('a wire moved open at its tail and then its head is open at both ends: grey, dashed, its ring and arrow head kept; a refresh keeps it; each end dropped on a step connects it again, coloured', async ({ page }) => {
   const { a, b } = chain!;
   const id = `${a}->${b}`;
   const panel = await open(page);
   await zoomInOn(page, panel, id);
   const colour = await wire(panel, id).locator('path.w').first().getAttribute('stroke');
   const tail = await tailSquare(page, panel, id);
-  const head0 = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="target"]`));
+  const head0 = await centreOf(endSquare(panel, id, 'head'));
   const spot1 = await emptySpot(panel, [tail, head0]);
   expect(spot1, 'no empty spot on the canvas').not.toBeNull();
-  expect(await dragReading(page, panel, tail, spot1!)).toBe('loose wire');
-  const loose = panel.locator('.react-flow__edge[data-id^="loose:"]');
-  await expect(loose).toHaveCount(1);
-  const lid = (await loose.getAttribute('data-id'))!;
-  const squares = panel.locator(`.design-wire[data-wire="${lid}"]`);
+  expect(await dragReading(page, panel, tail, spot1!)).toBe('move here');
 
   // its head too, onto nothing: open at both ends
-  const head = await centreOf(squares.locator('.design-handle.end[data-end="target"]'));
+  const head = await centreOf(endSquare(panel, id, 'head'));
   const spot2 = await emptySpot(panel, [spot1!, head]);
   expect(spot2, 'no second empty spot on the canvas').not.toBeNull();
-  expect(await dragReading(page, panel, head, spot2!)).toBe('loose wire');
-  const line = loose.locator('path.w').first();
+  expect(await dragReading(page, panel, head, spot2!)).toBe('move here');
+  const edge = wire(panel, id);
+  const line = edge.locator('path.w').first();
   await expect.poll(() => line.getAttribute('stroke')).toBe('#8A97A8');
-  expect(await line.evaluate((el) => getComputedStyle(el).strokeDasharray)).not.toBe('none');
-  await expect(loose.locator('circle.nx-open')).toHaveCount(2);
-  await expect(loose.locator('.nx-head')).toHaveCount(0);
-  await expect(squares.locator('.design-handle.end')).toHaveCount(2);
-  expect(await squares.locator('.design-handle.seg').count()).toBeGreaterThan(0);
-  await expect(wire(panel, id)).toHaveCount(0);
-  await panel.screenshot({ path: 'test-results/both-open.png' });
+  expect(await dashOf(edge)).not.toBe('none');
+  await expect(edge.locator('circle.nx-src')).toHaveCount(1);
+  await expect(edge.locator('.nx-head')).toHaveCount(1);
+  await expect(edge.locator('circle.nx-open')).toHaveCount(0);
+  await expect(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end`)).toHaveCount(2);
 
   await page.reload();
   const again = documentPanel(page, chain!.workflow);
-  const kept = again.locator(`.react-flow__edge[data-id="${lid}"]`);
+  const kept = wire(again, id);
   await expect(kept).toHaveCount(1);
-  await expect(kept.locator('circle.nx-open')).toHaveCount(2);
   expect(await kept.locator('path.w').first().getAttribute('stroke')).toBe('#8A97A8');
 
-  // its open end onto b: open at its start only, in b's colour
-  const end = await centreOf(kept.locator('.nx-open-hit[data-end="end"]'));
-  expect(await dragReading(page, again, end, await centreOf(node(again, b).locator('.nx-sn')))).toBe('connect here');
+  // its head onto b's input: b's colour, still dashed (its tail is open)
+  const p = await pointOnWire(again, id);
+  await page.mouse.click(p.x, p.y);
+  const end = await centreOf(endSquare(again, id, 'head'));
+  expect(await dragReading(page, again, end, await inputOf(again, b))).toBe('connect here');
   await expect.poll(() => kept.locator('path.w').first().getAttribute('stroke')).toBe(colour);
-  await expect(kept.locator('.nx-head')).toHaveCount(1);
-  await expect(kept.locator('circle.nx-open')).toHaveCount(1);
-  // its open start onto a: the ordinary wire a -> b again
-  const start = await centreOf(kept.locator('.nx-open-hit[data-end="start"]'));
-  expect(await dragReading(page, again, start, await centreOf(node(again, a).locator('.nx-sn')))).toBe('connect here');
-  await expect(wire(again, id)).toHaveCount(1);
-  await expect(again.locator('.react-flow__edge[data-id^="loose:"]')).toHaveCount(0);
-  expect(await wire(again, id).locator('path.w').first().getAttribute('stroke')).toBe(colour);
+  expect(await dashOf(kept)).not.toBe('none');
+  // its tail onto a's output: the wire a -> b connected again, solid
+  const start = await centreOf(endSquare(again, id, 'tail'));
+  expect(await dragReading(page, again, start, await outputOf(again, a))).toBe('connect here');
+  expect(await dashOf(kept)).toBe('none');
+  expect(await kept.locator('path.w').first().getAttribute('stroke')).toBe(colour);
 });

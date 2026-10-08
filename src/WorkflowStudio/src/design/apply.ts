@@ -1,29 +1,26 @@
 import type { StudioDocument } from '../app/document';
 import { snap, type Point } from '../layout/geometry';
 import type { Placement } from '../layout/placement';
-import { routeLoose, routeWires, routeWiring } from '../layout/wires';
+import { routeCircuit, routeWires } from '../layout/circuitRoute';
 import type { Assignment, Cache, Graph, Id, Processor, Schema, Step } from '../model/graph';
 import { reachableStepIds } from '../model/reachability';
-import { isEmptyDraft, type Draft } from './draft';
+import { circuitOf, isEmptyDraft, listsOf, type Draft } from './draft';
 import { isEmptyEdits, parseSlotKey, valueText, type EntityEdits, type FieldValue } from './design';
 
 /**
- * What the canvas shows (spec §5.1): the saved workflow with the draft laid over it. The wiring decides
- * reachability and so the parked steps (§3.5); moved blocks sit where the draft has them (the automatic
- * layout is not run again); wires are routed again with the draft's shapes. Parts naming what the saved
- * document does not have are ignored. Pure; an empty draft gives the saved document back unchanged.
+ * What the canvas shows (spec §5.1; plan 9 §7): the saved workflow with the draft laid over it. The circuit's current
+ * gives every step's next steps and the entry steps, and so reachability and the parked steps (§3.5); moved blocks sit
+ * where the draft has them (the automatic layout is not run again); every wire of the circuit is drawn again. Parts
+ * naming what the saved document does not have are ignored. Pure; an empty draft gives the saved document back unchanged.
  */
 export function applyDraft(saved: StudioDocument, draft: Draft): StudioDocument {
   if (isEmptyDraft(draft)) return saved;
   const { graph } = saved;
-  const has = (id: Id) => graph.steps.has(id);
-
+  const circuit = circuitOf(saved, draft);
+  const lists = listsOf(saved, circuit);
   const steps = new Map<Id, Step>(graph.steps);
-  for (const [id, next] of Object.entries(draft.next)) {
-    const step = steps.get(id);
-    if (step) steps.set(id, { ...step, nextStepIds: next.filter(has) });
-  }
-  const entryStepIds = (draft.entries ?? graph.workflow.entryStepIds).filter(has);
+  for (const [id, next] of lists.next) steps.set(id, { ...steps.get(id)!, nextStepIds: next });
+  const entryStepIds = lists.entries;
   const shownGraph: Graph = { ...graph, workflow: { ...graph.workflow, entryStepIds }, steps };
 
   const reachable = new Set(reachableStepIds(entryStepIds, steps));
@@ -37,10 +34,7 @@ export function applyDraft(saved: StudioDocument, draft: Draft): StudioDocument 
     steps: overlay(saved.placement.steps, draft.steps),
     caches: overlay(saved.placement.caches, draft.caches),
   };
-  // nothing is drawn broken: opening runs no validate (plan 8)
-  const brokenEdges = new Set(saved.wires.filter((w) => w.broken).map((w) => w.id));
-  const wiring = routeWiring({ entryStepIds, steps, brokenEdges, shapes: draft.routes }, placement);
-  return { graph: shownGraph, parkedIds, placement, wires: wiring.wires, loose: routeLoose(draft.loose, placement, { ...wiring, steps }) };
+  return { graph: shownGraph, parkedIds, placement, wires: routeCircuit(circuit, { placement, steps }) };
 }
 
 function overlay(base: ReadonlyMap<Id, Point>, moved: Readonly<Record<Id, Point>>): Map<Id, Point> {

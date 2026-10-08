@@ -1,9 +1,10 @@
 import type { KeyboardEvent as ReactKeyboardEvent, MutableRefObject } from 'react';
 import type { StudioDocument } from '../app/document';
+import { endPointOf } from '../layout/circuitRoute';
 import { GRID } from '../layout/geometry';
 import { nodePickIds, wirePickIds } from '../store/picks';
 import type { DesignProps } from './designProps';
-import { LOOSE_PREFIX, moveBlocks, removeLoose, removeWires } from './draft';
+import { circuitOf, moveBlocks, removeWires } from './draft';
 import { nodeBox } from './hit';
 
 /** The capsule toolbar and its zoom are drawn inside the canvas: their keys are their own. */
@@ -13,7 +14,7 @@ const ARROWS: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRigh
 
 /**
  * The canvas's own keys while it has focus (spec §3.4, §4.5, §5.3): arrows nudge the picked blocks 8 px
- * (a run of nudges is one step), Delete removes the picked wires (loose ones too), Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z
+ * (a run of nudges is one step), Delete removes the picked wires (a wire joined on one keeps its place, open), Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z
  * redo. Keys typed in an Inspector field never reach here: the Inspector is outside the canvas. Picks
  * naming blocks or wires the document no longer has (after an undo) are skipped. While `busy` (a rectangle,
  * a wire gesture or a block drag runs) no key acts: the drop would overwrite it. Escape is the gesture's own.
@@ -46,14 +47,13 @@ export function useDesignKeys(
       return;
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
-      const picked = wirePickIds(design.picks);
-      const wires = picked.filter((id) => shown.current.wires.some((w) => w.id === id));
-      // a loose wire is picked by its edge id `loose:{id}` (plan 8); one gone after an undo is skipped
-      const loose = picked.filter((id) => id.startsWith(LOOSE_PREFIX)).map((id) => id.slice(LOOSE_PREFIX.length))
-        .filter((id) => Object.hasOwn(design.draft.loose, id));
-      if (wires.length === 0 && loose.length === 0) return; // blocks are never removed (spec §2)
+      // every picked wire the circuit has (one gone after an undo is skipped); blocks are never removed (spec §2)
+      const circuit = circuitOf(saved, design.draft);
+      const ids = wirePickIds(design.picks).filter((id) => Object.hasOwn(circuit, id));
+      if (ids.length === 0) return;
       e.preventDefault();
-      design.onCommit(removeLoose(removeWires(design.draft, saved, wires), loose), { picks: design.picks.filter((p) => p.kind !== 'wire') });
+      // a wire joined on a removed one keeps its place: its end opens where it is drawn (plan 9 §2.2-6)
+      design.onCommit(removeWires(design.draft, saved, ids, endPointOf(shown.current.wires)), { picks: design.picks.filter((p) => p.kind !== 'wire') });
     }
   };
 }

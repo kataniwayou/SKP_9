@@ -13,14 +13,18 @@ describe('Legend', () => {
       expect(item.querySelector('.lg-w')!.getAttribute('stroke')).toBe(c.colour);
       expect(item.querySelector('.lg-head')).not.toBeNull();
     }
-    expect(container.querySelectorAll('.lg-item')).toHaveLength(CONDITIONS.length + 1);
+    expect(container.querySelectorAll('.lg-item')).toHaveLength(CONDITIONS.length + 2);
   });
 
-  it('shows a loose wire as a grey dashed line with an open end; no broken, no parked (plan 8)', () => {
-    const { getByText, queryByText } = render(<Legend />);
-    const loose = getByText('loose wire').closest('.lg-item')!;
-    expect(loose.querySelector('.lg-loose')).not.toBeNull();
-    expect(loose.querySelector('.lg-open')).not.toBeNull();
+  it('shows the undecided wire (grey, dashed, a ring and an arrow head) and the short circuit; no loose wire, nothing broken or parked (plan 9 §5)', () => {
+    const { getByText, queryByText, container } = render(<Legend />);
+    const undecided = getByText('undecided').closest('.lg-item')!;
+    expect(undecided.querySelector('.lg-undecided')).not.toBeNull();
+    expect(undecided.querySelector('.lg-ring')).not.toBeNull();
+    expect(undecided.querySelector('.lg-arrow')).not.toBeNull();
+    expect(getByText('short circuit').closest('.lg-item')!.querySelector('.lg-short')).not.toBeNull();
+    expect(container.querySelector('.lg-open')).toBeNull();
+    expect(queryByText(/loose/)).toBeNull();
     expect(queryByText('broken')).toBeNull();
     expect(queryByText('parked')).toBeNull();
   });

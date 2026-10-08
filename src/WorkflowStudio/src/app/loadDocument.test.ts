@@ -174,6 +174,5 @@ describe('loadDocument', () => {
 
     expect(calls).toEqual(['GET /api/v1/workflows/wf1/graph']);
     expect(result.ok && result.value.graph.design).toEqual({ steps: [] });
-    expect(result.ok && result.value.loose).toEqual([]);
   });
 });

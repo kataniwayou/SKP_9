@@ -1,7 +1,7 @@
 import { useContext, useId, type CSSProperties } from 'react';
 import type { Edge, EdgeProps } from '@xyflow/react';
 import { DesignContext } from '../../design/DesignContext';
-import { LOOSE_PREFIX } from '../../design/draft';
+import type { EndKind } from '../../layout/circuitRoute';
 import type { Pt } from '../../layout/router';
 import { useLiveArt } from '../liveArt';
 import { longestSegmentMiddle, pathOf } from '../svgPath';
@@ -14,66 +14,56 @@ export type CableEdgeData = {
   delay: number;
   /** Picked in design mode (plan 4): drawn with a halo. */
   picked?: boolean;
-  /** A joined wire's branch, from its split to its landing (plan 7). */
-  branch?: Pt[];
-  /** A joined wire's filled dots: its contact, then its split. */
-  joints?: Pt[];
-  /** The line under a dragged wire end: green when it may be joined, grey when the wire would be loose there (plan 7, plan 8 §5). */
-  halo?: 'ok' | 'no' | 'loose';
-  /** A loose wire (plan 8 §5): grey, dashed, an open circle at its end, no arrow head. */
-  loose?: boolean;
-  /** Loose at its start (its tail detached): dashed in its own colour, an open circle at its start, its head and junction as drawn when connected. */
-  openStart?: boolean;
-  /** Open at both ends: grey and dashed, an open circle at each end. */
-  openBoth?: boolean;
+  /** The line under a dragged wire end (plan 7, plan 9 §6): green when the end may join it, red when refused. */
+  halo?: 'ok' | 'no';
+  /** Not solid (plan 9 §5): an end open, or the family undecided. */
+  dashed?: boolean;
+  /** What each end is on; absent: a terminal. */
+  tailOn?: EndKind;
+  headOn?: EndKind;
+  /** In a short circuit (§2.2-7): its junction circles are red. */
+  short?: boolean;
 };
 export type CableEdgeType = Edge<CableEdgeData, 'cable'>;
 
-/** A loose wire's colour: grey, of no entry condition (plan 8 §5). */
-export const LOOSE_COLOUR = '#8A97A8';
+/** An undecided wire's colour: grey, of no entry condition (plan 9 rule 12). */
+export const UNDECIDED_COLOUR = '#8A97A8';
+
+/** An open chevron whose tip is `tip`, pointing along the run from `prev` (a run of no length points right). */
+export function arrowHead(prev: Pt, tip: Pt): string {
+  const dx = tip[0] - prev[0], dy = tip[1] - prev[1];
+  const len = Math.hypot(dx, dy);
+  const ux = len === 0 ? 1 : dx / len, uy = len === 0 ? 0 : dy / len;
+  const bx = tip[0] - 9 * ux, by = tip[1] - 9 * uy;
+  return `M${bx + 6 * uy} ${by - 6 * ux}L${tip[0]} ${tip[1]}L${bx - 6 * uy} ${by + 6 * ux}`;
+}
 
 /**
- * One wire as a circuit trace (spec §5.1; gallery trace90, mockup v50 cable): right-angled, a ring at
- * the source, an open chevron whose tip is the landing point, in the target's entry-condition colour.
- * Broken: dashed, with a soft transparent gap cut at the middle of the longest segment and ⚠ in it.
- * While `flowing` (the workflow is started) an intact wire carries a pulse toward its target.
- * Loose (plan 8 §5): grey and dashed, a ring at its source and an open circle where it was dropped; never pulses.
- * Loose at its start: dashed in its colour, an open circle where its tail was dropped, its arrow head kept; never pulses.
+ * One wire as a circuit trace (spec §5.1; plan 9 §5): right-angled, in its family's colour (grey while undecided),
+ * dashed unless both its ends are connected and its family decided. Its tail has a small ring and its head an open
+ * chevron, on a terminal or open alike; an end on another wire is a filled circle instead (red in a short circuit).
+ * Broken: dashed, with a soft gap cut at the middle of the longest segment and ⚠ in it. While `flowing` (the workflow
+ * is started) a solid wire carries a pulse toward its head.
  */
-export function CableEdgeView({ points, colour, broken, delay, picked, flowing, branch, joints, halo, loose, openStart, openBoth }: CableEdgeData & { flowing: boolean }) {
+export function CableEdgeView({ points, colour, broken, delay, picked, flowing, halo, dashed, tailOn = 'terminal', headOn = 'terminal', short }: CableEdgeData & { flowing: boolean }) {
   const gap = `nxgap${useId().replace(/[^\w-]/g, '')}`;
-  if (loose && !openStart) {
-    const [sx0, sy0] = points[0]!;
-    const [ex, ey] = points[points.length - 1]!;
-    return (
-      <g className={`wire loose${picked ? ' picked' : ''}`} style={{ '--nc': LOOSE_COLOUR } as CSSProperties}>
-        {!openBoth && <circle className="nx-src" cx={sx0} cy={sy0} r={2.6} />}
-        <path className="w" d={pathOf(points)} stroke={LOOSE_COLOUR} />
-        {openBoth && <circle className="nx-open" cx={sx0} cy={sy0} r={4.5} />}
-        <circle className="nx-open" cx={ex} cy={ey} r={4.5} />
-      </g>
-    );
-  }
   const d = pathOf(points);
-  const [sx, sy] = points[0]!;
-  // the arrow head goes on the line that enters a step: a plain wire's end, or a joined wire's branch end (spec §3)
-  const into = joints ? (branch && branch.length > 1 ? branch : null) : points;
-  const tip = into ? into[into.length - 1]! : null;
+  const first = points[0]!, tip = points[points.length - 1]!;
   const mark = broken ? longestSegmentMiddle(points) : null;
+  const dot = (p: Pt) => <circle className={short ? 'nx-joint short' : 'nx-joint'} cx={p[0]} cy={p[1]} r={4.5} />;
 
   const trace = (
     <>
-      {!openStart && <circle className="nx-src" cx={sx} cy={sy} r={2.6} />}
+      {tailOn !== 'junction' && <circle className="nx-src" cx={first[0]} cy={first[1]} r={2.6} />}
       <path className="w" d={d} stroke={colour} />
-      {branch && branch.length > 1 && <path className="w branch" d={pathOf(branch)} stroke={colour} />}
-      {tip && <path className="nx-head" d={`M${tip[0] - 9} ${tip[1] - 6}L${tip[0]} ${tip[1]}L${tip[0] - 9} ${tip[1] + 6}`} stroke={colour} />}
-      {joints?.map(([x, y], i) => <circle key={i} className="nx-joint" cx={x} cy={y} r={4.5} />)}
-      {openStart && <circle className="nx-open" cx={sx} cy={sy} r={4.5} />}
+      {headOn !== 'junction' && <path className="nx-head" d={arrowHead(points[points.length - 2] ?? tip, tip)} stroke={colour} />}
+      {tailOn === 'junction' && dot(first)}
+      {headOn === 'junction' && dot(tip)}
     </>
   );
 
   return (
-    <g className={`${broken ? 'wire broken' : 'wire'}${openStart ? ' loose' : ''}${picked ? ' picked' : ''}${halo ? ` halo-${halo}` : ''}`} style={{ '--nc': colour } as CSSProperties}>
+    <g className={`${broken ? 'wire broken' : 'wire'}${dashed ? ' dashed' : ''}${picked ? ' picked' : ''}${halo ? ` halo-${halo}` : ''}`} style={{ '--nc': colour } as CSSProperties}>
       {mark ? (
         <>
           <defs>
@@ -87,8 +77,7 @@ export function CableEdgeView({ points, colour, broken, delay, picked, flowing, 
           <text className="nx-warn" x={mark[0]} y={mark[1] + 5} textAnchor="middle">⚠</text>
         </>
       ) : trace}
-      {flowing && !broken && !openStart && <path className="nx-pulse" d={d} style={{ animationDelay: `${delay}s` }} />}
-      {flowing && !broken && !openStart && branch && branch.length > 1 && <path className="nx-pulse" d={pathOf(branch)} style={{ animationDelay: `${delay}s` }} />}
+      {flowing && !broken && !dashed && <path className="nx-pulse" d={d} style={{ animationDelay: `${delay}s` }} />}
     </g>
   );
 }
@@ -100,17 +89,8 @@ export function CableEdge({ id, data }: EdgeProps<CableEdgeType>) {
   return (
     <>
       <CableEdgeView {...data} flowing={started} />
-      {/* an invisible band about 8 px wide, so the hand cursor and clicks need no pixel precision (spec §4.1);
-          a loose wire keeps it too: it is what makes a click pick the wire */}
-      <path className="nx-hit" d={pathOf(data.points)} onPointerDown={gestures ? (e) => gestures.wirePointerDown(id, e, 'own') : undefined} />
-      {data.branch && data.branch.length > 1 && (
-        <path className="nx-hit branch" d={pathOf(data.branch)} onPointerDown={gestures ? (e) => gestures.wirePointerDown(id, e, 'branch') : undefined} />
-      )}
-      {/* a loose wire's open end (or open start, or both) is always draggable in design mode (plan 8 §5) */}
-      {data.loose && gestures && (data.openBoth ? ['start', 'end'] as const : [data.openStart ? 'start' : 'end'] as const).map((end) => {
-        const [ex, ey] = end === 'start' ? data.points[0]! : data.points[data.points.length - 1]!;
-        return <circle key={end} className="nx-open-hit" data-end={end} cx={ex} cy={ey} r={9} onPointerDown={(e) => gestures.looseEndPointerDown(id.slice(LOOSE_PREFIX.length), e, end)} />;
-      })}
+      {/* an invisible band about 8 px wide, so the hand cursor and clicks need no pixel precision (spec §4.1) */}
+      <path className="nx-hit" d={pathOf(data.points)} onPointerDown={gestures ? (e) => gestures.wirePointerDown(id, e) : undefined} />
     </>
   );
 }

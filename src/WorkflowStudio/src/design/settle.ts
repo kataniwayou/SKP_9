@@ -6,6 +6,9 @@ import { endPointOf, routeCircuit } from '../layout/circuitRoute';
 import type { Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE } from '../layout/ports';
 import type { Id } from '../model/graph';
+import { applyEdits } from './apply';
+import type { Design } from './design';
+import { withCircuit, type Draft } from './draft';
 
 const onCanvas = (saved: StudioDocument, id: Id) => saved.graph.steps.has(id) && saved.placement.steps.has(id);
 
@@ -119,4 +122,19 @@ export function reconcile(start: Readonly<Circuit>, expected: ReadonlySet<string
   }
   if (import.meta.env.DEV) console.warn(`settle: the circuit did not agree with the workflow after ${cap} rounds`);
   return c;
+}
+
+/**
+ * A draft made to agree with the workflow (decision 6): its circuit settled against what its own lists say. A draft
+ * with no circuit of its own is the workflow's wiring: nothing to settle.
+ */
+export function settleDraft(draft: Draft, saved: StudioDocument): Draft {
+  if (draft.wires === null) return draft;
+  return withCircuit(draft, saved, reconcile(draft.wires, expectedLinks(saved, draft.next, draft.entries), saved));
+}
+
+/** A design as it opens (the stored one, or a session's): its draft settled against the base with its own entity edits over it. */
+export function settleDesign(design: Design, saved: StudioDocument): Design {
+  if (design.draft.wires === null) return design;
+  return { ...design, draft: settleDraft(design.draft, applyEdits(saved, design.edits)) };
 }

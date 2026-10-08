@@ -1,8 +1,8 @@
 import type { StudioDocument } from '../app/document';
 import { CACHE_H, CACHE_W, SPHERE_R, STEP_H, STEP_W, type Point } from '../layout/geometry';
 import { CACHE_NODE_PREFIX, cacheNodeId, SPHERE_NODE_ID } from '../layout/nodeIds';
-import { nearestOn } from '../layout/junctions';
-import { drawnLine } from '../layout/wires';
+import { lengthOf, nearestOn } from '../layout/junctions';
+import type { Side } from '../circuit/circuit';
 import type { Pick } from '../store/picks';
 
 /** A rectangle in flow coordinates, x0 ≤ x1 and y0 ≤ y1. */
@@ -57,12 +57,21 @@ export function blockAt(doc: StudioDocument, p: Point, reach = 0): string | null
   return null;
 }
 
-/** The wire line nearest `p` within `tolerance` (flow units), and how far along its drawn line (own line, then branch); plan 7. */
-export function wireAt(doc: StudioDocument, p: Point, tolerance: number, exclude: string | null = null): { id: string; at: number } | null {
+/**
+ * The wire line nearest `p` within `tolerance` (flow units), and how far along it (plan 7). The wire whose end `own`
+ * is dragged counts too (an end on its own wire is refused out loud, plan 9 §3), except its run at that end, where
+ * the drag starts (Review Focus 5); a wire of one run is all that run.
+ */
+export function wireAt(doc: StudioDocument, p: Point, tolerance: number, own: { id: string; side: Side } | null = null): { id: string; at: number } | null {
   let best: { id: string; at: number; gap: number } | null = null;
   for (const w of doc.wires) {
-    if (w.id === exclude) continue;
-    const n = nearestOn(drawnLine(w), [p.x, p.y]);
+    let from = 0, to = Infinity;
+    if (own && w.id === own.id) {
+      if (w.points.length < 3) continue;
+      if (own.side === 'head') to = lengthOf([w.points]) - lengthOf([w.points.slice(-2)]);
+      else from = lengthOf([w.points.slice(0, 2)]);
+    }
+    const n = nearestOn([w.points], [p.x, p.y], from, to);
     if (n.gap <= tolerance && (best === null || n.gap < best.gap)) best = { id: w.id, at: n.at, gap: n.gap };
   }
   return best && { id: best.id, at: best.at };

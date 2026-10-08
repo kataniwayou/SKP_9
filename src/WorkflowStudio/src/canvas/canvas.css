@@ -50,29 +50,27 @@
 .design-band { fill: rgba(125, 211, 252, .08); stroke: var(--accent); }
 .design-guide { stroke: #fff; filter: drop-shadow(0 0 2px rgba(125, 211, 252, .9)); }
 .design-handle { pointer-events: all; cursor: pointer; }
-.design-handle.end { fill: var(--accent); stroke: #04111F; cursor: ew-resize; }
+.design-handle.end { fill: var(--accent); stroke: #04111F; cursor: move; }
 .design-handle.seg { fill: var(--panel); stroke: var(--accent); }
 /* a run square shows the way its run moves (Visio): a horizontal run goes up and down, a vertical one sideways;
-   an end square leaves its block sideways */
+   an end square moves its end any way (plan 9 rule 14) */
 .design-handle.seg.h { cursor: ns-resize; }
 .design-handle.seg.v { cursor: ew-resize; }
 .studio-canvas.gesture.gesture-ns, .studio-canvas.gesture.gesture-ns * { cursor: ns-resize !important; }
 .studio-canvas.gesture.gesture-ew, .studio-canvas.gesture.gesture-ew * { cursor: ew-resize !important; }
-/* plan 7: a joined wire's contact square moves its contact along any same-colour line (four-way arrow) */
-.design-handle.end.contact { cursor: move; }
 .studio-canvas.gesture.gesture-move, .studio-canvas.gesture.gesture-move * { cursor: move !important; }
 
 /* plan 4: the block under a dragged wire end (green: the drop is allowed; red: refused), the ghost wire, and the connection points */
 /* --inv (1 / zoom, set on the canvas) keeps the outline 3 px on screen at any zoom */
 .studio-canvas .react-flow__node.drop-ok { outline: calc(3px * var(--inv, 1)) solid #34D399; outline-offset: calc(4px * var(--inv, 1)); border-radius: 8px; }
 .studio-canvas .react-flow__node.drop-no { outline: calc(3px * var(--inv, 1)) solid #F87171; outline-offset: calc(4px * var(--inv, 1)); border-radius: 8px; }
-/* plan 8: released here the wire becomes loose (grey) */
-.studio-canvas .react-flow__node.drop-loose { outline: calc(3px * var(--inv, 1)) solid #9AA7B8; outline-offset: calc(4px * var(--inv, 1)); border-radius: 8px; }
+/* plan 9: released here the end is open (grey) */
+.studio-canvas .react-flow__node.drop-move { outline: calc(3px * var(--inv, 1)) solid #9AA7B8; outline-offset: calc(4px * var(--inv, 1)); border-radius: 8px; }
 .design-ghost { fill: none; stroke: var(--accent); }
 .design-drop-label rect { stroke-width: 1; }
 .design-drop-label.ok rect { fill: rgba(6, 40, 30, .92); stroke: #34D399; }
 .design-drop-label.no rect { fill: rgba(45, 10, 10, .92); stroke: #F87171; }
-.design-drop-label.loose rect { fill: rgba(20, 26, 36, .92); stroke: #9AA7B8; }
+.design-drop-label.move rect { fill: rgba(20, 26, 36, .92); stroke: #9AA7B8; }
 .design-drop-label text { fill: var(--ink); font-family: var(--sans); }
 /* a connection point is 12 px on screen at any zoom, centred on its spot (left/top in flow units) */
 .nx-port { position: absolute; width: calc(12px * var(--inv, 1)); height: calc(12px * var(--inv, 1)); transform: translate(-50%, -50%); border: 0; background: transparent; box-sizing: border-box; opacity: 0; cursor: pointer; } /* the connection point: a hit area only, never drawn */

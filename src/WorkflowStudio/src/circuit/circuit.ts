@@ -1,6 +1,6 @@
 import type { Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
-import { parseBends, type Bends } from '../layout/shape';
+import { isNum, parseBends, type Bends } from '../layout/shape';
 import type { Id, Step } from '../model/graph';
 
 /**
@@ -158,7 +158,6 @@ export const shapedByHand = (w: CircuitWire): boolean =>
 // ---- reading back: a session's or a stored layout's circuit, or a plan 7 / plan 8 one; anything malformed is dropped ----
 
 const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
-const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isId = (v: unknown): v is string => typeof v === 'string' && v !== '';
 
 function toEnd(v: unknown): End | null {

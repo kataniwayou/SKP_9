@@ -4,7 +4,8 @@ import { assignmentDto, cacheDto, graphDto, processorDto, schemaDto, stepDto, wo
 import type { WorkflowGraphDto } from '../api/types';
 import { applyDesign } from '../design/apply';
 import { EMPTY_EDITS, removeAssignment, setField } from '../design/design';
-import { EMPTY_DRAFT, loosen, loosenHead, loosenStart } from '../design/draft';
+import { setEnd } from '../circuit/circuit';
+import { circuitOf, EMPTY_DRAFT, withCircuit } from '../design/draft';
 import { designDirty } from '../store/studioState';
 import { createStudioStore } from '../store/studioStore';
 import { loadedDocument } from './fixtures';
@@ -41,43 +42,32 @@ describe('buildDesignRequest (plan 8 §4.2)', () => {
     expect([...body.layout.parked].sort()).toEqual(['s1', 's2']);
   });
 
-  it('never sends a loose wire as a next step, and keeps it in the layout (Review Focus 5)', async () => {
+  it('never sends a wire open at its head as a next step, and keeps it in the layout (plan 8 Review Focus 5)', async () => {
     const base = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
-    const draft = loosen(EMPTY_DRAFT, base, 's1->s2', 'l1', { x: 904, y: 400 });
+    const draft = withCircuit(EMPTY_DRAFT, base, setEnd(circuitOf(base, EMPTY_DRAFT), 's1->s2', 'head', { on: 'open', x: 904, y: 400 }));
 
     const body = buildDesignRequest(base, applyDesign(base, draft, EMPTY_EDITS), { draft, edits: EMPTY_EDITS });
 
     expect(body.steps).toEqual([{ id: 's1', updatedAt: expect.any(String), fields: {}, nextStepIds: [] }]);
     expect(body.workflow.entryStepIds).toBeNull();
-    expect(body.layout.loose).toEqual({ l1: { source: 's1', end: { x: 904, y: 400 } } });
+    expect(body.layout.wires['s1->s2']).toEqual({ tail: { on: 'step', step: 's1', y: null }, head: { on: 'open', x: 904, y: 400 } });
   });
 
-  it('never sends a wire loose at its start: its target loses it, an entry wire leaves the entry list; the layout keeps it', async () => {
+  it('never sends a wire open at its tail: its step loses it, an entry wire leaves the entry list; the layout keeps both', async () => {
     const base = await loadedDocument(graphDto({
       workflow: workflowDto({ entryStepIds: ['s1', 's3'] }),
       steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3')],
     }));
-    let draft = loosenStart(EMPTY_DRAFT, base, 's1->s2', 't1', { x: 304, y: 600 }, 96);
-    draft = loosenStart(draft, base, 'wf->s3', 't2', { x: 40, y: 600 }, 80);
+    let c = setEnd(circuitOf(base, EMPTY_DRAFT), 's1->s2', 'tail', { on: 'open', x: 304, y: 600 });
+    c = setEnd(c, 'wf->s3', 'tail', { on: 'open', x: 64, y: 704 });
+    const draft = withCircuit(EMPTY_DRAFT, base, c);
 
     const body = buildDesignRequest(base, applyDesign(base, draft, EMPTY_EDITS), { draft, edits: EMPTY_EDITS });
 
     expect(body.steps).toEqual([{ id: 's1', updatedAt: expect.any(String), fields: {}, nextStepIds: [] }]);
     expect(body.workflow.entryStepIds).toEqual(['s1']);
-    expect(JSON.stringify(body.steps)).not.toContain('s2');
-    expect(body.layout.loose).toEqual({
-      t1: { open: 'start', target: 's2', start: { x: 304, y: 600 }, landing: 96, contact: null, was: 's1->s2' },
-      t2: { open: 'start', target: 's3', start: { x: 40, y: 600 }, landing: 80, contact: null, was: 'wf->s3' },
-    });
-  });
-
-  it('never sends a wire open at both ends; the layout keeps it', async () => {
-    const base = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
-    const draft = loosenHead(loosenStart(EMPTY_DRAFT, base, 's1->s2', 'b1', { x: 304, y: 600 }, null), 'b1', { x: 904, y: 600 });
-    const body = buildDesignRequest(base, applyDesign(base, draft, EMPTY_EDITS), { draft, edits: EMPTY_EDITS });
-    expect(body.steps).toEqual([{ id: 's1', updatedAt: expect.any(String), fields: {}, nextStepIds: [] }]);
-    expect(body.workflow.entryStepIds).toBeNull();
-    expect(body.layout.loose).toEqual({ b1: { open: 'both', start: { x: 304, y: 600 }, end: { x: 904, y: 600 }, was: 's1->s2' } });
+    expect(body.layout.wires['s1->s2']!.tail).toEqual({ on: 'open', x: 304, y: 600 });
+    expect(body.layout.wires['wf->s3']!.tail).toEqual({ on: 'open', x: 64, y: 704 });
   });
 });
 

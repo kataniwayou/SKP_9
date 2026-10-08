@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { assignmentDto, graphDto, processorDto, schemaDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
+import { addCircuitWire, setEnd } from '../circuit/circuit';
 import { PMID, STEP_W } from '../layout/geometry';
-import { addLoose, addWire, EMPTY_DRAFT, moveBlocks, removeWires, setShape } from './draft';
+import { circuitOf, EMPTY_DRAFT, moveBlocks, removeWires, setShape, withCircuit, type Draft } from './draft';
 import { applyDesign, applyDraft } from './apply';
 import { createAssignment, EMPTY_EDITS, removeAssignment, setField } from './design';
 
@@ -27,40 +28,41 @@ describe('applyDraft', () => {
 
   it('parks a step nothing reaches any more, and what only it reached', async () => {
     const saved = await chain();
-    const shown = applyDraft(saved, removeWires(EMPTY_DRAFT, saved, ['s1->s2']));
+    const shown = applyDraft(saved, removeWires(EMPTY_DRAFT, saved, ['s1->s2'], () => null));
     expect(shown.parkedIds).toEqual(['s2', 's3']);
     expect(shown.wires.map((w) => w.id)).toEqual(['wf->s1', 's2->s3']);
     expect(saved.parkedIds).toEqual([]);
   });
 
-  it('wires a new edge in, and a re-wired wire is not broken', async () => {
+  it('rewires the shown graph from the circuit: a tail junction fans out, a tail on the hub makes an entry step (plan 9 §7)', async () => {
     const saved = await chain();
-    const shown = applyDraft(saved, addWire(EMPTY_DRAFT, saved, 'wf', 's3'));
+    let shown = applyDraft(saved, withCircuit(EMPTY_DRAFT, saved, setEnd(circuitOf(saved, EMPTY_DRAFT), 's2->s3', 'tail', { on: 'wire', host: 's1->s2', at: 40 })));
+    expect(shown.graph.steps.get('s1')!.nextStepIds).toEqual(['s2', 's3']);
+    expect(shown.graph.steps.get('s2')!.nextStepIds).toEqual([]);
+    shown = applyDraft(saved, withCircuit(EMPTY_DRAFT, saved, setEnd(circuitOf(saved, EMPTY_DRAFT), 's2->s3', 'tail', { on: 'hub', angle: 180 })));
     expect(shown.graph.workflow.entryStepIds).toEqual(['s1', 's3']);
-    expect(shown.wires.find((w) => w.id === 'wf->s3')!.broken).toBe(false);
+    expect(shown.wires.find((w) => w.id === 's2->s3')).toMatchObject({ source: 'wf', tailOn: 'terminal' });
   });
 
   it('ignores ids the saved document does not have (review focus 1)', async () => {
     const saved = await chain();
-    const draft = {
+    const draft: Draft = {
       ...EMPTY_DRAFT,
       steps: { gone: { x: 0, y: 0 } },
       caches: { gone: { x: 0, y: 0 } },
-      next: { gone: ['s1'], s1: ['s2', 'gone'] },
-      entries: ['s1', 'gone'],
-      routes: { 'gone->s1': { bends: null, landing: 80 } },
+      wires: { ...circuitOf(saved, EMPTY_DRAFT), 'gone->s1': { tail: { on: 'step', step: 'gone', y: null }, head: { on: 'step', step: 's1', y: null } } },
     };
     const shown = applyDraft(saved, draft);
     expect(shown.placement.steps.has('gone')).toBe(false);
     expect(shown.graph.steps.get('s1')!.nextStepIds).toEqual(['s2']);
     expect(shown.graph.workflow.entryStepIds).toEqual(['s1']);
-    expect(shown.wires.map((w) => w.id)).toEqual(saved.wires.map((w) => w.id));
+    expect(shown.wires.find((w) => w.id === 'gone->s1')!.tailOn).toBe('open');
   });
 
   it('applies a manual shape by wire id', async () => {
     const saved = await chain();
     const w = saved.wires.find((x) => x.id === 's1->s2')!;
-    const shown = applyDraft(saved, setShape(EMPTY_DRAFT, 's1->s2', { bends: null, landing: 128 }));
+    const shown = applyDraft(saved, setShape(EMPTY_DRAFT, saved, 's1->s2', { bends: null, landing: 128 }));
     const p = shown.placement.steps.get('s2')!;
     expect(shown.wires.find((x) => x.id === 's1->s2')!.points.at(-1)).toEqual([w.points.at(-1)![0], p.y + 128]);
   });
@@ -95,17 +97,15 @@ describe('applyDesign (plan 8 §3.1: what the canvas, the Inspector and the pane
     expect(applyDesign(base, EMPTY_DRAFT, EMPTY_EDITS)).toBe(base);
   });
 
-  it('routes a loose wire from the port of its source to its open end, and drops one whose source is not on the canvas', async () => {
+  it('draws a wire open at its head from its source\'s port to its open end, grey and dashed; it is never part of the wiring', async () => {
     const base = await loadedDocument(graphDto({ steps: [stepDto('s1')] }));
     const at = base.placement.steps.get('s1')!;
-    const draft = addLoose(addLoose(EMPTY_DRAFT, 'l1', 's1', { x: at.x + 600, y: at.y + 240 }), 'l2', 'gone', { x: 0, y: 0 });
-
+    const draft = withCircuit(EMPTY_DRAFT, base, addCircuitWire(circuitOf(base, EMPTY_DRAFT), 'w:l1', { tail: { on: 'step', step: 's1', y: null }, head: { on: 'open', x: at.x + 600, y: at.y + 240 } }));
     const shown = applyDesign(base, draft, EMPTY_EDITS);
-
-    expect(shown.loose.map((l) => l.id)).toEqual(['l1']);
-    const pts = shown.loose[0]!.points;
-    expect(pts[0]).toEqual([at.x + STEP_W, at.y + PMID]);
-    expect(pts[pts.length - 1]).toEqual([at.x + 600, at.y + 240]);
-    expect(shown.graph.steps.get('s1')!.nextStepIds).toEqual([]); // never part of the wiring
+    const l1 = shown.wires.find((w) => w.id === 'w:l1')!;
+    expect(l1.points[0]).toEqual([at.x + STEP_W, at.y + PMID]);
+    expect(l1.points.at(-1)).toEqual([at.x + 600, at.y + 240]);
+    expect(l1).toMatchObject({ condition: null, solid: false, headOn: 'open' });
+    expect(shown.graph.steps.get('s1')!.nextStepIds).toEqual([]);
   });
 });

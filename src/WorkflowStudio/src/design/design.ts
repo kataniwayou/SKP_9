@@ -284,12 +284,13 @@ const list = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.fi
 
 /**
  * The last saved design (spec §3.1): the server's stored body (`graph.design`, the request without its
- * layout) read back into a design, with the wire shapes and loose wires of the stored layout. With
- * nothing stored, only those shapes: the real entities hold the rest.
+ * layout) read back into a design, with the circuit (or a plan 8 layout's shapes and loose wires) of the stored
+ * layout. With nothing stored, only that circuit: the real entities hold the rest.
  */
 export function storedDesignOf(stored: unknown, layout: unknown): Design {
-  const shapes = parseDraft(isRecord(layout) ? { routes: layout.routes, loose: layout.loose } : {})!;
-  const draft: Draft = { ...EMPTY_DRAFT, routes: shapes.routes, loose: shapes.loose, next: copy({}) };
+  // a plan 9 layout holds the circuit; a plan 7 / plan 8 one its shapes and loose wires (spec §8)
+  const shapes = parseDraft(isRecord(layout) ? (Object.hasOwn(layout, 'wires') ? { wires: layout.wires } : { routes: layout.routes, loose: layout.loose }) : {})!;
+  const draft: Draft = { ...EMPTY_DRAFT, wires: shapes.wires, next: copy({}) };
   const edits: EntityEdits = { workflow: null, steps: copy({}), processors: copy({}), caches: copy({}), assignments: copy({}), schemas: copy({}) };
   if (!isRecord(stored)) return { draft, edits };
 
@@ -326,5 +327,7 @@ export function storedDesignOf(stored: unknown, layout: unknown): Design {
     const op = toOp(a);
     if (stepId !== null && op !== null) edits.assignments[stepId] = op;
   }
+  // a stored body that rewired steps but whose layout holds no circuit (plan 8): settling makes the circuit whole
+  if (draft.wires === null && (Object.keys(draft.next).length > 0 || draft.entries !== null)) draft.wires = copy({});
   return { draft, edits };
 }

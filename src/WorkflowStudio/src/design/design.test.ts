@@ -72,7 +72,7 @@ describe('entity edits (plan 8 §3.2)', () => {
   it('tells a design with graph changes from one with only shapes and stamps', () => {
     expect(hasGraphChanges(EMPTY_DESIGN)).toBe(false);
     expect(hasGraphChanges({
-      draft: { ...EMPTY_DRAFT, routes: { 'a->b': { bends: null, landing: 40 } }, loose: { l1: { source: 'a', end: { x: 0, y: 0 } } } },
+      draft: { ...EMPTY_DRAFT, wires: { 'a->b': { tail: { on: 'step', step: 'a', y: null }, head: { on: 'step', step: 'b', y: 40 } }, 'w:l1': { tail: { on: 'step', step: 'a', y: null }, head: { on: 'open', x: 0, y: 0 } } } },
       edits: { ...EMPTY_EDITS, steps: { s1: { updatedAt: 't', fields: {} } } },
     })).toBe(false);
     expect(hasGraphChanges({ draft: { ...EMPTY_DRAFT, next: { s1: [] } }, edits: EMPTY_EDITS })).toBe(true);
@@ -113,8 +113,9 @@ describe('the stored design (plan 8 §3.1)', () => {
     }, { routes: { 's1->s1': { bends: null, landing: 24 } }, loose: { l1: { source: 's1', end: { x: 600, y: 80 } } } });
     expect(d.draft.entries).toEqual(['s2']);
     expect(d.draft.next).toEqual({ s1: ['s1'] });
-    expect(d.draft.routes['s1->s1']).toEqual({ bends: null, landing: 24, contact: null });
-    expect(d.draft.loose['l1']).toEqual({ source: 's1', end: { x: 600, y: 80 } });
+    // a plan 8 layout reads as a circuit (plan 9 §8): the shape keeps its id and landing, the loose wire is `w:l1`
+    expect(d.draft.wires!['s1->s1']).toEqual({ tail: { on: 'step', step: 's1', y: null }, head: { on: 'step', step: 's1', y: 24 } });
+    expect(d.draft.wires!['w:l1']).toEqual({ tail: { on: 'step', step: 's1', y: null }, head: { on: 'open', x: 600, y: 80 } });
     expect(d.edits.workflow).toEqual({ updatedAt: 'w0', fields: { description: 'd' } });
     expect(d.edits.steps['s1']).toEqual({ updatedAt: 's0', fields: {} });
     expect(d.edits.processors['p1']!.fields).toEqual({ name: 'p' });
@@ -127,6 +128,12 @@ describe('the stored design (plan 8 §3.1)', () => {
     const d = storedDesignOf(null, { routes: {}, loose: {} });
     expect(hasGraphChanges(d)).toBe(false);
     expect(sameDesign(d, EMPTY_DESIGN)).toBe(true);
+  });
+
+  it('rewired with no circuit in its layout (plan 8), it holds an empty circuit for settling to make whole', () => {
+    const d = storedDesignOf({ steps: [{ id: 's1', fields: {}, nextStepIds: [] }] }, null);
+    expect(d.draft.next).toEqual({ s1: [] });
+    expect(d.draft.wires).toEqual({});
   });
 });
 

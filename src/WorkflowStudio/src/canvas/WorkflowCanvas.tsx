@@ -1,22 +1,23 @@
 import { useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ReactFlow, ReactFlowProvider, useStore, useStoreApi, type EdgeMouseHandler, type EdgeTypes, type NodeMouseHandler, type NodeTypes, type Viewport } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
+import { shapedByHand } from '../circuit/circuit';
 import { applyDraft } from '../design/apply';
 import { DesignContext } from '../design/DesignContext';
 import { DesignOverlay } from '../design/DesignOverlay';
 import type { DesignProps } from '../design/designProps';
-import { EMPTY_DRAFT, LOOSE_PREFIX, resetShape, storedBends, type Draft } from '../design/draft';
+import { circuitOf, EMPTY_DRAFT, resetShape, type Draft } from '../design/draft';
 import type { GuideLine } from '../design/guides';
 import { useBlockDrag } from '../design/useBlockDrag';
 import { useDesignKeys } from '../design/useDesignKeys';
 import { useRubberBand } from '../design/useRubberBand';
-import { looseAsWire, useWireGestures } from '../design/useWireGestures';
+import { useWireGestures } from '../design/useWireGestures';
 import { Menu, anchorAt, type Anchor } from '../dock/Menu';
 import { togglePick, type Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
 import { GRID } from '../layout/geometry';
-import { shapeFromPoints } from '../layout/shape';
-import type { WireRoute } from '../layout/wires';
+import { endsOf, shapeFromPoints } from '../layout/shape';
+import type { WireRoute } from '../layout/circuitRoute';
 import { CableEdge } from './edges/CableEdge';
 import { TetherEdge } from './edges/TetherEdge';
 import { FIT_VIEW_OPTIONS } from './fitOptions';
@@ -64,9 +65,11 @@ interface Props {
   design?: DesignProps;
 }
 
-/** Has the wire (a pick id) a shape of its own to reset: a connected wire's route, a loose wire's bends (plan 8 §5)? */
-const shapedByHand = (draft: Draft, wireId: string): boolean =>
-  (wireId.startsWith(LOOSE_PREFIX) ? storedBends(draft, wireId) !== undefined : Object.hasOwn(draft.routes, wireId));
+/** Has the wire a shape of its own to reset: bends, or an end slid along a step's side (plan 9 decision 11)? */
+const resettable = (doc: StudioDocument, draft: Draft, wireId: string): boolean => {
+  const c = circuitOf(doc, draft);
+  return Object.hasOwn(c, wireId) && shapedByHand(c[wireId]!);
+};
 
 /** React Flow's attribution badge is hidden (MIT licence): it would sit on the horizontal scroll bar. */
 const PRO_OPTIONS = { hideAttribution: true } as const;
@@ -136,32 +139,27 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   // the block under a dragged wire end, outlined green or red (spec §4.4); a line gets a halo instead (plan 7)
   const shown = useMemo(() => withHint(selected, wiring.hint && !wiring.hint.line ? wiring.hint : null), [selected, wiring.hint]);
   // a wire whose end is dragged follows the pointer: the wire, its handles and its runs (spec §4.4)
-  // a joined wire's dragged arrow moves its branch, not its own line (plan 7 §6.2)
-  const dragged = wiring.ghost?.wire ? { id: wiring.ghost.wire, part: wiring.ghost.part, points: wiring.ghost.points } : null;
+  const dragged = wiring.ghost?.wire ? { id: wiring.ghost.wire, points: wiring.ghost.points } : null;
   const edges = useMemo(() => marked.edges.map((e) => {
     if (e.type !== 'cable' || !e.data) return e;
     let data = e.data;
-    // a joined wire's dragged contact: drawn plain to the pointer, its old branch and dots gone (plan 7 §6.2)
-    if (dragged && e.id === dragged.id) data = dragged.part === 'branch' ? { ...data, branch: dragged.points } : { ...data, points: dragged.points, branch: undefined, joints: undefined };
-    // the line under a dragged arrow end: green when it may be joined, grey when the wire becomes loose there (plan 7 §6.1, plan 8 §5)
-    if (wiring.hint?.line && e.id === wiring.hint.id) data = { ...data, halo: wiring.hint.tone };
+    if (dragged && e.id === dragged.id) data = { ...data, points: dragged.points };
+    // the line under a dragged end: green when the end may join it, red when refused (plan 7 §6.1, plan 9 §6)
+    if (wiring.hint?.line && e.id === wiring.hint.id && wiring.hint.tone !== 'move') data = { ...data, halo: wiring.hint.tone };
     return data === e.data ? e : { ...e, data };
   }), [marked.edges, wiring.ghost, wiring.hint]);
   // picks naming wires that are gone (after an undo) draw nothing
-  // a picked loose wire has the same squares (plan 8 §5), its open end in the place of a target
   const pickedWires = useMemo(
     () => (design
-      ? [...shownDoc.wires, ...shownDoc.loose.map(looseAsWire)].filter((w) => design.picks.some((p) => p.kind === 'wire' && p.id === w.id)).map((w) => (dragged && w.id === dragged.id
-        ? dragged.part === 'branch' && w.joint ? { ...w, joint: { ...w.joint, branch: dragged.points } } : { ...w, points: dragged.points, joint: undefined }
-        : w))
+      ? shownDoc.wires.filter((w) => design.picks.some((p) => p.kind === 'wire' && p.id === w.id))
+        .map((w) => (dragged && w.id === dragged.id ? { ...w, points: dragged.points, core: { ends: endsOf(dragged.points), points: dragged.points } } : w))
       : []),
     [shownDoc, design?.picks, wiring.ghost],
   );
   // the run squares follow a drag's preview, not only the committed draft
-  // (a dragged branch leaves the own line, and its runs, where they are)
-  const bendsOf = (w: WireRoute) => (dragged && w.id === dragged.id && dragged.part !== 'branch'
+  const bendsOf = (w: WireRoute) => (dragged && w.id === dragged.id
     ? shapeFromPoints(w.points)
-    : storedBends(preview ?? design?.draft ?? EMPTY_DRAFT, w.id) ?? shapeFromPoints(w.joint?.own ?? w.points));
+    : circuitOf(doc, preview ?? design?.draft ?? EMPTY_DRAFT)[w.id]?.bends ?? shapeFromPoints(w.core.points));
   // the wire's right-click menu (spec §4.3)
   const [menu, setMenu] = useState<{ anchor: Anchor; wireId: string } | null>(null);
 
@@ -181,7 +179,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     onSelect(selectionForPicks(picks, null, shownDoc.graph), picks);
   };
   const onEdgeContextMenu: EdgeMouseHandler = (event, edge) => {
-    // a loose wire's menu too: Reset route clears its bends (plan 8 §5)
+    // every wire has the menu: Reset route clears its shape (plan 9 decision 11)
     if (!design || edge.type !== 'cable') return;
     event.preventDefault();
     const picks: Pick[] = [{ kind: 'wire', id: edge.id }];
@@ -247,7 +245,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onMoveEnd={(_event, v) => report(v)}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={(w, end, e) => (end === 'arrow' ? wiring.startArrow(w, e) : wiring.startEnd(w, end, e))} ghost={wiring.ghost && !wiring.ghost.wire ? wiring.ghost.points : null} hint={wiring.hint} />}
+              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost && !wiring.ghost.wire ? wiring.ghost.points : null} hint={wiring.hint} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize initial={savedSize} />
@@ -259,9 +257,9 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
         {menu && design && (
           <Menu label="Wire" anchor={menu.anchor} onClose={() => setMenu(null)} entries={[{
             id: 'reset', label: 'Reset route',
-            disabled: !shapedByHand(design.draft, menu.wireId),
-            tip: shapedByHand(design.draft, menu.wireId) ? 'Let the router shape this wire again' : 'Only a wire shaped by hand has a route to reset',
-            onSelect: () => design.onCommit(resetShape(design.draft, menu.wireId)),
+            disabled: !resettable(doc, design.draft, menu.wireId),
+            tip: resettable(doc, design.draft, menu.wireId) ? 'Let the router shape this wire again' : 'Only a wire shaped by hand has a route to reset',
+            onSelect: () => design.onCommit(resetShape(design.draft, doc, menu.wireId)),
           }]} />
         )}
       </LiveArtContext.Provider>
