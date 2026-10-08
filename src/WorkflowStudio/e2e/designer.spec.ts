@@ -128,6 +128,8 @@ test('a run drags and Reset route restores the automatic shape', async ({ page }
   await page.mouse.click(q.x, q.y, { button: 'right' });
   await page.getByRole('menuitem', { name: 'Reset route' }).click();
   await expect.poll(() => pathOf(panel, id)).toBe(before);
+  // back to its automatic place: nothing differs from the workflow, so there is no design draft (plan 9)
+  await expect(page.getByText('● design draft')).toHaveCount(0);
 });
 
 /** A point in a step's left (input) half or right (output) half, in page coordinates (plan 9 decision 5). */
@@ -239,6 +241,12 @@ test('the arrow head of a picked wire dropped on another step connects it there;
   await page.mouse.up();
   await expect(wire(panel, id)).toHaveCount(1);
   await expect.poll(() => arrowEndOf(panel, id)).not.toBe(before);
+  // its arrow head landed on c's input: the tip on c's left side, within its height
+  const cb = (await node(panel, c).boundingBox())!;
+  const tip = (await wire(panel, id).locator('.nx-head').boundingBox())!;
+  expect(Math.abs(tip.x + tip.width - cb.x)).toBeLessThan(6);
+  expect(tip.y + tip.height / 2).toBeGreaterThan(cb.y);
+  expect(tip.y + tip.height / 2).toBeLessThan(cb.y + cb.height);
   await expect(page.getByText('● design draft')).toBeVisible();
 });
 

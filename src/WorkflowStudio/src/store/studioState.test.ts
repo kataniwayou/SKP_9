@@ -337,8 +337,27 @@ describe('opening a design (plan 9 §8)', () => {
     } as never));
     const s = run(open('wf1'), { type: 'loaded', workflowId: 'wf1', doc: doc4 });
     const d = s.docs[0]!;
-    expect(d.design.draft.wires!['s3->s4']!.head).toEqual({ on: 'step', step: 's4', y: null });
+    // drawn plain: the workflow's own wires, so the design holds no circuit of its own
+    expect(d.design.draft.wires).toBeNull();
+    expect(circuitOf(doc4, d.design.draft)['s3->s4']!.head).toEqual({ on: 'step', step: 's4', y: null });
     expect(designDirty(d)).toBe(false);
     expect(canSave(d)).toBe(false);
+  });
+
+  it('a stored version 2 layout whose circuit is the plain wiring of the workflow is no design: not dirty, nothing to save', async () => {
+    const at = (step: string) => ({ on: 'step', step, y: null });
+    const plain = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')],
+      layout: { v: 2, wires: { 'wf->s1': { tail: { on: 'hub', angle: null }, head: at('s1') }, 's1->s2': { tail: at('s1'), head: at('s2') } } },
+    } as never));
+    const d = run(open('wf1'), { type: 'loaded', workflowId: 'wf1', doc: plain }).docs[0]!;
+    expect(d.design.draft.wires).toBeNull();
+    expect([designDirty(d), canSave(d)]).toEqual([false, false]);
+
+    // a tail moved round the hub is a visible layout change: dirty
+    const angled = withCircuit(EMPTY_DRAFT, plain, setEnd(circuitOf(plain, EMPTY_DRAFT), 'wf->s1', 'tail', { on: 'hub', angle: 90 }));
+    const s = reduce(run(open('wf1'), { type: 'loaded', workflowId: 'wf1', doc: plain }), { type: 'design', workflowId: 'wf1', draft: angled });
+    expect(designDirty(s.docs[0]!)).toBe(true);
   });
 });

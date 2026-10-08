@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { addCircuitWire, setEnd } from '../circuit/circuit';
+import { EMPTY_DESIGN, EMPTY_EDITS, hasGraphChanges, sameDesign } from './design';
 import { circuitOf, EMPTY_DRAFT, isEmptyDraft, listsOf, moveBlocks, parseDraft, removeWires, resetShape, setShape, withCircuit } from './draft';
 
 const chain = () => loadedDocument(graphDto({
@@ -59,9 +60,37 @@ describe('draft', () => {
     const d = setShape(EMPTY_DRAFT, saved, 's1->s2', { bends: { xs: [600], ys: [] }, landing: 80 });
     expect(d.wires!['s1->s2']).toEqual({ tail: at('s1'), head: { on: 'step', step: 's2', y: 80 }, bends: { xs: [600], ys: [] } });
     expect(d.next).toEqual({});
-    expect(resetShape(d, saved, 's1->s2').wires!['s1->s2']).toEqual({ tail: at('s1'), head: at('s2') });
+    // back to the workflow's own wires: the draft holds no circuit, nothing to save
+    expect(resetShape(d, saved, 's1->s2')).toEqual(EMPTY_DRAFT);
+    // what it is connected to stays: a tail on the hub at its angle
+    const hub = withCircuit(EMPTY_DRAFT, saved, setEnd(circuitOf(saved, EMPTY_DRAFT), 'wf->s1', 'tail', { on: 'hub', angle: 90 }));
+    const reset = resetShape(setShape(hub, saved, 'wf->s1', { bends: { xs: [400], ys: [] }, landing: 80 }), saved, 'wf->s1');
+    expect(reset.wires!['wf->s1']).toEqual({ tail: { on: 'hub', angle: 90 }, head: at('s1') });
     expect(resetShape(EMPTY_DRAFT, saved, 's1->s2')).toBe(EMPTY_DRAFT);
     expect([isEmptyDraft(EMPTY_DRAFT), isEmptyDraft(d)]).toEqual([true, false]);
+  });
+
+  it('a shape undone by Reset route is no design at all: the same as nothing designed (no false "design draft")', async () => {
+    const saved = await chain();
+    const reset = resetShape(setShape(EMPTY_DRAFT, saved, 's1->s2', { bends: { xs: [600], ys: [] }, landing: 80 }), saved, 's1->s2');
+    expect(sameDesign({ draft: reset, edits: EMPTY_EDITS }, EMPTY_DESIGN)).toBe(true);
+    // a tail moved round the hub is a visible change: it stays
+    const angled = withCircuit(EMPTY_DRAFT, saved, setEnd(circuitOf(saved, EMPTY_DRAFT), 'wf->s1', 'tail', { on: 'hub', angle: 90 }));
+    expect(sameDesign({ draft: angled, edits: EMPTY_EDITS }, EMPTY_DESIGN)).toBe(false);
+  });
+
+  it('a shape-only edit never rewrites a list: a next step the circuit cannot draw (not loaded) keeps its place', async () => {
+    const saved = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 'gone'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2', 'gone'] }), stepDto('s2')],
+    }));
+    const d = setShape(EMPTY_DRAFT, saved, 's1->s2', { bends: { xs: [600], ys: [] }, landing: 80 });
+    expect([d.next, d.entries]).toEqual([{}, null]);
+    expect(hasGraphChanges({ draft: d, edits: EMPTY_EDITS })).toBe(false);
+    expect(listsOf(saved, d.wires!).next.get('s1')).toEqual(['s2', 'gone']);
+    // a real change keeps the id it cannot draw, in its place
+    const cut = removeWires(d, saved, ['s1->s2'], () => null);
+    expect(cut.next).toEqual({ s1: ['gone'] });
   });
 
   it('parses its own JSON and drops what is not its shape', async () => {

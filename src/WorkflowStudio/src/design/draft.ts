@@ -81,10 +81,13 @@ export function circuitOf(saved: StudioDocument, draft: Draft): Circuit {
   return draft.wires ?? plainCircuit(saved.graph.workflow.entryStepIds, saved.graph.steps, (id) => saved.placement.steps.has(id));
 }
 
-/** The saved list's order first, then what is new: an unchanged list compares equal. */
-function ordered(saved: readonly Id[], derived: readonly Id[]): Id[] {
+/**
+ * The saved list's order first, then what is new: an unchanged list compares equal. A saved id the circuit cannot
+ * draw (a step the workflow does not have, or one not on the canvas) stays where it was: no wire can say otherwise.
+ */
+function ordered(saved: readonly Id[], derived: readonly Id[], drawable: (id: Id) => boolean): Id[] {
   const set = new Set(derived);
-  return [...saved.filter((id) => set.has(id)), ...derived.filter((id) => !saved.includes(id))];
+  return [...saved.filter((id) => set.has(id) || !drawable(id)), ...derived.filter((id) => !saved.includes(id))];
 }
 
 /**
@@ -94,17 +97,38 @@ function ordered(saved: readonly Id[], derived: readonly Id[]): Id[] {
 export function listsOf(saved: StudioDocument, circuit: Readonly<Circuit>): { next: Map<Id, Id[]>; entries: Id[] } {
   const { links } = circuitTrace(circuit, (id) => saved.graph.steps.get(id)?.entryCondition);
   const known = (ids: readonly Id[]) => ids.filter((id) => saved.graph.steps.has(id));
+  const drawable = (id: Id) => saved.graph.steps.has(id) && saved.placement.steps.has(id);
   const next = new Map<Id, Id[]>();
-  for (const [id, step] of saved.graph.steps) next.set(id, ordered(step.nextStepIds, known(links.get(id) ?? [])));
-  return { next, entries: ordered(saved.graph.workflow.entryStepIds, known(links.get(WORKFLOW_SOURCE) ?? [])) };
+  for (const [id, step] of saved.graph.steps) {
+    // a step off the canvas has no wires: its list stays the saved one
+    next.set(id, drawable(id) ? ordered(step.nextStepIds, known(links.get(id) ?? []), drawable) : step.nextStepIds);
+  }
+  return { next, entries: ordered(saved.graph.workflow.entryStepIds, known(links.get(WORKFLOW_SOURCE) ?? []), drawable) };
 }
 
-/** The draft with this circuit, its lists derived again (decision 2): a list equal to the saved one is left out. */
+/** A circuit as text that does not depend on key order: two circuits that draw the same compare equal. */
+function circuitKey(c: Readonly<Circuit>): string {
+  const sorted = (v: unknown): unknown => (v !== null && typeof v === 'object' && !Array.isArray(v)
+    ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted((v as Record<string, unknown>)[k])]))
+    : v);
+  return JSON.stringify(sorted(c));
+}
+
+/** The circuit is the saved workflow's own wires, automatic: the draft has no circuit of its own. */
+export const isPlainCircuit = (saved: StudioDocument, c: Readonly<Circuit>): boolean => circuitKey(c) === circuitKey(circuitOf(saved, EMPTY_DRAFT));
+
+/**
+ * The draft with this circuit, its lists derived again (decision 2): a list equal to the saved one is left out, and
+ * a circuit equal to the saved workflow's own wires is none of the draft's (null), so a change undone by hand, such as
+ * Reset route, leaves nothing to save.
+ */
 export function withCircuit(draft: Draft, saved: StudioDocument, wires: Circuit): Draft {
   const lists = listsOf(saved, wires);
   const next = copy<Id[]>({});
   for (const [id, list] of lists.next) if (!sameList(list, saved.graph.steps.get(id)?.nextStepIds ?? [])) next[id] = list;
-  return { ...draft, wires, next, entries: sameList(lists.entries, saved.graph.workflow.entryStepIds) ? null : lists.entries };
+  const entries = sameList(lists.entries, saved.graph.workflow.entryStepIds) ? null : lists.entries;
+  const plain = entries === null && Object.keys(next).length === 0 && isPlainCircuit(saved, wires);
+  return { ...draft, wires: plain ? null : wires, next, entries };
 }
 
 /** Wires removed (Delete, plan 9 §6): a wire joined on one keeps its place, that end open where it is drawn (§2.2-6). */
