@@ -66,8 +66,6 @@ describe('canJoin (plan 7)', () => {
     expect(dropLabel('ok', false, true)).toBe('join here');
     expect(dropLabel('loose', false, true)).toBe('loose wire');
     expect(dropLabel('sameWire', false, true)).toBe('same wire');
-    expect(dropLabel('start', false, true)).toBe('start stays on a block');
-    expect(dropLabel('oneEnd', false)).toBe('needs one end');
     expect(dropLabel('ok', false)).toBe('re-attach here');
   });
 
@@ -85,6 +83,5 @@ describe('wires dropped anywhere (plan 8 §5)', () => {
     // the hub back on itself snaps back too (decision 11)
     expect(canWire(doc, 'wf', 'wf')).toBe('self');
     expect(dropLabel('loose', false)).toBe('loose wire');
-    expect(dropLabel('cannotStart', false)).toBe('cannot start here');
   });
 });

@@ -753,7 +753,7 @@ describe('wire gestures', () => {
       const design = designOf({ picks: [{ kind: 'wire', id: 's3->s4' }] });
       const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
       expect(dragFrom(container, tailOf(container, 's3->s4'), onLine(doc, 's1->s2')).label).toBe('loose wire');
-      expect(Object.values(commits(design)[0]![0].loose).map((l) => ('open' in l ? l.target : null))).toEqual(['s4']);
+      expect(Object.values(commits(design)[0]![0].loose).map((l) => ('target' in l ? l.target : null))).toEqual(['s4']);
     });
 
     it("a joined wire's tail detached keeps its junction and its host's colour", async () => {
@@ -805,20 +805,21 @@ describe('wire gestures', () => {
       expect(commits(design)[0]![0]).toEqual(attachLooseStart(draft, doc, 't1', 's3'));
     });
 
-    it('its head released on nothing would leave it open at both ends: "needs one end", red, it snaps back; onto another step it re-targets; on its own step its landing slides', async () => {
+    it('its head released on nothing opens it at both ends ("loose wire", grey); onto another step it re-targets; on its own step its landing slides', async () => {
       const { doc, design } = await detached();
       const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
       const none = dragFrom(container, headOf(container, 'loose:t1'), { x: 1150, y: 40 });
-      expect(none.label).toBe('needs one end');
-      expect(none.tone).toContain('no');
-      expect(design.onCommit).not.toHaveBeenCalled();
+      expect(none.label).toBe('loose wire');
+      expect(none.tone).toContain('loose');
+      expect(commits(design)[0]![0].loose['t1']).toEqual({ open: 'both', start: EMPTY_AT, end: { x: 1152, y: 40 }, was: 's1->s2' });
+      expect(commits(design)[0]![1]).toEqual({ picks: [{ kind: 'wire', id: 'loose:t1' }] });
       const s3 = doc.placement.steps.get('s3')!;
       expect(dragFrom(container, headOf(container, 'loose:t1'), { x: s3.x + 20, y: s3.y + 72 }).label).toBe('re-attach here');
-      expect(commits(design)[0]![0].loose['t1']).toEqual({ open: 'start', target: 's3', start: EMPTY_AT, landing: 72, contact: null, was: 's1->s2' });
+      expect(commits(design)[1]![0].loose['t1']).toEqual({ open: 'start', target: 's3', start: EMPTY_AT, landing: 72, contact: null, was: 's1->s2' });
       const s2 = doc.placement.steps.get('s2')!;
       expect(dragFrom(container, headOf(container, 'loose:t1'), { x: s2.x + 20, y: s2.y + 120 }).label).toBe('move contact here');
-      expect(commits(design)[1]![0].loose['t1']).toMatchObject({ target: 's2', landing: clampLanding(120) });
-      expect(commits(design)[1]![0].next).toEqual({ s1: [] });
+      expect(commits(design)[2]![0].loose['t1']).toMatchObject({ target: 's2', landing: clampLanding(120) });
+      expect(commits(design)[2]![0].next).toEqual({ s1: [] });
     });
 
     const joinedLoose = async () => {
@@ -837,7 +838,7 @@ describe('wire gestures', () => {
       expect(commits(design)[0]![0].loose['t1']).toMatchObject({ open: 'start', target: 's5', contact: { host: 's1->s2', at: 40 } });
     });
 
-    it('its head square joins a same-colour line ("join here"); over a line of another colour it is refused ("needs one end")', async () => {
+    it('its head square joins a same-colour line ("join here"); over a line of another colour it opens at both ends ("loose wire")', async () => {
       const doc = await joinable();
       const draft = loosenStart(EMPTY_DRAFT, doc, 's3->s4', 't1', EMPTY_AT, null);
       const shown = applyDraft(doc, draft);
@@ -847,9 +848,9 @@ describe('wire gestures', () => {
       expect(commits(design)[0]![0].loose['t1']).toMatchObject({ open: 'start', target: 's4', contact: { host: 's1->s2' } });
       expect(commits(design)[0]![0].next).toEqual(draft.next);
       const other = dragFrom(container, headOf(container, 'loose:t1'), onLine(shown, 's3->s5'));
-      expect(other.label).toBe('needs one end');
-      expect(other.tone).toContain('no');
-      expect(commits(design)).toHaveLength(1);
+      expect(other.label).toBe('loose wire');
+      expect(container.querySelector('[data-testid="rf__edge-s3->s5"] .wire')!.getAttribute('class')).not.toContain('halo-no');
+      expect(commits(design)[1]![0].loose['t1']).toMatchObject({ open: 'both', start: EMPTY_AT });
     });
 
     it("a joined one's open start onto a step wires it with its junction; elsewhere it moves, the junction kept", async () => {
@@ -860,6 +861,82 @@ describe('wire gestures', () => {
       expect(commits(design)[0]![0].routes['s1->s4']!.contact).toEqual({ host: 's1->s2', at: 40 });
       expect(dragFrom(container, tailOf(container, 'loose:t1'), { x: 1150, y: 760 }).label).toBe('loose wire');
       expect(commits(design)[1]![0].loose['t1']).toMatchObject({ start: { x: 1152, y: 760 }, contact: { host: 's1->s2', at: 40 } });
+    });
+
+    describe('open at both ends', () => {
+      const both = (bends?: { xs: number[]; ys: number[] }) => {
+        const draft = { ...EMPTY_DRAFT, next: { s1: [] }, loose: { b1: { open: 'both' as const, start: { x: 1104, y: 600 }, end: EMPTY_AT, was: 's1->s2', ...(bends ? { bends } : {}) } } };
+        return designOf({ draft, picks: [{ kind: 'wire', id: 'loose:b1' }] });
+      };
+
+      it('is drawn grey and dashed, an open circle at each end, no arrow head; picked, it has the squares of a wire', async () => {
+        const doc = await twoAndOne();
+        const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={both()} onSelect={vi.fn()} />);
+        const edge = container.querySelector('[data-testid="rf__edge-loose:b1"]')!;
+        expect(edge.querySelector('path.w')!.getAttribute('stroke')).toBe('#8A97A8');
+        expect(edge.querySelectorAll('.nx-open')).toHaveLength(2);
+        expect(edge.querySelector('.nx-head')).toBeNull();
+        expect([...edge.querySelectorAll('.nx-open-hit')].map((c) => c.getAttribute('data-end'))).toEqual(['start', 'end']);
+        const drawn = wirePath(container, 'loose:b1');
+        expect([drawn[0], drawn.at(-1)]).toEqual([[1104, 600], [EMPTY_AT.x, EMPTY_AT.y]]);
+        const g = container.querySelector('.design-wire[data-wire="loose:b1"]')!;
+        expect(g.querySelectorAll('.design-handle.end')).toHaveLength(2);
+      });
+
+      it('its end onto a step lands there (open at its start only, in that step\'s colour); onto nothing it moves; its start onto a step or the hub starts there (grey, open at its end)', async () => {
+        const doc = await twoAndOne();
+        const design = both();
+        const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+        const s3 = doc.placement.steps.get('s3')!;
+        expect(dragFrom(container, headOf(container, 'loose:b1'), { x: s3.x + 20, y: s3.y + 72 }).label).toBe('connect here');
+        expect(commits(design)[0]).toEqual([{ ...design.draft, loose: { b1: { open: 'start', target: 's3', start: { x: 1104, y: 600 }, landing: 72, contact: null, was: 's1->s2' } } }, { picks: [{ kind: 'wire', id: 'loose:b1' }] }]);
+        expect(dragFrom(container, headOf(container, 'loose:b1'), { x: 1150, y: 760 }).label).toBe('loose wire');
+        expect(commits(design)[1]![0].loose['b1']).toMatchObject({ open: 'both', end: { x: 1152, y: 760 } });
+        expect(dragFrom(container, tailOf(container, 'loose:b1'), middleOf(doc, 's2')).label).toBe('connect here');
+        expect(commits(design)[2]![0].loose['b1']).toEqual({ source: 's2', end: EMPTY_AT });
+        expect(dragFrom(container, tailOf(container, 'loose:b1'), { x: doc.placement.sphere.cx, y: doc.placement.sphere.cy }).label).toBe('connect here');
+        expect(commits(design)[3]![0].loose['b1']).toEqual({ source: 'wf', end: EMPTY_AT });
+        expect(dragFrom(container, tailOf(container, 'loose:b1'), { x: 1150, y: 40 }).label).toBe('loose wire');
+        expect(commits(design)[4]![0].loose['b1']).toMatchObject({ open: 'both', start: { x: 1152, y: 40 }, end: EMPTY_AT });
+        // released where an end already is: no step
+        dragFrom(container, headOf(container, 'loose:b1'), EMPTY_AT);
+        expect(commits(design)).toHaveLength(5);
+        // a line is no target for its head: with no target it has no colour to join with
+        expect(commits(design).every(([d]) => Object.keys(d.routes).length === 0)).toBe(true);
+      });
+
+      it('its open circles drag their own ends', async () => {
+        const doc = await twoAndOne();
+        const design = both();
+        const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={{ ...design, picks: [] }} onSelect={vi.fn()} />);
+        const hit = (end: string) => container.querySelector(`[data-testid="rf__edge-loose:b1"] .nx-open-hit[data-end="${end}"]`)!;
+        dragFrom(container, hit('start'), middleOf(doc, 's3'));
+        expect(commits(design)[0]![0].loose['b1']).toEqual({ source: 's3', end: EMPTY_AT });
+        dragFrom(container, hit('end'), middleOf(doc, 's3'));
+        expect(commits(design)[1]![0].loose['b1']).toMatchObject({ open: 'start', target: 's3' });
+      });
+
+      it('a run square shapes it, both ends staying; Reset route clears the bends; Delete removes it', async () => {
+        const doc = await twoAndOne();
+        const design = both();
+        const view = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+        const seg = view.container.querySelector('.design-wire[data-wire="loose:b1"] .design-handle.seg.v')!;
+        const x = Number(seg.getAttribute('x')) - 64, y = Number(seg.getAttribute('y'));
+        fireEvent.pointerDown(seg, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+        fireEvent.pointerMove(document, { ...screenOf(view.container, { x, y }), pointerId: 1 });
+        fireEvent.pointerUp(document, { ...screenOf(view.container, { x, y }), pointerId: 1 });
+        const [shaped] = commits(design)[0]!;
+        expect(shaped.loose['b1']).toMatchObject({ open: 'both', start: { x: 1104, y: 600 }, end: EMPTY_AT, was: 's1->s2' });
+        expect(shaped.loose['b1']!.bends).toBeTruthy();
+        await tick();
+        view.rerender(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={{ ...design, draft: shaped }} onSelect={vi.fn()} />);
+        expect(rightAngled(wirePath(view.container, 'loose:b1'))).toBe(true);
+        fireEvent.contextMenu(view.container.querySelector('.react-flow__edge[data-id="loose:b1"] .nx-hit')!, { clientX: 50, clientY: 50 });
+        fireEvent.click(view.getByRole('menuitem', { name: /Reset route/ }));
+        expect(commits(design)[1]![0].loose['b1']).toEqual(design.draft.loose['b1']);
+        fireEvent.keyDown(view.container.querySelector('.studio-canvas')!, { key: 'Delete' });
+        expect(commits(design)[2]![0].loose).toEqual({});
+      });
     });
 
     it('a run square shapes it, keeping its head; Reset route clears the bends; Delete removes it', async () => {
@@ -1017,13 +1094,14 @@ describe('wire gestures', () => {
       expect(drag({ x: doc.placement.sphere.cx, y: doc.placement.sphere.cy }).label).toBe('re-attach here');
       expect(commits(design)[1]![0].loose['l1']).toMatchObject({ source: 'wf' });
 
-      // on empty canvas it would be open at both ends: refused
-      expect(drag({ x: 1150, y: 40 }).label).toBe('needs one end');
       expect(drag(middleOf(doc, 's1')).label).toBe('starts here');
       expect(commits(design)).toHaveLength(2);
+      // on empty canvas it opens at both ends, grey
+      expect(drag({ x: 1150, y: 40 }).label).toBe('loose wire');
+      expect(commits(design)[2]![0].loose['l1']).toEqual({ open: 'both', start: { x: 1152, y: 40 }, end: EMPTY_AT });
     });
 
-    it('the start square over a cache says "cannot start here" and snaps back', async () => {
+    it('the start square over a cache attaches to nothing: "loose wire", the wire open at both ends', async () => {
       const doc = await loadedDocument(graphDto({ steps: [stepDto('s1'), stepDto('s2')], caches: [cacheDto('c1')] }));
       const design = designOf({ draft: addLoose(EMPTY_DRAFT, 'l1', 's1', EMPTY_AT), picks: [{ kind: 'wire', id: 'loose:l1' }] });
       const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
@@ -1031,10 +1109,10 @@ describe('wire gestures', () => {
       const over = { x: c.x + CACHE_W / 2, y: c.y + CACHE_H / 2 };
       fireEvent.pointerDown(squares(container)!.querySelector('.design-handle.end[data-end="source"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
       fireEvent.pointerMove(document, { ...screenOf(container, over), pointerId: 1 });
-      expect(container.querySelector('.design-drop-label')!.textContent).toBe('cannot start here');
-      expect(nodeClass(container, 'cache:c1')).toContain('drop-no');
+      expect(container.querySelector('.design-drop-label')!.textContent).toBe('loose wire');
+      expect(nodeClass(container, 'cache:c1')).toContain('drop-loose');
       fireEvent.pointerUp(document, { ...screenOf(container, over), pointerId: 1 });
-      expect(design.onCommit).not.toHaveBeenCalled();
+      expect(vi.mocked(design.onCommit).mock.calls[0]![0].loose['l1']).toMatchObject({ open: 'both', end: EMPTY_AT });
     });
 
     it('the open-end square does what the open circle does: onto a step it becomes a wire, the loose wire following the pointer', async () => {

@@ -4,6 +4,7 @@ import { loadedDocument } from '../app/fixtures';
 import {
   addLoose, addWire, attachLoose, EMPTY_DRAFT, isEmptyDraft, loosen, moveBlocks, moveLoose, removeLoose, nextOf, entriesOf, parseDraft, reattach, removeWires, resetRoute, setShape, wireEnds, wireId,
   resetShape, resourceLoose, shapeLoose, storedBends, loosenStart, attachLooseStart, retargetLooseStart, shapeLooseStart,
+  loosenHead, loosenTail, connectHead, connectTail,
 } from './draft';
 
 const chain = () => loadedDocument(graphDto({
@@ -204,6 +205,45 @@ describe('loose wires (plan 8 §5)', () => {
       expect(retargetLooseStart(d, 'l1', 's3', 64).loose['l1']).toEqual({ open: 'start', target: 's3', start: { x: 300, y: 500 }, landing: 64, contact: null, was: 's1->s2' });
       // a straight shape is no shape
       expect(shapeLooseStart(d, 'l1', { bends: null, landing: 72, contact: null }).loose['l1']).toEqual({ open: 'start', target: 's2', start: { x: 300, y: 500 }, landing: 72, contact: null, was: 's1->s2' });
+    });
+  });
+
+  describe('a wire open at both ends', () => {
+    it("a start-loose wire's head, or a head-open wire's start, released on nothing opens it at both ends", async () => {
+      const doc = await chain();
+      const s = loosenStart(EMPTY_DRAFT, doc, 's1->s2', 'l1', { x: 300, y: 500 }, 80);
+      const both = loosenHead(s, 'l1', { x: 600, y: 520 });
+      expect(both.loose['l1']).toEqual({ open: 'both', start: { x: 300, y: 500 }, end: { x: 600, y: 520 }, was: 's1->s2' });
+      expect(both.next['s1']).toEqual([]);
+      expect(loosenTail(addLoose(EMPTY_DRAFT, 'l2', 's1', { x: 600, y: 80 }), 'l2', { x: 200, y: 600 }).loose['l2']).toEqual({ open: 'both', start: { x: 200, y: 600 }, end: { x: 600, y: 80 } });
+      // only the kinds they open
+      expect(loosenHead(both, 'l1', { x: 1, y: 1 })).toBe(both);
+      expect(loosenTail(s, 'l1', { x: 1, y: 1 })).toBe(s);
+    });
+
+    it('reads back from a session or a stored layout; a malformed one is dropped', () => {
+      const bends = { xs: [400, 520], ys: [200] };
+      const rec = { open: 'both', start: { x: 300, y: 500 }, end: { x: 600, y: 520 }, bends, was: 's1->s2' };
+      expect(parseDraft(JSON.parse(JSON.stringify({ loose: { l1: rec } })))!.loose['l1']).toEqual(rec);
+      expect(parseDraft({ loose: { a: { open: 'both', start: { x: 1, y: 2 } }, b: { open: 'both', end: { x: 1, y: 2 } } } })!.loose).toEqual({});
+    });
+
+    it('each end moves keeping its bends; Reset route clears them; its head onto a step opens it at its start only, its start onto a step at its end only; both: an ordinary wire', async () => {
+      const doc = await chain();
+      const bends = { xs: [400, 520], ys: [200] };
+      const d = { ...EMPTY_DRAFT, loose: { l1: { open: 'both' as const, start: { x: 300, y: 500 }, end: { x: 600, y: 520 }, bends, was: 's1->s2' } } };
+      expect(moveLoose(d, 'l1', { x: 320, y: 520 }, 'start').loose['l1']).toEqual({ ...d.loose.l1, start: { x: 320, y: 520 } });
+      expect(moveLoose(d, 'l1', { x: 640, y: 520 }).loose['l1']).toEqual({ ...d.loose.l1, end: { x: 640, y: 520 } });
+      expect(storedBends(d, 'loose:l1')).toEqual(bends);
+      expect(resetShape(d, 'loose:l1').loose['l1']).toEqual({ open: 'both', start: { x: 300, y: 500 }, end: { x: 600, y: 520 }, was: 's1->s2' });
+      expect(shapeLoose(d, 'l1', bends, { x: 600, y: 540 }).loose['l1']).toEqual({ ...d.loose.l1, end: { x: 600, y: 540 } });
+      const head = connectHead(d, 'l1', 's3', 64);
+      expect(head.loose['l1']).toEqual({ open: 'start', target: 's3', start: { x: 300, y: 500 }, landing: 64, contact: null, was: 's1->s2' });
+      expect(connectTail(d, 'l1', 's2').loose['l1']).toEqual({ source: 's2', end: { x: 600, y: 520 } });
+      const wired = attachLooseStart(head, doc, 'l1', 's1');
+      expect(wired.next['s1']).toEqual(['s2', 's3']);
+      expect(wired.loose).toEqual({});
+      expect(attachLoose(connectTail(d, 'l1', 's1'), doc, 'l1', 's2').next).toEqual({});
     });
   });
 });

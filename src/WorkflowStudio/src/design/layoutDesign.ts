@@ -2,7 +2,7 @@ import type { StudioDocument } from '../app/document';
 import type { Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE } from '../layout/ports';
 import type { WireShape } from '../layout/shape';
-import { isLooseStart, type LooseWire } from '../layout/wires';
+import { isLooseBoth, isLooseStart, type LooseWire } from '../layout/wires';
 import type { Id } from '../model/graph';
 import type { Draft } from './draft';
 
@@ -22,7 +22,7 @@ export interface SavedLayout {
   loose: Record<string, LooseWire>;
 }
 
-/** The layout of what the canvas shows: shapes only of wires that exist, loose wires only from sources (or, open at the start, to targets) on the canvas. */
+/** The layout of what the canvas shows: shapes only of wires that exist, loose wires only from sources (or, open at the start, to targets) on the canvas; one open at both ends always. */
 export function layoutOf(shown: StudioDocument, draft: Draft): SavedLayout {
   const wires = new Set(shown.wires.map((w) => w.id));
   const onCanvas = (source: string) => source === WORKFLOW_SOURCE || shown.placement.steps.has(source);
@@ -34,6 +34,6 @@ export function layoutOf(shown: StudioDocument, draft: Draft): SavedLayout {
     caches: points(shown.placement.caches),
     parked: [...shown.placement.steps.keys()],
     routes: Object.fromEntries(Object.entries(draft.routes).filter(([id]) => wires.has(id))),
-    loose: Object.fromEntries(Object.entries(draft.loose).filter(([, l]) => (isLooseStart(l) ? shown.placement.steps.has(l.target) : onCanvas(l.source)))),
+    loose: Object.fromEntries(Object.entries(draft.loose).filter(([, l]) => (isLooseBoth(l) || (isLooseStart(l) ? shown.placement.steps.has(l.target) : onCanvas(l.source))))),
   };
 }

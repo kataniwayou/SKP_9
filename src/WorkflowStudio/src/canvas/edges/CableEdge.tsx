@@ -24,6 +24,8 @@ export type CableEdgeData = {
   loose?: boolean;
   /** Loose at its start (its tail detached): dashed in its own colour, an open circle at its start, its head and junction as drawn when connected. */
   openStart?: boolean;
+  /** Open at both ends: grey and dashed, an open circle at each end. */
+  openBoth?: boolean;
 };
 export type CableEdgeType = Edge<CableEdgeData, 'cable'>;
 
@@ -38,15 +40,16 @@ export const LOOSE_COLOUR = '#8A97A8';
  * Loose (plan 8 §5): grey and dashed, a ring at its source and an open circle where it was dropped; never pulses.
  * Loose at its start: dashed in its colour, an open circle where its tail was dropped, its arrow head kept; never pulses.
  */
-export function CableEdgeView({ points, colour, broken, delay, picked, flowing, branch, joints, halo, loose, openStart }: CableEdgeData & { flowing: boolean }) {
+export function CableEdgeView({ points, colour, broken, delay, picked, flowing, branch, joints, halo, loose, openStart, openBoth }: CableEdgeData & { flowing: boolean }) {
   const gap = `nxgap${useId().replace(/[^\w-]/g, '')}`;
   if (loose && !openStart) {
     const [sx0, sy0] = points[0]!;
     const [ex, ey] = points[points.length - 1]!;
     return (
       <g className={`wire loose${picked ? ' picked' : ''}`} style={{ '--nc': LOOSE_COLOUR } as CSSProperties}>
-        <circle className="nx-src" cx={sx0} cy={sy0} r={2.6} />
+        {!openBoth && <circle className="nx-src" cx={sx0} cy={sy0} r={2.6} />}
         <path className="w" d={pathOf(points)} stroke={LOOSE_COLOUR} />
+        {openBoth && <circle className="nx-open" cx={sx0} cy={sy0} r={4.5} />}
         <circle className="nx-open" cx={ex} cy={ey} r={4.5} />
       </g>
     );
@@ -103,11 +106,11 @@ export function CableEdge({ id, data }: EdgeProps<CableEdgeType>) {
       {data.branch && data.branch.length > 1 && (
         <path className="nx-hit branch" d={pathOf(data.branch)} onPointerDown={gestures ? (e) => gestures.wirePointerDown(id, e, 'branch') : undefined} />
       )}
-      {/* a loose wire's open end (or open start) is always draggable in design mode (plan 8 §5) */}
-      {data.loose && gestures && (() => {
-        const [ex, ey] = data.openStart ? data.points[0]! : data.points[data.points.length - 1]!;
-        return <circle className="nx-open-hit" cx={ex} cy={ey} r={9} onPointerDown={(e) => gestures.looseEndPointerDown(id.slice(LOOSE_PREFIX.length), e)} />;
-      })()}
+      {/* a loose wire's open end (or open start, or both) is always draggable in design mode (plan 8 §5) */}
+      {data.loose && gestures && (data.openBoth ? ['start', 'end'] as const : [data.openStart ? 'start' : 'end'] as const).map((end) => {
+        const [ex, ey] = end === 'start' ? data.points[0]! : data.points[data.points.length - 1]!;
+        return <circle key={end} className="nx-open-hit" data-end={end} cx={ex} cy={ey} r={9} onPointerDown={(e) => gestures.looseEndPointerDown(id.slice(LOOSE_PREFIX.length), e, end)} />;
+      })}
     </>
   );
 }

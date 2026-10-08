@@ -1,11 +1,9 @@
 import type { StudioDocument } from '../app/document';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 
-/** `loose`: the drop attaches to nothing and the wire becomes loose there (plan 8 §5); `cannotStart`: a tail over such a place (it snaps back). */
-export type DropVerdict = 'ok' | 'self' | 'loose' | 'cannotStart';
+/** `loose`: the drop attaches to nothing and the wire becomes loose there (plan 8 §5), at one end or both. */
+export type DropVerdict = 'ok' | 'self' | 'loose';
 export type JoinVerdict = 'ok' | 'sameWire' | 'loose';
-/** A wire's start never joins a line; `oneEnd`: a drop that would leave a wire open at both ends (a start-loose wire's head on nothing). */
-export type Refusal = 'start' | 'oneEnd';
 
 /**
  * May a wire from `source` to `target` exist in the shown document (plan 8 §5)? `moving` is the wire whose
@@ -42,7 +40,7 @@ export function canJoin(shown: StudioDocument, wire: string, host: string): Join
 }
 
 /** What the pointer's label says over a block or a wire's line while a wire end or a new wire is dragged (plan 4 trial, plan 7). */
-export function dropLabel(verdict: DropVerdict | 'move' | 'here' | JoinVerdict | Refusal, newWire: boolean, line = false): string {
+export function dropLabel(verdict: DropVerdict | 'move' | 'here' | JoinVerdict, newWire: boolean, line = false): string {
   switch (verdict) {
     case 'ok': return line ? 'join here' : newWire ? 'connect here' : 're-attach here';
     case 'move': return 'move contact here';
@@ -50,8 +48,5 @@ export function dropLabel(verdict: DropVerdict | 'move' | 'here' | JoinVerdict |
     case 'self': return 'same step';
     case 'sameWire': return 'same wire';
     case 'loose': return 'loose wire';
-    case 'cannotStart': return 'cannot start here';
-    case 'start': return 'start stays on a block';
-    case 'oneEnd': return 'needs one end';
   }
 }

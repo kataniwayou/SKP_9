@@ -692,9 +692,10 @@ test('a picked loose wire has the squares of a wire: a run square reshapes it, a
   await page.mouse.move(s0.x, s0.y);
   await page.mouse.down();
   await page.mouse.move(empty!.x, empty!.y, { steps: 10 });
-  // held there: the wire follows the pointer, and the label says why it may not go there (open at both ends)
+  // held there: the wire follows the pointer, told "loose wire" (released, it would be open at both ends); Escape puts it back
   await expect.poll(() => kept.locator('path.w').getAttribute('d')).not.toBe(shaped);
-  await expect(again.locator('.design-drop-label')).toHaveText('needs one end');
+  await expect(again.locator('.design-drop-label')).toHaveText('loose wire');
+  await page.keyboard.press('Escape');
   await page.mouse.up();
   await page.waitForTimeout(300);
   await expect.poll(() => kept.locator('path.w').getAttribute('d')).toBe(shaped);
@@ -791,12 +792,17 @@ test('a wire\'s tail released on empty canvas leaves it loose at its start: dash
   await expect(page.getByText('● design draft')).toBeVisible();
   await panel.screenshot({ path: 'test-results/tail-loose.png' });
 
-  // its head released on nothing would leave it open at both ends: refused, it snaps back
+  // its head over nothing is told "loose wire" (released, it would be open at both ends); Escape puts it back
   const before = await line.getAttribute('d');
   const h = await centreOf(squares.locator('.design-handle.end[data-end="target"]'));
   const s = await centreOf(squares.locator('.design-handle.end[data-end="source"]'));
   const nowhere = await emptySpot(panel, [h, s]);
-  expect(await dragReading(page, panel, h, nowhere!)).toBe('needs one end');
+  await page.mouse.move(h.x, h.y);
+  await page.mouse.down();
+  await page.mouse.move(nowhere!.x, nowhere!.y, { steps: 10 });
+  await expect(panel.locator('.design-drop-label')).toHaveText('loose wire');
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
   await page.waitForTimeout(300);
   await expect.poll(() => line.getAttribute('d')).toBe(before);
 
@@ -925,4 +931,56 @@ test('a host wire detached at its tail and re-attached to a new source keeps the
   await page.reload();
   const again = documentPanel(page, j!.workflow);
   await expect(wire(again, a).locator('circle.nx-joint').first()).toBeVisible();
+});
+
+test('a wire detached at its tail and then its head is open at both ends: grey, dashed, an open circle at each end; a refresh keeps it; each end dropped on a step wires it again, coloured', async ({ page }) => {
+  const { a, b } = chain!;
+  const id = `${a}->${b}`;
+  const panel = await open(page);
+  await zoomInOn(page, panel, id);
+  const colour = await wire(panel, id).locator('path.w').first().getAttribute('stroke');
+  const tail = await tailSquare(page, panel, id);
+  const head0 = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end[data-end="target"]`));
+  const spot1 = await emptySpot(panel, [tail, head0]);
+  expect(spot1, 'no empty spot on the canvas').not.toBeNull();
+  expect(await dragReading(page, panel, tail, spot1!)).toBe('loose wire');
+  const loose = panel.locator('.react-flow__edge[data-id^="loose:"]');
+  await expect(loose).toHaveCount(1);
+  const lid = (await loose.getAttribute('data-id'))!;
+  const squares = panel.locator(`.design-wire[data-wire="${lid}"]`);
+
+  // its head too, onto nothing: open at both ends
+  const head = await centreOf(squares.locator('.design-handle.end[data-end="target"]'));
+  const spot2 = await emptySpot(panel, [spot1!, head]);
+  expect(spot2, 'no second empty spot on the canvas').not.toBeNull();
+  expect(await dragReading(page, panel, head, spot2!)).toBe('loose wire');
+  const line = loose.locator('path.w').first();
+  await expect.poll(() => line.getAttribute('stroke')).toBe('#8A97A8');
+  expect(await line.evaluate((el) => getComputedStyle(el).strokeDasharray)).not.toBe('none');
+  await expect(loose.locator('circle.nx-open')).toHaveCount(2);
+  await expect(loose.locator('.nx-head')).toHaveCount(0);
+  await expect(squares.locator('.design-handle.end')).toHaveCount(2);
+  expect(await squares.locator('.design-handle.seg').count()).toBeGreaterThan(0);
+  await expect(wire(panel, id)).toHaveCount(0);
+  await panel.screenshot({ path: 'test-results/both-open.png' });
+
+  await page.reload();
+  const again = documentPanel(page, chain!.workflow);
+  const kept = again.locator(`.react-flow__edge[data-id="${lid}"]`);
+  await expect(kept).toHaveCount(1);
+  await expect(kept.locator('circle.nx-open')).toHaveCount(2);
+  expect(await kept.locator('path.w').first().getAttribute('stroke')).toBe('#8A97A8');
+
+  // its open end onto b: open at its start only, in b's colour
+  const end = await centreOf(kept.locator('.nx-open-hit[data-end="end"]'));
+  expect(await dragReading(page, again, end, await centreOf(node(again, b).locator('.nx-sn')))).toBe('connect here');
+  await expect.poll(() => kept.locator('path.w').first().getAttribute('stroke')).toBe(colour);
+  await expect(kept.locator('.nx-head')).toHaveCount(1);
+  await expect(kept.locator('circle.nx-open')).toHaveCount(1);
+  // its open start onto a: the ordinary wire a -> b again
+  const start = await centreOf(kept.locator('.nx-open-hit[data-end="start"]'));
+  expect(await dragReading(page, again, start, await centreOf(node(again, a).locator('.nx-sn')))).toBe('connect here');
+  await expect(wire(again, id)).toHaveCount(1);
+  await expect(again.locator('.react-flow__edge[data-id^="loose:"]')).toHaveCount(0);
+  expect(await wire(again, id).locator('path.w').first().getAttribute('stroke')).toBe(colour);
 });

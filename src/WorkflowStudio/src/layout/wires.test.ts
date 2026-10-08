@@ -334,3 +334,16 @@ describe('routeLoose: a wire loose at its start', () => {
     expect(startRoutes({ l1: { open: 'start', target: 'nowhere', start: { x: 400, y: 600 }, landing: 80, contact: null } }, placement, ctx)).toEqual([]);
   });
 });
+
+describe('routeLoose: a wire open at both ends', () => {
+  const placement: Placement = { sphere: { cx: 128, cy: 128 }, steps: new Map([['a', { x: 288, y: 32 }]]), caches: new Map() };
+  it('is drawn right-angled from its open start to its open end, by its bends when it has them; it needs no step on the canvas', () => {
+    const [r] = routeLoose({ l1: { open: 'both', start: { x: 600, y: 400 }, end: { x: 900, y: 600 } } }, placement);
+    expect(r!.open).toBe('both');
+    expect(r!.points[0]).toEqual([600, 400]);
+    expect(r!.points[r!.points.length - 1]).toEqual([900, 600]);
+    expect(r!.points.every((p, i) => i === 0 || p[0] === r!.points[i - 1]![0] || p[1] === r!.points[i - 1]![1])).toBe(true);
+    const [b] = routeLoose({ l1: { open: 'both', start: { x: 600, y: 400 }, end: { x: 900, y: 600 }, bends: { xs: [700, 800], ys: [300] } } }, placement);
+    expect(b!.points).toEqual([[600, 400], [700, 400], [700, 300], [800, 300], [800, 600], [900, 600]]);
+  });
+});

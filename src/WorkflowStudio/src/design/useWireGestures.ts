@@ -7,13 +7,13 @@ import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import { route, simplify, type Box, type Pt } from '../layout/router';
 import { dragSegment, endsOf, nearestSegment, normalize, pointsOfShape, shapeFromPoints, type Bends, type WireShape } from '../layout/shape';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
-import { blockBoxes, isLooseStart, portOf, SPHERE_BOX_ID, stepBoxId, type LooseRoute, type WireRoute } from '../layout/wires';
+import { blockBoxes, isLooseEnd, isLooseStart, portOf, SPHERE_BOX_ID, stepBoxId, type LooseRoute, type WireRoute } from '../layout/wires';
 import type { DesignGestures } from './DesignContext';
 import type { DesignProps } from './designProps';
-import { addLoose, addWire, attachLoose, attachLooseStart, LOOSE_PREFIX, looseStartOf, loosen, loosenStart, moveLoose, reattach, resourceLoose, retargetLooseStart, setShape, shapeLoose, shapeLooseStart, storedBends, wireId, type Draft } from './draft';
+import { addLoose, addWire, attachLoose, attachLooseStart, connectHead, connectTail, LOOSE_PREFIX, looseBothOf, looseStartOf, loosen, loosenHead, loosenStart, loosenTail, moveLoose, reattach, resourceLoose, retargetLooseStart, setShape, shapeLoose, shapeLooseStart, storedBends, wireId, type Draft } from './draft';
 import { blockAt, wireAt } from './hit';
 import { newId } from './ids';
-import { canJoin, canWire, type DropVerdict, type JoinVerdict, type Refusal } from './rules';
+import { canJoin, canWire, type DropVerdict, type JoinVerdict } from './rules';
 
 /** The block or line under a dragged wire end: its outline or halo (tone), why (the drop rule's verdict) and where the pointer is, for the label. */
 export interface DropHint {
@@ -24,7 +24,7 @@ export interface DropHint {
   /** green: the drop attaches; grey: the wire becomes loose there (plan 8 §5); red: it snaps back. */
   tone: 'ok' | 'loose' | 'no';
   /** 'move': a wire end back on its own step slides its contact point there; 'here': a tail back on its own step stays. */
-  why: DropVerdict | 'move' | 'here' | JoinVerdict | Refusal;
+  why: DropVerdict | 'move' | 'here' | JoinVerdict;
   /** A new wire, not a re-attached end: an allowed drop says "connect here". */
   newWire: boolean;
   /** The pointer, in flow coordinates. */
@@ -41,14 +41,15 @@ export interface WireGhost {
 
 /**
  * A loose wire as the designer's handles see a wire (plan 8 §5): picked as `loose:{id}`, its open end in the
- * place of a target (open at its start: its open start in the place of a source, its head and junction its own),
- * so its squares and their drags are a connected wire's.
+ * place of a target (open at its start: its open start in the place of a source, its head and junction its own;
+ * open at both: both), so its squares and their drags are a connected wire's.
  */
 export function looseAsWire(l: LooseRoute): WireRoute {
   if (l.open === 'start') {
     return { id: `${LOOSE_PREFIX}${l.id}`, source: '', target: l.target, points: l.points, condition: l.condition, broken: false, ...(l.joint ? { joint: l.joint } : {}) };
   }
-  return { id: `${LOOSE_PREFIX}${l.id}`, source: l.source, target: '', points: l.points, condition: 0, broken: false };
+  // open at both ends: neither a source nor a target
+  return { id: `${LOOSE_PREFIX}${l.id}`, source: l.open === 'both' ? '' : l.source, target: '', points: l.points, condition: 0, broken: false };
 }
 
 
@@ -262,7 +263,7 @@ export function useWireGestures(
   /** What a line under a dragged arrow end does (plan 7 §6.1): joins it when the rule allows. */
   interface LineDrop {
     /** May the wire join this host? */
-    verdict: (host: string) => JoinVerdict | Refusal;
+    verdict: (host: string) => JoinVerdict;
     /** The draft while hovering an allowed line: the wire drawn joined there. */
     preview: (host: string, at: number) => Draft;
     done: (host: string, at: number) => void;
@@ -276,18 +277,16 @@ export function useWireGestures(
    * canvas makes the wire loose. On release: `done`, `line.done`, `onSelf`, `loose`, or nothing (it snaps back).
    */
   const dropGesture = (e: ReactPointerEvent, o: {
-    wire: string | null; path: (p: Point, over: string | null) => Pt[]; current: string | null; verdict: (over: string) => DropVerdict | Refusal;
+    wire: string | null; path: (p: Point, over: string | null) => Pt[]; current: string | null; verdict: (over: string) => DropVerdict;
     done: (over: string, p: Point) => void;
     /** Dropped back on `current`; required whenever `current` is set. */
     onSelf?: (p: Point) => void;
     /** The label over `current`: 'move' (a head slides its contact) or 'here' (a tail stays where it starts). */
     selfWhy?: 'move' | 'here';
-    /** What a wire's line under the pointer does: joins (`LineDrop`) or refuses (a start); absent, lines are not drop targets. */
-    line?: LineDrop | Refusal;
-    /** Released where it attaches to nothing: the wire becomes loose there (plan 8 §5); absent, it snaps back. */
+    /** What a wire's line under the pointer does: joins when `LineDrop` allows; absent, lines are not drop targets. */
+    line?: LineDrop;
+    /** Released where it attaches to nothing: the wire becomes loose there, at one end or both (plan 8 §5); absent, it snaps back. */
     loose?: (p: Point) => void;
-    /** Without `loose`: why empty canvas refuses the drop, told in red (absent: no label there). */
-    nothing?: Refusal;
     /** A joined wire's arrow: the ghost is its branch (plan 7 §6.2). */
     part?: 'branch';
     /** Labelled as a new wire ("connect here") though `wire` is set: a loose wire's open end (plan 8 §5). */
@@ -310,13 +309,12 @@ export function useWireGestures(
       over = blockAt(shown.current, p, DROP_REACH / getZoom());
       // a block wins over a line; the dragged wire itself is never the drop target
       onLine = over === null && o.line !== undefined ? wireAt(shown.current, p, DROP_REACH / getZoom(), o.wire) : null;
-      if (onLine && typeof o.line === 'object') {
+      if (onLine && o.line) {
         const why = o.line.verdict(onLine.id);
         setHint(hintFor(onLine.id, true, why, p));
         // an allowed line: the wire is drawn joined there (the preview) instead of the ghost
         if (why === 'ok') { setGhost(null); setPreview(o.line.preview(onLine.id, onLine.at)); return; }
-      } else if (onLine) setHint(hintFor(onLine.id, true, o.line as Refusal, p));
-      else if (over === null) setHint(o.nothing ? { id: null, line: false, tone: 'no', why: o.nothing, newWire, at: p } : hintFor(null, false, 'loose', p));
+      } else if (over === null) setHint(hintFor(null, false, 'loose', p));
       else if (over === o.current) setHint(hintFor(over, false, o.selfWhy ?? 'move', p));
       else setHint(hintFor(over, false, o.verdict(over), p));
       setPreview(null);
@@ -327,13 +325,12 @@ export function useWireGestures(
       setPreview(null);
       if (cancelled) return;
       const end = { x: snap(at.x), y: snap(at.y) };
-      if (onLine && typeof o.line === 'object') {
+      if (onLine && o.line) {
         const why = o.line.verdict(onLine.id);
         if (why === 'ok') o.line.done(onLine.id, onLine.at);
         else if (why === 'loose') o.loose?.(end);
         return;
       }
-      if (onLine) return; // a start over a line snaps back
       if (over === null) { o.loose?.(end); return; }
       if (over === o.current) { o.onSelf?.(at); return; }
       const why = o.verdict(over);
@@ -374,6 +371,11 @@ export function useWireGestures(
     // a loose wire's squares (plan 8 §5): its open end drags as its open circle does; its start re-sources it
     const looseId = looseIdOf(wire.id);
     if (looseId !== null) {
+      // open at both ends: each square drags its own open end
+      if (designRef.current && looseBothOf(designRef.current.draft, looseId)) {
+        startBothEnd(looseId, end === 'target' ? 'end' : 'start', e);
+        return;
+      }
       // open at its start: its start square is its open start; its head square drags its head as a connected wire's does
       if (designRef.current && looseStartOf(designRef.current.draft, looseId)) {
         if (end === 'target') startLooseHead(looseId, wire, 'contact', e);
@@ -489,14 +491,15 @@ export function useWireGestures(
    * Drags a loose wire's open end (plan 8 §5): onto a step it may wire to, it becomes an ordinary wire; anywhere
    * else its end moves there; back on its own source it snaps back ("same step").
    */
-  const startLoose = (looseId: string, e: ReactPointerEvent) => {
+  const startLoose = (looseId: string, e: ReactPointerEvent, which: 'start' | 'end' = 'end') => {
     const d = designRef.current;
     if (!d || e.button !== 0) return;
     const base = d.draft;
     const l = base.loose[looseId];
     if (!l) return;
-    // open at its start: its open circle is its start
+    // open at its start: its open circle is its start; open at both: the circle pressed
     if (isLooseStart(l)) { startLooseStart(looseId, e); return; }
+    if (!isLooseEnd(l)) { startBothEnd(looseId, which, e); return; }
     const { placement } = shown.current;
     const from = portOf(placement, l.source) ?? { x: STEP_W, y: PMID };
     const boxes = blockBoxes(placement);
@@ -523,15 +526,15 @@ export function useWireGestures(
 
   /**
    * Drags a picked loose wire's start square (plan 8 §5), as a connected wire's tail: onto another step or the hub
-   * it starts there (automatic again, as a re-attached tail is); anywhere else (a cache: "cannot start here", a
-   * line, empty canvas: "needs one end") or back on its own source it snaps back, since a loose wire always keeps a source.
+   * it starts there (automatic again, as a re-attached tail is); back on its own source nothing changes; anywhere
+   * else (a cache, a line, empty canvas: "loose wire") the wire is open at both ends there, grey.
    */
   const startLooseSource = (looseId: string, e: ReactPointerEvent) => {
     const d = designRef.current;
     if (!d || e.button !== 0) return;
     const base = d.draft;
     const l = base.loose[looseId];
-    if (!l || isLooseStart(l)) return;
+    if (!l || !isLooseEnd(l)) return;
     const boxes = blockBoxes(shown.current.placement);
     const pick = `${LOOSE_PREFIX}${looseId}`;
     setResize('ew');
@@ -541,13 +544,12 @@ export function useWireGestures(
       path: (p, over) => { const f = freeEnd(p, 'source', boxes, over); return clearPath(route(f.x, f.y, l.end.x, l.end.y, f.box, '', 0, boxes), boxes); },
       // a wire may start at any step on the canvas or at the hub; a cache is no source
       // canWire's own test of a step: `over` is a node on the canvas, so a step of the graph there is placed (parked ones too) and has a port
-      verdict: (over) => (over === SPHERE_NODE_ID || shown.current.graph.steps.has(over) ? 'ok' : 'cannotStart'),
+      verdict: (over) => (over === SPHERE_NODE_ID || shown.current.graph.steps.has(over) ? 'ok' : 'loose'),
       done: (over) => d.onCommit(resourceLoose(base, looseId, over === SPHERE_NODE_ID ? WORKFLOW_SOURCE : over), { picks: [{ kind: 'wire', id: pick }] }),
       // back on its own source: its start is fixed to that port, so nothing changes
       onSelf: () => {}, selfWhy: 'here',
-      line: 'start',
-      // released on nothing it would be open at both ends: refused, as a start-loose wire's head is
-      nothing: 'oneEnd',
+      // released where it attaches to nothing (a cache, a line, empty canvas): open at both ends there, grey
+      loose: (p) => d.onCommit(loosenTail(base, looseId, p), { picks: [{ kind: 'wire', id: pick }] }),
     });
   };
 
@@ -591,8 +593,8 @@ export function useWireGestures(
   /**
    * Drags a start-loose wire's head (its head square, or a joined one's contact or arrow square) as a connected
    * wire's: onto another step it lands there (the arrow keeping its junction); on its own step its landing slides
-   * (a contact square there makes it plain); its contact square on a same-colour line joins that line. Released on
-   * nothing it would be open at both ends: refused, "needs one end", it snaps back.
+   * (a contact square there makes it plain); its contact square on a same-colour line joins that line. Released where
+   * it attaches to nothing, it is open at both ends there (grey).
    */
   const startLooseHead = (looseId: string, wire: WireRoute, part: 'contact' | 'arrow', e: ReactPointerEvent) => {
     const d = designRef.current;
@@ -613,7 +615,7 @@ export function useWireGestures(
     dropGesture(e, {
       wire: pick, part: arrow ? 'branch' : undefined, current: l.target,
       path: (p, over) => { const f = freeEnd(p, 'target', boxes, over); return clearPath(route(fx, fy, f.x, f.y, '', f.box, 0, boxes), boxes); },
-      verdict: (over) => (shown.current.graph.steps.has(over) ? 'ok' : 'oneEnd'),
+      verdict: (over) => (shown.current.graph.steps.has(over) ? 'ok' : 'loose'),
       done: (over, p) => commit(retargetLooseStart(base, looseId, over, landingAt(over, p), arrow)),
       onSelf: (p) => {
         const landing = landingAt(l.target, p);
@@ -624,11 +626,50 @@ export function useWireGestures(
         commit(shapeLooseStart(base, looseId, { bends: l.bends ?? null, landing, contact: l.contact }));
       },
       selfWhy: 'move',
-      nothing: 'oneEnd',
+      // released where it attaches to nothing: open at both ends there, grey
+      loose: (p) => commit(loosenHead(base, looseId, p)),
       line: arrow ? undefined : {
-        verdict: (host) => (shown.current.wires.find((w) => w.id === host)?.condition === condition ? 'ok' : 'oneEnd'),
+        verdict: (host) => (shown.current.wires.find((w) => w.id === host)?.condition === condition ? 'ok' : 'loose'),
         preview: joinedAt,
         done: (host, at) => commit(joinedAt(host, at)),
+      },
+    });
+  };
+
+  /**
+   * Drags one open end of a wire open at both ends (its square or its open circle). Its end onto a step: it lands
+   * there, open at its start only, in that step's colour; its start onto a step or the hub: it starts there, open
+   * at its end only, grey until its head connects. Anywhere else (a line too: with no target it has no colour to
+   * join with) that end moves there, its bends kept; released where it already is, nothing.
+   */
+  const startBothEnd = (looseId: string, which: 'start' | 'end', e: ReactPointerEvent) => {
+    const d = designRef.current;
+    if (!d || e.button !== 0) return;
+    const base = d.draft;
+    const l = looseBothOf(base, looseId);
+    if (!l) return;
+    const boxes = blockBoxes(shown.current.placement);
+    const pick = `${LOOSE_PREFIX}${looseId}`;
+    const commit = (next: Draft) => d.onCommit(next, { picks: [{ kind: 'wire', id: pick }] });
+    const head = which === 'end';
+    const verdict = (over: string): DropVerdict => (shown.current.graph.steps.has(over) || (!head && over === SPHERE_NODE_ID) ? 'ok' : 'loose');
+    const path = (p: Point, over: string | null): Pt[] => {
+      const attaches = over !== null && verdict(over) === 'ok';
+      const f = attaches ? freeEnd(p, head ? 'target' : 'source', boxes, over) : { x: p.x, y: p.y, box: '' };
+      const [a, b] = head ? [l.start, f] : [f, l.end];
+      // what the release keeps: its own bends, as routeLoose draws them
+      if (!attaches && l.bends) return simplify(pointsOfShape({ sx: a.x, sy: a.y, tx: b.x, ty: b.y }, l.bends));
+      return clearPath(route(a.x, a.y, b.x, b.y, head ? '' : f.box, head ? f.box : '', 0, boxes), boxes);
+    };
+    const landingAt = (step: string, p: Point) => clampLanding(p.y - (shown.current.placement.steps.get(step)?.y ?? 0));
+    setResize(null);
+    dropGesture(e, {
+      wire: pick, newWire: true, path, current: null, verdict,
+      done: (over, p) => commit(head ? connectHead(base, looseId, over, landingAt(over, p)) : connectTail(base, looseId, over === SPHERE_NODE_ID ? WORKFLOW_SOURCE : over)),
+      loose: (p) => {
+        const was = head ? l.end : l.start;
+        if (p.x === was.x && p.y === was.y) return;
+        commit(moveLoose(base, looseId, p, which));
       },
     });
   };
@@ -658,8 +699,8 @@ export function useWireGestures(
     portPointerDown(source, e) {
       latestRef.current.startNew(source, e);
     },
-    looseEndPointerDown(looseId, e) {
-      latestRef.current.startLoose(looseId, e);
+    looseEndPointerDown(looseId, e, end) {
+      latestRef.current.startLoose(looseId, e, end);
     },
   }), [shown]);
 

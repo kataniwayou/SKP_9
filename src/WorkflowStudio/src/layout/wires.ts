@@ -60,13 +60,23 @@ export interface LooseStart {
   was?: string;
 }
 
-/** A loose wire: open at its head (the only kind stored before tails could be detached) or at its start. */
-export type LooseWire = LooseEnd | LooseStart;
+/** A wire open at both ends: from an open start to an open end; grey, as a wire whose head is on nothing is. */
+export interface LooseBoth {
+  open: 'both';
+  start: Point;
+  end: Point;
+  bends?: Bends;
+  /** As a start-loose wire's: the id it had as a connected wire. */
+  was?: string;
+}
+
+/** A loose wire: open at its head (the only kind stored before tails could be detached), at its start, or at both. */
+export type LooseWire = LooseEnd | LooseStart | LooseBoth;
 
 export const isLooseStart = (l: LooseWire): l is LooseStart => 'open' in l && l.open === 'start';
-
-/** Where a loose wire is open: its end, or its start. */
-export const openPointOf = (l: LooseWire): Point => (isLooseStart(l) ? l.start : l.end);
+export const isLooseBoth = (l: LooseWire): l is LooseBoth => 'open' in l && l.open === 'both';
+/** Open at its head only: from a source to an open end. */
+export const isLooseEnd = (l: LooseWire): l is LooseEnd => !('open' in l);
 
 /** A loose wire open at its head as drawn: right-angled from its source's port to its open end. */
 export interface LooseEndRoute {
@@ -86,7 +96,14 @@ export interface LooseStartRoute {
   joint?: Joint;
 }
 
-export type LooseRoute = LooseEndRoute | LooseStartRoute;
+/** A wire open at both ends as drawn: right-angled from its open start to its open end. */
+export interface LooseBothRoute {
+  open: 'both';
+  id: string;
+  points: Pt[];
+}
+
+export type LooseRoute = LooseEndRoute | LooseStartRoute | LooseBothRoute;
 
 export interface WiringInput {
   entryStepIds: Id[];
@@ -253,6 +270,14 @@ export function routeLoose(loose: Readonly<Record<string, LooseWire>>, placement
     if (isLooseStart(l)) {
       const r = ctx ? routeLooseStart(id, l, placement, ctx, boxes) : null;
       if (r) out.push(r);
+      continue;
+    }
+    // open at both ends: from its start to its end, by its own bends when it has them
+    if (isLooseBoth(l)) {
+      const points = l.bends && l.bends.xs.length > 0
+        ? simplify(pointsOfShape({ sx: l.start.x, sy: l.start.y, tx: l.end.x, ty: l.end.y }, l.bends))
+        : clearPath(route(l.start.x, l.start.y, l.end.x, l.end.y, '', '', 0, boxes), boxes);
+      out.push({ open: 'both', id, points });
       continue;
     }
     const from = portOf(placement, l.source);

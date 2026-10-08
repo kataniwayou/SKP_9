@@ -175,6 +175,13 @@ describe('toFlow', () => {
     expect(edges.find((e) => e.id === 'loose:t2')!.data).toMatchObject({ branch: joint.branch, joints: [joint.contact] });
   });
 
+  it('draws a wire open at both ends grey, on the hub, open at both ends', () => {
+    const d: StudioDocument = { ...doc(), loose: [{ id: 'b1', open: 'both', points: [[400, 400], [704, 600]] }] };
+    const e = toFlow(d, fitter).edges.find((x) => x.id === 'loose:b1')!;
+    expect([e.source, e.target, e.targetHandle]).toEqual(['wf', 'wf', 'loose']);
+    expect(e.data).toMatchObject({ loose: true, openBoth: true, colour: '#8A97A8', points: [[400, 400], [704, 600]] });
+  });
+
   it('cuts long names to fit and keeps the full text for the tooltip (review focus 5)', () => {
     const long = 'a-step-name-that-goes-on-and-on-and-on-forever';
     const graph = doc({ steps: new Map([['a', step('a', { name: long })], ['b', step('b')]]) });

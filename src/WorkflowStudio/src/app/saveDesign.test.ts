@@ -4,7 +4,7 @@ import { assignmentDto, cacheDto, graphDto, processorDto, schemaDto, stepDto, wo
 import type { WorkflowGraphDto } from '../api/types';
 import { applyDesign } from '../design/apply';
 import { EMPTY_EDITS, removeAssignment, setField } from '../design/design';
-import { EMPTY_DRAFT, loosen, loosenStart } from '../design/draft';
+import { EMPTY_DRAFT, loosen, loosenHead, loosenStart } from '../design/draft';
 import { designDirty } from '../store/studioState';
 import { createStudioStore } from '../store/studioStore';
 import { loadedDocument } from './fixtures';
@@ -69,6 +69,15 @@ describe('buildDesignRequest (plan 8 §4.2)', () => {
       t1: { open: 'start', target: 's2', start: { x: 304, y: 600 }, landing: 96, contact: null, was: 's1->s2' },
       t2: { open: 'start', target: 's3', start: { x: 40, y: 600 }, landing: 80, contact: null, was: 'wf->s3' },
     });
+  });
+
+  it('never sends a wire open at both ends; the layout keeps it', async () => {
+    const base = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+    const draft = loosenHead(loosenStart(EMPTY_DRAFT, base, 's1->s2', 'b1', { x: 304, y: 600 }, null), 'b1', { x: 904, y: 600 });
+    const body = buildDesignRequest(base, applyDesign(base, draft, EMPTY_EDITS), { draft, edits: EMPTY_EDITS });
+    expect(body.steps).toEqual([{ id: 's1', updatedAt: expect.any(String), fields: {}, nextStepIds: [] }]);
+    expect(body.workflow.entryStepIds).toBeNull();
+    expect(body.layout.loose).toEqual({ b1: { open: 'both', start: { x: 304, y: 600 }, end: { x: 904, y: 600 }, was: 's1->s2' } });
   });
 });
 

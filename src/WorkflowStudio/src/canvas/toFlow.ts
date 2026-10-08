@@ -117,6 +117,15 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
 
   // loose wires (plan 8 §5): drawn by the cable edge from their source; never part of the wiring
   for (const l of doc.loose) {
+    // open at both ends: grey, on the hub (React Flow needs a node), an open circle at each end
+    if (l.open === 'both') {
+      edges.push({
+        id: `${LOOSE_PREFIX}${l.id}`, type: 'cable', source: SPHERE_NODE_ID, target: SPHERE_NODE_ID,
+        sourceHandle: 'out', targetHandle: 'loose', selectable: false, focusable: false,
+        data: { points: l.points, colour: LOOSE_COLOUR, broken: false, delay: 0, loose: true, openBoth: true },
+      });
+      continue;
+    }
     // open at its start: on its target, in its colour, its head and junction as a connected wire's
     if (l.open === 'start') {
       edges.push({

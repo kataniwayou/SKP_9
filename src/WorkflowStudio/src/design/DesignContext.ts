@@ -7,8 +7,8 @@ export interface DesignGestures {
   wirePointerDown(wireId: string, e: ReactPointerEvent, part?: 'own' | 'branch'): void;
   /** A press on a block's connection point starts a new wire (spec §4.5). */
   portPointerDown(source: SourceId, e: ReactPointerEvent): void;
-  /** A press on a loose wire's open end (plan 8 §5): drags it onto a step, or elsewhere. */
-  looseEndPointerDown(looseId: string, e: ReactPointerEvent): void;
+  /** A press on a loose wire's open end, or open start (plan 8 §5): drags it onto a step, or elsewhere. */
+  looseEndPointerDown(looseId: string, e: ReactPointerEvent, end: 'start' | 'end'): void;
 }
 
 export const DesignContext = createContext<DesignGestures | null>(null);
