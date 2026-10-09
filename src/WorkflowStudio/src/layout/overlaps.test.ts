@@ -97,3 +97,35 @@ describe('LineIndex.count', () => {
     expect(ix.count([[64, 0], [64, 0]], () => true)).toBe(0);
   });
 });
+
+describe('mayShare: siblings out of one step or the hub (the user\'s ruling, 2026-10-09)', () => {
+  const at = (step: string): End => ({ on: 'step', step, y: null });
+  const hub: End = { on: 'hub', angle: null };
+  const open: End = { on: 'open', x: 0, y: 0 };
+  // s2, s3 Completed (1); s4 Failed (2)
+  const cond = (id: string) => (id === 's4' ? 2 : id === 's2' || id === 's3' ? 1 : undefined);
+  const share = (c: Circuit) => mayShare(c, netsOf(c, cond));
+
+  it('two wires out of the same step\'s output with the same family may share a line (a bus); different families may not', () => {
+    const c: Circuit = { a: { tail: at('s1'), head: at('s2') }, b: { tail: at('s1'), head: at('s3') }, d: { tail: at('s1'), head: at('s4') } };
+    expect(share(c)('a', 'b')).toBe(true);
+    expect(share(c)('a', 'd')).toBe(false);
+    expect(share(c)('b', 'd')).toBe(false);
+  });
+
+  it('two wires out of the hub with the same family may share a line; out of different steps they may not', () => {
+    const c: Circuit = { a: { tail: hub, head: at('s2') }, b: { tail: hub, head: at('s3') }, x: { tail: at('s5'), head: at('s3') }, y: { tail: at('s6'), head: at('s2') } };
+    expect(share(c)('a', 'b')).toBe(true);
+    expect(share(c)('x', 'y')).toBe(false);
+    expect(share(c)('a', 'x')).toBe(false);
+  });
+
+  it('siblings of no family yet (grey) share their colour; a direction-less wire or a short-circuited net never does', () => {
+    const c: Circuit = { a: { tail: at('s1'), head: open }, b: { tail: at('s1'), head: open }, f: { tail: open, head: open } };
+    expect(share(c)('a', 'b')).toBe(true);
+    expect(share(c)('a', 'f')).toBe(false);
+    // b's net short-circuited (a tap on it into a Failed step while it goes into a Completed one)
+    const shorted: Circuit = { a: { tail: at('s1'), head: at('s2') }, b: { tail: at('s1'), head: at('s3') }, t: { tail: { on: 'wire', host: 'b', at: 8 }, head: at('s4') } };
+    expect(share(shorted)('a', 'b')).toBe(false);
+  });
+});

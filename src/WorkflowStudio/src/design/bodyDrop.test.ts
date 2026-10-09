@@ -166,19 +166,31 @@ describe('a wire moved whole onto the hub (review 2026-10-09)', () => {
 });
 
 describe('a wire moved whole onto another wire (the user\'s rule 2, 2026-10-09)', () => {
-  it('lying exactly on another net\'s wire, its ends that would connect are "short circuit" and stay open; the wire still moves', async () => {
+  it('lying on a wire out of another step, its ends that would connect are "short circuit" and stay open; the wire still moves', async () => {
     const d = await doc(), c = plain(d);
-    const pts = drawn(d, c, 's2->s3');
-    // a both-open wire 400 below s2 -> s3, moved up onto it: its ends meet s2's output and s3's input
-    const c2 = free(c, 'w:f', translatePoints(pts, 0, 400));
+    // s1 -> s2 and s2 -> s3 run straight along one line: a wire from s1's output to s3's input lies on s2 -> s3 too
+    const one = drawn(d, c, 's1->s2'), two = drawn(d, c, 's2->s3');
+    expect([one.length, two.length, one[0]![1]]).toEqual([2, 2, two[0]![1]]);
+    const pts: Pt[] = [one[0]!, two.at(-1)!];
+    // a both-open wire 400 below that line, moved up onto it: its ends meet s1's output and s3's input
     const moved = translatePoints(pts, 0, 400);
-    const plainLanding = land(d, c2, 'w:f', moved, 0, -400);
-    expect(plainLanding.ends.map((e) => e.verdict)).toEqual(['connect', 'connect']);
+    const c2 = free(c, 'w:f', moved);
+    expect(land(d, c2, 'w:f', moved, 0, -400).ends.map((e) => e.verdict)).toEqual(['connect', 'connect']);
     const l = landBody(d, c2, 'w:f', moved, endPointOf(d.wires), 0, -400, null, 8, overlapJudge(d, 'w:f'));
     expect(l.ends.map((e) => e.verdict)).toEqual(['short', 'short']);
     expect(l.points).toEqual(pts);
     expect(l.result).toBe(l.preview);
     expect(l.result['w:f']!.tail).toMatchObject({ on: 'open' });
+  });
+
+  it('lying on a wire out of the same step of the same colour (the user\'s ruling, 2026-10-09), its ends connect: a bus', async () => {
+    const d = await doc(), c = plain(d);
+    const pts = drawn(d, c, 's2->s3');
+    // a both-open wire 400 below s2 -> s3, moved up onto it: its ends meet s2's output and s3's input, as s2 -> s3's do
+    const moved = translatePoints(pts, 0, 400);
+    const l = landBody(d, free(c, 'w:f', moved), 'w:f', moved, endPointOf(d.wires), 0, -400, null, 8, overlapJudge(d, 'w:f'));
+    expect(l.ends.map((e) => e.verdict)).toEqual(['connect', 'connect']);
+    expect(l.result['w:f']).toMatchObject({ tail: { on: 'step', step: 's2' }, head: { on: 'step', step: 's3' } });
   });
 
   it('beside another wire it connects as before', async () => {

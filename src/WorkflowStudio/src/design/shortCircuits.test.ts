@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
-import { addCircuitWire, moveWire, setEnd } from '../circuit/circuit';
+import { addCircuitWire, moveWire, setBends, setEnd } from '../circuit/circuit';
+import { overlapsOf } from '../layout/overlaps';
 import { applyDesign } from './apply';
 import { EMPTY_EDITS, setField } from './design';
 import { circuitOf, EMPTY_DRAFT, withCircuit } from './draft';
@@ -87,5 +88,42 @@ describe('overlap short circuits (the user\'s rule 2, 2026-10-09)', () => {
       expect(shortCircuitErrors(shown, draft)).toEqual([]);
       expect(heldSourcesOf(shown, draft)).toEqual({ steps: new Set(), hub: false });
     }
+  });
+});
+
+describe('siblings out of one step sharing a line (the user\'s ruling, 2026-10-09)', () => {
+  // s1 feeds s2 (Completed) and s3 (`s3`: its entry condition); both wires shaped by hand along one track
+  const fanned = (s3: 1 | 2 = 1) => loadedDocument(graphDto({
+    workflow: workflowDto({ entryStepIds: ['s1'] }),
+    steps: [stepDto('s1', { nextStepIds: ['s2', 's3'] }), stepDto('s2'), stepDto('s3', { entryCondition: s3 })],
+  }));
+  const onOneTrack = (base: Awaited<ReturnType<typeof fanned>>, ids: string[]) => {
+    // both down beside s1 to y 700, along it, then up to their steps: the run along y 700 is shared
+    const x = base.placement.steps.get('s1')!.x + 224;
+    let c = circuitOf(base, EMPTY_DRAFT);
+    for (const id of ids) c = setBends(c, id, { xs: [x + 16, x + 48], ys: [700] });
+    return withCircuit(EMPTY_DRAFT, base, c);
+  };
+  const shared = (shown: Awaited<ReturnType<typeof fanned>>, a: string, b: string) =>
+    overlapsOf(shown.wires).some((o) => (o.a === a && o.b === b) || (o.a === b && o.b === a));
+
+  it('of one colour: they lie on each other, but that is no short circuit: nothing red, nothing listed, both links shown', async () => {
+    const base = await fanned();
+    const draft = onOneTrack(base, ['s1->s2', 's1->s3']);
+    const shown = applyDesign(base, draft, EMPTY_EDITS);
+    expect(shared(shown, 's1->s2', 's1->s3')).toBe(true);
+    expect(shown.wires.some((w) => w.short || w.overlaps)).toBe(false);
+    expect(shortCircuitErrors(shown, draft)).toEqual([]);
+    expect(heldSourcesOf(shown, draft)).toEqual({ steps: new Set(), hub: false });
+    expect([...shown.graph.steps.get('s1')!.nextStepIds].sort()).toEqual(['s2', 's3']);
+  });
+
+  it('of different colours: a short circuit, listed, the step held back', async () => {
+    const base = await fanned(2);
+    const draft = onOneTrack(base, ['s1->s2', 's1->s3']);
+    const shown = applyDesign(base, draft, EMPTY_EDITS);
+    expect(shared(shown, 's1->s2', 's1->s3')).toBe(true);
+    expect(shortCircuitErrors(shown, draft).map((e) => e.message)).toEqual(['short circuit: step-s1_1.0.0-s1 → step-s2_1.0.0-s2 overlaps step-s1_1.0.0-s1 → step-s3_1.0.0-s3']);
+    expect(heldSourcesOf(shown, draft).steps).toEqual(new Set(['s1']));
   });
 });

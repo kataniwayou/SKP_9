@@ -86,17 +86,31 @@ export function overlapsOf(lines: readonly { id: string; points: readonly Pt[] }
 
 /**
  * Two wires that may share a stretch of line (the user's rule 2, 2026-10-09): both directed and in one net (joined
- * through junctions, so of one family), as fan-out wires sharing a trunk. A direction-less wire is in no live net, so
- * it shares a line with nothing.
+ * through junctions, so of one family), as fan-out wires sharing a trunk; or (the user's ruling, 2026-10-09) both with
+ * their tails on the same step's output, or both on the hub, and of the same colour (one family each, the same, or both
+ * still undecided), as siblings sharing a bus. A direction-less wire is in no live net, so it shares a line with
+ * nothing; a wire of a short-circuited net (two families) has no one colour to share.
  */
 export function mayShare(circuit: Readonly<Circuit>, nets: readonly Net[]): (a: string, b: string) => boolean {
   // a directed wire's net; a direction-less one (in no live net) is left out
   const netOf = new Map<string, number>();
   nets.forEach((n, i) => { for (const x of n.wires) if (Object.hasOwn(circuit, x) && !isFree(circuit[x]!)) netOf.set(x, i); });
+  /** What a wire's tail is on when that is a step or the hub, and its net's one colour (-1: undecided); null otherwise. */
+  const sibling = (x: string): { source: string; colour: number } | null => {
+    const n = netOf.get(x);
+    if (n === undefined) return null;
+    const t = circuit[x]!.tail;
+    const source = t.on === 'step' ? `s:${t.step}` : t.on === 'hub' ? 'hub' : null;
+    const families = nets[n]!.families;
+    return source === null || families.length > 1 ? null : { source, colour: families[0] ?? -1 };
+  };
   return (a, b) => {
     if (a === b) return false;
     const n = netOf.get(a);
-    return n !== undefined && n === netOf.get(b);
+    if (n === undefined) return false;
+    if (n === netOf.get(b)) return true;
+    const p = sibling(a), q = sibling(b);
+    return p !== null && q !== null && p.source === q.source && p.colour === q.colour;
   };
 }
 
