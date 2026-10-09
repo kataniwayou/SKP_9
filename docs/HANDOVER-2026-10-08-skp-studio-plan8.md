@@ -264,6 +264,31 @@ undecided (grey) siblings count as the same colour; a wire of a short-circuited 
 new a -> c run onto a -> b's upright: allowed, no red, "No problems", Save writes b, c, d; a -> d's run onto it is
 "short circuit"); both fail with the sibling clause disabled.
 
+**Review of the overlap work (2026-10-09) and the coordinator's ruling — BUILT, NOT DEPLOYED.** Repros in the
+scratchpad `vt2\` (old router copy in `old\`).
+- CRITICAL fixed: Save could drop links. With no circuit of its own (blocks moved only) the held sources were rebuilt
+  from the shown lists, which already leave a shorted net's links out, so nothing was held and the lists went out
+  without them. `heldSourcesOf` now reads the drawn short wires' own sources; `heldLinkCount` traces the circuit built
+  from the base. New property test `app/saveInvariant.test.ts` (120 random workflows: blocks moved, wires shaped by
+  hand, a both-open wire laid on a wire): Save never removes a loaded link; it failed before the fix (trial 42).
+- Ruling: two fully automatic wires on each other are never a short circuit (`isAutomatic`, `mayShare`); the router
+  still keeps off other nets' wires (`sharesNet`). Priorities: blocks first (overlap cost capped under one block hit;
+  search scored blocks then overlaps), its own source and target blocks never run through (`hitsOf`: the end segments
+  may touch their own block's border, not go inside), then elbows / U levels / junction side, then its own heights
+  (one end, or both together). Routing in id order (hand-shaped first): reversing the circuit gives the same drawing.
+  A hand-shaped wire's junction side follows its own runs, so a run drag keeps the side the router drew. Problems
+  overlap rows pick both wires (`DesignError.other`, `errorPicks`). Overlap keys rounded to 0.01 px.
+- Random plain workflows (the review's generator, 300): 0 open with a short circuit (was 10); 0 wires cross more
+  blocks than under the abf2aec router, 8 cross fewer (they ran through their own target); reversed order: identical.
+  Committed as tests in `circuitRoute.test.ts` (300 plain, 60 with hand shapes).
+- Routing medians, abf2aec router -> now (same process): live chain plain 0.17 -> 0.35 ms, one wire shaped 0.16 ->
+  0.32 ms, a both-open wire laid on an automatic wire 0.17 -> 0.69 ms; synthetic 118 wires 2.7 -> 2.9-3.1 ms. A wire
+  whose start or landing stub is covered skips the track search and goes to its heights.
+- Older tests changed: fixtures that laid a wire on an automatic straight wire now pin that wire by hand (automatic,
+  it now moves a track over); the overlaps unit tests of the net / sibling rules use `sharesNet`.
+- Tests: Vitest 909; e2e overlap.spec 7 (new: the Problems row picks both wires; a junction wire drawn from the far
+  side keeps it when a run square shapes it); each new check fails with its fix reverted.
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed

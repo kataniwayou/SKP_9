@@ -134,6 +134,19 @@ Agreed with the user on 2026-10-09; they supersede the 2026-10-08 notes in §6 w
     they may share a line, as a bus. Out of the same step but of different colours, it is still a short circuit. This
     holds for the drawing, Problems, the drags, Save's hold-back and the router (which may then let such siblings share
     a track, but routes them as before otherwise). A wire of a short-circuited net (two families) has no one colour.*
+  - *The coordinator's ruling (2026-10-09, after review): an overlap of two wires that are both fully automatic (no
+    bends, nothing held, both ends where the router puts them: no slid height, no hub angle or held height, nothing open
+    or joined by hand) is never a short circuit; it is the router's doing, not the user's, so a workflow nobody has
+    touched never opens with one. A short circuit needs at least one wire shaped, held or with an end placed by hand
+    (open ends and direction-less wires included). The router's priorities: never through a block, its own source and
+    target blocks included (it leaves and reaches them at their border); then off every wire of another net (elbows, U
+    levels, a level junction's other side, and last its own start and landing heights, both ends together too); an
+    automatic wire that still cannot keep off a hand-shaped one without crossing a block lies on it, and that is shown
+    as a short circuit. Routing is in id order, hand-shaped wires (and what they are joined on) first, so the drawing and
+    its short circuits never depend on the order the circuit lists its wires in. A hand-shaped wire leaves and reaches a
+    level junction on the side its own next or last run is (as it was drawn). Save holds back the sources of the wires
+    drawn short (never read back from the shown lists). A Problems overlap row picks both wires. Overlaps are matched to
+    a hundredth of a pixel.*
   - Both nets are short-circuited: both wires are drawn red along every stretch they share, their junctions red as in
     §2.2-7, and Problems lists "short circuit: <wire> overlaps <wire>", each wire named as the Inspector names it
     ("<from> → <to>", a terminal by its unique name, else "a junction" / "an open end"); the row's kind is Wire.
