@@ -129,6 +129,11 @@ Agreed with the user on 2026-10-09; they supersede the 2026-10-08 notes in §6 w
   in one net (joined through junctions, so of one family), as fan-out wires sharing a trunk. Crossing at a point is not
   an overlap, nor is meeting end to end or running side by side. A direction-less wire is in no live net, so one lying
   on any wire (a live one, or another direction-less one) is a short circuit.
+  - *The user's ruling (2026-10-09): two wires whose tails are on the same step's output side, or both on the hub, and
+    that are of the same colour (each net one family, the same; or both still undecided, grey) count as one net here:
+    they may share a line, as a bus. Out of the same step but of different colours, it is still a short circuit. This
+    holds for the drawing, Problems, the drags, Save's hold-back and the router (which may then let such siblings share
+    a track, but routes them as before otherwise). A wire of a short-circuited net (two families) has no one colour.*
   - Both nets are short-circuited: both wires are drawn red along every stretch they share, their junctions red as in
     §2.2-7, and Problems lists "short circuit: <wire> overlaps <wire>", each wire named as the Inspector names it
     ("<from> → <to>", a terminal by its unique name, else "a junction" / "an open end"); the row's kind is Wire.

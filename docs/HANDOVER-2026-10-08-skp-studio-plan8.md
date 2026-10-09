@@ -254,6 +254,16 @@ G, notes in §3-§7 and §10.
   no wire selection kind); an automatic host routed early (because a hand-shaped wire is joined on it) avoids only what
   was drawn before it.
 
+**Sibling bus (user ruling, 2026-10-09) — BUILT, NOT DEPLOYED.** Wires with their tails on the same step's output
+(or both on the hub) and of the same colour (one family each and the same, or both undecided) may share a line: no
+red, nothing in Problems, Save writes their links. Different colours out of one step stay a short circuit. One change in
+`mayShare` (`layout/overlaps.ts`), which the drawing, Problems, the drag judge, Save's hold-back, settle and the router
+all use; the router may now let such siblings share a track but routes them as before otherwise. Judgement call: two
+undecided (grey) siblings count as the same colour; a wire of a short-circuited net has no one colour. Tests: unit
+(`mayShare` siblings, drawing + Problems + hold-back for one and two colours) and e2e `overlap-siblings.spec.ts` (a
+new a -> c run onto a -> b's upright: allowed, no red, "No problems", Save writes b, c, d; a -> d's run onto it is
+"short circuit"); both fail with the sibling clause disabled.
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed
