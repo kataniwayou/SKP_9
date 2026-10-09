@@ -669,7 +669,11 @@ test('a picked new wire has squares on its ends and runs: a run square reshapes 
   const handle = runs.first();
   const at = await centreOf(handle);
   const across = /\bh\b/.test((await handle.getAttribute('class')) ?? '');
-  await drag(page, at, across ? { x: at.x, y: at.y + 48 } : { x: at.x + 48, y: at.y });
+  // where the run would lie on another wire the drag is a short circuit and snaps back (rule 2): then the other way
+  for (const by of [48, -48, 96, -96]) {
+    await drag(page, at, across ? { x: at.x, y: at.y + by } : { x: at.x + by, y: at.y });
+    if ((await line()) !== before) break;
+  }
   await expect.poll(line).not.toBe(before);
   const shaped = await line();
   await expect(page.getByText('● design draft')).toBeVisible();
