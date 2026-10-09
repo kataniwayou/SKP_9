@@ -310,3 +310,133 @@ export async function setEntryCondition(page: Page, panel: Locator, id: string, 
   await inspector(page).getByLabel('Entry condition', { exact: true }).click();
   await inspector(page).getByRole('option', { name }).click();
 }
+
+// ---- wires laid on wires (the user's rule 2, 2026-10-09): shared by overlap.spec and circuit-save.spec ----
+
+type P = [number, number];
+const frames = (page: Page) => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(null)))));
+/** The drop labels shown now. */
+export const labelsOf = (panel: Locator) => panel.locator('.design-drop-label').allTextContents();
+/** A picked wire's run square k. */
+export const runSquare = (panel: Locator, id: string, k: number): Locator => panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg[data-k="${k}"]`);
+/** A wire's points in flow coordinates, read from its drawn path. */
+export async function wirePoints(panel: Locator, id: string): Promise<P[]> {
+  const d = (await edge(panel, id).locator('path.w').first().getAttribute('d')) ?? '';
+  return [...d.matchAll(/[ML]([-\d.e]+)[ ,]([-\d.e]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+}
+/** A wire's longest upright run: its x, its top and bottom, and its index (run k: points k -> k + 1). */
+export async function upright(panel: Locator, id: string): Promise<{ x: number; lo: number; hi: number; k: number }> {
+  const pts = await wirePoints(panel, id);
+  let best: { x: number; lo: number; hi: number; k: number } | null = null;
+  for (let k = 0; k + 1 < pts.length; k++) {
+    const [a, b] = [pts[k]!, pts[k + 1]!];
+    if (a[0] !== b[0] || a[1] === b[1]) continue;
+    const r = { x: a[0], lo: Math.min(a[1], b[1]), hi: Math.max(a[1], b[1]), k };
+    if (!best || r.hi - r.lo > best.hi - best.lo) best = r;
+  }
+  if (!best) throw new Error(`${id} has no upright run`);
+  return best;
+}
+/** Flow px per screen px is 1 / this: the canvas's zoom. */
+export async function zoomOf(panel: Locator): Promise<number> {
+  const a = await flowToPage(panel, [0, 0]), b = await flowToPage(panel, [100, 0]);
+  return (b.x - a.x) / 100;
+}
+/** Every block's box in flow coordinates. */
+export async function blocks(panel: Locator): Promise<{ x: number; y: number; w: number; h: number }[]> {
+  return panel.locator('.react-flow__node').evaluateAll((els) => els.map((el) => {
+    const e = el as HTMLElement;
+    const m = /translate\(([-\d.e]+)px, ?([-\d.e]+)px\)/.exec(e.style.transform)!;
+    return { x: Number(m[1]), y: Number(m[2]), w: e.offsetWidth, h: e.offsetHeight };
+  }));
+}
+/** Presses `from` and moves the real mouse to `to` in small steps; the button stays down. */
+export async function pressTo(page: Page, from: Pt, to: Pt, via?: Pt): Promise<void> {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  if (via) await page.mouse.move(via.x, via.y, { steps: 8 });
+  await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 6 });
+  await page.mouse.move(to.x, to.y, { steps: 6 });
+  await frames(page);
+}
+
+/** A new wire from step `from` with both its ends then moved open: no end on a step or the hub, direction-less. */
+export async function freeWire(page: Page, panel: Locator, from: string): Promise<string> {
+  const spot = await emptySpot(panel);
+  const id = await newWire(page, panel, from, spot);
+  // the tail's leg may lie on another wire on its way (a short circuit, refused): then another spot
+  const tried: Pt[] = [spot];
+  for (let i = 0; i < 6; i++) {
+    const to = await emptySpot(panel, tried);
+    tried.push(to);
+    if ((await dragEnd(page, panel, id, 'tail', to)) === 'move here') break;
+  }
+  await expect(edge(panel, id).locator('path.nx-head')).toHaveCount(0);
+  await expect(edge(panel, id).locator('circle.nx-src')).toHaveCount(0);
+  return id;
+}
+
+/** The run square of a picked wire nearest the middle of its upright run `run` (flow coordinates). */
+export async function squareOn(panel: Locator, id: string, run: { x: number; lo: number; hi: number }): Promise<Pt> {
+  const want = await flowToPage(panel, [run.x, (run.lo + run.hi) / 2]);
+  let best: Pt | null = null;
+  for (const sq of await panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg`).all()) {
+    const c = await centreOf(sq);
+    if (!best || Math.hypot(c.x - want.x, c.y - want.y) < Math.hypot(best.x - want.x, best.y - want.y)) best = c;
+  }
+  if (!best) throw new Error(`${id} shows no run square`);
+  return best;
+}
+
+/** Drags a picked wire's upright run `run` across by `dx` flow px with the real mouse; the labels read on the way, then released. */
+export async function dragRunAcross(page: Page, panel: Locator, id: string, run: { x: number; lo: number; hi: number }, dx: number): Promise<string[]> {
+  await pickWire(page, panel, id);
+  const from = await squareOn(panel, id, run);
+  const z = await zoomOf(panel);
+  await pressTo(page, from, { x: from.x + dx * z, y: from.y });
+  const labels = await labelsOf(panel);
+  await page.mouse.up();
+  return labels;
+}
+
+/**
+ * Shapes wire `id` by hand where it is free to go: its longest upright run dragged a grid step or two across (the first
+ * offset that is no short circuit), so it keeps its shape from then on. Returns the run as it is then.
+ */
+export async function shapeByHand(page: Page, panel: Locator, id: string): Promise<{ x: number; lo: number; hi: number; k: number }> {
+  for (const dx of [-8, 8, -16, 16, -24, 24]) {
+    const run = await upright(panel, id);
+    if ((await dragRunAcross(page, panel, id, run, dx)).length > 0) continue;
+    await expect.poll(async () => (await upright(panel, id)).x).toBe(run.x + dx);
+    return upright(panel, id);
+  }
+  throw new Error(`${id}'s upright run has no free track a grid step or more across`);
+}
+
+/**
+ * Drags the body of `free` with the real mouse so its longest upright run lies on `live`'s, both ends clear of every
+ * block (so neither end takes a contact). Returns the stretch they share, in flow coordinates.
+ */
+export async function layOn(page: Page, panel: Locator, free: string, live: string): Promise<{ x: number; lo: number; hi: number }> {
+  const f = await upright(panel, free), l = await upright(panel, live);
+  const pts = await wirePoints(panel, free);
+  const boxes = await blocks(panel);
+  const clear = (p: P) => boxes.every((b) => p[0] < b.x - 24 || p[0] > b.x + b.w + 24 || p[1] < b.y - 24 || p[1] > b.y + b.h + 24);
+  const dx = l.x - f.x;
+  const mid = (l.lo + l.hi) / 2 - (f.lo + f.hi) / 2;
+  let dy: number | null = null;
+  for (let k = 0; k < 40 && dy === null; k++) {
+    for (const s of [k, -k]) {
+      const d = Math.round(mid / 8) * 8 + s * 8;
+      const shared = Math.min(l.hi, f.hi + d) - Math.max(l.lo, f.lo + d);
+      if (shared >= 16 && clear([pts[0]![0] + dx, pts[0]![1] + d]) && clear([pts.at(-1)![0] + dx, pts.at(-1)![1] + d])) { dy = d; break; }
+    }
+  }
+  if (dy === null) throw new Error(`no shift lays ${free} on ${live} with its ends clear of the blocks`);
+  const z = await zoomOf(panel);
+  const from = await pointOnWire(panel, free, 0.5);
+  await pressTo(page, from, { x: from.x + dx * z, y: from.y + dy * z });
+  await page.mouse.up();
+  await expect.poll(async () => (await upright(panel, free)).x).toBe(l.x);
+  return { x: l.x, lo: Math.max(l.lo, f.lo + dy), hi: Math.min(l.hi, f.hi + dy) };
+}
