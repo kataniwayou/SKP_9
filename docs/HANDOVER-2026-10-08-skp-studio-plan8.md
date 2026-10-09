@@ -174,6 +174,22 @@ and studio specs. The deployed bundle is still `index-BC19MgmE.js` (without thes
   direction and "needs a step first", a junction stays put when its host is turned, an entry wire moved onto the hub
   and its step, Save with a wire poured into a direction-less wire; each fails with its fix reverted.
 
+**Cut rule (user request, 2026-10-09) — BUILT, NOT DEPLOYED.** `11a6781` (feature), `d0814ce` (e2e). Spec: plan 9
+§2.3 E and §6. End-square drag only: released on one of its own wire's run squares the wire is cut there (the part
+from the square to the dragged end goes, the wire open there, its shape up to there kept, its other end held where
+drawn); on its other end square the wire is deleted (as Delete). `design/cut.ts`: `squaresOf` (shared with the
+overlay), `squareAt` (within a square's own screen size), `cutPaths` (preview: kept / gone), `cutWire`,
+`holdDrawn`. During an end drag the picked wire's squares no longer follow the ghost: they stay where they were
+when the drag began (they are the targets). Labels "cut here" / "delete wire" (green tone); the part that goes is
+drawn as a faded red path (`.design-gone`), a deleted wire faded (`.wire.faded`). Judgement calls: the tone is green
+(the release does something); a cut keeps a straight remainder as a one-run shape; the stationary automatic end is
+held where it is drawn (as an open drop does), so cutting does not re-route it; a junction kept on a tail-cut
+wire keeps its point (its `at` shifted back by the cut distance). Tests: Vitest 855; Playwright on dev 118 + 2
+skips. New e2e (real mouse): cut at a run square (corners before kept, after gone, end open, hover label and
+faded part, squares stay put, Ctrl+Z), moving off and Escape, the other end square deletes (Ctrl+Z), joined on the
+part that goes opens / on the part kept stays, run-square and body drags onto own squares never cut, and in
+circuit-save: Save writes the cut link gone and a fresh read draws it cut. Each fails with its behaviour broken.
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed

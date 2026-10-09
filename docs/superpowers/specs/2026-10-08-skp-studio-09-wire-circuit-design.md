@@ -108,6 +108,16 @@ Agreed with the user on 2026-10-09; they supersede the 2026-10-08 notes in §6 w
   on it keep their place (`at` measured from its new tail). A hub tail with a shape of its own starts at its ring
   point snapped to the grid after a short lead, so a body drag lands on the hub by a grid shift and stays exact.
 
+- **E. Cut (the user's rule, 2026-10-09; the end-square drag only, never a run square or the body).** While an end
+  square is dragged, its wire's squares stay where they were when the drag began; they are targets, hit within a
+  square's own size on screen. Released on a run square ("cut here", the part that goes drawn faded meanwhile) the
+  wire is cut there: everything from that square to the dragged end goes, corners included, and the wire ends there
+  open, its shape up to there kept (its other end held where it is drawn). Released on the other end square
+  ("delete wire", the wire faded) the whole wire is deleted, as Delete does. Ends joined on the part that goes open
+  where they are drawn; those on the part kept stay put. A wire left with no step or hub end has no direction (D).
+  Released on its own line off a square: "same wire" as before. Moving off a square is an ordinary end drag again;
+  Escape cancels; one undo step; saved and reloaded like any draft change.
+
 ## 3. The model
 
 **Terminals.**
@@ -193,6 +203,8 @@ Agreed with the user on 2026-10-09; they supersede the 2026-10-08 notes in §6 w
   wire has no direction: the sides decide it, rule D). Dropped back where it was, it is as it was. Judgement calls:
   the second end meets its contact when the shape fits it to within a step side's line (x exact, y within 4 px), a
   line's 4 px, or the hub ring's 12.5 px (half its 15 degree spacing); otherwise it stays open ("move here").*
+- **Cut** (the user's rule, 2026-10-09, §2.3 E): an end square released on one of its own wire's squares cuts the
+  wire at a run square ("cut here") or deletes it on the other end square ("delete wire").
 - New wires: unchanged (deferred, §2.1).
 
 ## 7. Save: from the circuit to the workflow
