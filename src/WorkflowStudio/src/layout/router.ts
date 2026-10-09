@@ -12,8 +12,13 @@ export interface Box {
 
 const BEND_COST = 24;
 const HIT_COST = 5000;
-/** A stretch shared with a wire of another net is a short circuit (the user's rule 2, 2026-10-09): worse than a block crossed. */
-const OVERLAP_COST = 2 * HIT_COST;
+/**
+ * A stretch shared with a wire of another net (the user's rule 2, 2026-10-09): dear, but never as dear as a block crossed
+ * (the coordinator's ruling: blocks first), so all of a candidate's stretches together stay under one block.
+ */
+const OVERLAP_COST = 1000;
+/** How far inside its own block a wire's first or last run may not go: it leaves or reaches the block at its border. */
+const OWN_INSET = 4;
 const HIT_MARGIN = 3;
 export const CLEARANCE = 24;
 
@@ -23,14 +28,25 @@ function segmentHits(a: Pt, b: Pt, box: Box): boolean {
   return x2 > box.x - HIT_MARGIN && x1 < box.x + box.w + HIT_MARGIN && y2 > box.y - HIT_MARGIN && y1 < box.y + box.h + HIT_MARGIN;
 }
 
-/** How many blocks the segments cross (the source's own box is allowed for the first segment, the target's for the last). */
+/** A segment inside a box by more than `OWN_INSET` (not just touching its border). */
+function segmentInside(a: Pt, b: Pt, box: Box): boolean {
+  const x1 = Math.min(a[0], b[0]), x2 = Math.max(a[0], b[0]);
+  const y1 = Math.min(a[1], b[1]), y2 = Math.max(a[1], b[1]);
+  return x2 > box.x + OWN_INSET && x1 < box.x + box.w - OWN_INSET && y2 > box.y + OWN_INSET && y1 < box.y + box.h - OWN_INSET;
+}
+
+/**
+ * How many blocks the segments cross. The first segment may touch its source's own box and the last its target's (it
+ * leaves or reaches it at its border), but neither may run through it (review 2026-10-09: a U level on the arrival line
+ * drove a wire through its own target).
+ */
 export function hitsOf(pts: readonly Pt[], srcId: string, tgtId: string, boxes: readonly Box[]): number {
   let hits = 0;
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i]!, b = pts[i + 1]!;
     for (const box of boxes) {
-      if ((box.id === srcId && i === 0) || (box.id === tgtId && i === pts.length - 2)) continue;
-      if (segmentHits(a, b, box)) hits++;
+      const own = (box.id === srcId && i === 0) || (box.id === tgtId && i === pts.length - 2);
+      if (own ? segmentInside(a, b, box) : segmentHits(a, b, box)) hits++;
     }
   }
   return hits;
@@ -119,7 +135,7 @@ export function route(sx: number, sy: number, tx: number, ty: number, srcId: str
   let best: Pt[] = candidates[0]!, bestCost = Infinity;
   for (const candidate of candidates) {
     const pts = simplify(candidate);
-    const c = cost(pts, srcId, tgtId, boxes) + (o.avoid ? o.avoid(pts) * OVERLAP_COST : 0);
+    const c = cost(pts, srcId, tgtId, boxes) + (o.avoid ? Math.min(o.avoid(pts) * OVERLAP_COST, HIT_COST - 1) : 0);
     if (c < bestCost) { bestCost = c; best = pts; }
   }
   return best;

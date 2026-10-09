@@ -336,7 +336,7 @@ describe('saveDesign (plan 8 §4.1)', () => {
     expect([sent.workflow.entryStepIds, sent.steps]).toEqual([null, []]);
     expect(Object.keys(sent.layout.wires).sort()).toEqual(['s1->s2', 'w:f', 'w:n', 'wf->s1', 'wf->s3']);
     expect(store.getState().docs[0]!.errors).toEqual([{
-      kind: 'wire', id: 'w:n', stage: 'wires', field: null, message: 'short circuit: step-s1_1.0.0-s1 → step-s3_1.0.0-s3 overlaps an open end → an open end',
+      kind: 'wire', id: 'w:n', other: 'w:f', stage: 'wires', field: null, message: 'short circuit: step-s1_1.0.0-s1 → step-s3_1.0.0-s3 overlaps an open end → an open end',
     }]);
     // s1 -> s3 runs only through the shorted net: it is the short circuit's own link, not one held back beside it
     expect(store.getState().output.at(-1)!.text).toBe('Saved and applied; 1 short circuit not written');

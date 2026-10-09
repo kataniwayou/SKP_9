@@ -59,15 +59,16 @@ describe('overlap short circuits (the user\'s rule 2, 2026-10-09)', () => {
   }));
   const open = { on: 'open', x: 0, y: 0 } as const;
 
-  it('a both-open wire laid exactly on a live wire: one error naming both wires as the Inspector does; the live wire\'s source is held back', async () => {
+  it('a both-open wire laid exactly on a live wire shaped by hand: one error naming both wires as the Inspector does; the live wire\'s source is held back', async () => {
     const base = await twoSteps();
     const host = base.wires.find((w) => w.id === 's1->s2')!.points;
-    const c = moveWire(addCircuitWire(circuitOf(base, EMPTY_DRAFT), 'w:f', { tail: open, head: open }), 'w:f', host, () => null);
+    // s1 -> s2 shaped by hand where it is (an automatic wire would move a track over: the coordinator's ruling)
+    const c = moveWire(addCircuitWire(setBends(circuitOf(base, EMPTY_DRAFT), 's1->s2', { xs: [host[0]![0]], ys: [] }), 'w:f', { tail: open, head: open }), 'w:f', host, () => null);
     const draft = withCircuit(EMPTY_DRAFT, base, c);
     const shown = applyDesign(base, draft, EMPTY_EDITS);
     const errors = shortCircuitErrors(shown, draft);
     expect(errors).toEqual([{
-      kind: 'wire', id: 's1->s2', stage: 'wires', field: null,
+      kind: 'wire', id: 's1->s2', other: 'w:f', stage: 'wires', field: null,
       message: 'short circuit: step-s1_1.0.0-s1 → step-s2_1.0.0-s2 overlaps an open end → an open end',
     }]);
     expect(isShortCircuitError(errors[0]!)).toBe(true);

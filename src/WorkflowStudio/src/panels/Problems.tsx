@@ -6,7 +6,7 @@ import { isShortCircuitError, shortCircuitErrors } from '../design/shortCircuits
 import { wireName } from '../design/wireName';
 import { entityName } from '../model/entityNames';
 import type { DesignError, Graph } from '../model/graph';
-import { errorTarget } from '../store/errorTarget';
+import { errorPicks, errorTarget } from '../store/errorTarget';
 import { selectionKey } from '../store/selection';
 import { activeDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
@@ -58,10 +58,13 @@ export function Problems() {
       <div className="pbody" role="list" aria-label="Problems">
         {errors.map((error, i) => {
           const target = errorTarget(error, graph, active.edits);
-          const choose = () => store.dispatch({ type: 'select', workflowId: active.workflowId, selection: target });
+          // a wire row picks its wires on the canvas (review 2026-10-09)
+          const picks = errorPicks(error);
+          const choose = () => store.dispatch(picks ? { type: 'select', workflowId: active.workflowId, selection: null, picks } : { type: 'select', workflowId: active.workflowId, selection: target });
           // the selection it already is changes nothing, so it needs no asking; the dialog opens in this pane's window (spec §6.3)
-          const select = target === null ? undefined
-            : (from: Element) => (selectionKey(target) === selectionKey(active.selection) ? choose() : guard(active.workflowId, choose, from.ownerDocument));
+          const select = picks ? (from: Element) => guard(active.workflowId, choose, from.ownerDocument)
+            : target === null ? undefined
+              : (from: Element) => (selectionKey(target) === selectionKey(active.selection) ? choose() : guard(active.workflowId, choose, from.ownerDocument));
           return (
             <div
               key={i}

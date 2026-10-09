@@ -33,8 +33,9 @@ describe('overlapJudge (the user\'s rule 2, 2026-10-09)', () => {
     const judge = overlapJudge(d, 'w:f');
     const [[ax, ay], [bx]] = [pointsOf(d, 's1->s2')[0]!, pointsOf(d, 's1->s2').at(-1)!];
     const on: Pt[] = [[ax, ay], [bx, ay]], beside: Pt[] = [[ax, ay + 8], [bx, ay + 8]], across: Pt[] = [[ax + 16, ay - 40], [ax + 16, ay + 40]];
-    // s1 -> s2 leaves s1 along that line: it cannot take another track
-    expect(judge(on, () => laid(d, on))).toBe(true);
+    // s1 -> s2 shaped by hand: it stays (automatic, it would move a track over: the coordinator's ruling)
+    expect(judge(on, () => pin(d, laid(d, on), 's1->s2'))).toBe(true);
+    expect(judge(on, () => laid(d, on))).toBe(false);
     expect(judge(beside, () => laid(d, beside))).toBe(false);
     expect(judge(across, () => laid(d, across))).toBe(false);
   });
@@ -55,7 +56,7 @@ describe('overlapJudge (the user\'s rule 2, 2026-10-09)', () => {
   it('a short circuit already there before the drag does not count again', async () => {
     const base = await doc();
     const host = pointsOf(base, 's1->s2');
-    const c = laid(base, host);
+    const c = pin(base, laid(base, host), 's1->s2');
     const shown = applyDesign(base, withCircuit(EMPTY_DRAFT, base, c), EMPTY_EDITS);
     expect(shown.wires.find((w) => w.id === 'w:f')!.shortWith).toEqual(['s1->s2']);
     // still on s1 -> s2: not new; on s3 -> s4 as well (shaped by hand, so it stays): new

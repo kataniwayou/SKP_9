@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Circuit, End } from '../circuit/circuit';
 import { netsOf } from '../circuit/families';
-import { LineIndex, mayShare, overlapShorts, overlapsOf } from './overlaps';
+import { LineIndex, mayShare, overlapShorts, overlapsOf, sharesNet } from './overlaps';
 import type { Pt } from './router';
 
 const line = (id: string, ...points: Pt[]) => ({ id, points });
@@ -57,10 +57,12 @@ describe('overlapShorts: which overlaps are short circuits', () => {
 
   it('two directed wires of one net (fan-out from a trunk) may share a line; wires of two nets may not', () => {
     // t: the trunk; a taps it (one net); z: another net
+    // all shaped by hand (two automatic wires never make a short circuit: the coordinator's ruling)
+    const shaped = { xs: [0], ys: [] };
     const c: Circuit = {
-      t: { tail: at('s1'), head: at('s2') },
-      a: { tail: { on: 'wire', host: 't', at: 40 }, head: at('s3') },
-      z: { tail: at('s5'), head: at('s6') },
+      t: { tail: at('s1'), head: at('s2'), bends: shaped },
+      a: { tail: { on: 'wire', host: 't', at: 40 }, head: at('s3'), bends: shaped },
+      z: { tail: at('s5'), head: at('s6'), bends: shaped },
     };
     const lines = [line('t', [0, 0], [200, 0]), line('a', [40, 0], [120, 0], [120, 80]), line('z', [100, 0], [300, 0])];
     const shorts = overlapShorts(lines, c, netsOf(c, cond));
@@ -77,9 +79,9 @@ describe('overlapShorts: which overlaps are short circuits', () => {
     expect(overlapShorts(lines, c, netsOf(c, cond)).map((o) => `${o.a}+${o.b}`)).toEqual(['f+g', 'f+x', 'g+x']);
   });
 
-  it('mayShare: one net and both directed', () => {
+  it('sharesNet: one net and both directed', () => {
     const c: Circuit = { t: { tail: at('s1'), head: at('s2') }, a: { tail: { on: 'wire', host: 't', at: 40 }, head: at('s3') }, f: { tail: open, head: open } };
-    const share = mayShare(c, netsOf(c, cond));
+    const share = sharesNet(c, netsOf(c, cond));
     expect([share('t', 'a'), share('a', 't'), share('t', 't'), share('t', 'f'), share('t', 'gone')]).toEqual([true, true, false, false, false]);
   });
 });
@@ -98,13 +100,13 @@ describe('LineIndex.count', () => {
   });
 });
 
-describe('mayShare: siblings out of one step or the hub (the user\'s ruling, 2026-10-09)', () => {
+describe('sharesNet: siblings out of one step or the hub (the user\'s ruling, 2026-10-09)', () => {
   const at = (step: string): End => ({ on: 'step', step, y: null });
   const hub: End = { on: 'hub', angle: null };
   const open: End = { on: 'open', x: 0, y: 0 };
   // s2, s3 Completed (1); s4 Failed (2)
   const cond = (id: string) => (id === 's4' ? 2 : id === 's2' || id === 's3' ? 1 : undefined);
-  const share = (c: Circuit) => mayShare(c, netsOf(c, cond));
+  const share = (c: Circuit) => sharesNet(c, netsOf(c, cond));
 
   it('two wires out of the same step\'s output with the same family may share a line (a bus); different families may not', () => {
     const c: Circuit = { a: { tail: at('s1'), head: at('s2') }, b: { tail: at('s1'), head: at('s3') }, d: { tail: at('s1'), head: at('s4') } };
@@ -127,5 +129,46 @@ describe('mayShare: siblings out of one step or the hub (the user\'s ruling, 202
     // b's net short-circuited (a tap on it into a Failed step while it goes into a Completed one)
     const shorted: Circuit = { a: { tail: at('s1'), head: at('s2') }, b: { tail: at('s1'), head: at('s3') }, t: { tail: { on: 'wire', host: 'b', at: 8 }, head: at('s4') } };
     expect(share(shorted)('a', 'b')).toBe(false);
+  });
+});
+
+describe('mayShare: two fully automatic wires never make a short circuit (the coordinator\'s ruling, 2026-10-09)', () => {
+  const at = (step: string, y: number | null = null): End => ({ on: 'step', step, y });
+  const cond = (id: string) => (id === 's4' ? 2 : 1);
+  const lines = [line('a', [0, 0], [200, 0]), line('b', [100, 0], [300, 0])];
+  const shortsOf = (c: Circuit) => overlapShorts(lines, c, netsOf(c, cond)).map((o) => `${o.a}+${o.b}`);
+
+  it('both automatic, of different nets and colours: the router laid them there, no short circuit', () => {
+    const c: Circuit = { a: { tail: at('s1'), head: at('s2') }, b: { tail: at('s3'), head: at('s4') } };
+    expect(mayShare(c, netsOf(c, cond))('a', 'b')).toBe(true);
+    expect(shortsOf(c)).toEqual([]);
+  });
+
+  it('one of them shaped by hand, slid along a side, held, on a hub angle, open or joined: a short circuit', () => {
+    const b: Circuit[string] = { tail: at('s3'), head: at('s4') };
+    for (const a of [
+      { tail: at('s1'), head: at('s2'), bends: { xs: [40], ys: [] } },
+      { tail: at('s1', 48), head: at('s2') },
+      { tail: at('s1'), head: at('s2', 64) },
+      { tail: at('s1'), head: at('s2'), held: 'tail' as const },
+      { tail: { on: 'hub', angle: 270 }, head: at('s2') },
+      { tail: { on: 'hub', angle: null, dy: 8 }, head: at('s2') },
+      { tail: at('s1'), head: { on: 'open', x: 0, y: 0 } },
+      { tail: { on: 'wire', host: 'zz', at: 8 }, head: at('s2') },
+    ] as Circuit[string][]) {
+      expect(shortsOf({ a, b }), JSON.stringify(a)).toEqual(['a+b']);
+    }
+  });
+});
+
+describe('overlap matching tolerates float noise, no more (review 2026-10-09)', () => {
+  it('a run at 551.9999999 is on the line at 552; one half a pixel off is not; nor is a crossing', () => {
+    const o = overlapsOf([line('a', [552, 0], [552, 200]), line('b', [551.9999999, 40], [551.9999999, 120])]);
+    expect(o.map((x) => [x.a, x.b])).toEqual([['a', 'b']]);
+    expect(overlapsOf([line('a', [552, 0], [552, 200]), line('b', [552.5, 40], [552.5, 120])])).toEqual([]);
+    expect(overlapsOf([line('a', [0, 100.00000001], [200, 100]), line('b', [50, 100], [150, 100])]).length).toBe(1);
+    const ix = new LineIndex();
+    ix.add('a', [[0, 7.9999999], [100, 7.9999999]]);
+    expect(ix.count([[20, 8], [60, 8]], () => true)).toBe(1);
   });
 });

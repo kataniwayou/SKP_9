@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
-import { addCircuitWire, plainCircuit, type Circuit } from '../circuit/circuit';
+import { addCircuitWire, plainCircuit, setBends, type Circuit } from '../circuit/circuit';
 import { trace } from '../circuit/trace';
 import { endPointOf, routeCircuit } from '../layout/circuitRoute';
 import { GRID, SPHERE_R, STEP_W } from '../layout/geometry';
@@ -174,7 +174,8 @@ describe('a wire moved whole onto another wire (the user\'s rule 2, 2026-10-09)'
     const pts: Pt[] = [one[0]!, two.at(-1)!];
     // a both-open wire 400 below that line, moved up onto it: its ends meet s1's output and s3's input
     const moved = translatePoints(pts, 0, 400);
-    const c2 = free(c, 'w:f', moved);
+    // s2 -> s3 shaped by hand where it is (automatic, it would move a track over: the coordinator's ruling)
+    const c2 = free(setBends(c, 's2->s3', { xs: [two[0]![0]], ys: [] }), 'w:f', moved);
     expect(land(d, c2, 'w:f', moved, 0, -400).ends.map((e) => e.verdict)).toEqual(['connect', 'connect']);
     const l = landBody(d, c2, 'w:f', moved, endPointOf(d.wires), 0, -400, null, 8, overlapJudge(d, 'w:f'));
     expect(l.ends.map((e) => e.verdict)).toEqual(['short', 'short']);

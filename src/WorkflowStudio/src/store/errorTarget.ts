@@ -1,5 +1,6 @@
 import { parseSlotKey, type EntityEdits } from '../design/design';
 import type { DesignError, Graph, Id } from '../model/graph';
+import type { Pick } from './picks';
 import type { Selection } from './selection';
 
 /**
@@ -26,6 +27,12 @@ export function errorTarget(error: DesignError, graph: Graph, edits: EntityEdits
     }
     default: return null;
   }
+}
+
+/** The wires a Save error names, to pick on the canvas (an overlap short circuit: both wires); null for any other error. */
+export function errorPicks(error: DesignError): Pick[] | null {
+  if (error.kind !== 'wire') return null;
+  return [{ kind: 'wire', id: error.id }, ...(error.other !== undefined ? [{ kind: 'wire' as const, id: error.other }] : [])];
 }
 
 function processorOn(graph: Graph, id: Id): Selection | null {

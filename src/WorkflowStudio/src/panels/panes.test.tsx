@@ -13,7 +13,7 @@ import { Problems } from './Problems';
 import { buildDesignRequest } from '../app/saveDesign';
 import { applyDesign } from '../design/apply';
 import { designOf } from '../store/studioState';
-import { addCircuitWire, moveWire, setEnd } from '../circuit/circuit';
+import { addCircuitWire, moveWire, setBends, setEnd } from '../circuit/circuit';
 import { circuitOf, EMPTY_DRAFT, withCircuit } from '../design/draft';
 
 const graph = graphDto({
@@ -348,7 +348,8 @@ describe('Problems: a wire lying on another net\'s wire (the user\'s rule 2, 202
     store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
     store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: base });
     const host = base.wires.find((w) => w.id === 's1->s2')!.points;
-    const c = moveWire(addCircuitWire(circuitOf(base, EMPTY_DRAFT), 'w:f', { tail: { on: 'open', x: 0, y: 0 }, head: { on: 'open', x: 0, y: 0 } }), 'w:f', host, () => null);
+    // s1 -> s2 shaped by hand where it is (an automatic wire would move a track over: the coordinator's ruling)
+    const c = moveWire(addCircuitWire(setBends(circuitOf(base, EMPTY_DRAFT), 's1->s2', { xs: [host[0]![0]], ys: [] }), 'w:f', { tail: { on: 'open', x: 0, y: 0 }, head: { on: 'open', x: 0, y: 0 } }), 'w:f', host, () => null);
     store.dispatch({ type: 'design', workflowId: 'wf1', draft: withCircuit(EMPTY_DRAFT, base, c) });
     wrap(store, <Problems />);
     const rows = screen.getAllByRole('listitem');
@@ -356,6 +357,10 @@ describe('Problems: a wire lying on another net\'s wire (the user\'s rule 2, 202
     expect(rows[0]!.querySelector('.gate')).toHaveTextContent('Wire');
     expect(rows[0]!.querySelector('b')).toHaveTextContent('fetch_1.0.0-s1 → store_1.0.0-s2');
     expect(rows[0]!.querySelector('.pd')).toHaveTextContent('short circuit: fetch_1.0.0-s1 → store_1.0.0-s2 overlaps an open end → an open end');
+    // clicking the row picks both wires on the canvas (review 2026-10-09)
+    expect(rows[0]).toHaveAttribute('tabindex', '0');
+    fireEvent.click(rows[0]!);
+    expect(store.getState().docs[0]!.picks).toEqual([{ kind: 'wire', id: 's1->s2' }, { kind: 'wire', id: 'w:f' }]);
     act(() => store.dispatch({ type: 'undo', workflowId: 'wf1' }));
     expect(screen.getByText('No problems')).toBeInTheDocument();
   });

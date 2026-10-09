@@ -93,6 +93,8 @@ export interface DesignError {
   stage: string;
   field: string | null;
   message: string;
+  /** A short circuit of two wires lying on each other (kind `wire`): the other wire (studio only). */
+  other?: Id;
 }
 
 export interface Graph {

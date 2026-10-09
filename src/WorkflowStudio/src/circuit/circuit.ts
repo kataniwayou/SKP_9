@@ -237,6 +237,16 @@ export function reverseWire(c: Readonly<Circuit>, id: string, length: number): C
   return out;
 }
 
+/**
+ * Fully automatic (the coordinator's ruling, 2026-10-09): no bends of its own, nothing held, and both ends on a step or
+ * the hub where the router puts them (no slid height, no hub angle or held height, nothing open or joined by hand). Two
+ * such wires lying on each other are the router's doing, never a short circuit.
+ */
+export const isAutomatic = (w: CircuitWire): boolean =>
+  (w.bends?.xs.length ?? 0) === 0 && w.held === undefined
+  && ((w.tail.on === 'step' && w.tail.y === null) || (w.tail.on === 'hub' && w.tail.angle === null && w.tail.dy === undefined))
+  && w.head.on === 'step' && w.head.y === null;
+
 /** Shaped by hand: its own bends, an end slid along a step's side, or a hub tail held at its height (Reset route has something to undo). */
 export const shapedByHand = (w: CircuitWire): boolean =>
   (w.bends?.xs.length ?? 0) > 0 || (w.tail.on === 'step' && w.tail.y !== null) || (w.head.on === 'step' && w.head.y !== null)

@@ -4,7 +4,7 @@ import type { Id, Step } from '../model/graph';
 import { clearPath } from './detour';
 import { GRID, PMID, PORT_GAP, SPHERE_R, STEP_W, clampLanding, offset, snap, type Point } from './geometry';
 import { CONTACT_MARGIN, lengthOf, ownEnds, pointAt } from './junctions';
-import { LineIndex, mayShare, overlapsOf, type Stretch } from './overlaps';
+import { LineIndex, mayShare, overlapsOf, sharesNet, type Stretch } from './overlaps';
 import type { Placement } from './placement';
 import { landingsOf, WORKFLOW_SOURCE, type Arrival, type SourceId } from './ports';
 import { hitsOf, route, simplify, type Pt, type RouteAvoid } from './router';
@@ -103,7 +103,8 @@ const BESIDE = 96;
  */
 export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): WireRoute[] {
   const { placement, steps } = ctx;
-  const ids = Object.keys(circuit);
+  // routed in one stable order (by id), whatever order the circuit lists its wires in (review 2026-10-09)
+  const ids = Object.keys(circuit).sort();
   const boxes = blockBoxes(placement);
   const stepAt = (id: Id) => (steps.has(id) ? placement.steps.get(id) : undefined);
   const wire = (id: string): CircuitWire => circuit[id]!;
@@ -131,7 +132,7 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
   }
   const departY = new Map<string, number>(), nudge = new Map<string, number>();
   for (const [s, members] of groups) {
-    const ordered = [...members].sort((a, b) => { const p = aim(a), q = aim(b); return p.y - q.y || p.x - q.x; });
+    const ordered = [...members].sort((a, b) => { const p = aim(a), q = aim(b); return p.y - q.y || p.x - q.x || (a < b ? -1 : a > b ? 1 : 0); });
     const base = s === WORKFLOW_SOURCE ? placement.sphere.cy : placement.steps.get(s)!.y + PMID;
     ordered.forEach((id, k) => { const o = offset(k, ordered.length, PORT_GAP); departY.set(id, base + o); nudge.set(id, o); });
   }
@@ -169,10 +170,12 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
   const families = new Map<string, number[]>();
   const nets = netsOf(circuit, conditionOf);
   for (const n of nets) for (const w of n.wires) families.set(w, n.families);
-  // what is drawn so far, so an automatic wire never lies on a wire of another net (rule 2): it takes a track of its own
+  // what is drawn so far, so an automatic wire keeps off every wire of another net where it can (rule 2): it takes a
+  // track of its own. Which overlaps are short circuits is `mayShare` (two automatic wires never are).
   const share = mayShare(circuit, nets);
+  const sameNet = sharesNet(circuit, nets);
   const taken = new LineIndex();
-  const clashes = (id: string, pts: Pt[]): number => taken.count(pts, (x) => !share(id, x));
+  const clashes = (id: string, pts: Pt[]): number => taken.count(pts, (x) => !sameNet(id, x));
   /** The family of the step a wire's head chain goes into: what a wire of a shorted net is drawn in (decision 10). */
   const headFamily = (id: string): number | undefined => {
     const seen = new Set<string>();
@@ -214,17 +217,25 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
 
     // a junction on a level run is left and reached square-on, one jog off the line (plan 7 §5.3), on the side the other
     // end is (`flip`: the other side)
-    const drawWith = (flipTail: boolean, flipHead: boolean, spread: number, avoid = true): { ends: Ends; core: Pt[]; points: Pt[] } => {
-      let sy = T.at.y, lead = T.lead;
+    const drawWith = (flipTail: boolean, flipHead: boolean, spread: number, avoid = true, at: { sy?: number; ty?: number } = {}): { ends: Ends; core: Pt[]; points: Pt[] } => {
+      // a shape drawn by hand leaves and reaches a level junction on the side its own next (or last) run is, as it was
+      // drawn (review 2026-10-09): its first run's way out, its last run's way in
+      const b = w.bends && w.bends.xs.length > 0 ? w.bends : null;
+      let sy = at.sy ?? T.at.y, lead = T.lead;
       if (T.contact && !T.vertical) {
         lead = [T.contact];
-        sy = snap(T.contact[1] + ((H.at.y >= T.contact[1]) !== flipTail ? JOG : -JOG));
+        const toward = b && b.ys.length > 0 ? b.ys[0]! : H.at.y;
+        sy = snap(T.contact[1] + ((toward >= T.contact[1]) !== flipTail ? JOG : -JOG));
       }
       const sx = T.at.x;
-      let tx = H.at.x, ty = H.at.y, leadIn: Pt[] = [];
+      let tx = H.at.x, ty = at.ty ?? H.at.y, leadIn: Pt[] = [];
       if (H.contact) {
         const o = ownEnds(sx, sy, H.contact, H.vertical);
         tx = o.ends.tx; ty = o.ends.ty; leadIn = o.tail;
+        if (b && !H.vertical) {
+          const from = b.ys.length > 0 ? b.ys[b.ys.length - 1]! : sy;
+          ty = snap(from > H.contact[1] ? H.contact[1] + JOG : H.contact[1] - JOG, GRID);
+        }
         if (flipHead && !H.vertical) ty = snap(2 * H.contact[1] - ty, GRID);
       }
       const ends: Ends = { sx, sy, tx, ty };
@@ -237,25 +248,56 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
       return { ends, core, points: lead.length === 0 && leadIn.length === 0 ? core : simplify([...lead, ...core, ...leadIn]) };
     };
     let drawn = drawWith(false, false, 0);
-    if (!(w.bends && w.bends.xs.length > 0)) {
-      // the router never lays a wire on another net's (rule 2), nor goes through a block to keep off one when a track
-      // around exists: the usual track, else the nearest one free of both, a junction perhaps left or reached from its
-      // line's other side. Scored by short circuits first, then blocks crossed.
-      const blocksOf = (d: { core: Pt[] }) => hitsOf(d.core, T.box, H.box, boxes);
-      let best = [clashes(id, drawn.points), blocksOf(drawn)] as const;
-      // the blocks the usual track crosses anyway: no search for fewer (most wires cross none)
-      const fewest = best[1] === 0 ? 0 : blocksOf(drawWith(false, false, 0, false));
-      const done = () => best[0] === 0 && best[1] <= fewest;
-      const flips: [boolean, boolean][] = [[false, false]];
-      if (T.contact && !T.vertical) flips.push([true, false]);
-      if (H.contact && !H.vertical) flips.push(...flips.map(([a]) => [a, true] as [boolean, boolean]));
-      search: for (let k = 0; !done() && k <= SPREADS; k++) {
-        for (const [ft, fh] of flips) {
-          for (const spread of k === 0 ? [0] : [k * GRID, -k * GRID]) {
-            if (k === 0 && !ft && !fh) continue;
-            const d = drawWith(ft, fh, spread), s = [clashes(id, d.points), blocksOf(d)] as const;
-            if (s[0] < best[0] || (s[0] === best[0] && s[1] < best[1])) { drawn = d; best = s; }
-            if (done()) break search;
+    // the router's priorities (the coordinator's ruling, 2026-10-09): never through a block (its own included), then off
+    // every other net's wire: the usual track, else the nearest one free of both (its elbows and U levels a grid step at
+    // a time), a junction on a level run perhaps left or reached from its line's other side, and last its own start and
+    // landing heights. A shape drawn by hand keeps its runs and its junction sides (above): nothing to search.
+    const shaped = (w.bends?.xs.length ?? 0) > 0;
+    const blocksOf = (d: { core: Pt[] }) => hitsOf(d.core, T.box, H.box, boxes);
+    const scoreOf = (d: { core: Pt[]; points: Pt[] }) => [blocksOf(d), clashes(id, d.points)] as const;
+    let best = scoreOf(drawn);
+    // the blocks the usual track crosses anyway (avoiding nothing): no search for fewer (most wires cross none)
+    const fewest = best[0] === 0 ? 0 : blocksOf(drawWith(false, false, 0, false));
+    const finished = () => best[1] === 0 && best[0] <= fewest;
+    const tryOne = (d: { ends: Ends; core: Pt[]; points: Pt[] }) => {
+      const s = scoreOf(d);
+      if (s[0] < best[0] || (s[0] === best[0] && s[1] < best[1])) { drawn = d; best = s; }
+      return finished();
+    };
+    const flips: [boolean, boolean][] = [[false, false]];
+    if (!shaped && T.contact && !T.vertical) flips.push([true, false]);
+    if (!shaped && H.contact && !H.vertical) flips.push(...flips.map(([a]) => [a, true] as [boolean, boolean]));
+    // a wire lying on its very start or landing (one grid step from either end) gets no free track from its elbows: on
+    // to its heights at once
+    const { sx: x0, sy: y0, tx: x1, ty: y1 } = drawn.ends;
+    const stub = best[1] > 0 && !T.contact && !H.contact
+      && (clashes(id, [[x0, y0], [x0 + GRID, y0]]) > 0 || clashes(id, [[x1 - GRID, y1], [x1, y1]]) > 0);
+    search: for (let k = 0; !finished() && !stub && k <= (shaped ? 0 : SPREADS); k++) {
+      for (const [ft, fh] of flips) {
+        for (const spread of k === 0 ? [0] : [k * GRID, -k * GRID]) {
+          if (k === 0 && !ft && !fh) continue;
+          if (tryOne(drawWith(ft, fh, spread))) break search;
+        }
+      }
+    }
+    if (!finished() && !shaped) {
+      // its own heights, where the router chose them: a tail along its step's output, a head along its step's input
+      const tailStep = w.tail.on === 'step' && w.tail.y === null && T.contact === null ? stepAt(w.tail.step) : undefined;
+      const headStep = w.head.on === 'step' && w.head.y === null && H.contact === null ? stepAt(w.head.step) : undefined;
+      heights: for (let k = 1; k <= HEIGHTS; k++) {
+        for (const dy of [k * GRID, -k * GRID]) {
+          if (tailStep) {
+            const sy = tailStep.y + clampLanding(T.at.y + dy - tailStep.y);
+            if (sy !== T.at.y && tryOne(drawWith(false, false, 0, true, { sy }))) break heights;
+          }
+          if (headStep) {
+            const ty = headStep.y + clampLanding(H.at.y + dy - headStep.y);
+            if (ty !== H.at.y && tryOne(drawWith(false, false, 0, true, { ty }))) break heights;
+          }
+          if (tailStep && headStep) {
+            // both together: a straight wire stays straight, one track over
+            const sy = tailStep.y + clampLanding(T.at.y + dy - tailStep.y), ty = headStep.y + clampLanding(H.at.y + dy - headStep.y);
+            if (tryOne(drawWith(false, false, 0, true, { sy, ty }))) break heights;
           }
         }
       }
@@ -278,13 +320,14 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     out.set(id, r);
     return r;
   };
-  // the shapes drawn by hand first: an automatic wire takes its track around them (rule 2)
+  // the shapes drawn by hand first (and what they are joined on), then the automatic wires, each in id order: an
+  // automatic wire takes its track around what is already drawn (rule 2)
   for (const id of ids) if ((wire(id).bends?.xs.length ?? 0) > 0) routeOne(id);
   for (const id of ids) routeOne(id);
-  const routes = ids.map((id) => out.get(id)!);
+  const routes = Object.keys(circuit).map((id) => out.get(id)!);
 
   // wires sharing a stretch of line across nets (rule 2): both nets short-circuited, the stretches drawn red
-  const lines = overlapsOf(routes).filter((o) => !share(o.a, o.b));
+  const lines = overlapsOf(ids.map((id) => out.get(id)!)).filter((o) => !share(o.a, o.b));
   if (lines.length === 0) return routes;
   const shorted = shortedWires(nets, lines.flatMap((o) => [o.a, o.b]));
   for (const o of lines) {
@@ -300,6 +343,8 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
 
 /** How many grid steps either way an automatic wire is moved at most to find a track no other net's wire lies on. */
 const SPREADS = 6;
+/** How many grid steps up or down along its side an automatic end is moved at most, when no track is free. */
+const HEIGHTS = 4;
 
 /** Where each drawn wire's ends are (its first point the tail, its last the head): to open an end where it is drawn. */
 export function endPointOf(routes: readonly WireRoute[]): (id: string, side: Side) => Point | null {
