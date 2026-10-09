@@ -7,6 +7,7 @@ import { shapeFromPoints } from '../layout/shape';
 import { translatePoints } from '../layout/wireMove';
 import { applyDrop, judgeDrop, pointOfTarget, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
+import type { OverlapJudge } from './overlapJudge';
 
 /** One end of a wire moved whole (the user's rule B, 2026-10-09): what it is over, the verdict, and where it is drawn. */
 export interface BodyEnd {
@@ -66,10 +67,13 @@ function gap(shown: StudioDocument, t: DropTarget, e: Point, aim: number | null)
  * the hub's ring, the host's line): the end that got there first (`first`, kept from the last move while it is still
  * on one) decides the shift. The other end connects too when the frozen shape meets its contact as well (or when
  * shifting onto that one instead meets both); otherwise it stays open. A refused end moves with the wire and stays open.
+ * `overlap` (the user's rule 2, 2026-10-09): when the wire connected as moved would lie on a wire it may not share a line
+ * with (a new short circuit), its connecting ends are "short circuit" and stay open; the wire still moves (drawn red where
+ * it lies on the other wire, and listed in Problems).
  */
 export function landBody(
   shown: StudioDocument, circuit: Readonly<Circuit>, id: string, points: readonly Pt[], drawnAt: (id: string, side: Side) => Point | null,
-  dx: number, dy: number, first: Side | null, reach: number,
+  dx: number, dy: number, first: Side | null, reach: number, overlap?: OverlapJudge,
 ): BodyLanding {
   const placed = (sx: number, sy: number) => {
     const pts = translatePoints(points, sx, sy);
@@ -138,6 +142,12 @@ export function landBody(
   if (!best.fits && ok(other(lead))) {
     const turn = onto(other(lead));
     if (turn.fits) best = turn;
+  }
+  // connected, the moved wire would lie on a wire it may not share a line with (rule 2): its ends stay open, where the
+  // pointer put it (not shifted onto a contact it does not take)
+  if (overlap && best.result !== best.preview && overlap(best.points, () => best.result)) {
+    const ends = alone.map((e) => (toneOf(e.verdict) === 'ok' ? { ...e, verdict: 'short' as const } : e));
+    return { dx, dy, points: raw.pts, preview: raw.c, result: raw.c, ends, first: null };
   }
   return { dx: best.dx, dy: best.dy, points: best.points, preview: best.preview, result: best.result, ends: best.ends, first: lead };
 }

@@ -8,6 +8,7 @@ import { GRID, SPHERE_R, STEP_W } from '../layout/geometry';
 import { simplify, type Pt } from '../layout/router';
 import { translatePoints } from '../layout/wireMove';
 import { landBody } from './bodyDrop';
+import { overlapJudge } from './overlapJudge';
 
 // s1 -> s2 -> s3 (Completed) and s4 -> s5 (Failed); entries s1, s4
 const doc = () => loadedDocument(graphDto({
@@ -161,5 +162,29 @@ describe('a wire moved whole onto the hub (review 2026-10-09)', () => {
     const moved = translatePoints(before, l.dx, l.dy);
     const routed = drawn(d, l.result, 'wf->a');
     expect(routed).toEqual(simplify([routed[0]!, [routed[0]![0], moved[0]![1]], ...moved]));
+  });
+});
+
+describe('a wire moved whole onto another wire (the user\'s rule 2, 2026-10-09)', () => {
+  it('lying exactly on another net\'s wire, its ends that would connect are "short circuit" and stay open; the wire still moves', async () => {
+    const d = await doc(), c = plain(d);
+    const pts = drawn(d, c, 's2->s3');
+    // a both-open wire 400 below s2 -> s3, moved up onto it: its ends meet s2's output and s3's input
+    const c2 = free(c, 'w:f', translatePoints(pts, 0, 400));
+    const moved = translatePoints(pts, 0, 400);
+    const plainLanding = land(d, c2, 'w:f', moved, 0, -400);
+    expect(plainLanding.ends.map((e) => e.verdict)).toEqual(['connect', 'connect']);
+    const l = landBody(d, c2, 'w:f', moved, endPointOf(d.wires), 0, -400, null, 8, overlapJudge(d, 'w:f'));
+    expect(l.ends.map((e) => e.verdict)).toEqual(['short', 'short']);
+    expect(l.points).toEqual(pts);
+    expect(l.result).toBe(l.preview);
+    expect(l.result['w:f']!.tail).toMatchObject({ on: 'open' });
+  });
+
+  it('beside another wire it connects as before', async () => {
+    const d = await doc(), c = plain(d);
+    const pts = drawn(d, c, 's1->s2');
+    const l = landBody(d, c, 's1->s2', pts, endPointOf(d.wires), 0, 8, null, 8, overlapJudge(d, 's1->s2'));
+    expect(l.ends.map((e) => e.verdict)).toEqual(['connect', 'connect']);
   });
 });
