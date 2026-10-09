@@ -14,6 +14,7 @@ import { buildDesignRequest } from '../app/saveDesign';
 import { applyDesign } from '../design/apply';
 import { designOf } from '../store/studioState';
 import { addCircuitWire, moveWire, setBends, setEnd } from '../circuit/circuit';
+import type { StudioDocument } from '../app/document';
 import { circuitOf, EMPTY_DRAFT, withCircuit } from '../design/draft';
 
 const graph = graphDto({
@@ -68,15 +69,58 @@ describe('Inspector', () => {
     for (const v of values) expect(v.getAttribute('data-tipcut')).toBe(v.textContent);
   });
 
-  it('says how many items are picked, and names a picked wire (plan 4)', async () => {
+  it('says how many items are picked, and reads a picked wire as text (the user request of 2026-10-09)', async () => {
     const { store } = await renderInspector({ getEntity: vi.fn() }, { selection: null, picks: [{ kind: 'node', id: 's1' }, { kind: 'wire', id: 's1->s2' }] });
     expect(await screen.findByText('2 items selected')).toBeInTheDocument();
 
     act(() => store.dispatch({ type: 'pick', workflowId: 'wf1', picks: [{ kind: 'wire', id: 's1->s2' }] }));
-    expect(screen.getByText(/^Wire: fetch_1\.0\.0-s1 → store_1\.0\.0-s2 · /)).toBeInTheDocument();
+    expect(screen.getByText('WIRE')).toBeInTheDocument();
+    expect(screen.getByLabelText('Wire name')).toHaveTextContent('fetch_1.0.0-s1 → store_1.0.0-s2');
+    const dl = screen.getByLabelText('Wire read-out');
+    const row = (label: string) => within(dl).getByText(label, { selector: 'dt' }).nextElementSibling!.textContent;
+    expect(row('From (tail)')).toBe('step fetch_1.0.0-s1, output side (automatic)');
+    expect(row('To (head)')).toBe('step store_1.0.0-s2, input side (automatic)');
+    expect(row('Direction')).toBe('directed');
+    expect(row('Condition')).toBe('Completed');
+    expect(row('Carries')).toBe('fetch_1.0.0-s1 → store_1.0.0-s2');
+    expect(row('Shape')).toBe('automatic');
+    expect(row('Joined on it')).toBe('none');
+    // names are plain text: nothing in the read-out is a button or a link
+    expect(within(dl).queryAllByRole('button')).toEqual([]);
+    expect(within(dl).queryAllByRole('link')).toEqual([]);
+
+    // it follows the drawing: the head detached, the read-out says so
+    const base = (store.getState().docs[0]!.status as { doc: StudioDocument }).doc;
+    const c = setEnd(circuitOf(base, EMPTY_DRAFT), 's1->s2', 'head', { on: 'open', x: 900, y: 48 });
+    act(() => store.dispatch({ type: 'design', workflowId: 'wf1', draft: withCircuit(EMPTY_DRAFT, base, c) }));
+    expect(row('To (head)')).toBe('open (at 900, 48)');
+    expect(row('Carries')).toBe('nothing');
+    expect(row('Condition')).toBe('undecided');
+
     // undo or redo can leave a pick naming a wire that is gone
     act(() => store.dispatch({ type: 'pick', workflowId: 'wf1', picks: [{ kind: 'wire', id: 'gone->s9' }] }));
-    expect(screen.getByText('Wire: gone → s9')).toBeInTheDocument();
+    expect(screen.getByLabelText('Wire name')).toHaveTextContent('gone → s9');
+    expect(screen.getByText('This wire is not drawn.')).toBeInTheDocument();
+  });
+
+  it('the workflow shows its graph as text under its fields: entry steps, a row per step, problems; it follows the drawing', async () => {
+    const { store } = await renderInspector({ getEntity: vi.fn(async () => ok(workflowDto())) }, { selection: { kind: 'workflow' } });
+    const graph = await screen.findByRole('region', { name: 'Graph' });
+    const entry = within(graph).getByText('Entry steps', { selector: 'dt' }).nextElementSibling!;
+    expect(entry.textContent).toBe('fetch_1.0.0-s1 · Completed');
+    const table = within(graph).getByRole('table', { name: 'Steps' });
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Step', 'Entry', 'Next steps']);
+    const rowsOf = () => within(table).getAllByRole('row').slice(1).map((r) => [...r.children].map((c) => c.textContent));
+    expect(rowsOf()).toEqual([['fetch_1.0.0-s1', 'Completed', 'store_1.0.0-s2'], ['store_1.0.0-s2', 'Completed', 'none']]);
+    expect(within(graph).getByText('Problems', { selector: 'dt' }).nextElementSibling!.textContent).toBe('none');
+    expect(within(graph).queryAllByRole('button')).toEqual([]);
+
+    const base = (store.getState().docs[0]!.status as { doc: StudioDocument }).doc;
+    const c = setEnd(circuitOf(base, EMPTY_DRAFT), 's1->s2', 'head', { on: 'open', x: 900, y: 48 });
+    act(() => store.dispatch({ type: 'design', workflowId: 'wf1', draft: withCircuit(EMPTY_DRAFT, base, c) }));
+    expect(rowsOf()).toEqual([['fetch_1.0.0-s1', 'Completed', 'none'], ['store_1.0.0-s2', 'Completed', 'none']]);
+    expect(within(graph).getByText('Open wires', { selector: 'dt' }).nextElementSibling!.textContent).toBe('1fetch_1.0.0-s1 → an open end');
+    expect(within(graph).getByText('Steps with no wires', { selector: 'dt' }).nextElementSibling!.textContent).toBe('1store_1.0.0-s2');
   });
 });
 

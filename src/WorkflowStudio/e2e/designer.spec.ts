@@ -110,7 +110,7 @@ test('Ctrl+click and a rectangle pick several items; a wire click names the wire
 
   const p = await pointOnWire(panel, `${a}->${b}`);
   await page.mouse.click(p.x, p.y);
-  await expect(inspector(page).getByText(/^Wire: /)).toBeVisible();
+  await expect(inspector(page).getByLabel('Wire read-out')).toBeVisible();
 });
 
 test('a run drags and Reset route restores the automatic shape', async ({ page }) => {
@@ -597,7 +597,7 @@ test('a new wire dropped on empty canvas is grey and dashed with a ring and an a
   expect(await dashOf(kept)).toBe('none');
   // the wire stays the pick: the click React Flow reports after the release does not take it away
   await expect(again.locator(`.design-wire[data-wire="${id}"]`)).toHaveCount(1);
-  await expect(inspector(page).getByText(/^Wire: /)).toBeVisible();
+  await expect(inspector(page).getByLabel('Wire read-out')).toBeVisible();
 });
 
 test('a new wire from the hub: its head dropped back on the hub is told "only a tail on the workflow" and snaps back', async ({ page }) => {
