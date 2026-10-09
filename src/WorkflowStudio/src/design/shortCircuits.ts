@@ -1,5 +1,5 @@
 import type { StudioDocument } from '../app/document';
-import { heldSources, netsOf } from '../circuit/families';
+import { netsOf } from '../circuit/families';
 import { trace } from '../circuit/trace';
 import { WORKFLOW_SOURCE } from '../layout/ports';
 import { conditionInfo } from '../model/entryConditions';
@@ -37,7 +37,7 @@ function overlapErrors(shown: StudioDocument): DesignError[] {
   for (const w of shown.wires) {
     for (const other of w.shortWith ?? []) {
       if ((order.get(other) ?? -1) <= order.get(w.id)!) continue;
-      out.push({ kind: 'wire', id: w.id, stage: 'wires', field: null, message: `${SHORT_CIRCUIT} ${wireName(shown, w.id)} overlaps ${wireName(shown, other)}` });
+      out.push({ kind: 'wire', id: w.id, other, stage: 'wires', field: null, message: `${SHORT_CIRCUIT} ${wireName(shown, w.id)} overlaps ${wireName(shown, other)}` });
     }
   }
   return out;
@@ -46,12 +46,21 @@ function overlapErrors(shown: StudioDocument): DesignError[] {
 /** A short circuit's error (the live list in Problems supersedes any copy a document carries). */
 export const isShortCircuitError = (e: DesignError): boolean => e.stage === 'wires' && e.message.startsWith(SHORT_CIRCUIT);
 
-/** The sources held back by short circuits (`heldSources`): their steps, and whether the hub (the entry list) is one. */
-export function heldSourcesOf(shown: StudioDocument, draft: Draft): { steps: Set<Id>; hub: boolean } {
-  // the wires drawn short: nets whose families disagree, and nets with a wire on another net's (rule 2)
-  const held = heldSources(circuitOf(shown, draft), shown.wires.filter((w) => w.short).map((w) => w.id));
-  const hub = held.delete(WORKFLOW_SOURCE);
-  return { steps: held, hub };
+/**
+ * The sources held back by short circuits: the tail terminal (a step, or the hub for the entry list) of every wire drawn
+ * short (a net whose families disagree, or one lying on another net's wire). Read from the drawn wires themselves, never
+ * from the shown lists: those already leave a shorted net's links out (review 2026-10-09), so a circuit rebuilt from them
+ * would hold nothing back and Save would drop the links.
+ */
+export function heldSourcesOf(shown: StudioDocument, _draft: Draft): { steps: Set<Id>; hub: boolean } {
+  const steps = new Set<Id>();
+  let hub = false;
+  for (const w of shown.wires) {
+    if (!w.short || w.source === null) continue;
+    if (w.source === WORKFLOW_SOURCE) hub = true;
+    else steps.add(w.source);
+  }
+  return { steps, hub };
 }
 
 /**
@@ -61,7 +70,8 @@ export function heldSourcesOf(shown: StudioDocument, draft: Draft): { steps: Set
  */
 export function heldLinkCount(base: StudioDocument, shown: StudioDocument, draft: Draft): number {
   const { steps, hub } = heldSourcesOf(shown, draft);
-  const all = trace(circuitOf(shown, draft)).links;
+  // the circuit from the base (with the draft's own over it): the shown lists leave a shorted net's links out
+  const all = trace(circuitOf(base, draft)).links;
   const listOf = (doc: StudioDocument, s: Id) => (s === WORKFLOW_SOURCE ? doc.graph.workflow.entryStepIds : doc.graph.steps.get(s)?.nextStepIds ?? []);
   let n = 0;
   for (const s of [...steps, ...(hub ? [WORKFLOW_SOURCE] : [])]) {
