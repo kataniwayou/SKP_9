@@ -184,11 +184,15 @@ when the drag began (they are the targets). Labels "cut here" / "delete wire" (g
 drawn as a faded red path (`.design-gone`), a deleted wire faded (`.wire.faded`). Judgement calls: the tone is green
 (the release does something); a cut keeps a straight remainder as a one-run shape; the stationary automatic end is
 held where it is drawn (as an open drop does), so cutting does not re-route it; a junction kept on a tail-cut
-wire keeps its point (its `at` shifted back by the cut distance). Tests: Vitest 855; Playwright on dev 118 + 2
+wire keeps its point (its `at` shifted back by the cut distance). Tests: Vitest 855 (859 after the review fixes); Playwright on dev 118 + 2 (119 after)
 skips. New e2e (real mouse): cut at a run square (corners before kept, after gone, end open, hover label and
 faded part, squares stay put, Ctrl+Z), moving off and Escape, the other end square deletes (Ctrl+Z), joined on the
 part that goes opens / on the part kept stays, run-square and body drags onto own squares never cut, and in
 circuit-save: Save writes the cut link gone and a fresh read draws it cut. Each fails with its behaviour broken.
+Review fixes (2026-10-09): a held automatic hub tail (a cut, or an entry wire's head dropped open) keeps its drawn
+height (`{ on: 'hub', angle: null, dy }`, out of the fan-out, dropped when the other end connects; it used to snap to
+15 degrees and move the kept part by up to a grid step); run squares and cut points sit on the 8 px grid along their
+run. Left as is (pre-existing): a junction on a very short kept part can slide by contactOn's 16 px end margin.
 
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):

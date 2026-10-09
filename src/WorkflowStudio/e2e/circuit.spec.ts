@@ -1031,7 +1031,8 @@ test('cut: an end square released on one of its own run squares cuts the wire th
   // hovering: "cut here", the part that goes drawn faded, the wire drawn up to the square
   expect(await labelsOf(panel)).toEqual(['cut here']);
   await expect(panel.locator('.design-gone')).toHaveCount(1);
-  const mid: [number, number] = [before[1]![0], (before[1]![1] + before[2]![1]) / 2];
+  // the run's middle on the 8 px grid: where its square is and where it cuts
+  const mid: [number, number] = [before[1]![0], Math.round((before[1]![1] + before[2]![1]) / 16) * 8];
   await expect.poll(() => pointsOf(panel, ab)).toEqual([before[0], before[1], mid]);
   // the squares stay where they were when the drag began
   expect(await centreOf(runSquare(panel, ab, 1))).toEqual(sq);
