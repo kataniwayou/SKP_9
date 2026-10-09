@@ -1,5 +1,5 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { documentPanel, dragEnd, emptySpot, get, inspector, openWorkflow, pane, pickWire, pointOnWire, save, setEntryCondition } from './studio';
+import { documentPanel, dragEnd, emptySpot, get, inspector, node, openWorkflow, pane, pickWire, pointOnWire, save, setEntryCondition } from './studio';
 import { createCircuitThrowaway, expect, removeThrowaway, test, type CircuitThrowaway } from './throwaway';
 
 // The Inspector's read-outs (the user's request, 2026-10-09): a picked wire and the workflow's graph as plain text, the
@@ -134,4 +134,46 @@ test('a short circuit shows in both read-outs: the wire\'s condition and what it
   await expect(graph(page).locator('.rrow[data-row="Short circuits"] li')).toHaveText(['short circuit: Completed meets Failed']);
   await expect(graph(page).locator(`tbody tr[data-step="${t.c}"] td`).first()).toHaveText('Failed');
   await shot(page, '6-graph-short-circuit');
+});
+
+/** Picks step `id` (a click on its title) and returns its Graph section. */
+async function pickStep(page: Page, panel: Locator, id: string): Promise<Locator> {
+  await node(panel, id).click({ position: { x: 20, y: 12 } });
+  await expect(inspector(page).locator('.kindpill')).toHaveText('STEP');
+  const g = graph(page);
+  await expect(g).toBeVisible();
+  return g;
+}
+const stepRow = (g: Locator, label: string) => g.locator(`.rrow[data-row="${label}"] dd`);
+const ids = (g: Locator, label: string, held = false) =>
+  g.locator(`.rrow[data-row="${label}"] li[data-step]${held ? '.held' : ':not(.held)'}`).evaluateAll((lis) => lis.map((li) => li.getAttribute('data-step')!));
+
+test('a picked step reads its place in the graph: In and Out follow a drag, and Out is what Save writes to BaseApi', async ({ page, request }) => {
+  const panel = await open(page);
+  // after the earlier Save, b -> c taps a -> b: a feeds c
+  let g = await pickStep(page, panel, t.c);
+  await expect(stepRow(g, 'Entry condition')).toHaveText(/^(Completed|Failed)$/);
+  expect(await ids(g, 'In')).toEqual([t.a]);
+  await expect(stepRow(g, 'Out')).toHaveText('none');
+  g = await pickStep(page, panel, t.a);
+  await expect(stepRow(g, 'In')).toHaveText('workflow');
+  const before = await listsIn(request);
+  expect(await ids(g, 'Out')).toEqual(before[t.a]);
+  await shot(page, '7-step-picked');
+
+  // a -> d's head dragged off d: a no longer feeds d, and the open wire is flagged on a
+  expect(await dragEnd(page, panel, `${t.a}->${t.d}`, 'head', await emptySpot(panel))).toBe('move here');
+  g = await pickStep(page, panel, t.a);
+  expect(await ids(g, 'Out')).toEqual(before[t.a]!.filter((x) => x !== t.d));
+  await expect(g.locator('.rrow[data-row="Wires on it"] li')).toHaveText([`${nameOf('a')} → an open end (open)`]);
+  g = await pickStep(page, panel, t.d);
+  await expect(stepRow(g, 'In')).toHaveText('none');
+  await expect(stepRow(g, 'Wires on it')).toHaveText('none');
+  await shot(page, '8-step-after-drag');
+
+  await save(page);
+  await expect(await pane(page, 'Output')).toContainText('Saved and applied');
+  g = await pickStep(page, panel, t.a);
+  expect(await ids(g, 'Out')).toEqual((await listsIn(request))[t.a]);
+  expect(await ids(g, 'Out', true)).toEqual([]);
 });

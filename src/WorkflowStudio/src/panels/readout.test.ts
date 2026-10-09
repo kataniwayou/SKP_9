@@ -7,7 +7,9 @@ import { addCircuitWire, moveWire, setBends, setEnd, type Circuit, type End } fr
 import { applyDesign } from '../design/apply';
 import { EMPTY_EDITS, setField } from '../design/design';
 import { circuitOf, EMPTY_DRAFT, withCircuit, type Draft } from '../design/draft';
-import { cornersOf, graphReadout, readoutModel, wireReadout, type ReadoutModel } from './readout';
+import { cornersOf, graphReadout, readoutModel, stepReadout, wireReadout, type ReadoutModel } from './readout';
+import { WORKFLOW_SOURCE } from '../layout/ports';
+import { shapeFromPoints } from '../layout/shape';
 
 // The Inspector's read-outs (the user's request, 2026-10-09): the drawing as text, from the model the canvas and Save use.
 const S1 = 'step-s1_1.0.0-s1', S2 = 'step-s2_1.0.0-s2', S3 = 'step-s3_1.0.0-s3', S4 = 'step-s4_1.0.0-s4';
@@ -203,4 +205,105 @@ describe('graphReadout', () => {
     const draft = drafted(base, (c) => setBends(c, 's1->s2', { xs: [600], ys: [] }));
     expect(model(base, draft).shown).toEqual(applyDesign(base, draft, EMPTY_EDITS));
   });
+});
+
+describe('stepReadout', () => {
+  const ins = (m: ReadoutModel, id: string) => stepReadout(m, id)!.in.map((l) => [l.id, l.held]);
+  const outs = (m: ReadoutModel, id: string) => stepReadout(m, id)!.out.map((l) => [l.id, l.held]);
+
+  it('an entry step: fed by the workflow, its next steps out, its wires counted, nothing flagged', async () => {
+    const m = model(await chain());
+    expect(stepReadout(m, 's1')).toEqual({
+      condition: 'Completed', in: [{ id: 'wf', name: 'workflow', held: false }], out: [{ id: 's2', name: S2, held: false }],
+      heldBack: false, wireCount: 2, flagged: [],
+    });
+    expect(ins(m, 's2')).toEqual([['s1', false]]);
+    expect(stepReadout(m, 'nope')).toBeNull();
+  });
+
+  it('a step with no wires: nothing in, nothing out, no wires; its own condition', async () => {
+    expect(stepReadout(model(await chain()), 's4')).toEqual({ condition: 'Failed', in: [], out: [], heldBack: false, wireCount: 0, flagged: [] });
+  });
+
+  it('fan-in through a junction: both sources feed the step of the host', async () => {
+    const base = await chain();
+    const draft = drafted(base, (c) => addCircuitWire(c, 'w:y', { tail: { on: 'step', step: 's3', y: null }, head: { on: 'wire', host: 's1->s2', at: 40 } }));
+    const m = model(base, draft);
+    expect(ins(m, 's2')).toEqual([['s1', false], ['s3', false]]);
+    expect(outs(m, 's3')).toEqual([['s2', false]]);
+    // w:y's head is on a wire, not on s2's side
+    expect(stepReadout(m, 's2')!.wireCount).toBe(1);
+  });
+
+  it('fan-out through a junction: the source feeds both steps', async () => {
+    const base = await chain();
+    const draft = drafted(base, (c) => addCircuitWire(c, 'w:x', { tail: { on: 'wire', host: 's1->s2', at: 40 }, head: { on: 'step', step: 's3', y: null } }));
+    const m = model(base, draft);
+    expect(outs(m, 's1')).toEqual([['s2', false], ['s3', false]]);
+    expect(ins(m, 's3')).toEqual([['s1', false]]);
+    expect(stepReadout(m, 's3')!.wireCount).toBe(1);
+  });
+
+  it('a short circuit: the source held back (the list BaseApi has kept, the new link held back), its shorted wires flagged', async () => {
+    const base = await chain();
+    const draft = drafted(base, (c) => addCircuitWire(c, 'w:z', { tail: { on: 'wire', host: 's1->s2', at: 40 }, head: { on: 'step', step: 's4', y: null } }));
+    const m = model(base, draft);
+    const s1 = stepReadout(m, 's1')!;
+    expect(s1.heldBack).toBe(true);
+    expect(outs(m, 's1')).toEqual([['s2', false], ['s4', true]]);
+    expect(s1.flagged).toEqual([{ id: 's1->s2', name: `${S1} → ${S2}`, notes: ['short circuit'] }]);
+    expect(ins(m, 's4')).toEqual([['s1', true]]);
+    expect(stepReadout(m, 's4')!.flagged).toEqual([{ id: 'w:z', name: `a junction → ${S4}`, notes: ['short circuit'] }]);
+  });
+
+  it('an open wire on its side is flagged; the step it left is no longer fed', async () => {
+    const base = await chain();
+    const draft = drafted(base, (c) => setEnd(c, 's1->s2', 'head', { on: 'open', x: 900, y: 48 }));
+    const m = model(base, draft);
+    expect(stepReadout(m, 's1')).toMatchObject({ out: [], wireCount: 2, flagged: [{ id: 's1->s2', name: `${S1} → an open end`, notes: ['open'] }] });
+    expect(stepReadout(m, 's2')).toMatchObject({ in: [], wireCount: 0, flagged: [] });
+  });
+
+  it('for random designs, the In and Out of every step are exactly the rows of the workflow Graph', async () => {
+    let seed = 4242;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)]!;
+    for (let trial = 0; trial < 60; trial++) {
+      const n = 3 + Math.floor(rnd() * 8);
+      const ids = Array.from({ length: n }, (_, i) => `s${i + 1}`);
+      const base = await loadedDocument(graphDto({
+        workflow: workflowDto({ entryStepIds: ids.filter((_, i) => i === 0 || rnd() < 0.2) }),
+        steps: ids.map((id, i) => stepDto(id, {
+          nextStepIds: ids.filter((_, j) => j !== i && rnd() < (j > i ? 0.35 : 0.05)), entryCondition: (1 + Math.floor(rnd() * 2)) as 1 | 2,
+        })),
+      }));
+      let c = circuitOf(base, EMPTY_DRAFT);
+      const wires = Object.keys(c);
+      for (let k = 0; k < 3 && wires.length > 1; k++) {
+        const w = pick(wires), host = pick(wires.filter((x) => x !== w));
+        const r = rnd();
+        if (r < 0.35) c = setEnd(c, w, 'tail', { on: 'wire', host, at: 40 });
+        else if (r < 0.6) c = setEnd(c, w, 'head', { on: 'wire', host, at: 40 });
+        else if (r < 0.8) c = setEnd(c, w, 'head', { on: 'open', x: 2000, y: 40 * k });
+        else {
+          const on = base.wires.find((x) => x.id === host)!;
+          const sh = shapeFromPoints(on.core.points);
+          if (sh.xs.length > 0) c = setBends(c, host, sh);
+          c = moveWire(addCircuitWire(c, `w:f${k}`, { tail: { on: 'open', x: 0, y: 0 }, head: { on: 'open', x: 0, y: 0 } }), `w:f${k}`, on.points, () => null);
+        }
+      }
+      const m = model(base, withCircuit(EMPTY_DRAFT, base, c));
+      const g = graphReadout(m);
+      for (const row of g.steps) {
+        const s = stepReadout(m, row.id)!;
+        expect(s.out, `trial ${trial} ${row.id} out`).toEqual(row.next);
+        expect(s.heldBack).toBe(row.heldBack);
+        const expected = [
+          ...g.entries.filter((l) => l.id === row.id).map((l) => [WORKFLOW_SOURCE, l.held]),
+          ...g.steps.flatMap((r) => r.next.filter((l) => l.id === row.id).map((l) => [r.id, l.held])),
+        ];
+        expect(s.in.map((l) => [l.id, l.held]), `trial ${trial} ${row.id} in`).toEqual(expected);
+      }
+    }
+  }, 60_000);
 });

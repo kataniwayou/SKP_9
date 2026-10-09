@@ -124,6 +124,26 @@ describe('Inspector', () => {
   });
 });
 
+describe('Inspector: the Graph of a step (the user request of 2026-10-09)', () => {
+  it('shows its condition, what feeds it, what it feeds and its wires, under its fields; it follows the drawing', async () => {
+    const { store } = await renderInspector({ getEntity: vi.fn(async () => ok(stepDto('s1', { name: 'fetch', nextStepIds: ['s2'], processorId: 'p1' }))) },
+      { selection: { kind: 'step', stepId: 's1' } });
+    const graph = await screen.findByRole('region', { name: 'Graph' });
+    const row = (label: string) => within(graph).getByText(label, { selector: 'dt' }).nextElementSibling!.textContent;
+    expect(row('Entry condition')).toBe('Completed');
+    expect(row('In')).toBe('workflow');
+    expect(row('Out')).toBe('store_1.0.0-s2');
+    expect(row('Wires on it')).toBe('2');
+    expect(within(graph).queryAllByRole('button')).toEqual([]);
+
+    const base = (store.getState().docs[0]!.status as { doc: StudioDocument }).doc;
+    const c = setEnd(circuitOf(base, EMPTY_DRAFT), 's1->s2', 'head', { on: 'open', x: 900, y: 48 });
+    act(() => store.dispatch({ type: 'design', workflowId: 'wf1', draft: withCircuit(EMPTY_DRAFT, base, c) }));
+    expect(row('Out')).toBe('none');
+    expect(row('Wires on it')).toBe('2fetch_1.0.0-s1 → an open end (open)');
+  });
+});
+
 describe('Inspector editing (plan 8 §3.3: the design, never BaseApi)', () => {
   const step = stepDto('s1', { name: 'fetch', nextStepIds: ['s2'], processorId: 'p1' });
   const reads = (kind: string, id: string) => ok(
