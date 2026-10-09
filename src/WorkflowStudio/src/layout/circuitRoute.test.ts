@@ -206,3 +206,24 @@ describe('direction-less wires and overlaps (the user\'s rules 1 and 2, 2026-10-
     expect(routes.get('m')).toMatchObject({ short: true, overlaps: [[[248, 150], [248, 200]]] });
   });
 });
+
+describe("the router keeps off other nets' wires at a junction too (the user's rule 2, 2026-10-09)", () => {
+  it("a head joined at a corner of its host comes in from the line's other side when its usual side lies on another net's wire", async () => {
+    // a -> b runs right from a, then down to b; a -> d (Failed) runs right just above it
+    const doc = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['a'] }),
+      steps: [stepDto('c'), stepDto('d', { entryCondition: 2 }), stepDto('b', { nextStepIds: ['c'] }), stepDto('a', { nextStepIds: ['b', 'd'] })],
+    }));
+    const ctx = { placement: doc.placement, steps: doc.graph.steps };
+    const plain = byId(routeCircuit(plainCircuit(['a'], doc.graph.steps, () => true), ctx));
+    expect(plain.get('a->b')!.points).toEqual([[512, 168], [552, 168], [552, 352], [576, 352]]);
+    expect(plain.get('a->d')!.points).toEqual([[512, 152], [576, 152]]);
+    // a wire from d poured into a -> b at its corner (40 along): one jog above the corner is a -> d's line
+    const c: Circuit = { ...plainCircuit(['a'], doc.graph.steps, () => true), n: w(at('d'), { on: 'wire', host: 'a->b', at: 40 }) };
+    const routes = byId(routeCircuit(c, ctx));
+    const n = routes.get('n')!;
+    expect(n.points.at(-1)).toEqual([552, 168]);
+    expect(n.points.at(-2)).toEqual([552, 184]);
+    expect([...routes.values()].some((r) => r.short)).toBe(false);
+  });
+});

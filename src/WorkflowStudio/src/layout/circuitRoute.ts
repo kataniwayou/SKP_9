@@ -216,34 +216,50 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     const T: Placed = tail ?? placedAt(head ? { x: head.at.x - BESIDE, y: head.at.y } : { x: 0, y: 0 });
     const H: Placed = head ?? placedAt({ x: T.at.x + BESIDE, y: T.at.y });
 
-    // a junction on a level run is left and reached square-on, one jog off the line (plan 7 §5.3)
-    let sy = T.at.y, lead = T.lead;
-    if (T.contact && !T.vertical) { lead = [T.contact]; sy = snap(T.contact[1] + (H.at.y >= T.contact[1] ? JOG : -JOG)); }
-    const sx = T.at.x;
-    let tx = H.at.x, ty = H.at.y, leadIn: Pt[] = [];
-    if (H.contact) { const o = ownEnds(sx, sy, H.contact, H.vertical); tx = o.ends.tx; ty = o.ends.ty; leadIn = o.tail; }
-    const ends: Ends = { sx, sy, tx, ty };
-    const auto = (spread: number): Pt[] => {
+    // a junction on a level run is left and reached square-on, one jog off the line (plan 7 §5.3), on the side the other
+    // end is (`flip`: the other side)
+    const drawWith = (flipTail: boolean, flipHead: boolean, spread: number): { ends: Ends; core: Pt[]; points: Pt[] } => {
+      let sy = T.at.y, lead = T.lead;
+      if (T.contact && !T.vertical) {
+        lead = [T.contact];
+        sy = snap(T.contact[1] + ((H.at.y >= T.contact[1]) !== flipTail ? JOG : -JOG));
+      }
+      const sx = T.at.x;
+      let tx = H.at.x, ty = H.at.y, leadIn: Pt[] = [];
+      if (H.contact) {
+        const o = ownEnds(sx, sy, H.contact, H.vertical);
+        tx = o.ends.tx; ty = o.ends.ty; leadIn = o.tail;
+        if (flipHead && !H.vertical) ty = snap(2 * H.contact[1] - ty, GRID);
+      }
+      const ends: Ends = { sx, sy, tx, ty };
       const o: RouteAvoid = { spread, avoid: (pts) => clashes(id, pts) };
-      return T.box !== '' && H.box !== ''
-        ? route(sx, sy, tx, ty, T.box, H.box, nudge.get(id) ?? 0, boxes, o)
-        : clearPath(route(sx, sy, tx, ty, T.box, H.box, 0, boxes, o), boxes);
+      const core = w.bends && w.bends.xs.length > 0
+        ? simplify(pointsOfShape(ends, w.bends))
+        : T.box !== '' && H.box !== ''
+          ? route(sx, sy, tx, ty, T.box, H.box, nudge.get(id) ?? 0, boxes, o)
+          : clearPath(route(sx, sy, tx, ty, T.box, H.box, 0, boxes, o), boxes);
+      return { ends, core, points: lead.length === 0 && leadIn.length === 0 ? core : simplify([...lead, ...core, ...leadIn]) };
     };
-    let core: Pt[];
-    if (w.bends && w.bends.xs.length > 0) core = simplify(pointsOfShape(ends, w.bends));
-    else {
-      // the router never lays a wire on another net's (rule 2): the usual track, else the nearest free one
-      core = auto(0);
-      let worst = clashes(id, core);
-      for (let k = 1; worst > 0 && k <= SPREADS; k++) {
-        for (const spread of [k * GRID, -k * GRID]) {
-          const c = auto(spread), n = clashes(id, c);
-          if (n < worst) { core = c; worst = n; }
-          if (n === 0) break;
+    let drawn = drawWith(false, false, 0);
+    if (!(w.bends && w.bends.xs.length > 0)) {
+      // the router never lays a wire on another net's (rule 2): the usual track, else the nearest free one, a junction
+      // perhaps left or reached from its line's other side
+      let worst = clashes(id, drawn.points);
+      const flips: [boolean, boolean][] = [[false, false]];
+      if (T.contact && !T.vertical) flips.push([true, false]);
+      if (H.contact && !H.vertical) flips.push(...flips.map(([a]) => [a, true] as [boolean, boolean]));
+      search: for (let k = 0; worst > 0 && k <= SPREADS; k++) {
+        for (const [ft, fh] of flips) {
+          for (const spread of k === 0 ? [0] : [k * GRID, -k * GRID]) {
+            if (k === 0 && !ft && !fh) continue;
+            const d = drawWith(ft, fh, spread), n = clashes(id, d.points);
+            if (n < worst) { drawn = d; worst = n; }
+            if (n === 0) break search;
+          }
         }
       }
     }
-    const points = lead.length === 0 && leadIn.length === 0 ? core : simplify([...lead, ...core, ...leadIn]);
+    const { ends, core, points } = drawn;
     taken.add(id, points);
 
     const fam = families.get(id) ?? [];
