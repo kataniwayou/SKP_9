@@ -1,6 +1,7 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import {
-  centreOf, documentPanel, dragReading, edge as wire, emptySpot, endSquare, expect, inspector, node, openWorkflow, pointOnWire, settledView, tab, test,
+  centreOf, documentPanel, dragReading, dropOpen, edge as wire, emptySpot, endSquare, expect, inspector, node, openWorkflow, pointOnWire, pressTo,
+  settledView, tab, test,
   workflowsWithSteps, type LiveWorkflow,
 } from './studio';
 
@@ -327,13 +328,13 @@ test('a dragged head lands on a step\'s border, never inside; along its own step
   await expect.poll(() => pathOf(panel, id)).not.toBe(before);
   expect(await blocksCrossed(panel, id)).toEqual([]);
 
-  // empty canvas: grey "move here"; released, the wire keeps its id, open at its head: dashed, its arrow head kept, no open circle
-  const head = await grab();
-  const empty = await emptySpot(panel, [head]);
-  expect(empty, 'no empty spot on the canvas').not.toBeNull();
-  await page.mouse.move(empty!.x, empty!.y, { steps: 8 });
-  await expect(panel.locator('.design-drop-label')).toHaveText('move here');
-  await page.mouse.up();
+  // empty canvas: grey "move here" (a spot whose leg lies on no other wire: rule 2); released, the wire keeps its id,
+  // open at its head: dashed, its arrow head kept, no open circle
+  await dropOpen(page, panel, async () => {
+    const p = await pointOnWire(panel, id);
+    await page.mouse.click(p.x, p.y);
+    return centreOf(endSquare(panel, id, 'head'));
+  });
   await expect(wire(panel, id)).toHaveCount(1);
   expect(await dashOf(wire(panel, id))).not.toBe('none');
   await expect(wire(panel, id).locator('.nx-head')).toHaveCount(1);
@@ -796,10 +797,7 @@ test('an entry wire\'s tail dragged off the hub is open there, its step no longe
   const id = `wf->${entry!}`;
   const panel = await open(page);
   const colour = await wire(panel, id).locator('path.w').first().getAttribute('stroke');
-  const tail = await tailSquare(page, panel, id);
-  const empty = await emptySpot(panel, [tail]);
-  expect(empty, 'no empty spot on the canvas').not.toBeNull();
-  expect(await dragReading(page, panel, tail, empty!)).toBe('move here');
+  await dropOpen(page, panel, () => tailSquare(page, panel, id));
   await expect(wire(panel, id)).toHaveCount(1);
   expect(await wire(panel, id).locator('path.w').first().getAttribute('stroke')).toBe(colour);
   expect(await dashOf(wire(panel, id))).not.toBe('none');
@@ -810,14 +808,18 @@ test('an entry wire\'s tail dragged off the hub is open there, its step no longe
   expect(await dashOf(wire(again, id))).not.toBe('none');
 
   const start = await tailSquare(page, again, id);
-  // a point inside the ring above its centre, whatever the zoom (the hub node is the ring's square)
+  // a point inside the ring above its centre, whatever the zoom (the hub node is the ring's square); the pointer goes
+  // across above the hub first, then down onto it, so the leg it draws lies on no other wire (rule 2)
   const hub = (await node(again, 'wf').boundingBox())!;
-  expect(await dragReading(page, again, start, { x: hub.x + hub.width / 2, y: hub.y + hub.height / 4 })).toBe('connect here');
+  const onHub = { x: hub.x + hub.width / 2, y: hub.y + hub.height / 4 };
+  await pressTo(page, start, onHub, { x: onHub.x, y: Math.min(start.y, hub.y - 40) });
+  await expect(again.locator('.design-drop-label')).toHaveText('connect here');
+  await page.mouse.up();
   await expect(wire(again, id)).toHaveCount(1);
   expect(await dashOf(wire(again, id))).toBe('none');
 });
 
-test('a joined wire\'s tail moved open keeps its junction and its host\'s colour; with no end on a step it has no direction: no ring, no arrow head (rule D)', async ({ page, request }) => {
+test('a joined wire\'s tail moved open keeps its junction; with no end on a step it has no direction: grey (the user\'s rule 1), no ring, no arrow head (rule D)', async ({ page, request }) => {
   const j = await findJoin(request);
   test.skip(j === null, 'no two same-colour wires into different steps');
   await openWorkflow(page, j!.workflow);
@@ -837,7 +839,9 @@ test('a joined wire\'s tail moved open keeps its junction and its host\'s colour
   expect(await dragReading(page, panel, tail, empty!)).toBe('move here');
   const edge = wire(panel, a);
   await expect(edge).toHaveCount(1);
-  expect(await edge.locator('path.w').first().getAttribute('stroke')).toBe(host);
+  // direction-less, it takes no colour from its host (the user's rule 1, 2026-10-09)
+  expect(host).not.toBe('#8A97A8');
+  expect(await edge.locator('path.w').first().getAttribute('stroke')).toBe('#8A97A8');
   await expect(edge.locator('circle.nx-joint')).toHaveCount(1);
   // joined on a line and open: direction-less (the user's rule D, 2026-10-09)
   await expect(edge.locator('circle.nx-src')).toHaveCount(0);

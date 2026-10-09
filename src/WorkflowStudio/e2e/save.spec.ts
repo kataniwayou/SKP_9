@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
-import { centreOf, documentPanel, get, inspector, newWires, node, openWorkflow, pane, pointOnWire, save, tab } from './studio';
+import { centreOf, documentPanel, dropOpen, get, inspector, newWires, node, openWorkflow, pane, pointOnWire, save, tab } from './studio';
 import { createThrowaway, expect, removeThrowaway, test, type Throwaway } from './throwaway';
 
 // Plan 8 §8: Save is the studio's only write, and these tests write only to their own throwaway workflow
@@ -137,17 +137,12 @@ test('an entry wire whose tail was dragged off the hub is never sent as an entry
   await openWorkflow(page, t.workflow);
   const panel = documentPanel(page, t.workflow);
   const wireId = `wf->${t.stepId}`;
-  const p = await pointOnWire(panel, wireId);
-  await page.mouse.click(p.x, p.y);
-  const tail = await centreOf(panel.locator(`.design-wire[data-wire="${wireId}"] .design-handle.end[data-end="tail"]`));
-  const area = (await panel.locator('.studio-canvas').boundingBox())!;
-  // not where the first test left its new wire's open head (bottom right): a spot higher up the right side
-  const empty = { x: area.x + area.width - 80, y: area.y + area.height * 0.3 };
-  await page.mouse.move(tail.x, tail.y);
-  await page.mouse.down();
-  await page.mouse.move(empty.x, empty.y, { steps: 12 });
-  await expect(panel.locator('.design-drop-label')).toHaveText('move here');
-  await page.mouse.up();
+  // an empty spot whose leg lies on no other wire (rule 2, 2026-10-09)
+  await dropOpen(page, panel, async () => {
+    const p = await pointOnWire(panel, wireId);
+    await page.mouse.click(p.x, p.y);
+    return centreOf(panel.locator(`.design-wire[data-wire="${wireId}"] .design-handle.end[data-end="tail"]`));
+  });
   await expect(panel.locator(`.react-flow__edge[data-id="${wireId}"] circle.nx-src`)).toHaveCount(1);
 
   const sent = page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith(`/workflows/${t.workflow.id}/design`));

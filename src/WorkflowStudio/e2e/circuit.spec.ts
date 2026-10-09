@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 import {
-  box, centreOf, clearMove, documentPanel, flowToPage, dragEnd, dragReading, edge, emptySpot, endSquare, expect, newWire, node, openWorkflow,
+  box, centreOf, clearMove, documentPanel, dropOpen, flowToPage, dragEnd, dragReading, edge, emptySpot, endSquare, expect, newWire, node, openWorkflow,
   pickWire, pointOnWire, setEntryCondition, tab, test, type Pt,
 } from './studio';
 import { createCircuitThrowaway, removeThrowaway, type CircuitThrowaway } from './throwaway';
@@ -206,13 +206,17 @@ test('rule 7: a wire with only its tail on a step (or on the hub) is grey and da
   expect(await dashOf(panel, hubWire)).not.toBe('none');
 });
 
-test('rule 8: a tail joined to a teal wire turns its wire teal', async ({ page }) => {
+test('rule 8: a tail joined to a teal wire is teal while its head gives it a direction; with its head open it is just a wire, grey (the user\'s rule 1, 2026-10-09)', async ({ page }) => {
   const panel = await open(page);
-  const id = await newWire(page, panel, t.a, await emptySpot(panel));
-  expect(await colourOf(panel, id)).toBe(GREY);
+  const id = await newWire(page, panel, t.a, await onSide(panel, t.c, 'in'));
+  expect(await colourOf(panel, id)).toBe(TEAL);
   expect(await dragEnd(page, panel, id, 'tail', await pointOnWire(panel, `${t.a}->${t.b}`, 0.5, 12))).toBe('join here');
   expect(await colourOf(panel, id)).toBe(TEAL);
-  expect(await dashOf(panel, id)).not.toBe('none'); // its head is still open
+  expect(await dashOf(panel, id)).toBe('none'); // both its ends connected
+  // its head open: no end on a step, so no direction, and no colour through the junction
+  await dropOpen(page, panel, async () => { await pickWire(page, panel, id); return centreOf(endSquare(panel, id, 'head')); });
+  expect(await colourOf(panel, id)).toBe(GREY);
+  expect(await dashOf(panel, id)).not.toBe('none');
 });
 
 test('rule 9: a head on a step takes the step\'s colour', async ({ page }) => {
@@ -724,8 +728,8 @@ test('rule B: a connected wire dragged away by its body and dropped back where i
 test('rule B: a wire with one end still connected, dragged by its body, moves whole: its shape frozen, that end detached (the closed hand never stretches a leg)', async ({ page }) => {
   const panel = await open(page);
   const ab = `${t.a}->${t.b}`;
-  // its head open first (its end square): the tail stays on a
-  expect(await dragEnd(page, panel, ab, 'head', await emptySpot(panel))).toBe('move here');
+  // its head open first (its end square, at a spot whose leg lies on no other wire: rule 2): the tail stays on a
+  await dropOpen(page, panel, async () => { await pickWire(page, panel, ab); return centreOf(endSquare(panel, ab, 'head')); });
   const before = await pointsOf(panel, ab);
   const a = await flowBox(panel, t.a);
   expect(before[0]![0]).toBe(a.x + a.w);
@@ -990,7 +994,8 @@ test('rule B on the hub: an entry wire moved down a little lands on the ring and
   expect(await dashOf(panel, id)).toBe('none');
 });
 
-for (const [where, onto] of [['the hub', (panel: Locator) => onHub(panel, 0)], ['an output', (panel: Locator) => onSide(panel, t.d, 'out')]] as const) {
+// on the hub at 45 degrees: at 0 its tail would lie on the hub's own entry wire's line (a short circuit, the user's rule 2)
+for (const [where, onto] of [['the hub', (panel: Locator) => onHub(panel, 45)], ['an output', (panel: Locator) => onSide(panel, t.d, 'out')]] as const) {
   test(`rule D, turned: a direction-less wire's stored head dropped on ${where} is its tail now; an end joined on it near the end that stayed does not move`, async ({ page }) => {
     const panel = await open(page);
     const k = await freeWire(page, panel, t.c);
@@ -1058,10 +1063,17 @@ test('cut: moving off the square restores the drag as before; Escape over the sq
   const sq = await centreOf(runSquare(panel, ab, 1));
   await pressTo(page, await centreOf(endSquare(panel, ab, 'head')), sq);
   expect(await labelsOf(panel)).toEqual(['cut here']);
-  // off the square onto empty canvas: an ordinary end drag again
-  const off = await emptySpot(panel, [sq]);
-  await page.mouse.move(off.x, off.y, { steps: 6 });
-  await frames(page);
+  // off the square onto empty canvas: an ordinary end drag again (a spot whose leg lies on no other wire: there it would
+  // be a short circuit, the user's rule 2)
+  const tried: Pt[] = [sq];
+  const near = [[-36, 0], [-36, 36], [-36, -36]].map(([dx, dy]) => ({ x: sq.x + dx!, y: sq.y + dy! }));
+  for (let i = 0; i < 9; i++) {
+    const off = near[i] ?? await emptySpot(panel, tried);
+    tried.push(off);
+    await page.mouse.move(off.x, off.y, { steps: 6 });
+    await frames(page);
+    if ((await labelsOf(panel))[0] !== 'short circuit') break;
+  }
   expect(await labelsOf(panel)).toEqual(['move here']);
   await expect(panel.locator('.design-gone')).toHaveCount(0);
   // back on it, then Escape: nothing changes
@@ -1098,7 +1110,8 @@ test('cut: a wire joined on the part that goes opens where it is drawn; one join
   // b -> c's tail joined low on a -> b's vertical run (past its middle), a new wire's tail joined on its first run
   expect(await dragEnd(page, panel, bc, 'tail', await pointOnWire(panel, ab, 0.8, 12))).toBe('join here');
   const joinedAt = (await pointsOf(panel, bc))[0]!;
-  const tap = await newWire(page, panel, t.c, await emptySpot(panel));
+  // from a, so its tail moves only a little onto a -> b (a leg drawn across the row would lie on other wires: rule 2)
+  const tap = await newWire(page, panel, t.a, await emptySpot(panel));
   expect(await dragEnd(page, panel, tap, 'tail', await pointOnWire(panel, ab, 0.08, 4))).toBe('join here');
   const tapAt = (await pointsOf(panel, tap))[0]!;
   await pickWire(page, panel, ab, 0.4);

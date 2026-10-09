@@ -469,7 +469,7 @@ test('after layout every step border lies on a 32 px line and every wire point o
   for (const d of drawn.wires) {
     const numbers = (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
     expect(numbers.length).toBeGreaterThanOrEqual(4);
-    for (const n of numbers) expect(n % 8, `wire point ${n} in ${d}`).toBe(0);
+    for (const n of numbers) expect(Math.abs(n % 8), `wire point ${n} in ${d}`).toBe(0);
   }
 });
 

@@ -230,7 +230,10 @@ export async function clearMove(panel: Locator, id: string, min = 48): Promise<P
   const [tail, head] = await endsOnPage(panel, id);
   const found = await panel.locator('.react-flow').evaluate((el, [t, h, least]) => {
     const r = el.getBoundingClientRect();
+    // clear of every block's box too (a point on a block's very border can still hit the pane)
+    const nodes = [...el.querySelectorAll('.react-flow__node')].map((n) => n.getBoundingClientRect());
     const free = (x: number, y: number) => x > r.left + 20 && x < r.right - 20 && y > r.top + 20 && y < r.bottom - 20
+      && nodes.every((b) => x < b.left - 24 || x > b.right + 24 || y < b.top - 24 || y > b.bottom + 24)
       && [[0, 0], [40, 0], [-40, 0], [0, 40], [0, -40]].every(([dx, dy]) => el.ownerDocument.elementFromPoint(x + dx!, y + dy!)?.classList.contains('react-flow__pane') === true);
     const tries: { x: number; y: number }[] = [];
     for (let dy = -400; dy <= 400; dy += 8) for (let dx = -400; dx <= 400; dx += 8) {
@@ -350,14 +353,31 @@ export async function blocks(panel: Locator): Promise<{ x: number; y: number; w:
     return { x: Number(m[1]), y: Number(m[2]), w: e.offsetWidth, h: e.offsetHeight };
   }));
 }
-/** Presses `from` and moves the real mouse to `to` in small steps; the button stays down. */
+/** Presses `from` and moves the real mouse to `to` in small steps (by way of `via` first); the button stays down. */
 export async function pressTo(page: Page, from: Pt, to: Pt, via?: Pt): Promise<void> {
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
+  const start = via ?? from;
   if (via) await page.mouse.move(via.x, via.y, { steps: 8 });
-  await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 6 });
+  await page.mouse.move((start.x + to.x) / 2, (start.y + to.y) / 2, { steps: 6 });
   await page.mouse.move(to.x, to.y, { steps: 6 });
   await frames(page);
+}
+
+/**
+ * Drags an end square (`square` presses nothing: it picks the wire and says where its square is) onto an empty spot of
+ * the canvas with the real mouse until the drop reads "move here": an end square's leg that lies on another wire on the
+ * way is a short circuit (the user's rule 2, 2026-10-09) and snaps back, so another spot is tried. Returns the spot.
+ */
+export async function dropOpen(page: Page, panel: Locator, square: () => Promise<Pt>, avoid: Pt[] = []): Promise<Pt> {
+  const tried: Pt[] = [...avoid];
+  for (let i = 0; i < 8; i++) {
+    const at = await square();
+    const spot = await emptySpot(panel, [...tried, at]);
+    tried.push(spot);
+    if ((await dragReading(page, panel, at, spot)) === 'move here') return spot;
+  }
+  throw new Error('no empty spot takes the end open: every leg lies on a wire');
 }
 
 /** A new wire from step `from` with both its ends then moved open: no end on a step or the hub, direction-less. */
