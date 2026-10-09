@@ -3,11 +3,9 @@ import type { EntityReadDto } from '../api/entities';
 import type { StepReadDto } from '../api/types';
 import type { StudioDocument } from '../app/document';
 import { useStudioActions } from '../app/studioActions';
-import { applyDesign, applyEdits } from '../design/apply';
+import { applyEdits } from '../design/apply';
 import { fieldsOf, hasEdit, slotKey, valueText } from '../design/design';
-import { wireName } from '../design/wireName';
 import { assignmentByStep, payloadKeyCount } from '../model/assignments';
-import { conditionInfo } from '../model/entryConditions';
 import { entityName } from '../model/entityNames';
 import { FIELDS, savedText, type FieldSpec } from '../store/entityForms';
 import { crumbLabel, editTargetOf, rootTarget, targetKey, type InspectorTarget, type SchemaSlot } from '../store/inspectorTarget';
@@ -16,6 +14,7 @@ import { useStudio, useStudioStore } from '../store/studioStore';
 import { FieldEditor } from './FieldEditor';
 import { detailRows, kindLabel, uniqueNameOf, type Row } from './inspectorView';
 import { PaneNote } from './PaneNote';
+import { GraphReadoutSection, WireReadoutPane } from './Readouts';
 
 /** Read-only text: one line, cut with an ellipsis, its full text a tooltip only when cut (spec §7). */
 const readOnly = (row: Row) => (
@@ -34,12 +33,6 @@ export function Inspector() {
   const key = targetKey(target);
   const workflowId = active?.workflowId ?? null;
   const ready = active?.status.kind === 'ready';
-  // a picked wire is named as the canvas draws it: the design over the base (plan 9); drawn only while one wire is picked
-  const wirePicked = active?.picks.length === 1 && active.picks[0]!.kind === 'wire';
-  const shownDoc = useMemo(
-    () => (active?.status.kind === 'ready' && wirePicked ? applyDesign(active.status.doc, active.design.draft, active.edits) : null),
-    [active?.status, active?.design.draft, active?.edits, wirePicked],
-  );
   useEffect(() => {
     if (workflowId !== null && ready && key !== 'none') service.read(workflowId);
   }, [service, workflowId, ready, key]);
@@ -50,22 +43,10 @@ export function Inspector() {
   // several picks, or one wire, have no entity to edit (spec §3.3)
   if (active.picks.length > 1) return <PaneNote pane="inspector">{`${active.picks.length} items selected`}</PaneNote>;
   const onlyWire = active.picks.length === 1 && active.picks[0]!.kind === 'wire' ? active.picks[0]!.id : null;
-  if (onlyWire !== null) return <PaneNote pane="inspector">{wireNote(shownDoc, onlyWire)}</PaneNote>;
+  // a picked wire is read as the canvas draws it: the design over the base (the user's request, 2026-10-09)
+  if (onlyWire !== null) return <WireReadoutPane open={active} id={onlyWire} />;
   if (target === null) return <PaneNote pane="inspector">Nothing selected. Click a step, a processor, a cache or the workflow.</PaneNote>;
   return <EntityPane open={active} target={target} />;
-}
-
-/**
- * "Wire: {from} → {to} · {family}" (plan 9): a terminal by its unique name, a junction or an open end by what it is,
- * then the wire's family ("undecided", or "short circuit"). A pick naming a wire the design no longer has (after an
- * undo) is read from its id.
- */
-function wireNote(shown: StudioDocument | null, id: string): string {
-  const name = wireName(shown, id);
-  const w = shown?.wires.find((x) => x.id === id);
-  if (!w) return name === null ? 'Wire' : `Wire: ${name}`;
-  const family = w.short ? 'short circuit' : w.condition === null ? 'undecided' : conditionInfo(w.condition).name;
-  return `Wire: ${name} · ${family}`;
 }
 
 function EntityPane({ open, target }: { open: OpenDocument; target: InspectorTarget }) {
@@ -114,6 +95,8 @@ function EntityPane({ open, target }: { open: OpenDocument; target: InspectorTar
             <fieldset className="plain" disabled={open.saving}>
               <EntityForm open={open} doc={doc} base={base} target={target} saved={saved} fields={fields} showDetails={showDetails} drill={drill} />
             </fieldset>
+            {/* the drawing's graph read as text, read-only (the user's request, 2026-10-09) */}
+            {target.kind === 'workflow' && <GraphReadoutSection open={open} />}
           </div>
           <div className="savebar">
             {target.kind === 'assignment' && (

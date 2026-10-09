@@ -64,6 +64,20 @@ export function heldSourcesOf(shown: StudioDocument, _draft: Draft): { steps: Se
 }
 
 /**
+ * The lists Save writes (plan 9 §7): a step's next steps and the entry steps as the drawing gives them (`shown`), except
+ * that a source held back by a short circuit keeps its list as the base (BaseApi) has it. `buildDesignRequest` sends
+ * these, and the Inspector's read-outs show them, so the two never disagree.
+ */
+export function writtenLists(base: StudioDocument, shown: StudioDocument, draft: Draft): {
+  held: { steps: Set<Id>; hub: boolean }; nextOf: (id: Id) => Id[]; entries: Id[];
+} {
+  const g = base.graph;
+  const held = heldSourcesOf(shown, draft);
+  const nextOf = (id: Id): Id[] => (held.steps.has(id) ? g.steps.get(id)?.nextStepIds ?? [] : shown.graph.steps.get(id)?.nextStepIds ?? g.steps.get(id)?.nextStepIds ?? []);
+  return { held, nextOf, entries: held.hub ? g.workflow.entryStepIds : shown.graph.workflow.entryStepIds };
+}
+
+/**
  * How many links of the held-back sources wait for the short circuit to be fixed (plan 9 §7): the clean links the
  * design adds or removes on those sources, which Save does not write. A link the loaded workflow has only through the
  * shorted net is not counted: it is the short circuit's own.

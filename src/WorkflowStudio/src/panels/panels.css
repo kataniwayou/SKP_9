@@ -73,3 +73,21 @@ textarea.input.json { white-space: pre; overflow: auto; }
 fieldset.plain { border: 0; margin: 0; padding: 0; min-width: 0; }
 .outl { padding: 2px 10px; font-family: var(--mono); font-size: 12px; }
 .outl .t { color: var(--muted); }
+
+/* read-outs (the user's request, 2026-10-09): the picked wire and the workflow's graph as plain text, wrapping */
+.readout .rt { font-family: var(--mono); font-size: 12.5px; color: var(--ink); overflow-wrap: break-word; }
+.readout dl { margin: 8px 0 0; }
+.readout .rrow { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; margin: 6px 0; font-size: 12.5px; align-items: baseline; }
+.readout dt { color: var(--muted); }
+.readout dd { margin: 0; min-width: 0; font-family: var(--mono); font-size: 12px; color: var(--ink); overflow-wrap: break-word; }
+.readout ul { list-style: none; margin: 0; padding: 0; }
+.readout li + li { margin-top: 2px; }
+.readout .held { color: var(--x); }
+.readout .none { color: var(--faint); }
+.readout .rnote { margin-top: 3px; font-family: var(--sans); font-size: 11.5px; color: var(--x); }
+.rtable { width: 100%; border-collapse: collapse; margin: 10px 0 4px; table-layout: fixed; font-size: 12px; }
+.rtable th, .rtable td { text-align: left; vertical-align: top; padding: 4px 6px 4px 0; border-top: 1px solid var(--line); min-width: 0; overflow-wrap: break-word; }
+.rtable thead th { border-top: 0; font-family: var(--sans); font-weight: 400; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.rtable thead th:nth-child(2) { width: 76px; }
+.rtable tbody th { font-family: var(--mono); font-weight: 400; color: var(--ink); }
+.rtable td { font-family: var(--mono); color: var(--ink); }

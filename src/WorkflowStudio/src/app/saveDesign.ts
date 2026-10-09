@@ -6,7 +6,7 @@ import { applyDesign } from '../design/apply';
 import { parseSlotKey, type Design, type FieldValue, type SchemaCopy } from '../design/design';
 import { sameList } from '../design/draft';
 import { layoutOf, type SavedLayout } from '../design/layoutDesign';
-import { heldLinkCount, heldSourcesOf, shortCircuitErrors } from '../design/shortCircuits';
+import { heldLinkCount, shortCircuitErrors, writtenLists } from '../design/shortCircuits';
 import type { Id } from '../model/graph';
 import type { SchemaSlot } from '../store/inspectorTarget';
 import { canSave, designOf } from '../store/studioState';
@@ -40,11 +40,10 @@ export interface DesignRequest {
 export function buildDesignRequest(base: StudioDocument, shown: StudioDocument, { draft, edits }: Design): DesignRequest {
   const g = base.graph;
   const has = (id: Id) => g.steps.has(id);
-  const held = heldSourcesOf(shown, draft);
-  const nextOf = (id: Id) => (held.steps.has(id) ? g.steps.get(id)!.nextStepIds : shown.graph.steps.get(id)?.nextStepIds ?? g.steps.get(id)!.nextStepIds);
+  // what Save writes is the same as what the Inspector's read-outs show (`writtenLists`)
+  const { nextOf, entries } = writtenLists(base, shown, draft);
   const rewired = new Set([...g.steps.keys()].filter((id) => !sameList(nextOf(id), g.steps.get(id)!.nextStepIds)));
   const stepIds = [...new Set([...Object.keys(edits.steps), ...rewired])].filter(has).sort();
-  const entries = held.hub ? g.workflow.entryStepIds : shown.graph.workflow.entryStepIds;
 
   const slots = new Map<Id, Partial<Record<SchemaSlot, Id>>>();
   const schemas: SchemaCopy[] = [];

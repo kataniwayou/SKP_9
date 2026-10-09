@@ -52,9 +52,13 @@ export interface RouteContext {
 
 /** The point `at` px along a drawn line, kept clear of its ends (plan 7 §5.3), and whether the run there is vertical. */
 export function contactOn(points: readonly Pt[], at: number): { p: Pt; vertical: boolean } {
+  return pointAt([points], contactDistance(points, at));
+}
+
+/** How far along a drawn line a junction stored `at` px along it is drawn: snapped to the grid, kept clear of its ends. */
+export function contactDistance(points: readonly Pt[], at: number): number {
   const total = lengthOf([points]);
-  const d = total < 2 * CONTACT_MARGIN ? total / 2 : Math.min(Math.max(snap(at, GRID), CONTACT_MARGIN), total - CONTACT_MARGIN);
-  return pointAt([points], d);
+  return total < 2 * CONTACT_MARGIN ? total / 2 : Math.min(Math.max(snap(at, GRID), CONTACT_MARGIN), total - CONTACT_MARGIN);
 }
 
 const tenth = (v: number) => Math.round(v * 10) / 10;
