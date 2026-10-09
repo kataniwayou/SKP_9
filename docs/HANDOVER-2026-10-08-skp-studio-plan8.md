@@ -407,6 +407,16 @@ adds this paragraph. Specs: plan 8 spec §4.1 and §4.3 (amended), studio spec �
   run against the local BaseApi, not by a live test; a press's timeout is not kept across a refresh (a refresh mid-start
   shows the live status, nothing pending).
 
+**Review of Output / Save log / Start-Stop (2026-10-09) — BUILT, NOT DEPLOYED.** `f176d89`. Plain F5 / Shift+F5
+only (Ctrl/Meta/Alt+F5 are the browser's) and never while a dialog is open; a pending Start/Stop keeps polling while
+its tab is hidden; Start/Stop blocked while saving; `DesignLogDto.RolledBack` marks a rolled-back save's change lines
+("(rolled back)" in Output); a refused entity is counted once (refused); the workflow stage names links the assignment
+stage removed and counts its stamp-only write as updated; per-Save bound (first 60 + last 120 lines, "… N lines of this
+Save omitted"), lines cut at 400 chars, payload / items / definition never echoed; `keepSession` rewrites a refused
+session with the log trimmed, then without it; wire stage batches its reads. Tests: hermetic 2026 + 70 skipped (+2),
+Release no-incremental clean; Vitest 975 (83 files); tsc clean; Playwright on dev against the branch BaseApi 137 + 2
+skips (run.spec now also presses Ctrl+F5, F5 in the picker and Shift+F5). Mutations: 3 BaseApi, 8 Vitest, 2 e2e.
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed
