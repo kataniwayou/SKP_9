@@ -156,6 +156,14 @@ describe('direction-less wires (the user\'s rule D, 2026-10-09)', () => {
 });
 
 describe('reading a circuit back', () => {
+  it('keeps a hub tail held at its drawn height (review 2026-10-09): automatic, at dy from the hub centre', () => {
+    const c = parseCircuit({ x: { tail: { on: 'hub', angle: null, dy: -8 }, head: { on: 'open', x: 1, y: 2 }, held: 'tail' } })!;
+    expect(c.x).toEqual({ tail: { on: 'hub', angle: null, dy: -8 }, head: { on: 'open', x: 1, y: 2 }, held: 'tail' });
+    expect(sameEnd({ on: 'hub', angle: null, dy: -8 }, { on: 'hub', angle: null })).toBe(false);
+    // its other end connected again: automatic again, the height dropped
+    expect(setEnd(c, 'x', 'head', { on: 'step', step: 's1', y: null }).x!.tail).toEqual({ on: 'hub', angle: null });
+  });
+
   it('parses its own JSON and drops a wire it cannot read (a head on the hub, a junction with no host)', () => {
     const c: Circuit = { 'w:1': { tail: { on: 'hub', angle: 90 }, head: { on: 'wire', host: 's1->s2', at: 40 }, bends: { xs: [8, 16], ys: [40] } }, 's1->s2': plain('s1', 's2') };
     expect(parseCircuit(JSON.parse(JSON.stringify(c)))).toEqual(c);

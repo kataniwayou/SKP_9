@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
-import { addCircuitWire, isFree, plainCircuit, type Circuit } from '../circuit/circuit';
+import { addCircuitWire, isFree, plainCircuit, setEnd, type Circuit } from '../circuit/circuit';
 import { endPointOf, routeCircuit } from '../layout/circuitRoute';
 import { lengthOf } from '../layout/junctions';
-import { pointsOfShape } from '../layout/shape';
-import { cutPaths, cutWire, squareAt, squaresOf } from './cut';
+import { shapeFromPoints } from '../layout/shape';
+import { cutPaths, cutWire, holdDrawn, squareAt, squaresOf } from './cut';
 
 // s1 -> s2 (Completed); a Z-shaped wire w:z from s1 to s2's input with its own bends
 const doc = () => loadedDocument(graphDto({
@@ -27,6 +27,12 @@ async function zWire() {
   return { d, c, bends, wire: routeOf(d, c, 'w:z') };
 }
 
+/** Where run square k of a wire is: where a cut there ends it. */
+const runAt = (w: Parameters<typeof squaresOf>[0], bends: Parameters<typeof squaresOf>[1], k: number): [number, number] => {
+  const s = squaresOf(w, bends, 1).find((q) => q.kind === 'run' && q.k === k)!;
+  return [s.x, s.y];
+};
+
 describe('the squares of a picked wire (the targets of a cut)', () => {
   it('one per end, one per run of its core away from the ends; a point within half a square of one is over it', async () => {
     const { wire, bends } = await zWire();
@@ -45,9 +51,8 @@ describe('the squares of a picked wire (the targets of a cut)', () => {
 describe('cutting a wire at one of its run squares (the user\'s rule, 2026-10-09)', () => {
   it('its head dragged onto a run square: everything from that square to the head goes, the wire ends there open, its shape up to there kept', async () => {
     const { d, c, bends, wire } = await zWire();
-    const core = pointsOfShape(wire.core.ends, bends);
     // run 3: the horizontal run between the second and third verticals
-    const mid: [number, number] = [(core[3]![0] + core[4]![0]) / 2, (core[3]![1] + core[4]![1]) / 2];
+    const mid = runAt(wire, bends, 3);
     const out = cutWire(c, 'w:z', 'head', wire, bends, 3, endPointOf(d.wires), d.placement);
     // the tail stays where it is drawn: held at its height
     expect(out['w:z']!.tail).toEqual({ on: 'step', step: 's1', y: wire.points[0]![1] - d.placement.steps.get('s1')!.y });
@@ -61,8 +66,7 @@ describe('cutting a wire at one of its run squares (the user\'s rule, 2026-10-09
 
   it('its tail dragged onto a run square: the part from the tail to that square goes; with no end left on a step or the hub it has no direction', async () => {
     const { d, c, bends, wire } = await zWire();
-    const core = pointsOfShape(wire.core.ends, bends);
-    const mid: [number, number] = [(core[1]![0] + core[2]![0]) / 2, (core[1]![1] + core[2]![1]) / 2];
+    const mid = runAt(wire, bends, 1);
     const out = cutWire(c, 'w:z', 'tail', wire, bends, 1, endPointOf(d.wires), d.placement);
     expect(out['w:z']!.tail).toEqual({ on: 'open', x: mid[0], y: mid[1] });
     expect(out['w:z']!.head).toEqual({ on: 'step', step: 's2', y: 136 });
@@ -105,13 +109,64 @@ describe('cutting a wire at one of its run squares (the user\'s rule, 2026-10-09
 
   it('the preview splits the drawn wire at the square: what stays and what goes', async () => {
     const { bends, wire } = await zWire();
-    const core = pointsOfShape(wire.core.ends, bends);
-    const mid: [number, number] = [(core[3]![0] + core[4]![0]) / 2, (core[3]![1] + core[4]![1]) / 2];
+    const mid = runAt(wire, bends, 3);
     const head = cutPaths(wire, bends, 'head', 3);
     expect(head.kept).toEqual([...wire.points.slice(0, 4), mid]);
     expect(head.gone).toEqual([mid, ...wire.points.slice(4)]);
     const tail = cutPaths(wire, bends, 'tail', 3);
     expect(tail.gone).toEqual(head.kept);
     expect(tail.kept).toEqual(head.gone);
+  });
+});
+
+describe('a cut keeps what stays exactly where it was drawn (review 2026-10-09)', () => {
+  // two entry wires: the hub's automatic tails fan out 8 above and below its centre, off the 15 degree ring points
+  const fan = () => loadedDocument(graphDto({
+    workflow: workflowDto({ entryStepIds: ['s1', 's3'] }),
+    steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3'), stepDto('s4')],
+  }));
+  const plainOf = (d: Doc) => plainCircuit(d.graph.workflow.entryStepIds, d.graph.steps, (id) => d.placement.steps.has(id));
+
+  it('an entry wire cut at a run square: its automatic hub tail is held at its drawn point, the part kept and a junction on it do not move', async () => {
+    const d = await fan();
+    const c0 = plainOf(d);
+    const before = routeOf(d, c0, 'wf->s1').points;
+    const c = addCircuitWire(c0, 'w:j', { tail: { on: 'step', step: 's4', y: 40 }, head: { on: 'wire', host: 'wf->s1', at: 24 } });
+    const routes = routeCircuit(c, ctx(d));
+    const w = routes.find((r) => r.id === 'wf->s1')!;
+    const bends = shapeFromPoints(w.core.points);
+    const run = squaresOf(w, bends, 1).find((s) => s.kind === 'run' && s.vertical)!;
+    const jAt = routes.find((r) => r.id === 'w:j')!.points.at(-1);
+    const out = cutWire(c, 'wf->s1', 'head', w, bends, run.kind === 'run' ? run.k : -1, endPointOf(routes), d.placement);
+    const after = routeOf(d, out, 'wf->s1').points;
+    expect(after.slice(0, -1)).toEqual(before.slice(0, after.length - 1));
+    expect(after.at(-1)).toEqual([run.x, run.y]);
+    expect(routeOf(d, out, 'w:j').points.at(-1)).toEqual(jAt);
+  });
+
+  it('holding an automatic hub tail keeps it at its drawn point (the open drop of an entry wire\'s head too)', async () => {
+    const d = await fan();
+    const c = plainOf(d);
+    for (const id of ['wf->s1', 'wf->s3']) {
+      const p = routeOf(d, c, id).points[0]!;
+      const held = holdDrawn(setEnd(c, id, 'head', { on: 'open', x: 900, y: 900 }), id, 'tail', { x: p[0], y: p[1] }, d.placement);
+      expect(held[id]!.tail).toEqual({ on: 'hub', angle: null, dy: p[1] - d.placement.sphere.cy });
+      expect(routeOf(d, held, id).points[0]).toEqual(p);
+    }
+  });
+
+  it('a run of odd length is cut on the 8 px grid, and its square is drawn there', async () => {
+    const d = await doc();
+    const s1 = d.placement.steps.get('s1')!;
+    const x0 = s1.x + 224;
+    // a vertical run 40 long: its middle is half a grid step off
+    const bends = { xs: [x0 + 40], ys: [] };
+    const c = addCircuitWire(plainCircuit(d.graph.workflow.entryStepIds, d.graph.steps, (id) => d.placement.steps.has(id)), 'w:o',
+      { tail: { on: 'step', step: 's1', y: 96 }, head: { on: 'open', x: x0 + 120, y: s1.y + 136 }, bends });
+    const w = routeOf(d, c, 'w:o');
+    const sq = squaresOf(w, bends, 1).find((s) => s.kind === 'run' && s.vertical)!;
+    expect([sq.x % 8, sq.y % 8]).toEqual([0, 0]);
+    const out = cutWire(c, 'w:o', 'head', w, bends, sq.kind === 'run' ? sq.k : -1, endPointOf(routeCircuit(c, ctx(d))), d.placement);
+    expect(out['w:o']!.head).toEqual({ on: 'open', x: sq.x, y: sq.y });
   });
 });

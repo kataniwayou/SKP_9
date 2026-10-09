@@ -712,7 +712,7 @@ describe('wire gestures', () => {
     expect(pathNow(doc, next, 's1->s2')).toEqual(moved);
   });
 
-  it('a head dragged open off a wire from the hub holds its automatic tail on the ring (the nearest 15 degrees), not moved by the fan-out', async () => {
+  it('a head dragged open off a wire from the hub holds its automatic tail exactly where it is drawn (review 2026-10-09), not moved by the fan-out', async () => {
     const doc = await two();
     const id = 'wf->s1';
     const pts = doc.wires.find((w) => w.id === id)!.points;
@@ -721,7 +721,7 @@ describe('wire gestures', () => {
     const s1 = doc.placement.steps.get('s1')!;
     expect(dragEnd(container, id, 'head', { x: pts.at(-1)![0], y: s1.y + STEP_H + 48 }).text).toBe('move here');
     const w = commits(design)[0]![0].wires![id]!;
-    expect(w.tail).toEqual({ on: 'hub', angle: 0 });
+    expect(w.tail).toEqual({ on: 'hub', angle: null, dy: pts[0]![1] - doc.placement.sphere.cy });
     expect(w.held).toBe('tail');
     expect(pathNow(doc, commits(design)[0]![0], id)[0]).toEqual(pts[0]);
   });

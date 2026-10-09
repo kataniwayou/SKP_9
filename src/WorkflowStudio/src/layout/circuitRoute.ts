@@ -117,7 +117,8 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
   const groups = new Map<SourceId, string[]>();
   for (const id of ids) {
     const t = wire(id).tail;
-    const s = t.on === 'step' && t.y === null && stepAt(t.step) ? t.step : t.on === 'hub' && t.angle === null ? WORKFLOW_SOURCE : null;
+    // a hub tail held at its drawn height (`dy`) keeps it: it takes no part in the fan-out
+    const s = t.on === 'step' && t.y === null && stepAt(t.step) ? t.step : t.on === 'hub' && t.angle === null && t.dy === undefined ? WORKFLOW_SOURCE : null;
     if (s !== null) groups.set(s, [...(groups.get(s) ?? []), id]);
   }
   const departY = new Map<string, number>(), nudge = new Map<string, number>();
@@ -136,7 +137,7 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
       return p ? placedAt({ x: p.x + STEP_W, y: t.y === null ? departY.get(id)! : p.y + clampLanding(t.y) }, stepBoxId(t.step)) : null;
     }
     if (t.on === 'hub') {
-      if (t.angle === null) return placedAt({ x: cx + SPHERE_R, y: departY.get(id)! }, SPHERE_BOX_ID);
+      if (t.angle === null) return placedAt({ x: cx + SPHERE_R, y: t.dy !== undefined ? cy + t.dy : departY.get(id)! }, SPHERE_BOX_ID);
       const own = wire(id).bends;
       const h = hubStart(cx, cy, t.angle, own && own.xs.length > 0 ? own.xs[0]! : null);
       return placedAt(h.start, '', h.lead);

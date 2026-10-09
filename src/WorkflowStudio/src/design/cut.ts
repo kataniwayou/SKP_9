@@ -1,6 +1,6 @@
-import { holdEnd, setBends, setEnd, snapAngle, type Circuit, type End, type Side } from '../circuit/circuit';
+import { holdEnd, setBends, setEnd, type Circuit, type End, type Side } from '../circuit/circuit';
 import type { WireRoute } from '../layout/circuitRoute';
-import type { Point } from '../layout/geometry';
+import { snap, type Point } from '../layout/geometry';
 import { lengthOf, nearestOn, slice } from '../layout/junctions';
 import type { Placement } from '../layout/placement';
 import { simplify, type Pt } from '../layout/router';
@@ -32,7 +32,7 @@ export function squaresOf(w: WireRoute, bends: Bends, k: number): Square[] {
   const last = 2 * bends.xs.length;
   const runs: Square[] = segmentHandles(w.core.ends, bends)
     .filter((h) => !(w.headOn === 'junction' && h.k === last) && clearOfEnds(h, ends, k))
-    .map((h) => ({ kind: 'run', k: h.k, x: h.x, y: h.y, vertical: h.vertical }));
+    .map((h) => { const [x, y] = cutPoint(w, bends, h.k); return { kind: 'run', k: h.k, x, y, vertical: h.vertical }; });
   return [...runs, { kind: 'end', side: 'tail', x: ends.sx, y: ends.sy }, { kind: 'end', side: 'head', x: ends.tx, y: ends.ty }];
 }
 
@@ -42,11 +42,15 @@ export function squareAt(squares: readonly Square[], p: Point, k: number): Squar
   return squares.find((s) => Math.abs(p.x - s.x) <= half && Math.abs(p.y - s.y) <= half) ?? null;
 }
 
-/** The middle of run `k` of the wire's core, where its square is. */
+/**
+ * Where run `k` of the wire's core is cut and its square drawn: its middle, on the 8 px grid along the run (kept on
+ * the run), so the open end a cut leaves is on the grid (review 2026-10-09).
+ */
 function cutPoint(w: WireRoute, bends: Bends, k: number): Pt {
   const pts = pointsOfShape(w.core.ends, bends);
   const a = pts[k]!, b = pts[k + 1]!;
-  return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const along = (u: number, v: number) => Math.min(Math.max(snap((u + v) / 2), Math.min(u, v)), Math.max(u, v));
+  return a[0] === b[0] ? [a[0], along(a[1], b[1])] : [along(a[0], b[0]), a[1]];
 }
 
 /** Where the cut point lies along the wire as drawn. */
@@ -65,18 +69,16 @@ export function cutPaths(w: WireRoute, bends: Bends, dragged: Side, k: number): 
 
 /**
  * End `side` of wire `id` held where it is drawn (`at`) when it is automatic on a step or the hub, so it does not move
- * once the other end has gone (the user's end drag, 2026-10-08): a step end at its drawn height, a hub end at the
- * nearest 15 degrees to where it leaves the ring.
+ * once the other end has gone (the user's end drag, 2026-10-08): a step end at its drawn height, a hub end at its
+ * drawn height on the hub's right side (`dy`, review 2026-10-09; it used to snap to the nearest 15 degrees).
  */
 export function holdDrawn(c: Circuit, id: string, side: Side, at: Point, placement: Placement): Circuit {
   const o = c[id]?.[side];
   if (!o) return c;
   const step = o.on === 'step' && o.y === null ? placement.steps.get(o.step) : undefined;
   if (o.on === 'step' && step) return holdEnd(c, id, side, { on: 'step', step: o.step, y: at.y - step.y });
-  if (o.on === 'hub' && o.angle === null) {
-    const { cx, cy } = placement.sphere;
-    return holdEnd(c, id, side, { on: 'hub', angle: snapAngle((Math.atan2(at.y - cy, at.x - cx) * 180) / Math.PI) });
-  }
+  // an automatic hub tail leaves the hub's right side: held at that height, exactly where it is drawn
+  if (o.on === 'hub' && o.angle === null) return holdEnd(c, id, side, { on: 'hub', angle: null, dy: at.y - placement.sphere.cy });
   return c;
 }
 

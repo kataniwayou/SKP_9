@@ -7,12 +7,13 @@ import type { Id, Step } from '../model/graph';
 /**
  * Where one end of a wire is (plan 9 §3). A tail on a step is on its right side (its output), a head on its left
  * side (its input); `y` is the step-local height along that side, null: automatic. The hub takes tails only, at
- * `angle` degrees round its ring (0 right, 90 down; null: automatic, its right side). On a wire: a junction `at` px
- * along the host's drawn line. Open: connected to nothing, at a flow point.
+ * `angle` degrees round its ring (0 right, 90 down; null: automatic, its right side; `dy`: an automatic tail held at
+ * its drawn height, that far below the hub's centre, review 2026-10-09). On a wire: a junction `at` px along the
+ * host's drawn line. Open: connected to nothing, at a flow point.
  */
 export type End =
   | { on: 'step'; step: Id; y: number | null }
-  | { on: 'hub'; angle: number | null }
+  | { on: 'hub'; angle: number | null; dy?: number }
   | { on: 'wire'; host: string; at: number }
   | { on: 'open'; x: number; y: number };
 
@@ -68,7 +69,7 @@ export function plainCircuit(entryStepIds: readonly Id[], steps: ReadonlyMap<Id,
 export function sameEnd(a: End, b: End): boolean {
   switch (a.on) {
     case 'step': return b.on === 'step' && a.step === b.step && a.y === b.y;
-    case 'hub': return b.on === 'hub' && a.angle === b.angle;
+    case 'hub': return b.on === 'hub' && a.angle === b.angle && (a.dy ?? null) === (b.dy ?? null);
     case 'wire': return b.on === 'wire' && a.host === b.host && a.at === b.at;
     case 'open': return b.on === 'open' && a.x === b.x && a.y === b.y;
   }
@@ -249,7 +250,7 @@ function toEnd(v: unknown): End | null {
   if (!isRecord(v)) return null;
   switch (v.on) {
     case 'step': return isId(v.step) ? { on: 'step', step: v.step, y: isNum(v.y) ? v.y : null } : null;
-    case 'hub': return { on: 'hub', angle: isNum(v.angle) ? snapAngle(v.angle) : null };
+    case 'hub': return isNum(v.angle) ? { on: 'hub', angle: snapAngle(v.angle) } : isNum(v.dy) ? { on: 'hub', angle: null, dy: v.dy } : { on: 'hub', angle: null };
     case 'wire': return isId(v.host) && isNum(v.at) ? { on: 'wire', host: v.host, at: v.at } : null;
     case 'open': return isNum(v.x) && isNum(v.y) ? { on: 'open', x: v.x, y: v.y } : null;
     default: return null;

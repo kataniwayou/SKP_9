@@ -1147,3 +1147,25 @@ test('cut is the end square\'s alone: a run square or the body dragged onto the 
     shiftOf(before, after);
   }
 });
+
+test('cut: an entry wire cut while the hub fans out its tails stays exactly where it was drawn, cut on the grid (review 2026-10-09)', async ({ page }) => {
+  const panel = await open(page);
+  // a second entry wire: the hub's automatic tails now leave 8 above and below its centre, off its 15 degree points
+  await newWire(page, panel, 'wf', await onSide(panel, t.b, 'in'));
+  const id = `wf->${t.a}`;
+  const before = await pointsOf(panel, id);
+  const hub = await flowBox(panel, 'wf');
+  expect(before[0]![1]).not.toBe(hub.y + hub.h / 2);
+  await pickWire(page, panel, id);
+  const run = runSquare(panel, id, 0);
+  await pressTo(page, await centreOf(endSquare(panel, id, 'head')), await centreOf(run));
+  expect(await labelsOf(panel)).toEqual(['cut here']);
+  await page.mouse.up();
+  await expect.poll(() => pointsOf(panel, id)).not.toEqual(before);
+  const after = await pointsOf(panel, id);
+  // its tail where it was, its first run on the same line, its open end on the grid
+  expect(after[0]).toEqual(before[0]);
+  expect(after.at(-1)![1]).toBe(before[0]![1]);
+  expect(Math.abs(after.at(-1)![0] % 8)).toBe(0);
+  expect(after).toHaveLength(2);
+});
