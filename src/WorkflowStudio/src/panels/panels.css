@@ -27,7 +27,8 @@
 .note.warn { color: var(--x); }
 .pane-note { padding: 8px 12px; margin: 0; font-size: 12.5px; }
 
-/* problems */
+/* Output's pinned problems (2026-10-09: Output is the only message pane); red, above the log */
+.pinned { flex: 0 1 auto; max-height: 45%; overflow: auto; border-bottom: 1px solid var(--error); scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
 .prob { padding: 7px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--muted); cursor: pointer; }
 .prob:hover { background: rgba(125, 211, 252, .06); }
 .prob.static { cursor: default; }
@@ -35,6 +36,11 @@
 .prob b { color: var(--ink); font-weight: 500; }
 .prob .gate { font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; margin-right: 8px; border: 1px solid var(--line-2); border-radius: 999px; color: var(--muted); background: var(--panel-2); }
 .prob .pd { margin-top: 3px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+.prob.err { border-left: 3px solid var(--error); background: rgba(248, 113, 113, .06); }
+.prob.err:hover { background: rgba(248, 113, 113, .12); }
+.prob.err b, .prob.err .pd { color: var(--error); }
+.prob.err .gate { color: var(--error); border-color: var(--error); }
+.prob:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 
 /* inspector editing (slice 3b; mockup v49 .input, .btn) */
 .input { font-family: var(--mono); font-size: 12px; background: var(--ground-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 6px 8px; color: var(--ink); width: 100%; min-width: 0; box-sizing: border-box; }
@@ -73,6 +79,8 @@ textarea.input.json { white-space: pre; overflow: auto; }
 fieldset.plain { border: 0; margin: 0; padding: 0; min-width: 0; }
 .outl { padding: 2px 10px; font-family: var(--mono); font-size: 12px; }
 .outl .t { color: var(--muted); }
+.outl.err { color: var(--error); }
+.outl.err b { color: var(--error); }
 
 /* read-outs (the user's request, 2026-10-09): the picked wire and the workflow's graph as plain text, wrapping */
 .readout .rt { font-family: var(--mono); font-size: 12.5px; color: var(--ink); overflow-wrap: break-word; }

@@ -4,7 +4,7 @@ import {
   addDocument, applyLayout, autoHide, captureLayout, dockAsDocument, dockBack, documentArea, ensureDocumentArea, floatGroup, floatPanel,
   closeTool, newMemory, pinBack, resetLayout, showTool, type DockMemory,
 } from './windowActions';
-import { readLayout, writeLayout } from './layoutPersistence';
+import { parseLayout, readLayout, writeLayout } from './layoutPersistence';
 import { memoryStorage } from '../test/memoryStorage';
 
 // dockview's core runs in jsdom (no sizes, so recordHome finds no home: tests set homes directly).
@@ -35,6 +35,9 @@ const where = (api: DockviewApi, id: string) => {
   return panel ? { group: panel.group.id, location: panel.group.api.location.type } : null;
 };
 
+/** Toolbox moved in as a tab of the Inspector's group: a tab group of two tool panes (none is tabbed by default since Problems went). */
+const tabToolbox = (api: DockviewApi) => api.getPanel('toolbox')!.api.moveTo({ group: api.getPanel('inspector')!.group, position: 'center' });
+
 describe('window actions on a real dockview', () => {
   it('keeps one document area: an empty group at first, then the documents as its tabs', () => {
     const { api, memory } = dock();
@@ -50,14 +53,13 @@ describe('window actions on a real dockview', () => {
     expect(api.getPanel('doc:a')!.api.renderer).toBe('always');
   });
 
-  it('shows the tool panes at their default places, Problems and Output tabbed together', () => {
+  it('shows the tool panes at their default places, each in a group of its own (no Problems pane, 2026-10-09)', () => {
     const { api, memory } = dock();
     addDocument(api, memory, 'a', 'orders');
-    for (const id of ['inspector', 'toolbox', 'problems', 'output'] as const) showTool(api, memory, id);
+    for (const id of ['inspector', 'toolbox', 'output'] as const) showTool(api, memory, id);
 
-    expect(api.panels.map((p) => p.id).sort()).toEqual(['doc:a', 'inspector', 'output', 'problems', 'toolbox']);
-    expect(where(api, 'output')!.group).toBe(where(api, 'problems')!.group);
-    expect(where(api, 'inspector')!.group).not.toBe(where(api, 'doc:a')!.group);
+    expect(api.panels.map((p) => p.id).sort()).toEqual(['doc:a', 'inspector', 'output', 'toolbox']);
+    expect(new Set(['doc:a', 'inspector', 'toolbox', 'output'].map((id) => where(api, id)!.group)).size).toBe(4);
     expect(showTool(api, memory, 'inspector')).toBe(api.getPanel('inspector'));
   });
 
@@ -65,17 +67,17 @@ describe('window actions on a real dockview', () => {
     const { api, memory } = dock();
     addDocument(api, memory, 'a', 'orders');
     showTool(api, memory, 'inspector');
-    showTool(api, memory, 'problems');
-    floatPanel(api, memory, api.getPanel('problems')!, NO_RECT);
-    expect(where(api, 'problems')!.location).toBe('floating');
-    memory.homes.problems = { ref: 'inspector', direction: 'below', size: 150, layout: [] };
+    showTool(api, memory, 'output');
+    floatPanel(api, memory, api.getPanel('output')!, NO_RECT);
+    expect(where(api, 'output')!.location).toBe('floating');
+    memory.homes.output = { ref: 'inspector', direction: 'below', size: 150, layout: [] };
 
-    dockBack(api, memory, api.getPanel('problems')!.group);
+    dockBack(api, memory, api.getPanel('output')!.group);
 
     const branch = JSON.stringify(api.toJSON().grid.root);
-    expect(where(api, 'problems')!.location).toBe('grid');
-    expect(branch.indexOf('"inspector"')).toBeLessThan(branch.indexOf('"problems"'));
-    expect(where(api, 'problems')!.group).not.toBe(where(api, 'inspector')!.group);
+    expect(where(api, 'output')!.location).toBe('grid');
+    expect(branch.indexOf('"inspector"')).toBeLessThan(branch.indexOf('"output"'));
+    expect(where(api, 'output')!.group).not.toBe(where(api, 'inspector')!.group);
   });
 
   it('docks a tab floated out of a tab group back into that group', () => {
@@ -84,13 +86,14 @@ describe('window actions on a real dockview', () => {
     try {
       const { api, memory } = dock();
       resetLayout(api, memory, 1200);
-      floatPanel(api, memory, api.getPanel('output')!, { left: 0, top: 0, right: 1200, bottom: 700 });
-      expect(where(api, 'output')!.location).toBe('floating');
-      expect(memory.homes.output).toMatchObject({ ref: 'problems', direction: 'within' });
+      tabToolbox(api);
+      floatPanel(api, memory, api.getPanel('toolbox')!, { left: 0, top: 0, right: 1200, bottom: 700 });
+      expect(where(api, 'toolbox')!.location).toBe('floating');
+      expect(memory.homes.toolbox).toMatchObject({ ref: 'inspector', direction: 'within' });
 
-      dockBack(api, memory, api.getPanel('output')!.group);
+      dockBack(api, memory, api.getPanel('toolbox')!.group);
 
-      expect(where(api, 'output')).toEqual(where(api, 'problems'));
+      expect(where(api, 'toolbox')).toEqual(where(api, 'inspector'));
     } finally {
       vi.restoreAllMocks();
     }
@@ -114,14 +117,15 @@ describe('window actions on a real dockview', () => {
   it('auto-hides a docked tool group in place and pins it back where it was', () => {
     const { api, memory } = dock();
     resetLayout(api, memory, 1200);
-    const problems = api.getPanel('problems')!;
+    tabToolbox(api);
+    const inspector = api.getPanel('inspector')!;
 
-    expect(autoHide(api, memory, problems, NO_RECT)).toEqual(['problems', 'output']);
-    expect(problems.group.api.isVisible).toBe(false);
-    expect(api.getPanel('output')!.group).toBe(problems.group);
+    expect(autoHide(api, memory, inspector, NO_RECT)).toEqual(['inspector', 'toolbox']);
+    expect(inspector.group.api.isVisible).toBe(false);
+    expect(api.getPanel('toolbox')!.group).toBe(inspector.group);
 
-    expect(pinBack(api, memory, 'output')).toEqual(['problems', 'output']);
-    expect(problems.group.api.isVisible).toBe(true);
+    expect(pinBack(api, memory, 'toolbox')).toEqual(['inspector', 'toolbox']);
+    expect(inspector.group.api.isVisible).toBe(true);
   });
 
   it('auto-hides a pane that shares the document area by taking it out, and shows it again', () => {
@@ -159,7 +163,7 @@ describe('window actions on a real dockview', () => {
 
     expect(api.getPanel('doc:a')).toBe(docA);
     expect(where(api, 'doc:a')!.location).toBe('grid');
-    expect(api.panels.map((p) => p.id).sort()).toEqual(['doc:a', 'inspector', 'output', 'problems', 'toolbox']);
+    expect(api.panels.map((p) => p.id).sort()).toEqual(['doc:a', 'inspector', 'output', 'toolbox']);
     expect(memory.homes).toEqual({});
   });
 
@@ -171,13 +175,13 @@ describe('window actions on a real dockview', () => {
     const hidden = autoHide(api, memory, api.getPanel('output')!, NO_RECT);
     const saved = captureLayout(api, memory, hidden);
     expect(JSON.stringify(saved.dock)).not.toContain('doc:a');
-    expect(saved.hidden).toEqual(['problems', 'output']);
+    expect(saved.hidden).toEqual(['output']);
 
     resetLayout(api, memory, 1200);
     addDocument(api, memory, 'b', 'billing');
     const docA = api.getPanel('doc:a'), docB = api.getPanel('doc:b');
 
-    expect(applyLayout(api, memory, saved)).toEqual(['problems', 'output']);
+    expect(applyLayout(api, memory, saved)).toEqual(['output']);
 
     expect(where(api, 'toolbox')!.location).toBe('floating');
     expect(api.getPanel('output')!.group.api.isVisible).toBe(false);
@@ -251,34 +255,37 @@ describe('window actions on panels that are no longer in the dock', () => {
 });
 
 describe('docking next to a hidden group', () => {
-  it('never puts a pane into a hidden group: Output docks to a visible group of its own', () => {
+  it('never puts a pane into a hidden group: Toolbox docks to a visible group of its own', () => {
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, right: 100, bottom: 100, x: 0, y: 0, width: 100, height: 100 } as DOMRect);
     try {
       const { api, memory } = dock();
       resetLayout(api, memory, 1200);
-      const problems = api.getPanel('problems')!;
-      floatPanel(api, memory, api.getPanel('output')!, { left: 0, top: 0, right: 1200, bottom: 700 });
-      expect(autoHide(api, memory, problems, NO_RECT)).toEqual(['problems']);
+      tabToolbox(api);
+      const inspector = api.getPanel('inspector')!;
+      floatPanel(api, memory, api.getPanel('toolbox')!, { left: 0, top: 0, right: 1200, bottom: 700 });
+      expect(autoHide(api, memory, inspector, NO_RECT)).toEqual(['inspector']);
 
-      dockBack(api, memory, api.getPanel('output')!.group);
+      dockBack(api, memory, api.getPanel('toolbox')!.group);
 
-      const landed = api.getPanel('output')!.group;
+      const landed = api.getPanel('toolbox')!.group;
       expect(landed.api.location.type).toBe('grid');
       expect(landed.api.isVisible).toBe(true);
-      expect(landed).not.toBe(problems.group);
-      expect(problems.group.api.isVisible).toBe(false);
+      expect(landed).not.toBe(inspector.group);
+      expect(inspector.group.api.isVisible).toBe(false);
     } finally {
       vi.restoreAllMocks();
     }
   });
 
-  it('shows a closed tool pane in a visible group, not beside a hidden mate', () => {
+  it('shows a closed tool pane in a visible group, not beside a hidden group it was a tab of', () => {
     const { api, memory } = dock();
     resetLayout(api, memory, 1200);
-    api.removePanel(api.getPanel('output')!);
-    autoHide(api, memory, api.getPanel('problems')!, NO_RECT);
+    tabToolbox(api);
+    api.removePanel(api.getPanel('toolbox')!);
+    autoHide(api, memory, api.getPanel('inspector')!, NO_RECT);
+    memory.homes.toolbox = { ref: 'inspector', direction: 'within', size: 0, layout: [] };
 
-    const panel = showTool(api, memory, 'output');
+    const panel = showTool(api, memory, 'toolbox');
 
     expect(panel.group.api.isVisible).toBe(true);
   });
@@ -327,11 +334,11 @@ describe('tool pane homes (review Important 2)', () => {
     const { api, memory } = dock();
     resetLayout(api, memory, 1200);
     api.removePanel(api.getPanel('output')!);
-    memory.homes.output = { ref: 'problems', direction: 'within', size: 0, layout: [] };
+    memory.homes.output = { ref: 'toolbox', direction: 'within', size: 0, layout: [] };
 
     showTool(api, memory, 'output');
 
-    expect(api.getPanel('output')!.group).toBe(api.getPanel('problems')!.group);
+    expect(api.getPanel('output')!.group).toBe(api.getPanel('toolbox')!.group);
     expect(memory.homes.output).toBeUndefined();
   });
 
@@ -360,12 +367,13 @@ describe('tool pane homes (review Important 2)', () => {
     try {
       const { api, memory } = dock();
       resetLayout(api, memory, 1200);
+      tabToolbox(api);
 
-      closeTool(api, memory, api.getPanel('output')!, DOCK);
-      expect(memory.homes.output).toEqual({ ref: 'problems', direction: 'within', size: 0, layout: [] });
+      closeTool(api, memory, api.getPanel('toolbox')!, DOCK);
+      expect(memory.homes.toolbox).toEqual({ ref: 'inspector', direction: 'within', size: 0, layout: [] });
 
-      showTool(api, memory, 'output');
-      expect(api.getPanel('output')!.group).toBe(api.getPanel('problems')!.group);
+      showTool(api, memory, 'toolbox');
+      expect(api.getPanel('toolbox')!.group).toBe(api.getPanel('inspector')!.group);
     } finally {
       vi.restoreAllMocks();
     }
@@ -422,8 +430,9 @@ describe('a tool pane popped out when the layout was saved (review Minor 3)', ()
     const { api, memory } = dock();
     resetLayout(api, memory, 1200);
     addDocument(api, memory, 'a', 'orders');
-    floatGroup(api, memory, api.getPanel('problems')!.group, NO_RECT);
-    vi.spyOn(api, 'toJSON').mockReturnValueOnce(asPoppedOut(api, ['problems']));
+    tabToolbox(api);
+    floatGroup(api, memory, api.getPanel('inspector')!.group, NO_RECT);
+    vi.spyOn(api, 'toJSON').mockReturnValueOnce(asPoppedOut(api, ['inspector']));
     const storage = memoryStorage();
     writeLayout(storage, captureLayout(api, memory, []));
     vi.restoreAllMocks();
@@ -432,9 +441,9 @@ describe('a tool pane popped out when the layout was saved (review Minor 3)', ()
     addDocument(fresh, freshMemory, 'b', 'billing');
     applyLayout(fresh, freshMemory, readLayout(storage)!);
 
-    expect(where(fresh, 'problems')?.location).toBe('grid');
-    expect(where(fresh, 'output')).toEqual(where(fresh, 'problems'));
-    expect(fresh.getPanel('problems')!.group.api.isVisible).toBe(true);
+    expect(where(fresh, 'inspector')?.location).toBe('grid');
+    expect(where(fresh, 'toolbox')).toEqual(where(fresh, 'inspector'));
+    expect(fresh.getPanel('inspector')!.group.api.isVisible).toBe(true);
   });
 });
 
@@ -450,7 +459,7 @@ describe('the document area takes the resize slack (ruling)', () => {
   }
   const sizes = (api: DockviewApi) => {
     const g = (id: string) => api.getPanel(id)!.group.api;
-    return { area: g('doc:a').width, areaHeight: g('doc:a').height, inspector: g('inspector').width, toolbox: g('toolbox').width, problems: g('problems').height };
+    return { area: g('doc:a').width, areaHeight: g('doc:a').height, inspector: g('inspector').width, toolbox: g('toolbox').width, output: g('output').height };
   };
 
   it('when the dock grows or shrinks, after Reset', () => {
@@ -458,7 +467,7 @@ describe('the document area takes the resize slack (ruling)', () => {
     resetLayout(api, memory, 1200);
     addDocument(api, memory, 'a', 'orders');
     const before = sizes(api);
-    expect(before).toEqual({ area: 570, areaHeight: 550, inspector: 340, toolbox: 290, problems: 150 });
+    expect(before).toEqual({ area: 570, areaHeight: 550, inspector: 340, toolbox: 290, output: 150 });
 
     api.layout(1500, 800);
     expect(sizes(api)).toEqual({ ...before, area: before.area + 300, areaHeight: before.areaHeight + 100 });
@@ -496,11 +505,10 @@ describe('the document area takes the resize slack (ruling)', () => {
     expect(api.getPanel('toolbox')!.group.api.width).toBe(before.toolbox);
     expect(api.getPanel('doc:a')!.group.api.width).toBe(before.area);
 
-    closeTool(api, memory, api.getPanel('problems')!, NO_RECT);
     closeTool(api, memory, api.getPanel('output')!, NO_RECT);
     expect(api.getPanel('doc:a')!.group.api.height).toBe(700);
-    showTool(api, memory, 'problems');
-    expect(api.getPanel('problems')!.group.api.height).toBe(before.problems);
+    showTool(api, memory, 'output');
+    expect(api.getPanel('output')!.group.api.height).toBe(before.output);
     expect(api.getPanel('inspector')!.group.api.width).toBe(before.inspector);
   });
 });
@@ -522,7 +530,7 @@ describe('applying a saved layout whose root size is the wrong dimension', () =>
     resetLayout(api, memory, 1200);
     applyLayout(api, memory, saved);
 
-    expect(api.getPanel('problems')!.group.api.height).toBe(150);
+    expect(api.getPanel('output')!.group.api.height).toBe(150);
     expect(api.getPanel('doc:a')!.group.api.height).toBe(550);
   });
 });
@@ -599,5 +607,29 @@ describe('Apply with a saved layout that lost its document group (a Save made wh
     const { api, memory, saved } = savedWhilePopped([]);
     applyLayout(api, memory, saved);
     expectDocumentArea(api);
+  });
+});
+
+describe('a session or saved layout from before Problems moved into Output (2026-10-09)', () => {
+  it('applies without error and without an empty place, keeping the documents', () => {
+    const { api, memory } = dock();
+    resetLayout(api, memory, 1200);
+    addDocument(api, memory, 'a', 'orders');
+    // the old default: Problems and Output tabbed together below the documents
+    api.addPanel({ id: 'problems', component: 'tool', title: 'Problems', position: { referencePanel: 'output' } });
+    const old = JSON.parse(JSON.stringify(captureLayout(api, memory, ['problems', 'output'] as never, { keepDocuments: true })));
+    expect(JSON.stringify(old)).toContain('"problems"');
+
+    const { api: fresh, memory: freshMemory } = dock();
+    addDocument(fresh, freshMemory, 'a', 'orders');
+    const docA = fresh.getPanel('doc:a');
+    const layout = parseLayout(old)!;
+    expect(() => applyLayout(fresh, freshMemory, layout)).not.toThrow();
+
+    expect(fresh.getPanel('problems')).toBeUndefined();
+    expect(fresh.panels.map((p) => p.id).sort()).toEqual(['doc:a', 'inspector', 'output', 'toolbox']);
+    expect(fresh.getPanel('doc:a')).toBe(docA);
+    expect(fresh.groups.filter((g) => g.panels.length === 0)).toEqual([]);
+    expect(fresh.getPanel('output')!.group.activePanel?.id).toBe('output');
   });
 });

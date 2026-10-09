@@ -45,6 +45,14 @@ export interface StudioApi {
    * errors. Answers `{ applied, errors }`.
    */
   saveDesign(workflowId: string, body: DesignSaveRequest): Promise<ApiResult<DesignOutcomeDto>>;
+  /**
+   * Start (2026-10-09): `POST /orchestration/start` with the workflow id as the body. BaseApi checks the workflow it
+   * holds (cycles, schema edges, payloads, processor liveness; a refusal is a 422 naming the gate) and queues the
+   * start: 202 with no body. The workflow appears in `GET /orchestration/live` a moment later.
+   */
+  startWorkflow(workflowId: string): Promise<ApiResult<null>>;
+  /** Stop: `POST /orchestration/stop`, the same way; 202, and the workflow leaves the live set a moment later. */
+  stopWorkflow(workflowId: string): Promise<ApiResult<null>>;
 }
 
 interface Problem {
@@ -106,7 +114,8 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
       return { ok: false, error: { kind: 'network', message: e instanceof Error ? e.message : String(e) } };
     }
     if (!response.ok) return { ok: false, error: await toError(response) };
-    if (response.status === 204) return { ok: true, value: null as T };
+    // 204, and the orchestration's 202 Accepted: no body
+    if (response.status === 204 || response.status === 202) return { ok: true, value: null as T };
     try {
       return { ok: true, value: (await response.json()) as T };
     } catch (e) {
@@ -134,5 +143,7 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
     listLive: () => get<unknown>('/orchestration/live'),
     listLiveness: () => get<unknown>('/processors/liveness'),
     saveDesign: (workflowId, body) => request<DesignOutcomeDto>('PUT', `/workflows/${id(workflowId)}/design`, body),
+    startWorkflow: (workflowId) => request<null>('POST', '/orchestration/start', workflowId),
+    stopWorkflow: (workflowId) => request<null>('POST', '/orchestration/stop', workflowId),
   };
 }

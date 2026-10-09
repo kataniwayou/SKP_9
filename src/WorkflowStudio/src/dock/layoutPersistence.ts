@@ -1,5 +1,5 @@
 import { Orientation, type GroupviewPanelState, type SerializedDockview, type SerializedFloatingGroup, type SerializedGridObject } from 'dockview-react';
-import { isDocPanelId, isToolId, type ToolId } from './ids';
+import { isDocPanelId, isToolId, RETIRED_TOOL_IDS, type ToolId } from './ids';
 import type { Direction, Home, Side } from './home';
 
 /** localStorage key of the saved window layout (spec §6.2.2: per browser, never in the database). */
@@ -69,9 +69,15 @@ export function readLayout(storage: Storage | null): SavedLayout | null {
   return parseLayout(value);
 }
 
-/** The layout in an already-parsed value (the saved layout, or the session's dock), or null when it is not one. */
+/**
+ * The layout in an already-parsed value (the saved layout, or the session's dock), or null when it is not one. A
+ * retired tool pane (Problems, 2026-10-09) is taken out first, so a layout stored before loads without it and with no
+ * empty place where it was.
+ */
 export function parseLayout(value: unknown): SavedLayout | null {
   if (!isRecord(value) || value.version !== LAYOUT_VERSION || !isDockLayout(value.dock)) return null;
+  const dock = withoutRetired(value.dock, typeof value.documentGroupId === 'string' ? value.documentGroupId : null);
+  const retiredRef = (h: Home) => RETIRED_TOOL_IDS.includes(h.ref);
 
   const hidden = Array.isArray(value.hidden) ? value.hidden.filter((id): id is ToolId => typeof id === 'string' && isToolId(id)) : [];
   const sides: Partial<Record<ToolId, Side>> = {};
@@ -80,12 +86,15 @@ export function parseLayout(value: unknown): SavedLayout | null {
     for (const [id, side] of Object.entries(value.sides)) if (isToolId(id) && isSide(side)) sides[id] = side;
   }
   if (isRecord(value.homes)) {
-    for (const [id, home] of Object.entries(value.homes)) if (isToolId(id) && isHome(home)) homes[id] = home;
+    for (const [id, home] of Object.entries(value.homes)) {
+      // a home beside a retired pane has no place to go back to: the pane goes to its side instead
+      if (isToolId(id) && isHome(home) && !retiredRef(home)) homes[id] = { ...home, layout: home.layout.filter((b) => !RETIRED_TOOL_IDS.includes(b.ref)) };
+    }
   }
   const popped = Array.isArray(value.popped) ? value.popped.filter((id): id is ToolId => typeof id === 'string' && isToolId(id)) : [];
   return {
     version: LAYOUT_VERSION,
-    dock: value.dock,
+    dock,
     documentGroupId: typeof value.documentGroupId === 'string' ? value.documentGroupId : null,
     hidden: [...new Set(hidden)],
     sides,
@@ -195,6 +204,41 @@ export function withDocuments(
 }
 
 type GridNode = SerializedGridObject<GroupState>;
+
+/**
+ * A copy of a layout without the retired tool panes (`RETIRED_TOOL_IDS`): their panels and tabs go; a group they leave
+ * empty goes too (the document area stays, even empty), in the grid, floating or popped out; the grid closes up.
+ * The same layout when it holds none.
+ */
+function withoutRetired(layout: SerializedDockview, documentGroupId: string | null): SerializedDockview {
+  if (!Object.keys(layout.panels).some((id) => RETIRED_TOOL_IDS.includes(id))) return layout;
+  const dock = JSON.parse(JSON.stringify(layout)) as SerializedDockview;
+  const emptied = new Set<string>();
+  const clean = (g: GroupState) => {
+    const kept = g.views.filter((v) => !RETIRED_TOOL_IDS.includes(v));
+    if (kept.length === g.views.length) return;
+    g.views = kept;
+    if (g.activeView !== undefined && !kept.includes(g.activeView)) {
+      if (kept.length > 0) g.activeView = kept[0];
+      else delete g.activeView;
+    }
+    if (kept.length === 0 && g.id !== documentGroupId) emptied.add(g.id);
+  };
+  forEachGroup(dock.grid.root, clean);
+  pruneGrid(dock, (g) => emptied.has(g.id));
+  const groups = (list: SerializedFloatingGroup[] | undefined) => (list ?? []).filter((f) => {
+    let views = 0;
+    const visit = (g: GroupState) => { clean(g); views += g.views.length; };
+    if (f.data) visit(f.data);
+    if (f.grid) forEachGroup(f.grid.root, visit);
+    return views > 0;
+  });
+  dock.floatingGroups = groups(dock.floatingGroups);
+  dock.popoutGroups = groups(dock.popoutGroups as SerializedFloatingGroup[] | undefined) as typeof dock.popoutGroups;
+  for (const id of RETIRED_TOOL_IDS) delete dock.panels[id];
+  fixRootSize(dock);
+  return dock;
+}
 
 /**
  * The root branch's size is its cross size: the grid's height when it runs horizontally, else its

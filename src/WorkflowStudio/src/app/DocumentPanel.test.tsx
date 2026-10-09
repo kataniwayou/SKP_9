@@ -248,6 +248,42 @@ describe('DocumentPanel', () => {
     expect(screen.getByRole('button', { name: '▶ Start' }).parentElement).toHaveAttribute('data-tip', 'Not available yet');
   });
 
+  it('Start and Stop follow the live poll: Start only while stopped, Stop only while running; a press shows starting… (2026-10-09)', async () => {
+    const live = { value: ['wf1'] as string[] };
+    const listLive = vi.fn(async () => ({ ok: true, value: live.value }));
+    const store = createStudioStore();
+    store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
+    store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] })) });
+    const onRun = vi.fn();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const api = { listLive, listLiveness: vi.fn().mockResolvedValue({ ok: true, value: [] }) } as unknown as StudioApi;
+    render(<StudioStoreProvider value={store}><div style={{ width: 1200, height: 800 }}><DocumentPanel api={api} workflowId="wf1" panel={fakePanel().panel} onRun={onRun} /></div></StudioStoreProvider>);
+    const start = () => screen.getByRole('button', { name: /Start/ });
+    const stop = () => screen.getByRole('button', { name: /Stop/ });
+
+    expect(await screen.findByText('▶ running')).toBeInTheDocument();
+    await waitFor(() => expect(store.getState().docs[0]!.live).toBe('running'));
+    expect(start()).toBeDisabled();
+    expect(start().parentElement).toHaveAttribute('data-tip', 'It is running');
+    expect(stop()).toBeEnabled();
+    fireEvent.click(stop());
+    expect(onRun).toHaveBeenCalledWith('stop');
+
+    live.value = [];
+    await act(async () => { await vi.advanceTimersByTimeAsync(LIVE_POLL_MS); });
+    expect(await screen.findByText('■ stopped')).toBeInTheDocument();
+    await waitFor(() => expect(start()).toBeEnabled());
+    expect(start()).toHaveAttribute('data-tip', 'Start the saved workflow (what BaseApi holds, not the drawing) (F5)');
+    expect(stop()).toBeDisabled();
+    fireEvent.click(start());
+    expect(onRun).toHaveBeenLastCalledWith('start');
+
+    act(() => store.dispatch({ type: 'runRequested', workflowId: 'wf1', op: 'start', token: 't', at: '2026-10-09T09:00:00Z' }));
+    expect(screen.getByText('starting…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '▶ Starting…' })).toBeDisabled();
+    expect(stop()).toBeDisabled();
+  });
+
   it('shows status unknown, not stopped, when the live poll fails', async () => {
     const { store } = await setup(vi.fn().mockResolvedValue({ ok: false, error: { kind: 'http', status: 500, detail: 'Redis down' } }));
     const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] }));

@@ -4,6 +4,7 @@ import { EMPTY_EDITS, parseEdits, type EntityEdits } from '../design/design';
 import { historyOf } from '../design/history';
 import { parseLayout, type SavedLayout } from '../dock/layoutPersistence';
 import { EMPTY_INSPECTOR, type InspectorDraft } from '../store/inspector';
+import { parseOutput, type OutputLine } from '../store/output';
 import { isTarget } from '../store/inspectorTarget';
 import { picksOf } from '../store/picks';
 import type { Selection } from '../store/selection';
@@ -42,6 +43,8 @@ export interface Session {
   showDetails: boolean;
   /** The dock with its documents (`captureLayout(…, { keepDocuments: true })`); null: the page's default. */
   dock: SavedLayout | null;
+  /** Output's lines (2026-10-09), so a refresh keeps them. Optional, so the version stays 1. */
+  output?: OutputLine[];
 }
 
 export function readSession(storage: Storage | null): Session | null {
@@ -73,7 +76,8 @@ export function readSession(storage: Storage | null): Session | null {
   }
   const activeId = typeof value.activeId === 'string' && docs.some((d) => d.workflowId === value.activeId)
     ? value.activeId : docs[0]?.workflowId ?? null;
-  return { version: SESSION_VERSION, docs, activeId, showDetails: value.showDetails === true, dock: parseLayout(value.dock) };
+  const output = parseOutput(value.output);
+  return { version: SESSION_VERSION, docs, activeId, showDetails: value.showDetails === true, dock: parseLayout(value.dock), ...(output.length > 0 ? { output } : {}) };
 }
 
 /** False when the browser refuses (quota, blocked storage); never throws. */
@@ -136,6 +140,7 @@ export function sessionOf(state: StudioState, views: ReadonlyMap<string, SavedVi
     activeId: state.activeId,
     showDetails: state.showDetails,
     dock,
+    ...(state.output.length > 0 ? { output: state.output } : {}),
   };
 }
 
@@ -152,10 +157,12 @@ export function restoredState(session: Session | null): StudioState {
       restored: d.design !== undefined || d.edits !== undefined,
       saving: false,
       errors: null,
+      live: 'checking',
+      run: null,
     })),
     activeId: session.activeId,
     showDetails: session.showDetails,
-    output: [],
+    output: session.output ?? [],
   };
 }
 

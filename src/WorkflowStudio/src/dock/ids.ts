@@ -1,13 +1,19 @@
-/** The four shared tool panes (spec §6.1). Their ids are their dockview panel ids. */
-export type ToolId = 'inspector' | 'toolbox' | 'problems' | 'output';
+/**
+ * The three shared tool panes (spec §6.1). Their ids are their dockview panel ids. Problems is gone (2026-10-09):
+ * Output pins the current problems at its top.
+ */
+export type ToolId = 'inspector' | 'toolbox' | 'output';
 
-export const TOOL_IDS: readonly ToolId[] = ['inspector', 'toolbox', 'problems', 'output'];
+export const TOOL_IDS: readonly ToolId[] = ['inspector', 'toolbox', 'output'];
 
 export const TOOL_TITLES: Readonly<Record<ToolId, string>> = {
-  inspector: 'Inspector', toolbox: 'Toolbox', problems: 'Problems', output: 'Output',
+  inspector: 'Inspector', toolbox: 'Toolbox', output: 'Output',
 };
 
 export const isToolId = (id: string): id is ToolId => (TOOL_IDS as readonly string[]).includes(id);
+
+/** Tool panes the studio had and no longer has; a stored layout holding one loads without it (layoutPersistence). */
+export const RETIRED_TOOL_IDS: readonly string[] = ['problems'];
 
 const DOC_PREFIX = 'doc:';
 

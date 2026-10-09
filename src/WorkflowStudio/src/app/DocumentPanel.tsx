@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { StudioApi } from '../api/client';
 import { healthOf } from '../api/liveness';
 import type { LiveArt } from '../canvas/liveArt';
@@ -6,6 +6,7 @@ import type { SavedView } from '../canvas/savedView';
 import { useFitter } from '../canvas/useFitter';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
 import type { Pick } from '../store/picks';
+import { runBlocked, type RunOp } from '../store/run';
 import type { Selection } from '../store/selection';
 import { canSave, designDirty } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
@@ -20,7 +21,7 @@ import { useLiveness, useLiveStatus, useOwnerDocument, usePanelShown, usePanelVi
  * `renderer: 'always'`, so both survive tab switches), its toolbar and its run status. Labels
  * are measured in the document the panel is drawn in, so a pop-out keeps its fonts (spec §6.3).
  */
-export function DocumentPanel({ api, workflowId, panel, initialView, onViewChange, onSelect, onRetry, onSave }: {
+export function DocumentPanel({ api, workflowId, panel, initialView, onViewChange, onSelect, onRetry, onSave, onRun }: {
   api: StudioApi;
   workflowId: string;
   panel: PanelLike;
@@ -37,6 +38,8 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
   onRetry?: () => void;
   /** Saves the design (plan 8 §4.1); the toolbar's Save shows when given. */
   onSave?: () => void;
+  /** Starts or stops the saved workflow (2026-10-09); without it Start and Stop stay disabled. */
+  onRun?: (op: RunOp) => void;
 }) {
   const open = useStudio((s) => s.docs.find((d) => d.workflowId === workflowId) ?? null);
   const store = useStudioStore();
@@ -45,6 +48,8 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
   const fitter = useFitter(ownerDocument);
   const visible = usePanelVisible(panel, ownerDocument) && open?.status.kind === 'ready';
   const status = useLiveStatus(api, workflowId, visible);
+  // the store keeps what the poll said: Start and Stop follow it, and a press waiting for it is done when it agrees
+  useEffect(() => { store.dispatch({ type: 'live', workflowId, status, at: new Date().toISOString() }); }, [store, workflowId, status]);
   const liveness = useLiveness(api, visible);
   // a failed live poll is "status unknown" in the capsule and on the hub pill, with not started's look (spec §5.1)
   const live = useMemo<LiveArt>(() => ({ started: status === 'running', status, health: healthOf(liveness) }), [status, liveness]);
@@ -86,6 +91,10 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
       >
         <CapsuleToolbar workflow={open.status.doc.graph.workflow} status={status}
           save={onSave ? { enabled: canSave(open), saving: open.saving, onSave } : undefined}
+          run={onRun ? {
+            blocked: { start: runBlocked(open, 'start'), stop: runBlocked(open, 'stop') }, pending: open.run?.op ?? null,
+            onStart: () => onRun('start'), onStop: () => onRun('stop'),
+          } : undefined}
           design={actions ? {
             dirty: designDirty(open), locked: open.saving, canUndo: canUndo(open.design), canRedo: canRedo(open.design),
             onUndo: () => store.dispatch({ type: 'undo', workflowId }),

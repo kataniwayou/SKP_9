@@ -24,6 +24,8 @@ function fakeApi(over: Partial<StudioApi> = {}): StudioApi {
     createAssignment: vi.fn().mockResolvedValue(notFound),
     deleteAssignment: vi.fn().mockResolvedValue(notFound),
     saveDesign: vi.fn().mockResolvedValue(notFound),
+    startWorkflow: vi.fn().mockResolvedValue(notFound),
+    stopWorkflow: vi.fn().mockResolvedValue(notFound),
     listLive: vi.fn().mockResolvedValue({ ok: true, value: [] }),
     listLiveness: vi.fn().mockResolvedValue({ ok: true, value: [] }),
     ...over,
@@ -64,7 +66,9 @@ describe('App', () => {
 
     const step = await screen.findByText('fetch');
     expect(within(inspector()).getByText('Nothing selected. Click a step, a processor, a cache or the workflow.')).toBeInTheDocument();
-    expect(screen.getByText('No problems')).toBeInTheDocument();
+    // nothing is pinned in Output (the Problems pane is gone, 2026-10-09)
+    expect(screen.queryByRole('list', { name: 'Problems' })).toBeNull();
+    expect(screen.queryByText('Problems')).toBeNull();
 
     fireEvent.click(step.closest('.react-flow__node')!);
     expect(await screen.findByLabelText('Unique name')).toHaveTextContent('fetch_1.0.0-s1');

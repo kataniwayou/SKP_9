@@ -1,5 +1,6 @@
 import type { StudioDocument } from '../app/document';
 import type { EntityReadDto } from '../api/entities';
+import type { LiveStatus } from '../api/liveStatus';
 import type { DesignError, Id } from '../model/graph';
 import {
   createAssignment, EMPTY_EDITS, hasGraphChanges, removeAssignment, revertEntity, sameDesign, setField, storedDesignOf,
@@ -14,6 +15,11 @@ import { EMPTY_INSPECTOR, type InspectorState } from './inspector';
 import { currentTarget, editTargetOf, rootTarget, targetKey, type InspectorTarget } from './inspectorTarget';
 import { picksOf, samePicks, type Pick } from './picks';
 import { selectionKey, type Selection } from './selection';
+import { appendOutput, type LineDraft, type OutputLine } from './output';
+import { RUN_TIMEOUT_MS, RUN_WORD, type RunOp, type RunState } from './run';
+import { saveAnswerLines, settleReport, type DesignLogLine } from './saveLog';
+
+export type { OutputLine } from './output';
 
 /** Where one open document is in its life: being read, ready to draw, or failed with a message. */
 export type DocStatus =
@@ -45,14 +51,10 @@ export interface OpenDocument {
   restored: boolean;
   /** A Save is in flight: the design is read-only (spec §4.1). */
   saving: boolean;
-}
-
-export interface OutputLine {
-  /** ISO time of the answer. */
-  at: string;
-  workflowId: Id;
-  name: string;
-  text: string;
+  /** What the live poll last said (`GET /orchestration/live`); not kept across a refresh. */
+  live: LiveStatus;
+  /** A Start or Stop being sent or waiting for the live set (2026-10-09); not kept across a refresh. */
+  run: RunState | null;
 }
 
 /**
@@ -62,11 +64,11 @@ export interface OutputLine {
 export interface StudioState {
   /** In the order they were opened. */
   docs: OpenDocument[];
-  /** The document the shared panes (Inspector, Problems) follow: the one last activated. */
+  /** The document the shared panes (Inspector, Output's pinned problems) follow: the one last activated. */
   activeId: Id | null;
   /** The Inspector's one "▸ show all" switch, shared by every entity (spec §7). */
   showDetails: boolean;
-  /** Save results, oldest first (plan 8 §4.1); not kept across a refresh. */
+  /** Output (2026-10-09): what Save, Start and Stop did, oldest first, the last OUTPUT_LIMIT lines; kept in the session. */
   output: OutputLine[];
 }
 
@@ -99,13 +101,26 @@ export type StudioAction =
   /** Removes a step's assignment in the design. */
   | { type: 'removeAssignment'; workflowId: Id; stepId: Id }
   | { type: 'saving'; workflowId: Id }
-  /** BaseApi's answer to a Save, with the document read again (null: the re-read failed). */
-  /** `held`: links of sources a short circuit holds back, which Save did not write (plan 9 §7). */
-  | { type: 'saveAnswered'; workflowId: Id; at: string; applied: boolean; errors: DesignError[]; doc: StudioDocument | null; held?: number }
+  /** Lines for Output, about this workflow (e.g. "Save started"). */
+  | { type: 'log'; workflowId: Id; lines: LineDraft[] }
+  /**
+   * BaseApi's answer to a Save, with the document read again (null: the re-read failed, `reread` says why).
+   * `held`: links of sources a short circuit holds back, which Save did not write (plan 9 §7). `log`: BaseApi's
+   * own account (null or absent: it sent none).
+   */
+  | { type: 'saveAnswered'; workflowId: Id; at: string; applied: boolean; errors: DesignError[]; doc: StudioDocument | null; held?: number; log?: DesignLogLine[] | null; reread?: string }
   /** A Save that never got an answer (400, network): nothing was stored. */
   | { type: 'saveFailed'; workflowId: Id; at: string; message: string }
   /** A failed document goes back to loading. */
-  | { type: 'retry'; workflowId: Id };
+  | { type: 'retry'; workflowId: Id }
+  /** The live poll's answer for this document. A Start or Stop waiting for it is done when it agrees. */
+  | { type: 'live'; workflowId: Id; status: LiveStatus; at: string }
+  /** Start or Stop pressed; `note` is a line Output gets first (the drawing is not what runs). */
+  | { type: 'runRequested'; workflowId: Id; op: RunOp; token: string; at: string; note?: string }
+  /** BaseApi's answer to Start or Stop: accepted (202), or refused with why. */
+  | { type: 'runAnswered'; workflowId: Id; token: string; at: string; ok: boolean; message?: string }
+  /** An accepted Start or Stop the live set has not agreed with in RUN_TIMEOUT_MS. */
+  | { type: 'runTimeout'; workflowId: Id; token: string; at: string };
 
 export const INITIAL_STATE: StudioState = { docs: [], activeId: null, showDetails: false, output: [] };
 
@@ -167,6 +182,7 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       const doc: OpenDocument = {
         workflowId: action.workflowId, name: action.name, version: action.version, status: { kind: 'loading' }, selection: null, inspector: EMPTY_INSPECTOR,
         picks: [], design: historyOf(), edits: EMPTY_EDITS, errors: null, stored: null, restored: false, saving: false,
+        live: 'checking', run: null,
       };
       return { ...state, docs: [...state.docs, doc], activeId: action.workflowId };
     }
@@ -269,13 +285,21 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       const n = action.errors.length;
       // applied by BaseApi, the errors left are the design's short circuits (plan 9 §7), whose links were not written
       const shorts = action.errors.filter(isShortCircuitError).length;
-      const held = action.held ?? 0;
-      const waits = held === 0 ? '' : `; ${held} link${held === 1 ? '' : 's'} held back until fixed`;
-      const text = !action.applied ? `Saved; not applied: ${n} error${n === 1 ? '' : 's'}`
-        : shorts === 0 ? 'Saved and applied' : `Saved and applied; ${shorts} short circuit${shorts === 1 ? '' : 's'} not written${waits}`;
+      const read = action.doc ? storedDesignOf(action.doc.graph.design, action.doc.graph.layout) : null;
+      const settled = read && action.doc ? settleDesign(read, action.doc) : null;
+      const graph = action.doc?.graph;
+      const lines = saveAnswerLines({
+        applied: action.applied, errors: action.errors.filter((e) => !isShortCircuitError(e)), log: action.log ?? null,
+        shorts, held: action.held ?? 0,
+        reread: graph
+          ? { ok: true, steps: graph.steps.size, links: graph.workflow.entryStepIds.length + [...graph.steps.values()].reduce((k, s) => k + s.nextStepIds.length, 0) }
+          : { ok: false, message: action.reread ?? 'no answer' },
+        settle: read && settled ? settleReport(read.draft, settled.draft) : null,
+        stored: graph?.design != null,
+      });
       const next = update(state, action.workflowId, (d) => {
         // either way the design is now stored on the workflow and the session's edits are cleared (spec §4.1)
-        const stored = action.doc ? settleDesign(storedDesignOf(action.doc.graph.design, action.doc.graph.layout), action.doc) : designOf(d);
+        const stored = settled ?? designOf(d);
         const status: DocStatus = action.doc ? { kind: 'ready', doc: action.doc } : d.status;
         const out: OpenDocument = {
           ...d, status, stored, restored: false, saving: false, errors: n === 0 ? null : action.errors,
@@ -284,17 +308,82 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
         };
         return { ...out, picks: prunedPicks(out, stored.draft) };
       });
-      return { ...next, output: [...next.output, { at: action.at, workflowId: action.workflowId, name: doc.name, text: action.doc ? text : `${text} (the workflow could not be read again)` }] };
+      return logged(next, action.workflowId, doc.name, lines.map((l) => ({ at: action.at, ...l })));
     }
     case 'saveFailed': {
       const doc = state.docs.find((d) => d.workflowId === action.workflowId);
       if (!doc) return state;
       const next = update(state, action.workflowId, (d) => ({ ...d, saving: false }));
-      return { ...next, output: [...next.output, { at: action.at, workflowId: action.workflowId, name: doc.name, text: `Not saved: ${action.message}` }] };
+      return logged(next, action.workflowId, doc.name, [{ at: action.at, text: `Not saved: ${action.message}`, level: 'error' }]);
+    }
+    case 'log': {
+      const doc = state.docs.find((d) => d.workflowId === action.workflowId);
+      return doc ? logged(state, action.workflowId, doc.name, action.lines) : state;
+    }
+    case 'live': {
+      const doc = state.docs.find((d) => d.workflowId === action.workflowId);
+      if (!doc) return state;
+      const run = doc.run;
+      // an accepted Start is done when the live set lists the workflow, an accepted Stop when it no longer does
+      const done = run?.phase === 'waiting' && (run.op === 'start' ? action.status === 'running' : action.status === 'stopped');
+      if (!done) return doc.live === action.status ? state : update(state, action.workflowId, (d) => ({ ...d, live: action.status }));
+      const next = update(state, action.workflowId, (d) => ({ ...d, live: action.status, run: null }));
+      const text = run!.op === 'start' ? 'running: the workflow is in BaseApi\'s live set' : 'stopped: the workflow left BaseApi\'s live set';
+      return logged(next, action.workflowId, doc.name, [{ at: action.at, text }]);
+    }
+    case 'runRequested': {
+      const doc = state.docs.find((d) => d.workflowId === action.workflowId);
+      if (!doc || doc.run !== null) return state;
+      const next = update(state, action.workflowId, (d) => ({ ...d, run: { op: action.op, phase: 'sending', token: action.token } }));
+      const lines: LineDraft[] = action.note ? [{ at: action.at, text: action.note }] : [];
+      lines.push({ at: action.at, text: `${RUN_WORD[action.op]} requested: POST /orchestration/${action.op} for the workflow BaseApi holds` });
+      return logged(next, action.workflowId, doc.name, lines);
+    }
+    case 'runAnswered': {
+      const doc = state.docs.find((d) => d.workflowId === action.workflowId);
+      const run = doc?.run;
+      if (!doc || !run || run.token !== action.token) return state;
+      const word = RUN_WORD[run.op];
+      if (!action.ok) {
+        const next = update(state, action.workflowId, (d) => ({ ...d, run: null }));
+        return logged(next, action.workflowId, doc.name, [{ at: action.at, text: `${word} refused by BaseApi: ${action.message ?? 'no reason given'}`, level: 'error' }]);
+      }
+      const next = update(state, action.workflowId, (d) => ({ ...d, run: { ...run, phase: 'waiting' } }));
+      const wait = run.op === 'start' ? 'starting… waiting for the workflow to appear in the live set' : 'stopping… waiting for the workflow to leave the live set';
+      const accepted = logged(next, action.workflowId, doc.name, [{ at: action.at, text: `${word} accepted by BaseApi (202): ${wait}` }]);
+      // the poll may already have seen it while the request was on its way
+      return reduce(accepted, { type: 'live', workflowId: action.workflowId, status: doc.live, at: action.at });
+    }
+    case 'runTimeout': {
+      const doc = state.docs.find((d) => d.workflowId === action.workflowId);
+      const run = doc?.run;
+      if (!doc || !run || run.token !== action.token || run.phase !== 'waiting') return state;
+      const next = update(state, action.workflowId, (d) => ({ ...d, run: null }));
+      const after = `${Math.round(RUN_TIMEOUT_MS / 1000)} s`;
+      const text = run.op === 'start'
+        ? `Start accepted, but the workflow is not in the live set after ${after}: its start message may have been parked (BaseApi's known gap); the status shows what BaseApi says`
+        : `Stop accepted, but the workflow is still in the live set after ${after}; the status shows what BaseApi says`;
+      return logged(next, action.workflowId, doc.name, [{ at: action.at, text, level: 'error' }]);
     }
     case 'retry':
       return update(state, action.workflowId, (d) => (d.status.kind !== 'failed' ? d : { ...d, status: { kind: 'loading' } }));
   }
+}
+
+/** The state with lines for one workflow appended to Output (bounded). */
+function logged(state: StudioState, workflowId: Id, name: string, lines: readonly LineDraft[]): StudioState {
+  if (lines.length === 0) return state;
+  return { ...state, output: appendOutput(state.output, lines.map((l) => ({ at: l.at, workflowId, name, text: l.text, level: l.level ?? 'info' }))) };
+}
+
+/**
+ * What Output says before a Start (2026-10-09): Start runs the workflow BaseApi holds, so a design not yet saved, or
+ * saved but not applied, is not part of the run. Null when the drawing is what BaseApi holds.
+ */
+export function startNote(d: OpenDocument): string | null {
+  if (designDirty(d)) return 'Started the saved workflow; your unsaved design is not part of this run';
+  if (d.stored !== null && hasGraphChanges(d.stored)) return 'Started the saved workflow; the design stored on it is not applied, so it is not part of this run';
+  return null;
 }
 
 /** The design as it stands: the canvas draft and the entity edits. */

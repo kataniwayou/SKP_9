@@ -126,7 +126,7 @@ function EntityForm({ open, doc, base, target, saved, fields, showDetails, drill
   const { service } = useStudioActions();
   const { workflowId } = open;
   const shown = (key: string) => (Object.hasOwn(fields, key) ? valueText(fields[key]) : savedText(saved, key));
-  // the last Save's errors on this entity, under their fields (Problems lists them all)
+  // the last Save's errors on this entity, under their fields (Output pins them all)
   const entityId = target.kind === 'workflow' ? workflowId : target.kind === 'schema' ? open.edits.schemas[slotKey(target.processorId, target.slot)]?.id ?? target.id : target.id;
   const errorsOf = (key: string) => (open.errors ?? []).filter((e) => e.id === entityId && e.field === key).map((e) => e.message);
   const editor = (spec: FieldSpec) => (

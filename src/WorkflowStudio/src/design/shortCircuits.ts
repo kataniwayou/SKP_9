@@ -43,7 +43,7 @@ function overlapErrors(shown: StudioDocument): DesignError[] {
   return out;
 }
 
-/** A short circuit's error (the live list in Problems supersedes any copy a document carries). */
+/** A short circuit's error (the live list pinned in Output supersedes any copy a document carries). */
 export const isShortCircuitError = (e: DesignError): boolean => e.stage === 'wires' && e.message.startsWith(SHORT_CIRCUIT);
 
 /**

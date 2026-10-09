@@ -17,7 +17,7 @@ import type { DesignError, Id } from '../model/graph';
 
 /**
  * Everything the Inspector's read-outs read (the user's request, 2026-10-09): the drawing exactly as the canvas draws
- * it (the design over the base) and what Save would write from it. Built from the same functions the canvas, Problems
+ * it (the design over the base) and what Save would write from it. Built from the same functions the canvas, Output's pinned problems
  * and Save use (`applyDesign`, `circuitOf`, `trace`, `writtenLists`, `shortCircuitErrors`), so the text cannot disagree
  * with what is drawn or saved. Pure.
  */
@@ -33,7 +33,7 @@ export interface ReadoutModel {
   written: ReturnType<typeof writtenLists>;
   /** Every link the drawn current makes, short-circuited nets included (by source, in the order first reached). */
   drawn: Map<SourceId, Id[]>;
-  /** The live short circuits, as Problems lists them. */
+  /** The live short circuits, as Output pins them. */
   shorts: DesignError[];
 }
 
@@ -79,7 +79,7 @@ export interface ReadoutRow {
 }
 
 export interface WireReadout {
-  /** As the Inspector and Problems name it: "{from} → {to}". */
+  /** As the Inspector and Output's pinned problems name it: "{from} → {to}". */
   name: string;
   rows: ReadoutRow[];
 }
@@ -269,7 +269,7 @@ export interface StepSource {
   held: boolean;
 }
 
-/** A wire touching a step's side, named as Problems names it, with what is wrong with it (open, no direction, short circuit). */
+/** A wire touching a step's side, named as Output's pinned problems name it, with what is wrong with it (open, no direction, short circuit). */
 export interface StepWire {
   id: string;
   name: string;

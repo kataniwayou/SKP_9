@@ -1,6 +1,6 @@
 import type { StudioApi } from '../api/client';
 import { describeError } from '../api/describeError';
-import { designErrorsFromDto } from '../api/toModel';
+import { designErrorsFromDto, designLogFromDto } from '../api/toModel';
 import type { DesignSaveRequest } from '../api/types';
 import { applyDesign } from '../design/apply';
 import { parseSlotKey, type Design, type FieldValue, type SchemaCopy } from '../design/design';
@@ -9,6 +9,7 @@ import { layoutOf, type SavedLayout } from '../design/layoutDesign';
 import { heldLinkCount, shortCircuitErrors, writtenLists } from '../design/shortCircuits';
 import type { Id } from '../model/graph';
 import type { SchemaSlot } from '../store/inspectorTarget';
+import { saveStartText } from '../store/saveLog';
 import { canSave, designOf } from '../store/studioState';
 import type { StudioStore } from '../store/studioStore';
 import type { StudioDocument } from './document';
@@ -77,9 +78,11 @@ export function buildDesignRequest(base: StudioDocument, shown: StudioDocument, 
 /**
  * Save (spec §4.1): the design's changes in one request, the design read-only until the answer. Either way
  * the design is then stored on the workflow: the document is read again with GETs (the stored design comes
- * back with it), its errors go to Problems and a line to Output. A request that got no answer stored
- * nothing: Output says why and the edits stay. A short circuit (plan 9 §7) is an error of the design's wiring:
- * the design is stored as drawn, its sources keep their loaded lists, and its errors come with the answer's.
+ * back with it), its errors are pinned at the top of Output, and Output logs the whole save (2026-10-09): "Save
+ * started", BaseApi's own log line by line, the verdict, the re-read and how the drawing was aligned. A request
+ * that got no answer stored nothing: Output says why in red and the edits stay. A short circuit (plan 9 §7) is an
+ * error of the design's wiring: the design is stored as drawn, its sources keep their loaded lists, and its errors
+ * come with the answer's.
  */
 export async function saveDesign(api: StudioApi, store: StudioStore, workflowId: Id, now: () => Date = () => new Date()): Promise<void> {
   const open = store.getState().docs.find((d) => d.workflowId === workflowId);
@@ -91,6 +94,7 @@ export async function saveDesign(api: StudioApi, store: StudioStore, workflowId:
   const held = heldLinkCount(base, shown, design.draft);
   const body = buildDesignRequest(base, shown, design);
   store.dispatch({ type: 'saving', workflowId });
+  store.dispatch({ type: 'log', workflowId, lines: [{ at: now().toISOString(), text: saveStartText(body) }] });
   const answer = await api.saveDesign(workflowId, body as unknown as DesignSaveRequest);
   if (!answer.ok) {
     store.dispatch({ type: 'saveFailed', workflowId, at: now().toISOString(), message: describeError(answer.error) });
@@ -100,5 +104,6 @@ export async function saveDesign(api: StudioApi, store: StudioStore, workflowId:
   store.dispatch({
     type: 'saveAnswered', workflowId, at: now().toISOString(), applied: answer.value.applied === true, held,
     errors: [...shorts, ...designErrorsFromDto(answer.value)], doc: reread.ok ? reread.value : null,
+    log: designLogFromDto(answer.value), ...(reread.ok ? {} : { reread: describeError(reread.error) }),
   });
 }

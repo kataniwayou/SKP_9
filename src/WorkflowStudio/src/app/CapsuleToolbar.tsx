@@ -2,10 +2,13 @@ import type { LiveStatus } from '../api/liveStatus';
 import { ZoomControls } from '../canvas/ZoomControls';
 import { entityName } from '../model/entityNames';
 import type { Workflow } from '../model/graph';
+import type { RunOp } from '../store/run';
 
 const NOT_YET = 'Not available yet';
 
-function StatusPill({ status }: { status: LiveStatus }) {
+function StatusPill({ status, pending }: { status: LiveStatus; pending: RunOp | null }) {
+  if (pending === 'start') return <span className="unknown">starting…</span>;
+  if (pending === 'stop') return <span className="unknown">stopping…</span>;
   switch (status) {
     case 'running': return <span className="run-chip">▶ running</span>;
     case 'stopped': return <span className="stopped">■ stopped</span>;
@@ -14,13 +17,24 @@ function StatusPill({ status }: { status: LiveStatus }) {
   }
 }
 
+/** Start's and Stop's tips while they can be pressed: both act on what BaseApi holds, not on the drawing. */
+const RUN_TIP: Readonly<Record<RunOp, string>> = {
+  start: 'Start the saved workflow (what BaseApi holds, not the drawing) (F5)',
+  stop: 'Stop the workflow (Shift+F5)',
+};
+
 /**
  * A document's capsule toolbar (spec §6.1, mockup v49 .docbar): its name, cron, run status, Save,
- * Start and Stop, and its own zoom and Fit. Save stores the design (plan 8 §4.1); Start and Stop are
- * still disabled. It must be rendered inside the document's WorkflowCanvas, for ZoomControls.
+ * Start and Stop, and its own zoom and Fit. Save stores the design (plan 8 §4.1); Start and Stop act on the
+ * saved workflow (2026-10-09). It must be rendered inside the document's WorkflowCanvas, for ZoomControls.
  */
-export function CapsuleToolbar({ workflow, status, save, design }: {
+export function CapsuleToolbar({ workflow, status, save, design, run }: {
   workflow: Workflow; status: LiveStatus;
+  /**
+   * Start and Stop (2026-10-09): why each cannot be pressed now (null: it can), the press in progress, and the
+   * presses. Absent: both disabled.
+   */
+  run?: { blocked: Readonly<Record<RunOp, string | null>>; pending: RunOp | null; onStart: () => void; onStop: () => void };
   /** The design's Save (plan 8 §4.1): enabled when the design differs from the base; read-only while it runs. */
   save?: { enabled: boolean; saving: boolean; onSave: () => void };
   /** The design draft (plan 4): its mark, Undo, Redo and Discard. */
@@ -32,7 +46,7 @@ export function CapsuleToolbar({ workflow, status, save, design }: {
         <b>{workflow.name}</b><span className="ver">_{workflow.version}</span>
       </div>
       <span className="cap-b chip">⏱ {workflow.cronExpression || 'not scheduled'}</span>
-      <div className="cap-b stat" aria-label="Status"><StatusPill status={status} /></div>
+      <div className="cap-b stat" aria-label="Status"><StatusPill status={status} pending={run?.pending ?? null} /></div>
       {design?.dirty && <span className="cap-b dirtyl">● design draft</span>}
       <span className="spacer" />
       <div className="docact">
@@ -48,10 +62,22 @@ export function CapsuleToolbar({ workflow, status, save, design }: {
           ? <button type="button" className="qb" disabled={save.saving} onClick={save.onSave} data-tip="Store the design; BaseApi applies it when it finds no errors">{save.saving ? '⤓ Saving…' : '⤓ Save'}</button>
           : <span data-tip="Nothing to save yet"><button type="button" className="qb" disabled>⤓ Save</button></span>}
         <span className="qsep" />
-        <span data-tip={NOT_YET}><button type="button" className="qb run" disabled>▶ Start</button></span>
-        <span data-tip={NOT_YET}><button type="button" className="qb stop" disabled>■ Stop</button></span>
+        <RunButton op="start" run={run} />
+        <RunButton op="stop" run={run} />
       </div>
       <ZoomControls />
     </div>
   );
+}
+
+/** Start or Stop: enabled only when the live status allows it and no press is in progress. */
+function RunButton({ op, run }: { op: RunOp; run: Parameters<typeof CapsuleToolbar>[0]['run'] }) {
+  const label = op === 'start' ? (run?.pending === 'start' ? '▶ Starting…' : '▶ Start') : (run?.pending === 'stop' ? '■ Stopping…' : '■ Stop');
+  const cls = op === 'start' ? 'qb run' : 'qb stop';
+  const blocked = run ? run.blocked[op] : NOT_YET;
+  if (run && blocked === null) {
+    return <button type="button" className={cls} onClick={op === 'start' ? run.onStart : run.onStop} data-tip={RUN_TIP[op]}>{label}</button>;
+  }
+  // a disabled button shows no tip of its own: the span carries it
+  return <span data-tip={blocked ?? undefined}><button type="button" className={cls} disabled>{label}</button></span>;
 }

@@ -69,7 +69,7 @@ function gap(shown: StudioDocument, t: DropTarget, e: Point, aim: number | null)
  * shifting onto that one instead meets both); otherwise it stays open. A refused end moves with the wire and stays open.
  * `overlap` (the user's rule 2, 2026-10-09): when the wire connected as moved would lie on a wire it may not share a line
  * with (a new short circuit), its connecting ends are "short circuit" and stay open; the wire still moves (drawn red where
- * it lies on the other wire, and listed in Problems).
+ * it lies on the other wire, and pinned in Output).
  */
 export function landBody(
   shown: StudioDocument, circuit: Readonly<Circuit>, id: string, points: readonly Pt[], drawnAt: (id: string, side: Side) => Point | null,

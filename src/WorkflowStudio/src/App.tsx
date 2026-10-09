@@ -6,6 +6,7 @@ import { ConfirmDialog } from './app/ConfirmDialog';
 import { DocumentPanel } from './app/DocumentPanel';
 import { createInspectorService } from './app/inspectorService';
 import { loadDocument } from './app/loadDocument';
+import { runWorkflow } from './app/runWorkflow';
 import { saveDesign } from './app/saveDesign';
 import { browserTabStorage, createSaver, readTabSession, restoredState, sessionOf, writeTabSession, type Session } from './app/session';
 import { StudioActionsProvider, type StudioActions } from './app/studioActions';
@@ -19,8 +20,8 @@ import { entityName } from './model/entityNames';
 import { Inspector } from './panels/Inspector';
 import { Output } from './panels/Output';
 import { Toolbox } from './panels/PaneNote';
-import { Problems } from './panels/Problems';
 import type { Pick } from './store/picks';
+import { runBlocked, RUN_WORD, type RunOp } from './store/run';
 import { selectionKey, type Selection } from './store/selection';
 import { designDirty, inspectorKey } from './store/studioState';
 import { createStudioStore, StudioStoreProvider, useStudio, useStudioStore } from './store/studioStore';
@@ -32,7 +33,6 @@ const uniqueName = (w: WorkflowReadDto) => entityName(w.name ?? '', w.version ??
 function renderTool(id: ToolId) {
   switch (id) {
     case 'inspector': return <Inspector />;
-    case 'problems': return <Problems />;
     case 'output': return <Output />;
     case 'toolbox': return <Toolbox />;
   }
@@ -203,6 +203,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
               actions.guard(id, () => store.dispatch({ type: 'select', workflowId: id, selection, picks }), doc);
             }}
             onSave={() => void saveDesign(api, store, id)}
+            onRun={(op) => void runWorkflow(api, store, id, op)}
             onRetry={() => { store.dispatch({ type: 'retry', workflowId: id }); load(id); }} />
         )}
         renderTool={renderTool}
@@ -215,6 +216,14 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
         storage={storage}
         restore={session?.dock ?? null}
         onLayoutChange={(dock) => { dockState.current = dock; saver.schedule(); }}
+        onRunCommand={(op: RunOp) => {
+          const open = store.getState().docs.find((d) => d.workflowId === store.getState().activeId);
+          if (!open) return `${RUN_WORD[op]}: open a workflow first.`;
+          const why = runBlocked(open, op);
+          if (why !== null) return `${RUN_WORD[op]} is not available: ${why}`;
+          void runWorkflow(api, store, open.workflowId, op);
+          return null;
+        }}
       />
       {prompt?.kind === 'design' && (
         <ConfirmDialog doc={prompt.doc} title="Discard design" onCancel={() => setPrompt(null)}

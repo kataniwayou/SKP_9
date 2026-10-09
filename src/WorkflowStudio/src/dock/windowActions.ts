@@ -16,11 +16,11 @@ export interface DockMemory {
 
 export const newMemory = (): DockMemory => ({ sides: {}, homes: {}, documentGroupId: null });
 
-export const DEFAULT_SIDES: Readonly<Record<ToolId, Side>> = { inspector: 'right', toolbox: 'right', problems: 'bottom', output: 'bottom' };
-/** The default sizes (mockup v49 TOOLS): Inspector 340 wide, Toolbox 290 wide, Problems and Output 150 high. */
-const TOOL_SIZE: Readonly<Record<ToolId, number>> = { inspector: 340, toolbox: 290, problems: 150, output: 150 };
-/** Problems and Output share a group when they share a side. */
-const MATE: Readonly<Partial<Record<ToolId, ToolId>>> = { problems: 'output', output: 'problems' };
+export const DEFAULT_SIDES: Readonly<Record<ToolId, Side>> = { inspector: 'right', toolbox: 'right', output: 'bottom' };
+/** The default sizes (mockup v49 TOOLS): Inspector 340 wide, Toolbox 290 wide, Output 150 high. */
+const TOOL_SIZE: Readonly<Record<ToolId, number>> = { inspector: 340, toolbox: 290, output: 150 };
+/** Panes that share a group when they share a side (none since Problems went, 2026-10-09). */
+const MATE: Readonly<Partial<Record<ToolId, ToolId>>> = {};
 
 export const toolSide = (memory: DockMemory, id: ToolId): Side => memory.sides[id] ?? DEFAULT_SIDES[id];
 
@@ -347,13 +347,12 @@ export function resetLayout(api: DockviewApi, memory: DockMemory, dockWidth: num
   memory.documentGroupId = area.id;
   api.addPanel({ ...toolPanel('inspector'), position: { referenceGroup: area, direction: 'right' }, initialWidth: TOOL_SIZE.inspector });
   api.addPanel({ ...toolPanel('toolbox'), position: { referencePanel: 'inspector', direction: 'right' }, initialWidth: TOOL_SIZE.toolbox });
-  api.addPanel({ ...toolPanel('problems'), position: { referenceGroup: area, direction: 'below' }, initialHeight: TOOL_SIZE.problems });
-  api.addPanel({ ...toolPanel('output'), position: { referencePanel: 'problems' }, inactive: true });
+  api.addPanel({ ...toolPanel('output'), position: { referenceGroup: area, direction: 'below' }, initialHeight: TOOL_SIZE.output, inactive: true });
   // the document area takes what the panes leave (it takes the slack), but keeps 480 px at least
   markDocumentArea(api, memory);
   api.getPanel('inspector')?.group.api.setSize({ width: TOOL_SIZE.inspector });
   api.getPanel('toolbox')?.group.api.setSize({ width: TOOL_SIZE.toolbox });
-  api.getPanel('problems')?.group.api.setSize({ height: TOOL_SIZE.problems });
+  api.getPanel('output')?.group.api.setSize({ height: TOOL_SIZE.output });
   if (dockWidth - TOOL_SIZE.inspector - TOOL_SIZE.toolbox < 480) area.api.setSize({ width: 480 });
   area.activePanel?.api.setActive();
 }

@@ -177,6 +177,12 @@ describe('buildDesignRequest (plan 8 §4.2)', () => {
   });
 });
 
+/** The Save's one-line verdict among Output's lines. */
+const verdict = (store: ReturnType<typeof createStudioStore>) => {
+  const line = store.getState().output.find((l) => /^(Saved|Not saved)/.test(l.text));
+  return line && { text: line.text, level: line.level };
+};
+
 describe('saveDesign (plan 8 §4.1)', () => {
   const NOW = () => new Date('2026-10-07T12:00:00Z');
   async function storeWithChange() {
@@ -192,9 +198,13 @@ describe('saveDesign (plan 8 §4.1)', () => {
     getStep: vi.fn().mockResolvedValue(notFound), getProcessor: vi.fn().mockResolvedValue(notFound), getSchema: vi.fn().mockResolvedValue(notFound),
   }) as unknown as StudioApi;
 
-  it('applied: the workflow is read again with GETs, no errors, Output says "Saved and applied"', async () => {
+  it('applied: the workflow is read again with GETs, no errors; Output logs the save from start to alignment', async () => {
     const store = await storeWithChange();
-    const api = apiWith({ ok: true, value: { applied: true, errors: [] } });
+    const log = [
+      { stage: 'store', level: 'info', kind: 'workflow', id: null, message: 'design stored on the workflow (the design and its layout), whatever the dry run finds' },
+      { stage: 'outcome', level: 'info', kind: 'outcome', id: null, message: 'committed: the entities hold the design; the stored design is emptied' },
+    ];
+    const api = apiWith({ ok: true, value: { applied: true, errors: [], log } });
 
     await saveDesign(api, store, 'wf1', NOW);
 
@@ -202,7 +212,16 @@ describe('saveDesign (plan 8 §4.1)', () => {
     expect(api.getGraph).toHaveBeenCalledWith('wf1');
     const d = store.getState().docs[0]!;
     expect([d.saving, d.errors, designDirty(d)]).toEqual([false, null, false]);
-    expect(store.getState().output).toEqual([{ at: '2026-10-07T12:00:00.000Z', workflowId: 'wf1', name: 'orders', text: 'Saved and applied' }]);
+    expect(store.getState().output.map((l) => l.text)).toEqual([
+      'Save started: sending the layout only',
+      'BaseApi · design stored on the workflow (the design and its layout), whatever the dry run finds',
+      'BaseApi · committed: the entities hold the design; the stored design is emptied',
+      'Saved and applied',
+      'graph re-read: 1 step, 1 link',
+      'drawing: the workflow\'s own wires, nothing to settle',
+      'nothing left stored: the entities hold the design, the layout is kept',
+    ]);
+    expect(store.getState().output[0]).toEqual({ at: '2026-10-07T12:00:00.000Z', workflowId: 'wf1', name: 'orders', text: 'Save started: sending the layout only', level: 'info' });
   });
 
   it('not applied: the stored design stays on the canvas; Problems gets each error, Output the count', async () => {
@@ -216,7 +235,7 @@ describe('saveDesign (plan 8 §4.1)', () => {
     expect(d.errors).toEqual(errors);
     expect(d.edits.steps['s1']!.fields).toEqual({ version: 'abc' });
     expect(designDirty(d)).toBe(false);
-    expect(store.getState().output.at(-1)!.text).toBe('Saved; not applied: 1 error');
+    expect(verdict(store)).toEqual({ text: 'Saved; not applied: 1 error', level: 'error' });
   });
 
   it('a request that never got an answer stores nothing: Output says why, the edits stay, nothing is read', async () => {
@@ -228,7 +247,7 @@ describe('saveDesign (plan 8 §4.1)', () => {
     const d = store.getState().docs[0]!;
     expect(api.getGraph).not.toHaveBeenCalled();
     expect([d.saving, designDirty(d)]).toEqual([false, true]);
-    expect(store.getState().output.at(-1)!.text).toBe('Not saved: Network error: down');
+    expect(store.getState().output.map((l) => [l.level, l.text])).toEqual([['info', 'Save started: sending the layout only'], ['error', 'Not saved: Network error: down']]);
   });
 
   it('sends nothing when there is nothing to save', async () => {
@@ -278,7 +297,7 @@ describe('saveDesign (plan 8 §4.1)', () => {
     expect(sent.layout.wires['s1->s3']!.tail).toEqual({ on: 'wire', host: 's1->s2', at: 40 });
     const short = { kind: 'step', id: 's3', stage: 'wires', field: null, message: 'short circuit: Completed meets Failed' };
     expect(store.getState().docs[0]!.errors).toEqual([short]);
-    expect(store.getState().output.at(-1)!.text).toBe('Saved and applied; 1 short circuit not written; 2 links held back until fixed');
+    expect(verdict(store)?.text).toBe('Saved and applied; 1 short circuit not written; 2 links held back until fixed');
 
     // the drawing waits, after the answer and after a reload: w:n stays, s1 -> s7 does not come back
     const wiresOf = (d: { design: { draft: { wires: unknown } } }) => Object.keys(d.design.draft.wires ?? {}).sort();
@@ -310,7 +329,7 @@ describe('saveDesign (plan 8 §4.1)', () => {
 
     const sent = vi.mocked(api.saveDesign).mock.calls[0]![1] as unknown as DesignRequest;
     expect([sent.workflow.entryStepIds, sent.steps]).toEqual([null, []]);
-    expect(store.getState().output.at(-1)!.text).toBe('Saved and applied; 1 short circuit not written; 1 link held back until fixed');
+    expect(verdict(store)?.text).toBe('Saved and applied; 1 short circuit not written; 1 link held back until fixed');
     expect(Object.keys(store.getState().docs[0]!.design.draft.wires ?? {})).toContain('w:e');
   });
 
@@ -339,7 +358,7 @@ describe('saveDesign (plan 8 §4.1)', () => {
       kind: 'wire', id: 'w:n', other: 'w:f', stage: 'wires', field: null, message: 'short circuit: step-s1_1.0.0-s1 → step-s3_1.0.0-s3 overlaps an open end → an open end',
     }]);
     // s1 -> s3 runs only through the shorted net: it is the short circuit's own link, not one held back beside it
-    expect(store.getState().output.at(-1)!.text).toBe('Saved and applied; 1 short circuit not written');
+    expect(verdict(store)?.text).toBe('Saved and applied; 1 short circuit not written');
     expect(Object.keys(store.getState().docs[0]!.design.draft.wires ?? {}).sort()).toEqual(['s1->s2', 'w:f', 'w:n', 'wf->s1', 'wf->s3']);
     // a fresh read draws it the same
     const reopened = createStudioStore();
@@ -369,6 +388,6 @@ describe('saveDesign (plan 8 §4.1)', () => {
     expect(sent.workflow.entryStepIds).toBeNull();
     expect(sent.steps).toEqual([]);
     expect(store.getState().docs[0]!.errors).toEqual([{ kind: 'step', id: 's2', stage: 'wires', field: null, message: 'short circuit: Completed meets Failed' }, bad]);
-    expect(store.getState().output.at(-1)!.text).toBe('Saved; not applied: 2 errors');
+    expect(verdict(store)?.text).toBe('Saved; not applied: 2 errors');
   });
 });

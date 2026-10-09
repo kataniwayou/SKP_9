@@ -112,7 +112,7 @@ describe('sessionOf / restoredState', () => {
   it('keeps each open document with its selection and view, and drops views of closed documents', () => {
     const state: StudioState = {
       ...INITIAL_STATE,
-      docs: [{ workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'workflow' }, inspector: EMPTY_INSPECTOR, picks: [], design: historyOf(), edits: EMPTY_EDITS, stored: null, restored: false, saving: false, errors: null }],
+      docs: [{ workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'workflow' }, inspector: EMPTY_INSPECTOR, picks: [], design: historyOf(), edits: EMPTY_EDITS, stored: null, restored: false, saving: false, errors: null, live: 'checking', run: null }],
       activeId: 'a',
       showDetails: true,
     };
@@ -212,5 +212,36 @@ describe('the design draft (plan 4)', () => {
     expect(back.design.draft.wires!['w:l1']).toEqual({ tail: { on: 'step', step: 's1', y: null }, head: { on: 'open', x: 8, y: 8 } });
     expect(back.edits).toEqual(EMPTY_EDITS);
     expect(back.restored).toBe(true);
+  });
+});
+
+describe('Output in the session (2026-10-09: a refresh keeps the log)', () => {
+  const lines = [
+    { at: '2026-10-09T09:00:00Z', workflowId: 'a', name: 'orders', text: 'Save started: sending the layout only', level: 'info' as const },
+    { at: '2026-10-09T09:00:01Z', workflowId: 'a', name: 'orders', text: 'Saved; not applied: 1 error', level: 'error' as const },
+  ];
+
+  it('writes the log with the session, reads it back with its levels, and starts the store from it', () => {
+    const state: StudioState = { ...restoredState(good), output: lines };
+    const storage = memoryStorage();
+    expect(writeSession(storage, sessionOf(state, new Map(), null))).toBe(true);
+    const read = readSession(storage)!;
+    expect(read.output).toEqual(lines);
+    expect(restoredState(read).output).toEqual(lines);
+  });
+
+  it('leaves the log out while it is empty, and reads a session without one (written before) as no lines', () => {
+    expect(sessionOf(restoredState(good), new Map(), null)).not.toHaveProperty('output');
+    expect(restoredState(readSession(memoryStorage({ [SESSION_KEY]: JSON.stringify(good) }))).output).toEqual([]);
+  });
+
+  it('drops what is not a line, reads an unknown level as info, and keeps at most the last 500', () => {
+    const many = Array.from({ length: 520 }, (_, i) => ({ ...lines[0]!, text: `line ${i}` }));
+    const text = JSON.stringify({ ...good, output: [7, { text: 'no time' }, { ...lines[1], level: 'loud' }, ...many] });
+    const read = readSession(memoryStorage({ [SESSION_KEY]: text }))!;
+    expect(read.output).toHaveLength(500);
+    expect(read.output![0]!.text).toBe('line 20');
+    expect(readSession(memoryStorage({ [SESSION_KEY]: JSON.stringify({ ...good, output: [{ ...lines[1], level: 'loud' }] }) }))!.output).toEqual([{ ...lines[1], level: 'info' }]);
+    expect(readSession(memoryStorage({ [SESSION_KEY]: JSON.stringify({ ...good, output: 'x' }) }))).not.toHaveProperty('output');
   });
 });

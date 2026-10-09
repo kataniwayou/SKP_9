@@ -71,9 +71,10 @@ describe('DockShell', () => {
     expect(toast()).toHaveTextContent('second');
   });
 
-  it('starts with the default layout: the four panes and an empty document area', () => {
+  it('starts with the default layout: the three panes and an empty document area (no Problems pane, 2026-10-09)', () => {
     setup();
-    for (const name of ['Inspector', 'Toolbox', 'Problems', 'Output']) expect(tab(name)).toBeInTheDocument();
+    expect(screen.queryAllByText('Problems', { selector: '.doctab .nm' })).toHaveLength(0);
+    for (const name of ['Inspector', 'Toolbox', 'Output']) expect(tab(name)).toBeInTheDocument();
     expect(screen.getByText('No workflow open')).toBeInTheDocument();
     expect(screen.getByText('body of inspector')).toBeInTheDocument();
   });
@@ -124,11 +125,12 @@ describe('DockShell', () => {
   it('hides and shows a pane from the View menu', () => {
     setup();
     openMenu('View');
-    choose(/Problems/);
-    expect(screen.queryByText('body of problems')).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /Problems/ })).toBeNull();
+    choose(/Output/);
+    expect(screen.queryByText('body of output')).toBeNull();
     openMenu('View');
-    choose(/Problems/);
-    expect(screen.getByText('body of problems')).toBeInTheDocument();
+    choose(/Output/);
+    expect(screen.getByText('body of output')).toBeInTheDocument();
   });
 
   it('auto-hides a pane from its tab menu, slides it out from the rail, and docks it back', () => {
@@ -170,7 +172,7 @@ describe('DockShell', () => {
     openMenu('Window');
     choose(/Save window layout/);
     expect(toast()).toHaveTextContent('Window layout saved in this browser');
-    expect(JSON.parse(storage.getItem(LAYOUT_KEY)!).hidden).toEqual(['problems', 'output']);
+    expect(JSON.parse(storage.getItem(LAYOUT_KEY)!).hidden).toEqual(['output']);
 
     openMenu('Window');
     choose(/Reset window layout/);
@@ -180,7 +182,7 @@ describe('DockShell', () => {
     openMenu('Window');
     choose(/Apply saved layout/);
     expect(railTab('output')).toBeInTheDocument();
-    expect(railTab('problems')).toBeInTheDocument();
+    expect(railTab('problems')).toBeNull();
   });
 
   it.each([
@@ -189,7 +191,7 @@ describe('DockShell', () => {
     ['rejected by dockview', JSON.stringify({ version: 1, dock: { grid: { root: { type: 'branch', data: [{ type: 'leaf', data: {} }] }, width: 1, height: 1, orientation: 'HORIZONTAL' }, panels: {} }, hidden: [], sides: {}, homes: {}, documentGroupId: null })],
   ])('falls back to the default layout when the saved one is %s (review focus 1)', (_name, text) => {
     setup({ storage: memoryStorage({ [LAYOUT_KEY]: text }) });
-    for (const name of ['Inspector', 'Toolbox', 'Problems', 'Output']) expect(tab(name)).toBeInTheDocument();
+    for (const name of ['Inspector', 'Toolbox', 'Output']) expect(tab(name)).toBeInTheDocument();
   });
 
   it('opens the picker from File, filters it, and opens the first match on Enter', () => {
@@ -214,12 +216,23 @@ describe('DockShell', () => {
     expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Search workflows' }));
   });
 
-  it('keeps Edit present but disabled, and Start/Stop keys harmless', () => {
+  it('keeps Edit present but disabled, and Start/Stop keys harmless without a page to run them', () => {
     setup();
     openMenu('Edit');
     for (const item of screen.getAllByRole('menuitem').filter((m) => m.classList.contains('mi'))) expect(item).toHaveAttribute('aria-disabled', 'true');
     fireEvent.keyDown(window, { key: 'F5' });
-    expect(toast()).toHaveTextContent('Start and Stop are not available yet.');
+    expect(toast()).toHaveTextContent('Start and Stop are not available.');
+  });
+
+  it('F5 starts and Shift+F5 stops through the page; a reason it cannot is a toast (2026-10-09)', () => {
+    const onRunCommand = vi.fn((op: 'start' | 'stop') => (op === 'stop' ? 'Stop is not available: It is not running' : null));
+    setup({ onRunCommand });
+    fireEvent.keyDown(window, { key: 'F5' });
+    expect(onRunCommand).toHaveBeenLastCalledWith('start');
+    expect(toast()?.textContent ?? '').toBe('');
+    fireEvent.keyDown(window, { key: 'F5', shiftKey: true });
+    expect(onRunCommand).toHaveBeenLastCalledWith('stop');
+    expect(toast()).toHaveTextContent('Stop is not available: It is not running');
   });
 
   it('toggles a strip menu with its own button', () => {
@@ -312,7 +325,7 @@ const docTabs = (name: string) => screen.queryAllByText(name, { selector: '.doct
 describe('DockShell, a layout dockview rejects', () => {
   it('falls back to the default layout at startup, with a toast', () => {
     expectingDockviewRejection(() => { setup({ storage: memoryStorage({ [LAYOUT_KEY]: REJECTED_BY_DOCKVIEW }) }); });
-    for (const name of ['Inspector', 'Toolbox', 'Problems', 'Output']) expect(docTabs(name)).toHaveLength(1);
+    for (const name of ['Inspector', 'Toolbox', 'Output']) expect(docTabs(name)).toHaveLength(1);
     expect(toast()).toHaveTextContent('The saved window layout could not be applied; the default layout is shown.');
   });
 
@@ -333,7 +346,7 @@ describe('DockShell, a layout dockview rejects', () => {
       expect(screen.getAllByText(`canvas of ${id}`)).toHaveLength(1);
     }
     expect(tab('wf-a').closest('.dv-groupview')).toBe(tab('wf-b').closest('.dv-groupview'));
-    for (const name of ['Inspector', 'Toolbox', 'Problems', 'Output']) expect(docTabs(name)).toHaveLength(1);
+    for (const name of ['Inspector', 'Toolbox', 'Output']) expect(docTabs(name)).toHaveLength(1);
     // the documents dockview dropped are disposed: no second canvas, no empty overlay left behind
     expect([...document.querySelectorAll('.dv-render-overlay')].map((o) => o.textContent).sort()).toEqual(['canvas of a', 'canvas of b']);
     expect(props.onCloseDocument).not.toHaveBeenCalled();
@@ -367,7 +380,7 @@ describe('DockShell, pop-out windows', () => {
     const win = await popOut('Output');
     expect(inPopout(win).getAllByText('Output', { selector: '.doctab .nm' })).toHaveLength(1);
     // getBy* throws when it finds nothing; toBeInTheDocument cannot judge a node of another window
-    expect(inPopout(win).getByText('body of problems').ownerDocument).toBe(win.document);
+    expect(inPopout(win).getByText('body of output').ownerDocument).toBe(win.document);
     expect(inPopout(win).getByTestId('defs').parentElement).toBe(win.document.body);
     expect(win.document.querySelector('.tip[role="tooltip"]')).not.toBeNull();
   });
@@ -392,7 +405,7 @@ describe('DockShell, pop-out windows', () => {
     fireEvent.keyDown(win, { key: 'Escape' });
 
     fireEvent.keyDown(win, { key: 'F5', shiftKey: true });
-    expect(win.document.querySelector('.toast')).toHaveTextContent('Start and Stop are not available yet.');
+    expect(win.document.querySelector('.toast')).toHaveTextContent('Start and Stop are not available.');
 
     fireEvent.keyDown(win, { key: 'w', altKey: true });
     expect(props.onCloseDocument).toHaveBeenCalledWith('a', win.document);
@@ -729,7 +742,7 @@ describe('DockShell, the drop rules on a drag overlay (spec 6.2.4)', () => {
     const { update } = setup();
     update({ documents: [doc('a'), doc('b')], activeDocumentId: 'a' });
     expect(overlay({ panelId: 'doc:a' }, 'content', 'toolbox')).toBe(false);
-    expect(overlay({ panelId: 'doc:a' }, 'tab', 'problems')).toBe(false);
+    expect(overlay({ panelId: 'doc:a' }, 'tab', 'output')).toBe(false);
     expect(overlay({ panelId: 'doc:a' }, 'edge', null)).toBe(false);
     expect(overlay({ groupOf: 'doc:a' }, 'content', 'inspector')).toBe(false);
     expect(overlay({ panelId: 'doc:a' }, 'tab', 'doc:b')).toBe(true);
@@ -740,9 +753,9 @@ describe('DockShell, the drop rules on a drag overlay (spec 6.2.4)', () => {
     const { update } = setup();
     update({ documents: [doc('a')], activeDocumentId: 'a' });
     expect(overlay({ panelId: 'toolbox' }, 'content', 'doc:a')).toBe(true);
-    expect(overlay({ panelId: 'toolbox' }, 'tab', 'problems')).toBe(true);
+    expect(overlay({ panelId: 'toolbox' }, 'tab', 'output')).toBe(true);
     expect(overlay({ panelId: 'toolbox' }, 'edge', null)).toBe(true);
-    expect(overlay({ groupOf: 'problems' }, 'content', 'inspector')).toBe(true);
+    expect(overlay({ groupOf: 'output' }, 'content', 'inspector')).toBe(true);
   });
 });
 
@@ -750,12 +763,12 @@ describe('session (plan 3d)', () => {
   it('reports its layout, documents included, when it changes, and restores it at startup in place of the saved layout', () => {
     const onLayoutChange = vi.fn();
     setup({ documents: [doc('a'), doc('b')], activeDocumentId: 'b', onLayoutChange });
-    // change the layout: auto-hide Problems from its tab menu
-    fireEvent.contextMenu(tab('Problems'));
+    // change the layout: auto-hide Output from its tab menu
+    fireEvent.contextMenu(tab('Output'));
     choose(/Auto hide/);
     const last = onLayoutChange.mock.calls.at(-1)![0] as SavedLayout;
     expect(Object.keys(last.dock.panels)).toEqual(expect.arrayContaining(['doc:a', 'doc:b']));
-    expect(last.hidden).toContain('problems');
+    expect(last.hidden).toContain('output');
 
     cleanup();
     // a saved window layout that differs: the session must win at startup
@@ -763,7 +776,7 @@ describe('session (plan 3d)', () => {
       documents: [doc('a'), doc('b')], activeDocumentId: 'b', restore: last,
       storage: memoryStorage({ [LAYOUT_KEY]: JSON.stringify({ ...last, hidden: [] }) }),
     });
-    expect(railTab('problems')).not.toBeNull();
+    expect(railTab('output')).not.toBeNull();
     expect(screen.getAllByText('wf-a', { selector: '.doctab .nm' })).toHaveLength(1);
     expect(screen.getAllByText('wf-b', { selector: '.doctab .nm' })).toHaveLength(1);
   });
@@ -785,7 +798,7 @@ describe('session (plan 3d)', () => {
     });
     expect(toast()).toHaveTextContent("The last session's layout could not be restored; the default layout is shown.");
     expect(docTabs('wf-a')).toHaveLength(1);
-    for (const name of ['Inspector', 'Toolbox', 'Problems', 'Output']) expect(docTabs(name)).toHaveLength(1);
+    for (const name of ['Inspector', 'Toolbox', 'Output']) expect(docTabs(name)).toHaveLength(1);
   });
 
   it('falls back to the default layout when the restored layout names a tool pane the dock does not know, keeping the documents', () => {

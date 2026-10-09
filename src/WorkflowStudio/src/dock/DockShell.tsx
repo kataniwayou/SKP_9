@@ -52,6 +52,11 @@ export interface DockShellProps {
   onLayoutChange?: (dock: SavedLayout) => void;
   /** A message for the toast; a new id shows it (the page's notices, e.g. a refused session write). */
   notice?: { id: number; text: string };
+  /**
+   * F5 / Shift+F5 (2026-10-09): Start or Stop the active document's saved workflow. Returns why it cannot now (shown
+   * as a toast), or null when it was pressed. Without it the keys say they are not available.
+   */
+  onRunCommand?: (op: 'start' | 'stop') => string | null;
 }
 
 const COMPONENTS = { document: DocumentHost, tool: ToolHost };
@@ -448,8 +453,13 @@ export function DockShell(props: DockShellProps) {
         e.preventDefault(); if (now.props.activeDocumentId) now.props.onCloseDocument(now.props.activeDocumentId, doc); break;
       case 'open':
         e.preventDefault(); openPicker(doc === document ? fileAnchor() : { x: 8, y: 8, doc }); break;
-      case 'start': case 'stop':
-        e.preventDefault(); showToast('Start and Stop are not available yet.', doc); break;
+      case 'start': case 'stop': {
+        e.preventDefault();
+        const run = now.props.onRunCommand;
+        const why = run ? run(command) : 'Start and Stop are not available.';
+        if (why !== null) showToast(why, doc);
+        break;
+      }
       case 'escape':
         if (now.switcher) setSwitcher(null);
         else if (now.menu) setMenu(null);

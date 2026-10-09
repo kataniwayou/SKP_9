@@ -9,7 +9,6 @@ import { inspectorGraph, renderInspector } from '../test/inspector';
 import { Output } from './Output';
 import { Toolbox } from './PaneNote';
 import type { DesignError } from '../model/graph';
-import { Problems } from './Problems';
 import { buildDesignRequest } from '../app/saveDesign';
 import { applyDesign } from '../design/apply';
 import { designOf } from '../store/studioState';
@@ -335,21 +334,25 @@ describe('Inspector editing (plan 8 §3.3: the design, never BaseApi)', () => {
   });
 });
 
-describe('Problems (plan 8 §4.1: the last Save\'s errors)', () => {
+/** Output's pinned problems (2026-10-09: the Problems pane moved into Output), or null when none are pinned. */
+const pinned = () => screen.queryByRole('list', { name: 'Problems' });
+
+describe('Output: the current problems pinned at the top, in red (plan 8 §4.1, 2026-10-09)', () => {
   const errors: DesignError[] = [
     { kind: 'step', id: 's2', stage: 'steps', field: 'version', message: "'abc' is not a version" },
     { kind: 'schema', id: 'nowhere', stage: 'schemas', field: 'definition', message: 'not JSON' },
   ];
 
-  it('says "No problems" when no Save has reported any', async () => {
-    wrap(await storeWith(null), <Problems />);
-    expect(screen.getByText('No problems')).toBeInTheDocument();
+  it('pins nothing when no Save has reported any', async () => {
+    wrap(await storeWith(null), <Output />);
+    expect(pinned()).toBeNull();
   });
 
   it('lists entity, field and message, and selects the entity of a row when clicked', async () => {
     const store = await storeWith(errors);
-    wrap(store, <Problems />);
-    const [named, unnamed] = screen.getAllByRole('listitem');
+    wrap(store, <Output />);
+    const [named, unnamed] = within(pinned()!).getAllByRole('listitem');
+    expect([named!.className, unnamed!.className]).toEqual(['prob err', 'prob err static']);
     expect(named).toHaveTextContent('Step');
     expect(named).toHaveTextContent('store_1.0.0-s2 · version');
     expect(named).toHaveTextContent("'abc' is not a version");
@@ -362,7 +365,7 @@ describe('Problems (plan 8 §4.1: the last Save\'s errors)', () => {
 
   it('selects from the keyboard: a row with an entity is focusable and Enter selects it', async () => {
     const store = await storeWith(errors);
-    wrap(store, <Problems />);
+    wrap(store, <Output />);
     const [named, unnamed] = screen.getAllByRole('listitem');
     expect(named).toHaveAttribute('tabindex', '0');
     expect(unnamed).not.toHaveAttribute('tabindex');
@@ -385,7 +388,7 @@ describe('Problems (plan 8 §4.1: the last Save\'s errors)', () => {
 
   it('lists a short circuit of the design while it lasts, not only after a Save; its row selects the step (plan 9 §2.2-7)', async () => {
     const store = await shorted();
-    wrap(store, <Problems />);
+    wrap(store, <Output />);
     const rows = screen.getAllByRole('listitem');
     expect(rows).toHaveLength(1);
     expect(rows[0]).toHaveTextContent('short circuit: Completed meets Failed');
@@ -397,7 +400,7 @@ describe('Problems (plan 8 §4.1: the last Save\'s errors)', () => {
     const copy: DesignError = { kind: 'step', id: 's3', stage: 'wires', field: null, message: 'short circuit: Completed meets Failed' };
     const other: DesignError = { kind: 'step', id: 's2', stage: 'steps', field: 'version', message: 'bad' };
     const store = await shorted([copy, other]);
-    wrap(store, <Problems />);
+    wrap(store, <Output />);
     expect(screen.getAllByRole('listitem').map((r) => r.querySelector('.pd')!.textContent)).toEqual(['short circuit: Completed meets Failed', 'bad']);
 
     act(() => store.dispatch({ type: 'undo', workflowId: 'wf1' }));
@@ -405,7 +408,7 @@ describe('Problems (plan 8 §4.1: the last Save\'s errors)', () => {
   });
 });
 
-describe('Problems: a wire lying on another net\'s wire (the user\'s rule 2, 2026-10-09)', () => {
+describe('Output pins a wire lying on another net\'s wire (the user\'s rule 2, 2026-10-09)', () => {
   it('lists "short circuit: <wire> overlaps <wire>" with the wires named as the Inspector names them, while it lasts', async () => {
     const base = await loadedDocument(graph);
     const store = createStudioStore();
@@ -415,7 +418,7 @@ describe('Problems: a wire lying on another net\'s wire (the user\'s rule 2, 202
     // s1 -> s2 shaped by hand where it is (an automatic wire would move a track over: the coordinator's ruling)
     const c = moveWire(addCircuitWire(setBends(circuitOf(base, EMPTY_DRAFT), 's1->s2', { xs: [host[0]![0]], ys: [] }), 'w:f', { tail: { on: 'open', x: 0, y: 0 }, head: { on: 'open', x: 0, y: 0 } }), 'w:f', host, () => null);
     store.dispatch({ type: 'design', workflowId: 'wf1', draft: withCircuit(EMPTY_DRAFT, base, c) });
-    wrap(store, <Problems />);
+    wrap(store, <Output />);
     const rows = screen.getAllByRole('listitem');
     expect(rows).toHaveLength(1);
     expect(rows[0]!.querySelector('.gate')).toHaveTextContent('Wire');
@@ -426,19 +429,38 @@ describe('Problems: a wire lying on another net\'s wire (the user\'s rule 2, 202
     fireEvent.click(rows[0]!);
     expect(store.getState().docs[0]!.picks).toEqual([{ kind: 'wire', id: 's1->s2' }, { kind: 'wire', id: 'w:f' }]);
     act(() => store.dispatch({ type: 'undo', workflowId: 'wf1' }));
-    expect(screen.getByText('No problems')).toBeInTheDocument();
+    expect(pinned()).toBeNull();
   });
 });
 
 describe('Output and Toolbox', () => {
-  it('Output says nothing happened yet, then logs each Save answer with its workflow (plan 8 §4.1)', async () => {
+  it('Output says nothing happened yet, then logs each line with its time and workflow, oldest first, errors red', async () => {
     const store = await storeWith();
     const { unmount } = wrap(store, <Output />);
-    expect(screen.getByText('Nothing yet. Each Save says here what happened.')).toBeInTheDocument();
+    expect(screen.getByText(/^Nothing yet\. Each Save, Start and Stop says here what happened/)).toBeInTheDocument();
     unmount();
+    act(() => store.dispatch({ type: 'log', workflowId: 'wf1', lines: [{ at: '2026-10-07T11:59:00Z', text: 'Save started: sending the layout only' }] }));
     act(() => store.dispatch({ type: 'saveFailed', workflowId: 'wf1', at: '2026-10-07T12:00:00Z', message: 'Network error: down' }));
     wrap(store, <Output />);
-    expect(screen.getByRole('log', { name: 'Output' })).toHaveTextContent('orders Not saved: Network error: down');
+    const log = screen.getByRole('log', { name: 'Output' });
+    const lines = [...log.querySelectorAll('.outl')];
+    expect(lines.map((l) => l.textContent)).toEqual([
+      `${new Date('2026-10-07T11:59:00Z').toLocaleTimeString()} orders Save started: sending the layout only`,
+      `${new Date('2026-10-07T12:00:00Z').toLocaleTimeString()} orders Not saved: Network error: down`,
+    ]);
+    expect(lines.map((l) => l.className)).toEqual(['outl', 'outl err']);
+    expect(pinned()).toBeNull();
+  });
+
+  it('the pinned problems sit above the log; a click picks, the log goes on below', async () => {
+    const store = await storeWith([{ kind: 'step', id: 's2', stage: 'steps', field: 'version', message: 'bad' }]);
+    act(() => store.dispatch({ type: 'log', workflowId: 'wf1', lines: [{ at: '2026-10-07T12:00:00Z', text: 'Saved; not applied: 1 error', level: 'error' }] }));
+    wrap(store, <Output />);
+    const pane = document.querySelector('[data-pane="output"]')!;
+    expect([...pane.children].map((c) => c.getAttribute('role'))).toEqual(['list', 'log']);
+    fireEvent.keyDown(within(pinned()!).getByRole('listitem'), { key: ' ' });
+    expect(store.getState().docs[0]!.selection).toEqual({ kind: 'step', stepId: 's2' });
+    expect(screen.getByRole('log', { name: 'Output' })).toHaveTextContent('Saved; not applied: 1 error');
   });
 
   it('Toolbox is a real pane with one line', () => {

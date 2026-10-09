@@ -4,7 +4,7 @@ import type { Pick } from './picks';
 import type { Selection } from './selection';
 
 /**
- * The entity a Save error names, as a canvas selection (plan 8 §4.1: clicking a Problems row selects it),
+ * The entity a Save error names, as a canvas selection (plan 8 §4.1: clicking a pinned problem in Output selects it),
  * or null when it names nothing on this canvas. An assignment selects its step (a created one's step is
  * found in the design); a processor, and a schema copy through its processor, select the processor on the
  * first step that uses it.

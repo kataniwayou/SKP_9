@@ -318,13 +318,51 @@ describe('the design (plan 8)', () => {
     expect(d0(s).errors).toEqual(errors);
     expect(d0(s).design.draft.next).toEqual({ s1: [] });
     expect(designDirty(d0(s))).toBe(false);
-    expect(s.output.at(-1)).toMatchObject({ workflowId: 'wf1', text: 'Saved; not applied: 1 error' });
+    // an answer with no log (an older BaseApi): its errors are logged in red, then the verdict, the re-read, the alignment
+    expect(s.output.map((l) => [l.level, l.text])).toEqual([
+      ['info', 'BaseApi sent no step-by-step log (an older BaseApi)'],
+      ['error', 'BaseApi · step s1: version: bad'],
+      ['error', 'Saved; not applied: 1 error'],
+      ['info', 'graph re-read: 2 steps, 2 links'],
+      ['info', 'drawing settled to BaseApi\'s links: 1 wire added'],
+      ['error', 'design stored on the workflow, not applied: the drawing shows the stored design'],
+    ]);
+    expect(s.output.every((l) => l.workflowId === 'wf1' && l.name === 'orders' && l.at === '2026-10-07T12:00:00Z')).toBe(true);
 
-    s = reduce(s, { type: 'saveAnswered', workflowId: 'wf1', at: '2026-10-07T12:01:00Z', applied: true, errors: [], doc: await loadedDocument(graphDto()) });
+    const log = [
+      { stage: 'steps', level: 'info' as const, kind: 'stage', id: null, message: 'steps: 1 step to check' },
+      { stage: 'steps', level: 'error' as const, kind: 'step', id: 's1', message: 'step \'a\': version: bad' },
+      { stage: 'outcome', level: 'info' as const, kind: 'outcome', id: null, message: 'committed: the entities hold the design; the stored design is emptied' },
+    ];
+    s = reduce({ ...s, output: [] }, { type: 'saveAnswered', workflowId: 'wf1', at: '2026-10-07T12:01:00Z', applied: true, errors: [], doc: await loadedDocument(graphDto()), log });
     expect(d0(s).errors).toBeNull();
-    expect(s.output.at(-1)!.text).toBe('Saved and applied');
+    expect(s.output.map((l) => [l.level, l.text])).toEqual([
+      ['info', 'BaseApi · steps: 1 step to check'],
+      ['error', 'BaseApi · step \'a\': version: bad'],
+      ['info', 'BaseApi · committed: the entities hold the design; the stored design is emptied'],
+      ['info', 'Saved and applied'],
+      ['info', 'graph re-read: 1 step, 1 link'],
+      ['info', 'drawing: the workflow\'s own wires, nothing to settle'],
+      ['info', 'nothing left stored: the entities hold the design, the layout is kept'],
+    ]);
+    s = reduce({ ...s, output: [] }, { type: 'saveAnswered', workflowId: 'wf1', at: '2026-10-07T12:01:30Z', applied: true, errors: [], doc: null, log: [], reread: 'Network error: down' });
+    expect(s.output.map((l) => [l.level, l.text])).toEqual([
+      ['info', 'Saved and applied'],
+      ['error', 'graph could not be read again: Network error: down; the drawing keeps the design as it was sent'],
+    ]);
     s = reduce(s, { type: 'saveFailed', workflowId: 'wf1', at: '2026-10-07T12:02:00Z', message: 'Network error: down' });
-    expect(s.output.at(-1)!.text).toBe('Not saved: Network error: down');
+    expect(s.output.at(-1)).toMatchObject({ text: 'Not saved: Network error: down', level: 'error' });
+  });
+
+  it('Output keeps the last 500 lines, oldest dropped first; a log action names its workflow', async () => {
+    let s = await loaded();
+    const lines = Array.from({ length: 300 }, (_, i) => ({ at: `t${i}`, text: `line ${i}` }));
+    s = reduce(s, { type: 'log', workflowId: 'wf1', lines });
+    s = reduce(s, { type: 'log', workflowId: 'wf1', lines: lines.map((l) => ({ ...l, text: `again ${l.text}`, level: 'error' as const })) });
+    expect(s.output).toHaveLength(500);
+    expect(s.output[0]!.text).toBe('line 100');
+    expect(s.output.at(-1)).toEqual({ at: 't299', workflowId: 'wf1', name: 'orders', text: 'again line 299', level: 'error' });
+    expect(reduce(s, { type: 'log', workflowId: 'nope', lines })).toBe(s);
   });
 });
 
