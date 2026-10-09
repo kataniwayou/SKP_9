@@ -398,7 +398,11 @@ describe('wire gestures', () => {
     expect(pts.length).toBeGreaterThan(2);
     const mid = (i: number): Point => ({ x: (pts[i]![0] + pts[i + 1]![0]) / 2, y: (pts[i]![1] + pts[i + 1]![1]) / 2 });
     expect(dragEnd(container, 's1->s2', 'head', mid(pts.length - 2)).text).not.toBe('same wire');
-    expect(dragEnd(container, 's1->s2', 'head', mid(0)).text).toBe('same wire');
+    // three quarters along its first run: its own line, clear of s1 and off the run's square
+    const quarter: Point = { x: pts[0]![0] + ((pts[1]![0] - pts[0]![0]) * 3) / 4, y: pts[0]![1] };
+    expect(dragEnd(container, 's1->s2', 'head', quarter).text).toBe('same wire');
+    // on that run's square: released there it would cut the wire (the user's rule, 2026-10-09)
+    expect(dragEnd(container, 's1->s2', 'head', mid(0)).text).toBe('cut here');
   });
 
   it('a host whose end is dropped open is detached: the end joined on it opens where it was drawn (spec §2.2-6)', async () => {

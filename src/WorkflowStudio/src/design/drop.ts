@@ -18,8 +18,11 @@ export type DropTarget =
 
 /** `needsStep`: a direction-less wire already joined on one wire's line, its other end onto another line (rule D). */
 export type Refusal = 'wrongSide' | 'sameStep' | 'sameWire' | 'short' | 'hubTail' | 'needsStep';
-/** `connect`: onto a terminal; `join`: onto a wire; `move`: the end is or stays open there (decision 12). */
-export type Verdict = 'connect' | 'join' | 'move' | Refusal;
+/**
+ * `connect`: onto a terminal; `join`: onto a wire; `move`: the end is or stays open there (decision 12); `cut` and
+ * `deleteWire`: an end square released on one of its own wire's squares (the user's rule, 2026-10-09).
+ */
+export type Verdict = 'connect' | 'join' | 'move' | 'cut' | 'deleteWire' | Refusal;
 
 /** The end a drop makes. */
 export function endOf(t: DropTarget): End {
@@ -204,11 +207,13 @@ export function dropLabel(v: Verdict): string {
     case 'short': return 'short circuit';
     case 'hubTail': return 'only a tail on the workflow';
     case 'needsStep': return 'needs a step first';
+    case 'cut': return 'cut here';
+    case 'deleteWire': return 'delete wire';
   }
 }
 
 /** Green when the drop connects or joins, grey when the end is or stays open, red when it snaps back. */
-export const toneOf = (v: Verdict): 'ok' | 'move' | 'no' => (v === 'connect' || v === 'join' ? 'ok' : v === 'move' ? 'move' : 'no');
+export const toneOf = (v: Verdict): 'ok' | 'move' | 'no' => (v === 'connect' || v === 'join' || v === 'cut' || v === 'deleteWire' ? 'ok' : v === 'move' ? 'move' : 'no');
 
 /**
  * What the pointer at `p` is over (decision 5): `over` is the block `blockAt` found (node id), `line` the wire `wireAt`

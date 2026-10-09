@@ -69,6 +69,9 @@
 /* plan 9: released here the end is open (grey) */
 .studio-canvas .react-flow__node.drop-move { outline: calc(3px * var(--inv, 1)) solid #9AA7B8; outline-offset: calc(4px * var(--inv, 1)); border-radius: 8px; }
 .design-ghost { fill: none; stroke: var(--accent); }
+/* the part an end square released on its own wire's square would cut away (the user's rule, 2026-10-09) */
+.design-gone { fill: none; stroke: #F87171; stroke-opacity: .45; stroke-linecap: round; }
+.studio-canvas .wire.faded { opacity: .3; }
 .design-drop-label rect { stroke-width: 1; }
 .design-drop-label.ok rect { fill: rgba(6, 40, 30, .92); stroke: #34D399; }
 .design-drop-label.no rect { fill: rgba(45, 10, 10, .92); stroke: #F87171; }

@@ -24,6 +24,8 @@ export type CableEdgeData = {
   short?: boolean;
   /** No end on a step or the hub (rule D, 2026-10-09): no direction, so no tail ring and no arrow head. */
   free?: boolean;
+  /** Its end square is over its other end square: released, it is deleted (drawn faded meanwhile). */
+  faded?: boolean;
 };
 export type CableEdgeType = Edge<CableEdgeData, 'cable'>;
 
@@ -46,13 +48,13 @@ export function arrowHead(prev: Pt, tip: Pt): string {
  * A direction-less wire (`free`: no end on a step or the hub, rule D) has neither ring nor chevron, only its circles.
  * While `flowing` (the workflow is started) a solid wire carries a pulse toward its head.
  */
-export function CableEdgeView({ points, colour, delay, picked, flowing, halo, dashed, tailOn = 'terminal', headOn = 'terminal', short, free }: CableEdgeData & { flowing: boolean }) {
+export function CableEdgeView({ points, colour, delay, picked, flowing, halo, dashed, tailOn = 'terminal', headOn = 'terminal', short, free, faded }: CableEdgeData & { flowing: boolean }) {
   const d = pathOf(points);
   const first = points[0]!, tip = points[points.length - 1]!;
   const dot = (p: Pt) => <circle className={short ? 'nx-joint short' : 'nx-joint'} cx={p[0]} cy={p[1]} r={4.5} />;
 
   return (
-    <g className={`wire${dashed ? ' dashed' : ''}${picked ? ' picked' : ''}${halo ? ` halo-${halo}` : ''}`} style={{ '--nc': colour } as CSSProperties}>
+    <g className={`wire${dashed ? ' dashed' : ''}${picked ? ' picked' : ''}${halo ? ` halo-${halo}` : ''}${faded ? ' faded' : ''}`} style={{ '--nc': colour } as CSSProperties}>
       {tailOn !== 'junction' && !free && <circle className="nx-src" cx={first[0]} cy={first[1]} r={2.6} />}
       <path className="w" d={d} stroke={colour} />
       {headOn !== 'junction' && !free && <path className="nx-head" d={arrowHead(points[points.length - 2] ?? tip, tip)} stroke={colour} />}

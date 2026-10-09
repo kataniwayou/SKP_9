@@ -16,7 +16,7 @@ import { Menu, anchorAt, type Anchor } from '../dock/Menu';
 import { togglePick, type Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
 import { GRID } from '../layout/geometry';
-import { endsOf, shapeFromPoints } from '../layout/shape';
+import { shapeFromPoints } from '../layout/shape';
 import type { WireRoute } from '../layout/circuitRoute';
 import { CableEdge } from './edges/CableEdge';
 import { TetherEdge } from './edges/TetherEdge';
@@ -144,24 +144,20 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const edges = useMemo(() => marked.edges.map((e) => {
     if (e.type !== 'cable' || !e.data) return e;
     let data = e.data;
-    if (dragged && e.id === dragged.id) data = { ...data, points: dragged.points };
+    if (dragged && e.id === dragged.id) data = { ...data, points: dragged.points, ...(wiring.ghost?.faded ? { faded: true } : {}) };
     // the line under a dragged end: green when the end may join it, red when refused (plan 7 §6.1, plan 9 §6)
     const line = wiring.hints.find((h) => h.line && h.id === e.id && h.tone !== 'move');
     if (line && line.tone !== 'move') data = { ...data, halo: line.tone };
     return data === e.data ? e : { ...e, data };
   }), [marked.edges, wiring.ghost, wiring.hints]);
-  // picks naming wires that are gone (after an undo) draw nothing
+  // picks naming wires that are gone (after an undo) draw nothing; while an end square is dragged its wire's squares
+  // stay where they were when the drag began: they are what it may be released on (the user's rule, 2026-10-09)
   const pickedWires = useMemo(
-    () => (design
-      ? shownDoc.wires.filter((w) => design.picks.some((p) => p.kind === 'wire' && p.id === w.id))
-        .map((w) => (dragged && w.id === dragged.id ? { ...w, points: dragged.points, core: { ends: endsOf(dragged.points), points: dragged.points } } : w))
-      : []),
-    [shownDoc, design?.picks, wiring.ghost],
+    () => (design ? shownDoc.wires.filter((w) => design.picks.some((p) => p.kind === 'wire' && p.id === w.id)) : []),
+    [shownDoc, design?.picks],
   );
-  // the run squares follow a drag's preview, not only the committed draft
-  const bendsOf = (w: WireRoute) => (dragged && w.id === dragged.id
-    ? shapeFromPoints(w.points)
-    : circuitOf(doc, preview ?? design?.draft ?? EMPTY_DRAFT)[w.id]?.bends ?? shapeFromPoints(w.core.points));
+  // the run squares follow a run drag's preview, not only the committed draft
+  const bendsOf = (w: WireRoute) => circuitOf(doc, preview ?? design?.draft ?? EMPTY_DRAFT)[w.id]?.bends ?? shapeFromPoints(w.core.points);
   // the wire's right-click menu (spec §4.3)
   const [menu, setMenu] = useState<{ anchor: Anchor; wireId: string } | null>(null);
 
@@ -247,7 +243,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onMoveEnd={(_event, v) => report(v)}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost && !wiring.ghost.wire ? wiring.ghost.points : null} hints={wiring.hints} />}
+              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost && !wiring.ghost.wire ? wiring.ghost.points : null} hints={wiring.hints} gone={wiring.ghost?.gone ?? null} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize initial={savedSize} />
