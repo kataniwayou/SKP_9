@@ -180,7 +180,8 @@ Agreed with the user on 2026-10-09; they supersede the 2026-10-08 notes in §6 w
 
 So the drawn graph can be checked by reading it, not only by looking at it. The user's decisions: the read-outs show
 the drawing only (the design over the base, as the canvas draws it), with no marks against BaseApi and no saved view
-beside it; there is none for a step; names are plain text, never links.
+beside it; names are plain text, never links. (A step's read-out was first left out; the user asked for one the
+same day, below.)
 
 - **A picked wire** (exactly one wire picked) replaces the old one line ("Wire: {from} → {to} · {family}") with a
   WIRE pane: its name ("{from} → {to}", as Problems names it), then a definition list:
@@ -207,6 +208,13 @@ beside it; there is none for a step; names are plain text, never links.
   back by a short circuit: Save keeps BaseApi's list". Then the problems, each with its count and names: steps with no
   wires, open wires, direction-less wires, short circuits (the messages Problems shows); "Problems: none" when there is
   none.
+- **A picked step** (the user's request, 2026-10-09: "do it to step too") shows, under its fields, a **Graph**
+  section: **Entry condition** (its own); **In**: what feeds it, the workflow first, then steps by unique name, each
+  "(held back)" when Save does not write that link; **Out**: its next steps as Save writes them, then drawn links held
+  back, and the held-back note when its own list is kept from BaseApi; **Wires on it**: how many wires have an end on
+  its sides, and those that are open, direction-less or in a short circuit, by name with what is wrong ("none" when no
+  wire touches it). In and Out are taken from the very links of the workflow's Graph (`linksOf`), so a step's read-out
+  and the workflow table always agree (a random-design test checks it).
 - **One source of truth.** The read-outs are built from what the canvas, Problems and Save use: `applyDesign`,
   `circuitOf`, the drawn routes' flags (`short`, `shortWith`, `free`, end kinds), `netsOf`, `trace` / `wiresBetween`,
   `shortCircuitErrors`, and `writtenLists` (shared with `buildDesignRequest`: a held source keeps the base's list).
@@ -373,7 +381,8 @@ colour; a both-open wire on a wire shaped by hand is red on both and listed, kep
 square laid on another net's wire are refused; a crossing and a fan-out wire up its own trunk are not short circuits)
 and e2e/overlap-save.spec.ts (Save holds the source back and writes nothing for it; a fresh read draws it red again).*
 *2026-10-09 (§2.4): e2e/readout.spec.ts (a picked wire's rows, and the rows after its head is dragged open, Undo; the
-Graph rows before and after Save equal BaseApi's nextStepIds and entry steps; a short circuit in both read-outs).*
+Graph rows before and after Save equal BaseApi's nextStepIds and entry steps; a short circuit in both read-outs; a
+picked step's In / Out, after a drag, and Out after Save equal to BaseApi's nextStepIds).*
 Plus: fan-in and fan-out saved as the right `nextStepIds` / `entryStepIds` (throwaway workflow); position along a wire
 changes what is reached; a wire loop and a hidden self-loop are refused; deleting a host leaves its joined wires open;
 an Inspector entry-condition edit that makes a short circuit is marked and listed in Problems; everything survives a

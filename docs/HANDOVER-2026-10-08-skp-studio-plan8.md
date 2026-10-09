@@ -341,6 +341,19 @@ read-out for steps, names as plain text.
   unfiltered, held items, reasons, junction distance, corners, joined, direction, unwired steps) and 3 e2e (draft
   ignored, base lists shown, no reasons): each fails.
 
+**Step read-out (user request, 2026-10-09: "do it to step too") — BUILT, NOT DEPLOYED** (the wire/workflow read-outs
+are deployed as 35fa1bc, bundle `index-BX8byXMC.js`; full Playwright on it 131 + 2 skips). A picked step's Inspector
+shows a Graph section under its fields: Entry condition, In (the workflow and/or source steps, held-back links marked),
+Out (Save's list, then held-back links, with the held note), Wires on it (count, plus open / direction-less / short
+circuit wires by name, or none). `stepReadout` in `panels/readout.ts` builds In and Out from the workflow Graph's own
+`linksOf`, so they cannot disagree; `StepGraphSection` in `Readouts.tsx`, same memoising. Judgement calls: "Wires on
+it" counts only ends on the step's sides (a wire joined on a wire into it is not counted); sources in In are ordered
+the workflow first, then by unique name. Tests: 7 unit (hub entry, no wires, fan-in, fan-out, short circuit / held,
+open wire, and a 60-trial random-design invariant: In/Out equal the workflow table), a panes test, e2e
+`readout.spec.ts` test 4 (pick c and a, drag a -> d's head open, Out/In/flags update, Save, Out equals BaseApi).
+Totals: Vitest 945 (80 files), tsc clean, Playwright on dev 132 + 2 skips. Five
+unit mutations and one e2e mutation each fail.
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed
