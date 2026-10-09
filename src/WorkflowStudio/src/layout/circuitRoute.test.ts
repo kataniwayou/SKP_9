@@ -3,7 +3,7 @@ import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { plainCircuit, type Circuit, type CircuitWire, type End } from '../circuit/circuit';
 import { SPHERE_R, STEP_W } from './geometry';
-import { contactOn, endPointOf, routeCircuit, routeWires } from './circuitRoute';
+import { contactOn, endPointOf, ripUpBetter, routeCircuit, routeWires } from './circuitRoute';
 import { hitsOf } from './router';
 import { overlapsOf, sharesNet } from './overlaps';
 import { netsOf } from '../circuit/families';
@@ -350,4 +350,21 @@ describe('the router after the re-review of 2026-10-09', () => {
       expect(left).toBeLessThanOrEqual(most);
     }, 120_000);
   }
+});
+
+describe('ripUpBetter: when a wire drawn again keeps its new track (final check 2026-10-09)', () => {
+  const s = (blocks: number, shorts: number, others: number, length: number) => ({ blocks, shorts, others, length });
+  it('never with more blocks crossed, whatever it gains', () => {
+    expect(ripUpBetter(s(1, 0, 0, 100), s(0, 3, 3, 900))).toBe(false);
+    expect(ripUpBetter(s(0, 3, 3, 900), s(1, 0, 0, 100))).toBe(true);
+  });
+  it('never trading overlaps with automatic wires for one with a hand-shaped wire (a short circuit)', () => {
+    expect(ripUpBetter(s(0, 1, 0, 100), s(0, 0, 3, 900))).toBe(false);
+    expect(ripUpBetter(s(0, 0, 3, 900), s(0, 1, 0, 100))).toBe(true);
+  });
+  it('then fewer other overlaps, then shorter; the same is no better', () => {
+    expect(ripUpBetter(s(0, 0, 1, 900), s(0, 0, 2, 100))).toBe(true);
+    expect(ripUpBetter(s(0, 0, 1, 100), s(0, 0, 1, 200))).toBe(true);
+    expect(ripUpBetter(s(0, 0, 1, 100), s(0, 0, 1, 100))).toBe(false);
+  });
 });

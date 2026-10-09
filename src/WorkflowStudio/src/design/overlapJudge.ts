@@ -1,5 +1,5 @@
 import type { StudioDocument } from '../app/document';
-import type { Circuit } from '../circuit/circuit';
+import { isAutomatic, type Circuit } from '../circuit/circuit';
 import { netsOf } from '../circuit/families';
 import { routeCircuit } from '../layout/circuitRoute';
 import { LineIndex, mayShare, type Stretch } from '../layout/overlaps';
@@ -23,18 +23,22 @@ const within = (s: Stretch, t: Stretch): boolean => {
 /**
  * For one drag of wire `id` (the user's rule 2, 2026-10-09): the other wires as `shown` draws them are indexed once, so
  * each pointer move only looks at the lines the dragged path lies on. A move makes a new short circuit when the path
- * shares a stretch of line with a wire that may not share one with it in `after` (`mayShare`), and that stretch is new:
- * a stretch the two wires already shared as drawn before the drag (a short circuit already there, or two automatic wires
- * the router left on each other) never refuses it (review 2026-10-09). A wire shaped by hand stays where it is; an
+ * shares a stretch of line with a wire that may not share one with it in `after` (`mayShare`), and that stretch is new.
+ * A stretch the two wires already shared as drawn before the drag is excused only when that was already a short circuit,
+ * or allowed only because both were automatic (the router left them there): one allowed because they were one net or a
+ * bus is not, since the gesture may be what parts them (final check 2026-10-09). `before` is the circuit before the drag. A wire shaped by hand stays where it is; an
  * automatic one takes a free track around a shape drawn by hand if it can, so then the circuit after the drop is drawn
  * and asked (rarely: only when the path lies on an automatic wire of another net).
  */
-export function overlapJudge(shown: StudioDocument, id: string): OverlapJudge {
+export function overlapJudge(shown: StudioDocument, id: string, was: Readonly<Circuit>): OverlapJudge {
   const index = new LineIndex();
   for (const w of shown.wires) if (w.id !== id) index.add(w.id, w.points);
   const mine = shown.wires.find((w) => w.id === id);
-  // the stretches it shares with each wire as drawn now
-  const before = mine ? index.stretches(mine.points, () => true) : new Map<string, Stretch[]>();
+  const shorted = new Set(mine?.shortWith ?? []);
+  const automatic = (x: string) => Object.hasOwn(was, x) && isAutomatic(was[x]!);
+  // the stretches it shares as drawn now with each wire it was already in a short circuit with, or both automatic
+  const excused = (x: string) => shorted.has(x) || (automatic(id) && automatic(x));
+  const before = mine ? index.stretches(mine.points, excused) : new Map<string, Stretch[]>();
   const fresh = (x: string, stretches: readonly Stretch[]) => stretches.some((s) => !(before.get(x) ?? []).some((t) => within(s, t)));
   const conditionOf = (s: string) => shown.graph.steps.get(s)?.entryCondition;
   return (points, after) => {

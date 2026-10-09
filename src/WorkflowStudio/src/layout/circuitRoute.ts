@@ -338,6 +338,14 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
   const hosts = new Set(ids.flatMap((id) => [wire(id).tail, wire(id).head].flatMap((e) => (e.on === 'wire' ? [e.host] : []))));
   const movable = (id: string) => isAutomatic(wire(id)) && !hosts.has(id);
   const others = (skip: string) => { taken = new LineIndex(); for (const id of ids) if (id !== skip) taken.add(id, out.get(id)!.points); };
+  // a wire's standing against everything else drawn (`taken` without it): blocks crossed, short circuits it is in under
+  // the rules, overlaps the rules allow (with other automatic wires), length
+  const standing = (id: string, r: WireRoute): RipUpScore => ({
+    blocks: hitsOf(r.core.points, r.source === null ? '' : r.source === WORKFLOW_SOURCE ? SPHERE_BOX_ID : stepBoxId(r.source), r.target === null ? '' : stepBoxId(r.target), boxes),
+    shorts: taken.count(r.points, (x) => !share(id, x)),
+    others: taken.count(r.points, (x) => share(id, x) && !sameNet(id, x)),
+    length: lengthOf([r.points]),
+  });
   for (let round = 0; round < RIPUPS; round++) {
     const stuck = overlapsOf(ids.map((id) => out.get(id)!)).filter((o) => !sameNet(o.a, o.b) && movable(o.a) && movable(o.b));
     if (stuck.length === 0) break;
@@ -345,12 +353,12 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     for (const id of [...new Set(stuck.flatMap((o) => [o.a, o.b]))].sort()) {
       const was = out.get(id)!;
       others(id);
-      const before = clashes(id, was.points);
-      if (before === 0) continue;
+      const before = standing(id, was);
+      if (before.shorts === 0 && before.others === 0) continue;
       out.delete(id);
       const again = routeOne(id)!;
       others(id);
-      if (clashes(id, again.points) < before) moved = true;
+      if (ripUpBetter(standing(id, again), before)) moved = true;
       else out.set(id, was);
     }
     if (!moved) break;
@@ -378,6 +386,21 @@ const SPREADS = 6;
 const HEIGHTS = 4;
 /** How many times automatic wires still on each other are drawn again, at most. */
 const RIPUPS = 3;
+
+/** A wire's standing when it is drawn again (rip-up): see `ripUpBetter`. */
+export interface RipUpScore { blocks: number; shorts: number; others: number; length: number }
+
+/**
+ * A wire drawn again keeps its new track only when it is strictly better in the router's order (final check 2026-10-09):
+ * fewer blocks crossed, then fewer short circuits under the rules (never trading overlaps with automatic wires for one
+ * with a wire shaped by hand), then fewer overlaps with other nets' automatic wires, then shorter.
+ */
+export function ripUpBetter(next: RipUpScore, was: RipUpScore): boolean {
+  for (const k of ['blocks', 'shorts', 'others', 'length'] as const) {
+    if (next[k] !== was[k]) return next[k] < was[k];
+  }
+  return false;
+}
 
 /** Where each drawn wire's ends are (its first point the tail, its last the head): to open an end where it is drawn. */
 export function endPointOf(routes: readonly WireRoute[]): (id: string, side: Side) => Point | null {

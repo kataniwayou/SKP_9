@@ -215,7 +215,7 @@ export function useWireGestures(
     };
     const shaped = (s: { bends: Bends | null; headY: number | null }): Draft => withCircuit(base, saved, shapedCircuit(s));
     // each move judges the core as it would be drawn (a lead from the hub or a junction does not move); the nets do not change
-    const judge = overlapJudge(shown.current, wire.id);
+    const judge = overlapJudge(shown.current, wire.id, circuit);
     let short = false;
     setResize(k % 2 === 0 ? 'ns' : 'ew');
     run(e, (p) => {
@@ -399,7 +399,7 @@ export function useWireGestures(
     };
     // a drop that keeps the drawn shape lies where it is drawn: on a wire it may not share a line with it is a short
     // circuit (rule 2); one the router draws again takes a free track by itself
-    const judge = overlapJudge(shown.current, wire.id);
+    const judge = overlapJudge(shown.current, wire.id, circuit);
     const overlaps = (t: DropTarget, path: Pt[]): boolean => (t.on === 'open' || keepShape()) && judge(path, () => dropped(t));
     setResize('move');
     dropGesture(e, {
@@ -437,7 +437,7 @@ export function useWireGestures(
     if (!Object.hasOwn(circuit, wire.id)) return;
     const from = flowPointOf(e);
     const points = wire.points;
-    const judge = overlapJudge(shown.current, wire.id);
+    const judge = overlapJudge(shown.current, wire.id, circuit);
     // the joined ends open where they are drawn now, not where the preview has moved their host to
     const drawnAt = endPointOf(shown.current.wires);
     let landing: (BodyLanding & { rawX: number; rawY: number }) | null = null;

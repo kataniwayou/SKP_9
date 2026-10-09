@@ -177,7 +177,7 @@ describe('a wire moved whole onto another wire (the user\'s rule 2, 2026-10-09)'
     // s2 -> s3 shaped by hand where it is (automatic, it would move a track over: the coordinator's ruling)
     const c2 = free(setBends(c, 's2->s3', { xs: [two[0]![0]], ys: [] }), 'w:f', moved);
     expect(land(d, c2, 'w:f', moved, 0, -400).ends.map((e) => e.verdict)).toEqual(['connect', 'connect']);
-    const l = landBody(d, c2, 'w:f', moved, endPointOf(d.wires), 0, -400, null, 8, overlapJudge(d, 'w:f'));
+    const l = landBody(d, c2, 'w:f', moved, endPointOf(d.wires), 0, -400, null, 8, overlapJudge(d, 'w:f', c));
     expect(l.ends.map((e) => e.verdict)).toEqual(['short', 'short']);
     expect(l.points).toEqual(pts);
     expect(l.result).toBe(l.preview);
@@ -189,7 +189,7 @@ describe('a wire moved whole onto another wire (the user\'s rule 2, 2026-10-09)'
     const pts = drawn(d, c, 's2->s3');
     // a both-open wire 400 below s2 -> s3, moved up onto it: its ends meet s2's output and s3's input, as s2 -> s3's do
     const moved = translatePoints(pts, 0, 400);
-    const l = landBody(d, free(c, 'w:f', moved), 'w:f', moved, endPointOf(d.wires), 0, -400, null, 8, overlapJudge(d, 'w:f'));
+    const l = landBody(d, free(c, 'w:f', moved), 'w:f', moved, endPointOf(d.wires), 0, -400, null, 8, overlapJudge(d, 'w:f', c));
     expect(l.ends.map((e) => e.verdict)).toEqual(['connect', 'connect']);
     expect(l.result['w:f']).toMatchObject({ tail: { on: 'step', step: 's2' }, head: { on: 'step', step: 's3' } });
   });
@@ -197,7 +197,7 @@ describe('a wire moved whole onto another wire (the user\'s rule 2, 2026-10-09)'
   it('beside another wire it connects as before', async () => {
     const d = await doc(), c = plain(d);
     const pts = drawn(d, c, 's1->s2');
-    const l = landBody(d, c, 's1->s2', pts, endPointOf(d.wires), 0, 8, null, 8, overlapJudge(d, 's1->s2'));
+    const l = landBody(d, c, 's1->s2', pts, endPointOf(d.wires), 0, 8, null, 8, overlapJudge(d, 's1->s2', c));
     expect(l.ends.map((e) => e.verdict)).toEqual(['connect', 'connect']);
   });
 });
