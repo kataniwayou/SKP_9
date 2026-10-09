@@ -1,5 +1,5 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { box, centreOf, documentPanel, dragEnd, dragReading, edge, emptySpot, get, newWire, newWires, node, openWorkflow, pane, pointOnWire, save, setEntryCondition, type Pt } from './studio';
+import { box, centreOf, documentPanel, dragEnd, dragReading, edge, emptySpot, endSquare, get, newWire, newWires, node, openWorkflow, pane, pickWire, pointOnWire, save, setEntryCondition, type Pt } from './studio';
 import { createCircuitThrowaway, expect, removeThrowaway, test, type CircuitThrowaway } from './throwaway';
 
 // Plan 9 §7: Save derives nextStepIds and entryStepIds by tracing the current. These tests save only their own throwaway
@@ -161,4 +161,29 @@ test('a direction-less wire writes nothing, nor does a wire joined on one: Save 
     await expect(edge(again, id).locator('path.nx-head')).toHaveCount(0);
   }
   await expect(edge(again, joined).locator('circle.nx-joint')).toHaveCount(1);
+});
+
+test('a wire cut by its head square released on its own run square: Save writes the link gone; a fresh read draws it cut, open at the cut (the user rule of 2026-10-09)', async ({ page, request }) => {
+  const panel = await open(page);
+  const ad = `${t.a}->${t.d}`;
+  expect(await nextOf(request, t.a)).toContain(t.d);
+  const others = await Promise.all([t.b, t.c, t.d].map((id) => nextOf(request, id)));
+  const before = await edge(panel, ad).locator('path.w').first().getAttribute('d');
+  await pickWire(page, panel, ad);
+  const head = await centreOf(endSquare(panel, ad, 'head'));
+  const run = await centreOf(panel.locator(`.design-wire[data-wire="${ad}"] .design-handle.seg`).first());
+  expect(await dragReading(page, panel, head, run)).toBe('cut here');
+  await expect.poll(() => edge(panel, ad).locator('path.w').first().getAttribute('d')).not.toBe(before);
+  await save(page);
+  await expect(await pane(page, 'Output')).toContainText('Saved');
+  expect(await nextOf(request, t.a)).not.toContain(t.d);
+  expect(await Promise.all([t.b, t.c, t.d].map((id) => nextOf(request, id)))).toEqual(others);
+  await page.reload();
+  const again = documentPanel(page, t.workflow);
+  await expect(edge(again, ad)).toHaveCount(1);
+  expect(await edge(again, ad).locator('path.w').first().evaluate((el) => getComputedStyle(el).strokeDasharray)).not.toBe('none');
+  // it ends at the cut: short of d's input
+  const d = await box(node(again, t.d));
+  const end = await edge(again, ad).locator('path.nx-head').boundingBox();
+  expect(end!.x + end!.width).toBeLessThan(d.x - 4);
 });

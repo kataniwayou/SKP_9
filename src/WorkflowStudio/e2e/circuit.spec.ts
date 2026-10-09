@@ -1004,3 +1004,146 @@ for (const [where, onto] of [['the hub', (panel: Locator) => onHub(panel, 0)], [
     expect(Math.hypot(now.x - dot.x, now.y - dot.y)).toBeLessThan(4);
   });
 }
+
+// ---- the user's cut rule (2026-10-09): an end square released on its own wire's squares ----
+
+/** A picked wire's run square k. */
+const runSquare = (panel: Locator, id: string, k: number) => panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg[data-k="${k}"]`);
+
+/** Presses `from` and moves the real mouse to `to` in small steps; the button stays down. */
+async function pressTo(page: Page, from: Pt, to: Pt): Promise<void> {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 6 });
+  await page.mouse.move(to.x, to.y, { steps: 6 });
+  await frames(page);
+}
+
+test('cut: an end square released on one of its own run squares cuts the wire there: the corners before it kept, those after it gone, the end open there; Ctrl+Z puts it back', async ({ page }) => {
+  const panel = await open(page);
+  const ab = `${t.a}->${t.b}`;
+  const before = await pointsOf(panel, ab);
+  expect(before).toHaveLength(4);
+  await pickWire(page, panel, ab);
+  // run 1 is a -> b's vertical run: its square is in its middle
+  const sq = await centreOf(runSquare(panel, ab, 1));
+  await pressTo(page, await centreOf(endSquare(panel, ab, 'head')), sq);
+  // hovering: "cut here", the part that goes drawn faded, the wire drawn up to the square
+  expect(await labelsOf(panel)).toEqual(['cut here']);
+  await expect(panel.locator('.design-gone')).toHaveCount(1);
+  const mid: [number, number] = [before[1]![0], (before[1]![1] + before[2]![1]) / 2];
+  await expect.poll(() => pointsOf(panel, ab)).toEqual([before[0], before[1], mid]);
+  // the squares stay where they were when the drag began
+  expect(await centreOf(runSquare(panel, ab, 1))).toEqual(sq);
+  await page.mouse.up();
+  await expect.poll(() => pointsOf(panel, ab)).toEqual([before[0], before[1], mid]);
+  // the corner after the square is gone; the head is open there: dashed, grey, its arrow head at the cut
+  expect(await dashOf(panel, ab)).not.toBe('none');
+  expect(await colourOf(panel, ab)).toBe(GREY);
+  await expect(edge(panel, ab).locator('path.nx-head')).toHaveCount(1);
+  await expect(panel.locator('.design-gone')).toHaveCount(0);
+  // one step back
+  await focusCanvas(page, panel);
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => pointsOf(panel, ab)).toEqual(before);
+  expect(await dashOf(panel, ab)).toBe('none');
+});
+
+test('cut: moving off the square restores the drag as before; Escape over the square cancels everything', async ({ page }) => {
+  const panel = await open(page);
+  const ab = `${t.a}->${t.b}`;
+  const before = await pointsOf(panel, ab);
+  await pickWire(page, panel, ab);
+  const sq = await centreOf(runSquare(panel, ab, 1));
+  await pressTo(page, await centreOf(endSquare(panel, ab, 'head')), sq);
+  expect(await labelsOf(panel)).toEqual(['cut here']);
+  // off the square onto empty canvas: an ordinary end drag again
+  const off = await emptySpot(panel, [sq]);
+  await page.mouse.move(off.x, off.y, { steps: 6 });
+  await frames(page);
+  expect(await labelsOf(panel)).toEqual(['move here']);
+  await expect(panel.locator('.design-gone')).toHaveCount(0);
+  // back on it, then Escape: nothing changes
+  await page.mouse.move(sq.x, sq.y, { steps: 6 });
+  await frames(page);
+  expect(await labelsOf(panel)).toEqual(['cut here']);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await expect(panel.locator('.design-drop-label')).toHaveCount(0);
+  await expect(panel.locator('.design-gone')).toHaveCount(0);
+  await expect.poll(() => pointsOf(panel, ab)).toEqual(before);
+  expect(await dashOf(panel, ab)).toBe('none');
+});
+
+test('cut: an end square released on the wire\'s other end square deletes the whole wire; Ctrl+Z brings it back', async ({ page }) => {
+  const panel = await open(page);
+  const ab = `${t.a}->${t.b}`;
+  await pickWire(page, panel, ab);
+  await pressTo(page, await centreOf(endSquare(panel, ab, 'head')), await centreOf(endSquare(panel, ab, 'tail')));
+  expect(await labelsOf(panel)).toEqual(['delete wire']);
+  await expect(edge(panel, ab).locator('g.wire.faded')).toHaveCount(1);
+  await page.mouse.up();
+  await expect(edge(panel, ab)).toHaveCount(0);
+  await expect(page.getByText('● design draft')).toBeVisible();
+  await focusCanvas(page, panel);
+  await page.keyboard.press('Control+z');
+  await expect(edge(panel, ab)).toHaveCount(1);
+  expect(await dashOf(panel, ab)).toBe('none');
+});
+
+test('cut: a wire joined on the part that goes opens where it is drawn; one joined on the part kept stays joined', async ({ page }) => {
+  const panel = await open(page);
+  const ab = `${t.a}->${t.b}`, bc = `${t.b}->${t.c}`;
+  // b -> c's tail joined low on a -> b's vertical run (past its middle), a new wire's tail joined on its first run
+  expect(await dragEnd(page, panel, bc, 'tail', await pointOnWire(panel, ab, 0.8, 12))).toBe('join here');
+  const joinedAt = (await pointsOf(panel, bc))[0]!;
+  const tap = await newWire(page, panel, t.c, await emptySpot(panel));
+  expect(await dragEnd(page, panel, tap, 'tail', await pointOnWire(panel, ab, 0.08, 4))).toBe('join here');
+  const tapAt = (await pointsOf(panel, tap))[0]!;
+  await pickWire(page, panel, ab, 0.4);
+  await pressTo(page, await centreOf(endSquare(panel, ab, 'head')), await centreOf(runSquare(panel, ab, 1)));
+  expect(await labelsOf(panel)).toEqual(['cut here']);
+  await page.mouse.up();
+  await expect(edge(panel, bc).locator('circle.nx-joint')).toHaveCount(0);
+  expect((await pointsOf(panel, bc))[0]).toEqual(joinedAt);
+  await expect(edge(panel, tap).locator('circle.nx-joint')).toHaveCount(1);
+  expect((await pointsOf(panel, tap))[0]).toEqual(tapAt);
+});
+
+test('cut is the end square\'s alone: a run square or the body dragged onto the wire\'s own squares never cuts or deletes it', async ({ page }) => {
+  const panel = await open(page);
+  const ab = `${t.a}->${t.b}`;
+  await pickWire(page, panel, ab);
+  // run 0 (horizontal) dragged down onto run 1's square: the run moves, the wire is whole, its head still on b
+  const run1 = await centreOf(runSquare(panel, ab, 1));
+  await pressTo(page, await centreOf(runSquare(panel, ab, 0)), run1);
+  await expect(panel.locator('.design-drop-label')).toHaveCount(0);
+  await expect(panel.locator('.design-gone')).toHaveCount(0);
+  await page.mouse.up();
+  await expect(edge(panel, ab)).toHaveCount(1);
+  const b = await flowBox(panel, t.b);
+  expect((await pointsOf(panel, ab)).at(-1)![0]).toBe(b.x);
+  expect(await dashOf(panel, ab)).toBe('none');
+  // run 1 (vertical) dragged sideways onto the tail square
+  await pickWire(page, panel, ab);
+  await pressTo(page, await centreOf(runSquare(panel, ab, 1)), await centreOf(endSquare(panel, ab, 'tail')));
+  await expect(panel.locator('.design-drop-label')).toHaveCount(0);
+  await page.mouse.up();
+  await expect(edge(panel, ab)).toHaveCount(1);
+  expect((await pointsOf(panel, ab)).at(-1)![0]).toBe(b.x);
+
+  // the body (closed hand) pressed and released over its own head square, then its tail square: it only moves whole
+  for (const side of ['head', 'tail'] as const) {
+    await pickWire(page, panel, ab);
+    const before = await pointsOf(panel, ab);
+    const target = await centreOf(endSquare(panel, ab, side));
+    const body = await pointOnWire(panel, ab, 0.5);
+    await pressTo(page, body, target);
+    expect((await labelsOf(panel)).some((l) => l === 'cut here' || l === 'delete wire')).toBe(false);
+    await page.mouse.up();
+    await expect(edge(panel, ab)).toHaveCount(1);
+    const after = await pointsOf(panel, ab);
+    expect(after).toHaveLength(before.length);
+    shiftOf(before, after);
+  }
+});
