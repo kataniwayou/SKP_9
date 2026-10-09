@@ -30,7 +30,8 @@ Decisions taken with the user (2026-10-07):
    virtual entities' changes go to the workflow row (a new `Design` column next to `Layout`), committed on their
    own. Then BaseApi **dry-runs** the virtual entities through **ordered stages**, collecting every error and
    writing nothing. **No errors: BaseApi aligns the real entities with the design in one transaction. Errors: the
-   real entities are not touched**, and the errors are shown in the Problems and Output panels. Errors are only
+   real entities are not touched**, and the errors are shown in the Problems and Output panels (since 2026-10-09:
+   pinned at the top of Output, the only message panel, §4.1). Errors are only
    ever the result of pressing Save: they are not stored anywhere, and opening a workflow shows none (it runs no
    dry run). The stored design is **last write wins** between two designers.
 9. **The browser session keeps unsaved edits** made since the last Save, so a refresh never loses work.
@@ -109,6 +110,23 @@ Either way the design is now stored on the workflow, and the session's unsaved e
   selects the entity), and a summary line to **Output** ("Saved; not applied: N errors", time).
 - Errors live only until the next Save, a Discard, or closing the workflow; they are never stored.
 
+**Amended 2026-10-09 (user decisions): one message panel, and Save logs what really happens.**
+- The **Problems panel is gone**; **Output** is the only message panel. The active document's current problems (the
+  live short circuits of the drawing, then the errors of its last Save: exactly what Problems listed, same names, same
+  click-to-pick, a wire row picking both wires of an overlap) are **pinned at the top of Output as red rows** (a list,
+  each row focusable, Enter or Space picks); below them the log (`role=log`), oldest first, error lines red. A dock
+  layout or session that still holds a Problems pane loads without it and with no empty place where it was (a group it
+  leaves empty goes; the document area stays).
+- **Save logs, in order:** "Save started: sending …" (what the request carries), BaseApi's own log line by line
+  (`BaseApi · …`, §4.3), the verdict ("Saved and applied" / "Saved; not applied: N errors"), the re-read
+  ("graph re-read: N steps, M links", or why it failed, red), then the alignment: short circuits held back
+  ("1 short circuit held back: N links not written", red), how settling changed the drawing (compared as drawn: wires
+  changed / added / removed, "agrees with BaseApi's links", or "the workflow's own wires, nothing to settle"), and what
+  stays stored ("design stored on the workflow, not applied", red, or "nothing left stored"). A Save with no answer is
+  "Not saved: …" in red. Every line has its time and workflow name. Output keeps the **last 500 lines** and is kept in
+  the session (`output`, optional, version still 1), so a refresh keeps it. An older BaseApi without a log gives one
+  line saying so and its errors as red lines.
+
 ### 4.2 BaseApi: `PUT /workflows/{id}/design`
 
 A new endpoint; `PUT /workflows/{id}/graph` (atomic) stays as it is. The workflow entity gains a nullable jsonb
@@ -159,6 +177,20 @@ Rules for every stage:
 - The answer is `200` `{ applied: boolean, errors: [{ kind, id, stage, field, message }] }` (`applied` is true
   exactly when `errors` is empty; the design is stored either way). Only a malformed body (not a design at all) is a `400`; a workflow that does not
   exist is a `404`.
+- **Amended 2026-10-09:** the answer also carries `log: [{ stage, level, kind, id, message }]` (optional, so older
+  studios ignore it), in the order things happened: the store ("design stored on the workflow …", stage `store`), "dry
+  run started", then for each stage one line when it starts ("steps: 2 steps to check", or "schemas: nothing to do"),
+  one per entity it changed with what changed ("step 'a': name 'a' → 'a2'; entryCondition PreviousCompleted →
+  PreviousFailed", "step 'a': next steps a2→e added, a2→c removed", "workflow 'wf': entry steps e added", "assignment
+  'x' on step 's1': created …"), one per refused entity (level `error`, its field and message), and one with its counts
+  ("steps: 1 updated, 1 unchanged, 1 refused"; `error` when any was refused); then the outcome (`outcome`): "dry run
+  passed: N changes, no errors" and "committed: the entities hold the design; the stored design is emptied", or "dry
+  run failed: N errors on M entities" and "rolled back: no entity was changed; the design stays stored on the
+  workflow" (both `error`). Only what a stage actually wrote is described: an entity it looked at and left as it was
+  (a wiring-only step in the steps stage, an assignment already gone) is counted as unchanged, with no line. Long
+  values (a description over 40 characters, a payload) read "description changed"; ids the log cannot name show
+  their first 8 characters. `kind` is the entity kind, `stage` for a stage's lines, `outcome` for the verdict; `id` is
+  null on those.
 
 ### 4.4 The schema copy's version
 

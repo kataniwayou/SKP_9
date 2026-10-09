@@ -287,11 +287,22 @@ Each rule is marked *Visio* (Visio's documented behaviour) or *ours* (a delibera
   each document's toolbar, and F5 / Shift+F5 still work.
 - A **Visual Studio-style dock on dockview-core 8.4** (MIT). Workflows are **document tabs**, opened
   from a searchable dropdown. Closing an unsaved one asks **Save / Discard / Cancel**.
-- **Shared tool panes:** Inspector, Toolbox, Problems, Output.
+- **Shared tool panes:** Inspector, Toolbox, Output. (Problems was one until 2026-10-09: the user moved its rows
+  into Output, pinned red at the top; see the plan 8 spec §4.1. A stored layout or session holding a Problems pane
+  loads without it.)
 - Each document has a capsule toolbar: name, cron, status, Save / Start / Stop, its own zoom and Fit.
   The status comes from `GET /orchestration/live` (§4.4), polled every 5 s while the tab is visible;
-  a failed poll shows *status unknown*. **Start and Stop stay disabled** ("Not available yet") until a
-  later slice enables them (user decision, 2026-10-06): the studio writes nothing to orchestration yet.
+  a failed poll shows *status unknown*. ~~Start and Stop stay disabled ("Not available yet") until a later slice
+  enables them (user decision, 2026-10-06).~~ **Enabled 2026-10-09 (user decision): Start and Stop act on the saved
+  workflow BaseApi holds, never on the drawing.** They call `POST /orchestration/start` and `/stop` with the workflow
+  id (202 Accepted). Start is enabled only while the live poll says *stopped*, Stop only while it says *running*;
+  neither while checking, unknown, or while a press is in progress (the pill and the button then say starting… /
+  stopping…). F5 / Shift+F5 do the same for the active document (a toast says why when they cannot). Output logs the
+  request, BaseApi's answer (a refusal in red with BaseApi's reason, e.g. a 422 gate) and, once the live set agrees,
+  "running" / "stopped". A Start while the design has unsaved changes logs first "Started the saved workflow; your
+  unsaved design is not part of this run" (and still starts); a stored design not applied gets a like note. An
+  accepted press the live set has not agreed with after 30 s ends in a red line (BaseApi's known gap: a start whose
+  control message is parked is accepted and never appears in the live set).
 - Clicking anything fills the Inspector, whether it is shown or hidden. Selectable: a step (parked
   included), a processor die, a cache and the sphere. Esc or an empty-canvas click clears the
   selection; selecting never moves or wires anything.
@@ -419,6 +430,9 @@ These build on §7.1 once canvas editing exists:
 
 ### 7.3 Problems
 
+> Superseded 2026-10-09: there is no Problems pane. The current problems (the design's short circuits and the last
+> Save's errors) are pinned red at the top of Output (plan 8 spec §4.1). Validate is no longer called (plan 8).
+
 From slice 3a, Problems lists the document's validate result (gate, title, detail), shows "Problems
 unavailable." when validate fails and "No problems" when the list is empty, and a click selects the
 entity a problem names, when it names one. The full pane (later) has two severities:
@@ -438,7 +452,7 @@ Start blockers come from `POST /workflows/{id}/validate` (§4.4), called shortly
 | Save, 422 (FK violation) | Whole save rolled back; Output shows the constraint and who references the entity; draft kept |
 | Toolbox delete, 422 | The entity stays; the referencing rows are listed. **Not supported by BaseApi yet** (found 2026-10-06): its 422 names one FK column, not the rows; slice 6 must add a usages read |
 | Inspector save, 400 / 404 / 409 / 422 | §7.1: field messages under their fields; otherwise a banner with the server's text; the form keeps what was typed |
-| Start, 422 (validation or liveness) | Output shows the orchestrator's reasons; Problems is not changed |
+| Start, 422 (validation or liveness) | Output shows BaseApi's reason in red (2026-10-09); nothing is pinned |
 | Schema update on a referenced schema, 409 | Never sent: the UI always creates a new schema version instead |
 | Stale ids in `Layout` | Ignored silently; new blocks get an elkjs position |
 | Network failure | Draft kept; Save stays enabled; Output logs the failure |

@@ -10,6 +10,7 @@ BaseApi `localhost:18080`. Do not stop them by hand.
 
 - **Plan 7 (junctions) is done and deployed** (`30996e5..a2a8c96`, handover `e38a2a3`). Spec
   `docs/superpowers/specs/2026-10-07-skp-studio-07-junctions-design.md`.
+- **Output / Save log / Start-Stop (2026-10-09) is BUILT, NOT DEPLOYED** (section below the step read-out).
 - **Plan 8 (virtual design) is BUILT and DEPLOYED.** Spec
   `docs/superpowers/specs/2026-10-07-skp-studio-08-virtual-design-design.md`; plan
   `docs/superpowers/plans/2026-10-07-skp-studio-08-virtual-design.md`. Executed subagent-driven (16 tasks, each
@@ -353,6 +354,58 @@ open wire, and a 60-trial random-design invariant: In/Out equal the workflow tab
 `readout.spec.ts` test 4 (pick c and a, drag a -> d's head open, Out/In/flags update, Save, Out equals BaseApi).
 Totals: Vitest 945 (80 files), tsc clean, Playwright on dev 132 + 2 skips. Five
 unit mutations and one e2e mutation each fail.
+
+**Output, the Save log, Start and Stop (user decisions, 2026-10-09) — BUILT, NOT DEPLOYED.** Commits `074f2cc`
+(BaseApi + regenerated client), `d7241d3` (studio), `ad8f7df` (e2e + a settle-report fix), and the docs commit that
+adds this paragraph. Specs: plan 8 spec §4.1 and §4.3 (amended), studio spec §6.1, §7.3, §8 (amended / superseded).
+- **One panel.** Problems is gone (dock, View/Window menus, `ToolId`, default layout: Output alone below the
+  documents). `panels/Output.tsx` pins the active document's live short circuits and last Save errors as red rows at
+  the top (`role=list` "Problems", focusable, Enter/Space, same names and click-to-pick as Problems had, a wire row
+  picking both wires), then the log (`role=log`), errors red (`--error: #F87171`, the canvas's short-circuit red).
+  `parseLayout` drops a retired pane (`RETIRED_TOOL_IDS`) from any stored layout or session: its tabs and panel go, a
+  group it leaves empty goes (grid, rail, floating, pop-out; the document area stays), homes beside it and its
+  snapshot boxes go. Apply never sees it, so an old session no longer trips "a tool pane the dock does not know".
+- **Save log.** BaseApi: `DesignOutcomeDto.Log` (optional `DesignLogDto(Stage, Level, Kind, Id?, Message)`), written
+  by `DesignRun` (`BeginStage`/`Changed`/`Unchanged`/`EndStage`, `Fail` also logs, `Label` names entities) and
+  `DesignLogText` (field diffs, link diffs "a→e added, a→c removed"); the syncer adds the store, "dry run started"
+  and the outcome lines. Studio: "Save started: sending …", then `BaseApi · …` lines, the verdict, "graph re-read",
+  held-back short circuits, settling (compared as drawn, `settleReport`), what stays stored; "Not saved: …" red.
+  `store/output.ts` keeps the last 500 lines; the session keeps them (`Session.output`, optional, version 1).
+- **Start / Stop.** `api.startWorkflow/stopWorkflow` (`POST /orchestration/start|stop`, body the id, 202 read as no
+  body). `OpenDocument.live` (dispatched by DocumentPanel from its poll) and `run` (`store/run.ts`, `runBlocked`);
+  `app/runWorkflow.ts` logs request / accepted / refused (red, `describeError`, e.g. "422: …"); the reducer's `live`
+  action finishes a waiting press when the live set agrees ("running" / "stopped"), `runTimeout` (30 s) ends it red
+  (the parked-start gap). Start's note: "Started the saved workflow; your unsaved design is not part of this run"
+  (dirty), or a like note for a stored design not applied. F5 / Shift+F5 run it for the active document.
+- Judgement calls: an empty stage is one line ("schemas: nothing to do") rather than start + finish; an entity a stage
+  looked at but left as it was is counted "unchanged" with no line (a wiring-only step in `steps`, an assignment
+  already gone); values over 40 characters read "<field> changed"; the stage counts line is `error` when any entity
+  was refused; "dry run passed: N changes" counts the change lines; "Start requested … for the workflow BaseApi
+  holds" logs before the note-free press too; held-back short circuits are red lines though the save applied;
+  nothing is pinned when there are no problems (no "No problems" text; e2e checks zero rows); a stored-but-not-applied
+  design also gets a Start note; the pinned list takes at most 60 % of Output's height and scrolls.
+- Tests: BaseApi hermetic 2024 passed + 70 skipped (new `DesignLogTests` 3: full applied order, refusal order and
+  levels, names of shared entities / assignments / links); Release `--no-incremental` build clean (no AD0001). Vitest
+  968 (82 files; new `runWorkflow.test.ts`, `saveLog.test.ts`, session output, layout migration (unit and on a real
+  dockview), Output pinned/log, toolbar Start/Stop states); tsc clean. Playwright on the dev server **against this
+  branch's BaseApi run locally**: 137 passed + 2 skipped (new `output.spec.ts` 4, `run.spec.ts` 1). Against the
+  deployed BaseApi: 135 passed + 2 skipped, `output.spec` "a Save with a change" fails (no `log` in the old answer;
+  the test after it then does not run) until BaseApi is deployed. Mutations checked: 2 BaseApi, 9 Vitest, 5 e2e, plus
+  the layout migration (unit + dockview); each fails.
+- Running the branch's BaseApi locally (no deploy): `kubectl -n skp port-forward svc/postgres 15432:5432`, then the
+  scratchpad `local-baseapi.ps1` (Release dll on :18090, the cluster's Postgres/Redis/RabbitMQ forwards, secrets read
+  from `skp-dev-secrets`), then `$env:SKP_API='http://localhost:18090'; npx playwright test` (vite's proxy reads
+  `SKP_API`). It joins the cluster's queues as a second BaseApi consumer while it runs; stop it afterwards.
+- `run.spec` starts and stops only its own `e2e-run-…` workflow (one step on a live processor with no schemas, e.g.
+  outcome-recorder, no cron so it never fires); the write guard allows `POST /orchestration/start|stop` only with
+  this run's `e2e-` id as the body; `afterAll` stops it through BaseApi and waits for the live set before deleting.
+- Deploys needed: **BaseApi** (the log; no migration) and **the studio** (bundle). Either order works: the studio
+  reads a missing log as "an older BaseApi", and an old studio ignores `log`.
+- Follow-ups: the Inspector keeps its read DTO after an applied Save (a field Save changed shows its old value until
+  the entity is picked again; seen in the e2e screenshot, pre-existing, not touched); live `WorkflowDesignLiveTests`
+  assert only `applied`/`errors`, so the log on Postgres (rollback order) is proven by the hermetic tests and the e2e
+  run against the local BaseApi, not by a live test; a press's timeout is not kept across a refresh (a refresh mid-start
+  shows the live status, nothing pending).
 
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
