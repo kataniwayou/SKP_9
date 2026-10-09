@@ -197,6 +197,63 @@ Re-review: a run one grid step long has no grid point inside it, so its square s
 is no cut target (`Square.cuts`, `cutTargets`); a cut never leaves a wire of no length. Reset route also clears a
 hub tail held at its height (back to plain automatic, nothing held) and is offered for that alone (`shapedByHand`).
 
+**Grey direction-less wires and overlap short circuits (user request, 2026-10-09) — BUILT, NOT DEPLOYED.** Code
+`7e0211f` (model, drawing, Problems, Save hold-back, router), `5da1a00` (drags), `522983c` (junction jog side), `2099fab`
+(never through a block to keep off a wire; the routed leg of an end drag keeps off wires; cheaper counting); tests
+`eb18fdc` (new e2e), `14b6e9b` (older e2e drags); docs in the commit that adds this paragraph. Spec: plan 9 §2.3 F and
+G, notes in §3-§7 and §10.
+- **Rule 1** (`netsOf`): a direction-less wire is in no live net, so it is always grey and dashed and nothing takes a
+  family through it. Two families joined only through one are no short circuit (nothing flows through it, as `trace`
+  already had it); the drop that gives it a direction is judged turned, so that one is refused.
+- **Rule 2** (`layout/overlaps.ts`: `LineIndex` keyed by the line a run lies on, `overlapsOf`, `mayShare`): two
+  different wires sharing more than a point of line are a short circuit unless both are directed and in one net. Both
+  nets are short-circuited (`shortedWires(nets, overlapping)`): red stretches on each wire (`WireRoute.overlaps`, drawn
+  as `path.nx-overlap`), `shortWith` partners, junctions red, Problems "short circuit: <wire> overlaps <wire>" (kind
+  `wire`, named by `design/wireName.ts`, shared with the Inspector), shown lists leave their links out, Save holds the
+  sources back (`heldSources(circuit, shorted)` from the drawn `short` flags), settle routes the circuit (with the
+  draft's block moves, `placementOf`) to know them.
+- **Router**: hand-shaped wires are drawn first; an automatic wire on another net's wire tries spreads (elbows and U
+  levels a grid step at a time, up to 6 each way) and the other jog side at a level junction, scored by short circuits
+  then blocks crossed (`hitsOf`), so it never goes through a block to dodge one when a track around exists.
+- **Drags** (`design/overlapJudge.ts`): end square (kept shape or open) and run square refuse ("short circuit", snap
+  back); body drag moves anyway, ends that would connect stay open where the pointer put them (`landBody` takes the
+  judge). Only when the path lies on an automatic wire is the circuit after the drop routed (that wire may step aside).
+  Pairs already short before the gesture do not refuse it.
+- Rulings (cost if wrong in brackets): exemption is "one net through junctions", so two plain wires out of one step,
+  or two heads slid to one point of a step's input, are a short circuit when they share a line (small: a rule tweak in
+  `mayShare`); two direction-less wires on each other are a short circuit (literal reading of "not in any live net";
+  nothing is held back, only listed); a whole net is held back, not only the wires on the stretch (as family shorts);
+  the overlap error names the pair in drawing order; the shortcut for "already a short before" is per pair of wires;
+  the end-square judge skips drops the router will draw again (it steps aside by itself); the pen's legs (rule C) are
+  not routed, so a leg drawn along a row's middle line through steps lies on the wires there and is refused (several
+  older e2e tests drew such legs by accident and now pick clear spots).
+- Visible on existing workflows: automatic wires that the old router laid on each other (long back edges on one U
+  level, a junction jog on another wire) now take adjacent tracks, e.g. a U one grid step higher (dock.spec saw a point
+  at y -8; the grid check now accepts -0).
+- Performance (`applyDesign`, median of 5 fresh-process medians, before -> after): live 18-wire chain 0.245 -> 0.458 ms
+  (one wire shaped) and 0.244 -> 0.608 ms (a both-open wire on an automatic wire); synthetic 118 wires 5.25 -> 6.33 ms
+  and 5.08 -> 5.77 ms. On the live chain five automatic wires now search for a free track (their old ones lay on other
+  nets' wires). Drag moves cost one index lookup per path; the circuit is routed only when the path lies on an
+  automatic wire.
+- Tests: Vitest 896 (78 files); tsc clean; Playwright on the dev server 126 passed + 2 skipped (the usual
+  art.spec skips). New: unit tests for the index, overlap shorts, same-net exemption, crossings, grey direction-less
+  wires, nets through free wires, hold-back, Problems row, settle, router spreads/jog/blocks, the judge, body landing,
+  `legPath`; e2e overlap.spec (6) and overlap-save.spec (1). Each new test was checked to fail with its behaviour broken
+  (source mutations: free-wire nets, overlap marks, run judge, end judge, crossings counted, same-net exemption ignored,
+  hold-back family-only, settle blind, body judge (unit), router block search). Older tests updated: families /
+  circuitRoute fixtures (a wire joined only on a line is direction-less now), circuit rule 8, designer joined-tail
+  colour, and the drags listed above.
+- Incident: removing my temporary baseline worktree (it had a junction to `node_modules`) with `git worktree remove
+  --force` deleted part of `src/WorkflowStudio/node_modules` through the junction. Restored with `npm install` from the
+  unchanged lockfile (every non-optional package present at its locked version, package files untouched); a running
+  node process held `@rolldown/binding-win32-x64-msvc`, so npm left a renamed copy `.binding-win32-x64-msvc-*` beside
+  it (harmless; goes on the next install once that process ends). `git worktree prune` also dropped the stale entries
+  of the two prunable SK_P9 worktrees (their folders were already gone; branches untouched).
+- Follow-ups: not deployed (and not run against the deployed studio); a run drag judges the core only (a hub or
+  junction lead does not move, so any overlap there was already there); Problems' wire rows select nothing (there is
+  no wire selection kind); an automatic host routed early (because a hand-shaped wire is joined on it) avoids only what
+  was drawn before it.
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed

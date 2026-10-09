@@ -118,6 +118,36 @@ Agreed with the user on 2026-10-09; they supersede the 2026-10-08 notes in §6 w
   Released on its own line off a square: "same wire" as before. Moving off a square is an ordinary end drag again;
   Escape cancels; one undo step; saved and reloaded like any draft change.
 
+- **F. A direction-less wire is just a wire (the user's rule 1, 2026-10-09).** A wire with no end on a step or the hub
+  (D) is always grey and dashed, whatever it is joined on or joined by. It is in no live net: a junction on it or of it
+  joins nothing, so no wire takes a family through it (a wire whose colour would come only through it is grey and, if
+  its own ends do not decide one, dashed). A directed wire keeps its colour rules (§4). Two families joined only through
+  a direction-less wire are no short circuit: nothing flows through it (D); the drop that gives it a direction is judged
+  on the wire turned that way, so that one is refused if the families then meet.
+- **G. Wires lying on each other are a short circuit (the user's rule 2, 2026-10-09).** Two different wires that share
+  a stretch of line (collinear runs overlapping for more than a point) are a short circuit, unless both are directed and
+  in one net (joined through junctions, so of one family), as fan-out wires sharing a trunk. Crossing at a point is not
+  an overlap, nor is meeting end to end or running side by side. A direction-less wire is in no live net, so one lying
+  on any wire (a live one, or another direction-less one) is a short circuit.
+  - Both nets are short-circuited: both wires are drawn red along every stretch they share, their junctions red as in
+    §2.2-7, and Problems lists "short circuit: <wire> overlaps <wire>", each wire named as the Inspector names it
+    ("<from> → <to>", a terminal by its unique name, else "a junction" / "an open end"); the row's kind is Wire.
+  - Save holds back the sources of both nets exactly as for a family short circuit (§7): their lists stay as BaseApi
+    has them, Output counts the overlap in "N short circuit(s) not written", and settling on load leaves them alone.
+  - Drags. An end square whose drop keeps its drawn shape (open, or corners drawn) and lies on a wire it may not share a
+    line with says "short circuit" (red) and snaps back; a run square likewise; a body drag still moves the wire (drawn
+    red and listed), but an end whose connection would make the short circuit is "short circuit" and stays open where
+    the pointer put it. A short circuit already there before the gesture does not refuse it (as in `judgeDrop`).
+  - The router never makes one by itself: hand-shaped wires are drawn first; an automatic wire whose usual track lies
+    on another net's wire takes the nearest free one (its elbows and its U's level moved a grid step at a time, up to six
+    either way), a junction on a level run perhaps left or reached from the line's other side; it never goes through a
+    block to keep off a wire when a track around exists. The leg the router draws into a contact at the end of an end
+    square's drag (C) does the same. Only hand-shaped or held geometry can lie on another net's wire (and a wire whose
+    ends leave it no free track, e.g. laid along the start of another wire's first run).
+  - Since an automatic wire steps aside, a drag is judged against the drawing after the drop when the path lies on an
+    automatic wire of another net (`overlapJudge`: the other wires indexed once per drag by the line they lie on; the
+    circuit after the drop routed only in that case).
+
 ## 3. The model
 
 **Terminals.**
@@ -139,6 +169,7 @@ Agreed with the user on 2026-10-09; they supersede the 2026-10-08 notes in §6 w
 - A **tail junction** on wire W at point p (fan-out): the wire takes W's current at p.
 - Refused: a wire's end on itself; both ends of one wire on the same wire (rule 4); a junction that closes a loop of
   wires (§2.2-3); a junction whose families disagree (§4).
+  *2026-10-09 (§2.3 F): a junction on or of a direction-less wire joins no net.*
 
 ## 4. Families (colour)
 
@@ -152,6 +183,7 @@ Agreed with the user on 2026-10-09; they supersede the 2026-10-08 notes in §6 w
 - **First decides** (rule 11): once a net has a family, further connections must agree; the order is only the order
   the user connected them in.
 - **Undecided:** grey (rule 12).
+- **Direction-less** (§2.3 F, 2026-10-09): always grey, in no live net; nothing takes a family through it.
 - **Later contradiction** from an Inspector edit: §2.2-7.
 
 ## 5. Drawing
@@ -162,6 +194,8 @@ Agreed with the user on 2026-10-09; they supersede the 2026-10-08 notes in §6 w
 | either own end open, family decided | dashed | the family |
 | family undecided (whatever its ends) | dashed | grey |
 | in a short circuit (§2.2-7 only) | as above, the junction marked red | the family |
+| direction-less (§2.3 F) | dashed | grey, always |
+| lying on another net's wire (§2.3 G) | as above, red along the shared stretches, junctions red | the family |
 
 - Ends: an arrow head at a head on a step or open; a filled circle at a junction end; the small ring at a tail on a
   terminal or open. *A direction-less wire (rule D, §2.3) has no arrow head and no ring, only its junction circle.*
@@ -176,7 +210,9 @@ Agreed with the user on 2026-10-09; they supersede the 2026-10-08 notes in §6 w
   would do: "connect here" / "join here" (green), "move here" (grey: the end becomes or stays open there), or a red
   refusal: "wrong side", "same step", "same wire", "short circuit", "only a tail on the workflow", "needs a step
   first" (rule D, 2026-10-09). Released: the drop is applied or the end snaps back. A direction-less wire's end takes
-  the role the side or the hub gives it (rule D, §2.3).
+  the role the side or the hub gives it (rule D, §2.3). *2026-10-09 (§2.3 G): "short circuit" also when the drawn
+  shape kept would lie on a wire it may not share a line with; a run square says so too and snaps back; a body drag
+  moves anyway and only its connecting ends stay open.*
 - Dropped on empty canvas, a cache, or anywhere it attaches to nothing: the end becomes open there (allowed for
   either end and for both; no "needs one end").
 - **Run squares** drag runs; the shape is kept (stored bends), as today. Right-click Reset route; Delete removes the
@@ -220,6 +256,8 @@ derives them from the circuit:
 - A path that does not reach a step or the hub at both ends writes nothing; it stays in the layout only.
 - A short-circuited net (§2.2-7) is reported as a Save error on the junction's wire (kind `step`, stage `wires`,
   message "short circuit: <family A> meets <family B>"), and its links are not written; the design is stored as drawn.
+  *2026-10-09 (§2.3 G): two nets with a wire lying on each other's are short-circuited the same way; the error is kind
+  `wire` (the first wire drawn), stage `wires`, "short circuit: <wire> overlaps <wire>", one per pair of wires.*
 - The layout keeps every wire with its ends (terminal point, junction host + point, or open point) and its bends.
   BaseApi stores the layout as it does today; BaseApi's request shape (`PUT /workflows/{id}/design`) does not change.
 - **On load**, a stored junction whose traced links disagree with the workflow loaded from BaseApi is drawn as a
@@ -263,6 +301,10 @@ throwaway workflow created and deleted through BaseApi's CRUD), one test per rul
 12. An undecided wire is grey, dashed.
 13. A wire with one end open is dashed in its family's colour; with both ends connected, solid.
 14. A picked wire shows its squares; the end squares show the four-way cursor, also while dragged.
+*2026-10-09 (§2.3 F, G): e2e/overlap.spec.ts (a direction-less wire joined on a teal wire stays grey and gives no
+colour; a both-open wire on a wire shaped by hand is red on both and listed, kept by a refresh; a run square and an end
+square laid on another net's wire are refused; a crossing and a fan-out wire up its own trunk are not short circuits)
+and e2e/overlap-save.spec.ts (Save holds the source back and writes nothing for it; a fresh read draws it red again).*
 Plus: fan-in and fan-out saved as the right `nextStepIds` / `entryStepIds` (throwaway workflow); position along a wire
 changes what is reached; a wire loop and a hidden self-loop are refused; deleting a host leaves its joined wires open;
 an Inspector entry-condition edit that makes a short circuit is marked and listed in Problems; everything survives a
