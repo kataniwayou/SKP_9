@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { designLogFromDto } from '../api/toModel';
-import { EMPTY_DRAFT } from '../design/draft';
+import { graphDto, stepDto } from '../api/fixtures';
+import { loadedDocument } from '../app/fixtures';
+import { circuitOf, EMPTY_DRAFT } from '../design/draft';
 import { saveAnswerLines, saveStartText, settleReport, type SaveFacts } from './saveLog';
 
 const wire = (x: number) => ({ tail: { on: 'step', step: 's1', y: null }, head: { on: 'open', x, y: 0 } }) as never;
@@ -32,11 +34,15 @@ describe('the Save log (2026-10-09)', () => {
     ]);
   });
 
-  it('settleReport counts wires changed, added and removed; null when neither draft has a circuit', () => {
-    expect(settleReport(EMPTY_DRAFT, EMPTY_DRAFT)).toBeNull();
+  it('settleReport counts wires changed, added and removed as drawn; null when neither draft has a circuit', async () => {
+    const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+    expect(settleReport(doc, EMPTY_DRAFT, EMPTY_DRAFT)).toBeNull();
     const before = { ...EMPTY_DRAFT, wires: { a: wire(1), b: wire(2), c: wire(3) } };
     const after = { ...EMPTY_DRAFT, wires: { a: wire(1), b: wire(9), d: wire(4) } };
-    expect(settleReport(before, after)).toEqual({ changed: 1, added: 1, removed: 1 });
+    expect(settleReport(doc, before, after)).toEqual({ changed: 1, added: 1, removed: 1 });
+    // a circuit equal to the workflow's own wires settled back to none (`wires: null`) is the same drawing
+    const own = { ...EMPTY_DRAFT, wires: circuitOf(doc, EMPTY_DRAFT) };
+    expect(settleReport(doc, own, EMPTY_DRAFT)).toEqual({ changed: 0, added: 0, removed: 0 });
   });
 
   it('reads BaseApi\'s log defensively: an unknown level is info, no log is null', () => {

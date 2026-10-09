@@ -90,6 +90,42 @@ export async function createCircuitThrowaway(request: APIRequestContext): Promis
   return { workflow: { id: created.workflowId, name: tag, version: '1.0.0', label: label(tag, '1.0.0', created.workflowId) }, tag, a, b, c, d, cacheId: created.cacheId };
 }
 
+/** The Start/Stop throwaway (2026-10-09): one step on a live, schema-less processor of the cluster, unscheduled. */
+export interface RunThrowaway { workflow: LiveWorkflow; tag: string; stepId: string; processorId: string }
+
+/**
+ * Creates a workflow BaseApi will start (`e2e-run-…`): one step on a processor the live poll says is live and that
+ * has no schemas (so no payload or schema edge can refuse it), no cron (it never fires). The processor is the
+ * cluster's and is only referenced, never changed or deleted. Null when no such processor is live.
+ */
+export async function createRunThrowaway(request: APIRequestContext): Promise<RunThrowaway | null> {
+  const liveness = await request.get('/api/v1/processors/liveness');
+  expect(liveness.ok()).toBe(true);
+  const live = new Set(((await liveness.json()) as { processorId: string; live: boolean }[]).filter((p) => p.live).map((p) => p.processorId));
+  const listed = await request.get('/api/v1/processors');
+  expect(listed.ok()).toBe(true);
+  type P = { id: string; inputSchemaId: string | null; outputSchemaId: string | null; configSchemaId: string | null };
+  const proc = ((await listed.json()) as P[]).find((p) => live.has(p.id) && !p.inputSchemaId && !p.outputSchemaId && !p.configSchemaId);
+  if (!proc) return null;
+  const tag = `e2e-run-${Date.now().toString(36)}-${randomBytes(2).toString('hex')}`;
+  created.tag = tag;
+  const stepId = await post(request, 'steps', { name: `${tag}-a`, version: '1.0.0', description: null, processorId: proc.id, nextStepIds: [], entryCondition: 1 });
+  created.extraStepIds = [stepId];
+  created.workflowId = await post(request, 'workflows', {
+    name: tag, version: '1.0.0', description: null, entryStepIds: [stepId], assignmentIds: [], cacheIds: [], cronExpression: null,
+  });
+  return { workflow: { id: created.workflowId, name: tag, version: '1.0.0', label: label(tag, '1.0.0', created.workflowId) }, tag, stepId, processorId: proc.id };
+}
+
+/** Stops this run's workflow through BaseApi (never another), and waits until the live set no longer lists it. */
+export async function stopRunThrowaway(request: APIRequestContext): Promise<void> {
+  const id = created.workflowId;
+  if (!id || !created.tag?.startsWith('e2e-')) return;
+  const r = await request.post('/api/v1/orchestration/stop', { data: JSON.stringify(id), headers: { 'Content-Type': 'application/json' } });
+  expect([202, 400], `POST stop: ${await r.text()}`).toContain(r.status());
+  await expect.poll(async () => ((await (await request.get('/api/v1/orchestration/live')).json()) as string[]).includes(id), { timeout: 30_000 }).toBe(false);
+}
+
 /**
  * Deletes whatever `created` holds (a partial set too): the workflow; every assignment on step A or B (the
  * one made here and any a Save created); every step this run made, unwired first (a wire restricts both its ends); the
@@ -144,12 +180,17 @@ export async function removeThrowaway(request: APIRequestContext): Promise<void>
   if (failures.length > 0) throw new Error(`could not remove the throwaway entities:\n  ${failures.join('\n  ')}`);
 }
 
-/** Why a request may not reach BaseApi, or null when it may: GETs, and Save of this run's workflow (plan 8 §8). */
+/**
+ * Why a request may not reach BaseApi, or null when it may: GETs, Save of this run's workflow (plan 8 §8), and Start
+ * or Stop of this run's workflow, an `e2e-` throwaway (2026-10-09), never of any other.
+ */
 function refusal(r: Request): string | null {
   const method = r.method();
   const path = new URL(r.url()).pathname;
   if (method === 'GET' || method === 'HEAD') return null;
   if (method === 'PUT' && created.workflowId !== undefined && path === `/api/v1/workflows/${created.workflowId}/design`) return null;
+  if (method === 'POST' && (path === '/api/v1/orchestration/start' || path === '/api/v1/orchestration/stop')
+    && created.workflowId !== undefined && created.tag?.startsWith('e2e-') && r.postDataJSON() === created.workflowId) return null;
   return `${method} ${path}`;
 }
 

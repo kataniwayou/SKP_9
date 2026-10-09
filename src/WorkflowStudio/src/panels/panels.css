@@ -28,7 +28,7 @@
 .pane-note { padding: 8px 12px; margin: 0; font-size: 12.5px; }
 
 /* Output's pinned problems (2026-10-09: Output is the only message pane); red, above the log */
-.pinned { flex: 0 1 auto; max-height: 45%; overflow: auto; border-bottom: 1px solid var(--error); scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.pinned { flex: 0 1 auto; max-height: 60%; overflow: auto; border-bottom: 1px solid var(--error); scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
 .prob { padding: 7px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--muted); cursor: pointer; }
 .prob:hover { background: rgba(125, 211, 252, .06); }
 .prob.static { cursor: default; }

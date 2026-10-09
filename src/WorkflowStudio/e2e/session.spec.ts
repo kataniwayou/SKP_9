@@ -19,10 +19,10 @@ test('a refresh brings back the open workflows, the active tab, each selection a
   await panelB.getByRole('button', { name: 'Zoom in' }).click();
   await panelB.getByRole('button', { name: 'Zoom in' }).click();
   const zoom = await panelB.getByLabel('Zoom level').textContent();
-  await tab(page, 'Problems').click({ button: 'right' });
+  await tab(page, 'Output').click({ button: 'right' });
   await page.getByRole('menuitem', { name: /Auto hide/ }).click();
-  await expect(page.locator('[data-rt="problems"]')).toBeVisible();
-  // the canvas grows when Problems hides (then gives back its strip's height) and keeps its centre: the view
+  await expect(page.locator('[data-rt="output"]')).toBeVisible();
+  // the canvas grows when Output hides (then gives back its strip's height) and keeps its centre: the view
   // as left is the one it settles at
   const transform = await settledView(page, panelB.locator('.react-flow__viewport'));
 
@@ -33,7 +33,7 @@ test('a refresh brings back the open workflows, the active tab, each selection a
   await expect(page.locator('.dv-tab.dv-active-tab .doctab .nm').filter({ hasText: new RegExp(`^${esc(b!.name)}$`) })).toHaveCount(1);
   await expect(documentPanel(page, b!).getByLabel('Zoom level')).toHaveText(zoom!);
   expect(await documentPanel(page, b!).locator('.react-flow__viewport').getAttribute('style')).toBe(transform);
-  await expect(page.locator('[data-rt="problems"]')).toBeVisible();
+  await expect(page.locator('[data-rt="output"]')).toBeVisible();
 
   await tab(page, a!.name).click();
   await expect(documentPanel(page, a!).locator('.react-flow__node-step.studio-sel')).toHaveCount(1);

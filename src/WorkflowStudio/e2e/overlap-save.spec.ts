@@ -1,5 +1,5 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { documentPanel, dragEnd, edge, emptySpot, freeWire, get, layOn, openWorkflow, pane, save, shapeByHand } from './studio';
+import { documentPanel, dragEnd, edge, emptySpot, freeWire, get, layOn, openWorkflow, pane, problems, save, shapeByHand } from './studio';
 import { createCircuitThrowaway, expect, removeThrowaway, test, type CircuitThrowaway } from './throwaway';
 
 // The user's rule 2 (2026-10-09) on Save: a wire lying on a wire of another net is a short circuit, held back like any
@@ -46,9 +46,9 @@ test('a wire lying on another net\'s wire is a short circuit: Save writes nothin
   expect(await lists()).toEqual(before);
   const ab$ = `${t.tag}-a_1\\.0\\.0-\\S+ → ${t.tag}-b_1\\.0\\.0-\\S+`, free$ = 'an open end → an open end';
   const named = new RegExp(`short circuit: (${ab$} overlaps ${free$}|${free$} overlaps ${ab$})`);
-  const problems = await pane(page, 'Problems');
-  await expect(problems.getByRole('listitem')).toHaveCount(1);
-  await expect(problems.getByRole('listitem').filter({ hasText: named })).toHaveCount(1);
+  const pinned = await problems(page);
+  await expect(pinned.getByRole('listitem')).toHaveCount(1);
+  await expect(pinned.getByRole('listitem').filter({ hasText: named })).toHaveCount(1);
   if (process.env.OVERLAP_SHOTS) await page.screenshot({ path: `${process.env.OVERLAP_SHOTS}/8-saved-held-back.png` });
   // a fresh read draws it as saved: the two wires red where they lie on each other, a -> d still open
   await page.reload();
@@ -56,6 +56,6 @@ test('a wire lying on another net\'s wire is a short circuit: Save writes nothin
   for (const id of [ab, f]) await expect(edge(again, id).locator('path.nx-overlap')).toHaveCount(1);
   await expect(edge(again, ad)).toHaveCount(1);
   expect(await edge(again, ad).locator('path.w').first().evaluate((el) => getComputedStyle(el).strokeDasharray)).not.toBe('none');
-  await expect((await pane(page, 'Problems')).getByRole('listitem').filter({ hasText: named })).toHaveCount(1);
+  await expect((await problems(page)).getByRole('listitem').filter({ hasText: named })).toHaveCount(1);
   if (process.env.OVERLAP_SHOTS) await page.screenshot({ path: `${process.env.OVERLAP_SHOTS}/9-saved-fresh-read.png` });
 });

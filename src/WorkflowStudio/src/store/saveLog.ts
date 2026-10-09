@@ -1,4 +1,5 @@
-import type { Draft } from '../design/draft';
+import type { StudioDocument } from '../app/document';
+import { circuitOf, type Draft } from '../design/draft';
 import type { DesignError } from '../model/graph';
 import { plural, type OutputLevel } from './output';
 
@@ -99,11 +100,15 @@ export function saveAnswerLines(f: SaveFacts): { text: string; level: OutputLeve
   return out;
 }
 
-/** How settling changed a draft's circuit: wires whose ends or shape changed, wires it added, wires it removed. */
-export function settleReport(before: Draft, after: Draft): SettleReport | null {
+/**
+ * How settling changed the drawing: wires whose ends or shape changed, wires it added, wires it removed, comparing the
+ * circuits as drawn (a draft with no circuit of its own draws the workflow's own wires, so settling one back to them
+ * changes nothing). Null when neither draft has a circuit of its own.
+ */
+export function settleReport(doc: StudioDocument, before: Draft, after: Draft): SettleReport | null {
   if (before.wires === null && after.wires === null) return null;
-  const a = before.wires ?? {};
-  const b = after.wires ?? {};
+  const a = circuitOf(doc, before);
+  const b = circuitOf(doc, after);
   let changed = 0, added = 0, removed = 0;
   for (const id of Object.keys(b)) {
     if (!Object.hasOwn(a, id)) added++;

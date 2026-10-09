@@ -294,7 +294,7 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
         reread: graph
           ? { ok: true, steps: graph.steps.size, links: graph.workflow.entryStepIds.length + [...graph.steps.values()].reduce((k, s) => k + s.nextStepIds.length, 0) }
           : { ok: false, message: action.reread ?? 'no answer' },
-        settle: read && settled ? settleReport(read.draft, settled.draft) : null,
+        settle: read && settled && action.doc ? settleReport(action.doc, read.draft, settled.draft) : null,
         stored: graph?.design != null,
       });
       const next = update(state, action.workflowId, (d) => {

@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import {
   box, centreOf, clearMove, documentPanel, dropOpen, flowToPage, dragEnd, dragReading, edge, emptySpot, endSquare, expect, newWire, node, openWorkflow,
-  pickWire, pointOnWire, setEntryCondition, tab, test, type Pt,
+  pickWire, pointOnWire, problems, setEntryCondition, test, type Pt,
 } from './studio';
 import { createCircuitThrowaway, removeThrowaway, type CircuitThrowaway } from './throwaway';
 
@@ -472,13 +472,12 @@ test('a tail at a hub angle, a slid head and an open head: Undo and Redo step th
   await expect(page.getByText('● design draft')).toBeVisible();
 });
 
-test('an entry-condition edit that makes a short circuit marks the junction red and lists it in Problems', async ({ page }) => {
+test('an entry-condition edit that makes a short circuit marks the junction red and pins it in Output', async ({ page }) => {
   const panel = await open(page);
   expect(await dragEnd(page, panel, `${t.b}->${t.c}`, 'tail', await pointOnWire(panel, `${t.a}->${t.b}`, 0.5, 12))).toBe('join here');
   await setEntryCondition(page, panel, t.c, /Failed/);
   await expect(edge(panel, `${t.b}->${t.c}`).locator('circle.nx-joint.short')).toHaveCount(1);
-  await tab(page, 'Problems').click();
-  await expect(page.locator('[data-pane="problems"]')).toContainText('short circuit: Completed meets Failed');
+  await expect(await problems(page)).toContainText('short circuit: Completed meets Failed');
 });
 
 // ---- the user's drag rules (2026-10-08): the body moves the whole wire; an end square adds one corner ----

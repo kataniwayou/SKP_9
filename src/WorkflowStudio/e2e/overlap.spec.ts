@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import {
   centreOf, documentPanel, dragEnd, dragRunAcross, edge, endSquare, expect, flowToPage, freeWire, labelsOf, layOn, newWire, node, openWorkflow,
-  pane, pickWire, pointOnWire, pressTo, shapeByHand, squareOn, test, upright, wirePoints as pointsOf, zoomOf,
+  pickWire, pointOnWire, problems, pressTo, shapeByHand, squareOn, test, upright, wirePoints as pointsOf, zoomOf,
 } from './studio';
 import { createCircuitThrowaway, removeThrowaway, type CircuitThrowaway } from './throwaway';
 
@@ -55,7 +55,7 @@ test('rule 1: a direction-less wire joined on a teal wire stays grey and dashed,
   await shot(page, '1-direction-less-grey');
 });
 
-test('rule 2: a both-open wire laid on a live wire shaped by hand is a short circuit: both drawn red along the shared stretch, Problems lists it; a refresh keeps it', async ({ page }) => {
+test('rule 2: a both-open wire laid on a live wire shaped by hand is a short circuit: both drawn red along the shared stretch, Output pins it; a refresh keeps it', async ({ page }) => {
   const panel = await open(page);
   const ab = `${t.a}->${t.b}`;
   // a -> b shaped by hand: its upright run a grid step across (an automatic wire would take a free track around the other)
@@ -69,8 +69,8 @@ test('rule 2: a both-open wire laid on a live wire shaped by hand is a short cir
     expect(await red(panel, id).getAttribute('d')).toBe(`M${shared.x} ${shared.lo} L${shared.x} ${shared.hi}`);
   }
   expect(await colourOf(panel, f)).toBe(GREY);
-  const problems = await pane(page, 'Problems');
-  const row = problems.getByRole('listitem').filter({ hasText: 'overlaps' });
+  const pinned = await problems(page);
+  const row = pinned.getByRole('listitem').filter({ hasText: 'overlaps' });
   await expect(row).toHaveCount(1);
   await expect(row).toContainText(new RegExp(`short circuit: ${t.tag}-a_1\\.0\\.0-\\S+ → ${t.tag}-b_1\\.0\\.0-\\S+ overlaps an open end → an open end`));
   await expect(row.locator('.gate')).toHaveText('Wire');
@@ -84,7 +84,7 @@ test('rule 2: a both-open wire laid on a live wire shaped by hand is a short cir
   await page.reload();
   const again = documentPanel(page, t.workflow);
   for (const id of [ab, f]) await expect(red(again, id)).toHaveCount(1);
-  await expect((await pane(page, 'Problems')).getByRole('listitem').filter({ hasText: 'overlaps' })).toHaveCount(1);
+  await expect((await problems(page)).getByRole('listitem').filter({ hasText: 'overlaps' })).toHaveCount(1);
   await shot(page, '3-after-refresh');
 });
 
@@ -148,7 +148,7 @@ test('rule 2: a crossing is no short circuit: an end square drawn across a live 
   expect(await pointsOf(panel, ab)).toEqual(abWas);
   expect(b.lo < 240 && b.hi > 240, 'it crosses a -> b').toBe(true);
   await expect(panel.locator('path.nx-overlap')).toHaveCount(0);
-  await expect((await pane(page, 'Problems'))).toContainText('No problems');
+  await expect((await problems(page)).getByRole('listitem')).toHaveCount(0);
   await shot(page, '6-crossing');
 });
 
@@ -168,7 +168,7 @@ test('rule 2: wires of one net may share a line: a fan-out wire run up its trunk
   expect(Math.min(now.hi, b.hi) - Math.max(now.lo, b.lo), 'it lies on the trunk').toBeGreaterThan(0);
   await expect(panel.locator('path.nx-overlap')).toHaveCount(0);
   await expect(edge(panel, bc).locator('circle.nx-joint.short')).toHaveCount(0);
-  await expect((await pane(page, 'Problems'))).toContainText('No problems');
+  await expect((await problems(page)).getByRole('listitem')).toHaveCount(0);
   await shot(page, '7-same-net-trunk');
 });
 

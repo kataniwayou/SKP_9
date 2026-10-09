@@ -66,7 +66,7 @@ test('auto-hides a pane and pins it back', async ({ page }) => {
   for (const k of ['y', 'width', 'height'] as const) expect(Math.abs(after[k] - before[k])).toBeLessThanOrEqual(2);
 });
 
-for (const pane of ['Toolbox', 'Inspector', 'Problems']) {
+for (const pane of ['Toolbox', 'Inspector', 'Output']) {
   test(`floats the ${pane} and docks it back to the exact spot`, async ({ page }) => {
     await openWorkflow(page, workflows[0]!);
     const before = await box(groupOf(page, pane));
@@ -147,7 +147,7 @@ test('the canvas follows its size: re-fits until zoomed, then keeps its centre',
   const zoom = await panel.getByLabel('Zoom level').textContent();
   const zoomed = await view();
   const height = (await box(panel.locator('.react-flow__pane'))).height;
-  await closeAll(['Problems', 'Output']);
+  await closeAll(['Output']);
   await expect.poll(async () => (await box(panel.locator('.react-flow__pane'))).height).toBeGreaterThan(height + 50);
   await expect(panel.getByLabel('Zoom level')).toHaveText(zoom!);
   await expect.poll(async () => Math.abs((await view()).dy - zoomed.dy)).toBeLessThanOrEqual(4);
@@ -394,14 +394,14 @@ test('a pane popped out at the refresh comes back docked',async ({ page }) => {
 
 /**
  * Resizes the window wider and taller, then narrower and shorter: the tool panes keep their width
- * (Inspector, Toolbox) and height (Problems) within 2 px, and the document group takes the difference.
+ * (Inspector, Toolbox) and height (Output) within 2 px, and the document group takes the difference.
  */
 async function expectDocumentAreaTakesSlack(page: Page, wf: LiveWorkflow) {
   const start = page.viewportSize()!;
   const sizes = async () => ({
     inspector: (await box(groupOf(page, 'Inspector'))).width,
     toolbox: (await box(groupOf(page, 'Toolbox'))).width,
-    problems: (await box(groupOf(page, 'Problems'))).height,
+    output: (await box(groupOf(page, 'Output'))).height,
     doc: await box(groupOf(page, wf.name)),
   });
   const before = await sizes();
@@ -412,7 +412,7 @@ async function expectDocumentAreaTakesSlack(page: Page, wf: LiveWorkflow) {
     const now = await sizes();
     expect(Math.abs(now.inspector - before.inspector), 'the Inspector keeps its width').toBeLessThanOrEqual(2);
     expect(Math.abs(now.toolbox - before.toolbox), 'the Toolbox keeps its width').toBeLessThanOrEqual(2);
-    expect(Math.abs(now.problems - before.problems), 'Problems keeps its height').toBeLessThanOrEqual(2);
+    expect(Math.abs(now.output - before.output), 'Output keeps its height').toBeLessThanOrEqual(2);
   }
   await page.setViewportSize(start);
   await expect.poll(async () => Math.abs((await box(groupOf(page, wf.name))).width - before.doc.width)).toBeLessThanOrEqual(2);

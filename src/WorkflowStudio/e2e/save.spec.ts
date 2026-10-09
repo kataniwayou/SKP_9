@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
-import { centreOf, documentPanel, dropOpen, get, inspector, newWires, node, openWorkflow, pane, pointOnWire, save, tab } from './studio';
+import { centreOf, documentPanel, dropOpen, get, inspector, newWires, node, openWorkflow, pane, problems, pointOnWire, save } from './studio';
 import { createThrowaway, expect, removeThrowaway, test, type Throwaway } from './throwaway';
 
 // Plan 8 §8: Save is the studio's only write, and these tests write only to their own throwaway workflow
@@ -30,7 +30,7 @@ async function selectStep(page: Page, panel: Locator, id: string): Promise<void>
   await expect(pill(page)).toHaveText('STEP');
 }
 
-test('an invalid design is stored but not applied: Problems and Output say why, BaseApi is unchanged, a fresh page shows the stored design', async ({ page, request, context }) => {
+test('an invalid design is stored but not applied: Output pins the error and says why, BaseApi is unchanged, a fresh page shows the stored design', async ({ page, request, context }) => {
   await openWorkflow(page, t.workflow);
   const panel = documentPanel(page, t.workflow);
 
@@ -54,9 +54,9 @@ test('an invalid design is stored but not applied: Problems and Output say why, 
   await expect(page.getByText('● design draft')).toBeVisible();
   await save(page);
 
-  const problems = await pane(page, 'Problems');
-  await expect(problems.getByRole('listitem')).toHaveCount(1);
-  await expect(problems.getByRole('listitem').first()).toContainText('version');
+  const pinned = await problems(page);
+  await expect(pinned.getByRole('listitem')).toHaveCount(1);
+  await expect(pinned.getByRole('listitem').first()).toContainText('version');
   await expect(await pane(page, 'Output')).toContainText('Saved; not applied: 1 error');
   // the real step is unchanged, and the design is stored on the workflow
   const step = await get<{ version: string; description: string | null }>(request, `steps/${t.stepId}`);
@@ -74,8 +74,7 @@ test('an invalid design is stored but not applied: Problems and Output say why, 
   await selectStep(fresh, again, t.stepId);
   await expect(field(fresh, 'Version')).toHaveValue('abc');
   await expect(field(fresh, 'Description')).toHaveValue('designed');
-  await tab(fresh, 'Problems').click();
-  await expect(fresh.locator('[data-pane="problems"]')).toContainText('No problems');
+  await expect((await problems(fresh)).getByRole('listitem')).toHaveCount(0);
   await fresh.close();
 });
 
@@ -88,7 +87,7 @@ test('fixed and saved again, the design is applied: BaseApi holds it, the stored
   await save(page);
 
   await expect(await pane(page, 'Output')).toContainText('Saved and applied');
-  await expect(await pane(page, 'Problems')).toContainText('No problems');
+  await expect((await problems(page)).getByRole('listitem')).toHaveCount(0);
   const step = await get<{ version: string; description: string | null }>(request, `steps/${t.stepId}`);
   expect([step.version, step.description]).toEqual(['1.0.1', 'designed']);
   expect((await get<{ design: unknown }>(request, `workflows/${t.workflow.id}/graph`)).design).toBeNull();

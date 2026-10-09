@@ -29,7 +29,7 @@ const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** The entity-name rule (model/entityNames.ts), so a test can find a workflow in the picker. */
 const label = (name: string, version: string, id: string) => `${name}_${version}-${GUID.test(id) ? id.slice(19).toLowerCase() : id}`;
 
-const TOOL_NAMES = new Set(['Toolbox', 'Inspector', 'Problems', 'Output']);
+const TOOL_NAMES = new Set(['Toolbox', 'Inspector', 'Output', 'Problems']);
 
 /**
  * Every workflow with a step, each with a distinct name that is not a tool window's. Read-only. Skips
@@ -301,9 +301,19 @@ export async function save(page: Page): Promise<void> {
 }
 
 /** Opens a tool pane by its tab and returns its body. */
-export async function pane(page: Page, name: 'Problems' | 'Output'): Promise<Locator> {
+export async function pane(page: Page, name: 'Output'): Promise<Locator> {
   await tab(page, name).click();
   return page.locator(`[data-pane="${name.toLowerCase()}"]`);
+}
+
+/** Output's pinned problems (2026-10-09: the Problems pane moved into Output): opens Output, returns the list. */
+export async function problems(page: Page): Promise<Locator> {
+  return (await pane(page, 'Output')).getByRole('list', { name: 'Problems' });
+}
+
+/** Output's log lines (role=log), oldest first. */
+export async function outputLines(page: Page): Promise<Locator> {
+  return (await pane(page, 'Output')).getByRole('log', { name: 'Output' }).locator('.outl');
 }
 
 /** Picks step `id` and chooses an entry condition in the Inspector, with the real mouse. */

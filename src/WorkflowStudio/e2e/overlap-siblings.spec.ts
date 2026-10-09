@@ -1,6 +1,6 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import {
-  box, documentPanel, dragEnd, dragRunAcross, edge, get, labelsOf, newWire, node, openWorkflow, pane, pickWire, pressTo, save, shapeByHand,
+  box, documentPanel, dragEnd, dragRunAcross, edge, get, labelsOf, newWire, node, openWorkflow, pane, pickWire, problems, pressTo, save, shapeByHand,
   squareOn, upright, zoomOf,
 } from './studio';
 import { createCircuitThrowaway, expect, removeThrowaway, test, type CircuitThrowaway } from './throwaway';
@@ -41,7 +41,7 @@ test('two wires out of one step of one colour may lie on each other (nothing red
   expect(still.x).toBe(b.x);
   expect(Math.min(now.hi, still.hi) - Math.max(now.lo, still.lo), 'they lie on each other').toBeGreaterThan(8);
   await expect(panel.locator('path.nx-overlap')).toHaveCount(0);
-  await expect(await pane(page, 'Problems')).toContainText('No problems');
+  await expect((await problems(page)).getByRole('listitem')).toHaveCount(0);
   if (process.env.OVERLAP_SHOTS) await page.screenshot({ path: `${process.env.OVERLAP_SHOTS}/10-siblings-one-colour.png` });
   // Save writes both links
   await save(page);

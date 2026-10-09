@@ -1,5 +1,5 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { box, centreOf, documentPanel, dragEnd, dragReading, edge, emptySpot, endSquare, get, newWire, newWires, node, openWorkflow, pane, pickWire, pointOnWire, save, setEntryCondition, type Pt } from './studio';
+import { box, centreOf, documentPanel, dragEnd, dragReading, edge, emptySpot, endSquare, get, newWire, newWires, node, openWorkflow, pane, problems, pickWire, pointOnWire, save, setEntryCondition, type Pt } from './studio';
 import { createCircuitThrowaway, expect, removeThrowaway, test, type CircuitThrowaway } from './throwaway';
 
 // Plan 9 §7: Save derives nextStepIds and entryStepIds by tracing the current. These tests save only their own throwaway
@@ -87,14 +87,14 @@ test('a head joined on a wire fans in; where it joins decides what its current r
   expect(sorted(await nextOf(request, t.a))).toEqual(sorted([t.b, t.c, t.d]));
 });
 
-test('an entry-condition edit that makes a short circuit: listed in Problems; Save writes none of its links and says so, the held-back lists stay as BaseApi had them; a fresh read keeps it marked', async ({ page, request }) => {
+test('an entry-condition edit that makes a short circuit: pinned in Output; Save writes none of its links and says so, the held-back lists stay as BaseApi had them; a fresh read keeps it marked', async ({ page, request }) => {
   const panel = await open(page);
   const heldA = sorted(await nextOf(request, t.a)), heldD = await nextOf(request, t.d);
   expect(heldA).toEqual(sorted([t.b, t.c, t.d]));
   expect(heldD).toEqual([t.b]);
   await setEntryCondition(page, panel, t.c, /Failed/);
   await expect(panel.locator('circle.nx-joint.short').first()).toBeVisible();
-  await expect(await pane(page, 'Problems')).toContainText('short circuit: Completed meets Failed');
+  await expect(await problems(page)).toContainText('short circuit: Completed meets Failed');
   const sent = page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith(`/workflows/${t.workflow.id}/design`));
   await save(page);
   // the request writes no list for the held-back sources (a and d: their wires are in the shorted net), and no entries
@@ -104,7 +104,7 @@ test('an entry-condition edit that makes a short circuit: listed in Problems; Sa
   // c's edit is in it
   expect(body.steps.some((s) => s.id === t.c)).toBe(true);
   await expect(await pane(page, 'Output')).toContainText('Saved and applied; 1 short circuit not written');
-  await expect(await pane(page, 'Problems')).toContainText('short circuit: Completed meets Failed');
+  await expect(await problems(page)).toContainText('short circuit: Completed meets Failed');
   // the rest applied: c's entry condition; the sources whose wires are in the shorted net keep their saved lists
   expect((await get<{ entryCondition: number }>(request, `steps/${t.c}`)).entryCondition).toBe(2);
   expect(sorted(await nextOf(request, t.a))).toEqual(heldA);
