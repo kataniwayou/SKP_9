@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { clearBends, clearPath, clearRun } from './detour';
+import { clearBends, clearPath, clearRun, legPath } from './detour';
+import { LineIndex } from './overlaps';
 import type { Box, Pt } from './router';
 import { pointsOfShape } from './shape';
 
@@ -92,5 +93,20 @@ describe('clearBends', () => {
     const mid = box('m', 288, 288);
     const bends = clearBends(ends, { xs: [48], ys: [] }, [box('s', -224, 0), mid, box('t', 800, 304)]);
     expect(crosses(pointsOfShape(ends, bends), mid)).toBe(false);
+  });
+});
+
+describe('legPath (a dragged end\'s leg; the user\'s rule 2, 2026-10-09)', () => {
+  it('takes a track no other wire lies on when the usual one is taken; without `avoid` it is the usual one', () => {
+    const usual = legPath({ x: 0, y: 0 }, { x: 160, y: 96 }, []);
+    expect(usual).toEqual([[0, 0], [80, 0], [80, 96], [160, 96]]);
+    // another wire lies up the usual elbow
+    const others = new LineIndex();
+    others.add('x', [[80, -40], [80, 140]]);
+    const avoid = (pts: Pt[]) => [...others.stretches(pts, () => true).values()].reduce((n, s) => n + s.length, 0);
+    const leg = legPath({ x: 0, y: 0 }, { x: 160, y: 96 }, [], avoid);
+    expect(avoid(leg)).toBe(0);
+    expect([leg[0], leg.at(-1)]).toEqual([[0, 0], [160, 96]]);
+    expect(rightAngled(leg)).toBe(true);
   });
 });

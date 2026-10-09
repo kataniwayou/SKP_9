@@ -4,6 +4,8 @@ import { loadedDocument } from '../app/fixtures';
 import { plainCircuit, type Circuit, type CircuitWire, type End } from '../circuit/circuit';
 import { SPHERE_R, STEP_W } from './geometry';
 import { contactOn, endPointOf, routeCircuit, routeWires } from './circuitRoute';
+import { hitsOf } from './router';
+import { blockBoxes, stepBoxId } from './wires';
 
 const at = (step: string, y: number | null = null): End => ({ on: 'step', step, y });
 const w = (tail: End, head: End): CircuitWire => ({ tail, head });
@@ -225,5 +227,23 @@ describe("the router keeps off other nets' wires at a junction too (the user's r
     expect(n.points.at(-1)).toEqual([552, 168]);
     expect(n.points.at(-2)).toEqual([552, 184]);
     expect([...routes.values()].some((r) => r.short)).toBe(false);
+  });
+
+  it("an automatic wire whose usual track around a block lies on another net's wire takes another track around it, never one through it", async () => {
+    // p -> r goes round q (below it, along y 216); both-open wires shaped by hand lie on every level it could go round q
+    // by (above q at 8, below it at 216, below every block at 248): only a way through q is free of them
+    const doc = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['p'] }),
+      steps: [stepDto('p', { nextStepIds: ['q', 'r'] }), stepDto('q', { nextStepIds: ['r'] }), stepDto('r')],
+    }));
+    const ctx = { placement: doc.placement, steps: doc.graph.steps };
+    const plain = plainCircuit(['p'], doc.graph.steps, () => true);
+    expect(byId(routeCircuit(plain, ctx)).get('p->r')!.points).toEqual([[512, 168], [544, 168], [544, 216], [840, 216], [840, 168], [864, 168]]);
+    const lying = (y: number): CircuitWire => ({ tail: { on: 'open', x: 600, y }, head: { on: 'open', x: 780, y }, bends: { xs: [600], ys: [] } });
+    const c: Circuit = { ...plain, f8: lying(8), f216: lying(216), f248: lying(248) };
+    const r = byId(routeCircuit(c, ctx)).get('p->r')!;
+    expect(r.short).toBe(false);
+    expect(hitsOf(r.core.points, stepBoxId('p'), stepBoxId('r'), blockBoxes(doc.placement))).toBe(0);
+    expect(r.points).not.toEqual([[512, 168], [864, 168]]);
   });
 });

@@ -7,7 +7,7 @@ import { CONTACT_MARGIN, lengthOf, ownEnds, pointAt } from './junctions';
 import { LineIndex, mayShare, overlapsOf, type Stretch } from './overlaps';
 import type { Placement } from './placement';
 import { landingsOf, WORKFLOW_SOURCE, type Arrival, type SourceId } from './ports';
-import { route, simplify, type Pt, type RouteAvoid } from './router';
+import { hitsOf, route, simplify, type Pt, type RouteAvoid } from './router';
 import { JOG, pointsOfShape, type Ends } from './shape';
 import { blockBoxes, SPHERE_BOX_ID, stepBoxId, type WiringInput } from './wires';
 
@@ -172,11 +172,7 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
   // what is drawn so far, so an automatic wire never lies on a wire of another net (rule 2): it takes a track of its own
   const share = mayShare(circuit, nets);
   const taken = new LineIndex();
-  const clashes = (id: string, pts: Pt[]): number => {
-    let n = 0;
-    for (const s of taken.stretches(pts, (x) => !share(id, x)).values()) n += s.length;
-    return n;
-  };
+  const clashes = (id: string, pts: Pt[]): number => taken.count(pts, (x) => !share(id, x));
   /** The family of the step a wire's head chain goes into: what a wire of a shorted net is drawn in (decision 10). */
   const headFamily = (id: string): number | undefined => {
     const seen = new Set<string>();
@@ -218,7 +214,7 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
 
     // a junction on a level run is left and reached square-on, one jog off the line (plan 7 §5.3), on the side the other
     // end is (`flip`: the other side)
-    const drawWith = (flipTail: boolean, flipHead: boolean, spread: number): { ends: Ends; core: Pt[]; points: Pt[] } => {
+    const drawWith = (flipTail: boolean, flipHead: boolean, spread: number, avoid = true): { ends: Ends; core: Pt[]; points: Pt[] } => {
       let sy = T.at.y, lead = T.lead;
       if (T.contact && !T.vertical) {
         lead = [T.contact];
@@ -232,7 +228,7 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
         if (flipHead && !H.vertical) ty = snap(2 * H.contact[1] - ty, GRID);
       }
       const ends: Ends = { sx, sy, tx, ty };
-      const o: RouteAvoid = { spread, avoid: (pts) => clashes(id, pts) };
+      const o: RouteAvoid = avoid ? { spread, avoid: (pts) => clashes(id, pts) } : { spread };
       const core = w.bends && w.bends.xs.length > 0
         ? simplify(pointsOfShape(ends, w.bends))
         : T.box !== '' && H.box !== ''
@@ -242,19 +238,24 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     };
     let drawn = drawWith(false, false, 0);
     if (!(w.bends && w.bends.xs.length > 0)) {
-      // the router never lays a wire on another net's (rule 2): the usual track, else the nearest free one, a junction
-      // perhaps left or reached from its line's other side
-      let worst = clashes(id, drawn.points);
+      // the router never lays a wire on another net's (rule 2), nor goes through a block to keep off one when a track
+      // around exists: the usual track, else the nearest one free of both, a junction perhaps left or reached from its
+      // line's other side. Scored by short circuits first, then blocks crossed.
+      const blocksOf = (d: { core: Pt[] }) => hitsOf(d.core, T.box, H.box, boxes);
+      let best = [clashes(id, drawn.points), blocksOf(drawn)] as const;
+      // the blocks the usual track crosses anyway: no search for fewer (most wires cross none)
+      const fewest = best[1] === 0 ? 0 : blocksOf(drawWith(false, false, 0, false));
+      const done = () => best[0] === 0 && best[1] <= fewest;
       const flips: [boolean, boolean][] = [[false, false]];
       if (T.contact && !T.vertical) flips.push([true, false]);
       if (H.contact && !H.vertical) flips.push(...flips.map(([a]) => [a, true] as [boolean, boolean]));
-      search: for (let k = 0; worst > 0 && k <= SPREADS; k++) {
+      search: for (let k = 0; !done() && k <= SPREADS; k++) {
         for (const [ft, fh] of flips) {
           for (const spread of k === 0 ? [0] : [k * GRID, -k * GRID]) {
             if (k === 0 && !ft && !fh) continue;
-            const d = drawWith(ft, fh, spread), n = clashes(id, d.points);
-            if (n < worst) { drawn = d; worst = n; }
-            if (n === 0) break search;
+            const d = drawWith(ft, fh, spread), s = [clashes(id, d.points), blocksOf(d)] as const;
+            if (s[0] < best[0] || (s[0] === best[0] && s[1] < best[1])) { drawn = d; best = s; }
+            if (done()) break search;
           }
         }
       }

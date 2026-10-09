@@ -6,12 +6,13 @@ import { togglePick, type Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
 import { addCircuitWire, freeWithout, NEW_WIRE_PREFIX, openJoinedOn, sameEnd, setBends, setEnd, type Circuit, type End, type Side } from '../circuit/circuit';
 import { endPointOf, hubStart, type WireRoute } from '../layout/circuitRoute';
-import { clearBends, clearPath, clearRun } from '../layout/detour';
+import { clearBends, clearRun, legPath } from '../layout/detour';
 import { clampLanding, PMID, snap, STEP_W, type Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
-import { route, simplify, type Box, type Pt } from '../layout/router';
+import { simplify, type Box, type Pt } from '../layout/router';
 import { dragSegment, normalize, pointsOfShape, shapeFromPoints, type Bends } from '../layout/shape';
 import { coreFrom, legsPath, moveLegs, startLegs, type Legs } from '../layout/wireMove';
+import { LineIndex } from '../layout/overlaps';
 import { blockBoxes, portOf } from '../layout/wires';
 import type { DesignGestures } from './DesignContext';
 import type { DesignProps } from './designProps';
@@ -61,10 +62,9 @@ function draggedRun(n: number, k: number): { vertical: boolean; index: number } 
   return k % 2 === 1 ? { vertical: true, index: (k - 1) / 2 } : { vertical: false, index: k / 2 - 1 };
 }
 
-/** A dragged end's wire, right-angled around the blocks from the end that stays (`from`) to where the moving end is drawn. */
-function ghostPath(from: Point, to: Point, side: Side, boxes: Box[]): Pt[] {
-  const [a, b] = side === 'head' ? [from, to] : [to, from];
-  return clearPath(route(a.x, a.y, b.x, b.y, '', '', 0, boxes), boxes);
+/** A dragged end's wire, right-angled around the blocks from the end that stays (`from`) to where the moving end is drawn (`legPath`). */
+function ghostPath(from: Point, to: Point, side: Side, boxes: Box[], avoid?: (pts: Pt[]) => number): Pt[] {
+  return side === 'head' ? legPath(from, to, boxes, avoid) : legPath(to, from, boxes, avoid);
 }
 
 /** Below this many screen pixels a press is a click, not a drag. */
@@ -323,6 +323,10 @@ export function useWireGestures(
     const stored = (pts: readonly Pt[]): Pt[] => (side === 'head' ? [...pts] : [...pts].reverse());
     let legs: Legs = startLegs(stored(wire.points), flowPointOf(e));
     const boxes = blockBoxes(shown.current.placement);
+    // the leg the router draws into a contact keeps off the other wires (rule 2), as the router does
+    const others = new LineIndex();
+    for (const x of shown.current.wires) if (x.id !== wire.id) others.add(x.id, x.points);
+    const avoid = (pts: Pt[]): number => others.count(pts, () => true);
     /** The bends of a path drawn from the end that stays (`oriented`), its lead before the core left out. */
     const bendsOf = (oriented: readonly Pt[]) => shapeFromPoints(stored(coreFrom(oriented, fixed)));
     // an automatic wire with no corner fixed in this drag is routed again onto a step, the hub or a line (as before)
@@ -341,14 +345,14 @@ export function useWireGestures(
         lead = [...h.lead].reverse();
       }
       if (!keepShape()) {
-        const leg = ghostPath({ x: sx, y: sy }, start, role, boxes);
+        const leg = ghostPath({ x: sx, y: sy }, start, role, boxes, avoid);
         return { core: role === 'head' ? leg : [...leg].reverse(), lead };
       }
       // the last leg: on along the anchor's way when it is vertical, then square into the contact from the side a wire
       // takes it (a head from the left, a tail to the right), so the corner drawn there stays; otherwise routed as a
       // wire leaves its tail (from the anchor to a head, from a tail to the anchor)
       const square = legs.axis === 'v' && (t.on === 'wire' || (role === 'head' ? a[0] <= start.x : a[0] >= start.x));
-      const leg = ghostPath({ x: a[0], y: a[1] }, start, role, boxes);
+      const leg = ghostPath({ x: a[0], y: a[1] }, start, role, boxes, avoid);
       const fromAnchor: Pt[] = square ? [[a[0], start.y], [start.x, start.y]] : role === 'head' ? leg : [...leg].reverse();
       return { core: simplify([...legs.path, ...fromAnchor]), lead };
     };

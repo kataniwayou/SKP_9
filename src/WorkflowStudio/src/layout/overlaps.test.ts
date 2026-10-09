@@ -83,3 +83,17 @@ describe('overlapShorts: which overlaps are short circuits', () => {
     expect([share('t', 'a'), share('a', 't'), share('t', 't'), share('t', 'f'), share('t', 'gone')]).toEqual([true, true, false, false, false]);
   });
 });
+
+describe('LineIndex.count', () => {
+  it('counts the stretches as `stretches` finds them', () => {
+    const ix = new LineIndex();
+    ix.add('a', [[0, 0], [100, 0], [100, 80], [300, 80]]);
+    ix.add('b', [[64, 0], [64, 400]]);
+    const path: Pt[] = [[40, 0], [140, 0], [140, 80], [260, 80]];
+    const all = [...ix.stretches(path, () => true).values()].reduce((n, s) => n + s.length, 0);
+    expect(ix.count(path, () => true)).toBe(all);
+    expect(all).toBe(2);
+    expect(ix.count(path, (id) => id !== 'a')).toBe(0);
+    expect(ix.count([[64, 0], [64, 0]], () => true)).toBe(0);
+  });
+});

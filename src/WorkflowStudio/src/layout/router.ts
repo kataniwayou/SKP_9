@@ -23,19 +23,24 @@ function segmentHits(a: Pt, b: Pt, box: Box): boolean {
   return x2 > box.x - HIT_MARGIN && x1 < box.x + box.w + HIT_MARGIN && y2 > box.y - HIT_MARGIN && y1 < box.y + box.h + HIT_MARGIN;
 }
 
-/** Length + 24 per bend + 5000 per block a segment crosses (the source's own box is allowed for the
- *  first segment, the target's for the last). */
-function cost(pts: Pt[], srcId: string, tgtId: string, boxes: Box[]): number {
-  let length = 0, hits = 0;
+/** How many blocks the segments cross (the source's own box is allowed for the first segment, the target's for the last). */
+export function hitsOf(pts: readonly Pt[], srcId: string, tgtId: string, boxes: readonly Box[]): number {
+  let hits = 0;
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i]!, b = pts[i + 1]!;
-    length += Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
     for (const box of boxes) {
       if ((box.id === srcId && i === 0) || (box.id === tgtId && i === pts.length - 2)) continue;
       if (segmentHits(a, b, box)) hits++;
     }
   }
-  return length + (pts.length - 2) * BEND_COST + hits * HIT_COST;
+  return hits;
+}
+
+/** Length + 24 per bend + 5000 per block a segment crosses (`hitsOf`). */
+function cost(pts: Pt[], srcId: string, tgtId: string, boxes: Box[]): number {
+  let length = 0;
+  for (let i = 0; i < pts.length - 1; i++) length += Math.abs(pts[i]![0] - pts[i + 1]![0]) + Math.abs(pts[i]![1] - pts[i + 1]![1]);
+  return length + (pts.length - 2) * BEND_COST + hitsOf(pts, srcId, tgtId, boxes) * HIT_COST;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);

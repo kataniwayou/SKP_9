@@ -1,5 +1,5 @@
 import { GRID, snap } from './geometry';
-import { simplify, type Box, type Pt } from './router';
+import { route, simplify, type Box, type Pt } from './router';
 import { pointsOfShape, shapeFromPoints, type Bends, type Ends } from './shape';
 
 /** How far a detour stands off a block's border, and a dragged run is pushed off one (the router's clearance). */
@@ -170,4 +170,24 @@ export function clearRun(bends: Bends, ends: Ends, run: { vertical: boolean; ind
 /** A manual shape kept clear of the blocks: its runs detour around any block they would cross. */
 export function clearBends(ends: Ends, bends: Bends, boxes: Box[]): Bends {
   return shapeFromPoints(clearPath(pointsOfShape(ends, bends), boxes));
+}
+
+/**
+ * A wire from `a` to `b` right-angled around the blocks, as a dragged end's leg is drawn. With `avoid` (how many stretches
+ * a path shares with other wires, the user's rule 2, 2026-10-09) it is routed as the router routes: on a track no other
+ * wire lies on, the nearest one a few grid steps across when the usual one is taken.
+ */
+export function legPath(a: { x: number; y: number }, b: { x: number; y: number }, boxes: Box[], avoid?: (pts: Pt[]) => number): Pt[] {
+  const draw = (spread: number) => clearPath(route(a.x, a.y, b.x, b.y, '', '', 0, boxes, avoid ? { avoid, spread } : {}), boxes);
+  let best = draw(0);
+  if (!avoid) return best;
+  let n = avoid(best);
+  for (let k = 1; n > 0 && k <= 6; k++) {
+    for (const spread of [k * GRID, -k * GRID]) {
+      const c = draw(spread), m = avoid(c);
+      if (m < n) { best = c; n = m; }
+      if (n === 0) break;
+    }
+  }
+  return best;
 }

@@ -33,6 +33,21 @@ export class LineIndex {
     }
   }
 
+  /** How many stretches `points` shares with indexed wires that `counts` (as `stretches`, without building them). */
+  count(points: readonly Pt[], counts: (id: string) => boolean): number {
+    let n = 0;
+    for (let i = 0; i + 1 < points.length; i++) {
+      const a = points[i]!, b = points[i + 1]!;
+      const levelRun = a[1] === b[1] && a[0] !== b[0];
+      if (!levelRun && !(a[0] === b[0] && a[1] !== b[1])) continue;
+      const list = levelRun ? this.level.get(a[1]) : this.upright.get(a[0]);
+      if (list === undefined) continue;
+      const lo = levelRun ? Math.min(a[0], b[0]) : Math.min(a[1], b[1]), hi = levelRun ? Math.max(a[0], b[0]) : Math.max(a[1], b[1]);
+      for (const s of list) if (Math.min(hi, s.hi) - Math.max(lo, s.lo) > MIN && counts(s.id)) n++;
+    }
+    return n;
+  }
+
   /** The stretches `points` shares with each indexed wire that `counts`, by that wire. */
   stretches(points: readonly Pt[], counts: (id: string) => boolean): Map<string, Stretch[]> {
     const out = new Map<string, Stretch[]>();
@@ -75,10 +90,14 @@ export function overlapsOf(lines: readonly { id: string; points: readonly Pt[] }
  * it shares a line with nothing.
  */
 export function mayShare(circuit: Readonly<Circuit>, nets: readonly Net[]): (a: string, b: string) => boolean {
+  // a directed wire's net; a direction-less one (in no live net) is left out
   const netOf = new Map<string, number>();
-  nets.forEach((n, i) => { for (const x of n.wires) netOf.set(x, i); });
-  const directed = (x: string) => Object.hasOwn(circuit, x) && !isFree(circuit[x]!);
-  return (a, b) => a !== b && netOf.has(a) && netOf.get(a) === netOf.get(b) && directed(a) && directed(b);
+  nets.forEach((n, i) => { for (const x of n.wires) if (Object.hasOwn(circuit, x) && !isFree(circuit[x]!)) netOf.set(x, i); });
+  return (a, b) => {
+    if (a === b) return false;
+    const n = netOf.get(a);
+    return n !== undefined && n === netOf.get(b);
+  };
 }
 
 /** The overlaps that are short circuits: every pair of wires sharing a stretch of line but those that `mayShare`. */
