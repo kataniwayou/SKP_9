@@ -5,6 +5,8 @@ import { plainCircuit, type Circuit, type CircuitWire, type End } from '../circu
 import { SPHERE_R, STEP_W } from './geometry';
 import { contactOn, endPointOf, routeCircuit, routeWires } from './circuitRoute';
 import { hitsOf } from './router';
+import { overlapsOf, sharesNet } from './overlaps';
+import { netsOf } from '../circuit/families';
 import { shapeFromPoints } from './shape';
 import { blockBoxes, SPHERE_BOX_ID, stepBoxId } from './wires';
 
@@ -311,4 +313,41 @@ describe('the router after the review of 2026-10-09 (the coordinator\'s ruling)'
     expect([r.points[0]![0], r.points.at(-1)![0]]).toEqual([512, 576]);
     expect(r.points.some((p) => p[1] !== 128)).toBe(true);
   });
+});
+
+describe('the router after the re-review of 2026-10-09', () => {
+  it('a shape drawn by hand joined on an automatic host does not let that host be drawn before the other shapes: no short circuit in either order', async () => {
+    const doc = await four();
+    const ctx = ctxOf(doc);
+    const plain = plainCircuit(['s1', 's3'], doc.graph.steps, (id) => doc.placement.steps.has(id));
+    // m lies on the hub wire's usual upright track; child is joined on that hub wire
+    const m: CircuitWire = { tail: { on: 'open', x: 232, y: 150 }, head: { on: 'open', x: 264, y: 200 }, bends: { xs: [248], ys: [] } };
+    const child: CircuitWire = { tail: { on: 'wire', host: 'wf->s1', at: 8 }, head: { on: 'open', x: 400, y: 400 }, bends: { xs: [320], ys: [] } };
+    const one = routeCircuit({ m, child, ...plain } as Circuit, ctx), two = routeCircuit({ child, m, ...plain } as Circuit, ctx);
+    for (const rs of [one, two]) expect(rs.filter((r) => r.short).map((r) => r.id)).toEqual([]);
+    const drawing = (rs: typeof one) => new Map(rs.map((r) => [r.id, JSON.stringify(r.points)]));
+    expect(drawing(two)).toEqual(drawing(one));
+  });
+
+  for (const [seed0, span, most] of [[4242, 13, 0], [12345, 14, 2]] as const) {
+    it(`300 untouched workflows (seed ${seed0}): automatic wires of different nets lie on each other in ${most === 0 ? 'none' : `at most ${most} (one crowded graph, drawn twice)`}`, async () => {
+      let seed: number = seed0;
+      const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+      let left = 0;
+      for (let trial = 0; trial < 300; trial++) {
+        const n = 3 + Math.floor(rnd() * span);
+        const ids = Array.from({ length: n }, (_, i) => `s${i + 1}`);
+        const steps = ids.map((id, i) => {
+          const next: string[] = [];
+          for (let j = 0; j < n; j++) if (j !== i && rnd() < (j > i ? 0.3 : 0.05)) next.push(ids[j]!);
+          return stepDto(id, { nextStepIds: next, entryCondition: (1 + Math.floor(rnd() * 3)) as 1 | 2 | 3 });
+        });
+        const doc = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ids.filter((_, i) => i === 0 || rnd() < 0.15) }), steps }));
+        const c = plainCircuit(doc.graph.workflow.entryStepIds, doc.graph.steps, (id) => doc.placement.steps.has(id));
+        const same = sharesNet(c, netsOf(c, (id) => doc.graph.steps.get(id)?.entryCondition));
+        if (overlapsOf(doc.wires).some((o) => !same(o.a, o.b))) left++;
+      }
+      expect(left).toBeLessThanOrEqual(most);
+    }, 120_000);
+  }
 });

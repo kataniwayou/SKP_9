@@ -13,6 +13,7 @@ import { endsOf, pointsOfShape, shapeFromPoints } from '../layout/shape';
 import { translatePoints } from '../layout/wireMove';
 import type { DesignProps } from './designProps';
 import { applyDraft } from './apply';
+import { overlapsOf } from '../layout/overlaps';
 
 const fitter = createTextFitter((t) => t.length * 7);
 const designOf = (over: Partial<DesignProps> = {}): DesignProps => ({ draft: EMPTY_DRAFT, picks: [], onPick: vi.fn(), onCommit: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn(), ...over });
@@ -724,5 +725,51 @@ describe('wire gestures', () => {
     expect(w.tail).toEqual({ on: 'hub', angle: null, dy: pts[0]![1] - doc.placement.sphere.cy });
     expect(w.held).toBe('tail');
     expect(pathNow(doc, commits(design)[0]![0], id)[0]).toEqual(pts[0]);
+  });
+});
+
+describe('a run drag on a wire the router left on another (re-review 2026-10-09)', () => {
+  // the review's seed 12345, trial 150: two automatic wires into s16 (s8 -> s16 one of them) share an upright run before
+  // s16 (the gap there is too crowded to give each its own track)
+  const crowded = async () => {
+    let seed = 12345;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    for (let trial = 0; ; trial++) {
+      const n = 3 + Math.floor(rnd() * 14);
+      const ids = Array.from({ length: n }, (_, i) => `s${i + 1}`);
+      const steps = ids.map((id, i) => {
+        const next: string[] = [];
+        for (let j = 0; j < n; j++) if (j !== i && rnd() < (j > i ? 0.3 : 0.05)) next.push(ids[j]!);
+        return stepDto(id, { nextStepIds: next, entryCondition: (1 + Math.floor(rnd() * 3)) as 1 | 2 | 3 });
+      });
+      const entries = ids.filter((_, i) => i === 0 || rnd() < 0.15);
+      if (trial === 150) return loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: entries }), steps }));
+    }
+  };
+
+  it('a run moved a grid step keeps the stretch it already shared: no "short circuit", committed', async () => {
+    const doc = await crowded();
+    // two wires into s16 share a stretch as the router drew them (not a short circuit: both automatic)
+    const pair = overlapsOf(doc.wires).find((o) => o.a.endsWith('->s16') && o.b.endsWith('->s16'))!;
+    expect(pair).toBeDefined();
+    const b = doc.wires.find((w) => w.id === 's8->s16')!;
+    expect([pair.a, pair.b]).toContain(b.id);
+    expect(b.short).toBe(false);
+    expect(b.core.points[1]![0]).toBe(b.core.points[2]![0]);
+    const design = designOf({ picks: [{ kind: 'wire', id: b.id }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} />);
+    // its first upright run (run 1) a grid step across
+    const handle = container.querySelector(`.design-wire[data-wire="${b.id}"] .design-handle.seg[data-k="1"]`)!;
+    expect(handle).not.toBeNull();
+    fireEvent.pointerDown(handle, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(handle.ownerDocument, { clientX: 108, clientY: 100, pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')).toBeNull();
+    fireEvent.pointerUp(handle.ownerDocument, { clientX: 108, clientY: 100, pointerId: 1 });
+    expect(design.onCommit).toHaveBeenCalledTimes(1);
+    const draft = vi.mocked(design.onCommit).mock.calls[0]![0];
+    // shaped by hand now (its run moved, pushed clear of the block beside it)
+    expect(draft.wires![b.id]!.bends!.xs[0]).not.toBe(b.core.points[1]![0]);
+    // and drawn with nothing short: the automatic partner took a track around it
+    expect(applyDraft(doc, draft).wires.filter((w) => w.short).map((w) => w.id)).toEqual([]);
   });
 });

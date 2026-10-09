@@ -1,4 +1,4 @@
-import { isFree, plainCircuit, type Circuit, type CircuitWire, type End, type Side } from '../circuit/circuit';
+import { isAutomatic, isFree, plainCircuit, type Circuit, type CircuitWire, type End, type Side } from '../circuit/circuit';
 import { netsOf, shortedWires } from '../circuit/families';
 import type { Id, Step } from '../model/graph';
 import { clearPath } from './detour';
@@ -174,7 +174,7 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
   // track of its own. Which overlaps are short circuits is `mayShare` (two automatic wires never are).
   const share = mayShare(circuit, nets);
   const sameNet = sharesNet(circuit, nets);
-  const taken = new LineIndex();
+  let taken = new LineIndex();
   const clashes = (id: string, pts: Pt[]): number => taken.count(pts, (x) => !sameNet(id, x));
   /** The family of the step a wire's head chain goes into: what a wire of a shorted net is drawn in (decision 10). */
   const headFamily = (id: string): number | undefined => {
@@ -217,7 +217,7 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
 
     // a junction on a level run is left and reached square-on, one jog off the line (plan 7 §5.3), on the side the other
     // end is (`flip`: the other side)
-    const drawWith = (flipTail: boolean, flipHead: boolean, spread: number, avoid = true, at: { sy?: number; ty?: number } = {}): { ends: Ends; core: Pt[]; points: Pt[] } => {
+    const drawWith = (flipTail: boolean, flipHead: boolean, spread: number, avoid = true, at: { sy?: number; ty?: number } = {}, mix = false): { ends: Ends; core: Pt[]; points: Pt[] } => {
       // a shape drawn by hand leaves and reaches a level junction on the side its own next (or last) run is, as it was
       // drawn (review 2026-10-09): its first run's way out, its last run's way in
       const b = w.bends && w.bends.xs.length > 0 ? w.bends : null;
@@ -239,7 +239,7 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
         if (flipHead && !H.vertical) ty = snap(2 * H.contact[1] - ty, GRID);
       }
       const ends: Ends = { sx, sy, tx, ty };
-      const o: RouteAvoid = avoid ? { spread, avoid: (pts) => clashes(id, pts) } : { spread };
+      const o: RouteAvoid = avoid ? { spread, mix, avoid: (pts) => clashes(id, pts) } : { spread };
       const core = w.bends && w.bends.xs.length > 0
         ? simplify(pointsOfShape(ends, w.bends))
         : T.box !== '' && H.box !== ''
@@ -272,11 +272,14 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     const { sx: x0, sy: y0, tx: x1, ty: y1 } = drawn.ends;
     const stub = best[1] > 0 && !T.contact && !H.contact
       && (clashes(id, [[x0, y0], [x0 + GRID, y0]]) > 0 || clashes(id, [[x1 - GRID, y1], [x1, y1]]) > 0);
-    search: for (let k = 0; !finished() && !stub && k <= (shaped ? 0 : SPREADS); k++) {
-      for (const [ft, fh] of flips) {
-        for (const spread of k === 0 ? [0] : [k * GRID, -k * GRID]) {
-          if (k === 0 && !ft && !fh) continue;
-          if (tryOne(drawWith(ft, fh, spread))) break search;
+    // the usual tracks spread first; only then every mix of a U's parts moved and not (a wider, dearer search)
+    search: for (const mix of [false, true]) {
+      for (let k = mix ? 1 : 0; !finished() && !stub && k <= (shaped ? 0 : SPREADS); k++) {
+        for (const [ft, fh] of flips) {
+          for (const spread of k === 0 ? [0] : [k * GRID, -k * GRID]) {
+            if (k === 0 && !ft && !fh) continue;
+            if (tryOne(drawWith(ft, fh, spread, true, {}, mix))) break search;
+          }
         }
       }
     }
@@ -320,10 +323,38 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     out.set(id, r);
     return r;
   };
-  // the shapes drawn by hand first (and what they are joined on), then the automatic wires, each in id order: an
-  // automatic wire takes its track around what is already drawn (rule 2)
-  for (const id of ids) if ((wire(id).bends?.xs.length ?? 0) > 0) routeOne(id);
+  // the shapes drawn by hand first: those on no other wire (so all of them are recorded before an automatic host is
+  // drawn, review 2026-10-09), then those joined on a wire (and the hosts they need), then the automatic wires, each in
+  // id order: an automatic wire takes its track around what is already drawn (rule 2)
+  const shapedByHand = (id: string) => (wire(id).bends?.xs.length ?? 0) > 0;
+  const joined = (id: string) => wire(id).tail.on === 'wire' || wire(id).head.on === 'wire';
+  for (const id of ids) if (shapedByHand(id) && !joined(id)) routeOne(id);
+  for (const id of ids) if (shapedByHand(id)) routeOne(id);
   for (const id of ids) routeOne(id);
+
+  // two automatic wires of different nets still on each other (the one drawn later found no free track): each is drawn
+  // again against everything else, and keeps its new track only when that lies on fewer wires (review 2026-10-09).
+  // A host is left as it is (what is joined on it follows its line).
+  const hosts = new Set(ids.flatMap((id) => [wire(id).tail, wire(id).head].flatMap((e) => (e.on === 'wire' ? [e.host] : []))));
+  const movable = (id: string) => isAutomatic(wire(id)) && !hosts.has(id);
+  const others = (skip: string) => { taken = new LineIndex(); for (const id of ids) if (id !== skip) taken.add(id, out.get(id)!.points); };
+  for (let round = 0; round < RIPUPS; round++) {
+    const stuck = overlapsOf(ids.map((id) => out.get(id)!)).filter((o) => !sameNet(o.a, o.b) && movable(o.a) && movable(o.b));
+    if (stuck.length === 0) break;
+    let moved = false;
+    for (const id of [...new Set(stuck.flatMap((o) => [o.a, o.b]))].sort()) {
+      const was = out.get(id)!;
+      others(id);
+      const before = clashes(id, was.points);
+      if (before === 0) continue;
+      out.delete(id);
+      const again = routeOne(id)!;
+      others(id);
+      if (clashes(id, again.points) < before) moved = true;
+      else out.set(id, was);
+    }
+    if (!moved) break;
+  }
   const routes = Object.keys(circuit).map((id) => out.get(id)!);
 
   // wires sharing a stretch of line across nets (rule 2): both nets short-circuited, the stretches drawn red
@@ -345,6 +376,8 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
 const SPREADS = 6;
 /** How many grid steps up or down along its side an automatic end is moved at most, when no track is free. */
 const HEIGHTS = 4;
+/** How many times automatic wires still on each other are drawn again, at most. */
+const RIPUPS = 3;
 
 /** Where each drawn wire's ends are (its first point the tail, its last the head): to open an end where it is drawn. */
 export function endPointOf(routes: readonly WireRoute[]): (id: string, side: Side) => Point | null {

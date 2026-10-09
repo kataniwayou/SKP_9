@@ -12,11 +12,6 @@ export interface Box {
 
 const BEND_COST = 24;
 const HIT_COST = 5000;
-/**
- * A stretch shared with a wire of another net (the user's rule 2, 2026-10-09): dear, but never as dear as a block crossed
- * (the coordinator's ruling: blocks first), so all of a candidate's stretches together stay under one block.
- */
-const OVERLAP_COST = 1000;
 /** How far inside its own block a wire's first or last run may not go: it leaves or reaches the block at its border. */
 const OWN_INSET = 4;
 const HIT_MARGIN = 3;
@@ -52,11 +47,16 @@ export function hitsOf(pts: readonly Pt[], srcId: string, tgtId: string, boxes: 
   return hits;
 }
 
-/** Length + 24 per bend + 5000 per block a segment crosses (`hitsOf`). */
-function cost(pts: Pt[], srcId: string, tgtId: string, boxes: Box[]): number {
+/** Length + 24 per bend. */
+function lengthCost(pts: Pt[]): number {
   let length = 0;
   for (let i = 0; i < pts.length - 1; i++) length += Math.abs(pts[i]![0] - pts[i + 1]![0]) + Math.abs(pts[i]![1] - pts[i + 1]![1]);
-  return length + (pts.length - 2) * BEND_COST + hitsOf(pts, srcId, tgtId, boxes) * HIT_COST;
+  return length + (pts.length - 2) * BEND_COST;
+}
+
+/** Length + 24 per bend + 5000 per block a segment crosses (`hitsOf`). */
+function cost(pts: Pt[], srcId: string, tgtId: string, boxes: Box[]): number {
+  return lengthCost(pts) + hitsOf(pts, srcId, tgtId, boxes) * HIT_COST;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
@@ -77,6 +77,8 @@ export interface RouteAvoid {
   avoid?: (pts: Pt[]) => number;
   /** Moves the candidates' own runs off their usual tracks (a multiple of the grid): their elbows, and the U's levels outward. */
   spread?: number;
+  /** With a spread, also every mix of the U's parts moved and not (a wider search, review 2026-10-09). */
+  mix?: boolean;
 }
 
 /**
@@ -126,17 +128,42 @@ export function route(sx: number, sy: number, tx: number, ty: number, srcId: str
     if (b) { levels.add(b.y - CLEARANCE); levels.add(b.y + b.h + CLEARANCE); }
   }
   if (levels.size === 0) levels.add(Math.max(sy, ty) + CLEARANCE);
+  // the U with no spread: its first upright, its level and its last upright where they usually are
+  const x10 = sx + clamp(CLEARANCE + nudge, GRID, COLUMN_PITCH - STEP_W - GRID), x20 = tx - CLEARANCE;
   for (const level of levels) {
     // a spread U goes further out: above the blocks higher, below them lower
     const ly = spread === 0 ? level : level + (level < Math.min(sy, ty) ? -1 : 1) * Math.abs(spread);
     candidates.push([[sx, sy], [x1, sy], [x1, ly], [x2, ly], [x2, ty], [tx, ty]]);
+    // and every other mix of the three moved and not (review 2026-10-09): a part moved may sit in a block, or be needed
+    // on its own
+    if (spread !== 0 && o.mix) {
+      for (let m = 0; m < 7; m++) {
+        const a = m & 1 ? x1 : x10, l = m & 2 ? ly : level, b = m & 4 ? x2 : x20;
+        candidates.push([[sx, sy], [a, sy], [a, l], [b, l], [b, ty], [tx, ty]]);
+      }
+    }
   }
 
   let best: Pt[] = candidates[0]!, bestCost = Infinity;
+  if (!o.avoid) {
+    for (const candidate of candidates) {
+      const pts = simplify(candidate);
+      const c = cost(pts, srcId, tgtId, boxes);
+      if (c < bestCost) { bestCost = c; best = pts; }
+    }
+    return best;
+  }
+  // with `avoid`, strictly in the router's order (the coordinator's ruling, 2026-10-09): blocks crossed, then stretches
+  // on other nets' wires, then length and bends
+  let bestHits = Infinity, bestOver = Infinity;
   for (const candidate of candidates) {
     const pts = simplify(candidate);
-    const c = cost(pts, srcId, tgtId, boxes) + (o.avoid ? Math.min(o.avoid(pts) * OVERLAP_COST, HIT_COST - 1) : 0);
-    if (c < bestCost) { bestCost = c; best = pts; }
+    const h = hitsOf(pts, srcId, tgtId, boxes);
+    if (h > bestHits) continue;
+    const over = o.avoid(pts);
+    if (h === bestHits && over > bestOver) continue;
+    const c = lengthCost(pts);
+    if (h < bestHits || over < bestOver || (over === bestOver && c < bestCost)) { bestHits = h; bestOver = over; bestCost = c; best = pts; }
   }
   return best;
 }

@@ -76,3 +76,23 @@ describe('overlapJudge (the user\'s rule 2, 2026-10-09)', () => {
     expect(overlapJudge(d, 'w:f')(path, () => pin(d, laid(d, path), 'wf->s1'))).toBe(true);
   });
 });
+
+describe('overlapJudge: only a stretch the drag makes counts (re-review 2026-10-09)', () => {
+  it('a stretch two wires already shared as drawn (automatic, the router left them there) never refuses a drag of one of them; a new one does', async () => {
+    const d = await doc();
+    // s3 -> s4 drawn (as the router might leave it) along s1 -> s2's line, both automatic
+    const host = pointsOf(d, 's1->s2');
+    const shown = { ...d, wires: d.wires.map((w) => (w.id === 's3->s4' ? { ...w, points: host } : w)) };
+    // shaped by hand where it is drawn (a run drag's result), s1 -> s2 pinned so it cannot step aside
+    const after = pin(d, setBends(circuitOf(d, EMPTY_DRAFT), 's3->s4', { xs: [host[0]![0]], ys: [] }), 's1->s2');
+    const judge = overlapJudge(shown, 's3->s4');
+    expect(judge(host, () => after)).toBe(false);
+    // a part of that stretch: still not new
+    expect(judge([host[0]!, [host[0]![0] + 16, host[0]![1]]], () => after)).toBe(false);
+    // on past the line's end onto nothing: nothing new on any wire
+    expect(judge([host[0]!, [host.at(-1)![0] + 64, host[0]![1]], [host.at(-1)![0] + 64, host[0]![1] + 40]], () => after)).toBe(false);
+    // onto another wire's line (the hub's, pinned): a new stretch, refused
+    const longer = d.wires.find((w) => w.id === 'wf->s1')!.points;
+    expect(judge(longer, () => pin(d, after, 'wf->s1'))).toBe(true);
+  });
+});
