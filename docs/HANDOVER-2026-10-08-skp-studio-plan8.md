@@ -306,6 +306,12 @@ scratchpad `vt2\` (old router copy in `old\`).
   wire on an automatic wire 0.18 -> 0.79); synthetic 118 wires 2.7 -> 3.9-4.1 ms (its long skip links on shared U levels
   are now searched apart instead of left on each other).
 - Each new check fails with its fix reverted (pass order, judge stretch filter, rip-up + mixes).
+- Final check (2026-10-09): an old stretch is excused by the drag judge only when the pair was already a short circuit
+  or allowed only because both were automatic, not because they were one net or a bus (a bus wire's head dragged onto a
+  step of another colour, or a tap's junction end detached, while the shared stretch stays: refused, as before
+  97bbfa7); `overlapJudge` takes the circuit before the drag. A rip-up track is kept only when strictly better by
+  (blocks crossed, short circuits under the rules, other overlaps, length) (`ripUpBetter`). Unit tests for both cases
+  and the comparator; the two judge tests fail with the old excuse rule.
 
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):

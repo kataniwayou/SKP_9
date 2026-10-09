@@ -153,7 +153,10 @@ Agreed with the user on 2026-10-09; they supersede the 2026-10-08 notes in §6 w
     every mix of its first upright, level and last upright moved; with avoidance the candidates are compared strictly by
     blocks, then stretches on other nets' wires, then length. A drag is refused only for a stretch it newly makes: one the
     two wires already shared as drawn (two automatic wires the router could not part, or a short circuit already there)
-    never blocks it, and the automatic partner then takes a track around the now hand-shaped wire where it can.*
+    never blocks it, and the automatic partner then takes a track around the now hand-shaped wire where it can. A
+    stretch shared only because the two were one net or a bus is not excused: the gesture may part them (final check).
+    A wire drawn again keeps its new track only when better by blocks, then short circuits, then other overlaps, then
+    length.*
   - Both nets are short-circuited: both wires are drawn red along every stretch they share, their junctions red as in
     §2.2-7, and Problems lists "short circuit: <wire> overlaps <wire>", each wire named as the Inspector names it
     ("<from> → <to>", a terminal by its unique name, else "a junction" / "an open end"); the row's kind is Wire.
