@@ -289,6 +289,24 @@ scratchpad `vt2\` (old router copy in `old\`).
 - Tests: Vitest 909; e2e overlap.spec 7 (new: the Problems row picks both wires; a junction wire drawn from the far
   side keeps it when a run square shapes it); each new check fails with its fix reverted.
 
+**Re-review (2026-10-09) — BUILT, NOT DEPLOYED.**
+- Order (finding 5): hand-shaped wires on no other wire are recorded before any hand-shaped wire joined on an automatic
+  host is drawn (which draws that host); then the automatic wires. The review's case (m and child in either order): no
+  short circuit, same drawing.
+- Automatic wires left on each other: rip-up (each drawn again against everything else, kept only when it lies on
+  fewer wires, 3 rounds); every mix of a U's parts moved tried in a second, dearer search phase; candidates compared
+  strictly blocks > overlaps > length. 300 untouched workflows: seed 4242 (the review's touch generator) 0 left (was 8);
+  seed 12345: 1 graph left, drawn twice (trials 150 and 233): four wires funnel into s16 through its 64 px gap and every
+  local alternative for one of them lies on a third (s12 -> s16, s2 -> s16, ...); only a global re-plan of landing slots
+  would part them. Committed as tests (0 and at most 2).
+- Safety net: `overlapJudge` refuses only stretches the gesture newly makes (a stretch the two wires already shared as
+  drawn never refuses). jsdom test: a run drag on s8 -> s16 in that crowded graph commits, and the drawing after it
+  has no short circuit (the automatic partner moved around the now hand-shaped wire); unit test with the partner pinned.
+- Routing medians, abf2aec -> now (same process): live chain 0.17 -> 0.37 ms (one wire shaped 0.16 -> 0.36, a both-open
+  wire on an automatic wire 0.18 -> 0.79); synthetic 118 wires 2.7 -> 3.9-4.1 ms (its long skip links on shared U levels
+  are now searched apart instead of left on each other).
+- Each new check fails with its fix reverted (pass order, judge stretch filter, rip-up + mixes).
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed

@@ -147,6 +147,13 @@ Agreed with the user on 2026-10-09; they supersede the 2026-10-08 notes in §6 w
     level junction on the side its own next or last run is (as it was drawn). Save holds back the sources of the wires
     drawn short (never read back from the shown lists). A Problems overlap row picks both wires. Overlaps are matched to
     a hundredth of a pixel.*
+  - *Re-review (2026-10-09): the router draws the hand-shaped wires on no other wire first, then those joined on a wire
+    (and their automatic hosts), then the automatic ones; two automatic wires of different nets still on each other are
+    drawn again (up to three rounds), each keeping a new track only when it lies on fewer wires; a spread U also tries
+    every mix of its first upright, level and last upright moved; with avoidance the candidates are compared strictly by
+    blocks, then stretches on other nets' wires, then length. A drag is refused only for a stretch it newly makes: one the
+    two wires already shared as drawn (two automatic wires the router could not part, or a short circuit already there)
+    never blocks it, and the automatic partner then takes a track around the now hand-shaped wire where it can.*
   - Both nets are short-circuited: both wires are drawn red along every stretch they share, their junctions red as in
     §2.2-7, and Problems lists "short circuit: <wire> overlaps <wire>", each wire named as the Inspector names it
     ("<from> → <to>", a terminal by its unique name, else "a junction" / "an open end"); the row's kind is Wire.
