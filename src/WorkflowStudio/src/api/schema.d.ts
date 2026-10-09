@@ -2424,9 +2424,18 @@ export interface components {
             field?: string | null;
             message?: string | null;
         };
+        DesignLogDto: {
+            stage?: string | null;
+            level?: string | null;
+            kind?: string | null;
+            /** Format: uuid */
+            id?: string | null;
+            message?: string | null;
+        };
         DesignOutcomeDto: {
             applied?: boolean;
             errors?: components["schemas"]["DesignErrorDto"][] | null;
+            log?: components["schemas"]["DesignLogDto"][] | null;
         };
         DesignProcessorDto: {
             /** Format: uuid */

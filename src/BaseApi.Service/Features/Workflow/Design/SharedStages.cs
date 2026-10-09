@@ -25,8 +25,11 @@ internal sealed class SchemaStage : IDesignStage
 
     public async Task RunAsync(DesignRun run, CancellationToken ct)
     {
-        foreach (var s in run.Request.Schemas ?? [])
+        var schemas = run.Request.Schemas ?? [];
+        run.BeginStage("schemas", schemas.Count, schemas.Count == 1 ? "copy to insert" : "copies to insert");
+        foreach (var s in schemas)
         {
+            run.Label(s.Id, $"schema copy '{s.Name}' {s.Version}");
             var applied = await run.UnitAsync("schema", s.Id, "schemas", async () =>
             {
                 var dto = new SchemaCreateDto(s.Name, s.Version, s.Description, s.Definition);
@@ -38,7 +41,9 @@ internal sealed class SchemaStage : IDesignStage
                 return problems;
             }, ct);
             if (!applied) run.FailedSchemas.Add(s.Id);
+            else run.Changed("schema", s.Id, "inserted", $"inserted as {DesignLogText.Short(s.Id)}");
         }
+        run.EndStage();
     }
 }
 
@@ -62,18 +67,26 @@ internal sealed class ProcessorStage : IDesignStage
 
     public async Task RunAsync(DesignRun run, CancellationToken ct)
     {
-        foreach (var p in run.Request.Processors ?? [])
+        var processors = run.Request.Processors ?? [];
+        run.BeginStage("processors", processors.Count, processors.Count == 1 ? "processor to update" : "processors to update");
+        var ids = processors.Select(p => p.Id).ToList();
+        var names = await _db.Set<ProcessorEntity>().AsNoTracking().Where(x => ids.Contains(x.Id))
+            .Select(x => new { x.Id, x.Name }).ToListAsync(ct);
+        foreach (var n in names) run.Label(n.Id, $"processor '{n.Name}'");
+        foreach (var p in processors)
         {
             var slots = p.Slots ?? new Dictionary<string, Guid>();
             foreach (var (slot, _) in slots.Where(kv => run.FailedSchemas.Contains(kv.Value)))
                 run.Fail("processor", p.Id, "processors", $"{slot}SchemaId", $"Not re-pointed: the {slot} schema copy failed.");
 
-            await run.UnitAsync("processor", p.Id, "processors", async () =>
+            string? change = null;
+            var applied = await run.UnitAsync("processor", p.Id, "processors", async () =>
             {
                 var entity = await _db.Set<ProcessorEntity>().FirstOrDefaultAsync(x => x.Id == p.Id, ct);
                 if (entity is null) return [new FieldError(null, "This processor no longer exists.")];
                 var errors = new List<FieldError>();
-                var dto = DesignFields.Apply(DesignFields.UpdateOf(entity), p.Fields, errors);
+                var before = DesignFields.UpdateOf(entity);
+                var dto = DesignFields.Apply(before, p.Fields, errors);
                 foreach (var (slot, schemaId) in slots.Where(kv => !run.FailedSchemas.Contains(kv.Value)))
                     dto = slot switch
                     {
@@ -86,9 +99,18 @@ internal sealed class ProcessorStage : IDesignStage
                 var problems = DesignFields.Failures(await _validator.ValidateAsync(dto, ct));
                 if (problems.Count > 0) return problems;
                 _mapper.Update(dto, entity);
+                change = DesignLogText.Join(DesignLogText.Fields(
+                    ("name", before.Name, dto.Name), ("version", before.Version, dto.Version), ("description", before.Description, dto.Description),
+                    ("sourceHash", before.SourceHash, dto.SourceHash), ("instanceId", before.InstanceId, dto.InstanceId),
+                    ("input schema", before.InputSchemaId, dto.InputSchemaId), ("output schema", before.OutputSchemaId, dto.OutputSchemaId),
+                    ("config schema", before.ConfigSchemaId, dto.ConfigSchemaId)));
                 return problems;
             }, ct, shared: true);
+            if (!applied) continue;
+            if (change is null) run.Unchanged();
+            else run.Changed("processor", p.Id, "updated", change);
         }
+        run.EndStage();
     }
 }
 
@@ -109,18 +131,35 @@ internal sealed class CacheStage : IDesignStage
 
     public async Task RunAsync(DesignRun run, CancellationToken ct)
     {
-        foreach (var c in run.Request.Caches ?? [])
-            await run.UnitAsync("cache", c.Id, "caches", async () =>
+        var caches = run.Request.Caches ?? [];
+        run.BeginStage("caches", caches.Count, caches.Count == 1 ? "cache to update" : "caches to update");
+        var ids = caches.Select(c => c.Id).ToList();
+        var names = await _db.Set<CacheEntity>().AsNoTracking().Where(x => ids.Contains(x.Id))
+            .Select(x => new { x.Id, x.Name }).ToListAsync(ct);
+        foreach (var n in names) run.Label(n.Id, $"cache '{n.Name}'");
+        foreach (var c in caches)
+        {
+            string? change = null;
+            var applied = await run.UnitAsync("cache", c.Id, "caches", async () =>
             {
                 var entity = await _db.Set<CacheEntity>().FirstOrDefaultAsync(x => x.Id == c.Id, ct);
                 if (entity is null) return [new FieldError(null, "This cache no longer exists.")];
                 var errors = new List<FieldError>();
-                var dto = DesignFields.Apply(DesignFields.UpdateOf(entity), c.Fields, errors);
+                var before = DesignFields.UpdateOf(entity);
+                var dto = DesignFields.Apply(before, c.Fields, errors);
                 if (errors.Count > 0) return errors;
                 var problems = DesignFields.Failures(await _validator.ValidateAsync(dto, ct));
                 if (problems.Count > 0) return problems;
                 _mapper.Update(dto, entity);
+                change = DesignLogText.Join(DesignLogText.Fields(
+                    ("name", before.Name, dto.Name), ("version", before.Version, dto.Version), ("description", before.Description, dto.Description),
+                    ("root", before.Root, dto.Root), ("items", before.Items, dto.Items)));
                 return problems;
             }, ct, shared: true);
+            if (!applied) continue;
+            if (change is null) run.Unchanged();
+            else run.Changed("cache", c.Id, "updated", change);
+        }
+        run.EndStage();
     }
 }

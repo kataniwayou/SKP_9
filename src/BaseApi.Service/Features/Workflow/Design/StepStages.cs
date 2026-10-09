@@ -27,8 +27,13 @@ internal sealed class StepStage : IDesignStage
 
     public async Task RunAsync(DesignRun run, CancellationToken ct)
     {
-        foreach (var s in run.Request.Steps ?? [])
+        var steps = run.Request.Steps ?? [];
+        run.BeginStage("steps", steps.Count, steps.Count == 1 ? "step to check" : "steps to check");
+        foreach (var (id, name) in await DesignLogText.StepNamesAsync(_db, steps.Select(s => s.Id), ct))
+            run.Label(id, $"step '{name}'");
+        foreach (var s in steps)
         {
+            string? change = null;
             var applied = await run.UnitAsync("step", s.Id, "steps", async () =>
             {
                 var entity = await _db.Set<StepEntity>().FirstOrDefaultAsync(x => x.Id == s.Id, ct);
@@ -36,16 +41,23 @@ internal sealed class StepStage : IDesignStage
                 if (DesignRun.IsStale(entity.UpdatedAt, s.UpdatedAt)) return [new FieldError(null, DesignRun.Conflict)];
                 if (s.Fields is not { Count: > 0 }) return [];
                 var errors = new List<FieldError>();
-                var dto = DesignFields.Apply(DesignFields.UpdateOf(entity), s.Fields, errors);
+                var before = DesignFields.UpdateOf(entity);
+                var dto = DesignFields.Apply(before, s.Fields, errors);
                 // a field already refused (unknown name, wrong type) is its own error: no CRUD verdict on top of it
                 if (errors.Count > 0) return errors;
                 var problems = DesignFields.Failures(await _validator.ValidateAsync(dto, ct));
                 if (problems.Count > 0) return problems;
                 _mapper.Update(dto, entity);
+                change = DesignLogText.Join(DesignLogText.Fields(
+                    ("name", before.Name, dto.Name), ("version", before.Version, dto.Version), ("description", before.Description, dto.Description),
+                    ("entryCondition", before.EntryCondition, dto.EntryCondition)));
                 return problems;
             }, ct);
             if (!applied) run.FailedSteps.Add(s.Id);
+            else if (change is null) run.Unchanged();
+            else run.Changed("step", s.Id, "updated", change);
         }
+        run.EndStage();
     }
 }
 
@@ -66,24 +78,35 @@ internal sealed class WireStage : IDesignStage
 
     public async Task RunAsync(DesignRun run, CancellationToken ct)
     {
-        foreach (var s in (run.Request.Steps ?? []).Where(x => x.NextStepIds is not null))
+        var rewired = (run.Request.Steps ?? []).Where(x => x.NextStepIds is not null).ToList();
+        run.BeginStage("wires", rewired.Count, rewired.Count == 1 ? "step with new next steps" : "steps with new next steps");
+        foreach (var s in rewired)
         {
             if (run.FailedSteps.Contains(s.Id))
             {
                 run.Fail("step", s.Id, "wires", "nextStepIds", "Not rewired: the step itself failed.");
                 continue;
             }
-            await run.UnitAsync("step", s.Id, "wires", async () =>
+            string? change = null;
+            var applied = await run.UnitAsync("step", s.Id, "wires", async () =>
             {
                 var entity = await _db.Set<StepEntity>().FirstOrDefaultAsync(x => x.Id == s.Id, ct);
                 if (entity is null) return [new FieldError(null, "This step no longer exists.")];
                 var problems = DesignFields.Failures(await _validator.ValidateAsync(DesignFields.UpdateOf(entity) with { NextStepIds = s.NextStepIds }, ct));
                 if (problems.Count > 0) return problems;
+                var before = await _db.Set<StepNextSteps>().AsNoTracking().Where(j => j.StepId == s.Id).Select(j => j.NextStepId).ToListAsync(ct);
                 // wires live only in StepNextSteps: force the stamp, as the graph saver does, so the next stale save conflicts
                 _db.Entry(entity).Property(e => e.UpdatedAt).IsModified = true;
                 await StepJunctions.SyncNextStepsAsync(_db, s.Id, s.NextStepIds, replaceExisting: true, ct);
+                var names = await DesignLogText.StepNamesAsync(_db, [s.Id, .. before, .. s.NextStepIds!], ct);
+                var links = DesignLogText.Links(before, s.NextStepIds!, t => $"{names[s.Id]}→{names[t]}");
+                change = links is null ? null : $"next steps {links}";
                 return problems;
             }, ct);
+            if (!applied) continue;
+            if (change is null) run.Unchanged();
+            else run.Changed("step", s.Id, "rewired", change);
         }
+        run.EndStage();
     }
 }

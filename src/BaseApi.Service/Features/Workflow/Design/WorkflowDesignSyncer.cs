@@ -35,6 +35,8 @@ internal sealed class WorkflowDesignSyncer : IWorkflowDesignSyncer
         _stages = stages;
     }
 
+    private static string Count(int n, string one, string? many = null) => $"{n} {(n == 1 ? one : many ?? one + "s")}";
+
     public async Task<DesignOutcomeDto> SaveAsync(Guid workflowId, DesignSaveRequest request, CancellationToken ct)
     {
         DesignShape.ThrowIfMalformed(workflowId, request);
@@ -48,6 +50,8 @@ internal sealed class WorkflowDesignSyncer : IWorkflowDesignSyncer
         // ---- 2. The stages, in one transaction, collecting every error. ----------------------------
         await using var tx = await _transactions.BeginAsync(ct);
         var run = new DesignRun(workflowId, request, _db, tx);
+        run.Note("store", "workflow", "design stored on the workflow (the design and its layout), whatever the dry run finds");
+        run.Note("outcome", "outcome", "dry run started: every stage in one transaction, each entity in its own savepoint");
         try
         {
             foreach (var stage in _stages)
@@ -56,13 +60,20 @@ internal sealed class WorkflowDesignSyncer : IWorkflowDesignSyncer
             if (run.Errors.Count > 0)
             {
                 await tx.RollbackAsync(CancellationToken.None);
-                return new DesignOutcomeDto(false, run.Errors);
+                var refused = run.Errors.Select(e => e.Id).Distinct().Count();
+                run.Note("outcome", "outcome",
+                    $"dry run failed: {Count(run.Errors.Count, "error")} on {Count(refused, "entity", "entities")}", "error");
+                run.Note("outcome", "outcome", "rolled back: no entity was changed; the design stays stored on the workflow", "error");
+                return new DesignOutcomeDto(false, run.Errors, run.Log);
             }
 
             // ---- 3. Aligned: the real entities now hold the design, so the stored one goes. --------
+            var changes = run.Log.Count(l => l.Level == "info" && l.Id is not null && l.Kind != "stage");
+            run.Note("outcome", "outcome", $"dry run passed: {Count(changes, "change")}, no errors");
             await _store.ClearAsync(workflowId, ct);
             await tx.CommitAsync(ct);
-            return new DesignOutcomeDto(true, []);
+            run.Note("outcome", "outcome", "committed: the entities hold the design; the stored design is emptied");
+            return new DesignOutcomeDto(true, [], run.Log);
         }
         finally
         {

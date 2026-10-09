@@ -60,7 +60,22 @@ public sealed record DesignAssignmentDto(
     string Op, Guid Id, Guid StepId, DateTime? UpdatedAt, Dictionary<string, JsonElement>? Fields);
 
 /// <summary>The answer: applied exactly when there are no errors; the design is stored either way.</summary>
-public sealed record DesignOutcomeDto(bool Applied, List<DesignErrorDto> Errors);
+/// <param name="Applied">True when the dry run found no errors and the transaction committed.</param>
+/// <param name="Errors">Every refused entity's error, in the order the stages found them.</param>
+/// <param name="Log">
+/// What the save did, in order (the studio's Output shows it line by line): the store, each stage's start
+/// and its counts, one line per entity it changed, one per refused entity, then the dry run's verdict and
+/// the commit or rollback. Null only from an older BaseApi; an addition, so older studios ignore it.
+/// </param>
+public sealed record DesignOutcomeDto(bool Applied, List<DesignErrorDto> Errors, List<DesignLogDto>? Log = null);
+
+/// <summary>One line of a design save's log.</summary>
+/// <param name="Stage"><c>store</c>, one of the seven stages (see <see cref="DesignErrorDto.Stage"/>), or <c>outcome</c>.</param>
+/// <param name="Level"><c>info</c> or <c>error</c>.</param>
+/// <param name="Kind">The entity kind the line is about, <c>stage</c> for a stage's start and counts, or <c>outcome</c>.</param>
+/// <param name="Id">The entity, or null for a stage or outcome line.</param>
+/// <param name="Message">What happened, as one sentence.</param>
+public sealed record DesignLogDto(string Stage, string Level, string Kind, Guid? Id, string Message);
 
 /// <param name="Id">The entity that failed.</param>
 /// <param name="Message">Why.</param>

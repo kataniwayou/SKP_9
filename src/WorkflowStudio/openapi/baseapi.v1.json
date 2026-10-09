@@ -3887,6 +3887,33 @@
         },
         "additionalProperties": false
       },
+      "DesignLogDto": {
+        "type": "object",
+        "properties": {
+          "stage": {
+            "type": "string",
+            "nullable": true
+          },
+          "level": {
+            "type": "string",
+            "nullable": true
+          },
+          "kind": {
+            "type": "string",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "DesignOutcomeDto": {
         "type": "object",
         "properties": {
@@ -3897,6 +3924,13 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/DesignErrorDto"
+            },
+            "nullable": true
+          },
+          "log": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesignLogDto"
             },
             "nullable": true
           }

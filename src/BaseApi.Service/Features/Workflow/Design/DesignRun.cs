@@ -39,8 +39,71 @@ internal sealed class DesignRun
     public List<Guid> CreatedAssignments { get; } = [];
     public List<Guid> DeletedAssignments { get; } = [];
 
-    public void Fail(string kind, Guid id, string stage, string? field, string message) =>
+    /// <summary>What the save did, in order (the answer's <see cref="DesignOutcomeDto.Log"/>).</summary>
+    public List<DesignLogDto> Log { get; } = [];
+
+    private readonly Dictionary<Guid, string> _labels = [];
+    private Tally? _tally;
+
+    /// <summary>An entity's error: the answer's error list, and an error line in the log naming it.</summary>
+    public void Fail(string kind, Guid id, string stage, string? field, string message)
+    {
         Errors.Add(new DesignErrorDto(kind, id, stage, field, message));
+        Log.Add(new DesignLogDto(stage, "error", kind, id, $"{LabelOf(kind, id)}: {(field is null ? "" : field + ": ")}{message}"));
+        if (_tally is { } t && t.Stage == stage) t.Refused.Add(id);
+    }
+
+    /// <summary>A line of the log that is not about one entity's change (the store, the outcome).</summary>
+    public void Note(string stage, string kind, string message, string level = "info") =>
+        Log.Add(new DesignLogDto(stage, level, kind, null, message));
+
+    /// <summary>How the log names an entity, e.g. <c>step 'a'</c>; the stages name what they load.</summary>
+    public void Label(Guid id, string label) => _labels[id] = label;
+
+    public string LabelOf(string kind, Guid id) => _labels.TryGetValue(id, out var label) ? label : $"{kind} {id}";
+
+    /// <summary>
+    /// A stage starts: one line with how many entities it has to look at, or one line saying it has none
+    /// (and then <see cref="EndStage"/> writes nothing).
+    /// </summary>
+    public void BeginStage(string stage, int count, string noun)
+    {
+        _tally = new Tally(stage, count);
+        Note(stage, "stage", count == 0 ? $"{stage}: nothing to do" : $"{stage}: {count} {noun}");
+    }
+
+    /// <summary>One entity this stage changed, with what changed; counted under <paramref name="verb"/> (e.g. "updated").</summary>
+    public void Changed(string kind, Guid id, string verb, string message)
+    {
+        var t = _tally ?? throw new InvalidOperationException("Changed outside a stage.");
+        t.Done[verb] = t.Done.GetValueOrDefault(verb) + 1;
+        Log.Add(new DesignLogDto(t.Stage, "info", kind, id, $"{LabelOf(kind, id)}: {message}"));
+    }
+
+    /// <summary>One entity this stage looked at and left as it was (no line of its own, only the count).</summary>
+    public void Unchanged() => (_tally ?? throw new InvalidOperationException("Unchanged outside a stage.")).Unchanged++;
+
+    /// <summary>A stage is done: one line with its counts ("steps: 3 updated, 1 unchanged, 1 refused").</summary>
+    public void EndStage()
+    {
+        if (_tally is not { } t) return;
+        _tally = null;
+        if (t.Count == 0) return;
+        var parts = t.Done.Select(kv => $"{kv.Value} {kv.Key}").ToList();
+        if (t.Unchanged > 0) parts.Add($"{t.Unchanged} unchanged");
+        if (t.Refused.Count > 0) parts.Add($"{t.Refused.Count} refused");
+        Log.Add(new DesignLogDto(t.Stage, t.Refused.Count > 0 ? "error" : "info", "stage",
+            null, $"{t.Stage}: {(parts.Count == 0 ? "nothing changed" : string.Join(", ", parts))}"));
+    }
+
+    private sealed class Tally(string stage, int count)
+    {
+        public string Stage { get; } = stage;
+        public int Count { get; } = count;
+        public Dictionary<string, int> Done { get; } = [];
+        public int Unchanged { get; set; }
+        public HashSet<Guid> Refused { get; } = [];
+    }
 
     /// <summary>Stale when the stored row is newer than what the designer loaded, or no stamp was sent.</summary>
     public static bool IsStale(DateTime stored, DateTime? loaded) => loaded is null || stored > loaded.Value;
