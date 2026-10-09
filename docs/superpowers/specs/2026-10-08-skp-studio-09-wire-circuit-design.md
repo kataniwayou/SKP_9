@@ -176,6 +176,45 @@ Agreed with the user on 2026-10-09; they supersede the 2026-10-08 notes in §6 w
     automatic wire of another net (`overlapJudge`: the other wires indexed once per drag by the line they lie on; the
     circuit after the drop routed only in that case).
 
+### 2.4 The Inspector's read-outs (the user's request, 2026-10-09)
+
+So the drawn graph can be checked by reading it, not only by looking at it. The user's decisions: the read-outs show
+the drawing only (the design over the base, as the canvas draws it), with no marks against BaseApi and no saved view
+beside it; there is none for a step; names are plain text, never links.
+
+- **A picked wire** (exactly one wire picked) replaces the old one line ("Wire: {from} → {to} · {family}") with a
+  WIRE pane: its name ("{from} → {to}", as Problems names it), then a definition list:
+  - **From (tail)** / **To (head)** (a direction-less wire: **One end** / **Other end**): "step <unique name>, output
+    side" / "input side", "(automatic)" or "(N px down)" when slid by hand (", held while the other end is open" for a
+    held end); "the workflow hub (automatic | at N° | held N px from its centre)"; "a junction on wire <name>, N px
+    along it" (where the canvas draws it: snapped to the grid, clear of the host's ends); "open (at x, y)" (also for an
+    end drawn open because its step is off the canvas or its host is gone).
+  - **Direction**: "directed", or "no direction (touches no step or hub)".
+  - **Condition**: the net's condition name; "undecided"; or one "short circuit: …" line per reason: "<A> meets <B>"
+    (its net's two conditions, as Problems words it), "overlaps <wire>" (this wire), "<wire> overlaps <wire>" (another
+    wire of its net).
+  - **Carries**: every link "<source> → <step>" ("workflow → <step>" for an entry) whose current passes through the
+    wire (the traced current, short-circuited nets included, so a shorted wire still shows what it would carry), each
+    marked by what Save does with it: nothing (written); "(kept as BaseApi has it: short circuit)" (its source is held
+    back and BaseApi already has the link); "(held back: short circuit)" (Save does not write it); "(not written: a
+    step never feeds itself)". Else "nothing".
+  - **Shape**: "automatic", or "by hand, N corners" (its own bends; N the drawn path's turns, leads included).
+  - **Joined on it**: the names of the wires with an end joined on it, or "none".
+  A pick naming a wire that is gone (after an undo) shows the name read from its id and "This wire is not drawn."
+- **The workflow** shows, under its fields, a **Graph** section: **Entry steps** (each "<name> · <condition>"), a
+  table **Step / Entry / Next steps**, one row per step by unique name, the next steps as Save writes them (in that
+  order) followed by drawn links Save does not write, marked "(held back)"; a held-back source (or the hub) says "held
+  back by a short circuit: Save keeps BaseApi's list". Then the problems, each with its count and names: steps with no
+  wires, open wires, direction-less wires, short circuits (the messages Problems shows); "Problems: none" when there is
+  none.
+- **One source of truth.** The read-outs are built from what the canvas, Problems and Save use: `applyDesign`,
+  `circuitOf`, the drawn routes' flags (`short`, `shortWith`, `free`, end kinds), `netsOf`, `trace` / `wiresBetween`,
+  `shortCircuitErrors`, and `writtenLists` (shared with `buildDesignRequest`: a held source keeps the base's list).
+  (`panels/readout.ts`, `panels/Readouts.tsx`.)
+- **Cost.** Built only while the pane shows it, memoised on the document, the draft and the edits; a gesture's preview
+  never reaches the store, so nothing is computed during a drag. It updates when the drag is committed (and on undo,
+  an Inspector edit, a reload).
+
 ## 3. The model
 
 **Terminals.**
@@ -333,6 +372,8 @@ throwaway workflow created and deleted through BaseApi's CRUD), one test per rul
 colour; a both-open wire on a wire shaped by hand is red on both and listed, kept by a refresh; a run square and an end
 square laid on another net's wire are refused; a crossing and a fan-out wire up its own trunk are not short circuits)
 and e2e/overlap-save.spec.ts (Save holds the source back and writes nothing for it; a fresh read draws it red again).*
+*2026-10-09 (§2.4): e2e/readout.spec.ts (a picked wire's rows, and the rows after its head is dragged open, Undo; the
+Graph rows before and after Save equal BaseApi's nextStepIds and entry steps; a short circuit in both read-outs).*
 Plus: fan-in and fan-out saved as the right `nextStepIds` / `entryStepIds` (throwaway workflow); position along a wire
 changes what is reached; a wire loop and a hidden self-loop are refused; deleting a host leaves its joined wires open;
 an Inspector entry-condition edit that makes a short circuit is marked and listed in Problems; everything survives a

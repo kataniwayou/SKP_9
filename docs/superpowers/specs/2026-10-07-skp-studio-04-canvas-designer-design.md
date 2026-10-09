@@ -57,6 +57,8 @@ once they approve it. Some rules (§4.4) were chosen to be tried first and may c
 - One block selected: the Inspector shows it, as today.
 - One wire selected: the Inspector shows "Wire: {source} → {target}" read-only. Its source and target
   are entities, but a wire has no entity of its own to edit.
+  *Superseded (2026-10-09): the Inspector reads a picked wire as text (its ends, direction, condition, the links it
+  carries, shape, wires joined on it), plan 9 spec §2.4.*
 - More than one item selected: the Inspector shows "N items selected" and no form.
 
 ### 3.4 Moving

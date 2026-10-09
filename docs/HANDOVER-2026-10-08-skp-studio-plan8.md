@@ -313,6 +313,34 @@ scratchpad `vt2\` (old router copy in `old\`).
   (blocks crossed, short circuits under the rules, other overlaps, length) (`ripUpBetter`). Unit tests for both cases
   and the comparator; the two judge tests fail with the old excuse rule.
 
+**Inspector read-outs (user request, 2026-10-09) — BUILT, NOT DEPLOYED.** Spec: plan 9 §2.4 (new), a superseded note
+in the plan 4 spec. User decisions: show the drawing only (design over base), no diff against BaseApi, no saved view, no
+read-out for steps, names as plain text.
+- A picked wire gets a WIRE pane (replacing "Wire: {from} → {to} · {family}"): From (tail) / To (head) (One end / Other
+  end when direction-less), Direction, Condition (with the short-circuit reasons), Carries (links through it, each
+  marked written / "kept as BaseApi has it" / "held back" / "not written: feeds itself"), Shape, Joined on it.
+- The workflow gets a **Graph** section under its fields: entry steps with conditions, a Step / Entry / Next steps table
+  (by unique name; Save's lists, then drawn links held back), and the problems (steps with no wires, open wires,
+  direction-less wires, short circuits) or none.
+- One source of truth: `panels/readout.ts` (`readoutModel`, `wireReadout`, `graphReadout`) reads `applyDesign`,
+  `circuitOf`, the drawn routes, `netsOf`, `trace` / `wiresBetween`, `shortCircuitErrors` and the new `writtenLists`
+  (`design/shortCircuits.ts`), which `buildDesignRequest` now uses too. `contactDistance` was split out of `contactOn`
+  so a junction's "N px along it" is the drawn distance. UI `panels/Readouts.tsx` (dl / table with headers), styles in
+  `panels.css` (`.readout`, `.rtable`). It is memoised on the document, draft and edits, and built only while it is
+  shown. Nothing is computed during a drag (previews never reach the store).
+- Judgement calls: steps sorted by unique name (stable under block moves); a held source's list is BaseApi's, and links
+  drawn but not written are appended as "(held back)"; a link through a shorted wire that BaseApi already has reads
+  "kept as BaseApi has it" rather than "held back"; corners count the drawn path's turns (leads included); slid ends
+  show in From/To, Shape says "by hand" only for wires with bends; open/direction-less wires are named as Problems names
+  them, so two "an open end → an open end" wires read alike.
+- Tests: Vitest 937 (80 files; +17 `readout.test.ts`, panes tests for the WIRE pane and the Graph section); tsc clean;
+  Playwright on the dev server 131 passed + 2 skipped. New e2e `readout.spec.ts` (real mouse, throwaway `e2e-9-…`): a
+  wire's rows, its head dragged open and the rows updated, Undo; Graph rows equal BaseApi's nextStepIds and entry steps
+  before a change and after Save; a short circuit (an entry-condition edit) in both read-outs. Two designer.spec checks
+  moved from "Wire: " to the read-out. Mutations checked: 11 unit (status, draft ignored, hold-back ignored, carries
+  unfiltered, held items, reasons, junction distance, corners, joined, direction, unwired steps) and 3 e2e (draft
+  ignored, base lists shown, no reasons): each fails.
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed
