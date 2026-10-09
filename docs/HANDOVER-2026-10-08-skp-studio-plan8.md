@@ -193,6 +193,9 @@ Review fixes (2026-10-09): a held automatic hub tail (a cut, or an entry wire's 
 height (`{ on: 'hub', angle: null, dy }`, out of the fan-out, dropped when the other end connects; it used to snap to
 15 degrees and move the kept part by up to a grid step); run squares and cut points sit on the 8 px grid along their
 run. Left as is (pre-existing): a junction on a very short kept part can slide by contactOn's 16 px end margin.
+Re-review: a run one grid step long has no grid point inside it, so its square stays at its middle for run drags and
+is no cut target (`Square.cuts`, `cutTargets`); a cut never leaves a wire of no length. Reset route also clears a
+hub tail held at its height (back to plain automatic, nothing held) and is offered for that alone (`shapedByHand`).
 
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):

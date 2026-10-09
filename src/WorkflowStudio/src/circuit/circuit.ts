@@ -237,9 +237,11 @@ export function reverseWire(c: Readonly<Circuit>, id: string, length: number): C
   return out;
 }
 
-/** Shaped by hand: its own bends, or an end slid along a step's side (Reset route has something to undo). */
+/** Shaped by hand: its own bends, an end slid along a step's side, or a hub tail held at its height (Reset route has something to undo). */
 export const shapedByHand = (w: CircuitWire): boolean =>
-  (w.bends?.xs.length ?? 0) > 0 || (w.tail.on === 'step' && w.tail.y !== null) || (w.head.on === 'step' && w.head.y !== null);
+  (w.bends?.xs.length ?? 0) > 0 || (w.tail.on === 'step' && w.tail.y !== null) || (w.head.on === 'step' && w.head.y !== null)
+  // a hub tail held at its drawn height (review 2026-10-09)
+  || (w.tail.on === 'hub' && w.tail.dy !== undefined);
 
 // ---- reading back: a session's or a stored layout's circuit, or a plan 7 / plan 8 one; anything malformed is dropped ----
 

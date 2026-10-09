@@ -9,9 +9,13 @@ import { endsOf, pointsOfShape, segmentHandles, shapeFromPoints, type Bends, typ
 /** On-screen size (px) of a picked wire's square, at any zoom. */
 export const SQUARE = 9;
 
-/** A picked wire's square (plan 9 rule 14): on a run of its core (run `k`), or on an end. */
+/**
+ * A picked wire's square (plan 9 rule 14): on a run of its core (run `k`), or on an end. `cuts`: a run with a grid
+ * point inside it, where an end square released cuts the wire (a run one grid step long has none: its square, at its
+ * middle, only drags the run).
+ */
 export type Square =
-  | { kind: 'run'; k: number; x: number; y: number; vertical: boolean }
+  | { kind: 'run'; k: number; x: number; y: number; vertical: boolean; cuts: boolean }
   | { kind: 'end'; side: Side; x: number; y: number };
 
 /**
@@ -30,11 +34,24 @@ function clearOfEnds(h: { x: number; y: number }, ends: Ends, k: number): boolea
 export function squaresOf(w: WireRoute, bends: Bends, k: number): Square[] {
   const ends = endsOf(w.points);
   const last = 2 * bends.xs.length;
-  const runs: Square[] = segmentHandles(w.core.ends, bends)
-    .filter((h) => !(w.headOn === 'junction' && h.k === last) && clearOfEnds(h, ends, k))
-    .map((h) => { const [x, y] = cutPoint(w, bends, h.k); return { kind: 'run', k: h.k, x, y, vertical: h.vertical }; });
+  const core = pointsOfShape(w.core.ends, bends);
+  const runs: Square[] = [];
+  for (const h of segmentHandles(w.core.ends, bends)) {
+    if (w.headOn === 'junction' && h.k === last) continue;
+    if (!clearOfEnds(h, ends, k)) continue;
+    // drawn where it cuts (on the grid, inside its run); a run with no grid point inside it keeps its square at its
+    // middle, for run drags only: never on a corner or an end
+    const [x, y] = cutPoint(w, bends, h.k);
+    const a = core[h.k]!, b = core[h.k + 1]!;
+    const cuts = !((x === a[0] && y === a[1]) || (x === b[0] && y === b[1]));
+    runs.push(cuts ? { kind: 'run', k: h.k, x, y, vertical: h.vertical, cuts } : { kind: 'run', k: h.k, x: h.x, y: h.y, vertical: h.vertical, cuts });
+  }
   return [...runs, { kind: 'end', side: 'tail', x: ends.sx, y: ends.sy }, { kind: 'end', side: 'head', x: ends.tx, y: ends.ty }];
 }
+
+/** What an end square being dragged (`side`) may be released on: the run squares that cut, and the other end's square. */
+export const cutTargets = (squares: readonly Square[], side: Side): Square[] =>
+  squares.filter((s) => (s.kind === 'run' ? s.cuts : s.side !== side));
 
 /** The square under `p` (flow coordinates), within the square's own size on screen (`k` flow units per pixel). */
 export function squareAt(squares: readonly Square[], p: Point, k: number): Square | null {
@@ -97,6 +114,8 @@ export function cutWire(
   const cut = cutPoint(w, bends, k);
   const core = pointsOfShape(w.core.ends, bends);
   const keptCore = simplify(dragged === 'head' ? [...core.slice(0, k + 1), cut] : [cut, ...core.slice(k + 1)]);
+  // a cut never leaves a wire of no length (its square is not drawn there either)
+  if (lengthOf([keptCore]) === 0 || keptCore.length < 2) return c as Circuit;
   const shape = shapeFromPoints(keptCore);
   let next = setEnd(c, id, dragged, { on: 'open', x: cut[0], y: cut[1] });
   next = setBends(next, id, shape.xs.length > 0 ? shape : { xs: [keptCore[0]![0]], ys: [] });

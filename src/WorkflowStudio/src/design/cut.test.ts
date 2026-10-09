@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
-import { addCircuitWire, isFree, plainCircuit, setEnd, type Circuit } from '../circuit/circuit';
+import { addCircuitWire, isFree, plainCircuit, setEnd, shapedByHand, type Circuit } from '../circuit/circuit';
 import { endPointOf, routeCircuit } from '../layout/circuitRoute';
 import { lengthOf } from '../layout/junctions';
-import { shapeFromPoints } from '../layout/shape';
-import { cutPaths, cutWire, holdDrawn, squareAt, squaresOf } from './cut';
+import { pointsOfShape, shapeFromPoints } from '../layout/shape';
+import { cutPaths, cutTargets, cutWire, holdDrawn, squareAt, squaresOf } from './cut';
+import { circuitOf, EMPTY_DRAFT, resetShape, withCircuit } from './draft';
 
 // s1 -> s2 (Completed); a Z-shaped wire w:z from s1 to s2's input with its own bends
 const doc = () => loadedDocument(graphDto({
@@ -168,5 +169,55 @@ describe('a cut keeps what stays exactly where it was drawn (review 2026-10-09)'
     expect([sq.x % 8, sq.y % 8]).toEqual([0, 0]);
     const out = cutWire(c, 'w:o', 'head', w, bends, sq.kind === 'run' ? sq.k : -1, endPointOf(routeCircuit(c, ctx(d))), d.placement);
     expect(out['w:o']!.head).toEqual({ on: 'open', x: sq.x, y: sq.y });
+  });
+});
+
+describe('short runs and Reset route after a cut (re-review 2026-10-09)', () => {
+  // an open wire leaving left: an 8 px first run, down 8, then left; its run squares must never sit on an end or a corner
+  const shortRuns = async () => {
+    const d = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1'), stepDto('s2')] }));
+    const c = addCircuitWire(plainCircuit(d.graph.workflow.entryStepIds, d.graph.steps, (id) => d.placement.steps.has(id)), 'w:s',
+      { tail: { on: 'open', x: 800, y: 800 }, head: { on: 'open', x: 600, y: 900 }, bends: { xs: [792, 640], ys: [808] } });
+    return { d, c, w: routeOf(d, c, 'w:s') };
+  };
+
+  it('a run square never sits on its run\'s end or a corner; one on a run with no grid point inside it is no cut target, at any zoom', async () => {
+    const { c, w } = await shortRuns();
+    const pts = pointsOfShape(w.core.ends, c['w:s']!.bends!);
+    for (const k of [1, 0.25]) {
+      const squares = squaresOf(w, c['w:s']!.bends!, k);
+      for (const s of squares) {
+        if (s.kind !== 'run') continue;
+        const a = pts[s.k]!, b = pts[s.k + 1]!;
+        expect([s.x, s.y]).not.toEqual(a);
+        expect([s.x, s.y]).not.toEqual(b);
+      }
+      // the 8 px first run: its square is drawn (zoomed in) for run drags, but an end square cannot cut there
+      const first = squares.find((s) => s.kind === 'run' && s.k === 0);
+      if (first && first.kind === 'run') expect(first.cuts).toBe(false);
+      expect(cutTargets(squares, 'head').some((s) => s.kind === 'run' && s.k === 0)).toBe(false);
+      expect(cutTargets(squares, 'head').filter((s) => s.kind === 'end').map((s) => s.kind === 'end' && s.side)).toEqual(['tail']);
+    }
+    expect(squaresOf(w, c['w:s']!.bends!, 0.25).some((s) => s.kind === 'run' && s.k === 0)).toBe(true);
+  });
+
+  it('a cut never leaves a wire of no length: cut on such a run, nothing changes', async () => {
+    const { d, c, w } = await shortRuns();
+    const out = cutWire(c, 'w:s', 'head', w, c['w:s']!.bends!, 0, endPointOf([w]), d.placement);
+    expect(out).toBe(c);
+  });
+
+  it('Reset route clears a hub tail held at its height: plain automatic again, and it is offered for that alone', async () => {
+    const d = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1'), stepDto('s2')] }));
+    const c = plainCircuit(d.graph.workflow.entryStepIds, d.graph.steps, (id) => d.placement.steps.has(id));
+    const held = holdDrawn(setEnd(c, 'wf->s1', 'head', { on: 'open', x: 900, y: 900 }), 'wf->s1', 'tail', { x: 224, y: 168 }, d.placement);
+    expect(held['wf->s1']!.tail).toMatchObject({ on: 'hub', dy: expect.any(Number) });
+    expect(shapedByHand({ tail: held['wf->s1']!.tail, head: { on: 'open', x: 900, y: 900 } })).toBe(true);
+    const draft = withCircuit(EMPTY_DRAFT, d, held);
+    const reset = circuitOf(d, resetShape(draft, d, 'wf->s1'))['wf->s1']!;
+    expect(reset.tail).toEqual({ on: 'hub', angle: null });
+    expect(reset.held).toBeUndefined();
+    // reconnected afterwards: plain again
+    expect(setEnd(circuitOf(d, resetShape(draft, d, 'wf->s1')), 'wf->s1', 'head', { on: 'step', step: 's1', y: null })['wf->s1']!.tail).toEqual({ on: 'hub', angle: null });
   });
 });

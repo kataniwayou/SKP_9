@@ -150,12 +150,15 @@ export function setShape(draft: Draft, saved: StudioDocument, id: string, shape:
   return withCircuit(draft, saved, out);
 }
 
-/** Reset route (decision 11): its bends go and its ends on steps go back to automatic heights; what it is connected to stays. */
+/**
+ * Reset route (decision 11): its bends go and its ends on steps go back to automatic heights, a hub tail held at its
+ * height too (and nothing is held any more); what it is connected to stays.
+ */
 export function resetShape(draft: Draft, saved: StudioDocument, id: string): Draft {
   const c = circuitOf(saved, draft);
   if (!Object.hasOwn(c, id) || !shapedByHand(c[id]!)) return draft;
   const w = c[id]!;
-  const auto = (e: End): End => (e.on === 'step' ? { on: 'step', step: e.step, y: null } : e);
+  const auto = (e: End): End => (e.on === 'step' ? { on: 'step', step: e.step, y: null } : e.on === 'hub' && e.dy !== undefined ? { on: 'hub', angle: null } : e);
   const out = copy<CircuitWire>(c);
   out[id] = { tail: auto(w.tail), head: auto(w.head) };
   return withCircuit(draft, saved, out);

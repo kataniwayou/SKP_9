@@ -17,7 +17,7 @@ import type { DesignGestures } from './DesignContext';
 import type { DesignProps } from './designProps';
 import { circuitOf, removeWires, withCircuit, type Draft } from './draft';
 import { landBody, type BodyLanding } from './bodyDrop';
-import { cutPaths, cutWire, holdDrawn, squareAt, squaresOf, type Square } from './cut';
+import { cutPaths, cutTargets, cutWire, holdDrawn, squareAt, squaresOf, type Square } from './cut';
 import { applyDrop, endOf, judgeDrop, pointOfTarget, roleOf, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
 import { newId } from './ids';
@@ -334,7 +334,7 @@ export function useWireGestures(
     // the wire's own squares as they are now, but the one being dragged: what it may be released on to cut the wire
     const shape = rec.bends ?? shapeFromPoints(wire.core.points);
     const zoomK = 1 / getZoom();
-    const squares = squaresOf(wire, shape, zoomK).filter((q) => !(q.kind === 'end' && q.side === side));
+    const squares = cutTargets(squaresOf(wire, shape, zoomK), side);
     const own: OwnSquares = {
       at: (p) => squareAt(squares, p, zoomK),
       preview: (q) => {
