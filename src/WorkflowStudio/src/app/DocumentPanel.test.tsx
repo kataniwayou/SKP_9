@@ -284,6 +284,35 @@ describe('DocumentPanel', () => {
     expect(stop()).toBeDisabled();
   });
 
+  it('a press waiting for the live set keeps polling while the tab is hidden, so it ends on the live set, not a timeout', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const live = { value: [] as string[] };
+    const listLive = vi.fn(async () => ({ ok: true, value: live.value }));
+    const store = createStudioStore();
+    store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
+    store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] })) });
+    const fake = fakePanel();
+    const api = { listLive, listLiveness: vi.fn().mockResolvedValue({ ok: true, value: [] }) } as unknown as StudioApi;
+    render(<StudioStoreProvider value={store}><div style={{ width: 1200, height: 800 }}><DocumentPanel api={api} workflowId="wf1" panel={fake.panel} onRun={vi.fn()} /></div></StudioStoreProvider>);
+    await waitFor(() => expect(store.getState().docs[0]!.live).toBe('stopped'));
+    act(() => {
+      store.dispatch({ type: 'runRequested', workflowId: 'wf1', op: 'start', token: 't', at: '2026-10-09T09:00:00Z' });
+      store.dispatch({ type: 'runAnswered', workflowId: 'wf1', token: 't', at: '2026-10-09T09:00:00Z', ok: true });
+    });
+
+    act(() => fake.show(false));
+    live.value = ['wf1'];
+    const calls = listLive.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(LIVE_POLL_MS); });
+    expect(listLive.mock.calls.length).toBeGreaterThan(calls);
+    await waitFor(() => expect(store.getState().docs[0]!.run).toBeNull());
+    expect(store.getState().output.at(-1)!.text).toBe('running: the workflow is in BaseApi\'s live set');
+    // done, the hidden tab stops polling again
+    const after = listLive.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(3 * LIVE_POLL_MS); });
+    expect(listLive.mock.calls.length).toBe(after);
+  });
+
   it('shows status unknown, not stopped, when the live poll fails', async () => {
     const { store } = await setup(vi.fn().mockResolvedValue({ ok: false, error: { kind: 'http', status: 500, detail: 'Redis down' } }));
     const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] }));

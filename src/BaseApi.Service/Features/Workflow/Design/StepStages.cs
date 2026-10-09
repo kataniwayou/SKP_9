@@ -54,7 +54,7 @@ internal sealed class StepStage : IDesignStage
                 return problems;
             }, ct);
             if (!applied) run.FailedSteps.Add(s.Id);
-            else if (change is null) run.Unchanged();
+            else if (change is null) run.Unchanged(s.Id);
             else run.Changed("step", s.Id, "updated", change);
         }
         run.EndStage();
@@ -80,6 +80,13 @@ internal sealed class WireStage : IDesignStage
     {
         var rewired = (run.Request.Steps ?? []).Where(x => x.NextStepIds is not null).ToList();
         run.BeginStage("wires", rewired.Count, rewired.Count == 1 ? "step with new next steps" : "steps with new next steps");
+        // the lists as they are and every name the lines need, read once (a unit changes only its own step's list)
+        var ids = rewired.Select(s => s.Id).ToList();
+        var current = (await _db.Set<StepNextSteps>().AsNoTracking().Where(j => ids.Contains(j.StepId))
+                .Select(j => new { j.StepId, j.NextStepId }).ToListAsync(ct))
+            .GroupBy(j => j.StepId).ToDictionary(g => g.Key, g => g.Select(j => j.NextStepId).ToList());
+        var names = await DesignLogText.StepNamesAsync(_db,
+            ids.Concat(current.Values.SelectMany(v => v)).Concat(rewired.SelectMany(s => s.NextStepIds!)), ct);
         foreach (var s in rewired)
         {
             if (run.FailedSteps.Contains(s.Id))
@@ -94,17 +101,16 @@ internal sealed class WireStage : IDesignStage
                 if (entity is null) return [new FieldError(null, "This step no longer exists.")];
                 var problems = DesignFields.Failures(await _validator.ValidateAsync(DesignFields.UpdateOf(entity) with { NextStepIds = s.NextStepIds }, ct));
                 if (problems.Count > 0) return problems;
-                var before = await _db.Set<StepNextSteps>().AsNoTracking().Where(j => j.StepId == s.Id).Select(j => j.NextStepId).ToListAsync(ct);
+                var before = current.GetValueOrDefault(s.Id) ?? [];
                 // wires live only in StepNextSteps: force the stamp, as the graph saver does, so the next stale save conflicts
                 _db.Entry(entity).Property(e => e.UpdatedAt).IsModified = true;
                 await StepJunctions.SyncNextStepsAsync(_db, s.Id, s.NextStepIds, replaceExisting: true, ct);
-                var names = await DesignLogText.StepNamesAsync(_db, [s.Id, .. before, .. s.NextStepIds!], ct);
                 var links = DesignLogText.Links(before, s.NextStepIds!, t => $"{names[s.Id]}→{names[t]}");
                 change = links is null ? null : $"next steps {links}";
                 return problems;
             }, ct);
             if (!applied) continue;
-            if (change is null) run.Unchanged();
+            if (change is null) run.Unchanged(s.Id);
             else run.Changed("step", s.Id, "rewired", change);
         }
         run.EndStage();

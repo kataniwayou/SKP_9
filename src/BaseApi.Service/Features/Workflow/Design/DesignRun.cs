@@ -38,6 +38,10 @@ internal sealed class DesignRun
     public HashSet<Guid> FailedSteps { get; } = [];
     public List<Guid> CreatedAssignments { get; } = [];
     public List<Guid> DeletedAssignments { get; } = [];
+    /// <summary>Assignments the assignment stage unlinked from this workflow (deleted ones that it listed).</summary>
+    public HashSet<Guid> UnlinkedAssignments { get; } = [];
+    /// <summary>The names of this design's assignments as the assignment stage found them (a deleted one keeps its name for the log).</summary>
+    public Dictionary<Guid, string> AssignmentNames { get; } = [];
 
     /// <summary>What the save did, in order (the answer's <see cref="DesignOutcomeDto.Log"/>).</summary>
     public List<DesignLogDto> Log { get; } = [];
@@ -72,16 +76,33 @@ internal sealed class DesignRun
         Note(stage, "stage", count == 0 ? $"{stage}: nothing to do" : $"{stage}: {count} {noun}");
     }
 
-    /// <summary>One entity this stage changed, with what changed; counted under <paramref name="verb"/> (e.g. "updated").</summary>
+    /// <summary>
+    /// One entity this stage changed, with what changed; counted under <paramref name="verb"/> (e.g. "updated"), unless
+    /// this stage already refused it (then it is counted once, as refused, and the line still says what it changed).
+    /// </summary>
     public void Changed(string kind, Guid id, string verb, string message)
     {
         var t = _tally ?? throw new InvalidOperationException("Changed outside a stage.");
-        t.Done[verb] = t.Done.GetValueOrDefault(verb) + 1;
+        if (!t.Refused.Contains(id)) t.Done[verb] = t.Done.GetValueOrDefault(verb) + 1;
         Log.Add(new DesignLogDto(t.Stage, "info", kind, id, $"{LabelOf(kind, id)}: {message}"));
     }
 
-    /// <summary>One entity this stage looked at and left as it was (no line of its own, only the count).</summary>
-    public void Unchanged() => (_tally ?? throw new InvalidOperationException("Unchanged outside a stage.")).Unchanged++;
+    /// <summary>One entity this stage looked at and left as it was (no line of its own, only the count; refused wins).</summary>
+    public void Unchanged(Guid id)
+    {
+        var t = _tally ?? throw new InvalidOperationException("Unchanged outside a stage.");
+        if (!t.Refused.Contains(id)) t.Unchanged++;
+    }
+
+    /// <summary>The save is rolled back: every change line so far is marked undone (the database never kept it).</summary>
+    public void MarkRolledBack()
+    {
+        for (var i = 0; i < Log.Count; i++)
+        {
+            var l = Log[i];
+            if (l.Level == "info" && l.Id is not null && l.Kind != "stage" && l.Kind != "outcome") Log[i] = l with { RolledBack = true };
+        }
+    }
 
     /// <summary>A stage is done: one line with its counts ("steps: 3 updated, 1 unchanged, 1 refused").</summary>
     public void EndStage()

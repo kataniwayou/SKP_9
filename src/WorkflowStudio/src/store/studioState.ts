@@ -15,7 +15,7 @@ import { EMPTY_INSPECTOR, type InspectorState } from './inspector';
 import { currentTarget, editTargetOf, rootTarget, targetKey, type InspectorTarget } from './inspectorTarget';
 import { picksOf, samePicks, type Pick } from './picks';
 import { selectionKey, type Selection } from './selection';
-import { appendOutput, type LineDraft, type OutputLine } from './output';
+import { appendOutput, capLine, type LineDraft, type OutputLine } from './output';
 import { RUN_TIMEOUT_MS, RUN_WORD, type RunOp, type RunState } from './run';
 import { saveAnswerLines, settleReport, type DesignLogLine } from './saveLog';
 
@@ -373,7 +373,7 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
 /** The state with lines for one workflow appended to Output (bounded). */
 function logged(state: StudioState, workflowId: Id, name: string, lines: readonly LineDraft[]): StudioState {
   if (lines.length === 0) return state;
-  return { ...state, output: appendOutput(state.output, lines.map((l) => ({ at: l.at, workflowId, name, text: l.text, level: l.level ?? 'info' }))) };
+  return { ...state, output: appendOutput(state.output, lines.map((l) => ({ at: l.at, workflowId, name, text: capLine(l.text), level: l.level ?? 'info' }))) };
 }
 
 /**

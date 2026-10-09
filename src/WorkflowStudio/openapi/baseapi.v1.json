@@ -3910,6 +3910,9 @@
           "message": {
             "type": "string",
             "nullable": true
+          },
+          "rolledBack": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false

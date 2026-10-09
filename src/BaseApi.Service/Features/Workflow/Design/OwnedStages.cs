@@ -36,10 +36,11 @@ internal sealed class AssignmentStage : IDesignStage
         var steps = await DesignLogText.StepNamesAsync(_db, assignments.Select(a => a.StepId), ct);
         var ids = assignments.Select(a => a.Id).ToList();
         var stored = await _db.Set<AssignmentEntity>().AsNoTracking().Where(x => ids.Contains(x.Id))
-            .Select(x => new { x.Id, x.Name }).ToListAsync(ct);
+            .Select(x => new { x.Id, x.Name }).ToDictionaryAsync(x => x.Id, x => x.Name, ct);
         foreach (var a in assignments)
         {
-            var name = stored.FirstOrDefault(x => x.Id == a.Id)?.Name ?? Text(a.Fields, "name");
+            var name = stored.GetValueOrDefault(a.Id) ?? Text(a.Fields, "name");
+            if (name is not null) run.AssignmentNames[a.Id] = name;
             run.Label(a.Id, name is null ? $"assignment on step '{steps[a.StepId]}'" : $"assignment '{name}' on step '{steps[a.StepId]}'");
         }
         foreach (var a in assignments)
@@ -57,16 +58,18 @@ internal sealed class AssignmentStage : IDesignStage
                 case "update":
                     if (await run.UnitAsync("assignment", a.Id, "assignments", () => UpdateAsync(a, c => change = c, ct), ct))
                     {
-                        if (change is null) run.Unchanged();
+                        if (change is null) run.Unchanged(a.Id);
                         else run.Changed("assignment", a.Id, "updated", change);
                     }
                     break;
                 default:
                     var gone = false;
-                    if (await run.UnitAsync("assignment", a.Id, "assignments", () => DeleteAsync(run.WorkflowId, a, g => gone = g, ct), ct))
+                    var unlinked = false;
+                    if (await run.UnitAsync("assignment", a.Id, "assignments", () => DeleteAsync(run.WorkflowId, a, g => gone = g, u => unlinked = u, ct), ct))
                     {
                         run.DeletedAssignments.Add(a.Id);
-                        if (gone) run.Unchanged();
+                        if (unlinked) run.UnlinkedAssignments.Add(a.Id);
+                        if (gone) run.Unchanged(a.Id);
                         else run.Changed("assignment", a.Id, "deleted", "unlinked from this workflow and deleted");
                     }
                     break;
@@ -112,7 +115,7 @@ internal sealed class AssignmentStage : IDesignStage
         return problems;
     }
 
-    private async Task<List<FieldError>> DeleteAsync(Guid workflowId, DesignAssignmentDto a, Action<bool> gone, CancellationToken ct)
+    private async Task<List<FieldError>> DeleteAsync(Guid workflowId, DesignAssignmentDto a, Action<bool> gone, Action<bool> unlinked, CancellationToken ct)
     {
         var entity = await _db.Set<AssignmentEntity>().FirstOrDefaultAsync(x => x.Id == a.Id, ct);
         gone(entity is null);
@@ -120,6 +123,7 @@ internal sealed class AssignmentStage : IDesignStage
         if (DesignRun.IsStale(entity.UpdatedAt, a.UpdatedAt)) return [new FieldError(null, DesignRun.Conflict)];
         // unlink, then delete the row: one save, ordered by EF from the foreign keys
         var links = await _db.Set<WorkflowAssignments>().Where(j => j.WorkflowId == workflowId && j.AssignmentId == a.Id).ToListAsync(ct);
+        unlinked(links.Count > 0);
         _db.RemoveRange(links);
         _db.Remove(entity);
         return [];
@@ -190,21 +194,19 @@ internal sealed class WorkflowStage : IDesignStage
             // entry, cache and assignment changes are junction-only: force the stamp, as the graph saver does
             _db.Entry(entity).Property(e => e.UpdatedAt).IsModified = true;
             await WorkflowJunctions.SyncAsync(_db, run.WorkflowId, dto.EntryStepIds, dto.AssignmentIds, dto.CacheIds, replaceExisting: true, ct);
-            change = await DescribeAsync(before, dto, oldEntry, oldCaches, linked, ct);
+            // what the workflow listed before this save: what it lists now, and what the assignment stage unlinked
+            change = await DescribeAsync(before, dto, oldEntry, oldCaches, [.. linked, .. run.UnlinkedAssignments.Where(id => !linked.Contains(id))], run.AssignmentNames, ct);
             return problems;
         }, ct);
-        if (applied)
-        {
-            if (change is null) run.Unchanged();
-            else run.Changed("workflow", run.WorkflowId, "updated", change);
-        }
+        // the stage always writes the workflow's stamp, so an applied unit is an update even when nothing else differs
+        if (applied) run.Changed("workflow", run.WorkflowId, "updated", change ?? "its stamp moved; no field or list changed");
         run.EndStage();
     }
 
     /// <summary>What the workflow stage wrote: its changed fields, and how its entry steps, caches and assignment links changed.</summary>
     private async Task<string?> DescribeAsync(
         (string Name, string Version, string? Description, string? CronExpression) before, WorkflowUpdateDto dto,
-        List<Guid> oldEntry, List<Guid> oldCaches, List<Guid> oldAssignments, CancellationToken ct)
+        List<Guid> oldEntry, List<Guid> oldCaches, List<Guid> oldAssignments, IReadOnlyDictionary<Guid, string> known, CancellationToken ct)
     {
         var entry = dto.EntryStepIds ?? [];
         var caches = dto.CacheIds ?? [];
@@ -216,6 +218,7 @@ internal sealed class WorkflowStage : IDesignStage
         var assignmentIds = oldAssignments.Concat(assignments).Distinct().ToList();
         var assignmentNames = await _db.Set<AssignmentEntity>().AsNoTracking().Where(a => assignmentIds.Contains(a.Id))
             .Select(a => new { a.Id, a.Name }).ToDictionaryAsync(a => a.Id, a => a.Name, ct);
+        foreach (var (id, n) in known) assignmentNames.TryAdd(id, n);
         string Named(Dictionary<Guid, string> names, Guid id) => names.TryGetValue(id, out var n) ? n : DesignLogText.Short(id);
 
         var parts = DesignLogText.Fields(
@@ -224,7 +227,7 @@ internal sealed class WorkflowStage : IDesignStage
         if (DesignLogText.Links(oldEntry, entry, id => steps[id]) is { } e) parts.Add($"entry steps {e}");
         if (DesignLogText.Links(oldCaches, caches, id => Named(cacheNames, id)) is { } c) parts.Add($"caches {c}");
         if (DesignLogText.Links(oldAssignments, assignments, id => Named(assignmentNames, id)) is { } a)
-            parts.Add($"assignments {a.Replace(" added", " linked").Replace(" removed", " unlinked")}");
+            parts.Add($"assignments {a.Replace(" added", " linked").Replace(" removed", " unlinked (by the assignments stage)")}");
         return DesignLogText.Join(parts);
     }
 }

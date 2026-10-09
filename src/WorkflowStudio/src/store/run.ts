@@ -18,8 +18,9 @@ export const RUN_TIMEOUT_MS = 30_000;
 export const RUN_WORD: Readonly<Record<RunOp, string>> = { start: 'Start', stop: 'Stop' };
 
 /** Why Start or Stop cannot be pressed now, or null when it can: the live status decides, and one press at a time. */
-export function runBlocked(doc: { status: { kind: string }; live: LiveStatus; run: RunState | null }, op: RunOp): string | null {
+export function runBlocked(doc: { status: { kind: string }; live: LiveStatus; run: RunState | null; saving: boolean }, op: RunOp): string | null {
   if (doc.status.kind !== 'ready') return 'The workflow is not loaded';
+  if (doc.saving) return 'Saving…';
   if (doc.run !== null) return doc.run.op === 'start' ? 'Starting…' : 'Stopping…';
   switch (doc.live) {
     case 'checking': return 'Checking whether it runs…';

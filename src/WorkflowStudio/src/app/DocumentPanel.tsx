@@ -47,7 +47,9 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
   const ownerDocument = useOwnerDocument(panel);
   const fitter = useFitter(ownerDocument);
   const visible = usePanelVisible(panel, ownerDocument) && open?.status.kind === 'ready';
-  const status = useLiveStatus(api, workflowId, visible);
+  // a Start or Stop in progress keeps polling while the tab is hidden: its outcome is the live set's, not a timeout's
+  const pressing = open?.status.kind === 'ready' && open.run !== null;
+  const status = useLiveStatus(api, workflowId, visible || pressing);
   // the store keeps what the poll said: Start and Stop follow it, and a press waiting for it is done when it agrees
   useEffect(() => { store.dispatch({ type: 'live', workflowId, status, at: new Date().toISOString() }); }, [store, workflowId, status]);
   const liveness = useLiveness(api, visible);

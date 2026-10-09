@@ -75,7 +75,11 @@ public sealed record DesignOutcomeDto(bool Applied, List<DesignErrorDto> Errors,
 /// <param name="Kind">The entity kind the line is about, <c>stage</c> for a stage's start and counts, or <c>outcome</c>.</param>
 /// <param name="Id">The entity, or null for a stage or outcome line.</param>
 /// <param name="Message">What happened, as one sentence.</param>
-public sealed record DesignLogDto(string Stage, string Level, string Kind, Guid? Id, string Message);
+/// <param name="RolledBack">
+/// True on a change line of a save that was rolled back: the stage made the change inside the dry run's transaction,
+/// and the rollback undid it, so the entity in the database is as it was.
+/// </param>
+public sealed record DesignLogDto(string Stage, string Level, string Kind, Guid? Id, string Message, bool RolledBack = false);
 
 /// <param name="Id">The entity that failed.</param>
 /// <param name="Message">Why.</param>

@@ -4,7 +4,22 @@ import type { DesignError } from '../model/graph';
 import { plural, type OutputLevel } from './output';
 
 /** One line of BaseApi's own account of a design save (`DesignOutcomeDto.log`). */
-export interface DesignLogLine { stage: string; level: OutputLevel; kind: string; id: string | null; message: string }
+export interface DesignLogLine {
+  stage: string; level: OutputLevel; kind: string; id: string | null; message: string;
+  /** A change the dry run made and its rollback undid (BaseApi's `rolledBack`). */
+  rolledBack?: boolean;
+}
+
+/** One Save's lines kept at most: the first SAVE_HEAD and the last SAVE_TAIL, an "omitted" line between. */
+export const SAVE_HEAD = 60;
+export const SAVE_TAIL = 120;
+
+/** A Save's lines within the per-save bound: its head (start, first stages) and its tail (outcome, alignment) stay. */
+export function boundSave<T extends { text: string }>(lines: T[], omitted: (n: number) => T): T[] {
+  if (lines.length <= SAVE_HEAD + SAVE_TAIL + 1) return lines;
+  const n = lines.length - SAVE_HEAD - SAVE_TAIL;
+  return [...lines.slice(0, SAVE_HEAD), omitted(n), ...lines.slice(lines.length - SAVE_TAIL)];
+}
 
 /** What settling the re-read design did to the drawing (plan 9 §8): wires changed, added and removed. */
 export interface SettleReport { changed: number; added: number; removed: number }
@@ -69,7 +84,7 @@ export function saveVerdict(applied: boolean, errors: number, shorts: number, he
 export function saveAnswerLines(f: SaveFacts): { text: string; level: OutputLevel }[] {
   const out: { text: string; level: OutputLevel }[] = [];
   if (f.log !== null) {
-    for (const l of f.log) out.push({ text: `BaseApi · ${l.message}`, level: l.level });
+    for (const l of f.log) out.push({ text: `BaseApi · ${l.rolledBack ? '(rolled back) ' : ''}${l.message}`, level: l.level });
   } else {
     out.push({ text: 'BaseApi sent no step-by-step log (an older BaseApi)', level: 'info' });
     for (const e of f.errors) out.push({ text: `BaseApi · ${e.kind} ${e.id}: ${e.field ? `${e.field}: ` : ''}${e.message}`, level: 'error' });
@@ -97,7 +112,7 @@ export function saveAnswerLines(f: SaveFacts): { text: string; level: OutputLeve
       ? { text: 'design stored on the workflow, not applied: the drawing shows the stored design', level: 'error' }
       : { text: 'nothing left stored: the entities hold the design, the layout is kept', level: 'info' });
   }
-  return out;
+  return boundSave(out, (n) => ({ text: `… ${n} lines of this Save omitted`, level: 'info' as OutputLevel }));
 }
 
 /**

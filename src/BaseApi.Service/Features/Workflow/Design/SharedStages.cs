@@ -107,7 +107,7 @@ internal sealed class ProcessorStage : IDesignStage
                 return problems;
             }, ct, shared: true);
             if (!applied) continue;
-            if (change is null) run.Unchanged();
+            if (change is null) run.Unchanged(p.Id);
             else run.Changed("processor", p.Id, "updated", change);
         }
         run.EndStage();
@@ -157,7 +157,7 @@ internal sealed class CacheStage : IDesignStage
                 return problems;
             }, ct, shared: true);
             if (!applied) continue;
-            if (change is null) run.Unchanged();
+            if (change is null) run.Unchanged(c.Id);
             else run.Changed("cache", c.Id, "updated", change);
         }
         run.EndStage();

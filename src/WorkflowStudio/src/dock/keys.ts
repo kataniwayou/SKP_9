@@ -10,6 +10,7 @@ export function keyCommand(e: KeyLike): KeyCommand | null {
   if (e.altKey && !mod && key === 'w') return 'closeDocument';
   if (mod && !e.altKey && !e.shiftKey && key === 'o') return 'open';
   if (e.key === 'Escape') return 'escape';
-  if (e.key === 'F5') return e.shiftKey ? 'stop' : 'start';
+  // plain F5 / Shift+F5 only: Ctrl, Meta or Alt with F5 is the browser's (Ctrl+F5 is a hard reload)
+  if (e.key === 'F5' && !mod && !e.altKey) return e.shiftKey ? 'stop' : 'start';
   return null;
 }

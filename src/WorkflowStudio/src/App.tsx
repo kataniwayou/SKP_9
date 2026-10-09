@@ -8,7 +8,7 @@ import { createInspectorService } from './app/inspectorService';
 import { loadDocument } from './app/loadDocument';
 import { runWorkflow } from './app/runWorkflow';
 import { saveDesign } from './app/saveDesign';
-import { browserTabStorage, createSaver, readTabSession, restoredState, sessionOf, writeTabSession, type Session } from './app/session';
+import { browserTabStorage, createSaver, keepSession, readTabSession, restoredState, sessionOf, type Session } from './app/session';
 import { StudioActionsProvider, type StudioActions } from './app/studioActions';
 import { SvgDefs } from './canvas/SvgDefs';
 import type { SavedView } from './canvas/savedView';
@@ -143,7 +143,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
   const saver = useMemo(() => createSaver(() => {
     const state = store.getState();
     for (const id of [...views.current.keys()]) if (!state.docs.some((d) => d.workflowId === id)) views.current.delete(id);
-    const kept = writeTabSession(tabStorage, storage, sessionOf(state, views.current, dockState.current));
+    const kept = keepSession(tabStorage, storage, sessionOf(state, views.current, dockState.current));
     if (!kept && !sessionRefused.current) setNotice((n) => ({ id: n.id + 1, text: 'This browser would not keep the session: a refresh may lose unsaved changes' }));
     sessionRefused.current = !kept;
   }), [store, storage, tabStorage]);

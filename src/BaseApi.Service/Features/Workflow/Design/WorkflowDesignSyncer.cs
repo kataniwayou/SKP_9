@@ -60,6 +60,7 @@ internal sealed class WorkflowDesignSyncer : IWorkflowDesignSyncer
             if (run.Errors.Count > 0)
             {
                 await tx.RollbackAsync(CancellationToken.None);
+                run.MarkRolledBack();
                 var refused = run.Errors.Select(e => e.Id).Distinct().Count();
                 run.Note("outcome", "outcome",
                     $"dry run failed: {Count(run.Errors.Count, "error")} on {Count(refused, "entity", "entities")}", "error");

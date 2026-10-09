@@ -354,6 +354,12 @@ describe('the design (plan 8)', () => {
     expect(s.output.at(-1)).toMatchObject({ text: 'Not saved: Network error: down', level: 'error' });
   });
 
+  it('a line longer than 400 characters is cut, ending in …', async () => {
+    const s = reduce(await loaded(), { type: 'log', workflowId: 'wf1', lines: [{ at: 't', text: 'x'.repeat(1000) }] });
+    expect(s.output[0]!.text).toHaveLength(400);
+    expect(s.output[0]!.text.endsWith('x…')).toBe(true);
+  });
+
   it('Output keeps the last 500 lines, oldest dropped first; a log action names its workflow', async () => {
     let s = await loaded();
     const lines = Array.from({ length: 300 }, (_, i) => ({ at: `t${i}`, text: `line ${i}` }));

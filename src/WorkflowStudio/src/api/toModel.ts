@@ -111,5 +111,6 @@ export function designLogFromDto(dto: DesignOutcomeDto): DesignLogLine[] | null 
   if (!Array.isArray(dto.log)) return null;
   return dto.log.map((l) => ({
     stage: text(l.stage), level: l.level === 'error' ? 'error' : 'info', kind: text(l.kind), id: optional(l.id), message: text(l.message),
+    ...(l.rolledBack === true ? { rolledBack: true } : {}),
   }));
 }

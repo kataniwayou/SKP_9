@@ -128,6 +128,19 @@ export function writeTabSession(tab: Storage | null, mirror: Storage | null, ses
   return writeSession(tab, session) || (mirrored && !holdsSession(tab));
 }
 
+/**
+ * Writes the session as `writeTabSession` does; when the browser refuses it (quota), writes it again with Output's log
+ * trimmed to its last 100 lines, then with no log, so the documents, dock and drafts are kept before the log.
+ */
+export function keepSession(tab: Storage | null, mirror: Storage | null, session: Session): boolean {
+  if (writeTabSession(tab, mirror, session)) return true;
+  const output = session.output ?? [];
+  if (output.length > 100 && writeTabSession(tab, mirror, { ...session, output: output.slice(-100) })) return true;
+  if (output.length === 0) return false;
+  const { output: _, ...without } = session;
+  return writeTabSession(tab, mirror, without);
+}
+
 /** The session for the current state: views of documents that are no longer open are dropped. */
 export function sessionOf(state: StudioState, views: ReadonlyMap<string, SavedView>, dock: SavedLayout | null): Session {
   return {

@@ -6,7 +6,7 @@ import { EMPTY_EDITS } from '../design/design';
 import { historyOf } from '../design/history';
 import { INITIAL_STATE, reduce, type StudioState } from '../store/studioState';
 import { loadedDocument } from './fixtures';
-import { createSaver, readSession, readTabSession, restoredState, SESSION_KEY, sessionOf, writeSession, writeTabSession, type Session } from './session';
+import { createSaver, keepSession, readSession, readTabSession, restoredState, SESSION_KEY, sessionOf, writeSession, writeTabSession, type Session } from './session';
 
 const dock = { version: 1, dock: { grid: { root: { type: 'branch', data: [] }, width: 1200, height: 700, orientation: 'HORIZONTAL' }, panels: {} }, documentGroupId: null, hidden: [], sides: {}, homes: {}, popped: [] };
 
@@ -233,6 +233,27 @@ describe('Output in the session (2026-10-09: a refresh keeps the log)', () => {
   it('leaves the log out while it is empty, and reads a session without one (written before) as no lines', () => {
     expect(sessionOf(restoredState(good), new Map(), null)).not.toHaveProperty('output');
     expect(restoredState(readSession(memoryStorage({ [SESSION_KEY]: JSON.stringify(good) }))).output).toEqual([]);
+  });
+
+  it('a browser that refuses the session for its size keeps it with the log trimmed, then without it, never dropping the documents', () => {
+    const big = Array.from({ length: 300 }, (_, i) => ({ ...lines[0]!, text: `line ${i}` }));
+    const session = sessionOf({ ...restoredState(good), output: big }, new Map(), null);
+    // a tab storage that takes a session only while its log is at most `fits` lines
+    const limited = (fits: number) => {
+      const inner = memoryStorage();
+      return { ...inner, getItem: (k: string) => inner.getItem(k), setItem: (k: string, v: string) => {
+        if ((JSON.parse(v).output?.length ?? 0) > fits) throw new Error('QuotaExceededError');
+        inner.setItem(k, v);
+      } } as unknown as Storage;
+    };
+    const roomy = limited(1000), tight = limited(100), tiny = limited(0);
+    expect(keepSession(roomy, null, session)).toBe(true);
+    expect(readSession(roomy)!.output).toHaveLength(300);
+    expect(keepSession(tight, null, session)).toBe(true);
+    expect(readSession(tight)!.output!.map((l) => l.text)).toEqual(big.slice(-100).map((l) => l.text));
+    expect(keepSession(tiny, null, session)).toBe(true);
+    expect(readSession(tiny)!.docs.map((d) => d.workflowId)).toEqual(['a', 'b']);
+    expect(readSession(tiny)).not.toHaveProperty('output');
   });
 
   it('drops what is not a line, reads an unknown level as info, and keeps at most the last 500', () => {

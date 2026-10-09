@@ -455,6 +455,8 @@ export function DockShell(props: DockShellProps) {
         e.preventDefault(); openPicker(doc === document ? fileAnchor() : { x: 8, y: 8, doc }); break;
       case 'start': case 'stop': {
         e.preventDefault();
+        // a dialog (a question, the picker, the switcher) is open: the key does nothing
+        if (doc.querySelector('[role="dialog"], [role="alertdialog"]')) break;
         const run = now.props.onRunCommand;
         const why = run ? run(command) : 'Start and Stop are not available.';
         if (why !== null) showToast(why, doc);

@@ -43,6 +43,20 @@ test('Start with an unsaved design notes it and starts the saved workflow; the s
   await page.mouse.up();
   await expect(page.getByText('● design draft')).toBeVisible();
 
+  // keys (review 2026-10-09): Ctrl+F5 is the browser's, and F5 does nothing while a dialog is open
+  const presses: string[] = [];
+  page.on('request', (r) => { if (r.method() === 'POST' && r.url().includes('/orchestration/')) presses.push(r.url()); });
+  await page.keyboard.press('Control+F5');
+  await page.keyboard.press('Control+o');
+  await expect(page.getByRole('dialog', { name: 'Open workflow' })).toBeVisible();
+  await page.keyboard.press('F5');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Open workflow' })).toHaveCount(0);
+  await page.waitForTimeout(500);
+  expect(presses).toEqual([]);
+  await expect(page.getByRole('log', { name: 'Output' }).locator('.outl')).toHaveCount(0);
+  await expect(page.getByText('● design draft')).toBeVisible();
+
   const sent = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/orchestration/start'));
   await start.click();
   expect((await sent).postDataJSON()).toBe(wf.id);
@@ -61,7 +75,8 @@ test('Start with an unsaved design notes it and starts the saved workflow; the s
   await expect(page.getByText('● design draft')).toBeVisible();
   await shot(page, '5-started');
 
-  await stop.click();
+  // Stop from the keyboard: Shift+F5 on the active document
+  await page.keyboard.press('Shift+F5');
   await expect(status).toHaveText('■ stopped', { timeout: 30_000 });
   await expect(start).toBeEnabled();
   await expect(stop).toBeDisabled();

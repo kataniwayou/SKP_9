@@ -17,8 +17,14 @@ export interface OutputLine {
 /** A line before it is given its workflow's name (the reducer knows the name). */
 export interface LineDraft { at: string; text: string; level?: OutputLevel }
 
-/** Output keeps the last 500 lines; older ones go first. */
+/** Output keeps the last 500 lines; older ones go first. One Save writes at most about 180 (saveLog `boundSave`). */
 export const OUTPUT_LIMIT = 500;
+
+/** A line longer than this is cut, ending in "…". */
+export const LINE_LIMIT = 400;
+
+/** The text within LINE_LIMIT. */
+export const capLine = (text: string): string => (text.length <= LINE_LIMIT ? text : `${text.slice(0, LINE_LIMIT - 1)}…`);
 
 /** The lines with `more` after them, the oldest dropped beyond the limit. */
 export function appendOutput(lines: readonly OutputLine[], more: readonly OutputLine[]): OutputLine[] {

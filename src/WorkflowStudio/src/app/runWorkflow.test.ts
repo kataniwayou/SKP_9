@@ -25,13 +25,16 @@ const texts = (store: ReturnType<typeof createStudioStore>) => store.getState().
 
 describe('Start and Stop follow the live status (2026-10-09)', () => {
   it('Start only while stopped, Stop only while running; neither while checking, unknown or a press is in progress', async () => {
-    const base = { status: { kind: 'ready' }, run: null };
+    const base = { status: { kind: 'ready' }, run: null, saving: false };
     expect([runBlocked({ ...base, live: 'stopped' }, 'start'), runBlocked({ ...base, live: 'stopped' }, 'stop')]).toEqual([null, 'It is not running']);
     expect([runBlocked({ ...base, live: 'running' }, 'start'), runBlocked({ ...base, live: 'running' }, 'stop')]).toEqual(['It is running', null]);
     expect(runBlocked({ ...base, live: 'checking' }, 'start')).toBe('Checking whether it runs…');
     expect(runBlocked({ ...base, live: 'unknown' }, 'stop')).toBe('BaseApi could not say whether it runs');
     expect(runBlocked({ ...base, live: 'stopped', run: { op: 'start', phase: 'waiting', token: 't' } }, 'start')).toBe('Starting…');
-    expect(runBlocked({ status: { kind: 'loading' }, live: 'stopped', run: null }, 'start')).toBe('The workflow is not loaded');
+    expect(runBlocked({ status: { kind: 'loading' }, live: 'stopped', run: null, saving: false }, 'start')).toBe('The workflow is not loaded');
+    // review 2026-10-09: not while a Save is in flight
+    expect(runBlocked({ ...base, live: 'stopped', saving: true }, 'start')).toBe('Saving…');
+    expect(runBlocked({ ...base, live: 'running', saving: true }, 'stop')).toBe('Saving…');
   });
 
   it('Start: request, accepted, then running once the live set lists it; Output logs each step', async () => {

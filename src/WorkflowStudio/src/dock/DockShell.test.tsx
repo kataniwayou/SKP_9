@@ -233,6 +233,27 @@ describe('DockShell', () => {
     fireEvent.keyDown(window, { key: 'F5', shiftKey: true });
     expect(onRunCommand).toHaveBeenLastCalledWith('stop');
     expect(toast()).toHaveTextContent('Stop is not available: It is not running');
+    // Ctrl+F5 is the browser's; nothing reaches the page
+    fireEvent.keyDown(window, { key: 'F5', ctrlKey: true });
+    expect(onRunCommand).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores F5 while a dialog is open (a question, the picker)', () => {
+    const onRunCommand = vi.fn(() => null);
+    setup({ onRunCommand });
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'alertdialog');
+    document.body.appendChild(dialog);
+    try {
+      fireEvent.keyDown(window, { key: 'F5' });
+      expect(onRunCommand).not.toHaveBeenCalled();
+    } finally {
+      dialog.remove();
+    }
+    openMenu('File');
+    choose(/Open workflow/);
+    fireEvent.keyDown(window, { key: 'F5' });
+    expect(onRunCommand).not.toHaveBeenCalled();
   });
 
   it('toggles a strip menu with its own button', () => {

@@ -3,7 +3,7 @@ import { designLogFromDto } from '../api/toModel';
 import { graphDto, stepDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { circuitOf, EMPTY_DRAFT } from '../design/draft';
-import { saveAnswerLines, saveStartText, settleReport, type SaveFacts } from './saveLog';
+import { SAVE_HEAD, SAVE_TAIL, saveAnswerLines, saveStartText, settleReport, type SaveFacts } from './saveLog';
 
 const wire = (x: number) => ({ tail: { on: 'step', step: 's1', y: null }, head: { on: 'open', x, y: 0 } }) as never;
 
@@ -34,6 +34,20 @@ describe('the Save log (2026-10-09)', () => {
     ]);
   });
 
+  it('a rolled-back change line says so; one Save keeps its head and tail within the bound', () => {
+    const base: SaveFacts = { applied: false, errors: [], shorts: 0, held: 0, stored: true, reread: { ok: true, steps: 1, links: 0 }, settle: null, log: [] };
+    const undone = saveAnswerLines({ ...base, log: [{ stage: 'steps', level: 'info', kind: 'step', id: 's1', message: "step 'a': name 'a' → 'b'", rolledBack: true }] });
+    expect(undone[0]).toEqual({ text: "BaseApi · (rolled back) step 'a': name 'a' → 'b'", level: 'info' });
+
+    const log = Array.from({ length: 400 }, (_, i) => ({ stage: 'steps', level: 'info' as const, kind: 'step', id: `s${i}`, message: `change ${i}` }));
+    const lines = saveAnswerLines({ ...base, log });
+    expect(lines).toHaveLength(SAVE_HEAD + 1 + SAVE_TAIL);
+    expect(lines[0]!.text).toBe('BaseApi · change 0');
+    expect(lines[SAVE_HEAD]!.text).toBe(`… ${400 + 4 - SAVE_HEAD - SAVE_TAIL} lines of this Save omitted`);
+    expect(lines.at(-1)!.text).toBe('design stored on the workflow, not applied: the drawing shows the stored design');
+    expect(lines.some((l) => l.text === 'Saved; not applied: 0 errors')).toBe(true);
+  });
+
   it('settleReport counts wires changed, added and removed as drawn; null when neither draft has a circuit', async () => {
     const doc = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
     expect(settleReport(doc, EMPTY_DRAFT, EMPTY_DRAFT)).toBeNull();
@@ -47,6 +61,7 @@ describe('the Save log (2026-10-09)', () => {
 
   it('reads BaseApi\'s log defensively: an unknown level is info, no log is null', () => {
     expect(designLogFromDto({ applied: true, errors: [] })).toBeNull();
+    expect(designLogFromDto({ applied: false, errors: [], log: [{ stage: 's', level: 'info', kind: 'step', id: 'x', message: 'm', rolledBack: true }] })![0]!.rolledBack).toBe(true);
     expect(designLogFromDto({ applied: true, errors: [], log: [{ stage: 'steps', level: 'warn', kind: 'step', id: 's1', message: 'm' }, { level: 'error' }] })).toEqual([
       { stage: 'steps', level: 'info', kind: 'step', id: 's1', message: 'm' },
       { stage: '', level: 'error', kind: '', id: null, message: '' },

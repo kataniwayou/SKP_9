@@ -2431,6 +2431,7 @@ export interface components {
             /** Format: uuid */
             id?: string | null;
             message?: string | null;
+            rolledBack?: boolean;
         };
         DesignOutcomeDto: {
             applied?: boolean;

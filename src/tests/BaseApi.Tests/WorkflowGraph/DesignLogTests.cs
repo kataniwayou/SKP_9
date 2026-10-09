@@ -10,7 +10,8 @@ namespace BaseApi.Tests.WorkflowGraph;
 /// </summary>
 public sealed class DesignLogTests
 {
-    private static string[] Lines(DesignOutcomeDto o) => o.Log!.Select(l => $"{l.Level} {l.Stage}: {l.Message}").ToArray();
+    private static string[] Lines(DesignOutcomeDto o) =>
+        o.Log!.Select(l => $"{l.Level} {l.Stage}: {l.Message}{(l.RolledBack ? " [rolled back]" : "")}").ToArray();
 
     [Fact]
     public async Task AnAppliedSaveLogsEveryStageEveryChangeAndTheCommitInOrder()
@@ -86,7 +87,7 @@ public sealed class DesignLogTests
         {
             "info steps: steps: 2 steps to check",
             $"error steps: step 'a': version: {version}",
-            "info steps: step 'b': description none → 'fine'",
+            "info steps: step 'b': description none → 'fine' [rolled back]",
             "error steps: steps: 1 updated, 1 refused",
             "info wires: wires: 1 step with new next steps",
             "error wires: step 'a': nextStepIds: Not rewired: the step itself failed.",
@@ -137,11 +138,61 @@ public sealed class DesignLogTests
         Assert.Contains("info assignments: assignment 'made' on step 's1': created (linked to the workflow in the workflow stage)", lines);
         Assert.Contains("info assignments: assignment 'asg' on step 's2': unlinked from this workflow and deleted", lines);
         Assert.Contains("info assignments: assignments: 1 created, 1 deleted", lines);
-        Assert.Contains("info workflow: workflow 'wf': assignments made linked", lines);
+        Assert.Contains("info workflow: workflow 'wf': assignments made linked, asg unlinked (by the assignments stage)", lines);
+        Assert.DoesNotContain(outcome.Log!, l => l.RolledBack);
         // stages log in the spec's order
         string[] order = ["schemas", "processors", "caches", "steps", "wires", "assignments", "workflow"];
         var starts = order.Select(st => Array.FindIndex(lines, l => l.StartsWith($"info {st}: {st}: "))).ToArray();
         Assert.Equal(starts.OrderBy(i => i), starts);
         Assert.DoesNotContain(-1, starts);
+    }
+
+    [Fact]
+    public async Task AnEntityRefusedAndChangedInOneStageIsCountedOnceAsRefused()
+    {
+        await using var h = new GraphHarness();
+        var original = await h.SchemaAsync("cfg");
+        var proc = await h.ProcessorAsync("p", config: original);
+        var wf = await h.WorkflowAsync("wf", [await h.StepAsync(proc)]);
+        var copy = Guid.NewGuid();
+
+        var outcome = await h.Syncer().SaveAsync(wf, Of(
+            processors: [new DesignProcessorDto(proc, F("""{"description":"d"}"""), new() { ["config"] = copy })],
+            schemas: [new DesignSchemaDto(copy, "cfg", "1.0.0", null, "not json")]), h.Ct);
+
+        var lines = Lines(outcome);
+        Assert.Contains("error processors: processor 'p': configSchemaId: Not re-pointed: the config schema copy failed.", lines);
+        Assert.Contains("info processors: processor 'p': description none → 'd' [rolled back]", lines);
+        Assert.Contains("error processors: processors: 1 refused", lines);
+    }
+
+    [Fact]
+    public async Task AnAssignmentOnlyDeleteShowsTheWorkflowUnlinkAndPayloadsAreNeverEchoed()
+    {
+        await using var h = new GraphHarness();
+        var proc = await h.ProcessorAsync();
+        var s1 = await h.StepAsync(proc, "s1");
+        var s2 = await h.StepAsync(proc, "s2");
+        var gone = await h.AssignmentAsync(s1);
+        var kept = await h.AssignmentAsync(s2, """{"secret":1}""");
+        var wf = await h.WorkflowAsync("wf", [s1, s2], [gone, kept]);
+        var loaded = await h.Reader.ReadAsync(wf, h.Ct);
+        var stamp = (Guid id) => loaded.Assignments.Single(a => a.Id == id).UpdatedAt;
+        h.Forget();
+
+        var outcome = await h.Syncer().SaveAsync(wf, Of(
+            workflow: new DesignWorkflowDto(loaded.Workflow.UpdatedAt, null, null, null),
+            assignments:
+            [
+                new DesignAssignmentDto("delete", gone, s1, stamp(gone), null),
+                new DesignAssignmentDto("update", kept, s2, stamp(kept), F("""{"payload":"{\"secret\":2}"}""")),
+            ]), h.Ct);
+
+        Assert.True(outcome.Applied, Describe(outcome));
+        var lines = Lines(outcome);
+        Assert.Contains("info workflow: workflow 'wf': assignments asg unlinked (by the assignments stage)", lines);
+        Assert.Contains("info workflow: workflow: 1 updated", lines);
+        Assert.Contains("info assignments: assignment 'asg' on step 's2': payload changed", lines);
+        Assert.DoesNotContain(outcome.Log!, l => l.Message.Contains("secret"));
     }
 }

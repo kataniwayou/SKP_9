@@ -12,6 +12,9 @@ internal static class DesignLogText
 {
     private const int Shown = 40;
 
+    /// <summary>Fields whose values are data, never echoed in the log: only that they changed.</summary>
+    private static readonly HashSet<string> Opaque = ["payload", "items", "definition"];
+
     /// <summary>
     /// The fields that differ, as "name 'a' → 'b'"; a long value (a description, a payload, a definition)
     /// as "payload changed". Empty when nothing differs.
@@ -22,8 +25,8 @@ internal static class DesignLogText
         foreach (var (field, before, after) in fields)
         {
             if (Equals(before, after)) continue;
-            var b = Show(before);
-            var a = Show(after);
+            var b = Opaque.Contains(field) ? null : Show(before);
+            var a = Opaque.Contains(field) ? null : Show(after);
             changes.Add(b is null || a is null ? $"{field} changed" : $"{field} {b} → {a}");
         }
         return changes;
