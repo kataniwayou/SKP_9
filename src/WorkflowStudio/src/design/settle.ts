@@ -1,12 +1,13 @@
 import type { StudioDocument } from '../app/document';
 import { plainWireId, removeCircuitWires, setEnd, type Circuit, type End, type Side } from '../circuit/circuit';
-import { circuitTrace, heldSources, shortedWires } from '../circuit/families';
+import { circuitTrace, heldSources } from '../circuit/families';
 import { linkKeys, trace, wiresBetween } from '../circuit/trace';
 import { endPointOf, routeCircuit } from '../layout/circuitRoute';
+import type { Placement } from '../layout/placement';
 import type { Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE } from '../layout/ports';
 import type { Id } from '../model/graph';
-import { applyEdits } from './apply';
+import { applyEdits, overlappingOf, placementOf } from './apply';
 import type { Design } from './design';
 import { withCircuit, type Draft } from './draft';
 
@@ -86,14 +87,15 @@ function addPlain(c: Circuit, links: readonly string[]): Circuit {
  * link is made by a plan 7 wire `s->t` with its head on a junction (back into `t`), an unexpected link has every
  * junction on its way drawn plain, a plain wire still making one goes, and what is still missing gets a new
  * automatic wire. Links through a short-circuited net count as made and are never unexpected, and so are all links of
- * a source with a wire in such a net (`heldSources`: Save keeps those sources' loaded lists, so their drawing waits for
+ * a source with a wire in such a net (a net short-circuited by its families or by a wire drawn on another net's, drawn
+ * where the draft's blocks are: `placement`; `heldSources`: Save keeps those sources' loaded lists, so their drawing waits for
  * the short circuit to be fixed); "written" is what Save
  * writes (`circuitTrace`: shorted nets and a step fed its own input left out). Of the junctions on an unexpected
  * link's way, those also on the way of a written expected link are kept (they carry a link the workflow has); only
  * when that leaves none are they all drawn plain. Every round takes away a junction end or a wire, or adds the missing
  * wires, so it settles within the cap; should it not, the circuit is returned as it is, with a warning in dev.
  */
-export function reconcile(start: Readonly<Circuit>, expected: ReadonlySet<string>, saved: StudioDocument): Circuit {
+export function reconcile(start: Readonly<Circuit>, expected: ReadonlySet<string>, saved: StudioDocument, placement: Placement = saved.placement): Circuit {
   const placed = (e: End) => e.on !== 'step' || onCanvas(saved, e.step);
   const kept = Object.assign(Object.create(null) as Circuit, Object.fromEntries(Object.entries(start).filter(([, w]) => placed(w.tail) && placed(w.head))));
   let c = plainEnds(kept, saved, (id, side) => { const e = kept[id]![side]; return e.on === 'wire' && !Object.hasOwn(kept, e.host); });
@@ -101,11 +103,12 @@ export function reconcile(start: Readonly<Circuit>, expected: ReadonlySet<string
   // a round opens a junction end (two a wire at most), removes a wire, or adds missing wires
   const cap = 3 * Object.keys(start).length + expected.size + 2;
   for (let round = 0; round < cap; round++) {
-    const current = circuitTrace(c, conditionOf);
-    const shorted = shortedWires(current.nets);
+    // a wire drawn on a wire of another net short-circuits both nets (the user's rule 2, 2026-10-09)
+    const current = circuitTrace(c, conditionOf, overlappingOf(routeCircuit(c, { placement, steps: saved.graph.steps })));
+    const shorted = current.shorted;
     const made = linkKeys(trace(c).links);
     const written = linkKeys(current.links);
-    const held = heldSources(c, current.nets);
+    const held = heldSources(c, shorted);
     const free = (k: string) => !held.has(k.slice(0, k.indexOf('->')));
     const missing = [...expected].filter((k) => !made.has(k) && free(k));
     const extra = [...written].filter((k) => !expected.has(k) && free(k));
@@ -137,7 +140,7 @@ export function reconcile(start: Readonly<Circuit>, expected: ReadonlySet<string
  */
 export function settleDraft(draft: Draft, saved: StudioDocument): Draft {
   if (draft.wires === null) return draft;
-  return withCircuit(draft, saved, reconcile(draft.wires, expectedLinks(saved, draft.next, draft.entries), saved));
+  return withCircuit(draft, saved, reconcile(draft.wires, expectedLinks(saved, draft.next, draft.entries), saved, placementOf(saved, draft)));
 }
 
 /** A design as it opens (the stored one, or a session's): its draft settled against the base with its own entity edits over it. */

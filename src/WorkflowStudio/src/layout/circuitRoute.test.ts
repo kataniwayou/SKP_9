@@ -82,7 +82,8 @@ describe('routeCircuit (plan 9 §5)', () => {
     expect(routes.get('x')!.points.at(-1)).toEqual(contactOn(host, 40).p);
     expect(routes.get('y')!.points[0]).toEqual(contactOn(host, 64).p);
     expect(routes.get('x')).toMatchObject({ headOn: 'junction', target: null, condition: 1, solid: true });
-    expect(routes.get('y')).toMatchObject({ tailOn: 'junction', source: null, condition: 1, solid: false });
+    // y is joined only on a line and open: direction-less, so grey whatever it is joined on (the user's rule 1, 2026-10-09)
+    expect(routes.get('y')).toMatchObject({ tailOn: 'junction', source: null, condition: null, solid: false, free: true });
   });
 
   it('a short circuit: every wire of the net is marked, each in the family its own head reaches', async () => {
@@ -134,5 +135,74 @@ describe('a hub tail with a shape of its own (review 2026-10-09)', () => {
     const right = routeCircuit({ x: { tail: { on: 'hub', angle: 165 }, head: { on: 'open', x: 900, y: 300 }, bends: { xs: [600], ys: [] } } }, ctxOf(doc))[0]!;
     expect(right.points[1]![0]).toBe(right.points[0]![0]);
     expect(right.points[1]![1]).toBeGreaterThan(cy + SPHERE_R);
+  });
+});
+
+describe('direction-less wires and overlaps (the user\'s rules 1 and 2, 2026-10-09)', () => {
+  const open = (x: number, y: number): End => ({ on: 'open', x, y });
+  const shaped = (tail: End, head: End, xs: number[], ys: number[] = []): CircuitWire => ({ tail, head, bends: { xs, ys } });
+
+  it('a direction-less wire is grey and dashed whatever it is joined on; a wire that would take its colour only through it takes none', async () => {
+    const doc = await four();
+    const routes = byId(routeCircuit({
+      ...plainCircuit(['s1', 's3'], doc.graph.steps, (id) => doc.placement.steps.has(id)),
+      f: w({ on: 'wire', host: 's1->s2', at: 40 }, open(700, 640)),
+      y: w(at('s3', 64), { on: 'wire', host: 'f', at: 40 }),
+    }, ctxOf(doc)));
+    expect(routes.get('f')).toMatchObject({ free: true, condition: null, solid: false, short: false });
+    expect(routes.get('y')).toMatchObject({ free: false, condition: null, solid: false });
+    // the host keeps its own colour
+    expect(routes.get('s1->s2')).toMatchObject({ condition: 1, solid: true, short: false });
+  });
+
+  it('a both-open wire laid exactly on a live wire: both are short circuits, the shared stretch marked on each, the other named', async () => {
+    const doc = await four();
+    const c: Circuit = {
+      ...plainCircuit(['s1', 's3'], doc.graph.steps, (id) => doc.placement.steps.has(id)),
+      // exactly over s1 -> s2 ([512,128] -> [576,128])
+      f: shaped(open(512, 128), open(576, 128), [512]),
+    };
+    const routes = byId(routeCircuit(c, ctxOf(doc)));
+    expect(routes.get('f')).toMatchObject({ short: true, overlaps: [[[512, 128], [576, 128]]], shortWith: ['s1->s2'] });
+    expect(routes.get('s1->s2')).toMatchObject({ short: true, overlaps: [[[512, 128], [576, 128]]], shortWith: ['f'], condition: 1 });
+    expect(routes.get('s3->s4')!.short).toBe(false);
+    expect('overlaps' in routes.get('s3->s4')!).toBe(false);
+  });
+
+  it('crossing a live wire is no short circuit', async () => {
+    const doc = await four();
+    const routes = byId(routeCircuit({
+      ...plainCircuit(['s1', 's3'], doc.graph.steps, (id) => doc.placement.steps.has(id)),
+      f: shaped(open(520, 80), open(560, 200), [544]),
+    }, ctxOf(doc)));
+    expect(routes.get('f')!.short).toBe(false);
+    expect(routes.get('s1->s2')!.short).toBe(false);
+  });
+
+  it('the router never lays an automatic wire on a wire of another net: it takes a free track beside a shape drawn by hand', async () => {
+    const doc = await four();
+    // the hub's automatic wire into s1 runs up x = 248 from 232 to 128; a hand-drawn wire lies on that track
+    const plain = byId(routeCircuit(plainCircuit(['s1', 's3'], doc.graph.steps, (id) => doc.placement.steps.has(id)), ctxOf(doc)));
+    expect(plain.get('wf->s1')!.points).toEqual([[224, 232], [248, 232], [248, 128], [288, 128]]);
+    const m = shaped(open(232, 150), open(264, 200), [248]);
+    // listed last, it is still drawn first: the automatic wire goes round it
+    const routes = byId(routeCircuit({ ...plainCircuit(['s1', 's3'], doc.graph.steps, (id) => doc.placement.steps.has(id)), m }, ctxOf(doc)));
+    const r = routes.get('wf->s1')!;
+    expect([r.points[0], r.points.at(-1)]).toEqual([[224, 232], [288, 128]]);
+    expect(r.points).not.toEqual(plain.get('wf->s1')!.points);
+    expect([r.short, routes.get('m')!.short]).toEqual([false, false]);
+    expect(routes.get('m')!.points).toEqual([[232, 150], [248, 150], [248, 200], [264, 200]]);
+  });
+
+  it('only a shape drawn by hand lies on another net\'s wire: then both are short circuits', async () => {
+    const doc = await four();
+    const c: Circuit = {
+      ...plainCircuit(['s1', 's3'], doc.graph.steps, (id) => doc.placement.steps.has(id)),
+      'wf->s1': shaped({ on: 'hub', angle: null }, at('s1'), [248]),
+      m: shaped(open(232, 150), open(264, 200), [248]),
+    };
+    const routes = byId(routeCircuit(c, ctxOf(doc)));
+    expect(routes.get('wf->s1')).toMatchObject({ short: true, shortWith: ['m'] });
+    expect(routes.get('m')).toMatchObject({ short: true, overlaps: [[[248, 150], [248, 200]]] });
   });
 });

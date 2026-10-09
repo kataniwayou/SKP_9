@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
 import { useGuard } from '../app/studioActions';
 import { applyDesign } from '../design/apply';
+import type { StudioDocument } from '../app/document';
 import { isShortCircuitError, shortCircuitErrors } from '../design/shortCircuits';
+import { wireName } from '../design/wireName';
 import { entityName } from '../model/entityNames';
 import type { DesignError, Graph } from '../model/graph';
 import { errorTarget } from '../store/errorTarget';
@@ -11,13 +13,14 @@ import { useStudio, useStudioStore } from '../store/studioStore';
 import { PaneNote } from './PaneNote';
 
 const KIND: Readonly<Record<string, string>> = {
-  workflow: 'Workflow', step: 'Step', processor: 'Processor', cache: 'Cache', assignment: 'Assignment', schema: 'Schema',
+  workflow: 'Workflow', step: 'Step', processor: 'Processor', cache: 'Cache', assignment: 'Assignment', schema: 'Schema', wire: 'Wire',
 };
 
-/** The entity a row names, by its unique name when this canvas holds it, else by its id. */
-function entityLabel(e: DesignError, graph: Graph): string {
+/** The entity a row names, by its unique name when this canvas holds it, else by its id; a wire as the Inspector names it. */
+function entityLabel(e: DesignError, graph: Graph, shown: StudioDocument | null): string {
   const named = (x: { name: string; version: string; id: string } | undefined) => (x ? entityName(x.name, x.version, x.id) : e.id);
   switch (e.kind) {
+    case 'wire': return wireName(shown, e.id) ?? e.id;
     case 'workflow': return named(graph.workflow);
     case 'step': return named(graph.steps.get(e.id));
     case 'processor': return named(graph.processors.get(e.id));
@@ -35,11 +38,13 @@ export function Problems() {
   const active = useStudio(activeDocument);
   const store = useStudioStore();
   const guard = useGuard();
-  // short circuits are the design's own (plan 9 §2.2-7): listed while they last, not only after a Save
-  const live = useMemo(
-    () => (active?.status.kind === 'ready' ? shortCircuitErrors(applyDesign(active.status.doc, active.design.draft, active.edits), active.design.draft) : []),
+  // short circuits are the design's own (plan 9 §2.2-7; a wire on another net's, the user's rule 2): listed while they
+  // last, not only after a Save
+  const shown = useMemo(
+    () => (active?.status.kind === 'ready' ? applyDesign(active.status.doc, active.design.draft, active.edits) : null),
     [active?.status, active?.design.draft, active?.edits],
   );
+  const live = useMemo(() => (shown && active ? shortCircuitErrors(shown, active.design.draft) : []), [shown]); // the draft is in `shown`'s inputs
 
   if (active === null) return <PaneNote pane="problems">Open a workflow to see its problems.</PaneNote>;
   if (active.status.kind === 'loading') return <PaneNote pane="problems">Loading…</PaneNote>;
@@ -68,7 +73,7 @@ export function Problems() {
               data-tip={select ? 'Select it' : undefined}
             >
               <span className="gate">{KIND[error.kind] ?? error.kind}</span>
-              <b>{entityLabel(error, graph)}{error.field ? ` · ${error.field}` : ''}</b>
+              <b>{entityLabel(error, graph, shown)}{error.field ? ` · ${error.field}` : ''}</b>
               <div className="pd">{error.message}</div>
             </div>
           );

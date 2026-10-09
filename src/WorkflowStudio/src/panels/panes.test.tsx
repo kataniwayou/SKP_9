@@ -13,7 +13,7 @@ import { Problems } from './Problems';
 import { buildDesignRequest } from '../app/saveDesign';
 import { applyDesign } from '../design/apply';
 import { designOf } from '../store/studioState';
-import { setEnd } from '../circuit/circuit';
+import { addCircuitWire, moveWire, setEnd } from '../circuit/circuit';
 import { circuitOf, EMPTY_DRAFT, withCircuit } from '../design/draft';
 
 const graph = graphDto({
@@ -338,6 +338,26 @@ describe('Problems (plan 8 §4.1: the last Save\'s errors)', () => {
 
     act(() => store.dispatch({ type: 'undo', workflowId: 'wf1' }));
     expect(screen.getAllByRole('listitem').map((r) => r.querySelector('.pd')!.textContent)).toEqual(['bad']);
+  });
+});
+
+describe('Problems: a wire lying on another net\'s wire (the user\'s rule 2, 2026-10-09)', () => {
+  it('lists "short circuit: <wire> overlaps <wire>" with the wires named as the Inspector names them, while it lasts', async () => {
+    const base = await loadedDocument(graph);
+    const store = createStudioStore();
+    store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
+    store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: base });
+    const host = base.wires.find((w) => w.id === 's1->s2')!.points;
+    const c = moveWire(addCircuitWire(circuitOf(base, EMPTY_DRAFT), 'w:f', { tail: { on: 'open', x: 0, y: 0 }, head: { on: 'open', x: 0, y: 0 } }), 'w:f', host, () => null);
+    store.dispatch({ type: 'design', workflowId: 'wf1', draft: withCircuit(EMPTY_DRAFT, base, c) });
+    wrap(store, <Problems />);
+    const rows = screen.getAllByRole('listitem');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.querySelector('.gate')).toHaveTextContent('Wire');
+    expect(rows[0]!.querySelector('b')).toHaveTextContent('fetch_1.0.0-s1 → store_1.0.0-s2');
+    expect(rows[0]!.querySelector('.pd')).toHaveTextContent('short circuit: fetch_1.0.0-s1 → store_1.0.0-s2 overlaps an open end → an open end');
+    act(() => store.dispatch({ type: 'undo', workflowId: 'wf1' }));
+    expect(screen.getByText('No problems')).toBeInTheDocument();
   });
 });
 

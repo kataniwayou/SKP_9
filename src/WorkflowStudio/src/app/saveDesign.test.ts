@@ -4,13 +4,18 @@ import { assignmentDto, cacheDto, graphDto, processorDto, schemaDto, stepDto, wo
 import type { WorkflowGraphDto } from '../api/types';
 import { applyDesign, applyEdits } from '../design/apply';
 import { EMPTY_EDITS, removeAssignment, setField } from '../design/design';
-import { addCircuitWire, setEnd } from '../circuit/circuit';
+import { addCircuitWire, moveWire, setEnd } from '../circuit/circuit';
 import { circuitOf, EMPTY_DRAFT, moveBlocks, removeWires, setShape, withCircuit } from '../design/draft';
 import { designDirty } from '../store/studioState';
 import { createStudioStore } from '../store/studioStore';
 import { loadedDocument } from './fixtures';
 import { loadDocument } from './loadDocument';
 import { buildDesignRequest, saveDesign, type DesignRequest } from './saveDesign';
+import { setBends, type Circuit } from '../circuit/circuit';
+import { shapeFromPoints } from '../layout/shape';
+import type { Pt } from '../layout/router';
+
+const setShapeOf = (c: Circuit, id: string, core: Pt[]): Circuit => setBends(c, id, shapeFromPoints(core));
 
 const notFound = { ok: false, error: { kind: 'notFound', status: 404 } } as const;
 
@@ -307,6 +312,41 @@ describe('saveDesign (plan 8 §4.1)', () => {
     expect([sent.workflow.entryStepIds, sent.steps]).toEqual([null, []]);
     expect(store.getState().output.at(-1)!.text).toBe('Saved and applied; 1 short circuit not written; 1 link held back until fixed');
     expect(Object.keys(store.getState().docs[0]!.design.draft.wires ?? {})).toContain('w:e');
+  });
+
+  it("a wire lying on another net's wire is a short circuit: its source keeps its loaded list, the drawing waits and survives a reload (the user's rule 2, 2026-10-09)", async () => {
+    const workflow = workflowDto({ entryStepIds: ['s1', 's3'] });
+    const graph = graphDto({ workflow, steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3')] });
+    const base = await loadedDocument(graph);
+    const store = createStudioStore();
+    store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
+    store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: base });
+    // a new wire s1 -> s3 shaped by hand, and a both-open wire laid exactly on it
+    let c = addCircuitWire(circuitOf(base, EMPTY_DRAFT), 'w:n', { tail: { on: 'step', step: 's1', y: null }, head: { on: 'step', step: 's3', y: null } });
+    const drawn = applyDesign(base, withCircuit(EMPTY_DRAFT, base, c), EMPTY_EDITS).wires.find((w) => w.id === 'w:n')!;
+    c = setShapeOf(c, 'w:n', drawn.core.points);
+    c = moveWire(addCircuitWire(c, 'w:f', { tail: { on: 'open', x: 0, y: 0 }, head: { on: 'open', x: 0, y: 0 } }), 'w:f', drawn.points, () => null);
+    store.dispatch({ type: 'design', workflowId: 'wf1', draft: withCircuit(EMPTY_DRAFT, base, c) });
+    const api = appliedApi((sent) => ({ ...graph, layout: sent.layout as never }));
+
+    await saveDesign(api, store, 'wf1', NOW);
+
+    const sent = vi.mocked(api.saveDesign).mock.calls[0]![1] as unknown as DesignRequest;
+    // nothing written for s1: its list stays as BaseApi has it
+    expect([sent.workflow.entryStepIds, sent.steps]).toEqual([null, []]);
+    expect(Object.keys(sent.layout.wires).sort()).toEqual(['s1->s2', 'w:f', 'w:n', 'wf->s1', 'wf->s3']);
+    expect(store.getState().docs[0]!.errors).toEqual([{
+      kind: 'wire', id: 'w:n', stage: 'wires', field: null, message: 'short circuit: step-s1_1.0.0-s1 → step-s3_1.0.0-s3 overlaps an open end → an open end',
+    }]);
+    // s1 -> s3 runs only through the shorted net: it is the short circuit's own link, not one held back beside it
+    expect(store.getState().output.at(-1)!.text).toBe('Saved and applied; 1 short circuit not written');
+    expect(Object.keys(store.getState().docs[0]!.design.draft.wires ?? {}).sort()).toEqual(['s1->s2', 'w:f', 'w:n', 'wf->s1', 'wf->s3']);
+    // a fresh read draws it the same
+    const reopened = createStudioStore();
+    reopened.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
+    const reread = await loadDocument(api, 'wf1');
+    reopened.dispatch({ type: 'loaded', workflowId: 'wf1', doc: reread.ok ? reread.value : base });
+    expect(Object.keys(reopened.getState().docs[0]!.design.draft.wires ?? {}).sort()).toEqual(['s1->s2', 'w:f', 'w:n', 'wf->s1', 'wf->s3']);
   });
 
   it('a short circuit on an entry wire keeps the loaded entry list; a BaseApi error with it is not applied (plan 9 §7)', async () => {

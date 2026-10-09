@@ -5,6 +5,7 @@ import { WORKFLOW_SOURCE } from '../layout/ports';
 import { conditionInfo } from '../model/entryConditions';
 import type { DesignError, Id } from '../model/graph';
 import { circuitOf, type Draft } from './draft';
+import { wireName } from './wireName';
 
 /** How a short circuit's message starts (plan 9 §7). */
 export const SHORT_CIRCUIT = 'short circuit:';
@@ -18,11 +19,28 @@ export const SHORT_CIRCUIT = 'short circuit:';
 export function shortCircuitErrors(shown: StudioDocument, draft: Draft): DesignError[] {
   const circuit = circuitOf(shown, draft);
   const conditionOf = (id: Id) => shown.graph.steps.get(id)?.entryCondition;
-  return netsOf(circuit, conditionOf).filter((n) => n.families.length > 1).map((n) => {
+  const families: DesignError[] = netsOf(circuit, conditionOf).filter((n) => n.families.length > 1).map((n) => {
     const first = n.families[0]!, last = n.families[n.families.length - 1]!;
     const steps = n.wires.flatMap((w) => { const h = circuit[w]!.head; return h.on === 'step' && conditionOf(h.step) === last ? [h.step] : []; }).sort();
     return { kind: 'step', id: steps[0]!, stage: 'wires', field: null, message: `${SHORT_CIRCUIT} ${conditionInfo(first).name} meets ${conditionInfo(last).name}` };
   });
+  return [...families, ...overlapErrors(shown)];
+}
+
+/**
+ * One error per pair of wires sharing a stretch of line across nets (the user's rule 2, 2026-10-09), in the order they
+ * are drawn: kind `wire` on the first, "short circuit: <wire> overlaps <wire>", each wire named as the Inspector names it.
+ */
+function overlapErrors(shown: StudioDocument): DesignError[] {
+  const order = new Map(shown.wires.map((w, i) => [w.id, i]));
+  const out: DesignError[] = [];
+  for (const w of shown.wires) {
+    for (const other of w.shortWith ?? []) {
+      if ((order.get(other) ?? -1) <= order.get(w.id)!) continue;
+      out.push({ kind: 'wire', id: w.id, stage: 'wires', field: null, message: `${SHORT_CIRCUIT} ${wireName(shown, w.id)} overlaps ${wireName(shown, other)}` });
+    }
+  }
+  return out;
 }
 
 /** A short circuit's error (the live list in Problems supersedes any copy a document carries). */
@@ -30,8 +48,8 @@ export const isShortCircuitError = (e: DesignError): boolean => e.stage === 'wir
 
 /** The sources held back by short circuits (`heldSources`): their steps, and whether the hub (the entry list) is one. */
 export function heldSourcesOf(shown: StudioDocument, draft: Draft): { steps: Set<Id>; hub: boolean } {
-  const circuit = circuitOf(shown, draft);
-  const held = heldSources(circuit, netsOf(circuit, (id) => shown.graph.steps.get(id)?.entryCondition));
+  // the wires drawn short: nets whose families disagree, and nets with a wire on another net's (rule 2)
+  const held = heldSources(circuitOf(shown, draft), shown.wires.filter((w) => w.short).map((w) => w.id));
   const hub = held.delete(WORKFLOW_SOURCE);
   return { steps: held, hub };
 }

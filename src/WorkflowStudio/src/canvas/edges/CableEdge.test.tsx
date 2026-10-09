@@ -54,6 +54,13 @@ describe('CableEdgeView', () => {
     expect(joined.container.querySelector('circle.nx-joint')).not.toBeNull();
   });
 
+  it('draws each stretch it shares with a wire of another net in the short circuit\'s red, over its own line (the user\'s rule 2, 2026-10-09)', () => {
+    const { container } = render(<svg><CableEdgeView points={[[0, 8], [64, 8], [64, 40]]} colour="#2DD4BF" delay={0} flowing={false} short overlaps={[[[16, 8], [48, 8]], [[64, 16], [64, 32]]]} /></svg>);
+    const red = [...container.querySelectorAll('path.nx-overlap')].map((p) => p.getAttribute('d'));
+    expect(red).toEqual(['M16 8 L48 8', 'M64 16 L64 32']);
+    expect(render(<svg><CableEdgeView points={[[0, 8], [64, 8]]} colour="#2DD4BF" delay={0} flowing={false} /></svg>).container.querySelector('path.nx-overlap')).toBeNull();
+  });
+
   it('points an arrow head along the last run, whichever way it runs', () => {
     expect(arrowHead([0, 8], [64, 8])).toBe('M55 2L64 8L55 14');
     expect(arrowHead([64, 0], [64, 40])).toBe('M70 31L64 40L58 31');

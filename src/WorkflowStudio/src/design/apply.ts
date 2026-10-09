@@ -1,7 +1,7 @@
 import type { StudioDocument } from '../app/document';
 import { snap, type Point } from '../layout/geometry';
 import type { Placement } from '../layout/placement';
-import { routeCircuit, routeWires } from '../layout/circuitRoute';
+import { routeCircuit, routeWires, type WireRoute } from '../layout/circuitRoute';
 import type { Assignment, Cache, Graph, Id, Processor, Schema, Step } from '../model/graph';
 import { reachableStepIds } from '../model/reachability';
 import { circuitOf, isEmptyDraft, listsOf, type Draft } from './draft';
@@ -17,7 +17,11 @@ export function applyDraft(saved: StudioDocument, draft: Draft): StudioDocument 
   if (isEmptyDraft(draft)) return saved;
   const { graph } = saved;
   const circuit = circuitOf(saved, draft);
-  const lists = listsOf(saved, circuit);
+  const placement = placementOf(saved, draft);
+  // drawn first: a wire lying on another net's wire short-circuits both nets (the user's rule 2, 2026-10-09), and links
+  // through a short-circuited net are left out of the lists (the routes need only the steps' entry conditions)
+  const wires = routeCircuit(circuit, { placement, steps: graph.steps });
+  const lists = listsOf(saved, circuit, overlappingOf(wires));
   const steps = new Map<Id, Step>(graph.steps);
   for (const [id, next] of lists.next) steps.set(id, { ...steps.get(id)!, nextStepIds: next });
   const entryStepIds = lists.entries;
@@ -29,13 +33,20 @@ export function applyDraft(saved: StudioDocument, draft: Draft): StudioDocument 
     ...[...steps.keys()].filter((id) => !reachable.has(id) && !saved.parkedIds.includes(id)),
   ];
 
-  const placement: Placement = {
+  return { graph: shownGraph, parkedIds, placement, wires };
+}
+
+/** Where the blocks are with the draft's moves laid over the saved places (spec §5.1). */
+export function placementOf(saved: StudioDocument, draft: Draft): Placement {
+  return {
     sphere: draft.sphere ? { cx: snap(draft.sphere.x), cy: snap(draft.sphere.y) } : saved.placement.sphere,
     steps: overlay(saved.placement.steps, draft.steps),
     caches: overlay(saved.placement.caches, draft.caches),
   };
-  return { graph: shownGraph, parkedIds, placement, wires: routeCircuit(circuit, { placement, steps }) };
 }
+
+/** The wires drawn lying on a wire of another net (the user's rule 2, 2026-10-09). */
+export const overlappingOf = (wires: readonly WireRoute[]): string[] => wires.filter((w) => w.shortWith !== undefined).map((w) => w.id);
 
 function overlay(base: ReadonlyMap<Id, Point>, moved: Readonly<Record<Id, Point>>): Map<Id, Point> {
   const out = new Map(base);

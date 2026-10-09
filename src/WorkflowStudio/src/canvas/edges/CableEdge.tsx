@@ -2,6 +2,7 @@ import { useContext, type CSSProperties } from 'react';
 import type { Edge, EdgeProps } from '@xyflow/react';
 import { DesignContext } from '../../design/DesignContext';
 import type { EndKind } from '../../layout/circuitRoute';
+import type { Stretch } from '../../layout/overlaps';
 import type { Pt } from '../../layout/router';
 import { useLiveArt } from '../liveArt';
 import { pathOf } from '../svgPath';
@@ -22,6 +23,8 @@ export type CableEdgeData = {
   headOn?: EndKind;
   /** In a short circuit (§2.2-7): its junction circles are red. */
   short?: boolean;
+  /** The stretches it shares with wires of other nets (the user's rule 2, 2026-10-09): drawn red over its line. */
+  overlaps?: Stretch[];
   /** No end on a step or the hub (rule D, 2026-10-09): no direction, so no tail ring and no arrow head. */
   free?: boolean;
   /** Its end square is over its other end square: released, it is deleted (drawn faded meanwhile). */
@@ -46,9 +49,10 @@ export function arrowHead(prev: Pt, tip: Pt): string {
  * dashed unless both its ends are connected and its family decided. Its tail has a small ring and its head an open
  * chevron, on a terminal or open alike; an end on another wire is a filled circle instead (red in a short circuit).
  * A direction-less wire (`free`: no end on a step or the hub, rule D) has neither ring nor chevron, only its circles.
+ * A stretch it shares with a wire of another net (`overlaps`, a short circuit) is drawn red over its line.
  * While `flowing` (the workflow is started) a solid wire carries a pulse toward its head.
  */
-export function CableEdgeView({ points, colour, delay, picked, flowing, halo, dashed, tailOn = 'terminal', headOn = 'terminal', short, free, faded }: CableEdgeData & { flowing: boolean }) {
+export function CableEdgeView({ points, colour, delay, picked, flowing, halo, dashed, tailOn = 'terminal', headOn = 'terminal', short, free, faded, overlaps }: CableEdgeData & { flowing: boolean }) {
   const d = pathOf(points);
   const first = points[0]!, tip = points[points.length - 1]!;
   const dot = (p: Pt) => <circle className={short ? 'nx-joint short' : 'nx-joint'} cx={p[0]} cy={p[1]} r={4.5} />;
@@ -58,6 +62,7 @@ export function CableEdgeView({ points, colour, delay, picked, flowing, halo, da
       {tailOn !== 'junction' && !free && <circle className="nx-src" cx={first[0]} cy={first[1]} r={2.6} />}
       <path className="w" d={d} stroke={colour} />
       {headOn !== 'junction' && !free && <path className="nx-head" d={arrowHead(points[points.length - 2] ?? tip, tip)} stroke={colour} />}
+      {overlaps?.map((s, i) => <path key={i} className="nx-overlap" d={pathOf(s)} />)}
       {tailOn === 'junction' && dot(first)}
       {headOn === 'junction' && dot(tip)}
       {flowing && !dashed && <path className="nx-pulse" d={d} style={{ animationDelay: `${delay}s` }} />}

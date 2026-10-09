@@ -5,7 +5,7 @@ import type { StudioDocument } from '../app/document';
 import { useStudioActions } from '../app/studioActions';
 import { applyDesign, applyEdits } from '../design/apply';
 import { fieldsOf, hasEdit, slotKey, valueText } from '../design/design';
-import { WORKFLOW_SOURCE } from '../layout/ports';
+import { wireName } from '../design/wireName';
 import { assignmentByStep, payloadKeyCount } from '../model/assignments';
 import { conditionInfo } from '../model/entryConditions';
 import { entityName } from '../model/entityNames';
@@ -61,21 +61,11 @@ export function Inspector() {
  * undo) is read from its id.
  */
 function wireNote(shown: StudioDocument | null, id: string): string {
-  const graph = shown?.graph;
-  const name = (stepId: string) => {
-    if (stepId === WORKFLOW_SOURCE) return graph ? entityName(graph.workflow.name, graph.workflow.version, graph.workflow.id) : stepId;
-    const s = graph?.steps.get(stepId);
-    return s ? entityName(s.name, s.version, s.id) : stepId;
-  };
+  const name = wireName(shown, id);
   const w = shown?.wires.find((x) => x.id === id);
-  if (!w) {
-    const at = id.indexOf('->');
-    return at > 0 ? `Wire: ${name(id.slice(0, at))} → ${name(id.slice(at + 2))}` : 'Wire';
-  }
-  const from = w.source !== null ? name(w.source) : w.tailOn === 'junction' ? 'a junction' : 'an open end';
-  const to = w.target !== null ? name(w.target) : w.headOn === 'junction' ? 'a junction' : 'an open end';
+  if (!w) return name === null ? 'Wire' : `Wire: ${name}`;
   const family = w.short ? 'short circuit' : w.condition === null ? 'undecided' : conditionInfo(w.condition).name;
-  return `Wire: ${from} → ${to} · ${family}`;
+  return `Wire: ${name} · ${family}`;
 }
 
 function EntityPane({ open, target }: { open: OpenDocument; target: InspectorTarget }) {

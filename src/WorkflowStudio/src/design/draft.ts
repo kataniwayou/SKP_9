@@ -92,10 +92,11 @@ function ordered(saved: readonly Id[], derived: readonly Id[], drawable: (id: Id
 
 /**
  * The next-step lists and the entry list the circuit's current gives (plan 9 §7), for every step of the saved
- * workflow, in its order; links through a short-circuited net are left out (§2.2-7), and so is a step it does not have.
+ * workflow, in its order; links through a short-circuited net are left out (§2.2-7; `overlapping`: the wires drawn on a
+ * wire of another net, the user's rule 2, 2026-10-09), and so is a step it does not have.
  */
-export function listsOf(saved: StudioDocument, circuit: Readonly<Circuit>): { next: Map<Id, Id[]>; entries: Id[] } {
-  const { links } = circuitTrace(circuit, (id) => saved.graph.steps.get(id)?.entryCondition);
+export function listsOf(saved: StudioDocument, circuit: Readonly<Circuit>, overlapping: readonly string[] = []): { next: Map<Id, Id[]>; entries: Id[] } {
+  const { links } = circuitTrace(circuit, (id) => saved.graph.steps.get(id)?.entryCondition, overlapping);
   const known = (ids: readonly Id[]) => ids.filter((id) => saved.graph.steps.has(id));
   const drawable = (id: Id) => saved.graph.steps.has(id) && saved.placement.steps.has(id);
   const next = new Map<Id, Id[]>();

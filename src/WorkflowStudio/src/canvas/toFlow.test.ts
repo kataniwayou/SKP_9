@@ -157,6 +157,7 @@ describe('toFlow', () => {
       route({ id: 'w:1', free: true }),
       route({ id: 'w:2', source: 'a', tailOn: 'terminal', headOn: 'junction', condition: 2, short: true }),
       route({ id: 'w:3', target: 'b', tailOn: 'junction', headOn: 'terminal', condition: 2, solid: true }),
+      route({ id: 'w:4', short: true, free: true, overlaps: [[[0, 0], [32, 0]]], shortWith: ['w:3'] }),
     ] };
     const { edges } = toFlow(d, fitter);
     const e = (id: string) => edges.find((x) => x.id === id)!;
@@ -167,6 +168,9 @@ describe('toFlow', () => {
     expect(e('w:2').data).toMatchObject({ colour: '#FF7A66', short: true, headOn: 'junction', dashed: true });
     expect([e('w:3').source, e('w:3').target, e('w:3').targetHandle]).toEqual(['b', 'b', 'in']);
     expect(e('w:3').data).toMatchObject({ dashed: false, tailOn: 'junction' });
+    // a stretch shared with another net's wire is drawn red (the user's rule 2, 2026-10-09); none: no field
+    expect(e('w:4').data).toMatchObject({ short: true, overlaps: [[[0, 0], [32, 0]]] });
+    expect('overlaps' in e('w:3').data!).toBe(false);
   });
 
   it('cuts long names to fit and keeps the full text for the tooltip (review focus 5)', () => {

@@ -12,6 +12,8 @@ export interface Box {
 
 const BEND_COST = 24;
 const HIT_COST = 5000;
+/** A stretch shared with a wire of another net is a short circuit (the user's rule 2, 2026-10-09): worse than a block crossed. */
+const OVERLAP_COST = 2 * HIT_COST;
 const HIT_MARGIN = 3;
 export const CLEARANCE = 24;
 
@@ -48,26 +50,36 @@ export function simplify(pts: Pt[]): Pt[] {
   });
 }
 
+/** What else a route weighs (the user's rule 2, 2026-10-09). */
+export interface RouteAvoid {
+  /** How many stretches a candidate shares with wires of other nets (each costs more than a block crossed). */
+  avoid?: (pts: Pt[]) => number;
+  /** Moves the candidates' own runs off their usual tracks (a multiple of the grid): their elbows, and the U's levels outward. */
+  spread?: number;
+}
+
 /**
  * An orthogonal route from a source port (sx, sy) to a landing (tx, ty), the cheapest of: straight;
  * Z with its elbow at 50 / 30 / 70 % of the gap or 16 px from either end; and U shapes over or under
  * the blocks in the way. `nudge` is the wire's fan-out offset, so sibling wires keep distinct
- * vertical runs. Every candidate point is on the 8 px grid when its inputs are.
+ * vertical runs. Every candidate point is on the 8 px grid when its inputs are. `o.avoid` makes a
+ * candidate lying on another net's wire dear; `o.spread` gives every candidate a track of its own.
  */
-export function route(sx: number, sy: number, tx: number, ty: number, srcId: string, tgtId: string, nudge: number, boxes: Box[]): Pt[] {
+export function route(sx: number, sy: number, tx: number, ty: number, srcId: string, tgtId: string, nudge: number, boxes: Box[], o: RouteAvoid = {}): Pt[] {
   const candidates: Pt[][] = [];
+  const spread = o.spread ?? 0;
 
   // Level and to the right: straight is always on offer (the landing rule sends such wires from a
   // gap of STRAIGHT_MIN_GAP, below the CLEARANCE the bent shapes need).
   if (sy === ty && tx > sx) candidates.push([[sx, sy], [tx, ty]]);
   if (tx - sx >= CLEARANCE) {
     for (const f of [0.5, 0.3, 0.7]) {
-      const mx = snap(sx + (tx - sx) * f) + nudge;
+      const mx = snap(sx + (tx - sx) * f) + nudge + spread;
       candidates.push([[sx, sy], [mx, sy], [mx, ty], [tx, ty]]);
     }
     candidates.push(
-      [[sx, sy], [sx + 16 + nudge, sy], [sx + 16 + nudge, ty], [tx, ty]],
-      [[sx, sy], [tx - 16, sy], [tx - 16, ty], [tx, ty]],
+      [[sx, sy], [sx + 16 + nudge + Math.abs(spread), sy], [sx + 16 + nudge + Math.abs(spread), ty], [tx, ty]],
+      [[sx, sy], [tx - 16 - Math.abs(spread), sy], [tx - 16 - Math.abs(spread), ty], [tx, ty]],
     );
   }
   // A forward gap of 16 to 23 px is too short for the shapes above; a Z with its elbow one grid step
@@ -80,7 +92,7 @@ export function route(sx: number, sy: number, tx: number, ty: number, srcId: str
   // its edge (a large negative fan-out nudge must not pull it back through the source) and at least
   // one grid step short of the next column (the gap is COLUMN_PITCH - STEP_W = 64; a large positive
   // nudge must not land it on the neighbouring block's edge).
-  const x1 = sx + clamp(CLEARANCE + nudge, GRID, COLUMN_PITCH - STEP_W - GRID), x2 = tx - CLEARANCE;
+  const x1 = sx + clamp(CLEARANCE + nudge + spread, GRID, COLUMN_PITCH - STEP_W - GRID), x2 = tx - CLEARANCE - Math.abs(spread);
   const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
   const span = boxes.filter((b) => b.x < hi + 20 && b.x + b.w > lo - 20);
   const levels = new Set<number>();
@@ -93,12 +105,16 @@ export function route(sx: number, sy: number, tx: number, ty: number, srcId: str
     if (b) { levels.add(b.y - CLEARANCE); levels.add(b.y + b.h + CLEARANCE); }
   }
   if (levels.size === 0) levels.add(Math.max(sy, ty) + CLEARANCE);
-  for (const ly of levels) candidates.push([[sx, sy], [x1, sy], [x1, ly], [x2, ly], [x2, ty], [tx, ty]]);
+  for (const level of levels) {
+    // a spread U goes further out: above the blocks higher, below them lower
+    const ly = spread === 0 ? level : level + (level < Math.min(sy, ty) ? -1 : 1) * Math.abs(spread);
+    candidates.push([[sx, sy], [x1, sy], [x1, ly], [x2, ly], [x2, ty], [tx, ty]]);
+  }
 
   let best: Pt[] = candidates[0]!, bestCost = Infinity;
   for (const candidate of candidates) {
     const pts = simplify(candidate);
-    const c = cost(pts, srcId, tgtId, boxes);
+    const c = cost(pts, srcId, tgtId, boxes) + (o.avoid ? o.avoid(pts) * OVERLAP_COST : 0);
     if (c < bestCost) { bestCost = c; best = pts; }
   }
   return best;

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
-import { plainCircuit, type Circuit, type End } from '../circuit/circuit';
+import { moveWire, plainCircuit, type Circuit, type End } from '../circuit/circuit';
+import { routeCircuit } from '../layout/circuitRoute';
+import { shapeFromPoints } from '../layout/shape';
 import { linkKeys, trace } from '../circuit/trace';
 import { EMPTY_EDITS, setField } from './design';
 import { EMPTY_DRAFT, withCircuit } from './draft';
@@ -200,5 +202,16 @@ describe('settleDraft and settleDesign', () => {
     // s3 Failed in the design: the net is shorted, its links are not expected, the junction stays
     const out = settleDesign({ draft: { ...draft, next: { s1: [] } }, edits }, d);
     expect(out.draft.wires!['w:x']!.tail).toEqual(on('s1->s2', 40));
+  });
+});
+
+describe('reconcile and overlap short circuits (the user\'s rule 2, 2026-10-09)', () => {
+  it('a new wire held back by a wire lying on it stays drawn: its source\'s links wait, as for any short circuit', async () => {
+    const d = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1', 's3'] }), steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3')] }));
+    // s1 -> s3 drawn by hand (BaseApi does not have it: Save held it back), and a both-open wire lying on it
+    const auto = routeCircuit({ ...plainOf(d), 'w:n': { tail: at('s1'), head: at('s3') } }, { placement: d.placement, steps: d.graph.steps }).find((r) => r.id === 'w:n')!;
+    let c: Circuit = { ...plainOf(d), 'w:n': { tail: at('s1'), head: at('s3'), bends: shapeFromPoints(auto.core.points) }, 'w:f': { tail: { on: 'open', x: 0, y: 0 }, head: { on: 'open', x: 0, y: 0 } } };
+    c = moveWire(c, 'w:f', auto.points, () => null);
+    expect(reconcile(c, expectedLinks(d, {}, null), d)).toEqual(c);
   });
 });

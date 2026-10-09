@@ -1,12 +1,13 @@
 import { isFree, plainCircuit, type Circuit, type CircuitWire, type End, type Side } from '../circuit/circuit';
-import { netsOf } from '../circuit/families';
+import { netsOf, shortedWires } from '../circuit/families';
 import type { Id, Step } from '../model/graph';
 import { clearPath } from './detour';
 import { GRID, PMID, PORT_GAP, SPHERE_R, STEP_W, clampLanding, offset, snap, type Point } from './geometry';
 import { CONTACT_MARGIN, lengthOf, ownEnds, pointAt } from './junctions';
+import { LineIndex, mayShare, overlapsOf, type Stretch } from './overlaps';
 import type { Placement } from './placement';
 import { landingsOf, WORKFLOW_SOURCE, type Arrival, type SourceId } from './ports';
-import { route, simplify, type Pt } from './router';
+import { route, simplify, type Pt, type RouteAvoid } from './router';
 import { JOG, pointsOfShape, type Ends } from './shape';
 import { blockBoxes, SPHERE_BOX_ID, stepBoxId, type WiringInput } from './wires';
 
@@ -30,8 +31,15 @@ export interface WireRoute {
   solid: boolean;
   tailOn: EndKind;
   headOn: EndKind;
-  /** In a net whose families disagree (§2.2-7): its junctions are marked red. */
+  /**
+   * In a short-circuited net (§2.2-7): its families disagree, or one of its wires shares a stretch of line with a wire
+   * of another net (the user's rule 2, 2026-10-09); its junctions are marked red.
+   */
   short: boolean;
+  /** The stretches it shares with wires of other nets (rule 2), drawn red; absent when none. */
+  overlaps?: Stretch[];
+  /** The wires it shares those stretches with, in the order they are drawn; absent when none. */
+  shortWith?: string[];
   /** No end on a step or the hub (rule D, 2026-10-09): no direction yet, so neither a tail ring nor an arrow head. */
   free: boolean;
 }
@@ -159,7 +167,16 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
 
   const conditionOf = (id: Id) => steps.get(id)?.entryCondition;
   const families = new Map<string, number[]>();
-  for (const n of netsOf(circuit, conditionOf)) for (const w of n.wires) families.set(w, n.families);
+  const nets = netsOf(circuit, conditionOf);
+  for (const n of nets) for (const w of n.wires) families.set(w, n.families);
+  // what is drawn so far, so an automatic wire never lies on a wire of another net (rule 2): it takes a track of its own
+  const share = mayShare(circuit, nets);
+  const taken = new LineIndex();
+  const clashes = (id: string, pts: Pt[]): number => {
+    let n = 0;
+    for (const s of taken.stretches(pts, (x) => !share(id, x)).values()) n += s.length;
+    return n;
+  };
   /** The family of the step a wire's head chain goes into: what a wire of a shorted net is drawn in (decision 10). */
   const headFamily = (id: string): number | undefined => {
     const seen = new Set<string>();
@@ -206,12 +223,28 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     let tx = H.at.x, ty = H.at.y, leadIn: Pt[] = [];
     if (H.contact) { const o = ownEnds(sx, sy, H.contact, H.vertical); tx = o.ends.tx; ty = o.ends.ty; leadIn = o.tail; }
     const ends: Ends = { sx, sy, tx, ty };
-    const core = w.bends && w.bends.xs.length > 0
-      ? simplify(pointsOfShape(ends, w.bends))
-      : T.box !== '' && H.box !== ''
-        ? route(sx, sy, tx, ty, T.box, H.box, nudge.get(id) ?? 0, boxes)
-        : clearPath(route(sx, sy, tx, ty, T.box, H.box, 0, boxes), boxes);
+    const auto = (spread: number): Pt[] => {
+      const o: RouteAvoid = { spread, avoid: (pts) => clashes(id, pts) };
+      return T.box !== '' && H.box !== ''
+        ? route(sx, sy, tx, ty, T.box, H.box, nudge.get(id) ?? 0, boxes, o)
+        : clearPath(route(sx, sy, tx, ty, T.box, H.box, 0, boxes, o), boxes);
+    };
+    let core: Pt[];
+    if (w.bends && w.bends.xs.length > 0) core = simplify(pointsOfShape(ends, w.bends));
+    else {
+      // the router never lays a wire on another net's (rule 2): the usual track, else the nearest free one
+      core = auto(0);
+      let worst = clashes(id, core);
+      for (let k = 1; worst > 0 && k <= SPREADS; k++) {
+        for (const spread of [k * GRID, -k * GRID]) {
+          const c = auto(spread), n = clashes(id, c);
+          if (n < worst) { core = c; worst = n; }
+          if (n === 0) break;
+        }
+      }
+    }
     const points = lead.length === 0 && leadIn.length === 0 ? core : simplify([...lead, ...core, ...leadIn]);
+    taken.add(id, points);
 
     const fam = families.get(id) ?? [];
     const short = fam.length > 1;
@@ -228,9 +261,28 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     out.set(id, r);
     return r;
   };
+  // the shapes drawn by hand first: an automatic wire takes its track around them (rule 2)
+  for (const id of ids) if ((wire(id).bends?.xs.length ?? 0) > 0) routeOne(id);
   for (const id of ids) routeOne(id);
-  return ids.map((id) => out.get(id)!);
+  const routes = ids.map((id) => out.get(id)!);
+
+  // wires sharing a stretch of line across nets (rule 2): both nets short-circuited, the stretches drawn red
+  const lines = overlapsOf(routes).filter((o) => !share(o.a, o.b));
+  if (lines.length === 0) return routes;
+  const shorted = shortedWires(nets, lines.flatMap((o) => [o.a, o.b]));
+  for (const o of lines) {
+    for (const [me, other] of [[o.a, o.b], [o.b, o.a]] as const) {
+      const r = out.get(me)!;
+      (r.overlaps ??= []).push(...o.stretches);
+      (r.shortWith ??= []).push(other);
+    }
+  }
+  for (const r of routes) if (shorted.has(r.id)) r.short = true;
+  return routes;
 }
+
+/** How many grid steps either way an automatic wire is moved at most to find a track no other net's wire lies on. */
+const SPREADS = 6;
 
 /** Where each drawn wire's ends are (its first point the tail, its last the head): to open an end where it is drawn. */
 export function endPointOf(routes: readonly WireRoute[]): (id: string, side: Side) => Point | null {
