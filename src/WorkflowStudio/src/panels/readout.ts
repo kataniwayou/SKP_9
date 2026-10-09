@@ -229,15 +229,18 @@ const conditionName = (m: ReadoutModel, id: Id): string => {
   return c === undefined ? '—' : conditionInfo(c).name;
 };
 
+/** Every step of the drawing by unique name: the order both read-outs list steps in. */
+const stepsByName = (m: ReadoutModel): { id: Id; name: string }[] => [...m.shown.graph.steps.values()]
+  .map((s) => ({ id: s.id, name: entityName(s.name, s.version, s.id) }))
+  .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
 /**
  * The workflow's graph read as text (the user's request, 2026-10-09): its entry steps, one row per step (by unique name)
  * with its entry condition and the next steps Save would write, and the drawing's problems.
  */
 export function graphReadout(m: ReadoutModel): GraphReadout {
   const { shown, circuit } = m;
-  const steps = [...shown.graph.steps.values()]
-    .map((s) => ({ id: s.id, name: entityName(s.name, s.version, s.id) }))
-    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+  const steps = stepsByName(m)
     .map(({ id, name }) => ({ id, name, condition: conditionName(m, id), next: linksOf(m, id), heldBack: m.written.held.steps.has(id) }));
 
   const wired = new Set<Id>();
@@ -256,4 +259,64 @@ export function graphReadout(m: ReadoutModel): GraphReadout {
     steps,
     problems,
   };
+}
+
+/** A source feeding a step (the workflow hub, or a step whose next steps hold it): written by Save, or held back. */
+export interface StepSource {
+  /** A step id, or `wf` for the hub (the step is an entry step). */
+  id: SourceId;
+  name: string;
+  held: boolean;
+}
+
+/** A wire touching a step's side, named as Problems names it, with what is wrong with it (open, no direction, short circuit). */
+export interface StepWire {
+  id: string;
+  name: string;
+  notes: string[];
+}
+
+export interface StepReadout {
+  condition: string;
+  /** What feeds it, the hub first, then steps by unique name: exactly the workflow Graph's links into it. */
+  in: StepSource[];
+  /** Its next steps as Save writes them, then those drawn but held back: its workflow Graph row. */
+  out: GraphLink[];
+  /** Its own source is held back by a short circuit: Save keeps BaseApi's list. */
+  heldBack: boolean;
+  /** How many wires have an end on its sides. */
+  wireCount: number;
+  /** Those of them that are open, direction-less or in a short circuit. */
+  flagged: StepWire[];
+}
+
+/**
+ * A picked step's place in the graph read as text (the user's request, 2026-10-09): its entry condition, what feeds it
+ * and what it feeds, built from the same links as the workflow's Graph (`linksOf`), so the two never disagree; and the
+ * wires on its sides. Null when the drawing has no such step.
+ */
+export function stepReadout(m: ReadoutModel, id: Id): StepReadout | null {
+  const { shown, circuit } = m;
+  if (!shown.graph.steps.has(id)) return null;
+  const steps = stepsByName(m);
+  const into: StepSource[] = [];
+  for (const src of [WORKFLOW_SOURCE, ...steps.map((s) => s.id)]) {
+    for (const l of linksOf(m, src)) if (l.id === id) into.push({ id: src, name: sourceName(shown, src), held: l.held });
+  }
+  const touching = Object.keys(circuit).filter((k) => {
+    const w = circuit[k]!;
+    return (w.tail.on === 'step' && w.tail.step === id) || (w.head.on === 'step' && w.head.step === id);
+  }).sort();
+  const flagged: StepWire[] = [];
+  for (const k of touching) {
+    const r = shown.wires.find((x) => x.id === k);
+    if (!r) continue;
+    const notes = [
+      ...(r.tailOn === 'open' || r.headOn === 'open' ? ['open'] : []),
+      ...(r.free ? ['no direction'] : []),
+      ...(r.short ? ['short circuit'] : []),
+    ];
+    if (notes.length > 0) flagged.push({ id: k, name: wireName(shown, k) ?? k, notes });
+  }
+  return { condition: conditionName(m, id), in: into, out: linksOf(m, id), heldBack: m.written.held.steps.has(id), wireCount: touching.length, flagged };
 }

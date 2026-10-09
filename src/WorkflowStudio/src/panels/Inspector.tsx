@@ -14,7 +14,7 @@ import { useStudio, useStudioStore } from '../store/studioStore';
 import { FieldEditor } from './FieldEditor';
 import { detailRows, kindLabel, uniqueNameOf, type Row } from './inspectorView';
 import { PaneNote } from './PaneNote';
-import { GraphReadoutSection, WireReadoutPane } from './Readouts';
+import { GraphReadoutSection, StepGraphSection, WireReadoutPane } from './Readouts';
 
 /** Read-only text: one line, cut with an ellipsis, its full text a tooltip only when cut (spec §7). */
 const readOnly = (row: Row) => (
@@ -97,6 +97,7 @@ function EntityPane({ open, target }: { open: OpenDocument; target: InspectorTar
             </fieldset>
             {/* the drawing's graph read as text, read-only (the user's request, 2026-10-09) */}
             {target.kind === 'workflow' && <GraphReadoutSection open={open} />}
+            {target.kind === 'step' && <StepGraphSection open={open} stepId={target.id} />}
           </div>
           <div className="savebar">
             {target.kind === 'assignment' && (

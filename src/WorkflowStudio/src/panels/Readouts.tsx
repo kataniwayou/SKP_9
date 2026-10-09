@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { wireName } from '../design/wireName';
 import type { OpenDocument } from '../store/studioState';
-import { graphReadout, readoutModel, wireReadout, type GraphLink } from './readout';
+import { graphReadout, readoutModel, stepReadout, wireReadout, type GraphLink } from './readout';
 
 /**
  * The model of the read-outs, built only while one is shown, and again only when the drawing changes (a committed
@@ -106,6 +106,48 @@ export function GraphReadoutSection({ open }: { open: OpenDocument }) {
               <dd>{p.names.length}<ul>{p.names.map((n, i) => <li key={i}>{n}</li>)}</ul></dd>
             </div>
           ))}
+      </dl>
+    </section>
+  );
+}
+
+/** A picked step's place in the graph, under its fields (the user's request, 2026-10-09): the same links as the workflow's Graph. */
+export function StepGraphSection({ open, stepId }: { open: OpenDocument; stepId: string }) {
+  const model = useReadoutModel(open);
+  const g = useMemo(() => (model ? stepReadout(model, stepId) : null), [model, stepId]);
+  if (g === null) return null;
+  return (
+    <section className="sec readout" aria-label="Graph">
+      <div className="sec-title">Graph</div>
+      <dl>
+        <div className="rrow" data-row="Entry condition"><dt>Entry condition</dt><dd>{g.condition}</dd></div>
+        <div className="rrow" data-row="In">
+          <dt>In</dt>
+          <dd>
+            {g.in.length === 0 ? <span className="none">none</span> : (
+              <ul className="links">
+                {g.in.map((l) => (
+                  <li key={`${l.id}${l.held ? ':held' : ''}`} data-step={l.id} className={l.held ? 'held' : undefined}>
+                    {l.name}{l.held ? ' (held back)' : ''}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </dd>
+        </div>
+        <div className="rrow" data-row="Out">
+          <dt>Out</dt>
+          <dd><Links links={g.out} />{g.heldBack && <div className="rnote">{HELD_NOTE}</div>}</dd>
+        </div>
+        <div className="rrow" data-row="Wires on it">
+          <dt>Wires on it</dt>
+          <dd>
+            {g.wireCount === 0 ? <span className="none">none</span> : g.wireCount}
+            {g.flagged.length > 0 && (
+              <ul>{g.flagged.map((w) => <li key={w.id} data-wire={w.id}>{w.name} ({w.notes.join(', ')})</li>)}</ul>
+            )}
+          </dd>
+        </div>
       </dl>
     </section>
   );
