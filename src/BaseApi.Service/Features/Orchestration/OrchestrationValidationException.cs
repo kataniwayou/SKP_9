@@ -85,7 +85,31 @@ public sealed class OrchestrationValidationException : Exception
             "Participating processor is not live",
             $"Processor '{procId}' is not live: {reason}.",
             new ProcessorLivenessOffending(procId, reason));
+
+    /// <summary>
+    /// Deletion gate (2026-10-10) — the workflow is being deleted, or was: a start would make a live id with no row
+    /// to stop it by.
+    /// </summary>
+    public static OrchestrationValidationException WorkflowDeleting(Guid workflowId)
+        => new(
+            "workflowDeleting",
+            "Workflow is being deleted",
+            $"Workflow '{workflowId}' is being deleted; it cannot be started.",
+            new WorkflowOffending(workflowId));
+
+    /// <summary>
+    /// Running gate (2026-10-10) — a delete of a running workflow: deleted, its running copy could never be stopped.
+    /// </summary>
+    public static OrchestrationValidationException WorkflowRunning(Guid workflowId)
+        => new(
+            "workflowRunning",
+            "Workflow is running",
+            $"Workflow '{workflowId}' is running: stop it first. Deleted while running, it could never be stopped.",
+            new WorkflowOffending(workflowId));
 }
+
+/// <summary>Offending payload for the deletion and running gates — the workflow.</summary>
+public sealed record WorkflowOffending(Guid workflowId);
 
 /// <summary>Offending payload for the cycle gate — the chain of step ids forming the cycle.</summary>
 public sealed record CycleOffending(IReadOnlyList<Guid> stepChain);

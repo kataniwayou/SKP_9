@@ -1,3 +1,4 @@
+using BaseApi.Service.Features.Workflow.Delete;
 using BaseApi.Core.Persistence;
 using BaseApi.Core.Services;
 using BaseApi.Service.Features.Workflow.Design;
@@ -42,6 +43,11 @@ internal static class WorkflowServiceCollectionExtensions
         services.AddScoped<IWorkflowDesignSyncer>(sp => new WorkflowDesignSyncer(
             sp.GetRequiredService<BaseDbContext>(), sp.GetRequiredService<IDesignStore>(),
             sp.GetRequiredService<IDesignTransactions>(), DesignStages.Ordered(sp)));
+
+        // A workflow's deletion with its own steps and assignments (2026-10-10).
+        services.AddScoped<IWorkflowDeleter, WorkflowDeleter>();
+        // the CRUD DELETE refused while the workflow runs or is being deleted
+        services.AddScoped<WorkflowDeleteGuardFilter>();
 
         // Runs via AddAppFeatures, so it lands after the core handlers and before the catch-all.
         services.AddExceptionHandler<GraphConflictExceptionHandler>();

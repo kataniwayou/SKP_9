@@ -3060,6 +3060,82 @@
         }
       }
     },
+    "/api/v1/Workflows/{id}/delete": {
+      "post": {
+        "tags": [
+          "Workflows"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "dryRun",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "description": "Optional correlation ID for request tracking. If absent, the server generates a new 32-char hex value and echoes it on the response header.",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowDeleteOutcomeDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowDeleteOutcomeDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowDeleteOutcomeDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/Workflows/{id}/validate": {
       "post": {
         "tags": [
@@ -4859,6 +4935,48 @@
           },
           "cronExpression": {
             "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorkflowDeleteOutcomeDto": {
+        "type": "object",
+        "properties": {
+          "applied": {
+            "type": "boolean"
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "steps": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "assignments": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "caches": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "processors": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesignErrorDto"
+            },
+            "nullable": true
+          },
+          "log": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesignLogDto"
+            },
             "nullable": true
           }
         },

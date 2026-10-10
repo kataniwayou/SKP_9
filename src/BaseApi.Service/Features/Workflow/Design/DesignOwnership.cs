@@ -37,7 +37,7 @@ internal static class DesignOwnership
     }
 
     /// <summary>The step ids a stored layout places: its <c>parked</c> list and the keys of its <c>steps</c>.</summary>
-    private static IEnumerable<Guid> LayoutSteps(string? layout)
+    internal static IEnumerable<Guid> LayoutSteps(string? layout)
     {
         if (Parse(layout) is not { } root) yield break;
         if (root.TryGetProperty("parked", out var parked) && parked.ValueKind == JsonValueKind.Array)

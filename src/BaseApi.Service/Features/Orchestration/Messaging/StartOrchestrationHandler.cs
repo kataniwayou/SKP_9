@@ -1,5 +1,6 @@
 using System.Text.Json;
 using BaseApi.Service.Features.Orchestration.Projection;
+using BaseApi.Service.Features.Workflow.Delete;
 using Messaging.Contracts;
 using Messaging.Transport;
 using Microsoft.Extensions.Logging;
@@ -34,11 +35,13 @@ internal sealed class StartOrchestrationHandler : IQueueMessageHandler
     private readonly L2LiveSet _live;
     private readonly IQueueFanoutPublisher _publisher;
     private readonly ILogger<StartOrchestrationHandler> _logger;
+    private readonly IWorkflowRunGuard? _runGuard;
 
     public StartOrchestrationHandler(
         L2ProjectionWriter writer, L2LiveSet live, IQueueFanoutPublisher publisher,
-        ILogger<StartOrchestrationHandler> logger)
+        ILogger<StartOrchestrationHandler> logger, IWorkflowRunGuard? runGuard = null)
     {
+        _runGuard  = runGuard;
         _writer    = writer ?? throw new ArgumentNullException(nameof(writer));
         _live      = live ?? throw new ArgumentNullException(nameof(live));
         _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
@@ -61,6 +64,14 @@ internal sealed class StartOrchestrationHandler : IQueueMessageHandler
         if (workflow.WorkflowId == Guid.Empty)
         {
             throw new JsonException("start message carries an empty workflow id");
+        }
+
+        // A start queued before its workflow's deletion began is never projected (2026-10-10): applied now, the id
+        // would be live with no row left to stop it by. Acknowledged, not parked: there is nothing to retry.
+        if (_runGuard is not null && await _runGuard.IsDeletingAsync(workflow.WorkflowId, ct).ConfigureAwait(false))
+        {
+            _logger.LogWarning("workflow {WorkflowId} is being deleted or was deleted; its start is not projected", workflow.WorkflowId);
+            return;
         }
 
         _logger.LogInformation(

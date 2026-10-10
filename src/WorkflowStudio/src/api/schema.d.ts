@@ -1986,6 +1986,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/Workflows/{id}/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: {
+                    dryRun?: boolean;
+                };
+                header?: {
+                    /** @description Optional correlation ID for request tracking. If absent, the server generates a new 32-char hex value and echoes it on the response header. */
+                    "X-Correlation-Id"?: string;
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["WorkflowDeleteOutcomeDto"];
+                        "application/json": components["schemas"]["WorkflowDeleteOutcomeDto"];
+                        "text/json": components["schemas"]["WorkflowDeleteOutcomeDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/Workflows/{id}/validate": {
         parameters: {
             query?: never;
@@ -2723,6 +2778,20 @@ export interface components {
             assignmentIds?: string[] | null;
             cacheIds?: string[] | null;
             cronExpression?: string | null;
+        };
+        WorkflowDeleteOutcomeDto: {
+            applied?: boolean;
+            dryRun?: boolean;
+            /** Format: int32 */
+            steps?: number;
+            /** Format: int32 */
+            assignments?: number;
+            /** Format: int32 */
+            caches?: number;
+            /** Format: int32 */
+            processors?: number;
+            errors?: components["schemas"]["DesignErrorDto"][] | null;
+            log?: components["schemas"]["DesignLogDto"][] | null;
         };
         WorkflowGraphDto: {
             workflow?: components["schemas"]["WorkflowReadDto"];

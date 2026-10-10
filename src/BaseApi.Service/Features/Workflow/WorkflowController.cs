@@ -2,6 +2,7 @@ using System.Text.Json;
 using BaseApi.Core.Controllers;
 using BaseApi.Core.Services;
 using BaseApi.Service.Features.Orchestration;
+using BaseApi.Service.Features.Workflow.Delete;
 using BaseApi.Service.Features.Workflow.Design;
 using BaseApi.Service.Features.Workflow.Graph;
 using Microsoft.AspNetCore.Http;
@@ -36,6 +37,7 @@ namespace BaseApi.Service.Features.Workflow;
 /// The validate action delegates to <see cref="IWorkflowValidator"/>.
 /// </para>
 /// </summary>
+[ServiceFilter(typeof(WorkflowDeleteGuardFilter))]
 public sealed class WorkflowsController :
     BaseController<WorkflowEntity, WorkflowCreateDto, WorkflowUpdateDto, WorkflowReadDto>
 {
@@ -44,6 +46,7 @@ public sealed class WorkflowsController :
     private readonly IWorkflowGraphSaver _graphSaver;
     private readonly IWorkflowValidator _validator;
     private readonly IWorkflowDesignSyncer _designSyncer;
+    private readonly IWorkflowDeleter? _deleter;
 
     public WorkflowsController(
         BaseService<WorkflowEntity, WorkflowCreateDto, WorkflowUpdateDto, WorkflowReadDto> service,
@@ -51,9 +54,11 @@ public sealed class WorkflowsController :
         IWorkflowGraphReader graphReader,
         IWorkflowGraphSaver graphSaver,
         IWorkflowValidator validator,
-        IWorkflowDesignSyncer designSyncer)
+        IWorkflowDesignSyncer designSyncer,
+        IWorkflowDeleter? deleter = null)
         : base(service)
     {
+        _deleter = deleter;
         _validator = validator;
         _db = db;
         _graphReader = graphReader;
@@ -236,6 +241,18 @@ public sealed class WorkflowsController :
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> PutDesign(Guid id, [FromBody] DesignSaveRequest request, CancellationToken ct)
         => Ok(await _designSyncer.SaveAsync(id, request, ct));
+
+    /// <summary>
+    /// Deletes the workflow with its own steps and assignments (2026-10-10); its caches are only unlinked and processors
+    /// never touched. Refused while it runs or while another workflow uses a step or assignment of it. With
+    /// <c>dryRun</c>, everything is done in a transaction and rolled back: the answer says what would be deleted.
+    /// Refusals are a 200 with <c>applied: false</c> and the errors; a missing workflow is a 404.
+    /// </summary>
+    [HttpPost("{id:guid}/delete")]
+    [ProducesResponseType(typeof(WorkflowDeleteOutcomeDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteWorkflow(Guid id, [FromQuery] bool dryRun, CancellationToken ct)
+        => _deleter is null ? NotFound() : Ok(await _deleter.DeleteAsync(id, dryRun, ct));
 
     /// <summary>
     /// Every problem a start of this workflow would refuse, from every gate -- cycles, missing steps,

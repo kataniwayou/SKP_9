@@ -2,6 +2,7 @@ using BaseApi.Core.Persistence;
 using BaseApi.Service.Features.Orchestration.Loading;
 using BaseApi.Service.Features.Orchestration.Projection;
 using BaseApi.Service.Features.Orchestration.Validation;
+using BaseApi.Service.Features.Workflow.Delete;
 using Messaging.Transport;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -46,7 +47,8 @@ internal static class OrchestrationServiceCollectionExtensions
             sp.GetRequiredService<PayloadConfigSchemaValidator>(),
             sp.GetRequiredService<ProcessorLivenessValidator>(),
             sp.GetRequiredService<IQueueSender>(),
-            sp.GetRequiredService<ILogger<OrchestrationService>>()));
+            sp.GetRequiredService<ILogger<OrchestrationService>>(),
+            sp.GetRequiredService<IWorkflowRunGuard>()));
         services.AddScoped<IWorkflowGraphLoader, WorkflowGraphLoader>();
         services.AddScoped<CycleDetector>();
         services.AddScoped<SchemaEdgeValidator>();
@@ -65,6 +67,9 @@ internal static class OrchestrationServiceCollectionExtensions
         // resolved per delivery gets its own, matching every other dependency in this folder; both
         // are stateless over an injected multiplexer, so the lifetime costs nothing.
         services.AddScoped<L2LiveSet>();
+        // A workflow's deletion and its start never race (2026-10-10): the delete endpoint, the start and the start
+        // message's handler share it.
+        services.AddScoped<IWorkflowRunGuard, RedisWorkflowRunGuard>();
         // The studio's status read: the same live set, through a public interface the controller can take.
         services.AddScoped<ILiveWorkflowReader>(sp => sp.GetRequiredService<L2LiveSet>());
         services.AddScoped<IStepRowLookup, DbStepRowLookup>();

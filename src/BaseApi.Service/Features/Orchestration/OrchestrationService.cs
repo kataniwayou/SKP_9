@@ -5,6 +5,7 @@ using BaseApi.Service.Features.Cache;
 using BaseApi.Service.Features.Orchestration.Loading;
 using BaseApi.Service.Features.Orchestration.Validation;
 using BaseApi.Service.Features.Workflow;
+using BaseApi.Service.Features.Workflow.Delete;
 using FluentValidation;
 using FluentValidation.Results;
 using Messaging.Contracts;
@@ -41,6 +42,7 @@ public sealed class OrchestrationService
     private readonly ProcessorLivenessValidator _processorLivenessValidator;
     private readonly IQueueSender _sender;
     private readonly ILogger<OrchestrationService> _logger;
+    private readonly IWorkflowRunGuard? _runGuard;
 
     // The constructor is internal rather than public: it accepts internal seam types, which the
     // compiler forbids on a public member. The class itself stays public and sealed so the
@@ -53,8 +55,10 @@ public sealed class OrchestrationService
         PayloadConfigSchemaValidator payloadConfigSchemaValidator,
         ProcessorLivenessValidator processorLivenessValidator,
         IQueueSender sender,
-        ILogger<OrchestrationService> logger)
+        ILogger<OrchestrationService> logger,
+        IWorkflowRunGuard? runGuard = null)
     {
+        _runGuard = runGuard;
         _db                           = db                           ?? throw new ArgumentNullException(nameof(db));
         _loader                       = loader                       ?? throw new ArgumentNullException(nameof(loader));
         _cycleDetector                = cycleDetector                ?? throw new ArgumentNullException(nameof(cycleDetector));
@@ -76,6 +80,11 @@ public sealed class OrchestrationService
     public async Task StartAsync(Guid workflowId, CancellationToken ct)
     {
         await ExistenceCheckAsync(workflowId, ct);
+
+        // A workflow being deleted (or deleted) is never started (2026-10-10): started then, its id would be live with no
+        // row left to stop it by.
+        if (_runGuard is not null && await _runGuard.IsDeletingAsync(workflowId, ct))
+            throw OrchestrationValidationException.WorkflowDeleting(workflowId);
 
         // The loader takes a list; this path always supplies exactly one id.
         using var snapshot = await _loader.LoadL1Async(new[] { workflowId }, ct);
