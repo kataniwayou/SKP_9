@@ -266,9 +266,25 @@ session and the stored design cover them like any drawing.
   the pasted blocks (its `parked` lists them), so a reload draws them where they were pasted; a stored design that was
   not applied reads its blocks back (positions from its layout), and the loader reads the processors its pasted steps
   run.
-- **BaseApi** (backward compatible): new ids are refused when taken ("Not created: a step with this id already
-  exists."), a pasted step needs its processor, the CRUD's create rules judge the fields; a pasted step that was not
-  created fails its wires and its assignment. Log lines "step 'x' created (copy of 'y')", "cache 'z' created (copy of
+- **BaseApi** (backward compatible): new ids are refused when taken by a different row ("Not created: a different step
+  with this id already exists."), a pasted step needs its processor, the CRUD's create rules judge the fields; a pasted
+  step that was not created fails its wires and its assignment.
+- **Review rulings (2026-10-10):**
+  - A cache's root is unique (`uq_cache_root`, its L2 address): a **pasted cache gets a new root** at paste time,
+    `<root>-copy`, then `-copy-2`, `-copy-3`, … unique against every root the studio knows (the open workflows'
+    loaded caches, their pasted caches and Inspector edits, the clipboard). The root stays editable. BaseApi checks it
+    in the caches stage, on create and on a root change: "Root 'r' is already used by cache 'x'." (field `root`).
+  - A deleted step keeps the `updatedAt` it was loaded with (`Blocks.stamps`, `deletedSteps[].updatedAt` in the stored
+    design) through a refused Save, a reopen of the stored design and a refresh; Save never sends a later re-read's
+    stamp, so a change someone made meanwhile is "changed by someone else since you opened it".
+  - The clipboard carries a step's assignment's own name, version, description and payload (the graph read carries
+    them); `copyOf` is for the log and fills only what is not sent, so a cut (copy, delete, Save) then paste in another
+    workflow saves.
+  - A design deletes only its workflow's own steps (its entry steps reach them, its stored layout places them, or its
+    stored design already deletes them) and caches (its cache list, or its stored design's deletes): "Not deleted: not a
+    step of this workflow." Ids of all zeros (new ids, `copyOf`) are a 400. A create whose row already exists exactly
+    as this save would create it (a Save sent again after its answer was lost) counts as unchanged. A wire joined on a
+    free picked wire is copied with it. Log lines "step 'x' created (copy of 'y')", "cache 'z' created (copy of
   'c')", "step 'x' deleted" (", with its assignment 'a'"), "cache 'z' deleted"; refusals "step 'b': Not deleted: still
   used by workflow 'w' (an entry step there)" as error lines. A request naming one id in two of create / change /
   delete is malformed (400).

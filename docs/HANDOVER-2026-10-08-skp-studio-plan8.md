@@ -577,6 +577,20 @@ plan 9 spec §6, §9 and the plan 4 spec.
   original's only once its read lands; a paste does not route pasted automatic wires around blocks beyond what the
   router does; large clipboards are kept whole in the session (quota trimming drops Output first, not the clipboard).
 
+**Review of copy/paste/delete (2026-10-10) — BUILT, NOT DEPLOYED.** Findings fixed (plan 8 spec §4.5 "Review rulings"):
+pasted caches get a unique root (`uniqueRoot`: `<root>-copy`, `-copy-2`, … against every root the open workflows and the
+clipboard hold) and BaseApi refuses a taken root clearly on create and on a root change (the in-memory suite never
+showed `uq_cache_root`; the old hermetic tests passed with a duplicate root); deleted steps keep their loaded stamps
+(`Blocks.stamps`, stored `deletedSteps[].updatedAt`) through refused saves, reopen and refresh; the clipboard carries an
+assignment's own name/version/description/payload (`Assignment.name/version/description` from the graph read);
+deletes limited to the workflow's own steps/caches (`DesignOwnership`: entry-reachable, stored layout, stored design's
+deletes, cache list); all-zero `copyOf` refused; a create that finds exactly its own row is unchanged (retry after a
+lost answer); `DesignRun.CreatedSteps` removed; wires joined on a free picked wire are copied. Tests: hermetic 2060 + 74
+skipped (+4), live `WorkflowDesignLiveTests` 16/16 on Postgres via the branch BaseApi (+1: a pasted cache with its own
+root, a taken root refused clearly), Release `--no-incremental` clean; Vitest 1032 (+5); copypaste.spec 9 (+3: cache
+paste and Save, cut and paste across workflows, a kept delete's stamp conflicting after B's change). Mutations: BaseApi
+3, Vitest 1, e2e 3, each fails.
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed
