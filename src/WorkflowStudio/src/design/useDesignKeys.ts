@@ -1,15 +1,11 @@
-import { useRef, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, MutableRefObject } from 'react';
 import type { StudioDocument } from '../app/document';
-import type { Circuit, Side } from '../circuit/circuit';
 import { endPointOf } from '../layout/circuitRoute';
 import { GRID } from '../layout/geometry';
-import type { Pt } from '../layout/router';
 import { nodePickIds, wirePickIds } from '../store/picks';
-import { landBody } from './bodyDrop';
 import type { DesignProps } from './designProps';
-import { circuitOf, moveGroup, removeWires, withCircuit, type Draft } from './draft';
+import { circuitOf, moveGroup, removeWires } from './draft';
 import { nodeBox } from './hit';
-import { overlapJudge } from './overlapJudge';
 
 /** The capsule toolbar and its zoom are drawn inside the canvas: their keys are their own; so are a text field's. */
 const NOT_CANVAS = '.docbar, .zoom, input, textarea, select, [contenteditable]';
@@ -19,7 +15,7 @@ const ARROWS: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRigh
 /**
  * The canvas's own keys while it has focus (spec §3.4, §4.5, §5.3): arrows nudge the picked blocks 8 px, the picked
  * wires with them (decision 8, 2026-10-10; a run of nudges is one step); with no block picked, the picked wires as the
- * closed hand moves them (`nudgeWires`, 2026-10-10); Delete removes the picked steps, caches and
+ * closed hand drags them (`wires`, 2026-10-10: held, its hints shown; let go, dropped); Delete removes the picked steps, caches and
  * wires (2026-10-10; a wire joined on one keeps its place, open; Backspace does nothing); Ctrl+C copies the picks and
  * Ctrl+V pastes the clipboard (Cmd on a Mac); Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z
  * redo. Keys typed in an Inspector field never reach here: the Inspector is outside the canvas. Picks
@@ -31,21 +27,26 @@ export function useDesignKeys(
   shown: MutableRefObject<StudioDocument>,
   design: DesignProps | undefined,
   busy: () => boolean = () => false,
+  /** The closed hand's drag driven by the arrows (`useWireGestures().keys`): picked wires with no block picked. */
+  wires?: WireKeys,
 ) {
-  // a run of arrow presses on picked wires: one closed-hand move, measured from where the run began
-  const runRef = useRef<WireRun | null>(null);
   return (e: ReactKeyboardEvent) => {
     if (!design) return;
     if ((e.target as Element).closest?.(NOT_CANVAS)) return;
     if (busy()) return;
+    // Escape while an arrow is held drops the held move, as a drag's Escape does
+    if (e.key === 'Escape' && wires?.cancel()) { e.preventDefault(); return; }
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
+    if (mod) wires?.release();
     if (mod && !e.altKey && key === 'z') { e.preventDefault(); if (e.shiftKey) design.onRedo(); else design.onUndo(); return; }
     if (mod && !e.altKey && key === 'y') { e.preventDefault(); design.onRedo(); return; }
     if (mod && !e.altKey && !e.shiftKey && key === 'c') { if (design.onCopy) { e.preventDefault(); design.onCopy(); } return; }
     if (mod && !e.altKey && !e.shiftKey && key === 'v') { if (design.onPaste) { e.preventDefault(); design.onPaste(); } return; }
-    if (mod || e.altKey) return;
     const arrow = ARROWS[e.key];
+    // any other key first lets go of a held arrow move, as a drop
+    if (!arrow) wires?.release();
+    if (mod || e.altKey) return;
     if (arrow) {
       const moved = new Map<string, { x: number; y: number }>();
       for (const id of nodePickIds(design.picks)) {
@@ -53,13 +54,8 @@ export function useDesignKeys(
         if (b) moved.set(id, { x: b.x + arrow[0] * GRID, y: b.y + arrow[1] * GRID });
       }
       if (moved.size === 0) {
-        // no block picked: the picked wires move as the closed hand moves them (the user's rule, 2026-10-10)
-        const next = nudgeWires(saved, shown.current, design.draft, wirePickIds(design.picks), arrow[0] * GRID, arrow[1] * GRID, runRef.current);
-        if (next === null) return;
-        runRef.current = next.run;
-        e.preventDefault();
-        // still held where it was (an end pulled back onto its contact, as a drag holds it): nothing to commit
-        if (next.draft !== design.draft) design.onCommit(next.draft, { merge: 'nudge' });
+        // no block picked: the picked wires move as the closed hand drags them, its hints shown; the key's release drops them
+        if (wires?.move(wirePickIds(design.picks), arrow[0] * GRID, arrow[1] * GRID)) e.preventDefault();
         return;
       }
       e.preventDefault();
@@ -83,61 +79,12 @@ export function useDesignKeys(
   };
 }
 
-/** How near a nudged end must come to a contact to take it: the closed hand's drop reach (8 px at zoom 1). */
-const NUDGE_REACH = GRID;
-
-/**
- * A run of arrow presses on picked wires (no block picked): the draft and the wires as drawn before its first press, how
- * far it has moved them so far, each wire's end that reached a contact first, and the wires as its last press left
- * them (a press continues the run only while they are still so: an undo or any other change starts a new one).
- */
-export interface WireRun {
-  ids: string;
-  base: Draft;
-  shown: StudioDocument;
-  dx: number;
-  dy: number;
-  first: Record<string, Side | null>;
-  after: string;
+/** The closed hand's drag of the picked wires, driven by the arrows (`useWireGestures().keys`). */
+export interface WireKeys {
+  move: (ids: readonly string[], ddx: number, ddy: number) => boolean;
+  release: () => void;
+  cancel: () => boolean;
 }
 
-const wiresKey = (c: Readonly<Circuit>, ids: readonly string[]) => JSON.stringify(ids.map((id) => c[id] ?? null));
-
-/**
- * The picked wires (no block picked) moved one more grid step by an arrow, exactly as the closed hand moves them (rule
- * B, `landBody`; the user's rule, 2026-10-10): a run of presses is one move, measured from the wires as they were before
- * its first press, as a drag is from where it began. Each moves whole, its shape kept, detached from every contact, the
- * ends joined on it opened where they are drawn; an end over a contact it may take shifts the wire onto it and connects
- * there (the end that got there first decides), the others stay open; connected, a new short circuit leaves its ends
- * open. Moved back exactly where the run began, the draft is as it was. Null when no picked wire is in the circuit or
- * drawn.
- */
-export function nudgeWires(
-  saved: StudioDocument, shown: StudioDocument, draft: Draft, ids: readonly string[], ddx: number, ddy: number, last: WireRun | null = null,
-): { draft: Draft; run: WireRun } | null {
-  const key = JSON.stringify(ids);
-  const now = circuitOf(saved, draft);
-  const go = last !== null && last.ids === key && last.after === wiresKey(now, ids);
-  const run: WireRun = go ? last : { ids: key, base: draft, shown, dx: 0, dy: 0, first: {}, after: '' };
-  const dx = run.dx + ddx, dy = run.dy + ddy;
-  const from = run.shown;
-  const drawn = new Map(from.wires.map((w) => [w.id, w.points as readonly Pt[]]));
-  const drawnAt = endPointOf(from.wires);
-  let circuit = circuitOf(saved, run.base);
-  const first: Record<string, Side | null> = {};
-  let moved = false, still = true;
-  for (const id of ids) {
-    const points = drawn.get(id);
-    if (!Object.hasOwn(circuit, id) || !points || points.length < 2) continue;
-    moved = true;
-    const landing = landBody(from, circuit, id, points, drawnAt, dx, dy, run.first[id] ?? null, NUDGE_REACH, overlapJudge(from, id, circuit));
-    first[id] = landing.first;
-    // shifted back exactly where it was: as it was (a drag back to its start)
-    if (landing.dx === 0 && landing.dy === 0) continue;
-    still = false;
-    circuit = landing.result;
-  }
-  if (!moved) return null;
-  const next = still ? run.base : withCircuit(run.base, saved, circuit);
-  return { draft: next, run: { ...run, dx, dy, first, after: wiresKey(circuitOf(saved, next), ids) } };
-}
+/** Whether a key is one of the arrows (its release lets go of a held wire move). */
+export const isArrow = (key: string): boolean => Object.hasOwn(ARROWS, key);

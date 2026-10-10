@@ -18,6 +18,7 @@ import type { DesignGestures } from './DesignContext';
 import type { DesignProps } from './designProps';
 import { circuitOf, removeWires, withCircuit, type Draft } from './draft';
 import { landBody, type BodyLanding } from './bodyDrop';
+import { landWires, type RunLanding, type WireRun } from './keyBody';
 import { cutPaths, cutTargets, cutWire, holdDrawn, squareAt, squaresOf, type Square } from './cut';
 import { applyDrop, endOf, judgeDrop, pointOfTarget, roleOf, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
@@ -499,6 +500,49 @@ export function useWireGestures(
   function flowPointOf(e: ReactPointerEvent): Point {
     return screenToFlowPosition({ x: e.clientX, y: e.clientY }, { snapToGrid: false });
   }
+  // ---- arrows with only wires picked: the closed hand's drag, driven by the keys (the user's rule, 2026-10-10) ----
+  // the held run (an arrow down, nothing committed since its last press) and the last released one (a later press
+  // goes on from it while the wires are still as it left them)
+  const keyHeld = useRef<RunLanding | null>(null);
+  const keyLast = useRef<WireRun | null>(null);
+  const keys = useMemo(() => ({
+    /**
+     * An arrow press (or its repeat) moves the picked wires `ids` one more step: as a pointer move of the closed hand,
+     * the moved wires and each end's hint (the step's frame, "connect here") are shown, nothing committed. False when no
+     * picked wire can move.
+     */
+    move(ids: readonly string[], ddx: number, ddy: number): boolean {
+      const d = designRef.current;
+      if (!d) return false;
+      const held = keyHeld.current;
+      const l = landWires(saved, shown.current, d.draft, ids, ddx, ddy, held?.run ?? keyLast.current, held !== null, DROP_REACH / getZoom());
+      if (l === null) return false;
+      keyHeld.current = l;
+      setPreview(l.still ? null : withCircuit(l.run.base, saved, l.preview));
+      setHints(l.ends.map((x) => ({ id: x.id, line: x.line, tone: toneOf(x.verdict), why: x.verdict, at: x.at })));
+      return true;
+    },
+    /** The arrow is let go: as the closed hand's release, every end over a contact it may take connects; one history step per run. */
+    release() {
+      const l = keyHeld.current;
+      if (l === null) return;
+      keyHeld.current = null;
+      keyLast.current = l.run;
+      setPreview(null);
+      setHints([]);
+      const d = designRef.current;
+      if (d && l.next !== d.draft) d.onCommit(l.next, { merge: 'nudge' });
+    },
+    /** Escape while an arrow is held: as the drag's Escape, what the held presses did since the last release is dropped. */
+    cancel(): boolean {
+      if (keyHeld.current === null) return false;
+      keyHeld.current = null;
+      setPreview(null);
+      setHints([]);
+      return true;
+    },
+  }), [saved, shown, setPreview, getZoom]);
+
   const latestRef = useRef({ startBody, startNew });
   latestRef.current = { startBody, startNew };
 
@@ -515,5 +559,5 @@ export function useWireGestures(
   }), [shown]);
 
   // a run or end drag's cursor only while that drag runs; a body drag and a new wire keep the closed hand
-  return { gestures, startSegment, startEnd, ghost, hints, active, running, resize: active ? resize : null };
+  return { gestures, startSegment, startEnd, ghost, hints, active, running, resize: active ? resize : null, keys };
 }

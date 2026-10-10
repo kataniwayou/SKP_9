@@ -9,7 +9,7 @@ import type { DesignProps } from '../design/designProps';
 import { circuitOf, EMPTY_DRAFT, resetShape, type Draft } from '../design/draft';
 import type { GuideLine } from '../design/guides';
 import { useBlockDrag } from '../design/useBlockDrag';
-import { useDesignKeys } from '../design/useDesignKeys';
+import { isArrow, useDesignKeys } from '../design/useDesignKeys';
 import { useRubberBand } from '../design/useRubberBand';
 import { useWireGestures } from '../design/useWireGestures';
 import { Menu, anchorAt, type Anchor } from '../dock/Menu';
@@ -135,7 +135,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   // --inv (1 / zoom) lets canvas.css keep drop outlines and connection points one size on screen at any zoom
   const zoom = useStore((s) => s.transform[2]);
   // a key while a gesture runs would be overwritten by its drop: the canvas's keys wait for it (Escape is the gesture's)
-  const onKeyDown = useDesignKeys(doc, shownRef, design, () => pressing() || wiring.running() || drag.dragging());
+  const onKeyDown = useDesignKeys(doc, shownRef, design, () => pressing() || wiring.running() || drag.dragging(), wiring.keys);
   // the block under a dragged wire end, outlined green or red (spec §4.4); a line gets a halo instead (plan 7); a wire
   // moved whole has one per end (rule B, 2026-10-09)
   const shown = useMemo(() => wiring.hints.filter((h) => !h.line).reduce(withHint, selected), [selected, wiring.hints]);
@@ -198,7 +198,10 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
         <div className={banding || wiring.active ? `studio-canvas gesture${wiring.resize ? ` gesture-${wiring.resize}` : ''}` : 'studio-canvas'} style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%', '--inv': String(1 / zoom) } as CSSProperties}
           tabIndex={design ? 0 : undefined}
           onKeyDown={design ? onKeyDown : undefined}
-          onPointerDownCapture={design ? (e) => { e.currentTarget.focus({ preventScroll: true }); drag.notePress(e.target as Element); onPointerDownCapture(e); } : undefined}>
+          // an arrow let go drops the wires it held (the closed hand's release); so does leaving the canvas or a press
+          onKeyUp={design ? (e) => { if (isArrow(e.key)) wiring.keys.release(); } : undefined}
+          onBlur={design ? () => wiring.keys.release() : undefined}
+          onPointerDownCapture={design ? (e) => { wiring.keys.release(); e.currentTarget.focus({ preventScroll: true }); drag.notePress(e.target as Element); onPointerDownCapture(e); } : undefined}>
           <DesignContext.Provider value={design ? wiring.gestures : null}>
             <ReactFlow
               nodes={shown}

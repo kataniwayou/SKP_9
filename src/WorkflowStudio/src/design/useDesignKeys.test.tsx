@@ -1,12 +1,10 @@
 import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { graphDto, stepDto, workflowDto } from '../api/fixtures';
+import { graphDto, stepDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
-import { applyDesign } from './apply';
-import { EMPTY_EDITS } from './design';
-import { circuitOf, EMPTY_DRAFT } from './draft';
+import { EMPTY_DRAFT } from './draft';
 import type { DesignProps } from './designProps';
-import { nudgeWires, useDesignKeys, type WireRun } from './useDesignKeys';
+import { useDesignKeys, type WireKeys } from './useDesignKeys';
 
 function Probe({ design, saved, busy }: { design: DesignProps; saved: Awaited<ReturnType<typeof loadedDocument>>; busy?: () => boolean }) {
   const onKeyDown = useDesignKeys(saved, { current: saved }, design, busy);
@@ -16,6 +14,11 @@ function Probe({ design, saved, busy }: { design: DesignProps; saved: Awaited<Re
       <input aria-label="field" />
     </div>
   );
+}
+
+function ProbeWith({ design, saved, wires }: { design: DesignProps; saved: Awaited<ReturnType<typeof loadedDocument>>; wires: WireKeys }) {
+  const onKeyDown = useDesignKeys(saved, { current: saved }, design, () => false, wires);
+  return <div data-testid="c" tabIndex={0} onKeyDown={onKeyDown} />;
 }
 
 const designOf = (over: Partial<DesignProps> = {}): DesignProps => ({ draft: EMPTY_DRAFT, picks: [], onPick: vi.fn(), onCommit: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn(), ...over });
@@ -151,49 +154,25 @@ describe('design keys', () => {
     expect(design.onCommit).not.toHaveBeenCalled();
   });
 
-  it('arrows with only a wire picked move it as the closed hand does: an end pulled back onto its own step holds it there, nothing committed (2026-10-10)', async () => {
+  it('arrows with only wires picked go to the closed-hand drag (its hints, its release); any other key lets go first; Escape drops a held move (2026-10-10)', async () => {
     const saved = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
     const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
-    const { getByTestId } = render(<Probe design={design} saved={saved} />);
-    // left: its tail would go into s1, which takes it back onto its side, as a drag 8 px left does
-    fireEvent.keyDown(getByTestId('c'), { key: 'ArrowLeft' });
+    const wires = { move: vi.fn(() => true), release: vi.fn(), cancel: vi.fn(() => true) };
+    const { getByTestId } = render(<ProbeWith design={design} saved={saved} wires={wires} />);
+    fireEvent.keyDown(getByTestId('c'), { key: 'ArrowDown' });
+    expect(wires.move).toHaveBeenCalledWith(['s1->s2'], 0, 8);
     expect(design.onCommit).not.toHaveBeenCalled();
-  });
-
-  it('a run of presses is one move from where it began: far down it is detached and grey, its links gone; back up it is exactly as it was', async () => {
-    const saved = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
-    for (const id of ['s1->s2', 'wf->s1']) {
-      const was = saved.wires.find((x) => x.id === id)!.points;
-      let draft = EMPTY_DRAFT, run: WireRun | null = null;
-      const press = (dy: number) => {
-        const next = nudgeWires(saved, applyDesign(saved, draft, EMPTY_EDITS), draft, [id], 0, dy, run)!;
-        draft = next.draft;
-        run = next.run;
-      };
-      for (let i = 0; i < 40; i++) press(8);
-      const w = circuitOf(saved, draft)[id]!;
-      expect([w.tail.on, w.head.on]).toEqual(['open', 'open']);
-      const shown = applyDesign(saved, draft, EMPTY_EDITS);
-      expect(shown.wires.find((x) => x.id === id)!.points).toEqual(was.map(([x, y]) => [x, y + 320]));
-      expect(shown.graph.steps.get('s1')!.nextStepIds).toEqual(id === 's1->s2' ? [] : ['s2']);
-      // back up the same 40 presses: the draft it began from, the wire automatic and connected again
-      for (let i = 0; i < 40; i++) press(-8);
-      expect(draft).toBe(EMPTY_DRAFT);
-      // one down and one up (the user's case): the same
-      press(8);
-      press(-8);
-      expect(draft).toBe(EMPTY_DRAFT);
-    }
-  });
-
-  it('a press after any other change (an undo) starts a new run from the wire as it is then', async () => {
-    const saved = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
-    let draft = EMPTY_DRAFT, run: WireRun | null = null;
-    for (let i = 0; i < 40; i++) ({ draft, run } = nudgeWires(saved, applyDesign(saved, draft, EMPTY_EDITS), draft, ['s1->s2'], 0, 8, run)!);
-    // undone: the draft is the one the run began from, not the one it left
-    const next = nudgeWires(saved, saved, EMPTY_DRAFT, ['s1->s2'], 0, 8, run)!;
-    expect([next.run.dx, next.run.dy]).toEqual([0, 8]);
-    expect(next.run.base).toBe(EMPTY_DRAFT);
+    fireEvent.keyDown(getByTestId('c'), { key: 'Escape' });
+    expect(wires.cancel).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(getByTestId('c'), { key: 'z', ctrlKey: true });
+    expect(wires.release).toHaveBeenCalled();
+    expect(design.onUndo).toHaveBeenCalledTimes(1);
+    // with a block picked as well the group moves as before, the wire with it, committed at once
+    const group = designOf({ picks: [{ kind: 'node', id: 's1' }, { kind: 'wire', id: 's1->s2' }] });
+    const view = render(<ProbeWith design={group} saved={saved} wires={wires} />);
+    fireEvent.keyDown(view.getAllByTestId('c')[1]!, { key: 'ArrowDown' });
+    expect(wires.move).toHaveBeenCalledTimes(1);
+    expect(group.onCommit).toHaveBeenCalledWith(expect.anything(), { merge: 'nudge' });
   });
 
   it('with no wire or block picked an arrow does nothing', async () => {

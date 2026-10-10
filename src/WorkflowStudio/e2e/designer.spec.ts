@@ -1,7 +1,7 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import {
   centreOf, documentPanel, dragReading, dropOpen, edge as wire, emptySpot, endSquare, expect, inspector, node, openWorkflow, pickWire, pointOnWire, pressTo,
-  settledView, tab, test,
+  labelsOf, settledView, tab, test,
   workflowsWithSteps, type LiveWorkflow,
 } from './studio';
 
@@ -212,7 +212,7 @@ test('arrow keys nudge the picked step on the focused canvas; Ctrl+Z puts it bac
   await expect(page.getByText('● design draft')).toHaveCount(0);
 });
 
-test('arrow keys with only a wire picked move it as the closed hand does: down until detached and grey, back up exactly as it was (2026-10-10)', async ({ page }) => {
+test('arrow keys with only a wire picked drag it as the closed hand does: its hints while held, dropped when let go; down until detached and grey, back up exactly as it was (2026-10-10)', async ({ page }) => {
   const panel = await open(page);
   const { a, b } = chain!;
   const id = `${a}->${b}`;
@@ -220,7 +220,22 @@ test('arrow keys with only a wire picked move it as the closed hand does: down u
   await pickWire(page, panel, id);
   await expect(panel.locator('.studio-canvas')).toBeFocused();
   const drawn = wire(panel, id).locator('g.wire');
-  // the user's case: one down, one up: as it was, no draft
+  // held down, the closed hand's feedback: the wire moved, each end's step lit and labelled "connect here"; nothing
+  // committed until the key is let go
+  await page.keyboard.down('ArrowDown');
+  await expect.poll(() => labelsOf(panel)).toEqual(['connect here', 'connect here']);
+  await expect(node(panel, a)).toHaveClass(/drop-ok/);
+  await expect(node(panel, b)).toHaveClass(/drop-ok/);
+  await expect(page.getByText('● design draft')).toHaveCount(0);
+  await page.keyboard.up('ArrowDown');
+  await expect.poll(() => labelsOf(panel)).toEqual([]);
+  await expect(node(panel, b)).not.toHaveClass(/drop-ok/);
+  await expect(page.getByText('● design draft')).toBeVisible();
+  // the user's case: one down, then one up: as it was, no draft
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(() => pathOf(panel, id)).toBe(before);
+  await expect(drawn).not.toHaveClass(/dashed/);
+  await expect(page.getByText('● design draft')).toHaveCount(0);
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowUp');
   await expect.poll(() => pathOf(panel, id)).toBe(before);
