@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-05-skp-studio-design.md` (§3.2, §4.4, §6.1 status, §7 Problems, §11; amended alongside this plan).
 
+> **Note 2026-10-10:** the two GETs stay as built here; the studio now follows the same data through the liveness hub (`/api/hubs/liveness`, SignalR), whose monitor judges processors with this plan's `ProcessorLivenessProbe`. Studio spec §6.4.
+
 ## Global Constraints
 
 - **One implementation per rule.** The gates' rules are not copied anywhere. `Validate`/`ValidateAsync` keep throwing the **same first problem** they throw today; `Collect`/`CollectAsync` return every problem in the same traversal order, so the first collected problem is exactly the one `Validate` throws.

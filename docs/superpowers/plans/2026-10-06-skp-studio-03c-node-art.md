@@ -32,7 +32,7 @@ The plan copies every number it needs, so an executor never has to open these fi
 5. **Base stroke widths live in CSS classes, not inline styles.** v50 wrote widths inline, which silently beat its own hover and selection rules. Here a selected step really does draw the 2 px cyan frame.
 6. **The cache drops its item count.** The locked art shows the root on a plate and no "N items".
 7. **The hub's back glow takes no clicks** (`pointer-events: none`). It reaches 124 px from the centre, past the hub's 96 px box, and would otherwise grab clicks meant for wires and the cache.
-8. **Liveness is polled per open document**, every 5 s, beside the live status and with the same rules: only while that tab is visible, never while loading or failed. A hidden or loading document shows every processor *undetermined* and the hub *not started*.
+8. **Liveness is polled per open document**, every 5 s, beside the live status and with the same rules: only while that tab is visible, never while loading or failed. A hidden or loading document shows every processor *undetermined* and the hub *not started*. *(Superseded 2026-10-10: one app-wide liveness store fed by the liveness hub, in every document shown or hidden; the GETs are polled once for the app only while the hub is not connected. Studio spec §6.4.)*
 
 ## Global Constraints
 

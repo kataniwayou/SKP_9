@@ -1,6 +1,6 @@
 # SKP Studio -- design
 
-Date: 2026-10-05. Status: approved. §5 amended the same day (connector editing, lit grid, grid sizes) and approved. Amended again the same day from the user's mockup review (v49, approved): the grid's bright 32 px dashes removed (§5.1), toolbox create and remove (§4.3), Inspector shortening and entity details (§7). Amended again the same day: start rules are no longer duplicated in the frontend; BaseApi gains a dry-run validate, a live-workflow list and a processor-liveness read (§3.1, §3.2, §4.4, §6.1, §7, §9, §10, §11). Amended 2026-10-06: the Inspector shows the unique entity name and the picker uses it (§7); slices reordered to dock (3a) and Inspector editing (3b) before canvas editing (§10); the Inspector edits each entity's DTO metadata with GET/PUT, shared entities are the operator's responsibility, Start/Stop stay disabled (§6.1, §7.1, §8, §9). Amended 2026-10-06 again: locked node art (gallery + v50), cache 160 × 160, live health and started states, slice 3c (§5.1, §10). Branch: `feature/path-importer`.
+Date: 2026-10-05. Status: approved. §5 amended the same day (connector editing, lit grid, grid sizes) and approved. Amended again the same day from the user's mockup review (v49, approved): the grid's bright 32 px dashes removed (§5.1), toolbox create and remove (§4.3), Inspector shortening and entity details (§7). Amended again the same day: start rules are no longer duplicated in the frontend; BaseApi gains a dry-run validate, a live-workflow list and a processor-liveness read (§3.1, §3.2, §4.4, §6.1, §7, §9, §10, §11). Amended 2026-10-06: the Inspector shows the unique entity name and the picker uses it (§7); slices reordered to dock (3a) and Inspector editing (3b) before canvas editing (§10); the Inspector edits each entity's DTO metadata with GET/PUT, shared entities are the operator's responsibility, Start/Stop stay disabled (§6.1, §7.1, §8, §9). Amended 2026-10-06 again: locked node art (gallery + v50), cache 160 × 160, live health and started states, slice 3c (§5.1, §10). Amended 2026-10-10 (user, approved design): live push of workflow and processor liveness over SignalR; the per-document polls are gone (§4.4, §5.1, §6.1, new §6.4). Branch: `feature/path-importer`.
 
 ## 1. Purpose
 
@@ -132,10 +132,14 @@ The response is the graph re-read through `WorkflowGraphLoader`.
 - The gates gain a collect mode beside their throw-first mode, so there is **one implementation of each
   rule** and the start path is unchanged.
 - **`GET /orchestration/live`** lists the running workflow ids (the `skp:live` set). Start and stop are
-  queued (202), so the studio polls it and shows "starting…" / "stopping…" until the set catches up.
+  queued (202), so the studio ~~polls it~~ follows the live set (since 2026-10-10 through the liveness hub, §6.4;
+  this GET is the start gate's companion and the studio's fallback) and shows "starting…" / "stopping…" until the
+  set catches up.
 - **`GET /processors/liveness`** reports each processor: live, and its replicas classified (healthy,
   absent, unhealthy, stale, malformed), judged exactly as the start gate judges.
 - A Redis fault on any of them is a 500, never a "not live" answer.
+- **The liveness hub (2026-10-10), `/api/hubs/liveness`** (SignalR): pushes changes of the two GETs' data to every
+  connected studio; see §6.4. The GETs are unchanged.
 
 ## 5. Visual system
 
@@ -162,12 +166,13 @@ gallery wins**. v50's dock chrome is identical to v49's. Built in slice **3c** (
   cap (name, `STEP vX`, entry-condition pill, assignment keys) and the processor panel inside (die with
   its ring, name and version, in / out / cfg slots).
 - **Processor health colours only the die and its ring:** **healthy** green, the orbit spinning;
-  **unhealthy** red and still; **undetermined** grey and blinking slowly. Data: `GET
-  /processors/liveness` (§4.4), polled with the document's live status (every 5 s, visible tab only);
-  `live` → healthy, not live → unhealthy, no answer (poll failed, processor absent) → undetermined.
+  **unhealthy** red and still; **undetermined** grey and blinking slowly. Data: ~~`GET
+  /processors/liveness` (§4.4), polled with the document's live status (every 5 s, visible tab only)~~ the app's
+  liveness store (§6.4, 2026-10-10), in every document, shown or hidden;
+  `live` → healthy, not live → unhealthy, no answer (unknown, processor absent) → undetermined.
 - **Workflow:** a hub dial with equal docking points all round. **Started** (its id is in `GET
   /orchestration/live`): the inside green, the segment ring turning. **Not started**: the inside grey,
-  still and blinking slowly. The two outer rings are static and white. A failed live poll shows not
+  still and blinking slowly. The two outer rings are static and white. An unknown status (§6.4) shows not
   started's look plus the capsule's *status unknown*.
 - **Cache:** a square in the step border style: a hex mark, the name, `CACHE · vX`, and the root on a
   plate. Static.
@@ -291,15 +296,15 @@ Each rule is marked *Visio* (Visio's documented behaviour) or *ours* (a delibera
   into Output, pinned red at the top; see the plan 8 spec §4.1. A stored layout or session holding a Problems pane
   loads without it.)
 - Each document has a capsule toolbar: name, cron, status, Save / Start / Stop, its own zoom and Fit.
-  The status comes from `GET /orchestration/live` (§4.4), polled every 5 s while the tab is visible;
-  a failed poll shows *status unknown*. ~~Start and Stop stay disabled ("Not available yet") until a later slice
+  The status comes from ~~`GET /orchestration/live` (§4.4), polled every 5 s while the tab is visible~~ the app's
+  liveness store (§6.4, 2026-10-10), whether the tab is shown or not; *status unknown* when the store cannot say. ~~Start and Stop stay disabled ("Not available yet") until a later slice
   enables them (user decision, 2026-10-06).~~ **Enabled 2026-10-09 (user decision): Start and Stop act on the saved
   workflow BaseApi holds, never on the drawing.** They call `POST /orchestration/start` and `/stop` with the workflow
   id (202 Accepted). Start is enabled only while the live poll says *stopped*, Stop only while it says *running*;
   neither while checking, unknown, or while a press is in progress (the pill and the button then say starting… /
   stopping…). F5 / Shift+F5 do the same for the active document (a toast says why when they cannot). Output logs the
   request, BaseApi's answer (a refusal in red with BaseApi's reason, e.g. a 422 gate) and, once the live set agrees,
-  "running" / "stopped". A Start while the design has unsaved changes logs first "Started the saved workflow; your
+  "running" / "stopped" (since 2026-10-10 that is the liveness store's own line, §6.4, logged once whoever started it). A Start while the design has unsaved changes logs first "Started the saved workflow; your
   unsaved design is not part of this run" (and still starts); a stored design not applied gets a like note. An
   accepted press the live set has not agreed with after 30 s ends in a red line (BaseApi's known gap: a start whose
   control message is parked is accepted and never appears in the live set).
@@ -333,6 +338,55 @@ Each rule is marked *Visio* (Visio's documented behaviour) or *ours* (a delibera
   that, defined once as tokens: auto-hide flyout 1000, menus and pickers 1010, toast 1020, modal 1030,
   switcher 1040, tooltip 1050. (Found in the mockup: a document tab's menu opened under a floated
   group; fixed in v41.)
+
+### 6.4 Live state (2026-10-10, user-approved design)
+
+The studio follows the running system through **one liveness store for the whole app**, fed by BaseApi's liveness hub.
+Nothing polls per document any more.
+
+**BaseApi.**
+- A SignalR hub at **`/api/hubs/liveness`** (under `/api/` like every BaseApi route, so nginx and the vite proxy pass
+  it through unchanged; both now forward the WebSocket upgrade, nginx with a long read timeout for the hub path only).
+- One **LivenessMonitor** (a hosted service) reads every 2 s (`Liveness:IntervalSeconds`): the `skp:live` set and every
+  processor row judged by the start gate's own `ProcessorLivenessProbe` (16 probes at a time,
+  `Liveness:ProbeParallelism`). It diffs with its last reading and broadcasts **changes only**:
+  `workflowLive { workflowId, running }`, `processorLiveness { processorId, live, healthy, replicas, reason, removed }`
+  (`reason` is the gate's refusal wording, null while live; `removed` when the processor row is gone) and
+  `monitorStatus { known, reason }`. Every broadcast carries a **sequence number** one above the last.
+- A failed read (Redis or the database) is logged (the first in a row, then one in 30) and read again next tick; after
+  2 in a row (`Liveness:UnknownAfterFailures`) the hub says `monitorStatus known: false`; the first good read after it
+  says `known: true` plus the changes since the last good reading. Nothing a tick throws ends the host.
+- Hub method **`Snapshot()`**: `{ sequence, known, runningWorkflowIds, processors[] }`, the sequence being the last
+  change it includes. Right after BaseApi starts it waits up to 5 s for the first reading, else answers `known: false`.
+- `GET /orchestration/live` and `GET /processors/liveness` are unchanged (the start gate, and the studio's fallback).
+- **One replica, no backplane.** Scaling BaseApi out needs a SignalR backplane (e.g. Redis) and one monitor (or one
+  sequence) across replicas.
+
+**Studio.**
+- One SignalR connection (`@microsoft/signalr` 10.0.11), opened at app start, independent of documents: WebSockets
+  only, no negotiate request (so the studio still sends nothing but GETs and the socket), automatic reconnect with
+  backoff 0, 1, 2, 5, 10, 20, then every 30 s, never giving up; a failed first start is retried the same way.
+- **The liveness store** (`live/liveState.ts`, `live/liveClient.ts`): running workflow ids, the processor map,
+  connection state (connecting / connected / reconnecting / offline) and the last sequence. On connect and reconnect
+  it takes a `Snapshot()`; a change with the next sequence number is applied; a change at or below it is ignored; a
+  gap (or a change while a snapshot is on its way) is held and a snapshot taken, after which held changes above it are
+  applied in order. `monitorStatus known: false` shows *status unknown* / undetermined; `known: true` takes a snapshot.
+- **Fallback:** while not connected, **one** app-wide poll of the two GETs every 5 s feeds the same store (a poll
+  answer that lands once connected is dropped); the status area at the right of the menu strip shows a small
+  **"live updates reconnecting"** mark (`role=status`, "Live updates"). On reconnect a fresh snapshot replaces what
+  the polls said, the mark goes and polling stops. Nothing shows while connecting at start.
+- **Everything reads the store:** the hub dial and the capsule's status pill, processor health on step art in every
+  document (shown or hidden), Start / Stop enabling (`runBlocked`), the running / stopped confirmation of a press and
+  its 30 s timeout, the Inspector's processor view (a read-only **Liveness** row: "live · 2 of 3 replicas healthy",
+  "not live · <the gate's reason>", "not reported", "checking…", "unknown"), and the workflow picker, which shows a
+  teal **running dot** (text alternative "running") beside every running workflow.
+- **Output logs workflow liveness changes only**, for every workflow, open or not: "<name> running" / "<name>
+  stopped" (named from the open document, else the workflow list; else the id, and the list is read again). Never a
+  processor. The first answer after a page load is the baseline, not a change; an unknown spell keeps the baseline, so
+  what changed meanwhile is logged when known again. A Start or Stop press's confirmation **is** this line (logged
+  once); if it arrives before BaseApi's 202 the accepted line is just "Start accepted by BaseApi (202)" and the press
+  is done.
+- The store is not kept across a refresh (it is read afresh); documents, dock, drawing and drafts still are (§6.1).
 
 ## 7. Inspector editors
 

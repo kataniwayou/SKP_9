@@ -17,6 +17,7 @@ Decisions taken with the user (2026-10-07):
 
 1. **Load with GETs only**, then work offline. No `POST /workflows/{id}/validate` (start checks are not this phase).
    The live-light polls (`GET /orchestration/live`, `GET /processors/liveness`) stay as they are (SignalR later).
+   *(Superseded 2026-10-10: the liveness hub pushes both; the studio polls the GETs only as its fallback, studio spec §6.4.)*
 2. **Every edit is virtual**: the workflow, steps (fields and wiring), assignments, processors, schemas and caches
    are edited as copies in the browser.
 3. **Ownership.** Steps and assignments belong to one workflow and are never shared (the studio guarantees it by

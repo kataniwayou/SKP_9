@@ -31,7 +31,7 @@ The spec leaves these open; each is decided here and should be shown to the user
 
 ## Global Constraints
 
-- **Nothing is written while designing.** Opening a workflow is GETs only (`/workflows/{id}/graph`, `/steps/{id}`, `/processors/{id}`, `/schemas/{id}`); no `POST /validate` anywhere in the studio. The live polls (`GET /orchestration/live`, `GET /processors/liveness`) stay. The only write the studio sends is `PUT /workflows/{id}/design`, on Save.
+- **Nothing is written while designing.** Opening a workflow is GETs only (`/workflows/{id}/graph`, `/steps/{id}`, `/processors/{id}`, `/schemas/{id}`); no `POST /validate` anywhere in the studio. The live polls (`GET /orchestration/live`, `GET /processors/liveness`) stay (superseded 2026-10-10: pushed by the liveness hub, polled only as the fallback; studio spec §6.4). The only write the studio sends is `PUT /workflows/{id}/design`, on Save.
 - **`PUT /workflows/{id}/graph` and `POST /workflows/{id}/validate` stay as they are** in BaseApi (nothing in this plan changes them).
 - **Stage order** (exact names, used in `errors[].stage`): `schemas`, `processors`, `caches`, `steps`, `wires`, `assignments`, `workflow`. Error `kind` values: `schema`, `processor`, `cache`, `step`, `assignment`, `workflow`.
 - **Only the CRUD field rules decide a failure** (the existing validators: `SchemaCreateDtoValidator`, `ProcessorUpdateDtoValidator`, `CacheUpdateDtoValidator`, `StepUpdateDtoValidator`, `AssignmentCreateDtoValidator`, `AssignmentUpdateDtoValidator`, `WorkflowUpdateDtoValidator` incl. "at least one entry step"), plus database constraints. No cycle, schema-edge, payload or liveness check. No validator changes.

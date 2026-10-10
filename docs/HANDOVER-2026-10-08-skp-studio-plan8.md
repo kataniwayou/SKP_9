@@ -11,6 +11,8 @@ BaseApi `localhost:18080`. Do not stop them by hand.
 - **Plan 7 (junctions) is done and deployed** (`30996e5..a2a8c96`, handover `e38a2a3`). Spec
   `docs/superpowers/specs/2026-10-07-skp-studio-07-junctions-design.md`.
 - **Output / Save log / Start-Stop (2026-10-09) is BUILT, NOT DEPLOYED** (section below the step read-out).
+- **Live push over SignalR (2026-10-10) is BUILT, NOT DEPLOYED** (section after the Save spinner): BaseApi needs a
+  redeploy and the studio (bundle and nginx.conf) too.
 - **Plan 8 (virtual design) is BUILT and DEPLOYED.** Spec
   `docs/superpowers/specs/2026-10-07-skp-studio-08-virtual-design-design.md`; plan
   `docs/superpowers/plans/2026-10-07-skp-studio-08-virtual-design.md`. Executed subagent-driven (16 tasks, each
@@ -455,6 +457,54 @@ Tests: Vitest 989 (84 files; min 300 ms, reduced class, announcer, tab spinner, 
 dev (deployed BaseApi) 143 + 2 skips; new `spinner.spec.ts` (PUT held 1.5 s by page.route: button and tab spinner,
 another tab in front, gone after alignment, announcements; reduced motion via emulateMedia). Mutations: 4 Vitest, 2
 e2e.
+
+**Live push of workflow and processor liveness over SignalR (user-approved design, 2026-10-10) — BUILT, NOT DEPLOYED.**
+Commits `0807a03` (BaseApi hub + monitor + hermetic tests), `85def3e` (BaseApi live test), `73a292d` (studio, nginx,
+vite), `6441d67` (e2e), and the docs commit that adds this paragraph. Spec: studio spec §6.4 (new) with superseded notes
+in §4.4, §5.1, §6.1; notes in the plan 8 spec and in plans 01b, 03c and 08.
+- **BaseApi** (`Features/Liveness/`): `LivenessHub` at `/api/hubs/liveness` (under `/api/` so both proxies pass it
+  unchanged); `LivenessMonitor` (hosted) reads `skp:live` and probes every processor row with the gate's
+  `ProcessorLivenessProbe` every 2 s (`Liveness:IntervalSeconds`, 16 probes at a time), `LivenessState` diffs and hands
+  out sequence numbers, `HubLivenessPublisher` broadcasts `workflowLive`, `processorLiveness` (with `removed`) and
+  `monitorStatus`. `Snapshot()` = whole state + the sequence it includes (waits up to 5 s for the first reading after a
+  start). Failed reads are logged (1st, then 1 in 30) and retried; 2 in a row = `monitorStatus known: false`. GETs
+  unchanged. **One replica, no backplane:** scaling out needs a SignalR backplane (Redis) and a single monitor/sequence.
+- **Studio** (`src/live/`): `liveState.ts` (pure reducer, defensive GET parsing moved here from `api/liveStatus.ts` /
+  `api/liveness.ts`, whose old parsers and tests are gone), `liveClient.ts` (connection, snapshot/gap/held changes,
+  fallback poll, retries), `signalrHub.ts`, `LiveContext.tsx`. `OpenDocument.live` and the `live` action are gone;
+  `liveChanged` logs "running"/"stopped" for any workflow and ends a waiting press; `runAnswered` carries the status
+  at answer time; `runBlocked(doc, live, op)`; `runWorkflow(..., liveOf)`. DocumentPanel no longer polls (and no longer
+  takes `api`); `usePanelVisible`/`useLiveStatus`/`useLiveness` removed. `LiveMark` in DockShell's new `status` slot,
+  picker `running` dot, Inspector Liveness row. `App` prop `hub` (default: SignalR, or none when a test injects `api`).
+- **Proxies:** nginx `location /api/hubs/` with `proxy_http_version 1.1`, Upgrade/Connection, 3600 s read/send
+  timeouts, no buffering; everything else unchanged. Vite `/api` proxy `ws: true`.
+- **Judgement calls:** hub path `/api/hubs/liveness` on BaseApi itself (no rewrite in either proxy); WebSockets only
+  with `skipNegotiation` (no POST negotiate, so the read-only e2e guard holds and no sticky sessions are needed; a proxy
+  without WebSockets means fallback polling); a third broadcast `monitorStatus` so a Redis outage shows "unknown" as
+  the old failed poll did instead of stale data (client re-snapshots on known again); `removed` on processor events for
+  deleted rows; the first answer after a load is the baseline (no Output lines), an unknown spell keeps the baseline;
+  the press confirmation line is now just "running"/"stopped" (when it beats the 202 the accepted line is "Start
+  accepted by BaseApi (202)" and the press is done); no mark while connecting at start (only reconnecting/offline);
+  names in Output from the open document, else the workflow list, else the id (and the list is re-read); the live
+  test speaks the SignalR JSON protocol over a bare `ClientWebSocket` (no client package for the offline feed); the
+  e2e writes heartbeats with a hand-rolled RESP helper (`e2e/redis.ts`) to `localhost:6380` for its own throwaway
+  processor only.
+- **Tests:** BaseApi hermetic 2042 passed + 71 skipped (+16: `LivenessStateTests` 7, `LivenessMonitorTests` 5,
+  `LivenessHubTests` 2, `RedisLivenessSourceTests` 2); live `LivenessHubLiveTests` 1/1 against this branch's BaseApi
+  on :18090 (and again through a temporary nginx container with the new conf), fails against the deployed BaseApi
+  (404, no hub); Release `--no-incremental` clean. Vitest 991 (85 files; new `liveState.test.ts`,
+  `liveClient.test.ts`, `App.live.test.tsx`, Inspector liveness; DocumentPanel and runWorkflow tests rewritten for
+  the store); tsc clean. Playwright on the dev server against the local BaseApi: 146 passed + 2 skipped (new
+  `live.spec.ts` 2, `live-processor.spec.ts` 1); the production bundle behind the new nginx.conf (temporary container
+  proxying to :18090): live, live-processor and run specs 4/4. Mutations: BaseApi 4 (processor diff, unknown
+  threshold, monitor rethrow, plus a sequence one), Vitest 12, e2e 4 (no health from the store, no fallback poll, hub
+  events ignored, status only while shown); each fails.
+- **Deploy steps:** BaseApi image (no migration; new optional config section `Liveness`), then the studio image (the
+  bundle *and* nginx.conf ship in it). Either order: an old studio ignores the hub; a new studio against an old
+  BaseApi gets a 404 on the socket and stays on the 5 s fallback poll with the "live updates reconnecting" mark.
+- **Follow-ups:** backplane before a second BaseApi replica; the monitor reads every processor row each tick (fine at
+  today's counts; cache the id list if it grows); bundle grew ~100 kB (signalr); Output's "running"/"stopped" for a
+  workflow nobody watches can be noisy if many workflows start at once (no grouping).
 
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
