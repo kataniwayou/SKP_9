@@ -12,6 +12,7 @@ import { crumbLabel, editTargetOf, rootTarget, targetKey, type InspectorTarget, 
 import { activeDocument, shownTargetOf, type OpenDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { FieldEditor } from './FieldEditor';
+import { editBaseOf } from '../store/inspectorBase';
 import { detailRows, inspectorBaseOf, kindLabel, uniqueNameOf, type Row } from './inspectorView';
 import { PaneNote } from './PaneNote';
 import { GraphReadoutSection, StepGraphSection, WireReadoutPane } from './Readouts';
@@ -66,6 +67,8 @@ function EntityPane({ open, target }: { open: OpenDocument; target: InspectorTar
   // the design graph's entity (2026-10-10): the loaded graph's values, the read only for what the graph does not carry
   const read = inspector.saved?.key === targetKey(target) ? inspector.saved.dto : null;
   const saved = inspectorBaseOf(base.graph, target, read);
+  // an entity the graph does not fully carry waits for its read of this generation before it can be edited
+  const editable = editBaseOf(base.graph, target, inspector.saved, targetKey(target), open.generation) !== null;
   const fields = fieldsOf(open.edits, editTargetOf(target));
   // a stamp-only entry counts: it is sent on Save, and Revert is how a stale one is cleared (spec §6.2)
   const dirty = hasEdit(open.edits, editTargetOf(target));
@@ -101,7 +104,8 @@ function EntityPane({ open, target }: { open: OpenDocument; target: InspectorTar
               </div>
             )}
             {/* read-only while a Save is in flight (spec §4.1) */}
-            <fieldset className="plain" disabled={open.saving}>
+            {!editable && <div className="sec"><p className="note">Reading what BaseApi holds now…</p></div>}
+            <fieldset className="plain" disabled={open.saving || !editable}>
               <EntityForm open={open} doc={doc} base={base} target={target} saved={saved} fields={fields} showDetails={showDetails} drill={drill} />
             </fieldset>
             {/* the drawing's graph read as text, read-only (the user's request, 2026-10-09) */}

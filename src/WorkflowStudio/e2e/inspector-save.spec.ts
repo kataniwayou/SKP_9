@@ -87,3 +87,32 @@ test('the workflow and a processor: saved values shown at once; Discard shows th
   await expect(field(page, 'Description')).toHaveValue('saved proc text');
   await expect(unsaved(page)).toHaveCount(0);
 });
+
+test('rename a step, Save, rename it straight back and Save again: both applied, no "changed by someone else"', async ({ page, request }) => {
+  const panel = await open(page);
+  const original = `${t.tag}-b`;
+  const read = page.waitForResponse((r) => r.request().method() === 'GET' && r.url().endsWith(`/steps/${t.stepBId}`));
+  await node(panel, t.stepBId).click({ position: { x: 20, y: 12 } });
+  await expect(pill(page)).toHaveText('STEP');
+  await read;
+  // from here the step's own GET fails: the Inspector's read stays the one from before the Save (the review's case)
+  await page.route(`**/api/v1/steps/${t.stepBId}`, (r) => (r.request().method() === 'GET' ? r.abort() : r.fallback()));
+
+  await typeInto(page, 'Name', `${original}2`);
+  await save(page);
+  await expect(inspector(page).getByText(/^Could not read it\./)).toBeVisible();
+  expect((await get<{ name: string }>(request, `steps/${t.stepBId}`)).name).toBe(`${original}2`);
+  await expect(field(page, 'Name')).toHaveValue(`${original}2`);
+
+  // straight away, no re-pick: back to the old name (a change against what BaseApi now holds, with its new stamp)
+  await typeInto(page, 'Name', original);
+  await expect(unsaved(page)).toBeVisible();
+  await save(page);
+  expect((await get<{ name: string }>(request, `steps/${t.stepBId}`)).name).toBe(original);
+  await expect(field(page, 'Name')).toHaveValue(original);
+  await expect(unsaved(page)).toHaveCount(0);
+  const output = page.locator('[data-pane="output"]');
+  await expect(output.getByRole('log').locator('.outl').filter({ hasText: /^.*Saved and applied$/ })).toHaveCount(2);
+  await expect(output.getByRole('log')).not.toContainText('changed by someone else');
+  await expect(output.getByRole('list', { name: 'Problems' })).toHaveCount(0);
+});

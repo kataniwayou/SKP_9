@@ -280,11 +280,10 @@ describe('the design (plan 8)', () => {
     expect(designDirty(d0(s))).toBe(false);
   });
 
-  it('a typed field changes the shown entity in the design once its base is read; never while saving', async () => {
+  it('a typed field changes the shown entity in the design, judged against the graph entity (read or not); never while saving', async () => {
     let s = reduce(await loaded(), { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's2' } });
     const edit: StudioAction = { type: 'editField', workflowId: 'wf1', key: 'name', value: 'renamed', copyId: 'c' };
-    expect(reduce(s, edit)).toBe(s); // nothing read yet
-    s = reduce(s, { type: 'read', workflowId: 'wf1', key: 'step:s2', result: { ok: true, dto: stepDto('s2') } });
+    // a step is wholly in the graph: no read is needed to take an edit (review 2026-10-10: keystrokes were lost)
     s = reduce(s, edit);
     expect(d0(s).edits.steps['s2']!.fields).toEqual({ name: 'renamed' });
     expect(designDirty(d0(s))).toBe(true);
@@ -416,5 +415,67 @@ describe('opening a design (plan 9 §8)', () => {
     const angled = withCircuit(EMPTY_DRAFT, plain, setEnd(circuitOf(plain, EMPTY_DRAFT), 'wf->s1', 'tail', { on: 'hub', angle: 90 }));
     const s = reduce(run(open('wf1'), { type: 'loaded', workflowId: 'wf1', doc: plain }), { type: 'design', workflowId: 'wf1', draft: angled });
     expect(designDirty(s.docs[0]!)).toBe(true);
+  });
+});
+
+describe('an Inspector edit is judged against what the form shows (review 2026-10-10)', () => {
+  const graphAt = (name: string, updatedAt: string) => graphDto({
+    steps: [stepDto('s1', { name, updatedAt, nextStepIds: ['s2'] }), stepDto('s2')],
+    assignments: [assignmentDto('a2', { stepId: 's2', updatedAt: 'ta' })],
+  } as never);
+  const at = async (name: string, stamp: string) => {
+    let s = run(open('wf1'));
+    s = reduce(s, { type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graphAt(name, stamp)) });
+    return reduce(s, { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's1' } });
+  };
+  const edit = (s: StudioState, key: string, value: string) => reduce(s, { type: 'editField', workflowId: 'wf1', key, value, copyId: 'c' });
+
+  it('with no read yet, a step edit is taken from the graph (no keystroke lost), with the graph\'s stamp', async () => {
+    const s = edit(await at('fetch', 't1'), 'description', 'x');
+    expect(s.docs[0]!.edits.steps['s1']).toEqual({ updatedAt: 't1', fields: { description: 'x' } });
+  });
+
+  it('after a Save, a stale read neither stamps the next edit nor decides what "typed back" is', async () => {
+    let s = await at('fetch', 't1');
+    const gen = s.docs[0]!.generation;
+    s = reduce(s, { type: 'read', workflowId: 'wf1', key: 'step:s1', gen, result: { ok: true, dto: stepDto('s1', { name: 'fetch', updatedAt: 't1' }) } });
+    // renamed and saved: BaseApi now holds 'renamed' with a newer stamp; the old read is still in the Inspector
+    s = edit(s, 'name', 'renamed');
+    s = reduce(s, { type: 'saveAnswered', workflowId: 'wf1', at: 'now', applied: true, errors: [], doc: await loadedDocument(graphAt('renamed', 't2')) });
+    expect(s.docs[0]!.inspector.saved?.dto).toMatchObject({ updatedAt: 't1' });
+    // renaming back to the old name is a change, with the new stamp
+    s = edit(s, 'name', 'fetch');
+    expect(s.docs[0]!.edits.steps['s1']).toEqual({ updatedAt: 't2', fields: { name: 'fetch' } });
+    // and typed back to what BaseApi holds now, it is no change
+    s = edit(s, 'name', 'renamed');
+    expect(s.docs[0]!.edits.steps['s1']).toBeUndefined();
+  });
+
+  it('the graph wins over a read of the same generation that disagrees (the form shows the graph)', async () => {
+    let s = await at('renamed', 't2');
+    const gen = s.docs[0]!.generation;
+    s = reduce(s, { type: 'read', workflowId: 'wf1', key: 'step:s1', gen, result: { ok: true, dto: stepDto('s1', { name: 'fetch', updatedAt: 't1' }) } });
+    s = edit(s, 'name', 'fetch');
+    expect(s.docs[0]!.edits.steps['s1']).toEqual({ updatedAt: 't2', fields: { name: 'fetch' } });
+  });
+
+  it('an assignment (not fully in the graph) takes no edit until its read of this generation lands', async () => {
+    let s = await at('fetch', 't1');
+    s = reduce(s, { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's2' } });
+    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a2', stepId: 's2' } });
+    expect(edit(s, 'name', 'x')).toBe(s);
+    const gen = s.docs[0]!.generation;
+    s = reduce(s, { type: 'read', workflowId: 'wf1', key: 'assignment:a2', gen, result: { ok: true, dto: assignmentDto('a2', { stepId: 's2', updatedAt: 'ta' }) } });
+    expect(edit(s, 'name', 'x').docs[0]!.edits.assignments['s2']).toMatchObject({ op: 'update', updatedAt: 'ta', fields: { name: 'x' } });
+  });
+
+  it('Clear during a Save keeps that Save\'s "Save started" line, so its answer is not headless', async () => {
+    let s = await at('fetch', 't1');
+    s = reduce(s, { type: 'log', workflowId: 'wf1', lines: [{ at: 't0', text: 'older line' }, { at: 't1', text: 'Save started: sending 1 step and the layout' }] });
+    s = reduce(s, { type: 'saving', workflowId: 'wf1' });
+    s = reduce(s, { type: 'clearOutput' });
+    expect(s.output.map((l) => l.text)).toEqual(['Save started: sending 1 step and the layout']);
+    s = reduce(s, { type: 'saveFailed', workflowId: 'wf1', at: 't2', message: 'down' });
+    expect(reduce(s, { type: 'clearOutput' }).output).toEqual([]);
   });
 });

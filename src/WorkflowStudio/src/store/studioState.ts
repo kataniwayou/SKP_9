@@ -12,6 +12,7 @@ import { settleDesign } from '../design/settle';
 import { isShortCircuitError } from '../design/shortCircuits';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { EMPTY_INSPECTOR, type InspectorState } from './inspector';
+import { editBaseOf } from './inspectorBase';
 import { currentTarget, editTargetOf, rootTarget, targetKey, type InspectorTarget } from './inspectorTarget';
 import { picksOf, samePicks, type Pick } from './picks';
 import { selectionKey, type Selection } from './selection';
@@ -262,9 +263,11 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
     case 'editField':
       return update(state, action.workflowId, (d) => {
         const target = shownTargetOf(d);
-        const base = d.inspector.saved;
-        if (d.saving || target === null || base === null || base.key !== targetKey(target)) return d;
-        return { ...d, edits: setField(d.edits, editTargetOf(target), base.dto, action.key, action.value, () => action.copyId) };
+        if (d.saving || target === null || d.status.kind !== 'ready') return d;
+        // judged against what the form shows: the graph's entity (its stamp too), the read only of this generation
+        const base = editBaseOf(d.status.doc.graph, target, d.inspector.saved, targetKey(target), d.generation);
+        if (base === null) return d;
+        return { ...d, edits: setField(d.edits, editTargetOf(target), base, action.key, action.value, () => action.copyId) };
       });
     case 'revertEntity':
       return update(state, action.workflowId, (d) => {
@@ -328,8 +331,15 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       const next = update(state, action.workflowId, (d) => ({ ...d, saving: false }));
       return logged(next, action.workflowId, doc.name, [{ at: action.at, text: `Not saved: ${action.message}`, level: 'error' }]);
     }
-    case 'clearOutput':
-      return state.output.length === 0 ? state : { ...state, output: [] };
+    case 'clearOutput': {
+      if (state.output.length === 0) return state;
+      // a Save in progress keeps its "Save started" line, so its answer does not arrive headless
+      const kept = state.docs.filter((d) => d.saving).flatMap((d) => {
+        const head = state.output.findLast((l) => l.workflowId === d.workflowId && l.text.startsWith('Save started'));
+        return head ? [head] : [];
+      });
+      return { ...state, output: state.output.filter((l) => kept.includes(l)) };
+    }
     case 'log': {
       const doc = state.docs.find((d) => d.workflowId === action.workflowId);
       return doc ? logged(state, action.workflowId, doc.name, action.lines) : state;

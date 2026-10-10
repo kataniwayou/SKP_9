@@ -530,3 +530,25 @@ describe('Output: Clear (2026-10-10)', () => {
     expect(screen.getByRole('button', { name: 'Clear output' })).toBeDisabled();
   });
 });
+
+describe('an entity the graph does not fully carry waits for its read before it can be edited (review 2026-10-10)', () => {
+  it('after a Save, an assignment shows "Reading…" with its fields disabled until the read of the new generation lands', async () => {
+    const graph = graphDto({ ...inspectorGraph, assignments: [assignmentDto('a1', { stepId: 's1', name: 'asg' })] } as never);
+    const getEntity = vi.fn((kind: string): Promise<unknown> => Promise.resolve(kind !== 'assignment' ? ok(stepDto('s1', { name: 'fetch' })) : ok(assignmentDto('a1', { stepId: 's1', name: 'asg' })))) as never as ReturnType<typeof vi.fn>;
+    const { store } = await renderInspector({ getEntity: getEntity as never }, { selection: { kind: 'step', stepId: 's1' }, graph });
+    act(() => store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'a1', stepId: 's1' } }));
+    expect(await screen.findByLabelText('Name')).toBeEnabled();
+
+    // the workflow read again; the assignment's read of the new generation has not landed
+    let land: () => void = () => {};
+    getEntity.mockImplementation((kind: string) => (kind !== 'assignment' ? Promise.resolve(ok(stepDto('s1')))
+      : new Promise((r) => { land = () => r(ok(assignmentDto('a1', { stepId: 's1', name: 'asg' }))); })));
+    const reread = await loadedDocument(graph);
+    act(() => store.dispatch({ type: 'saveAnswered', workflowId: 'wf1', at: 'now', applied: true, errors: [], doc: reread }));
+    expect(screen.getByText('Reading what BaseApi holds now…')).toBeInTheDocument();
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    await act(async () => { land(); });
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    expect(screen.queryByText('Reading what BaseApi holds now…')).toBeNull();
+  });
+});
