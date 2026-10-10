@@ -57,7 +57,8 @@ function PinnedProblems({ active, errors, shown }: { active: OpenDocument; error
   const store = useStudioStore();
   const guard = useGuard();
   if (active.status.kind !== 'ready' || errors.length === 0) return null;
-  const { graph } = active.status.doc;
+  // the drawing's graph: a pasted step's error is named as the canvas names it
+  const { graph } = shown ?? active.status.doc;
   return (
     <div className="pinned" role="list" aria-label="Problems">
       {errors.map((error, i) => {

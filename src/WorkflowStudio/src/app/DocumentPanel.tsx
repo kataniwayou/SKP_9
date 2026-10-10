@@ -10,6 +10,7 @@ import { canSave, designDirty } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { applyDraft, applyEdits } from '../design/apply';
 import { canRedo, canUndo } from '../design/history';
+import { newId } from '../design/ids';
 import { CapsuleToolbar } from './CapsuleToolbar';
 import { useStudioActionsOrNull } from './studioActions';
 import { useHealthOf, useWorkflowStatus } from '../live/LiveContext';
@@ -54,7 +55,9 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
   // the canvas draws the design (plan 8 §3.1): the base with the entity edits; the canvas draft goes over it inside the canvas
   const base = open?.status.kind === 'ready' ? open.status.doc : null;
   const edits = open?.edits ?? null;
-  const edited = useMemo(() => (base && edits ? applyEdits(base, edits) : null), [base, edits]);
+  // the draft's pasted and deleted blocks first (2026-10-10): the canvas treats them as the workflow's own
+  const blocks = open?.design.draft.blocks;
+  const edited = useMemo(() => (base && edits ? applyEdits(base, edits, blocks) : null), [base, edits, blocks]);
 
   // while a Save runs the design is read-only (spec §4.1): the canvas draws it whole, with no design mode
   const frozen = useMemo(() => (edited && open?.saving ? applyDraft(edited, open.design.draft) : null), [edited, open?.saving, open?.design.draft]);
@@ -79,6 +82,10 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
           onCommit: (draft, o) => store.dispatch({ type: 'design', workflowId, draft, merge: o?.merge, picks: o?.picks }),
           onUndo: () => store.dispatch({ type: 'undo', workflowId }),
           onRedo: () => store.dispatch({ type: 'redo', workflowId }),
+          // copy, paste and delete (2026-10-10): the store does them, so the clipboard is shared by every document
+          onCopy: () => store.dispatch({ type: 'copy', workflowId }),
+          onPaste: () => store.dispatch({ type: 'paste', workflowId, newId }),
+          onDelete: () => store.dispatch({ type: 'deletePicks', workflowId }),
         }}
         onSelect={onSelect ? (selection, picks) => onSelect(selection, ownerDocument, picks) : (selection, picks) => {
           store.dispatch({ type: 'activate', workflowId });

@@ -4,6 +4,7 @@ import type { StepReadDto } from '../api/types';
 import type { StudioDocument } from '../app/document';
 import { useStudioActions } from '../app/studioActions';
 import { applyEdits } from '../design/apply';
+import { applyBlocks } from '../design/blocks';
 import { fieldsOf, hasEdit, slotKey, valueText } from '../design/design';
 import { assignmentByStep, payloadKeyCount } from '../model/assignments';
 import { entityName } from '../model/entityNames';
@@ -58,7 +59,10 @@ function EntityPane({ open, target }: { open: OpenDocument; target: InspectorTar
   const showDetails = useStudio((s) => s.showDetails);
   const { service } = useStudioActions();
   const { workflowId, inspector } = open;
-  const base = open.status.kind === 'ready' ? open.status.doc : null;
+  // the workflow with the draft's pasted and deleted blocks (2026-10-10): a pasted step is inspected like any other
+  const loaded = open.status.kind === 'ready' ? open.status.doc : null;
+  const blocks = open.design.draft.blocks;
+  const base = useMemo(() => (loaded ? applyBlocks(loaded, blocks) : null), [loaded, blocks]);
   // the Inspector shows the design: names, assignments and schema copies as edited (spec §3.1)
   const doc = useMemo(() => (base ? applyEdits(base, open.edits) : null), [base, open.edits]);
   if (doc === null || base === null) return null;

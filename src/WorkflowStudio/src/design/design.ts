@@ -3,6 +3,7 @@ import type { Id } from '../model/graph';
 import { savedText } from '../store/entityForms';
 import type { SchemaSlot } from '../store/inspectorTarget';
 import { EMPTY_DRAFT, parseDraft, type Draft } from './draft';
+import { EMPTY_BLOCKS, isEmptyBlocks, type Blocks, type NewCache, type NewStep } from './blocks';
 
 /** A field's value as the update DTO carries it: text, the entry condition's number, or null. */
 export type FieldValue = string | number | null;
@@ -203,7 +204,7 @@ const anyFields = (r: Readonly<Record<string, EntityEdit>>) => Object.values(r).
 
 /** Whether the design changes the real entities (Save has something to apply): wiring or entity edits, not shapes or stamps. */
 export function hasGraphChanges({ draft, edits }: Design): boolean {
-  return Object.keys(draft.next).length > 0 || draft.entries !== null
+  return Object.keys(draft.next).length > 0 || draft.entries !== null || !isEmptyBlocks(draft.blocks)
     || (edits.workflow !== null && Object.keys(edits.workflow.fields).length > 0)
     || anyFields(edits.steps) || anyFields(edits.processors) || anyFields(edits.caches)
     || Object.keys(edits.assignments).length > 0 || Object.keys(edits.schemas).length > 0;
@@ -222,6 +223,37 @@ function canonical(v: unknown): unknown {
 
 /** Equal designs, whatever the order their records were built in. */
 export const sameDesign = (a: Design, b: Design): boolean => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+
+/** The blocks a stored design creates and deletes (its `newSteps`, `newCaches`, `deletedSteps`, `deletedCaches`). */
+function storedBlocks(stored: Record<string, unknown>, layout: unknown): Blocks {
+  const placed = (kind: 'steps' | 'caches', id: string) => {
+    const at = isRecord(layout) && isRecord(layout[kind]) ? (layout[kind] as Record<string, unknown>)[id] : undefined;
+    return isRecord(at) && typeof at.x === 'number' && typeof at.y === 'number' ? { x: at.x, y: at.y } : { x: 0, y: 0 };
+  };
+  const text = (f: Record<string, FieldValue>, k: string): string => (typeof f[k] === 'string' ? f[k] : '');
+  const steps = copy<NewStep>({});
+  for (const s of list(stored.newSteps)) {
+    const id = str(s.id), processorId = str(s.processorId);
+    if (id === null || processorId === null) continue;
+    const f = toFields(s.fields);
+    steps[id] = {
+      copyOf: str(s.copyOf), name: text(f, 'name'), version: text(f, 'version'), description: typeof f.description === 'string' ? f.description : null,
+      processorId, entryCondition: typeof f.entryCondition === 'number' ? f.entryCondition : 1, at: placed('steps', id), assignment: null,
+    };
+  }
+  const caches = copy<NewCache>({});
+  for (const c of list(stored.newCaches)) {
+    const id = str(c.id);
+    if (id === null) continue;
+    const f = toFields(c.fields);
+    caches[id] = {
+      copyOf: str(c.copyOf), name: text(f, 'name'), version: text(f, 'version'), description: typeof f.description === 'string' ? f.description : null,
+      root: text(f, 'root'), items: text(f, 'items'), at: placed('caches', id),
+    };
+  }
+  const ids = (v: unknown) => list(v).flatMap((x) => { const id = str(x.id); return id === null ? [] : [id]; });
+  return { ...EMPTY_BLOCKS, steps, caches, removed: { steps: ids(stored.deletedSteps), caches: ids(stored.deletedCaches) } };
+}
 
 // ---- reading back: the session's edits and the server's stored design; anything malformed is dropped ----
 
@@ -322,10 +354,21 @@ export function storedDesignOf(stored: unknown, layout: unknown): Design {
     const fields = toFields(c.fields);
     if (id !== null && Object.keys(fields).length > 0) edits.caches[id] = { updatedAt: null, fields };
   }
+  // pasted and deleted blocks (2026-10-10): placed where the stored layout has them
+  const blocks = storedBlocks(stored, layout);
+  for (const s of list(stored.newSteps)) {
+    const id = str(s.id), next = toIds(s.nextStepIds);
+    if (id !== null && Object.hasOwn(blocks.steps, id) && next !== null) draft.next[id] = next;
+  }
+  if (!isEmptyBlocks(blocks)) draft.blocks = blocks;
   for (const a of list(stored.assignments)) {
     const stepId = str(a.stepId);
     const op = toOp(a);
-    if (stepId !== null && op !== null) edits.assignments[stepId] = op;
+    if (stepId === null || op === null) continue;
+    // a pasted step's assignment is its own (created with it)
+    const pasted = blocks.steps[stepId];
+    if (pasted && op.op === 'create') pasted.assignment = { id: op.id, copyOf: str(a.copyOf), fields: op.fields };
+    else edits.assignments[stepId] = op;
   }
   // a stored body that rewired steps but whose layout holds no circuit (plan 8): settling makes the circuit whole
   if (draft.wires === null && (Object.keys(draft.next).length > 0 || draft.entries !== null)) draft.wires = copy({});

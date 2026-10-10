@@ -1,6 +1,7 @@
 import type { Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import type { Pt } from '../layout/router';
+import { clampLanding } from '../layout/geometry';
 import { isNum, parseBends, shapeFromPoints, type Bends } from '../layout/shape';
 import type { Id, Step } from '../model/graph';
 
@@ -129,6 +130,39 @@ export function setBends(c: Readonly<Circuit>, id: string, bends: Bends | null):
   const out = copy(c);
   out[id] = withBends(w.tail, w.head, bends, w.held);
   return out;
+}
+
+/** A shape moved by (dx, dy): every vertical run's x and every middle run's y. */
+export const shiftBends = (b: Bends, dx: number, dy: number): Bends => ({ xs: b.xs.map((x) => x + dx), ys: b.ys.map((y) => y + dy) });
+
+/**
+ * Wires moved with the blocks they were picked with (decision 8, 2026-10-10): each wire's bends and its open ends shift
+ * by (dx, dy), and so does a held end (its height on a step, or below the hub) when what it is on does not move itself
+ * (`moves`: a step id, or 'hub'). Ends on a step or the hub otherwise stay theirs (a moved block takes them along), a
+ * junction end stays at its distance along its host. A fully automatic wire has nothing to shift: the router draws it
+ * as before. `c` itself when nothing changes.
+ */
+export function shiftWires(c: Readonly<Circuit>, ids: readonly string[], dx: number, dy: number, moves: (block: Id | 'hub') => boolean): Circuit {
+  if (dx === 0 && dy === 0) return c as Circuit;
+  let out: Circuit | null = null;
+  for (const id of new Set(ids)) {
+    if (!has(c, id)) continue;
+    const w = c[id]!;
+    const end = (side: Side): End => {
+      const e = w[side];
+      if (e.on === 'open') return { on: 'open', x: e.x + dx, y: e.y + dy };
+      if (w.held !== side) return e;
+      if (e.on === 'step' && e.y !== null && !moves(e.step)) return { on: 'step', step: e.step, y: clampLanding(e.y + dy) };
+      if (e.on === 'hub' && e.dy !== undefined && !moves('hub')) return { on: 'hub', angle: null, dy: e.dy + dy };
+      return e;
+    };
+    const tail = end('tail'), head = end('head');
+    const bends = w.bends && w.bends.xs.length > 0 ? shiftBends(w.bends, dx, dy) : w.bends;
+    if (tail === w.tail && head === w.head && bends === w.bends) continue;
+    out ??= copy(c);
+    out[id] = withBends(tail, head, bends, w.held);
+  }
+  return out ?? (c as Circuit);
 }
 
 export function addCircuitWire(c: Readonly<Circuit>, id: string, w: CircuitWire): Circuit {

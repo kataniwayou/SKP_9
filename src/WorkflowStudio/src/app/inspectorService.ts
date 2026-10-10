@@ -3,6 +3,7 @@ import { describeError } from '../api/describeError';
 import type { EntityReadDto } from '../api/entities';
 import type { AssignmentReadDto, SchemaReadDto } from '../api/types';
 import { newId } from '../design/ids';
+import { applyBlocks, type NewAssignment } from '../design/blocks';
 import type { Id } from '../model/graph';
 import { fieldValue, type FieldSpec } from '../store/entityForms';
 import { crumbLabel, targetKey, type InspectorTarget } from '../store/inspectorTarget';
@@ -35,10 +36,29 @@ function madeUp(doc: OpenDocument, target: InspectorTarget): EntityReadDto | nul
     }
   }
   if (target.kind === 'schema' && target.id === '' && doc.status.kind === 'ready') {
-    const p = doc.status.doc.graph.processors.get(target.processorId);
+    const p = applyBlocks(doc.status.doc, doc.design.draft.blocks).graph.processors.get(target.processorId);
     return { id: '', name: `${p?.name ?? target.processorId}-${target.slot}`, version: '1.0.0', description: null, definition: '{}' } as SchemaReadDto;
   }
   return null;
+}
+
+/** A pasted step's own assignment (2026-10-10), when the target is one: a new row that exists only in the design. */
+function pastedAssignment(doc: OpenDocument, target: InspectorTarget): NewAssignment | null {
+  if (target.kind !== 'assignment') return null;
+  const a = doc.design.draft.blocks.steps[target.stepId]?.assignment;
+  return a && a.id === target.id ? a : null;
+}
+
+/** A pasted assignment's base: the fields it was copied with over its original's read (when it copies a real row). */
+function pastedDto(a: NewAssignment, stepId: Id, original: EntityReadDto | null): EntityReadDto {
+  const f = a.fields;
+  const text = (k: string, was: string) => (typeof f[k] === 'string' ? (f[k] as string) : was);
+  const o = (original ?? {}) as Partial<AssignmentReadDto>;
+  return {
+    ...o, id: a.id, stepId, name: text('name', o.name ?? ''), version: text('version', o.version ?? ''),
+    description: Object.hasOwn(f, 'description') ? (f.description === null ? null : String(f.description)) : (o.description ?? null),
+    payload: text('payload', o.payload ?? '{}'),
+  } as AssignmentReadDto;
 }
 
 export function createInspectorService(api: StudioApi, store: StudioStore): InspectorService {
@@ -59,6 +79,20 @@ export function createInspectorService(api: StudioApi, store: StudioStore): Insp
     const virtual = madeUp(doc, target);
     if (virtual !== null) {
       store.dispatch({ type: 'read', workflowId, key, gen, result: { ok: true, dto: virtual } });
+      return;
+    }
+    const pasted = pastedAssignment(doc, target);
+    if (pasted !== null && target.kind === 'assignment') {
+      // its name, version and description are its original's until Save: read from that row when it is a real one
+      if (pasted.copyOf === null) {
+        store.dispatch({ type: 'read', workflowId, key, gen, result: { ok: true, dto: pastedDto(pasted, target.stepId, null) } });
+        return;
+      }
+      reading.set(workflowId, reads);
+      void api.getEntity('assignment', pasted.copyOf).then((r) => {
+        if (reading.get(workflowId) === reads) reading.delete(workflowId);
+        store.dispatch({ type: 'read', workflowId, key, gen, result: { ok: true, dto: pastedDto(pasted, target.stepId, r.ok ? r.value : null) } });
+      });
       return;
     }
     reading.set(workflowId, reads);

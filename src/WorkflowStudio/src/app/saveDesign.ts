@@ -24,8 +24,15 @@ export interface DesignRequest {
   processors: { id: Id; fields: Fields; slots: Partial<Record<SchemaSlot, Id>> }[];
   caches: { id: Id; fields: Fields }[];
   schemas: SchemaCopy[];
-  assignments: { op: 'create' | 'update' | 'delete'; id: Id; stepId: Id; updatedAt: string | null; fields: Fields }[];
+  /** `copyOf` (a pasted step's assignment, 2026-10-10): the real row whose fields BaseApi starts from. */
+  assignments: { op: 'create' | 'update' | 'delete'; id: Id; stepId: Id; updatedAt: string | null; fields: Fields; copyOf?: Id }[];
   layout: SavedLayout;
+  /** Pasted steps (2026-10-10): sent only when there are some, so an older BaseApi never sees an empty list it does not know. */
+  newSteps?: { id: Id; copyOf: Id | null; processorId: Id; fields: Fields; nextStepIds: Id[] | null }[];
+  newCaches?: { id: Id; copyOf: Id | null; fields: Fields }[];
+  /** Deleted steps with the stamp the designer loaded (steps are owned). */
+  deletedSteps?: { id: Id; updatedAt: string | null }[];
+  deletedCaches?: { id: Id; updatedAt: null }[];
 }
 
 /**
@@ -40,10 +47,16 @@ export interface DesignRequest {
  */
 export function buildDesignRequest(base: StudioDocument, shown: StudioDocument, { draft, edits }: Design): DesignRequest {
   const g = base.graph;
-  const has = (id: Id) => g.steps.has(id);
+  const { blocks } = draft;
+  // deleted steps and caches (2026-10-10): sent to be deleted, and out of every list and change
+  const removed = new Set(blocks.removed.steps.filter((id) => g.steps.has(id)));
+  const removedCaches = new Set(blocks.removed.caches.filter((id) => g.caches.has(id)));
+  const has = (id: Id) => g.steps.has(id) && !removed.has(id);
   // what Save writes is the same as what the Inspector's read-outs show (`writtenLists`)
-  const { nextOf, entries } = writtenLists(base, shown, draft);
-  const rewired = new Set([...g.steps.keys()].filter((id) => !sameList(nextOf(id), g.steps.get(id)!.nextStepIds)));
+  const written = writtenLists(base, shown, draft);
+  const nextOf = (id: Id) => written.nextOf(id).filter((t) => !removed.has(t));
+  const entries = written.entries.filter((t) => !removed.has(t));
+  const rewired = new Set([...g.steps.keys()].filter((id) => has(id) && !sameList(nextOf(id), g.steps.get(id)!.nextStepIds)));
   const stepIds = [...new Set([...Object.keys(edits.steps), ...rewired])].filter(has).sort();
 
   const slots = new Map<Id, Partial<Record<SchemaSlot, Id>>>();
@@ -56,22 +69,55 @@ export function buildDesignRequest(base: StudioDocument, shown: StudioDocument, 
   }
   const processorIds = [...new Set([...Object.keys(edits.processors), ...slots.keys()])].filter((id) => g.processors.has(id)).sort();
 
+  // pasted steps and caches (2026-10-10): their fields as copied with the Inspector's edits over them
+  const pasted = Object.entries(blocks.steps).filter(([id]) => !g.steps.has(id));
+  const newSteps = pasted.map(([id, n]) => {
+    const next = nextOf(id);
+    return {
+      id, copyOf: n.copyOf, processorId: n.processorId,
+      fields: { name: n.name, version: n.version, description: n.description, entryCondition: n.entryCondition, ...edits.steps[id]?.fields },
+      nextStepIds: next.length > 0 ? [...next] : null,
+    };
+  });
+  const newCaches = Object.entries(blocks.caches).filter(([id]) => !g.caches.has(id)).map(([id, c]) => ({
+    id, copyOf: c.copyOf, fields: { name: c.name, version: c.version, description: c.description, root: c.root, items: c.items, ...edits.caches[id]?.fields },
+  }));
+  // a pasted step's assignment is created with it: as copied, unless the Inspector removed it, changed it or made another
+  const pastedAssignments: DesignRequest['assignments'] = pasted.flatMap(([stepId, n]) => {
+    const op = edits.assignments[stepId];
+    if (op?.op === 'delete') return [];
+    if (op?.op === 'create') return [{ op: 'create', id: op.id, stepId, updatedAt: null, fields: { ...op.fields } }];
+    const a = n.assignment;
+    if (!a) return [];
+    const changed = op?.op === 'update' && op.id === a.id ? op.fields : {};
+    return [{ op: 'create', id: a.id, stepId, updatedAt: null, fields: { ...a.fields, ...changed }, ...(a.copyOf ? { copyOf: a.copyOf } : {}) }];
+  });
+  const cacheIds = shown.graph.workflow.cacheIds;
+
   return {
     workflow: {
       updatedAt: edits.workflow?.updatedAt ?? g.workflow.updatedAt, fields: { ...edits.workflow?.fields },
-      entryStepIds: sameList(entries, g.workflow.entryStepIds) ? null : [...entries], cacheIds: null,
+      entryStepIds: sameList(entries, g.workflow.entryStepIds) ? null : [...entries],
+      cacheIds: sameList(cacheIds, g.workflow.cacheIds) ? null : [...cacheIds],
     },
     steps: stepIds.map((id) => ({
       id, updatedAt: edits.steps[id]?.updatedAt ?? g.steps.get(id)!.updatedAt, fields: { ...edits.steps[id]?.fields },
       nextStepIds: rewired.has(id) ? [...nextOf(id)] : null,
     })),
     processors: processorIds.map((id) => ({ id, fields: { ...edits.processors[id]?.fields }, slots: slots.get(id) ?? {} })),
-    caches: Object.entries(edits.caches).filter(([id]) => g.caches.has(id)).map(([id, e]) => ({ id, fields: { ...e.fields } })),
+    caches: Object.entries(edits.caches).filter(([id]) => g.caches.has(id) && !removedCaches.has(id)).map(([id, e]) => ({ id, fields: { ...e.fields } })),
     schemas,
-    assignments: Object.entries(edits.assignments).filter(([stepId]) => has(stepId)).map(([stepId, op]) => ({
-      op: op.op, id: op.id, stepId, updatedAt: op.op === 'create' ? null : op.updatedAt, fields: op.op === 'delete' ? {} : { ...op.fields },
-    })),
+    assignments: [
+      ...Object.entries(edits.assignments).filter(([stepId]) => has(stepId)).map(([stepId, op]) => ({
+        op: op.op, id: op.id, stepId, updatedAt: op.op === 'create' ? null : op.updatedAt, fields: op.op === 'delete' ? {} : { ...op.fields },
+      })),
+      ...pastedAssignments,
+    ],
     layout: layoutOf(shown, draft),
+    ...(newSteps.length > 0 ? { newSteps } : {}),
+    ...(newCaches.length > 0 ? { newCaches } : {}),
+    ...(removed.size > 0 ? { deletedSteps: [...removed].map((id) => ({ id, updatedAt: edits.steps[id]?.updatedAt ?? g.steps.get(id)!.updatedAt })) } : {}),
+    ...(removedCaches.size > 0 ? { deletedCaches: [...removedCaches].map((id) => ({ id, updatedAt: null })) } : {}),
   };
 }
 

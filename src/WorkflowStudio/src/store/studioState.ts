@@ -7,6 +7,8 @@ import {
   type Design, type EntityEdits, type FieldValue,
 } from '../design/design';
 import { circuitOf, EMPTY_DRAFT, type Draft } from '../design/draft';
+import { applyBlocks } from '../design/blocks';
+import { copyClip, deletePicked, pasteClip, type Clip } from '../design/clipboard';
 import { commit, historyOf, redo, undo, type DesignHistory } from '../design/history';
 import { settleDesign } from '../design/settle';
 import { isShortCircuitError } from '../design/shortCircuits';
@@ -75,6 +77,8 @@ export interface StudioState {
   showDetails: boolean;
   /** Output (2026-10-09): what Save, Start and Stop did, oldest first, the last OUTPUT_LIMIT lines; kept in the session. */
   output: OutputLine[];
+  /** What Ctrl+C last copied, in any document (2026-10-10); Ctrl+V pastes it into the active one. Kept in the session. */
+  clipboard: Clip | null;
 }
 
 export type StudioAction =
@@ -131,9 +135,15 @@ export type StudioAction =
   /** BaseApi's answer to Start or Stop: accepted (202), or refused with why. `live`: the workflow's status as it lands. */
   | { type: 'runAnswered'; workflowId: Id; token: string; at: string; ok: boolean; message?: string; live: LiveStatus }
   /** An accepted Start or Stop the live set has not agreed with in RUN_TIMEOUT_MS. */
-  | { type: 'runTimeout'; workflowId: Id; token: string; at: string };
+  | { type: 'runTimeout'; workflowId: Id; token: string; at: string }
+  /** Ctrl+C on a document's canvas (2026-10-10): its picks become the clipboard (the hub is skipped). */
+  | { type: 'copy'; workflowId: Id }
+  /** Ctrl+V: the clipboard pasted into this document with new ids (`newId`), one history step; the pasted items are picked. */
+  | { type: 'paste'; workflowId: Id; newId: () => string }
+  /** Delete: the picked steps, caches and wires leave the design (the hub is skipped), one history step. */
+  | { type: 'deletePicks'; workflowId: Id };
 
-export const INITIAL_STATE: StudioState = { docs: [], activeId: null, showDetails: false, output: [] };
+export const INITIAL_STATE: StudioState = { docs: [], activeId: null, showDetails: false, output: [], clipboard: null };
 
 const update = (state: StudioState, id: Id, change: (doc: OpenDocument) => OpenDocument): StudioState => {
   const index = state.docs.findIndex((d) => d.workflowId === id);
@@ -167,7 +177,8 @@ const withPicks = (d: OpenDocument, picks: Pick[]): OpenDocument =>
  */
 function prunedPicks(d: OpenDocument, draft: Draft): Pick[] {
   if (d.status.kind !== 'ready') return d.picks;
-  const saved = d.status.doc;
+  // the workflow with this draft's pasted and deleted blocks (2026-10-10)
+  const saved = applyBlocks(d.status.doc, draft.blocks);
   const wires = circuitOf(saved, draft);
   const exists = (p: Pick): boolean => {
     if (p.kind === 'node') {
@@ -182,8 +193,33 @@ function prunedPicks(d: OpenDocument, draft: Draft): Pick[] {
   return kept.length === d.picks.length ? d.picks : kept;
 }
 
+/**
+ * The Inspector's selection after the blocks changed (a paste, a delete, undo or redo, 2026-10-10): a step or cache the
+ * workflow with `draft`'s blocks no longer has is shown no more (nothing selected, the Inspector back to its root).
+ */
+function prunedSelection(d: OpenDocument, draft: Draft): OpenDocument {
+  if (d.status.kind !== 'ready' || d.selection === null) return d;
+  const { graph } = applyBlocks(d.status.doc, draft.blocks);
+  const s = d.selection;
+  const there = s.kind === 'workflow' || (s.kind === 'cache' ? graph.caches.has(s.cacheId) : graph.steps.has(s.stepId));
+  return there ? d : { ...d, selection: null, inspector: EMPTY_INSPECTOR };
+}
+
 const redesign = (d: OpenDocument, design: DesignHistory): OpenDocument =>
-  design === d.design ? d : { ...d, design, picks: prunedPicks(d, design.draft) };
+  design === d.design ? d : prunedSelection({ ...d, design, picks: prunedPicks(d, design.draft) }, design.draft);
+
+/** A paste or a delete: one history step, the picks it leaves, and the Inspector on the one block picked (or nothing). */
+function blocksChanged(d: OpenDocument, draft: Draft, picks: Pick[]): OpenDocument {
+  if (d.status.kind !== 'ready') return d;
+  const graph = applyBlocks(d.status.doc, draft.blocks).graph;
+  const only = picks.length === 1 && picks[0]!.kind === 'node' ? picks[0]!.id : null;
+  const selection: Selection | null = only === null ? null
+    : only === SPHERE_NODE_ID ? { kind: 'workflow' }
+      : only.startsWith(CACHE_NODE_PREFIX) ? { kind: 'cache', cacheId: only.slice(CACHE_NODE_PREFIX.length) }
+        : graph.steps.has(only) ? { kind: 'step', stepId: only } : null;
+  const moved: OpenDocument = { ...d, design: commit(d.design, draft), picks };
+  return selectionKey(selection) === selectionKey(d.selection) ? moved : { ...moved, selection, inspector: EMPTY_INSPECTOR };
+}
 
 /** Pure: every change to the studio's state goes through here. Unknown ids leave the state as it was. */
 export function reduce(state: StudioState, action: StudioAction): StudioState {
@@ -265,8 +301,10 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       return update(state, action.workflowId, (d) => {
         const target = shownTargetOf(d);
         if (d.saving || target === null || d.status.kind !== 'ready') return d;
-        // judged against what the form shows: the graph's entity (its stamp too), the read only of this generation
-        const base = editBaseOf(d.status.doc.graph, target, d.inspector.saved, targetKey(target), d.generation);
+        // judged against what the form shows: the graph's entity (its stamp too), the read only of this generation; a
+        // pasted step or cache is the graph's like any other (2026-10-10)
+        const graph = applyBlocks(d.status.doc, d.design.draft.blocks).graph;
+        const base = editBaseOf(graph, target, d.inspector.saved, targetKey(target), d.generation);
         if (base === null) return d;
         return { ...d, edits: setField(d.edits, editTargetOf(target), base, action.key, action.value, () => action.copyId) };
       });
@@ -285,7 +323,7 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
     case 'removeAssignment':
       return update(state, action.workflowId, (d) => {
         if (d.saving) return d;
-        const base = d.status.kind === 'ready' ? d.status.doc.graph.assignments.find((a) => a.stepId === action.stepId) : undefined;
+        const base = d.status.kind === 'ready' ? applyBlocks(d.status.doc, d.design.draft.blocks).graph.assignments.find((a) => a.stepId === action.stepId) : undefined;
         const edits = removeAssignment(d.edits, action.stepId, base && { id: base.id, updatedAt: base.updatedAt });
         const shown = shownTargetOf(d);
         const leave = shown?.kind === 'assignment' && shown.stepId === action.stepId;
@@ -388,6 +426,28 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
     }
     case 'retry':
       return update(state, action.workflowId, (d) => (d.status.kind !== 'failed' ? d : { ...d, status: { kind: 'loading' } }));
+    case 'copy': {
+      const d = state.docs.find((x) => x.workflowId === action.workflowId);
+      if (!d || d.status.kind !== 'ready') return state;
+      const clip = copyClip(d.status.doc, d.edits, d.design.draft, d.picks, d.workflowId);
+      return clip === null ? state : { ...state, clipboard: clip };
+    }
+    case 'paste': {
+      const clip = state.clipboard;
+      const d = state.docs.find((x) => x.workflowId === action.workflowId);
+      if (!clip || !d || d.status.kind !== 'ready' || d.saving) return state;
+      const pasted = pasteClip(d.status.doc, d.edits, d.design.draft, clip, action.newId, d.workflowId);
+      if (pasted === null) return state;
+      // each further paste of the same clip starts one more 32 px step away (the cascade)
+      const next = update(state, action.workflowId, (x) => blocksChanged(x, pasted.draft, pasted.picks));
+      return { ...next, clipboard: { ...clip, pasted: clip.pasted + 1 } };
+    }
+    case 'deletePicks':
+      return update(state, action.workflowId, (d) => {
+        if (d.status.kind !== 'ready' || d.saving) return d;
+        const r = deletePicked(d.status.doc, d.edits, d.design.draft, d.picks);
+        return r === null ? d : prunedSelection(blocksChanged(d, r.draft, r.picks), r.draft);
+      });
   }
 }
 

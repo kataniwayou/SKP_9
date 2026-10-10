@@ -50,6 +50,10 @@ export interface SentDesign {
   caches: unknown[];
   schemas: unknown[];
   assignments: unknown[];
+  newSteps?: unknown[];
+  newCaches?: unknown[];
+  deletedSteps?: unknown[];
+  deletedCaches?: unknown[];
 }
 
 /** "Save started": what goes to BaseApi in the request. */
@@ -67,6 +71,11 @@ export function saveStartText(sent: SentDesign): string {
   if (sent.caches.length > 0) parts.push(plural(sent.caches.length, 'cache'));
   if (sent.schemas.length > 0) parts.push(plural(sent.schemas.length, 'schema copy', 'schema copies'));
   if (sent.assignments.length > 0) parts.push(plural(sent.assignments.length, 'assignment change'));
+  // pasted and deleted blocks (2026-10-10)
+  if (sent.newSteps?.length) parts.push(plural(sent.newSteps.length, 'new step'));
+  if (sent.newCaches?.length) parts.push(plural(sent.newCaches.length, 'new cache'));
+  if (sent.deletedSteps?.length) parts.push(plural(sent.deletedSteps.length, 'step to delete', 'steps to delete'));
+  if (sent.deletedCaches?.length) parts.push(plural(sent.deletedCaches.length, 'cache to delete', 'caches to delete'));
   return parts.length === 0 ? 'Save started: sending the layout only' : `Save started: sending ${parts.join(', ')} and the layout`;
 }
 

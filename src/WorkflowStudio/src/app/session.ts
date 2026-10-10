@@ -1,5 +1,6 @@
 import type { SavedView } from '../canvas/savedView';
 import { parseDraft, type Draft } from '../design/draft';
+import { parseClip, type Clip } from '../design/clipboard';
 import { EMPTY_EDITS, parseEdits, type EntityEdits } from '../design/design';
 import { historyOf } from '../design/history';
 import { parseLayout, type SavedLayout } from '../dock/layoutPersistence';
@@ -45,6 +46,8 @@ export interface Session {
   dock: SavedLayout | null;
   /** Output's lines (2026-10-09), so a refresh keeps them. Optional, so the version stays 1. */
   output?: OutputLine[];
+  /** The studio's clipboard (2026-10-10), so a refresh keeps it. Optional, so the version stays 1. */
+  clipboard?: Clip;
 }
 
 export function readSession(storage: Storage | null): Session | null {
@@ -77,7 +80,11 @@ export function readSession(storage: Storage | null): Session | null {
   const activeId = typeof value.activeId === 'string' && docs.some((d) => d.workflowId === value.activeId)
     ? value.activeId : docs[0]?.workflowId ?? null;
   const output = parseOutput(value.output);
-  return { version: SESSION_VERSION, docs, activeId, showDetails: value.showDetails === true, dock: parseLayout(value.dock), ...(output.length > 0 ? { output } : {}) };
+  const clipboard = parseClip(value.clipboard);
+  return {
+    version: SESSION_VERSION, docs, activeId, showDetails: value.showDetails === true, dock: parseLayout(value.dock),
+    ...(output.length > 0 ? { output } : {}), ...(clipboard !== null ? { clipboard } : {}),
+  };
 }
 
 /** False when the browser refuses (quota, blocked storage); never throws. */
@@ -154,6 +161,7 @@ export function sessionOf(state: StudioState, views: ReadonlyMap<string, SavedVi
     showDetails: state.showDetails,
     dock,
     ...(state.output.length > 0 ? { output: state.output } : {}),
+    ...(state.clipboard !== null ? { clipboard: state.clipboard } : {}),
   };
 }
 
@@ -176,6 +184,7 @@ export function restoredState(session: Session | null): StudioState {
     activeId: session.activeId,
     showDetails: session.showDetails,
     output: session.output ?? [],
+    clipboard: session.clipboard ?? null,
   };
 }
 

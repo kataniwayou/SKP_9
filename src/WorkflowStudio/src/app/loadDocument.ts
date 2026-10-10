@@ -56,6 +56,14 @@ async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<StudioDoc
     }
   }
 
+  // a stored design's pasted steps (2026-10-10) may run a processor this workflow's graph does not carry
+  for (const processorId of storedProcessorIds(graph.design)) {
+    if (graph.processors.has(processorId)) continue;
+    const processor = await api.getProcessor(processorId);
+    if (processor.ok) graph.processors.set(processorId, processorFromDto(processor.value));
+    else if (processor.error.kind !== 'notFound') return processor;
+  }
+
   await loadMissingSchemas(api, graph);
 
   let placement: Placement;
@@ -74,6 +82,16 @@ async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<StudioDoc
   const wires = routeWires({ entryStepIds: graph.workflow.entryStepIds, steps: graph.steps }, placement);
 
   return { ok: true, value: { graph, parkedIds, placement, wires } };
+}
+
+/** The processors a stored design's pasted steps run (`newSteps[].processorId`). */
+function storedProcessorIds(design: unknown): Id[] {
+  const steps = design !== null && typeof design === 'object' ? (design as { newSteps?: unknown }).newSteps : undefined;
+  if (!Array.isArray(steps)) return [];
+  return [...new Set(steps.flatMap((s: unknown) => {
+    const id = s !== null && typeof s === 'object' ? (s as { processorId?: unknown }).processorId : undefined;
+    return typeof id === 'string' && id !== '' ? [id] : [];
+  }))];
 }
 
 /** GET /schemas/{id} for every processor slot the graph names but does not carry (parked steps only). */

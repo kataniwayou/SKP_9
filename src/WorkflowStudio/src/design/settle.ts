@@ -146,5 +146,5 @@ export function settleDraft(draft: Draft, saved: StudioDocument): Draft {
 /** A design as it opens (the stored one, or a session's): its draft settled against the base with its own entity edits over it. */
 export function settleDesign(design: Design, saved: StudioDocument): Design {
   if (design.draft.wires === null) return design;
-  return { ...design, draft: settleDraft(design.draft, applyEdits(saved, design.edits)) };
+  return { ...design, draft: settleDraft(design.draft, applyEdits(saved, design.edits, design.draft.blocks)) };
 }

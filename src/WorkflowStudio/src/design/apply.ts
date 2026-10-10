@@ -4,6 +4,7 @@ import type { Placement } from '../layout/placement';
 import { routeCircuit, routeWires, type WireRoute } from '../layout/circuitRoute';
 import type { Assignment, Cache, Graph, Id, Processor, Schema, Step } from '../model/graph';
 import { reachableStepIds } from '../model/reachability';
+import { applyBlocks, EMPTY_BLOCKS, type Blocks } from './blocks';
 import { circuitOf, isEmptyDraft, listsOf, type Draft } from './draft';
 import { isEmptyEdits, parseSlotKey, valueText, type EntityEdits, type FieldValue } from './design';
 
@@ -60,11 +61,13 @@ const nullable = (f: Readonly<Record<string, FieldValue>>, k: string, was: strin
   (Object.hasOwn(f, k) ? (valueText(f[k]) === '' ? null : valueText(f[k])) : was);
 
 /**
- * The base with the design's entity edits laid over it (spec §3.1): fields, a slot re-pointed to its schema
+ * The base with the design's blocks (the draft's created and removed steps and caches, 2026-10-10: `applyBlocks`) and
+ * then its entity edits laid over it (spec §3.1): fields, a slot re-pointed to its schema
  * copy, assignments created, updated or deleted. Wires are routed again, so an entry condition changed in the
- * design colours its wires. Pure; edits that change nothing give the base back unchanged.
+ * design colours its wires. Pure; edits that change nothing give the base (with its blocks) back unchanged.
  */
-export function applyEdits(base: StudioDocument, edits: EntityEdits): StudioDocument {
+export function applyEdits(withoutBlocks: StudioDocument, edits: EntityEdits, blocks: Blocks = EMPTY_BLOCKS): StudioDocument {
+  const base = applyBlocks(withoutBlocks, blocks);
   if (isEmptyEdits(edits)) return base;
   const g = base.graph;
   const wf = edits.workflow?.fields ?? {};
@@ -132,5 +135,5 @@ export function applyEdits(base: StudioDocument, edits: EntityEdits): StudioDocu
 
 /** What the canvas shows (spec §3.1): the base, the entity edits, then the canvas draft. */
 export function applyDesign(base: StudioDocument, draft: Draft, edits: EntityEdits): StudioDocument {
-  return applyDraft(applyEdits(base, edits), draft);
+  return applyDraft(applyEdits(base, edits, draft.blocks), draft);
 }

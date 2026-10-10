@@ -11,6 +11,7 @@ function Probe({ design, saved, busy }: { design: DesignProps; saved: Awaited<Re
   return (
     <div data-testid="c" tabIndex={0} onKeyDown={onKeyDown}>
       <div className="docbar"><button type="button">Save</button><div className="zoom"><button type="button">+</button></div></div>
+      <input aria-label="field" />
     </div>
   );
 }
@@ -96,6 +97,48 @@ describe('design keys', () => {
     fireEvent.keyDown(getByRole('button', { name: 'Save' }), { key: 'z', ctrlKey: true });
     expect(design.onCommit).not.toHaveBeenCalled();
     expect(design.onUndo).not.toHaveBeenCalled();
+  });
+
+  it('Ctrl+C copies, Ctrl+V pastes, Delete deletes (Cmd too, 2026-10-10); Backspace does nothing', async () => {
+    const saved = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+    const design = designOf({ picks: [{ kind: 'node', id: 's1' }, { kind: 'wire', id: 's1->s2' }], onCopy: vi.fn(), onPaste: vi.fn(), onDelete: vi.fn() });
+    const { getByTestId } = render(<Probe design={design} saved={saved} />);
+    const c = getByTestId('c');
+    fireEvent.keyDown(c, { key: 'c', ctrlKey: true });
+    fireEvent.keyDown(c, { key: 'v', metaKey: true });
+    fireEvent.keyDown(c, { key: 'C', ctrlKey: true, shiftKey: true });
+    fireEvent.keyDown(c, { key: 'Backspace' });
+    expect([design.onCopy, design.onPaste, design.onDelete].map((f) => (f as ReturnType<typeof vi.fn>).mock.calls.length)).toEqual([1, 1, 0]);
+    fireEvent.keyDown(c, { key: 'Delete' });
+    expect(design.onDelete).toHaveBeenCalledTimes(1);
+    expect(design.onCommit).not.toHaveBeenCalled();
+  });
+
+  it('keys typed in a text field never copy, paste or delete', async () => {
+    const saved = await loadedDocument(graphDto({ steps: [stepDto('s1')] }));
+    const design = designOf({ picks: [{ kind: 'node', id: 's1' }], onCopy: vi.fn(), onPaste: vi.fn(), onDelete: vi.fn() });
+    const { getByRole } = render(<Probe design={design} saved={saved} />);
+    const field = getByRole('textbox', { name: 'field' });
+    fireEvent.keyDown(field, { key: 'c', ctrlKey: true });
+    fireEvent.keyDown(field, { key: 'v', ctrlKey: true });
+    fireEvent.keyDown(field, { key: 'Delete' });
+    expect(design.onCopy).not.toHaveBeenCalled();
+    expect(design.onPaste).not.toHaveBeenCalled();
+    expect(design.onDelete).not.toHaveBeenCalled();
+  });
+
+  it('an arrow nudge moves the picked wires with the picked blocks (decision 8)', async () => {
+    const saved = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+    const { setBends } = await import('../circuit/circuit');
+    const { circuitOf, withCircuit } = await import('./draft');
+    const draft = withCircuit(EMPTY_DRAFT, saved, setBends(circuitOf(saved, EMPTY_DRAFT), 's1->s2', { xs: [400], ys: [] }));
+    const design = designOf({ draft, picks: [{ kind: 'node', id: 's1' }, { kind: 'wire', id: 's1->s2' }] });
+    const { getByTestId } = render(<Probe design={design} saved={saved} />);
+    fireEvent.keyDown(getByTestId('c'), { key: 'ArrowDown' });
+    const committed = (design.onCommit as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(committed.wires['s1->s2'].bends).toEqual({ xs: [400], ys: [] });
+    fireEvent.keyDown(getByTestId('c'), { key: 'ArrowRight' });
+    expect((design.onCommit as ReturnType<typeof vi.fn>).mock.calls[1]![0].wires['s1->s2'].bends).toEqual({ xs: [408], ys: [] });
   });
 
   it('Delete with no wire picked changes nothing (review focus 4)', async () => {

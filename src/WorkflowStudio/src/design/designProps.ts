@@ -11,4 +11,10 @@ export interface DesignProps {
   onCommit: (draft: Draft, options?: { merge?: string; picks?: Pick[] }) => void;
   onUndo: () => void;
   onRedo: () => void;
+  /** Ctrl+C (2026-10-10): the picks to the studio's clipboard. */
+  onCopy?: () => void;
+  /** Ctrl+V: the clipboard pasted here, one history step. */
+  onPaste?: () => void;
+  /** Delete: the picked steps, caches and wires out of the design, one history step; absent, only picked wires go. */
+  onDelete?: () => void;
 }

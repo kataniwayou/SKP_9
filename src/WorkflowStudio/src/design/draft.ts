@@ -1,11 +1,12 @@
 import type { StudioDocument } from '../app/document';
-import { legacyCircuit, parseCircuit, plainCircuit, removeCircuitWires, shapedByHand, type Circuit, type CircuitWire, type End, type Side } from '../circuit/circuit';
+import { legacyCircuit, parseCircuit, plainCircuit, removeCircuitWires, shapedByHand, shiftWires, type Circuit, type CircuitWire, type End, type Side } from '../circuit/circuit';
 import { circuitTrace } from '../circuit/families';
 import { SPHERE_R, type Point } from '../layout/geometry';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { WORKFLOW_SOURCE } from '../layout/ports';
 import { isNum, type Bends } from '../layout/shape';
 import type { Id } from '../model/graph';
+import { EMPTY_BLOCKS, isEmptyBlocks, parseBlocks, type Blocks } from './blocks';
 
 export type { Bends } from '../layout/shape';
 
@@ -26,14 +27,19 @@ export interface Draft {
   entries: Id[] | null;
   /** The whole circuit by wire id (plan 9 §3); null: the saved workflow's own wires, automatic. */
   wires: Circuit | null;
+  /**
+   * Steps and caches created (pasted) or removed (deleted) (2026-10-10). `saved` in this module is always the workflow
+   * with them laid over it (`applyBlocks`, done by `applyEdits`): a pasted step is a step like any other here.
+   */
+  blocks: Blocks;
 }
 
-export const EMPTY_DRAFT: Draft = { sphere: null, steps: {}, caches: {}, next: {}, entries: null, wires: null };
+export const EMPTY_DRAFT: Draft = { sphere: null, steps: {}, caches: {}, next: {}, entries: null, wires: null, blocks: EMPTY_BLOCKS };
 
 const empty = (r: Record<string, unknown>) => Object.keys(r).length === 0;
 
 export function isEmptyDraft(d: Draft): boolean {
-  return d.sphere === null && d.entries === null && d.wires === null && empty(d.steps) && empty(d.caches) && empty(d.next);
+  return d.sphere === null && d.entries === null && d.wires === null && empty(d.steps) && empty(d.caches) && empty(d.next) && isEmptyBlocks(d.blocks);
 }
 
 /** A copy with a null prototype, so an id such as `__proto__` is an ordinary key. */
@@ -74,6 +80,19 @@ export function moveBlocks(draft: Draft, saved: StudioDocument, moved: ReadonlyM
     else steps[id] = at;
   }
   return { ...draft, sphere, steps, caches };
+}
+
+/**
+ * A group moved as one unit (decision 8, 2026-10-10): the blocks to `moved` (as `moveBlocks`), and the picked wires
+ * `wireIds` by the same (dx, dy): their bends, open ends and held ends shift with them (`shiftWires`); a fully automatic
+ * wire keeps being routed as before.
+ */
+export function moveGroup(draft: Draft, saved: StudioDocument, moved: ReadonlyMap<string, Point>, wireIds: readonly string[], dx: number, dy: number): Draft {
+  const next = moveBlocks(draft, saved, moved);
+  if (wireIds.length === 0 || (dx === 0 && dy === 0)) return next;
+  const c = circuitOf(saved, next);
+  const shifted = shiftWires(c, wireIds, dx, dy, (block) => moved.has(block === 'hub' ? SPHERE_NODE_ID : block));
+  return shifted === c ? next : withCircuit(next, saved, shifted);
 }
 
 /** The circuit the canvas shows: the draft's own, else the saved workflow's wires (plan 9 decision 2). */
@@ -199,5 +218,6 @@ export function parseDraft(value: unknown): Draft | null {
     next,
     entries,
     wires: wires ?? (rewired ? copy<CircuitWire>({}) : null),
+    blocks: parseBlocks(value.blocks),
   };
 }

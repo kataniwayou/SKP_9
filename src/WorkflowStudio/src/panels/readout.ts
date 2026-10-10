@@ -40,7 +40,7 @@ export interface ReadoutModel {
 export function readoutModel(base: StudioDocument, draft: Draft, edits: EntityEdits): ReadoutModel {
   const shown = applyDesign(base, draft, edits);
   // the circuit `applyDraft` draws: the draft's own, else the (edited) workflow's wires
-  const circuit = circuitOf(applyEdits(base, edits), draft);
+  const circuit = circuitOf(applyEdits(base, edits, draft.blocks), draft);
   return {
     base, shown, circuit, draft, written: writtenLists(base, shown, draft), drawn: trace(circuit).links, shorts: shortCircuitErrors(shown, draft),
   };

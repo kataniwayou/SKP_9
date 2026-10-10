@@ -3,16 +3,18 @@ import type { NodeChange, OnNodeDrag, OnNodesChange } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
 import { PMID, snap, type Point } from '../layout/geometry';
 import type { Selection } from '../store/selection';
-import { nodePickIds, type Pick } from '../store/picks';
+import { nodePickIds, wirePickIds, type Pick } from '../store/picks';
 import { selectionFromClick } from '../canvas/selection';
 import type { DesignProps } from './designProps';
-import { moveBlocks, type Draft } from './draft';
+import { circuitOf, moveGroup, type Draft } from './draft';
 import { guideBoxes, snapToGuides, type GuideLine } from './guides';
 import { nodeBox } from './hit';
 
 interface Drag {
   primary: string;
   ids: string[];
+  /** The picked wires, moved with the blocks as one unit (decision 8, 2026-10-10). */
+  wires: string[];
   start: Map<string, Point>;
   base: Draft;
   preview: Draft | null;
@@ -102,8 +104,11 @@ export function useBlockDrag(
       if (!picked) design.onPick(before);
     };
     owner?.addEventListener('keydown', escape, true);
+    // the picked wires go with the picked blocks (a block that was not picked moves alone); one gone after an undo is skipped
+    const circuit = circuitOf(saved, design.draft);
+    const wires = picked ? wirePickIds(design.picks).filter((id) => Object.hasOwn(circuit, id)) : [];
     drag.current = {
-      primary: node.id, ids,
+      primary: node.id, ids, wires,
       start: new Map(ids.map((id) => { const b = nodeBox(doc, id)!; return [id, { x: b.x, y: b.y }] as const; })),
       base: design.draft, preview: null, cancelled: false,
       selectAfter: picked ? undefined : selectionFromClick(node, target, doc.graph),
@@ -128,7 +133,7 @@ export function useBlockDrag(
     }
     // back where it started: nothing to show, and the drop makes no step
     const moved = new Map(d.ids.map((id) => { const s = d.start.get(id)!; return [id, { x: s.x + dx, y: s.y + dy }] as const; }));
-    d.preview = dx === 0 && dy === 0 ? null : moveBlocks(d.base, saved, moved);
+    d.preview = dx === 0 && dy === 0 ? null : moveGroup(d.base, saved, moved, d.wires, dx, dy);
     setPreview(d.preview);
   };
 
