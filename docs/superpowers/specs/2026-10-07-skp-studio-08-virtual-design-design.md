@@ -365,6 +365,22 @@ session and the stored design cover them like any drawing.
 - Applied: the document is read again from BaseApi and is an ordinary workflow from then on (Start, Delete, the
   picker's list).
 
+#### 4.5.4 A cache's items as a table (the user's decision, 2026-10-10)
+
+A cache's `items` reaches L2 as a string-to-string dictionary (`skp:wf:{id}:cache:{root}:{key}`), so the Inspector edits it
+as a key/value table (field kind `dict`, `panels/DictEditor.tsx`, `store/dict.ts`), not as raw JSON:
+- One row per entry in stored order; a click edits a cell, Enter or leaving it commits, Escape puts the cell back;
+  `+ Add item` adds a row with its key focused; × deletes a row; the header counts the items. Tab: key, value, next key.
+- BaseApi's rules (CacheDtoValidator): a key empty, containing ':' or written twice marks its row red with the reason and
+  is not committed until fixed (the other rows still are; the red row stays as last committed); text over 1 MB is not
+  committed. Values are free strings.
+- Each commit writes the field as a compact JSON object: an ordinary Inspector field edit (design graph, refresh, Save).
+  Inspector field edits are not in the design's Undo history (as for every field); Revert drops them.
+- The JSON toggle shows the same dictionary as pretty text; a valid edit commits on leaving the box.
+- Stored text that is no string dictionary (bad JSON, not an object, a non-string value, an empty or colon key, a key
+  twice) is shown as text with the reason; the table toggle is off until it is one.
+- Postgres keeps `items` as jsonb: after a Save the keys come back in jsonb's own order.
+
 ### 4.4 The schema copy's version
 
 Plan 1's atomic save bumps the copied version's patch (`1.2.3` → `1.2.4`); the design save copies it unchanged

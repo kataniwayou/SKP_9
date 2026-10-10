@@ -654,6 +654,12 @@ live `WorkflowDesignLiveTests` 17/17 (+1) against the branch BaseApi; Vitest 106
 on :18090: 162 passed + 2 skipped (new `newworkflow.spec.ts` 2). Deploy BaseApi before the studio (an old BaseApi 404s
 the first Save: it has no workflow to store the design on).
 
+**Cache items table (2026-10-10) — BUILT, NOT DEPLOYED** (plan 8 spec §4.5.4). The cache's `items` field is kind `dict`:
+a key/value table in the Inspector with add/edit/delete, keys checked as BaseApi does (empty, ':' or twice: red, not
+committed), a JSON toggle, and invalid stored text shown as text with the reason. Studio only. Tests: `store/dict.test.ts`,
+`panels/DictEditor.test.tsx`, `e2e/cacheitems.spec.ts`. Note: field edits are not in Undo (Revert drops them); jsonb
+reorders keys on Save.
+
 ### Rulings made along the way
 
 User:
