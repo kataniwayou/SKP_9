@@ -165,6 +165,48 @@ public sealed class WorkflowDesignLiveTests : IAsyncLifetime
     private async Task<string> StepStampAsync(Guid id) => Stamp(await GetAsync($"steps/{id}"));
 
     [Fact]
+    public async Task ANewWorkflowIsCreatedByItsFirstSaveAndOneThatFailsLeavesNothingBehind()
+    {
+        // 2026-10-10 (Workspace › New workflow): the create stage inside the real transaction, then the rollback
+        RealStack.SkipUnlessEnabled();
+        object Body(Guid step, Guid? processor, string name) => new
+        {
+            workflow = new { updatedAt = (string?)null, entryStepIds = new[] { step } },
+            newSteps = new[] { new { id = step, copyOf = (Guid?)null, processorId = processor, fields = new { name = Tag(), version = "1.0.0", description = (string?)null, entryCondition = 1 }, nextStepIds = Array.Empty<Guid>() } },
+            newWorkflow = new { fields = new { name, version = "1.0.0", description = (string?)null, cronExpression = (string?)null } },
+            layout = new { v = 1 },
+        };
+        Guid wf = Guid.NewGuid(), s = Guid.NewGuid();
+        _workflows.Add(wf);
+        _steps.Add(s);
+        var name = Tag();
+
+        var (applied, errors) = await PutDesignAsync(wf, Body(s, _processor, name));
+
+        Assert.True(applied, Describe(errors));
+        var made = await GetAsync($"workflows/{wf}");
+        Assert.Equal(name, Text(made, "name"));
+        Assert.Equal([s], made.GetProperty("entryStepIds").EnumerateArray().Select(x => x.GetGuid()));
+        Assert.Equal(_processor, (await GetAsync($"steps/{s}")).GetProperty("processorId").GetGuid());
+
+        // a step with no processor fails the dry run: neither the workflow nor its step is left behind
+        Guid wf2 = Guid.NewGuid(), s2 = Guid.NewGuid();
+        var (applied2, errors2) = await PutDesignAsync(wf2, Body(s2, null, Tag()));
+        Assert.False(applied2);
+        Assert.Contains(errors2, e => Is(e, "step", s2, "processorId"));
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/workflows/{wf2}", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/steps/{s2}", Ct)).StatusCode);
+
+        // a taken name: refused, nothing created
+        Guid wf3 = Guid.NewGuid(), s3 = Guid.NewGuid();
+        var (applied3, errors3) = await PutDesignAsync(wf3, Body(s3, _processor, name));
+        Assert.False(applied3);
+        Assert.Contains(errors3, e => Is(e, "workflow", wf3, "name"));
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/workflows/{wf3}", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/steps/{s3}", Ct)).StatusCode);
+    }
+
+    [Fact]
     public async Task APastedStepWithItsAssignmentIsCreatedAndTheStepItReplacesIsDeleted()
     {
         // 2026-10-10 (copy, paste, delete): created rows and the delete in one transaction, through the real foreign keys

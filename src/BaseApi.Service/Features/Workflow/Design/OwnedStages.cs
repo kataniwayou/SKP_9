@@ -180,9 +180,11 @@ internal sealed class WorkflowStage : IDesignStage
     {
         var w = run.Request.Workflow;
         var linksChanged = run.CreatedAssignments.Count > 0 || run.DeletedAssignments.Count > 0;
-        var changed = w is not null && (w.Fields is { Count: > 0 } || w.EntryStepIds is not null || w.CacheIds is not null);
-        run.BeginStage("workflow", changed || linksChanged ? 1 : 0, "workflow to update");
-        if (!changed && !linksChanged)
+        // a workflow this save creates is always judged here: the CRUD's rules (at least one entry step) hold for it too
+        var changed = run.CreatesWorkflow || run.Recreated
+            || (w is not null && (w.Fields is { Count: > 0 } || w.EntryStepIds is not null || w.CacheIds is not null));
+        run.BeginStage("workflow", (changed || linksChanged) && !run.WorkflowMissing ? 1 : 0, "workflow to update");
+        if ((!changed && !linksChanged) || run.WorkflowMissing)
         {
             run.EndStage();
             return;
@@ -194,7 +196,8 @@ internal sealed class WorkflowStage : IDesignStage
             var entity = await _db.Set<WorkflowEntity>().FirstOrDefaultAsync(x => x.Id == run.WorkflowId, ct);
             if (entity is null) return [new FieldError(null, "This workflow no longer exists.")];
             run.Label(run.WorkflowId, $"workflow '{entity.Name}'");
-            if (DesignRun.IsStale(entity.UpdatedAt, w?.UpdatedAt)) return [new FieldError(null, DesignRun.Conflict)];
+            // created by this save (or its earlier try): the studio never loaded a stamp of it
+            if (!run.CreatesWorkflow && !run.Recreated && DesignRun.IsStale(entity.UpdatedAt, w?.UpdatedAt)) return [new FieldError(null, DesignRun.Conflict)];
 
             var entry = w?.EntryStepIds ?? await _db.Set<WorkflowEntrySteps>()
                 .Where(j => j.WorkflowId == run.WorkflowId).Select(j => j.StepId).ToListAsync(ct);

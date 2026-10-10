@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using BaseApi.Core.Exceptions;
 using BaseApi.Core.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace BaseApi.Service.Features.Workflow.Design;
 
@@ -40,21 +41,53 @@ internal sealed class WorkflowDesignSyncer : IWorkflowDesignSyncer
     public async Task<DesignOutcomeDto> SaveAsync(Guid workflowId, DesignSaveRequest request, CancellationToken ct)
     {
         DesignShape.ThrowIfMalformed(workflowId, request);
+
+        // ---- 0. A new workflow (2026-10-10): created by the create stage; nothing to store it on before that. ----
+        var creates = false;
+        var recreated = false;
+        if (request.NewWorkflow is { } nw)
+        {
+            var stored = await _db.Set<WorkflowEntity>().AsNoTracking().Where(w => w.Id == workflowId)
+                .Select(w => new { w.Name, w.Version, w.Description, w.CronExpression }).FirstOrDefaultAsync(ct);
+            if (stored is null) creates = true;
+            else
+            {
+                // this creation's retry (its first try committed) holds exactly these fields: an ordinary save from here
+                var fields = CreateWorkflowStage.FieldsOf(nw, []);
+                var cron = string.IsNullOrWhiteSpace(fields.CronExpression) ? null : fields.CronExpression;
+                if ((stored.Name, stored.Version, stored.Description, stored.CronExpression) != (fields.Name, fields.Version, fields.Description, cron))
+                {
+                    const string taken = "Not created: a different workflow with this id already exists.";
+                    return new DesignOutcomeDto(false, [new DesignErrorDto("workflow", workflowId, "create", null, taken)],
+                    [
+                        new DesignLogDto("create", "error", "workflow", workflowId, $"workflow {workflowId}: {taken}"),
+                        new DesignLogDto("outcome", "error", "outcome", null, "nothing was stored or changed"),
+                    ]);
+                }
+                recreated = true;
+            }
+        }
+
         // what this workflow holds before the store replaces its layout: the only steps and caches a design may delete
         var (ownSteps, ownCaches) = await DesignOwnership.ReadAsync(_db, workflowId, ct);
 
         // ---- 1. Store: always, on its own commit; the layout goes to Layout, the rest to Design. ----
-        var design = JsonSerializer.Serialize(request with { Layout = null }, StoredJson);
-        if (!await _store.StoreAsync(workflowId, design, request.Layout!.Value.GetRawText(), ct))
-            throw new NotFoundException(nameof(WorkflowEntity), workflowId);
-        _db.ChangeTracker.Clear();
+        if (!creates)
+        {
+            var design = JsonSerializer.Serialize(request with { Layout = null }, StoredJson);
+            if (!await _store.StoreAsync(workflowId, design, request.Layout!.Value.GetRawText(), ct))
+                throw new NotFoundException(nameof(WorkflowEntity), workflowId);
+            _db.ChangeTracker.Clear();
+        }
 
         // ---- 2. The stages, in one transaction, collecting every error. ----------------------------
         await using var tx = await _transactions.BeginAsync(ct);
-        var run = new DesignRun(workflowId, request, _db, tx);
+        var run = new DesignRun(workflowId, request, _db, tx) { CreatesWorkflow = creates, Recreated = recreated };
         run.WorkflowSteps.UnionWith(ownSteps);
         run.WorkflowCaches.UnionWith(ownCaches);
-        run.Note("store", "workflow", "design stored on the workflow (the design and its layout), whatever the dry run finds");
+        if (creates) run.Note("store", "workflow", "a new workflow: nothing is stored until the create stage makes it");
+        else if (recreated) run.Note("store", "workflow", "the new workflow was already created by an earlier try of this save; design stored on it");
+        else run.Note("store", "workflow", "design stored on the workflow (the design and its layout), whatever the dry run finds");
         run.Note("outcome", "outcome", "dry run started: every stage in one transaction, each entity in its own savepoint");
         try
         {
@@ -68,7 +101,9 @@ internal sealed class WorkflowDesignSyncer : IWorkflowDesignSyncer
                 var refused = run.Errors.Select(e => e.Id).Distinct().Count();
                 run.Note("outcome", "outcome",
                     $"dry run failed: {Count(run.Errors.Count, "error")} on {Count(refused, "entity", "entities")}", "error");
-                run.Note("outcome", "outcome", "rolled back: no entity was changed; the design stays stored on the workflow", "error");
+                run.Note("outcome", "outcome", creates
+                    ? "rolled back: the workflow was not created and no entity was changed; nothing is stored"
+                    : "rolled back: no entity was changed; the design stays stored on the workflow", "error");
                 return new DesignOutcomeDto(false, run.Errors, run.Log);
             }
 

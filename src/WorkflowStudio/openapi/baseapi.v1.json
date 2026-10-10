@@ -4066,6 +4066,17 @@
         },
         "additionalProperties": false
       },
+      "DesignNewWorkflowDto": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "type": "object",
+            "additionalProperties": { },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "DesignOutcomeDto": {
         "type": "object",
         "properties": {
@@ -4183,6 +4194,9 @@
               "$ref": "#/components/schemas/DesignDeleteDto"
             },
             "nullable": true
+          },
+          "newWorkflow": {
+            "$ref": "#/components/schemas/DesignNewWorkflowDto"
           }
         },
         "additionalProperties": false

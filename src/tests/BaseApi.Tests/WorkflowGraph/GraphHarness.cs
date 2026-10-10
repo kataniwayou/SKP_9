@@ -179,6 +179,7 @@ internal sealed class GraphHarness : IAsyncDisposable
     /// <summary>Every stage, in the spec's order (plan 8 §4.3); each stage task adds its own.</summary>
     public IReadOnlyList<IDesignStage> AllStages() =>
     [
+        new CreateWorkflowStage(Db, new WorkflowUpdateDtoValidator()),
         new SchemaStage(Db, new SchemaCreateDtoValidator(), new SchemaEntityMapper()),
         new ProcessorStage(Db, new ProcessorUpdateDtoValidator(), new ProcessorEntityMapper()),
         new CacheStage(Db, new CacheUpdateDtoValidator(), new CacheCreateDtoValidator(), new CacheEntityMapper()),

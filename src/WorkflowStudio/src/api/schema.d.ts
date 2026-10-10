@@ -2517,6 +2517,11 @@ export interface components {
             } | null;
             nextStepIds?: string[] | null;
         };
+        DesignNewWorkflowDto: {
+            fields?: {
+                [key: string]: unknown;
+            } | null;
+        };
         DesignOutcomeDto: {
             applied?: boolean;
             errors?: components["schemas"]["DesignErrorDto"][] | null;
@@ -2544,6 +2549,7 @@ export interface components {
             newCaches?: components["schemas"]["DesignNewCacheDto"][] | null;
             deletedSteps?: components["schemas"]["DesignDeleteDto"][] | null;
             deletedCaches?: components["schemas"]["DesignDeleteDto"][] | null;
+            newWorkflow?: components["schemas"]["DesignNewWorkflowDto"];
         };
         DesignSchemaDto: {
             /** Format: uuid */

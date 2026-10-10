@@ -26,6 +26,13 @@ namespace BaseApi.Service.Features.Workflow.Design;
 /// one. Null or absent: none.
 /// </param>
 /// <param name="DeletedCaches">Caches to delete (the deletes stage); refused while any workflow still lists one.</param>
+/// <param name="NewWorkflow">
+/// The workflow itself is new (2026-10-10, Workspace › New workflow): it exists only in the studio until this save, which
+/// creates it with the route's id as its first stage (<c>create</c>) and then runs every other stage as usual; any error
+/// rolls the creation back with the rest, and nothing is stored. A workflow with this id that already holds exactly these
+/// fields is this creation's retry (an ordinary save from there); one that holds others is refused. Null or absent: the
+/// workflow exists.
+/// </param>
 public sealed record DesignSaveRequest(
     DesignWorkflowDto? Workflow,
     List<DesignStepDto>? Steps,
@@ -37,7 +44,12 @@ public sealed record DesignSaveRequest(
     List<DesignNewStepDto>? NewSteps = null,
     List<DesignNewCacheDto>? NewCaches = null,
     List<DesignDeleteDto>? DeletedSteps = null,
-    List<DesignDeleteDto>? DeletedCaches = null);
+    List<DesignDeleteDto>? DeletedCaches = null,
+    DesignNewWorkflowDto? NewWorkflow = null);
+
+/// <summary>A workflow the design creates (Workspace › New workflow, 2026-10-10).</summary>
+/// <param name="Fields">Its fields by camelCase name (<c>name</c>, <c>version</c>, <c>description</c>, <c>cronExpression</c>).</param>
+public sealed record DesignNewWorkflowDto(Dictionary<string, JsonElement>? Fields);
 
 /// <summary>A step the design creates (a pasted copy): its own new id, the same processor as its original.</summary>
 /// <param name="Id">The new step's id, made by the studio; refused when a step with it already exists.</param>
@@ -123,6 +135,6 @@ public sealed record DesignLogDto(string Stage, string Level, string Kind, Guid?
 /// <param name="Id">The entity that failed.</param>
 /// <param name="Message">Why.</param>
 /// <param name="Kind"><c>schema</c>, <c>processor</c>, <c>cache</c>, <c>step</c>, <c>assignment</c> or <c>workflow</c>.</param>
-/// <param name="Stage"><c>schemas</c>, <c>processors</c>, <c>caches</c>, <c>steps</c>, <c>wires</c>, <c>assignments</c>, <c>workflow</c> or <c>deletes</c>.</param>
+/// <param name="Stage"><c>create</c> (a new workflow), <c>schemas</c>, <c>processors</c>, <c>caches</c>, <c>steps</c>, <c>wires</c>, <c>assignments</c>, <c>workflow</c> or <c>deletes</c>.</param>
 /// <param name="Field">The camelCase field, or null when the error is about the whole entity.</param>
 public sealed record DesignErrorDto(string Kind, Guid Id, string Stage, string? Field, string Message);

@@ -43,6 +43,15 @@ internal sealed class DesignRun
     public HashSet<Guid> WorkflowSteps { get; } = [];
     public HashSet<Guid> WorkflowCaches { get; } = [];
     public List<Guid> CreatedAssignments { get; } = [];
+    /// <summary>
+    /// The workflow is created by this save (<see cref="DesignSaveRequest.NewWorkflow"/>, 2026-10-10): the create stage
+    /// inserts it, and the workflow stage always runs (a workflow needs its entry steps) with no loaded stamp to check.
+    /// </summary>
+    public bool CreatesWorkflow { get; set; }
+    /// <summary>The workflow was created by an earlier try of this save (a retry): the studio never loaded its stamp.</summary>
+    public bool Recreated { get; set; }
+    /// <summary>The create stage refused the workflow: the workflow stage has nothing to update.</summary>
+    public bool WorkflowMissing { get; set; }
     public List<Guid> DeletedAssignments { get; } = [];
     /// <summary>Assignments the assignment stage unlinked from this workflow (deleted ones that it listed).</summary>
     public HashSet<Guid> UnlinkedAssignments { get; } = [];
