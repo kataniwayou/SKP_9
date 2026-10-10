@@ -18,7 +18,7 @@ describe('graphFromDto', () => {
     expect(graph.steps.get('s2')!.entryCondition).toBe(5);
     expect(graph.processors.get('p1')!.outputSchemaId).toBe('sc1');
     expect(graph.schemas.get('sc1')!.version).toBe('1.4.2');
-    expect(graph.assignments).toEqual([{ id: 'a1', stepId: 's1', payload: '{"k":1}', updatedAt: '' }]);
+    expect(graph.assignments).toEqual([{ id: 'a1', stepId: 's1', payload: '{"k":1}', updatedAt: '', name: 'x', version: '1.0.0', description: null }]);
     expect(graph.caches.get('c1')!.root).toBe('r');
     expect(graph.layout).toEqual({ steps: { s1: { x: 8, y: 16 } } });
   });

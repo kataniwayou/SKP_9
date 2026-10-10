@@ -32,6 +32,8 @@ const other = () => loadedDocument(graphDto({
 }));
 
 const ids = () => { let n = 0; return () => `n${++n}`; };
+/** The assignment a1's own fields as the graph read carries them (the fixture's). */
+const ASG = { name: 'assignment-a1', version: '1.0.0', description: null };
 const node = (id: string) => ({ kind: 'node' as const, id });
 const wire = (id: string) => ({ kind: 'wire' as const, id });
 
@@ -50,7 +52,7 @@ describe('copy (2026-10-10)', () => {
     const base = await chain();
     const clip = copyClip(base, EMPTY_EDITS, EMPTY_DRAFT, [node(SPHERE_NODE_ID), node('s1'), node('s2'), wire('wf->s1'), wire('s1->s2')], 'wf1')!;
     expect(clip.steps.map((s) => [s.id, s.name, s.processorId, s.entryCondition])).toEqual([['s1', 'step-s1', 'p1', 1], ['s2', 'step-s2', 'p1', 2]]);
-    expect(clip.steps[0]!.assignment).toEqual({ copyOf: 'a1', fields: { payload: '{"k":1}' } });
+    expect(clip.steps[0]!.assignment).toEqual({ copyOf: 'a1', fields: { ...ASG, payload: '{"k":1}' } });
     expect(clip.steps[1]!.assignment).toBeNull();
     // s1 -> s2 runs between copied steps; the hub's wire and s2 -> s3 reach what is left out
     expect(Object.keys(clip.wires)).toEqual(['s1->s2']);
@@ -63,7 +65,7 @@ describe('copy (2026-10-10)', () => {
     const first = copyClip(base, EMPTY_EDITS, EMPTY_DRAFT, [node('s1')], 'wf1')!;
     const { draft } = paste(base, EMPTY_DRAFT, first);
     const again = copyClip(base, EMPTY_EDITS, draft, [node('n1')], 'wf1')!;
-    expect(again.steps[0]!.assignment).toEqual({ copyOf: 'a1', fields: { payload: '{"k":1}' } });
+    expect(again.steps[0]!.assignment).toEqual({ copyOf: 'a1', fields: { ...ASG, payload: '{"k":1}' } });
   });
 
   it('the hub alone copies nothing', async () => {
@@ -75,11 +77,11 @@ describe('copy (2026-10-10)', () => {
     const base = await chain();
     const edits: EntityEdits = {
       ...EMPTY_EDITS, steps: { s1: { updatedAt: null, fields: { name: 'renamed' } } },
-      assignments: { s1: { op: 'update', id: 'a1', updatedAt: null, fields: { payload: '{"k":2}' } } },
+      assignments: { s1: { op: 'update', id: 'a1', updatedAt: null, fields: { ...ASG, payload: '{"k":2}' } } },
     };
     const clip = copyClip(base, edits, EMPTY_DRAFT, [node('s1')], 'wf1')!;
     expect(clip.steps[0]!.name).toBe('renamed');
-    expect(clip.steps[0]!.assignment).toEqual({ copyOf: 'a1', fields: { payload: '{"k":2}' } });
+    expect(clip.steps[0]!.assignment).toEqual({ copyOf: 'a1', fields: { ...ASG, payload: '{"k":2}' } });
   });
 
   it('a wire picked alone is copied free: both ends open where it is drawn, its drawn shape kept', async () => {
@@ -112,7 +114,7 @@ describe('paste (2026-10-10)', () => {
     // steps first, then caches, wires, assignments
     expect(Object.keys(draft.blocks.steps)).toEqual(['n1', 'n2']);
     const n1 = draft.blocks.steps.n1!;
-    expect([n1.copyOf, n1.name, n1.version, n1.processorId, n1.assignment]).toEqual(['s1', 'step-s1', '1.0.0', 'p1', { id: 'n4', copyOf: 'a1', fields: { payload: '{"k":1}' } }]);
+    expect([n1.copyOf, n1.name, n1.version, n1.processorId, n1.assignment]).toEqual(['s1', 'step-s1', '1.0.0', 'p1', { id: 'n4', copyOf: 'a1', fields: { ...ASG, payload: '{"k":1}' } }]);
     expect(draft.blocks.steps.n2!.entryCondition).toBe(2);
     // the copied wire joins the copies, under a new design wire id
     const c = circuitOf(applyEdits(base, EMPTY_EDITS, draft.blocks), draft);
@@ -210,6 +212,76 @@ describe('paste (2026-10-10)', () => {
     expect(Object.keys(draft.blocks.refs.processors)).toEqual(['p1']);
     expect(shown.graph.processors.get('p1')!.name).toBe('proc-p1');
     expect(shown.graph.steps.get('n1')!.processorId).toBe('p1');
+  });
+});
+
+describe('review fixes (2026-10-10)', () => {
+  it('a pasted cache gets a root no cache the studio knows has: -copy, then -copy-2, …', async () => {
+    const base = await chain();
+    let clip = copyClip(base, EMPTY_EDITS, EMPTY_DRAFT, [node(cacheNodeId('c1'))], 'wf1')!;
+    let draft = EMPTY_DRAFT;
+    const newId = ids();
+    const roots: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      draft = pasteClip(base, EMPTY_EDITS, draft, clip, newId, 'wf1', ['c1-copy-3'])!.draft;
+      clip = { ...clip, pasted: clip.pasted + 1 };
+      roots.push(Object.values(draft.blocks.caches).at(-1)!.root);
+    }
+    // the cache's own root is c1; c1-copy-3 is another open workflow's
+    expect(roots).toEqual(['c1-copy', 'c1-copy-2', 'c1-copy-4']);
+    const body = buildDesignRequest(base, applyDesign(base, draft, EMPTY_EDITS), { draft, edits: EMPTY_EDITS });
+    expect(new Set(body.newCaches!.map((c) => c.fields.root)).size).toBe(3);
+  });
+
+  it('the store gives a pasted cache a root no open workflow uses', async () => {
+    const a = await chain('wf1');
+    const b = await loadedDocument(graphDto({
+      workflow: workflowDto({ id: 'wf2', entryStepIds: ['t1'], cacheIds: ['k'] }), steps: [stepDto('t1')], caches: [cacheDto('k', { root: 'c1-copy' })],
+    }));
+    const state = [
+      { type: 'open', workflowId: 'wf1', name: 'a', version: '1' }, { type: 'loaded', workflowId: 'wf1', doc: a },
+      { type: 'open', workflowId: 'wf2', name: 'b', version: '1' }, { type: 'loaded', workflowId: 'wf2', doc: b },
+      { type: 'pick', workflowId: 'wf1', picks: [node(cacheNodeId('c1'))] }, { type: 'copy', workflowId: 'wf1' },
+      { type: 'paste', workflowId: 'wf1', newId: ids() },
+    ].reduce((s, x) => reduce(s, x as StudioAction), INITIAL_STATE);
+    expect(Object.values(state.docs[0]!.design.draft.blocks.caches)[0]!.root).toBe('c1-copy-2');
+  });
+
+  it('a deleted step keeps the stamp it was loaded with through a stored design and a re-read: someone else\'s change conflicts', async () => {
+    const base = await chain();
+    const loaded = base.graph.steps.get('s3')!.updatedAt;
+    const draft = deletePicked(base, EMPTY_EDITS, EMPTY_DRAFT, [node('s3')])!.draft;
+    expect(draft.blocks.stamps).toEqual({ s3: loaded });
+    const { layout, ...stored } = buildDesignRequest(base, applyDesign(base, draft, EMPTY_EDITS), { draft, edits: EMPTY_EDITS });
+    // a refused Save: the workflow read again, s3 changed by someone else meanwhile
+    const reread: StudioDocument = { ...base, graph: { ...base.graph, steps: new Map([...base.graph.steps].map(([id, s]) => [id, id === 's3' ? { ...s, updatedAt: '2026-10-10T09:00:00Z' } : s])) } };
+    const back = storedDesignOf(JSON.parse(JSON.stringify(stored)), JSON.parse(JSON.stringify(layout)));
+    expect(back.draft.blocks.stamps).toEqual({ s3: loaded });
+    // and kept by a refresh (the session's draft)
+    const session = parseDraft(JSON.parse(JSON.stringify(back.draft)))!;
+    const again = buildDesignRequest(reread, applyDesign(reread, session, EMPTY_EDITS), { draft: session, edits: EMPTY_EDITS });
+    expect(again.deletedSteps).toEqual([{ id: 's3', updatedAt: loaded }]);
+  });
+
+  it('cut and paste across workflows: the copy carries its assignment\'s own fields, so it saves once the original is gone', async () => {
+    const source = await chain();
+    const target = await other();
+    const clip = copyClip(source, EMPTY_EDITS, EMPTY_DRAFT, [node('s1')], 'wf1')!;
+    // the original is deleted (and saved) before the paste is saved
+    expect(deletePicked(source, EMPTY_EDITS, EMPTY_DRAFT, [node('s1')])!.draft.blocks.removed.steps).toEqual(['s1']);
+    const { draft } = paste(target, EMPTY_DRAFT, clip);
+    const body = buildDesignRequest(target, applyDesign(target, draft, EMPTY_EDITS), { draft, edits: EMPTY_EDITS });
+    expect(body.assignments).toEqual([{ op: 'create', id: 'n2', stepId: 'n1', updatedAt: null, fields: { ...ASG, payload: '{"k":1}' }, copyOf: 'a1' }]);
+  });
+
+  it('a free picked wire comes with the wires joined on it', async () => {
+    const base = await chain();
+    // s2 -> s3 taps s1 -> s2; only s1 -> s2 (both ends left out) and s3 are copied: the tap's head is on s3
+    const draft = withCircuit(EMPTY_DRAFT, base, setEnd(circuitOf(base, EMPTY_DRAFT), 's2->s3', 'tail', { on: 'wire', host: 's1->s2', at: 40 }));
+    const clip = copyClip(base, EMPTY_EDITS, draft, [wire('s1->s2'), node('s3')], 'wf1')!;
+    expect(Object.keys(clip.wires).sort()).toEqual(['s1->s2', 's2->s3']);
+    expect(clip.wires['s1->s2']!.tail.on).toBe('open');
+    expect(clip.wires['s2->s3']!.tail).toEqual({ on: 'wire', host: 's1->s2', at: 40 });
   });
 });
 
@@ -334,8 +406,8 @@ describe('blocks in the drawing, the request and the stored design', () => {
       { id: 'n1', copyOf: 's1', processorId: 'p1', fields: { name: 'step-s1', version: '1.0.0', description: 'edited', entryCondition: 1 }, nextStepIds: ['n2'] },
       { id: 'n2', copyOf: 's2', processorId: 'p1', fields: { name: 'step-s2', version: '1.0.0', description: null, entryCondition: 2 }, nextStepIds: null },
     ]);
-    expect(body.assignments).toEqual([{ op: 'create', id: 'n5', stepId: 'n1', updatedAt: null, fields: { payload: '{"k":1}' }, copyOf: 'a1' }]);
-    expect(body.newCaches).toEqual([{ id: 'n3', copyOf: 'c1', fields: { name: 'cache-c1', version: '1.0.0', description: null, root: 'c1', items: '{}' } }]);
+    expect(body.assignments).toEqual([{ op: 'create', id: 'n5', stepId: 'n1', updatedAt: null, fields: { ...ASG, payload: '{"k":1}' }, copyOf: 'a1' }]);
+    expect(body.newCaches).toEqual([{ id: 'n3', copyOf: 'c1', fields: { name: 'cache-c1', version: '1.0.0', description: null, root: 'c1-copy', items: '{}' } }]);
     expect(body.deletedSteps).toEqual([{ id: 's3', updatedAt: base.graph.steps.get('s3')!.updatedAt }]);
     // s2 led to s3: its list goes without it
     expect(body.steps).toEqual([{ id: 's2', updatedAt: base.graph.steps.get('s2')!.updatedAt, fields: {}, nextStepIds: [] }]);

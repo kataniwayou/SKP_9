@@ -83,6 +83,8 @@ export function graphFromDto(dto: WorkflowGraphDto): Graph {
 
   const assignments: Assignment[] = (dto.assignments ?? []).map((a) => ({
     id: required(a.id, 'assignment id'), stepId: text(a.stepId), payload: text(a.payload), updatedAt: text(a.updatedAt),
+    ...(typeof a.name === 'string' ? { name: a.name } : {}), ...(typeof a.version === 'string' ? { version: a.version } : {}),
+    ...(a.description === null || typeof a.description === 'string' ? { description: a.description } : {}),
   }));
 
   if (!dto.workflow) throw new Error('The server sent no workflow.');

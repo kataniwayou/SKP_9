@@ -97,7 +97,7 @@ export async function createCircuitThrowaway(request: APIRequestContext): Promis
  * a (payload {"k":7}), the workflow (entry a), and a second workflow `{tag}-other` whose entry step is b, so b is used by
  * another workflow (its delete is refused). Pasted copies keep their names, so cleanup finds them by the tag.
  */
-export interface CopyThrowaway { workflow: LiveWorkflow; other: LiveWorkflow; tag: string; a: string; b: string; assignmentId: string; processorId: string }
+export interface CopyThrowaway { workflow: LiveWorkflow; other: LiveWorkflow; tag: string; a: string; b: string; assignmentId: string; processorId: string; cacheId: string; root: string }
 
 export async function createCopyThrowaway(request: APIRequestContext): Promise<CopyThrowaway> {
   const tag = `e2e-cp-${Date.now().toString(36)}-${randomBytes(2).toString('hex')}`;
@@ -110,8 +110,9 @@ export async function createCopyThrowaway(request: APIRequestContext): Promise<C
   created.stepBId = await post(request, 'steps', { name: `${tag}-b`, version: '1.0.0', description: null, processorId: created.processorId, nextStepIds: [], entryCondition: 1 });
   created.stepId = await post(request, 'steps', { name: `${tag}-a`, version: '1.0.0', description: null, processorId: created.processorId, nextStepIds: [created.stepBId], entryCondition: 1 });
   created.assignmentId = await post(request, 'assignments', { name: `${tag}-asg`, version: '2.0.0', description: 'copied', stepId: created.stepId, payload: '{"k":7}' });
+  created.cacheId = await post(request, 'caches', { name: `${tag}-cache`, version: '1.0.0', description: null, root: `${tag}-root`, items: '{}' });
   created.workflowId = await post(request, 'workflows', {
-    name: tag, version: '1.0.0', description: null, entryStepIds: [created.stepId], assignmentIds: [created.assignmentId], cacheIds: [], cronExpression: null,
+    name: tag, version: '1.0.0', description: null, entryStepIds: [created.stepId], assignmentIds: [created.assignmentId], cacheIds: [created.cacheId], cronExpression: null,
   });
   const other = await post(request, 'workflows', {
     name: `${tag}-other`, version: '1.0.0', description: null, entryStepIds: [created.stepBId], assignmentIds: [], cacheIds: [], cronExpression: null,
@@ -121,6 +122,7 @@ export async function createCopyThrowaway(request: APIRequestContext): Promise<C
     workflow: { id: created.workflowId, name: tag, version: '1.0.0', label: label(tag, '1.0.0', created.workflowId) },
     other: { id: other, name: `${tag}-other`, version: '1.0.0', label: label(`${tag}-other`, '1.0.0', other) },
     tag, a: created.stepId, b: created.stepBId, assignmentId: created.assignmentId, processorId: created.processorId,
+    cacheId: created.cacheId, root: `${tag}-root`,
   };
 }
 

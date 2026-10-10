@@ -51,10 +51,16 @@ export interface Blocks {
   steps: Record<Id, NewStep>;
   caches: Record<Id, NewCache>;
   removed: { steps: Id[]; caches: Id[] };
+  /**
+   * The `updatedAt` each removed step was loaded with when it was deleted (review 2026-10-10): Save sends it, so a step
+   * someone else changed since is a conflict, also after a refused Save, a reopen of the stored design or a refresh
+   * (never the stamp of a later re-read).
+   */
+  stamps: Record<Id, string>;
   refs: { processors: Record<Id, Processor>; schemas: Record<Id, Schema> };
 }
 
-export const EMPTY_BLOCKS: Blocks = { steps: {}, caches: {}, removed: { steps: [], caches: [] }, refs: { processors: {}, schemas: {} } };
+export const EMPTY_BLOCKS: Blocks = { steps: {}, caches: {}, removed: { steps: [], caches: [] }, stamps: {}, refs: { processors: {}, schemas: {} } };
 
 const none = (r: object) => Object.keys(r).length === 0;
 
@@ -111,8 +117,12 @@ export function applyBlocks(base: StudioDocument, blocks: Blocks): StudioDocumen
   const assignments: Assignment[] = g.assignments.filter((a) => !goneSteps.has(a.stepId));
   for (const [stepId, n] of Object.entries(blocks.steps)) {
     if (!n.assignment || assignments.some((a) => a.stepId === stepId)) continue;
-    const payload = n.assignment.fields.payload;
-    assignments.push({ id: n.assignment.id, stepId, payload: typeof payload === 'string' ? payload : '{}', updatedAt: '' });
+    const f = n.assignment.fields;
+    assignments.push({
+      id: n.assignment.id, stepId, payload: typeof f.payload === 'string' ? f.payload : '{}', updatedAt: '',
+      ...(typeof f.name === 'string' ? { name: f.name } : {}), ...(typeof f.version === 'string' ? { version: f.version } : {}),
+      ...(f.description === null || typeof f.description === 'string' ? { description: f.description } : {}),
+    });
   }
 
   const cacheIds = [...g.workflow.cacheIds.filter((id) => !goneCaches.has(id)), ...Object.keys(blocks.caches).filter((id) => !g.workflow.cacheIds.includes(id))];
@@ -199,6 +209,7 @@ export function parseBlocks(v: unknown): Blocks {
     steps: records(v.steps, parseStep),
     caches: records(v.caches, parseCache),
     removed: { steps: ids(removed.steps), caches: ids(removed.caches) },
+    stamps: records(v.stamps, (x) => (typeof x === 'string' && x !== '' ? x : null)),
     refs: { processors: records(refs.processors, ref<Processor>), schemas: records(refs.schemas, ref<Schema>) },
   };
 }

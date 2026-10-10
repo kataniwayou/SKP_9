@@ -73,6 +73,10 @@ export interface Assignment {
   payload: string;
   /** The concurrency stamp a remove or an edit sends back (plan 8). */
   updatedAt: string;
+  /** Its own fields as the graph read carries them (copy and paste keeps them, 2026-10-10 review); absent in older fixtures. */
+  name?: string;
+  version?: string;
+  description?: string | null;
 }
 
 export interface Cache {

@@ -116,7 +116,8 @@ export function buildDesignRequest(base: StudioDocument, shown: StudioDocument, 
     layout: layoutOf(shown, draft),
     ...(newSteps.length > 0 ? { newSteps } : {}),
     ...(newCaches.length > 0 ? { newCaches } : {}),
-    ...(removed.size > 0 ? { deletedSteps: [...removed].map((id) => ({ id, updatedAt: edits.steps[id]?.updatedAt ?? g.steps.get(id)!.updatedAt })) } : {}),
+    // the stamp the step was loaded with when it was deleted, never a later re-read's (review 2026-10-10)
+    ...(removed.size > 0 ? { deletedSteps: [...removed].map((id) => ({ id, updatedAt: blocks.stamps[id] ?? edits.steps[id]?.updatedAt ?? g.steps.get(id)!.updatedAt })) } : {}),
     ...(removedCaches.size > 0 ? { deletedCaches: [...removedCaches].map((id) => ({ id, updatedAt: null })) } : {}),
   };
 }

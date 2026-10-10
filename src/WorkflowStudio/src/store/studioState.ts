@@ -437,7 +437,8 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       const clip = state.clipboard;
       const d = state.docs.find((x) => x.workflowId === action.workflowId);
       if (!clip || !d || d.status.kind !== 'ready' || d.saving) return state;
-      const pasted = pasteClip(d.status.doc, d.edits, d.design.draft, clip, action.newId, d.workflowId);
+      // a pasted cache gets a root no open workflow uses (review 2026-10-10)
+      const pasted = pasteClip(d.status.doc, d.edits, d.design.draft, clip, action.newId, d.workflowId, knownRoots(state));
       if (pasted === null) return state;
       // each further paste of the same clip starts one more 32 px step away (the cascade)
       const next = update(state, action.workflowId, (x) => blocksChanged(x, pasted.draft, pasted.picks));
@@ -450,6 +451,15 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
         return r === null ? d : prunedSelection(blocksChanged(d, r.draft, r.picks), r.draft);
       });
   }
+}
+
+/** Every cache root the open workflows hold: loaded, pasted, or typed in the Inspector. */
+function knownRoots(state: StudioState): string[] {
+  return state.docs.flatMap((d) => [
+    ...(d.status.kind === 'ready' ? [...d.status.doc.graph.caches.values()].map((c) => c.root) : []),
+    ...Object.values(d.design.draft.blocks.caches).map((c) => c.root),
+    ...Object.values(d.edits.caches).flatMap((e) => (typeof e.fields.root === 'string' ? [e.fields.root] : [])),
+  ]);
 }
 
 /** The live set agrees with a press: a Start's workflow runs, a Stop's does not. */

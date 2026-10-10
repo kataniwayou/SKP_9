@@ -5,7 +5,7 @@ import { CACHE_H, CACHE_W, CELL, GRID, SPHERE_R, STEP_H, STEP_W, type Point } fr
 import { CACHE_NODE_PREFIX, cacheNodeId, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { isNum, shapeFromPoints } from '../layout/shape';
 import { assignmentByStep } from '../model/assignments';
-import type { Id, Processor, Schema } from '../model/graph';
+import type { Assignment, Id, Processor, Schema } from '../model/graph';
 import { nodePickIds, wirePickIds, type Pick } from '../store/picks';
 import { applyDraft, applyEdits } from './apply';
 import { parseFields, type Blocks, type NewStep } from './blocks';
@@ -97,23 +97,30 @@ export function copyClip(base: StudioDocument, edits: EntityEdits, draft: Draft,
   if (stepIds.length + cacheIds.length + picked.length === 0) return null;
 
   const steps = new Set(stepIds);
-  // the wires between copied items: a junction wire comes when its host does, so this grows until it settles
-  const inside = new Set<string>();
-  for (let grew = true; grew;) {
-    grew = false;
-    for (const [id, w] of Object.entries(circuit)) {
-      if (inside.has(id)) continue;
-      const t = footing(w.tail, steps, inside), h = footing(w.head, steps, inside);
-      if (t !== 'out' && h !== 'out' && (t === 'in' || h === 'in')) { inside.add(id); grew = true; }
+  // the wires between copied items: a junction wire comes when its host does, so this grows until it settles; a picked
+  // wire with no end on a copied item is copied free, and the wires joined on it come too (review 2026-10-10)
+  const inside = new Set<string>(), free = new Set<string>();
+  const copied = { has: (id: string) => inside.has(id) || free.has(id) } as ReadonlySet<string>;
+  const grow = () => {
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const [id, w] of Object.entries(circuit)) {
+        if (copied.has(id)) continue;
+        const t = footing(w.tail, steps, copied), h = footing(w.head, steps, copied);
+        if (t !== 'out' && h !== 'out' && (t === 'in' || h === 'in')) { inside.add(id); grew = true; }
+      }
     }
+  };
+  grow();
+  for (const id of picked) {
+    const w = circuit[id]!;
+    if (!copied.has(id) && footing(w.tail, steps, copied) !== 'in' && footing(w.head, steps, copied) !== 'in') free.add(id);
   }
+  grow();
   const wires: Circuit = Object.create(null) as Circuit;
   for (const id of inside) wires[id] = circuit[id]!;
   const drawn = new Map(shown.wires.map((w) => [w.id, w.points]));
-  for (const id of picked) {
-    if (inside.has(id)) continue;
-    const w = circuit[id]!;
-    if (footing(w.tail, steps, inside) === 'in' || footing(w.head, steps, inside) === 'in') continue;
+  for (const id of free) {
     const points = drawn.get(id);
     if (!points || points.length < 2) continue;
     // a free wire: both ends open where it is drawn, its drawn shape kept (as a wire moved whole, rule B)
@@ -147,14 +154,29 @@ export function copyClip(base: StudioDocument, edits: EntityEdits, draft: Draft,
  * come from (`copyOf`, so BaseApi fills what the studio does not hold: its name, version, description). A pasted step's
  * copy keeps its own original's row; an assignment created in the Inspector has no row, only its fields.
  */
-function assignmentClip(stepId: Id, a: { id: Id; payload: string } | undefined, blocks: Blocks, edits: EntityEdits): ClipStep['assignment'] {
+function assignmentClip(stepId: Id, a: Assignment | undefined, blocks: Blocks, edits: EntityEdits): ClipStep['assignment'] {
   if (!a) return null;
   const op = edits.assignments[stepId];
   const edited = op && op.op !== 'delete' && op.id === a.id ? op.fields : {};
   const pasted = blocks.steps[stepId]?.assignment;
   if (pasted && pasted.id === a.id) return { copyOf: pasted.copyOf, fields: { ...pasted.fields, ...edited, payload: a.payload } };
   if (op?.op === 'create' && op.id === a.id) return { copyOf: null, fields: { ...op.fields, payload: a.payload } };
-  return { copyOf: a.id, fields: { ...edited, payload: a.payload } };
+  // its own fields as the graph read them (review 2026-10-10): the copy saves even when the original row is gone by then
+  const own: Record<string, FieldValue> = {
+    ...(a.name !== undefined ? { name: a.name } : {}), ...(a.version !== undefined ? { version: a.version } : {}),
+    ...(a.description !== undefined ? { description: a.description } : {}),
+  };
+  return { copyOf: a.id, fields: { ...own, ...edited, payload: a.payload } };
+}
+
+/**
+ * A cache root not in `taken` (review 2026-10-10: a cache's root is unique, it is its L2 address): `<root>-copy`, then
+ * `<root>-copy-2`, `-copy-3`, …
+ */
+export function uniqueRoot(root: string, taken: ReadonlySet<string>): string {
+  const first = `${root}-copy`;
+  if (!taken.has(first)) return first;
+  for (let n = 2; ; n++) if (!taken.has(`${first}-${n}`)) return `${first}-${n}`;
 }
 
 // ---- where a paste lands ----
@@ -245,7 +267,9 @@ const copy = <T>(r: Readonly<Record<string, T>>): Record<string, T> => Object.as
  * shapes moved by the same offset, junctions their place along their host. The pasted items are the new picks. Null
  * when the clip holds nothing.
  */
-export function pasteClip(base: StudioDocument, edits: EntityEdits, draft: Draft, clip: Clip, newId: () => string, into: Id = clip.from): { draft: Draft; picks: Pick[] } | null {
+export function pasteClip(
+  base: StudioDocument, edits: EntityEdits, draft: Draft, clip: Clip, newId: () => string, into: Id = clip.from, knownRoots: Iterable<string> = [],
+): { draft: Draft; picks: Pick[] } | null {
   if (clip.steps.length + clip.caches.length + Object.keys(clip.wires).length === 0) return null;
   const { saved, shown } = views(base, edits, draft);
   const k = clip.pasted + 1;
@@ -267,8 +291,12 @@ export function pasteClip(base: StudioDocument, edits: EntityEdits, draft: Draft
     steps[stepIds.get(s.id)!] = made;
   }
   const caches = copy(draft.blocks.caches);
+  // every root the studio knows is taken: this workflow's (as designed), the clip's own, the other open workflows'
+  const roots = new Set<string>([...knownRoots, ...[...shown.graph.caches.values()].map((c) => c.root), ...clip.caches.map((c) => c.root)]);
   for (const c of clip.caches) {
-    caches[cacheIds.get(c.id)!] = { copyOf: c.id, name: c.name, version: c.version, description: c.description, root: c.root, items: c.items, at: { x: c.at.x + dx, y: c.at.y + dy } };
+    const root = uniqueRoot(c.root, roots);
+    roots.add(root);
+    caches[cacheIds.get(c.id)!] = { copyOf: c.id, name: c.name, version: c.version, description: c.description, root, items: c.items, at: { x: c.at.x + dx, y: c.at.y + dy } };
   }
   const processors = copy(draft.blocks.refs.processors), schemas = copy(draft.blocks.refs.schemas);
   for (const p of clip.processors) if (!saved.graph.processors.has(p.id)) processors[p.id] = p;
@@ -324,10 +352,16 @@ export function deletePicked(base: StudioDocument, edits: EntityEdits, draft: Dr
 
   const steps = copy(draft.blocks.steps), caches = copy(draft.blocks.caches);
   const removedSteps = [...draft.blocks.removed.steps], removedCaches = [...draft.blocks.removed.caches];
+  const stamps = copy(draft.blocks.stamps);
   const moved = copy(draft.steps), movedCaches = copy(draft.caches);
   for (const id of stepIds) {
     if (Object.hasOwn(steps, id)) delete steps[id];
-    else if (!removedSteps.includes(id)) removedSteps.push(id);
+    else if (!removedSteps.includes(id)) {
+      removedSteps.push(id);
+      // the stamp it was loaded with (the edit's, when the design kept an older one): Save sends this one
+      const at = edits.steps[id]?.updatedAt ?? base.graph.steps.get(id)?.updatedAt;
+      if (at) stamps[id] = at;
+    }
     delete moved[id];
   }
   for (const id of cacheIds) {
@@ -342,7 +376,7 @@ export function deletePicked(base: StudioDocument, edits: EntityEdits, draft: Dr
   const slots = new Set(Object.values(processors).flatMap((p) => [p.inputSchemaId, p.outputSchemaId, p.configSchemaId]));
   const schemas = copy<Schema>({});
   for (const [sid, s] of Object.entries(draft.blocks.refs.schemas)) if (slots.has(sid)) schemas[sid] = s;
-  const blocks: Blocks = { steps, caches, removed: { steps: removedSteps, caches: removedCaches }, refs: { processors, schemas } };
+  const blocks: Blocks = { steps, caches, removed: { steps: removedSteps, caches: removedCaches }, stamps, refs: { processors, schemas } };
 
   const after = removeCircuitWires(circuit, wires, endPointOf(shown.wires));
   const next = withCircuit({ ...draft, blocks, steps: moved, caches: movedCaches }, applyEdits(base, edits, blocks), after);

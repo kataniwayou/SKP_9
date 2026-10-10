@@ -252,7 +252,13 @@ function storedBlocks(stored: Record<string, unknown>, layout: unknown): Blocks 
     };
   }
   const ids = (v: unknown) => list(v).flatMap((x) => { const id = str(x.id); return id === null ? [] : [id]; });
-  return { ...EMPTY_BLOCKS, steps, caches, removed: { steps: ids(stored.deletedSteps), caches: ids(stored.deletedCaches) } };
+  // the stamps the steps were loaded with when deleted: a later re-read never replaces them (review 2026-10-10)
+  const stamps = copy<string>({});
+  for (const d of list(stored.deletedSteps)) {
+    const id = str(d.id), at = str(d.updatedAt);
+    if (id !== null && at !== null) stamps[id] = at;
+  }
+  return { ...EMPTY_BLOCKS, steps, caches, removed: { steps: ids(stored.deletedSteps), caches: ids(stored.deletedCaches) }, stamps };
 }
 
 // ---- reading back: the session's edits and the server's stored design; anything malformed is dropped ----

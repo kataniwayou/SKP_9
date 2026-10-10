@@ -9,6 +9,8 @@ test.describe.configure({ mode: 'serial', retries: 0 });
 let t: CopyThrowaway;
 /** The copies the first test pastes and saves: a's and b's. */
 let copyA = '', copyB = '';
+/** The copy of a pasted into the other workflow. */
+let inOther = '';
 test.beforeAll(async ({ request }) => { t = await createCopyThrowaway(request); });
 test.afterAll(async ({ request }) => { await removeThrowaway(request); });
 test.beforeEach(async ({ page }) => {
@@ -135,7 +137,7 @@ test('Backspace does nothing; Delete removes a pasted step, Undo brings it back,
   await page.keyboard.press('Delete');
   await expect(node(panel, copyB)).toHaveCount(0);
   await expect(newWires(panel)).toHaveCount(0);
-  await expect(panel.locator('.react-flow__edge')).toHaveCount(2);
+  await expect(panel.locator('.react-flow__edge-cable')).toHaveCount(2);
   await page.keyboard.press('Control+z');
   await expect(node(panel, copyB)).toBeVisible();
   await page.keyboard.press('Control+y');
@@ -234,11 +236,62 @@ test('copied in one workflow, the clipboard survives a refresh and pastes into a
 
   await save(page);
   await expect(await pane(page, 'Output')).toContainText('Saved and applied');
+  inOther = pasted;
   const s = await get<{ name: string; processorId: string }>(request, `steps/${pasted}`);
   expect([s.name, s.processorId]).toEqual([`${t.tag}-a`, t.processorId]);
   const [asg] = await assignmentsOf(request, pasted);
   expect(JSON.parse(asg!.payload)).toEqual({ k: 7 });
   expect((await get<{ assignmentIds: string[] }>(request, `workflows/${t.other.id}`)).assignmentIds).toEqual([asg!.id]);
+});
+
+test('a pasted cache gets a root of its own (<root>-copy) and Save creates it beside the original', async ({ page, request }) => {
+  const panel = await open(page);
+  await node(panel, `cache:${t.cacheId}`).click();
+  await expect(node(panel, `cache:${t.cacheId}`)).toHaveClass(/studio-pick/);
+  const before = await nodeIds(panel);
+  await page.keyboard.press('Control+c');
+  await page.keyboard.press('Control+v');
+  await expect(panel.locator('.react-flow__node')).toHaveCount(before.length + 1);
+  const made = (await nodeIds(panel)).find((id) => !before.includes(id))!;
+  expect(made.startsWith('cache:')).toBe(true);
+  const id = made.slice('cache:'.length);
+  const now = await boxesById(panel);
+  for (const [other, b] of now) if (other !== made) expect(overlaps(now.get(made)!, b), `on ${other}`).toBe(false);
+  // the Inspector shows the new root, editable
+  await node(panel, made).click();
+  await expect(inspector(page).getByLabel('Root', { exact: true })).toHaveValue(`${t.root}-copy`);
+  await shot(page, '6-cache-pasted');
+
+  await save(page);
+  await expect(await pane(page, 'Output')).toContainText('Saved and applied');
+  const c = await get<{ name: string; root: string }>(request, `caches/${id}`);
+  expect([c.name, c.root]).toEqual([`${t.tag}-cache`, `${t.root}-copy`]);
+  expect([...(await get<{ cacheIds: string[] }>(request, `workflows/${t.workflow.id}`)).cacheIds].sort()).toEqual([t.cacheId, id].sort());
+});
+
+test('cut and paste across workflows: the copy keeps its assignment\'s own name, version and description though the original is deleted first', async ({ page, request }) => {
+  const panel = await open(page);
+  const [original] = await assignmentsOf(request, copyA);
+  expect(original).toBeDefined();
+  await node(panel, copyA).locator('.nx-sn').click();
+  await page.keyboard.press('Control+c');
+  await page.keyboard.press('Delete');
+  await expect(node(panel, copyA)).toHaveCount(0);
+  await save(page);
+  await expect(await pane(page, 'Output')).toContainText('Saved and applied');
+  expect((await request.get(`/api/v1/assignments/${original!.id}`)).status()).toBe(404);
+
+  const there = await open(page, t.other);
+  const before = await nodeIds(there);
+  const pane0 = await box(there.locator('.react-flow__pane'));
+  await page.mouse.click(pane0.x + pane0.width - 40, pane0.y + pane0.height - 40);
+  await page.keyboard.press('Control+v');
+  await expect(there.locator('.react-flow__node')).toHaveCount(before.length + 1);
+  const pasted = (await nodeIds(there)).find((x) => !before.includes(x))!;
+  await save(page);
+  await expect((await outputLines(page)).filter({ hasText: 'Saved and applied' })).toHaveCount(2);
+  const [asg] = await assignmentsOf(request, pasted);
+  expect([asg!.name, asg!.version, asg!.description, JSON.parse(asg!.payload)]).toEqual([`${t.tag}-asg`, '2.0.0', 'copied', { k: 7 }]);
 });
 
 test('Delete of a step another workflow uses: Save refuses it in red and the step stays', async ({ page, request }) => {
@@ -262,4 +315,25 @@ test('Delete of a step another workflow uses: Save refuses it in red and the ste
   expect((await request.get(`/api/v1/steps/${t.b}`)).status()).toBe(200);
   expect((await get<{ nextStepIds: string[] }>(request, `steps/${t.a}`)).nextStepIds).toEqual([t.b]);
   await shot(page, '5-refused');
+});
+
+test('a delete kept through a refused Save and a reopen still carries the stamp it was loaded with: someone else\'s change conflicts', async ({ page, request }) => {
+  // B, meanwhile: changes b and stops the other workflow from using it
+  type S = { name: string; version: string; description: string | null; processorId: string; nextStepIds: string[]; entryCondition: number };
+  const b = await get<S>(request, `steps/${t.b}`);
+  const put = await request.put(`/api/v1/steps/${t.b}`, { data: { ...b, description: 'changed by B' } });
+  expect(put.ok(), await put.text()).toBe(true);
+  type W = { name: string; version: string; description: string | null; entryStepIds: string[]; assignmentIds: string[]; cacheIds: string[]; cronExpression: string | null };
+  const o = await get<W>(request, `workflows/${t.other.id}`);
+  const w = await request.put(`/api/v1/workflows/${t.other.id}`, { data: { ...o, entryStepIds: [inOther] } });
+  expect(w.ok(), await w.text()).toBe(true);
+
+  // A reopens the workflow (its stored design still deletes b) and saves again
+  await open(page);
+  await save(page);
+  await expect(await pane(page, 'Output')).toContainText('Saved; not applied');
+  const row = (await problems(page)).getByRole('listitem').filter({ hasText: 'changed by someone else since you opened it' });
+  await expect(row).toHaveCount(1);
+  expect((await get<S>(request, `steps/${t.b}`)).description).toBe('changed by B');
+  await shot(page, '7-stale-delete');
 });
