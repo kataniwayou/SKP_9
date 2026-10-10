@@ -30,6 +30,8 @@ const STATES: Record<LiveStatus, string> = {
  * not started is grey, still and blinking slowly. Nothing is written outside the dial, whose outer ring is for the
  * wires' contact points (the user's rule, 2026-10-10): inside it WORKFLOW, and under it the state, which never
  * blinks. An unknown or unchecked status has not started's look, but its state says so rather than "not started".
+ * The state's colour (2026-10-10): started healthy green, not started undetermined grey, unknown warn amber,
+ * checking muted.
  */
 export function WorkflowView({ tip, started, status }: WorkflowNodeData & { started: boolean; status: LiveStatus }) {
   const core = `nxcore${useId().replace(/[^\w-]/g, '')}`;
@@ -54,7 +56,7 @@ export function WorkflowView({ tip, started, status }: WorkflowNodeData & { star
         </g>
       </g>
       <text className="nx-wl" x={C} y={C - 2} textAnchor="middle">WORKFLOW</text>
-      <text className="nx-state" x={C} y={C + 16} textAnchor="middle"><tspan>{STATES[status]}</tspan></text>
+      <text className={`nx-state st-${status}`} data-status={status} x={C} y={C + 16} textAnchor="middle"><tspan>{STATES[status]}</tspan></text>
     </g>
   );
 }

@@ -75,4 +75,14 @@ describe('WorkflowView', () => {
     // inside the inner core (r - 22 around the centre r, r)
     expect(Math.abs(y - SPHERE_R)).toBeLessThan(SPHERE_R - 22);
   });
+
+  it('marks its state with the status, for its colour: started green, not started grey, unknown amber, checking muted (2026-10-10)', () => {
+    for (const status of ['running', 'stopped', 'unknown', 'checking'] as const) {
+      const { container, unmount } = render(<svg><WorkflowView {...data} started={status === 'running'} status={status} /></svg>);
+      const state = container.querySelector('.nx-state')!;
+      expect(state.classList.contains(`st-${status}`)).toBe(true);
+      expect(state.getAttribute('data-status')).toBe(status);
+      unmount();
+    }
+  });
 });

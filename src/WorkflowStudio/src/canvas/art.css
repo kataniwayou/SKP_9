@@ -61,6 +61,11 @@
 .wf .nx-core-dots { stroke-dasharray: 1 3; stroke-width: 4; opacity: .55; }
 .wf .nx-wl { font: 400 11px var(--sans); fill: var(--nh); letter-spacing: 3px; }
 .wf .nx-state { font: 400 10px var(--mono); fill: var(--nh); }
+/* the state under WORKFLOW, coloured by what BaseApi says (2026-10-10) */
+.wf .nx-state.st-running { fill: var(--healthy); }
+.wf .nx-state.st-stopped { fill: var(--undetermined); }
+.wf .nx-state.st-unknown { fill: var(--warn); }
+.wf .nx-state.st-checking { fill: var(--muted); }
 .wf.nx-idlewf .hub-inner { animation: nxwait 2.6s ease-in-out infinite; }
 .wf.nx-idlewf .nx-spin { animation: none; }
 .wf.nx:hover .sphere { filter: brightness(1.08); }
