@@ -3971,7 +3971,8 @@
           },
           "processorId": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "nullable": true
           },
           "fields": {
             "type": "object",

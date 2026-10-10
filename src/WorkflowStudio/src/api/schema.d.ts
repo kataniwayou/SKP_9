@@ -2456,7 +2456,7 @@ export interface components {
             /** Format: uuid */
             copyOf?: string | null;
             /** Format: uuid */
-            processorId?: string;
+            processorId?: string | null;
             fields?: {
                 [key: string]: unknown;
             } | null;

@@ -42,11 +42,12 @@ public sealed record DesignSaveRequest(
 /// <summary>A step the design creates (a pasted copy): its own new id, the same processor as its original.</summary>
 /// <param name="Id">The new step's id, made by the studio; refused when a step with it already exists.</param>
 /// <param name="CopyOf">The step it is a copy of (for the log only; may itself be a step of this design); null: none.</param>
-/// <param name="ProcessorId">The processor it runs (processors are never copied).</param>
+/// <param name="ProcessorId">The processor it runs (processors are never copied); null or empty: it has none (the designer
+/// removed it, 2026-10-10), which the steps stage refuses on that step, so the dry run fails.</param>
 /// <param name="Fields">Its fields by camelCase name (<c>name</c>, <c>version</c>, <c>description</c>, <c>entryCondition</c>).</param>
 /// <param name="NextStepIds">Its next steps (written in the wires stage); null or empty: none.</param>
 public sealed record DesignNewStepDto(
-    Guid Id, Guid? CopyOf, Guid ProcessorId, Dictionary<string, JsonElement>? Fields, List<Guid>? NextStepIds);
+    Guid Id, Guid? CopyOf, Guid? ProcessorId, Dictionary<string, JsonElement>? Fields, List<Guid>? NextStepIds);
 
 /// <summary>A cache the design creates (a pasted copy), with a new id; the workflow's cache list links it.</summary>
 /// <param name="Id">The new cache's id; refused when a cache with it already exists.</param>

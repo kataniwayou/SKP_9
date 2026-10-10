@@ -66,12 +66,17 @@ internal sealed class StepStage : IDesignStage
                 var dto = DesignFields.Apply(before, s.Fields, errors);
                 // a field already refused (unknown name, wrong type) is its own error: no CRUD verdict on top of it
                 if (errors.Count > 0) return errors;
+                // its processor removed in the design (2026-10-10): the dry run fails on this step
+                if (dto.ProcessorId == Guid.Empty) return [new FieldError("processorId", DesignFields.NoProcessor)];
+                if (dto.ProcessorId != before.ProcessorId
+                    && !await _db.Set<BaseApi.Service.Features.Processor.ProcessorEntity>().AnyAsync(p => p.Id == dto.ProcessorId, ct))
+                    return [new FieldError("processorId", "Its processor no longer exists.")];
                 var problems = DesignFields.Failures(await _validator.ValidateAsync(dto, ct));
                 if (problems.Count > 0) return problems;
                 _mapper.Update(dto, entity);
                 change = DesignLogText.Join(DesignLogText.Fields(
                     ("name", before.Name, dto.Name), ("version", before.Version, dto.Version), ("description", before.Description, dto.Description),
-                    ("entryCondition", before.EntryCondition, dto.EntryCondition)));
+                    ("entryCondition", before.EntryCondition, dto.EntryCondition), ("processor", before.ProcessorId, dto.ProcessorId)));
                 return problems;
             }, ct);
             if (!applied) run.FailedSteps.Add(s.Id);
@@ -88,10 +93,13 @@ internal sealed class StepStage : IDesignStage
         var applied = await run.UnitAsync("step", n.Id, "steps", async () =>
         {
             var errors = new List<FieldError>();
+            // its processor removed in the design (2026-10-10): the dry run fails on this step
+            if (n.ProcessorId is not { } processorId || processorId == Guid.Empty) return [new FieldError("processorId", DesignFields.NoProcessor)];
             // no field means its empty value: the CRUD's rules then say what is missing (an omitted entry condition is refused)
-            var fields = DesignFields.Apply(new StepUpdateDto("", "", null, n.ProcessorId, null, default), n.Fields, errors);
+            var fields = DesignFields.Apply(new StepUpdateDto("", "", null, processorId, null, default), n.Fields, errors);
             if (errors.Count > 0) return errors;
-            var dto = new StepCreateDto(fields.Name, fields.Version, fields.Description, n.ProcessorId, null, fields.EntryCondition);
+            if (fields.ProcessorId == Guid.Empty) return [new FieldError("processorId", DesignFields.NoProcessor)];
+            var dto = new StepCreateDto(fields.Name, fields.Version, fields.Description, fields.ProcessorId, null, fields.EntryCondition);
             var existing = await _db.Set<StepEntity>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == n.Id, ct);
             if (existing is not null)
             {
@@ -110,7 +118,7 @@ internal sealed class StepStage : IDesignStage
                 }
                 return [new FieldError(null, "Not created: a different step with this id already exists.")];
             }
-            if (!await _db.Set<BaseApi.Service.Features.Processor.ProcessorEntity>().AnyAsync(p => p.Id == n.ProcessorId, ct))
+            if (!await _db.Set<BaseApi.Service.Features.Processor.ProcessorEntity>().AnyAsync(p => p.Id == dto.ProcessorId, ct))
                 return [new FieldError("processorId", "Not created: its processor no longer exists.")];
             var problems = DesignFields.Failures(await _createValidator.ValidateAsync(dto, ct));
             if (problems.Count > 0) return problems;

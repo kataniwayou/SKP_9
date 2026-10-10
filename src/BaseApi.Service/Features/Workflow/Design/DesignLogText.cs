@@ -13,7 +13,7 @@ internal static class DesignLogText
     private const int Shown = 40;
 
     /// <summary>Fields whose values are data, never echoed in the log: only that they changed.</summary>
-    private static readonly HashSet<string> Opaque = ["payload", "items", "definition"];
+    private static readonly HashSet<string> Opaque = ["payload", "items", "definition", "processor"];
 
     /// <summary>
     /// The fields that differ, as "name 'a' → 'b'"; a long value (a description, a payload, a definition)

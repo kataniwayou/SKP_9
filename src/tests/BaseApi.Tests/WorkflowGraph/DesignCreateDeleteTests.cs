@@ -494,8 +494,6 @@ public sealed class DesignCreateDeleteTests
         Assert.Throws<ValidationException>(() => DesignShape.ThrowIfMalformed(Guid.NewGuid(), Of(
             newSteps: [new DesignNewStepDto(Guid.Empty, null, proc, null, null)])));
         Assert.Throws<ValidationException>(() => DesignShape.ThrowIfMalformed(Guid.NewGuid(), Of(
-            newSteps: [new DesignNewStepDto(id, null, Guid.Empty, null, null)])));
-        Assert.Throws<ValidationException>(() => DesignShape.ThrowIfMalformed(Guid.NewGuid(), Of(
             newCaches: [new DesignNewCacheDto(Guid.Empty, null, null)])));
         Assert.Throws<ValidationException>(() => DesignShape.ThrowIfMalformed(Guid.NewGuid(), Of(
             newSteps: [new DesignNewStepDto(id, Guid.Empty, proc, null, null)])));
@@ -514,5 +512,91 @@ public sealed class DesignCreateDeleteTests
         Assert.Null(body.NewSteps);
         Assert.Null(body.DeletedCaches);
         Assert.Null(body.Assignments![0].CopyOf);
+    }
+
+    // ---- a step with its processor removed in the design (2026-10-10): the steps stage refuses it, the dry run fails ----
+
+    [Fact]
+    public void ANewStepWithNoProcessorIsNotAMalformedBody()
+    {
+        Assert.Null(Record.Exception(() => DesignShape.ThrowIfMalformed(Guid.NewGuid(), Of(
+            newSteps: [new DesignNewStepDto(Guid.NewGuid(), null, null, null, null), new DesignNewStepDto(Guid.NewGuid(), null, Guid.Empty, null, null)]))));
+    }
+
+    [Fact]
+    public async Task ANewStepWithNoProcessorIsRefusedOnItsProcessorAndNothingIsWritten()
+    {
+        await using var h = new GraphHarness();
+        var proc = await h.ProcessorAsync();
+        var a = await h.StepAsync(proc, "a");
+        var wf = await h.WorkflowAsync("wf", [a]);
+        var loaded = await h.Reader.ReadAsync(wf, h.Ct);
+        h.Forget();
+        Guid none = Guid.NewGuid(), empty = Guid.NewGuid();
+
+        var outcome = await h.Syncer().SaveAsync(wf, Of(
+            workflow: new DesignWorkflowDto(loaded.Workflow.UpdatedAt, null, [a, none, empty], null),
+            newSteps:
+            [
+                new DesignNewStepDto(none, a, null, StepFields("n"), null),
+                new DesignNewStepDto(empty, a, Guid.Empty, StepFields("e"), null),
+            ]), h.Ct);
+
+        Assert.False(outcome.Applied);
+        Assert.Contains(outcome.Errors, e => (e.Id, e.Stage, e.Field, e.Message) == (none, "steps", "processorId", DesignFields.NoProcessor));
+        Assert.Contains(outcome.Errors, e => (e.Id, e.Stage, e.Field, e.Message) == (empty, "steps", "processorId", DesignFields.NoProcessor));
+        h.Forget();
+        Assert.Equal(1, await h.Db.Steps.CountAsync(h.Ct));
+    }
+
+    [Fact]
+    public async Task AStepWhoseProcessorTheDesignRemovedIsRefusedAndKeepsItsRow()
+    {
+        await using var h = new GraphHarness();
+        var proc = await h.ProcessorAsync();
+        var a = await h.StepAsync(proc, "a");
+        var wf = await h.WorkflowAsync("wf", [a]);
+        var loaded = await h.Reader.ReadAsync(wf, h.Ct);
+        h.Forget();
+
+        var outcome = await h.Syncer().SaveAsync(wf, Of(steps:
+            [new DesignStepDto(a, loaded.Steps.Single(s => s.Id == a).UpdatedAt, F("""{"processorId":null,"description":"d"}"""), null)]), h.Ct);
+
+        Assert.False(outcome.Applied);
+        Assert.Contains(outcome.Errors, e => (e.Id, e.Stage, e.Field, e.Message) == (a, "steps", "processorId", DesignFields.NoProcessor));
+        h.Forget();
+        var row = await h.Db.Steps.SingleAsync(s => s.Id == a, h.Ct);
+        Assert.Equal((proc, (string?)null), (row.ProcessorId, row.Description));
+    }
+
+    [Fact]
+    public async Task AStepsProcessorFieldNamesAnExistingProcessorOrIsRefused()
+    {
+        await using var h = new GraphHarness();
+        var proc = await h.ProcessorAsync();
+        var other = await h.ProcessorAsync("other");
+        var a = await h.StepAsync(proc, "a");
+        var b = await h.StepAsync(proc, "b");
+        var c = await h.StepAsync(proc, "c");
+        var wf = await h.WorkflowAsync("wf", [a, b, c]);
+        var loaded = await h.Reader.ReadAsync(wf, h.Ct);
+        DateTime? Stamp(Guid id) => loaded.Steps.Single(s => s.Id == id).UpdatedAt;
+        h.Forget();
+
+        var refused = await h.Syncer().SaveAsync(wf, Of(steps:
+        [
+            new DesignStepDto(b, Stamp(b), F($$"""{"processorId":"{{Guid.NewGuid()}}"}"""), null),
+            new DesignStepDto(c, Stamp(c), F("""{"processorId":7}"""), null),
+        ]), h.Ct);
+        Assert.False(refused.Applied);
+        Assert.Contains(refused.Errors, e => (e.Id, e.Field, e.Message) == (b, "processorId", "Its processor no longer exists."));
+        Assert.Contains(refused.Errors, e => (e.Id, e.Field) == (c, "processorId"));
+        h.Forget();
+
+        var moved = await h.Syncer().SaveAsync(wf, Of(steps: [new DesignStepDto(a, Stamp(a), F($$"""{"processorId":"{{other}}"}"""), null)]), h.Ct);
+        Assert.True(moved.Applied, Describe(moved));
+        h.Forget();
+        Assert.Equal(other, (await h.Db.Steps.SingleAsync(s => s.Id == a, h.Ct)).ProcessorId);
+        Assert.Contains("info steps: step 'a': processor changed", Lines(moved));
     }
 }

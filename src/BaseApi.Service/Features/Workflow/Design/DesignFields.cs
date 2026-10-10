@@ -41,6 +41,8 @@ internal static class DesignFields
                 "version" => dto with { Version = Text(v, key, errors) ?? "" },
                 "description" => dto with { Description = Text(v, key, errors) },
                 "entryCondition" => Number(v, key, errors) is { } n ? dto with { EntryCondition = (StepEntryCondition)n } : dto,
+                // the processor it runs (2026-10-10); null or empty: the designer removed it, which the stage refuses
+                "processorId" => dto with { ProcessorId = Id(v, key, errors) ?? Guid.Empty },
                 _ => Unknown(dto, key, errors),
             };
         return dto;
@@ -120,6 +122,20 @@ internal static class DesignFields
             case JsonValueKind.String: return v.GetString();
             case JsonValueKind.Null: return null;
             default: errors.Add(new FieldError(key, $"{key} must be text or null.")); return null;
+        }
+    }
+
+    /// <summary>The message a step with no processor is refused with (2026-10-10).</summary>
+    public const string NoProcessor = "No processor: drag one from the toolbox.";
+
+    private static Guid? Id(JsonElement v, string key, List<FieldError> errors)
+    {
+        switch (v.ValueKind)
+        {
+            case JsonValueKind.Null: return null;
+            case JsonValueKind.String when v.GetString() is { Length: 0 }: return null;
+            case JsonValueKind.String when Guid.TryParse(v.GetString(), out var id): return id;
+            default: errors.Add(new FieldError(key, $"{key} must be an id or null.")); return null;
         }
     }
 
