@@ -122,7 +122,7 @@ describe('an entity the active design changed is shown as that design has it, ma
   });
 });
 
-describe('an empty cache is drawn with the empty step\'s dashed rectangle, muted, no ⚠ (2026-10-11)', () => {
+describe('an empty cache is drawn with the empty step\'s dashed amber rectangle and ⚠ (2026-10-11)', () => {
   it('no items: the dashed rectangle instead of the honeycomb and the root plate; with an item: as usual', () => {
     expect([emptyItems('{}'), emptyItems(' '), emptyItems('{"a":"1"}'), emptyItems('not json'), emptyItems('[]')]).toEqual([true, true, false, false, false]);
     const empty = cacheFromDto(cacheDto('k1', { items: '{}' }));
@@ -131,10 +131,11 @@ describe('an empty cache is drawn with the empty step\'s dashed rectangle, muted
     expect(container.querySelector('.cache-empty-line')).toHaveAttribute('fill', 'none');
     expect(container.querySelector('.nx-hex')).toBeNull();
     expect(container.querySelector('.nx-plate')).toBeNull();
-    expect(container.textContent).not.toContain('⚠');
+    expect(container.querySelector('.cache-empty-mark')?.textContent).toBe('⚠');
     expect(container.querySelector('.nx-cl')).not.toBeNull();
     rerender(<svg><CacheView {...cacheData({ ...empty, items: '{"a":"1"}' }, fitter)} /></svg>);
     expect(container.querySelector('.cache-empty-line')).toBeNull();
+    expect(container.querySelector('.cache-empty-mark')).toBeNull();
     expect(container.querySelector('.nx-hex')).not.toBeNull();
   });
 });

@@ -13,7 +13,7 @@ export type CacheNodeData = {
   /** The root plate's width: the root's text plus its margin, never past 128. */
   plateWidth: number;
   tooltip: string;
-  /** No items (2026-10-11): the honeycomb and the root plate give way to a dashed amber rectangle, as an empty step's slot. */
+  /** No items (2026-10-11): the honeycomb and the root plate give way to a dashed amber rectangle with a ⚠, as an empty step's slot. */
   empty?: boolean;
 };
 export type CacheNodeType = Node<CacheNodeData, 'cache'>;
@@ -42,8 +42,12 @@ export function CacheView({ lines, versionLine, root, plateWidth, tooltip, empty
         </Fragment>
       ))}
       {empty ? (
-        // an empty cache (2026-10-11): the content area dashed in amber as an empty step's slot, transparent inside, no ⚠ (it saves fine)
-        <rect className="cache-empty-line" x={14} y={14} width={W - 28} height={H - 28} rx={5} fill="none" />
+        // an empty cache (2026-10-11): the content area dashed in amber with a ⚠ where the honeycomb was, as an empty step's
+        // slot (the user's rule; it saves fine, the sign says it holds nothing yet); transparent inside
+        <>
+          <rect className="cache-empty-line" x={14} y={14} width={W - 28} height={H - 28} rx={5} fill="none" />
+          <text className="cache-empty-mark" x={MID} y={53} textAnchor="middle">⚠</text>
+        </>
       ) : (
         <>
           <g className="nx-g"><polygon className="nx-hl nx-bd nx-hex" points={hexPoints(MID, 46, 20)} /></g>
