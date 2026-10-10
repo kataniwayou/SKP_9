@@ -8,7 +8,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    proxy: { '/api': process.env.SKP_API ?? 'http://localhost:18080' },
+    // ws: the liveness hub (/api/hubs/liveness) is a WebSocket (2026-10-10)
+    proxy: { '/api': { target: process.env.SKP_API ?? 'http://localhost:18080', ws: true } },
   },
   test: {
     environment: 'jsdom',

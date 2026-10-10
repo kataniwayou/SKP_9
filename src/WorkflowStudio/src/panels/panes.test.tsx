@@ -6,6 +6,7 @@ import { loadedDocument } from '../app/fixtures';
 import { entityName } from '../model/entityNames';
 import { createStudioStore, StudioStoreProvider, type StudioStore } from '../store/studioStore';
 import { inspectorGraph, renderInspector } from '../test/inspector';
+import { liveStub } from '../test/liveStub';
 import { Output } from './Output';
 import { Toolbox } from './PaneNote';
 import type { DesignError } from '../model/graph';
@@ -66,6 +67,24 @@ describe('Inspector', () => {
     const values = [...container.querySelectorAll('.ro, .slot .v')];
     expect(values.length).toBeGreaterThan(5);
     for (const v of values) expect(v.getAttribute('data-tipcut')).toBe(v.textContent);
+  });
+
+  it("shows the processor's liveness from the app's liveness store, and follows it (2026-10-10)", async () => {
+    const live = liveStub();
+    await renderInspector({ getEntity: vi.fn().mockResolvedValue(ok(processorDto('p1', { name: 'fetcher', configSchemaId: 'sc1' }))) },
+      { selection: { kind: 'processor', processorId: 'p1', stepId: 's1' }, live });
+    const status = await screen.findByLabelText('Liveness');
+    expect(status).toHaveTextContent('checking…');
+    act(() => live.known([], { P1: { live: true, healthy: 2, replicas: 3, reason: null } }));
+    expect(status).toHaveTextContent('live · 2 of 3 replicas healthy');
+    expect(status).toHaveClass('healthy');
+    act(() => live.known([], { p1: false }));
+    expect(status).toHaveTextContent('not live · no healthy replica (1 checked: 0 absent, 0 unhealthy, 1 stale, 0 malformed)');
+    expect(status).toHaveClass('unhealthy');
+    act(() => live.known([], {}));
+    expect(status).toHaveTextContent('not reported');
+    act(() => live.unknown());
+    expect(status).toHaveTextContent('unknown: BaseApi could not say');
   });
 
   it('says how many items are picked, and reads a picked wire as text (the user request of 2026-10-09)', async () => {

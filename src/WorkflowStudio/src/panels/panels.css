@@ -101,3 +101,8 @@ fieldset.plain { border: 0; margin: 0; padding: 0; min-width: 0; }
 .rtable thead th:nth-child(2) { width: 76px; }
 .rtable tbody th { font-family: var(--mono); font-weight: 400; color: var(--ink); }
 .rtable td { font-family: var(--mono); color: var(--ink); }
+
+/* the processor's liveness in the Inspector (2026-10-10): the art's health colours */
+.ro.liveness.healthy { color: var(--healthy); }
+.ro.liveness.unhealthy { color: var(--unhealthy); }
+.ro.liveness.undetermined { color: var(--undetermined); }

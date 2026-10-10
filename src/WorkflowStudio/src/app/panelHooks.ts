@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
 import type { DockviewPanelApi } from 'dockview-react';
-import type { ApiResult, StudioApi } from '../api/client';
-import { liveStatusOf, type LiveStatus } from '../api/liveStatus';
 
 /** The part of a dockview panel's api these hooks use (tests pass a stand-in). */
 export type PanelLike = Pick<DockviewPanelApi, 'getWindow' | 'onDidLocationChange' | 'isVisible' | 'onDidVisibilityChange'>;
@@ -29,60 +27,4 @@ export function usePanelShown(panel: PanelLike): boolean {
     return () => sub.dispose();
   }, [panel]);
   return shown;
-}
-
-/** True while the panel's tab is the visible one and its window is not hidden (a background browser tab). */
-export function usePanelVisible(panel: PanelLike, doc: Document): boolean {
-  const shown = usePanelShown(panel);
-  const [pageVisible, setPageVisible] = useState(doc.visibilityState !== 'hidden');
-  useEffect(() => {
-    const update = () => setPageVisible(doc.visibilityState !== 'hidden');
-    update();
-    doc.addEventListener('visibilitychange', update);
-    return () => doc.removeEventListener('visibilitychange', update);
-  }, [doc]);
-  return shown && pageVisible;
-}
-
-export const LIVE_POLL_MS = 5000;
-
-type Call = (api: StudioApi) => Promise<ApiResult<unknown>>;
-// module-level, so the polling effect sees the same function every render
-const LIVE: Call = (api) => api.listLive();
-const LIVENESS: Call = (api) => api.listLiveness();
-
-/**
- * Calls `call(api)` now and every 5 s while `visible`, and returns its last answer: null while
- * hidden and before the first answer. A thrown call is a network failure. An answer that lands
- * after the poll stopped (hidden, unmounted, restarted) is dropped.
- */
-function usePoll(api: StudioApi, call: Call, visible: boolean): ApiResult<unknown> | null {
-  const [result, setResult] = useState<ApiResult<unknown> | null>(null);
-  useEffect(() => {
-    if (!visible) { setResult(null); return; }
-    let live = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
-      const answer = await Promise.resolve()
-        .then(() => call(api))
-        .catch((e: unknown): ApiResult<unknown> => ({ ok: false, error: { kind: 'network', message: String(e) } }));
-      if (!live) return;
-      setResult(answer);
-      timer = setTimeout(() => void poll(), LIVE_POLL_MS);
-    };
-    void poll();
-    return () => { live = false; clearTimeout(timer); };
-  }, [api, call, visible]);
-  return result;
-}
-
-/** Polls `GET /orchestration/live` every 5 s, only while `visible` (spec §6.1). Starts as "checking". */
-export function useLiveStatus(api: StudioApi, workflowId: string, visible: boolean): LiveStatus {
-  const result = usePoll(api, LIVE, visible);
-  return result === null ? 'checking' : liveStatusOf(result, workflowId);
-}
-
-/** Polls `GET /processors/liveness` with the live status (spec §5.1): the same 5 s, the same visibility. */
-export function useLiveness(api: StudioApi, visible: boolean): ApiResult<unknown> | null {
-  return usePoll(api, LIVENESS, visible);
 }

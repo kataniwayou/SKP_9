@@ -11,6 +11,7 @@ import { FIELDS, savedText, type FieldSpec } from '../store/entityForms';
 import { crumbLabel, editTargetOf, rootTarget, targetKey, type InspectorTarget, type SchemaSlot } from '../store/inspectorTarget';
 import { activeDocument, shownTargetOf, type OpenDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
+import { useProcessorLive } from '../live/LiveContext';
 import { FieldEditor } from './FieldEditor';
 import { editBaseOf } from '../store/inspectorBase';
 import { detailRows, inspectorBaseOf, kindLabel, uniqueNameOf, type Row } from './inspectorView';
@@ -205,6 +206,7 @@ function EntityForm({ open, doc, base, target, saved, fields, showDetails, drill
           return readOnly({ label: 'Step', value: s ? entityName(s.name, s.version, s.id) : target.stepId });
         })()}
       </div>
+      {target.kind === 'processor' && <ProcessorLivenessSection processorId={target.id} />}
       {target.kind === 'processor' && (
         <div className="sec">
           <div className="sec-title">Schemas</div>
@@ -228,5 +230,26 @@ function EntityForm({ open, doc, base, target, saved, fields, showDetails, drill
         </div>
       )}
     </>
+  );
+}
+
+/** What the processor's replicas say now, as the start gate judges them (the liveness store, 2026-10-10); read-only. */
+export function livenessText(known: 'checking' | 'known' | 'unknown', p: { live: boolean; healthy: number; replicas: number; reason: string | null } | null): string {
+  if (known === 'checking') return 'checking…';
+  if (known === 'unknown') return 'unknown: BaseApi could not say';
+  if (p === null) return 'not reported';
+  if (p.live) return `live · ${p.healthy} of ${p.replicas} replica${p.replicas === 1 ? '' : 's'} healthy`;
+  return `not live · ${p.reason ?? 'no healthy replica'}`;
+}
+
+function ProcessorLivenessSection({ processorId }: { processorId: string }) {
+  const { known, processor } = useProcessorLive(processorId);
+  const text = livenessText(known, processor);
+  const tone = known !== 'known' || processor === null ? 'undetermined' : processor.live ? 'healthy' : 'unhealthy';
+  return (
+    <div className="sec">
+      <div className="sec-title">Liveness</div>
+      <div className="field"><label>Status</label><span className={`ro liveness ${tone}`} aria-label="Liveness" data-tipcut={text}>{text}</span></div>
+    </div>
   );
 }

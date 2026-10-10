@@ -52,8 +52,6 @@ export interface OpenDocument {
   restored: boolean;
   /** A Save is in flight: the design is read-only (spec §4.1). */
   saving: boolean;
-  /** What the live poll last said (`GET /orchestration/live`); not kept across a refresh. */
-  live: LiveStatus;
   /** A Start or Stop being sent or waiting for the live set (2026-10-09); not kept across a refresh. */
   run: RunState | null;
   /**
@@ -123,12 +121,15 @@ export type StudioAction =
   | { type: 'saveFailed'; workflowId: Id; at: string; message: string }
   /** A failed document goes back to loading. */
   | { type: 'retry'; workflowId: Id }
-  /** The live poll's answer for this document. A Start or Stop waiting for it is done when it agrees. */
-  | { type: 'live'; workflowId: Id; status: LiveStatus; at: string }
+  /**
+   * A workflow started or stopped (2026-10-10: the liveness store says so, for every workflow, open or not). Output logs
+   * "<name> running" / "<name> stopped"; an open document's Start or Stop waiting for it is done.
+   */
+  | { type: 'liveChanged'; workflowId: Id; name: string; running: boolean; at: string }
   /** Start or Stop pressed; `note` is a line Output gets first (the drawing is not what runs). */
   | { type: 'runRequested'; workflowId: Id; op: RunOp; token: string; at: string; note?: string }
-  /** BaseApi's answer to Start or Stop: accepted (202), or refused with why. */
-  | { type: 'runAnswered'; workflowId: Id; token: string; at: string; ok: boolean; message?: string }
+  /** BaseApi's answer to Start or Stop: accepted (202), or refused with why. `live`: the workflow's status as it lands. */
+  | { type: 'runAnswered'; workflowId: Id; token: string; at: string; ok: boolean; message?: string; live: LiveStatus }
   /** An accepted Start or Stop the live set has not agreed with in RUN_TIMEOUT_MS. */
   | { type: 'runTimeout'; workflowId: Id; token: string; at: string };
 
@@ -192,7 +193,7 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       const doc: OpenDocument = {
         workflowId: action.workflowId, name: action.name, version: action.version, status: { kind: 'loading' }, selection: null, inspector: EMPTY_INSPECTOR,
         picks: [], design: historyOf(), edits: EMPTY_EDITS, errors: null, stored: null, restored: false, saving: false,
-        live: 'checking', run: null, generation: 0,
+        run: null, generation: 0,
       };
       return { ...state, docs: [...state.docs, doc], activeId: action.workflowId };
     }
@@ -344,16 +345,12 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       const doc = state.docs.find((d) => d.workflowId === action.workflowId);
       return doc ? logged(state, action.workflowId, doc.name, action.lines) : state;
     }
-    case 'live': {
-      const doc = state.docs.find((d) => d.workflowId === action.workflowId);
-      if (!doc) return state;
-      const run = doc.run;
+    case 'liveChanged': {
+      // one line per change, whoever started it: a press's confirmation is this same line (2026-10-10)
+      const lines = [{ at: action.at, text: action.running ? 'running' : 'stopped' }];
       // an accepted Start is done when the live set lists the workflow, an accepted Stop when it no longer does
-      const done = run?.phase === 'waiting' && (run.op === 'start' ? action.status === 'running' : action.status === 'stopped');
-      if (!done) return doc.live === action.status ? state : update(state, action.workflowId, (d) => ({ ...d, live: action.status }));
-      const next = update(state, action.workflowId, (d) => ({ ...d, live: action.status, run: null }));
-      const text = run!.op === 'start' ? 'running: the workflow is in BaseApi\'s live set' : 'stopped: the workflow left BaseApi\'s live set';
-      return logged(next, action.workflowId, doc.name, [{ at: action.at, text }]);
+      const next = update(state, action.workflowId, (d) => (d.run?.phase === 'waiting' && agrees(d.run.op, action.running) ? { ...d, run: null } : d));
+      return logged(next, action.workflowId, action.name, lines);
     }
     case 'runRequested': {
       const doc = state.docs.find((d) => d.workflowId === action.workflowId);
@@ -372,11 +369,11 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
         const next = update(state, action.workflowId, (d) => ({ ...d, run: null }));
         return logged(next, action.workflowId, doc.name, [{ at: action.at, text: `${word} refused by BaseApi: ${action.message ?? 'no reason given'}`, level: 'error' }]);
       }
-      const next = update(state, action.workflowId, (d) => ({ ...d, run: { ...run, phase: 'waiting' } }));
+      // the live set may already agree (its change came while the request was on its way): done, and already logged
+      const seen = action.live === (run.op === 'start' ? 'running' : 'stopped');
+      const next = update(state, action.workflowId, (d) => ({ ...d, run: seen ? null : { ...run, phase: 'waiting' } }));
       const wait = run.op === 'start' ? 'starting… waiting for the workflow to appear in the live set' : 'stopping… waiting for the workflow to leave the live set';
-      const accepted = logged(next, action.workflowId, doc.name, [{ at: action.at, text: `${word} accepted by BaseApi (202): ${wait}` }]);
-      // the poll may already have seen it while the request was on its way
-      return reduce(accepted, { type: 'live', workflowId: action.workflowId, status: doc.live, at: action.at });
+      return logged(next, action.workflowId, doc.name, [{ at: action.at, text: seen ? `${word} accepted by BaseApi (202)` : `${word} accepted by BaseApi (202): ${wait}` }]);
     }
     case 'runTimeout': {
       const doc = state.docs.find((d) => d.workflowId === action.workflowId);
@@ -393,6 +390,9 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       return update(state, action.workflowId, (d) => (d.status.kind !== 'failed' ? d : { ...d, status: { kind: 'loading' } }));
   }
 }
+
+/** The live set agrees with a press: a Start's workflow runs, a Stop's does not. */
+const agrees = (op: RunOp, running: boolean): boolean => (op === 'start') === running;
 
 /** The state with lines for one workflow appended to Output (bounded). */
 function logged(state: StudioState, workflowId: Id, name: string, lines: readonly LineDraft[]): StudioState {

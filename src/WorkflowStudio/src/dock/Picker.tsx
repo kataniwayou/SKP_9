@@ -9,6 +9,8 @@ export interface PickerItem {
   label: string;
   /** Already open as a document: picking it switches to that tab. */
   open: boolean;
+  /** In BaseApi's live set (2026-10-10): a running dot, read as "running". */
+  running?: boolean;
 }
 
 /** Case-insensitive substring match on the label; the list keeps its order. */
@@ -70,6 +72,7 @@ export function Picker({ items, anchor, onPick, onClose, note }: {
       <div role="listbox" aria-label="Workflows" id={`${baseId}-list`}>
         {shown.map((item, i) => (
           <div key={item.id} id={optionId(i)} role="option" aria-selected={i === at} className={i === at ? 'pk hi' : 'pk'} onClick={() => pick(item.id)}>
+            <span className="rslot">{item.running && <span className="rdot" role="img" aria-label="running" data-tip="running" />}</span>
             <b data-tipcut={item.label}>{item.label}</b>
             <span className="o">{item.open ? 'open — switch' : ''}</span>
           </div>

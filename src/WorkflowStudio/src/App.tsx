@@ -17,6 +17,10 @@ import { DockShell, type DockDocument, type PickerItem } from './dock/DockShell'
 import type { ToolId } from './dock/ids';
 import { browserStorage, type SavedLayout } from './dock/layoutPersistence';
 import { entityName } from './model/entityNames';
+import { createLiveStore, type HubFactory } from './live/liveClient';
+import { LiveStoreProvider, useLive, useLiveStore } from './live/LiveContext';
+import { statusOf } from './live/liveState';
+import { signalRHub } from './live/signalrHub';
 import { Inspector } from './panels/Inspector';
 import { Output } from './panels/Output';
 import { Toolbox } from './panels/PaneNote';
@@ -44,31 +48,42 @@ export interface AppProps {
   storage?: Storage | null;
   /** This tab's storage, where its session lives. Default: sessionStorage. */
   tabStorage?: Storage | null;
+  /**
+   * The liveness hub (2026-10-10). Default: BaseApi's SignalR hub, or none when `api` is injected (a test's fake api:
+   * the studio then polls it). Null: no hub, poll only.
+   */
+  hub?: HubFactory | null;
 }
 
 /**
  * The studio page (slice 3a): one store, the dock, and what goes in its documents and panes. The page
  * keeps its session (plan 3d): the store starts from it, so a refresh brings back what was open.
  */
-export function App({ api: injected, storage, tabStorage }: AppProps) {
+export function App({ api: injected, storage, tabStorage, hub }: AppProps) {
   const api = useMemo(() => injected ?? createApi(), [injected]);
   const resolved = useMemo(() => (storage === undefined ? browserStorage() : storage), [storage]);
   const tab = useMemo(() => (tabStorage === undefined ? browserTabStorage() : tabStorage), [tabStorage]);
   const session = useMemo(() => readTabSession(tab, resolved), [tab, resolved]);
   // the session is read once: the store is made once, from the session the page started with
   const store = useMemo(() => createStudioStore(restoredState(session)), []);
+  // one liveness store for the app, opened at start and independent of documents (2026-10-10); not kept across a refresh
+  const live = useMemo(() => createLiveStore({ api, hub: hub !== undefined ? hub : injected ? null : signalRHub() }), []);
+  useEffect(() => { live.start(); return () => live.stop(); }, [live]);
   // the page's fonts start loading at once, so the first document opens with its fitter ready
   useEffect(() => { void fitterFor(document); }, []);
   return (
     <StudioStoreProvider value={store}>
-      <SvgDefs />
-      <Studio api={api} storage={resolved} tabStorage={tab} session={session} />
+      <LiveStoreProvider value={live}>
+        <SvgDefs />
+        <Studio api={api} storage={resolved} tabStorage={tab} session={session} />
+      </LiveStoreProvider>
     </StudioStoreProvider>
   );
 }
 
 function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage: Storage | null; tabStorage: Storage | null; session: Session | null }) {
   const store = useStudioStore();
+  const live = useLiveStore();
   const docs = useStudio((s) => s.docs);
   const activeId = useStudio((s) => s.activeId);
   const inspector = useStudio(inspectorKey);
@@ -88,6 +103,28 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
     });
   }, [api]);
   useEffect(readList, [readList]);
+
+  // Output logs every workflow that starts or stops, open or not (2026-10-10), named from the open document or the
+  // workflow list; a workflow the list does not know yet is named by its id, and the list is read again
+  const listed = useRef(workflows);
+  listed.current = workflows;
+  useEffect(() => live.onWorkflowChange((changes) => {
+    const at = new Date().toISOString();
+    let stale = false;
+    for (const change of changes) {
+      const same = (id: string | null | undefined) => id?.toLowerCase() === change.workflowId;
+      const open = store.getState().docs.find((d) => same(d.workflowId));
+      const known = listed.current.find((w) => same(w.id));
+      if (!open && !known) stale = true;
+      store.dispatch({
+        type: 'liveChanged', workflowId: open?.workflowId ?? known?.id ?? change.workflowId,
+        name: open?.name ?? known?.name ?? change.workflowId, running: change.running, at,
+      });
+    }
+    if (stale) readList();
+  }), [live, store, readList]);
+  const liveOf = useCallback((id: string) => statusOf(live.getState(), id), [live]);
+  const running = useLive((s) => (s.workflows === 'known' ? s.running : null));
 
   /** Fetches an open document's workflow; a result that lands after the document was closed is dropped. */
   const load = useCallback((id: string) => {
@@ -163,8 +200,10 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
 
   );
   const items: PickerItem[] = useMemo(
-    () => workflows.filter((w) => w.id).map((w) => ({ id: w.id!, label: uniqueName(w), open: documents.some((d) => d.id === w.id) })),
-    [workflows, documents],
+    () => workflows.filter((w) => w.id).map((w) => ({
+      id: w.id!, label: uniqueName(w), open: documents.some((d) => d.id === w.id), running: running?.has(w.id!.toLowerCase()) ?? false,
+    })),
+    [workflows, documents, running],
   );
 
   return (
@@ -186,11 +225,12 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
           else close();
         }}
         workflows={items}
+        status={<LiveMark />}
         pickerNote={listError}
         onPickerOpen={readList}
         onOpenWorkflow={openWorkflow}
         renderDocument={(id, panel) => (
-          <DocumentPanel api={api} workflowId={id} panel={panel}
+          <DocumentPanel workflowId={id} panel={panel}
             initialView={views.current.get(id) ?? null}
             onViewChange={(v) => { views.current.set(id, v); saver.schedule(); }}
             onSelect={(selection: Selection | null, doc: Document, picks?: Pick[]) => {
@@ -204,7 +244,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
               actions.guard(id, () => store.dispatch({ type: 'select', workflowId: id, selection, picks }), doc);
             }}
             onSave={() => void saveDesign(api, store, id)}
-            onRun={(op) => void runWorkflow(api, store, id, op)}
+            onRun={(op) => void runWorkflow(api, store, id, op, liveOf)}
             onRetry={() => { store.dispatch({ type: 'retry', workflowId: id }); load(id); }} />
         )}
         renderTool={renderTool}
@@ -224,9 +264,9 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
         onRunCommand={(op: RunOp) => {
           const open = store.getState().docs.find((d) => d.workflowId === store.getState().activeId);
           if (!open) return `${RUN_WORD[op]}: open a workflow first.`;
-          const why = runBlocked(open, op);
+          const why = runBlocked(open, liveOf(open.workflowId), op);
           if (why !== null) return `${RUN_WORD[op]} is not available: ${why}`;
-          void runWorkflow(api, store, open.workflowId, op);
+          void runWorkflow(api, store, open.workflowId, op, liveOf);
           return null;
         }}
       />
@@ -254,6 +294,21 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
           ]} />
       )}
     </StudioActionsProvider>
+  );
+}
+
+/**
+ * The status area's mark while live updates are not reaching the studio from the hub (2026-10-10): the studio polls
+ * meanwhile, and the mark goes when the hub is back. Nothing while connected or still connecting at start.
+ */
+export function LiveMark() {
+  const connection = useLive((s) => s.connection);
+  if (connection === 'connected' || connection === 'connecting') return null;
+  return (
+    <span className="livemark" role="status" aria-label="Live updates"
+      data-tip="Live updates from BaseApi are not connected; the studio reads the status every 5 s until they are back">
+      <span className="spin-dot" aria-hidden="true" />live updates reconnecting
+    </span>
   );
 }
 

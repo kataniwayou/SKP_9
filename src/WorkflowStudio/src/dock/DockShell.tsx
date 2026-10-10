@@ -31,6 +31,8 @@ export interface DockShellProps {
   onCloseDocument: (id: string, doc?: Document) => void;
   /** The picker's list (spec §6.1: searchable, by unique name). */
   workflows: readonly PickerItem[];
+  /** The status area at the right of the menu strip (2026-10-10: the "live updates reconnecting" mark). */
+  status?: ReactNode;
   /** Shown in the picker when `workflows` is empty, e.g. why the list could not be read. */
   pickerNote?: string;
   /** Called each time the picker opens, so the page can re-read the list. */
@@ -527,6 +529,7 @@ export function DockShell(props: DockShellProps) {
               </button>
             ))}
           </div>
+          {props.status !== undefined && <div className="mstatus">{props.status}</div>}
         </div>
         <div className="dockwrap">
           <div className="dock" ref={dockRef}>

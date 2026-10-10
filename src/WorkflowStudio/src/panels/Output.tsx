@@ -91,7 +91,8 @@ function PinnedProblems({ active, errors, shown }: { active: OpenDocument; error
 
 /**
  * Output (2026-10-09: the only message pane). Pinned at the top in red, the active document's current problems (as
- * the Problems pane listed them); below them the log of what Save, Start and Stop did, oldest first, each line with its
+ * the Problems pane listed them); below them the log of what Save, Start and Stop did and of every workflow that starts or
+ * stops (2026-10-10), oldest first, each line with its
  * time and workflow, errors in red. The log is bounded and kept in the session.
  */
 /** Output's own toolbar: Clear empties the log (all workflows); the pinned problems stay. */
@@ -126,7 +127,7 @@ export function Output() {
     return (
       <div className="paneBody" data-pane="output">
         <OutputBar empty />
-        <div className="pbody"><div className="note pane-note">Nothing yet. Each Save, Start and Stop says here what happened; current problems are pinned here.</div></div>
+        <div className="pbody"><div className="note pane-note">Nothing yet. Each Save, Start and Stop says here what happened, and every workflow that starts or stops; current problems are pinned here.</div></div>
       </div>
     );
   }

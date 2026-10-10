@@ -170,7 +170,6 @@ export function restoredState(session: Session | null): StudioState {
       restored: d.design !== undefined || d.edits !== undefined,
       saving: false,
       errors: null,
-      live: 'checking',
       run: null,
       generation: 0,
     })),

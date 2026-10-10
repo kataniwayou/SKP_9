@@ -6,10 +6,12 @@ import type { WorkflowGraphDto } from '../api/types';
 import { loadedDocument } from '../app/fixtures';
 import { createInspectorService } from '../app/inspectorService';
 import { StudioActionsProvider, type StudioActions } from '../app/studioActions';
+import { LiveStoreProvider } from '../live/LiveContext';
 import { Inspector } from '../panels/Inspector';
 import type { Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
 import { createStudioStore, StudioStoreProvider } from '../store/studioStore';
+import { liveStub, type LiveStub } from './liveStub';
 
 const notFound = { ok: false, error: { kind: 'notFound', status: 404 } } as const;
 
@@ -19,7 +21,7 @@ export const inspectorGraph = graphDto({
 } as never);
 
 /** Tests only: the Inspector over a loaded document, a real service on `api`, and a guard that records. */
-export async function renderInspector(api: Partial<StudioApi>, { selection, picks, graph = inspectorGraph }: { selection: Selection | null; picks?: Pick[]; graph?: WorkflowGraphDto }) {
+export async function renderInspector(api: Partial<StudioApi>, { selection, picks, graph = inspectorGraph, live = liveStub() }: { selection: Selection | null; picks?: Pick[]; graph?: WorkflowGraphDto; live?: LiveStub }) {
   const store = createStudioStore();
   store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
   store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graph) });
@@ -34,7 +36,9 @@ export async function renderInspector(api: Partial<StudioApi>, { selection, pick
   const confirmDiscardDesign = vi.fn<StudioActions['confirmDiscardDesign']>();
   const view = render(
     <StudioStoreProvider value={store}>
-      <StudioActionsProvider value={{ service, guard, confirmDiscardDesign }}><Inspector /></StudioActionsProvider>
+      <LiveStoreProvider value={live}>
+        <StudioActionsProvider value={{ service, guard, confirmDiscardDesign }}><Inspector /></StudioActionsProvider>
+      </LiveStoreProvider>
     </StudioStoreProvider>,
   );
   return { ...view, store, api: full, service, guard };

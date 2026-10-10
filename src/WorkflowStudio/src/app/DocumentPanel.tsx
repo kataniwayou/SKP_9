@@ -1,6 +1,4 @@
-import { useEffect, useMemo } from 'react';
-import type { StudioApi } from '../api/client';
-import { healthOf } from '../api/liveness';
+import { useMemo } from 'react';
 import type { LiveArt } from '../canvas/liveArt';
 import type { SavedView } from '../canvas/savedView';
 import { useFitter } from '../canvas/useFitter';
@@ -14,15 +12,16 @@ import { applyDraft, applyEdits } from '../design/apply';
 import { canRedo, canUndo } from '../design/history';
 import { CapsuleToolbar } from './CapsuleToolbar';
 import { useStudioActionsOrNull } from './studioActions';
-import { useLiveness, useLiveStatus, useOwnerDocument, usePanelShown, usePanelVisible, type PanelLike } from './panelHooks';
+import { useHealthOf, useWorkflowStatus } from '../live/LiveContext';
+import { useOwnerDocument, usePanelShown, type PanelLike } from './panelHooks';
 
 /**
  * One workflow document in its dock tab: its own React Flow canvas and viewport (the panel uses
  * `renderer: 'always'`, so both survive tab switches), its toolbar and its run status. Labels
- * are measured in the document the panel is drawn in, so a pop-out keeps its fonts (spec §6.3).
+ * are measured in the document the panel is drawn in, so a pop-out keeps its fonts (spec §6.3). The run status and
+ * processor health come from the app's one liveness store (2026-10-10), shown or hidden alike: nothing here polls.
  */
-export function DocumentPanel({ api, workflowId, panel, initialView, onViewChange, onSelect, onRetry, onSave, onRun }: {
-  api: StudioApi;
+export function DocumentPanel({ workflowId, panel, initialView, onViewChange, onSelect, onRetry, onSave, onRun }: {
   workflowId: string;
   panel: PanelLike;
   /** Where this document's view was when the page was left (the session); null: fit it. */
@@ -46,15 +45,10 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
   const actions = useStudioActionsOrNull();
   const ownerDocument = useOwnerDocument(panel);
   const fitter = useFitter(ownerDocument);
-  const visible = usePanelVisible(panel, ownerDocument) && open?.status.kind === 'ready';
-  // a Start or Stop in progress keeps polling while the tab is hidden: its outcome is the live set's, not a timeout's
-  const pressing = open?.status.kind === 'ready' && open.run !== null;
-  const status = useLiveStatus(api, workflowId, visible || pressing);
-  // the store keeps what the poll said: Start and Stop follow it, and a press waiting for it is done when it agrees
-  useEffect(() => { store.dispatch({ type: 'live', workflowId, status, at: new Date().toISOString() }); }, [store, workflowId, status]);
-  const liveness = useLiveness(api, visible);
-  // a failed live poll is "status unknown" in the capsule and on the hub pill, with not started's look (spec §5.1)
-  const live = useMemo<LiveArt>(() => ({ started: status === 'running', status, health: healthOf(liveness) }), [status, liveness]);
+  const status = useWorkflowStatus(workflowId);
+  const health = useHealthOf();
+  // an unknown status is "status unknown" in the capsule and on the hub pill, with not started's look (spec §5.1)
+  const live = useMemo<LiveArt>(() => ({ started: status === 'running', status, health }), [status, health]);
   // a background tab's canvas stays mounted; .bg hides its nodes (document.css says why)
   const cls = usePanelShown(panel) ? 'docpanel' : 'docpanel bg';
   // the canvas draws the design (plan 8 §3.1): the base with the entity edits; the canvas draft goes over it inside the canvas
@@ -94,7 +88,7 @@ export function DocumentPanel({ api, workflowId, panel, initialView, onViewChang
         <CapsuleToolbar workflow={open.status.doc.graph.workflow} status={status}
           save={onSave ? { enabled: canSave(open), saving: open.saving, onSave } : undefined}
           run={onRun ? {
-            blocked: { start: runBlocked(open, 'start'), stop: runBlocked(open, 'stop') }, pending: open.run?.op ?? null,
+            blocked: { start: runBlocked(open, status, 'start'), stop: runBlocked(open, status, 'stop') }, pending: open.run?.op ?? null,
             onStart: () => onRun('start'), onStop: () => onRun('stop'),
           } : undefined}
           design={actions ? {
