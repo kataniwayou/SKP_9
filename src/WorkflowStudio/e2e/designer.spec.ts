@@ -1,7 +1,7 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import {
-  centreOf, documentPanel, dragReading, dropOpen, edge as wire, emptySpot, endSquare, expect, inspector, node, openWorkflow, pointOnWire, pressTo,
-  settledView, tab, test,
+  centreOf, documentPanel, dragReading, dropOpen, edge as wire, emptySpot, endSquare, expect, inspector, node, openWorkflow, pickWire, pointOnWire, pressTo,
+  settledView, tab, test, wirePoints,
   workflowsWithSteps, type LiveWorkflow,
 } from './studio';
 
@@ -209,6 +209,29 @@ test('arrow keys nudge the picked step on the focused canvas; Ctrl+Z puts it bac
   // the two nudges are one step
   await page.keyboard.press('Control+z');
   await expect.poll(() => pathOf(panel, id)).toBe(before);
+  await expect(page.getByText('● design draft')).toHaveCount(0);
+});
+
+test('arrow keys with only a wire picked move it as the closed hand does: whole, detached, grey; Ctrl+Z puts it back (2026-10-10)', async ({ page }) => {
+  const panel = await open(page);
+  const { a, b } = chain!;
+  const id = `${a}->${b}`;
+  const before = await pathOf(panel, id);
+  const pts = await wirePoints(panel, id);
+  await pickWire(page, panel, id);
+  await expect(panel.locator('.studio-canvas')).toBeFocused();
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowLeft');
+  // the same shape, 24 px to the left; open at both ends: no arrow head, no source dot, dashed grey
+  await expect.poll(() => wirePoints(panel, id)).toEqual(pts.map(([x, y]) => [x - 24, y]));
+  const drawn = wire(panel, id).locator('g.wire');
+  await expect(drawn).toHaveClass(/dashed/);
+  await expect(drawn.locator('.nx-head')).toHaveCount(0);
+  await expect(drawn.locator('.nx-src')).toHaveCount(0);
+  await expect(page.getByText('● design draft')).toBeVisible();
+  // the three presses are one step: one Ctrl+Z puts it back, connected
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => pathOf(panel, id)).toBe(before);
+  await expect(drawn).not.toHaveClass(/dashed/);
   await expect(page.getByText('● design draft')).toHaveCount(0);
 });
 

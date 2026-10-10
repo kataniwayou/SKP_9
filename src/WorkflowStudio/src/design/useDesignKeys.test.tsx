@@ -2,9 +2,11 @@ import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { graphDto, stepDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
-import { EMPTY_DRAFT } from './draft';
+import { applyDesign } from './apply';
+import { EMPTY_EDITS } from './design';
+import { circuitOf, EMPTY_DRAFT } from './draft';
 import type { DesignProps } from './designProps';
-import { useDesignKeys } from './useDesignKeys';
+import { nudgeWires, useDesignKeys } from './useDesignKeys';
 
 function Probe({ design, saved, busy }: { design: DesignProps; saved: Awaited<ReturnType<typeof loadedDocument>>; busy?: () => boolean }) {
   const onKeyDown = useDesignKeys(saved, { current: saved }, design, busy);
@@ -146,6 +148,54 @@ describe('design keys', () => {
     const design = designOf({ picks: [{ kind: 'node', id: 's1' }] });
     const { getByTestId } = render(<Probe design={design} saved={saved} />);
     fireEvent.keyDown(getByTestId('c'), { key: 'Delete' });
+    expect(design.onCommit).not.toHaveBeenCalled();
+  });
+
+  it('an arrow with only a wire picked moves it as the closed hand does: whole, detached, its links gone; one merged step (2026-10-10)', async () => {
+    const saved = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { getByTestId } = render(<Probe design={design} saved={saved} />);
+    fireEvent.keyDown(getByTestId('c'), { key: 'ArrowLeft' });
+    expect(design.onCommit).toHaveBeenCalledWith(expect.anything(), { merge: 'nudge' });
+    const draft = (design.onCommit as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const w = circuitOf(saved, draft)['s1->s2']!;
+    const was = saved.wires.find((x) => x.id === 's1->s2')!.points;
+    expect([w.tail, w.head]).toEqual([
+      { on: 'open', x: was[0]![0] - 8, y: was[0]![1] },
+      { on: 'open', x: was.at(-1)![0] - 8, y: was.at(-1)![1] },
+    ]);
+    // drawn the same shape, 8 px to the left
+    const shown = applyDesign(saved, draft, EMPTY_EDITS);
+    expect(shown.wires.find((x) => x.id === 's1->s2')!.points).toEqual(was.map(([x, y]) => [x - 8, y]));
+    expect(shown.graph.steps.get('s1')!.nextStepIds).toEqual([]);
+  });
+
+  it('a nudged wire whose ends land exactly on contacts connects there: back where it was, it is as it was', async () => {
+    const saved = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+    const left = nudgeWires(saved, saved, EMPTY_DRAFT, ['s1->s2'], -8, 0)!;
+    const shown = applyDesign(saved, left, EMPTY_EDITS);
+    const back = nudgeWires(saved, shown, left, ['s1->s2'], 8, 0)!;
+    const w = circuitOf(saved, back)['s1->s2']!;
+    expect(w.tail).toMatchObject({ on: 'step', step: 's1' });
+    expect(w.head).toMatchObject({ on: 'step', step: 's2' });
+    expect(applyDesign(saved, back, EMPTY_EDITS).graph.steps.get('s1')!.nextStepIds).toEqual(['s2']);
+  });
+
+  it('a press that would only put an end into a block moves the wire the full step, open (no magnet back)', async () => {
+    const saved = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+    // right: the head goes 8 px into s2, the tail 8 px off s1's side
+    const right = nudgeWires(saved, saved, EMPTY_DRAFT, ['s1->s2'], 8, 0)!;
+    const w = circuitOf(saved, right)['s1->s2']!;
+    const was = saved.wires.find((x) => x.id === 's1->s2')!.points;
+    expect(w.head).toEqual({ on: 'open', x: was.at(-1)![0] + 8, y: was.at(-1)![1] });
+    expect(w.tail).toEqual({ on: 'open', x: was[0]![0] + 8, y: was[0]![1] });
+  });
+
+  it('with no wire or block picked an arrow does nothing', async () => {
+    const saved = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+    const design = designOf({ picks: [{ kind: 'wire', id: 'gone' }] });
+    const { getByTestId } = render(<Probe design={design} saved={saved} />);
+    fireEvent.keyDown(getByTestId('c'), { key: 'ArrowUp' });
     expect(design.onCommit).not.toHaveBeenCalled();
   });
 });
