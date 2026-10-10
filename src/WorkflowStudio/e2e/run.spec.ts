@@ -65,12 +65,15 @@ test('Start with an unsaved design notes it and starts the saved workflow; the s
   await expect(stop).toBeEnabled();
   expect((await request.get('/api/v1/orchestration/live').then((r) => r.json())) as string[]).toContain(wf.id);
   const started = (await texts(page)).map((l) => l.text);
-  expect(started).toEqual([
+  expect(started.slice(0, 2)).toEqual([
     'Started the saved workflow; your unsaved design is not part of this run',
     'Start requested: POST /orchestration/start for the workflow BaseApi holds',
-    'Start accepted by BaseApi (202): starting… waiting for the workflow to appear in the live set',
-    'running: the workflow is in BaseApi\'s live set',
   ]);
+  // the liveness hub's "running" is the press's confirmation (2026-10-10); it may even beat BaseApi's 202 answer
+  expect([
+    ['Start accepted by BaseApi (202): starting… waiting for the workflow to appear in the live set', 'running'],
+    ['running', 'Start accepted by BaseApi (202)'],
+  ]).toContainEqual(started.slice(2));
   // the draft is still the user's, unsaved
   await expect(page.getByText('● design draft')).toBeVisible();
   await shot(page, '5-started');
@@ -81,11 +84,12 @@ test('Start with an unsaved design notes it and starts the saved workflow; the s
   await expect(start).toBeEnabled();
   await expect(stop).toBeDisabled();
   expect((await request.get('/api/v1/orchestration/live').then((r) => r.json())) as string[]).not.toContain(wf.id);
-  expect((await texts(page)).map((l) => l.text).slice(4)).toEqual([
-    'Stop requested: POST /orchestration/stop for the workflow BaseApi holds',
-    'Stop accepted by BaseApi (202): stopping… waiting for the workflow to leave the live set',
-    'stopped: the workflow left BaseApi\'s live set',
-  ]);
+  const stopped = (await texts(page)).map((l) => l.text).slice(4);
+  expect(stopped[0]).toBe('Stop requested: POST /orchestration/stop for the workflow BaseApi holds');
+  expect([
+    ['Stop accepted by BaseApi (202): stopping… waiting for the workflow to leave the live set', 'stopped'],
+    ['stopped', 'Stop accepted by BaseApi (202)'],
+  ]).toContainEqual(stopped.slice(1));
   expect((await texts(page)).filter((l) => l.red)).toEqual([]);
   await shot(page, '6-stopped');
 });
