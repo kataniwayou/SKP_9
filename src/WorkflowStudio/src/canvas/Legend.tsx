@@ -19,7 +19,13 @@ export function Legend() {
         </svg>
         undecided
       </span>
-      <span className="lg-item" title={'Short circuit: wires of two families meet at a junction.\nIts links are not written on Save; change an entry condition or move the wire.'}>
+      <span className="lg-item" title={'Short circuit: one net carrying two meanings, drawn red:\n'
+        + '• a junction joins wires of two families (e.g. Completed meets Failed)\n'
+        + '• a junction closes a loop of wires\n'
+        + '• a wire lies on a wire of another net (a grey wire on a coloured one too);\n'
+        + '  wires of one net may share a line, and the router\'s own wires never count.\n'
+        + 'Listed in red in Output. Save keeps BaseApi\'s next steps for the steps it touches;\n'
+        + 'change an entry condition or move the wire.'}>
         <svg width="30" height="14" viewBox="0 0 30 14" className="lg-icon" aria-hidden="true">
           <path className="lg-line" d="M1 7H29" />
           <circle className="lg-short" cx="15" cy="7" r="3.5" />

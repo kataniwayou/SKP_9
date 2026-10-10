@@ -22,7 +22,10 @@ describe('Legend', () => {
     expect(undecided.querySelector('.lg-undecided')).not.toBeNull();
     expect(undecided.querySelector('.lg-ring')).not.toBeNull();
     expect(undecided.querySelector('.lg-arrow')).not.toBeNull();
-    expect(getByText('short circuit').closest('.lg-item')!.querySelector('.lg-short')).not.toBeNull();
+    const short = getByText('short circuit').closest('.lg-item')!;
+    expect(short.querySelector('.lg-short')).not.toBeNull();
+    // its tooltip names all three kinds: two families at a junction, a loop, an overlap with another net
+    expect(short.getAttribute('title')).toMatch(/two families[\s\S]*loop[\s\S]*another net/);
     expect(container.querySelector('.lg-open')).toBeNull();
     expect(queryByText(/loose/)).toBeNull();
     expect(queryByText('broken')).toBeNull();
