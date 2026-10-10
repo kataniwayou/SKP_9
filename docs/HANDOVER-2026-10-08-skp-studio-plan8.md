@@ -667,6 +667,13 @@ or cache (linked) is the same entity. Studio only: BaseApi already takes the ste
 `newCaches` and the workflow's `cacheIds`. Tests: `design/toolDrop.test.ts`, `panels/Toolbox.test.tsx`,
 `e2e/toolbox.spec.ts`. A drag cannot cross browser windows.
 
+**Toolbox clicks, the design shown through, the empty cache (2026-10-11) — BUILT, NOT DEPLOYED** (spec §4.5.5). A tile
+clicked (not dragged) picks an existing processor or cache for the Inspector, read-only, one at a time
+(`StudioState.toolboxPick`; `panels/ToolboxEntityPane.tsx`); a hidden Inspector stays hidden; a canvas click or a drop
+clears it. Tiles show the active design's values of an entity it changed, with the unsaved mark (`panels/toolboxView.ts`).
+An empty cache draws a dashed muted rectangle (`CacheView` `empty`, `toFlow.emptyItems`). Tests:
+`panels/ToolboxPick.test.tsx`, `e2e/toolboxpick.spec.ts`.
+
 ### Rulings made along the way
 
 User:

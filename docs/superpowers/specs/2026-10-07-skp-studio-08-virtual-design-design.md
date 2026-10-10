@@ -413,6 +413,19 @@ opens and after every Save that was answered; a search box filters processors an
 - The processor and schemas a drop needs are kept in the blocks' `refs`. A Save BaseApi refused keeps them: the stored
   layout carries `linked` (the caches' snapshots) and `refs`; the stored body's step change names the assigned processor.
 
+- **A click on a tile (2026-10-11)** — a press let go before it moved 4 px — is not a drag. An existing processor or cache
+  is picked for the Inspector, read-only (the Toolbox only drags; dropped on a canvas the Inspector edits it there): one
+  tile at a time, highlighted in the selection's blue; the same tile again keeps it; a template (empty step, wire, empty
+  cache) picks nothing. A hidden Inspector stays hidden but what it shows switches. A click on a canvas (a selection or a
+  pick there) or a drop takes the Inspector back. Not kept in the session (a refresh starts with no Toolbox pick).
+- **The active design shows through (2026-10-11):** a processor or cache the active document's design changed (name,
+  version, description; a cache's root and items too) is drawn on its tile, and shown in the Inspector when picked, as
+  that design has it, with the "unsaved changes" orange mark; after a Save the lists are read again and BaseApi's values
+  show. Items that differ only in spacing or key order are no change.
+- **An empty cache (2026-10-11)** — no items, on the Toolbox's tile and on any canvas — is drawn with the empty step's
+  dashed rectangle, in the muted grey and with no ⚠ (it saves fine), in place of the honeycomb and the root plate; with
+  an item it is drawn as usual.
+
 ### 4.4 The schema copy's version
 
 Plan 1's atomic save bumps the copied version's patch (`1.2.3` → `1.2.4`); the design save copies it unchanged
