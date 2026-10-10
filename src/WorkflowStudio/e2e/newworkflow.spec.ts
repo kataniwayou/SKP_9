@@ -156,3 +156,29 @@ test('a taken name: Save refuses it in red and nothing is created; closing asks,
   await expect(page.locator('.dv-tab .doctab').filter({ hasText: t.tag }).first()).toBeVisible();
   await expect(page.locator('.dv-tab .doctab').filter({ hasText: 'untitled' })).toHaveCount(0);
 });
+
+test('a blank workflow (no entry step) is saved as a design in progress; Start refuses it in red and nothing runs (2026-10-10)', async ({ page, request }) => {
+  const panel = await newWorkflow(page);
+  await panel.locator('.react-flow__node-workflow').click();
+  await expect(pill(page)).toHaveText('WORKFLOW');
+  const name = `${t.tag}-blank`;
+  await typeInto(page, 'Name', name);
+  await expect.poll(() => newId(page)).not.toBeNull();
+  const id = (await newId(page))!;
+
+  // nothing wired from the hub: Save stores it all the same
+  await save(page);
+  const output = await pane(page, 'Output');
+  await expect(output).toContainText('Saved and applied');
+  const made = await get<{ name: string; entryStepIds: string[] }>(request, `workflows/${id}`);
+  expect([made.name, made.entryStepIds]).toEqual([name, []]);
+
+  // Start is offered, and BaseApi refuses it: started, it would dispatch nothing
+  const saved = page.locator('.docpanel').filter({ has: page.locator(`.crumb[data-tip^="${name}"]`) });
+  const start = saved.getByRole('button', { name: /Start/ });
+  await expect(start).toBeEnabled();
+  await start.click();
+  await expect(output.locator('.outl.err').filter({ hasText: 'no entry step' }).first()).toBeVisible();
+  expect((await get<string[]>(request, 'orchestration/live')).includes(id)).toBe(false);
+  await shot(page, '5-blank');
+});

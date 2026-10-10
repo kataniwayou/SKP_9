@@ -89,6 +89,15 @@ public sealed class OrchestrationService
         // The loader takes a list; this path always supplies exactly one id.
         using var snapshot = await _loader.LoadL1Async(new[] { workflowId }, ct);
 
+        // No entry step (2026-10-10): the design save stores a workflow in progress without one, but started it would be
+        // scheduled and dispatch nothing.
+        if (snapshot.Workflows.TryGetValue(workflowId, out var held) && (held.EntryStepIds is null || held.EntryStepIds.Count == 0))
+        {
+            var ex = OrchestrationValidationException.NoEntryStep(workflowId);
+            ex.Data["workflowId"] = workflowId;
+            throw ex;
+        }
+
         // The gate order is locked: cycle, then schema edge, then payload against config schema.
         //
         // WHICH WORKFLOW WAS REFUSED IS TAGGED HERE, because the gates do not know. A gate sees a

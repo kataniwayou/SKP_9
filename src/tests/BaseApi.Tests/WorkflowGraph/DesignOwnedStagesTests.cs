@@ -55,18 +55,19 @@ public sealed class DesignOwnedStagesTests
     }
 
     [Fact]
-    public async Task NoEntryStepIsAWorkflowError()
+    public async Task NoEntryStepIsADesignInProgressStoredAsIs()
     {
         await using var h = new GraphHarness();
         var s1 = await h.StepAsync(await h.ProcessorAsync());
         var wf = await h.WorkflowAsync("wf", [s1]);
         var loaded = await h.Reader.ReadAsync(wf, h.Ct);
 
+        // every wire from the hub removed (2026-10-10): saved; Start refuses it (gate noEntryStep)
         var outcome = await h.Syncer().SaveAsync(wf, Of(workflow: new DesignWorkflowDto(loaded.Workflow.UpdatedAt, null, [], null)), h.Ct);
 
-        var error = Assert.Single(outcome.Errors);
-        Assert.Equal(("workflow", wf, "workflow", "entryStepIds"), (error.Kind, error.Id, error.Stage, error.Field));
-        Assert.Contains("at least one", error.Message);
+        Assert.True(outcome.Applied);
+        Assert.Empty(outcome.Errors);
+        Assert.Empty((await h.Reader.ReadAsync(wf, h.Ct)).Workflow.EntryStepIds ?? []);
     }
 
     [Fact]

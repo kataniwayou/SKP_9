@@ -159,8 +159,9 @@ internal sealed class AssignmentStage : IDesignStage
 
 /// <summary>
 /// Stage 7: the workflow's fields, entry steps and caches, and the assignment links stage 6 produced.
-/// Owned: checked against the stamp the designer loaded. "At least one entry step" is the workflow
-/// CRUD's own rule. Runs only when something of the workflow changed.
+/// Owned: checked against the stamp the designer loaded. The workflow CRUD's rules hold, except "at least one
+/// entry step": a design may store a workflow without one (2026-10-10), and Start refuses it. Runs only when
+/// something of the workflow changed.
 /// </summary>
 internal sealed class WorkflowStage : IDesignStage
 {
@@ -180,7 +181,7 @@ internal sealed class WorkflowStage : IDesignStage
     {
         var w = run.Request.Workflow;
         var linksChanged = run.CreatedAssignments.Count > 0 || run.DeletedAssignments.Count > 0;
-        // a workflow this save creates is always judged here: the CRUD's rules (at least one entry step) hold for it too
+        // a workflow this save creates is always judged here: the CRUD's rules hold for it too (an empty entry list is allowed)
         var changed = run.CreatesWorkflow || run.Recreated
             || (w is not null && (w.Fields is { Count: > 0 } || w.EntryStepIds is not null || w.CacheIds is not null));
         run.BeginStage("workflow", (changed || linksChanged) && !run.WorkflowMissing ? 1 : 0, "workflow to update");
@@ -213,7 +214,10 @@ internal sealed class WorkflowStage : IDesignStage
                 new WorkflowUpdateDto(entity.Name, entity.Version, entity.Description, entry, assignments, caches, entity.CronExpression),
                 w?.Fields, errors);
             if (errors.Count > 0) return errors;
-            var problems = DesignFields.Failures(await _validator.ValidateAsync(dto, ct));
+            // no entry step is a design in progress (2026-10-10): stored; Start refuses it (gate noEntryStep). The CRUD's own
+            // rule stays as it is for its other callers.
+            var problems = DesignFields.Failures(await _validator.ValidateAsync(dto, ct))
+                .Where(p => !(p.Field == "entryStepIds" && (dto.EntryStepIds ?? []).Count == 0)).ToList();
             if (problems.Count > 0) return problems;
             var before = (entity.Name, entity.Version, entity.Description, entity.CronExpression);
             var oldEntry = await _db.Set<WorkflowEntrySteps>().AsNoTracking()

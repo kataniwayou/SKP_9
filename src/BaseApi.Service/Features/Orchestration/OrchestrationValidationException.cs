@@ -19,7 +19,7 @@ namespace BaseApi.Service.Features.Orchestration;
 /// </summary>
 public sealed class OrchestrationValidationException : Exception
 {
-    /// <summary>Gate discriminator: "cycle", "missingStep", "schemaEdge", "payloadConfigSchema" or "processorLiveness".</summary>
+    /// <summary>Gate discriminator: "cycle", "missingStep", "schemaEdge", "payloadConfigSchema", "processorLiveness", "noEntryStep", "workflowDeleting" or "workflowRunning".</summary>
     public string Gate { get; }
 
     /// <summary>Gate-specific problem title.</summary>
@@ -95,6 +95,17 @@ public sealed class OrchestrationValidationException : Exception
             "workflowDeleting",
             "Workflow is being deleted",
             $"Workflow '{workflowId}' is being deleted; it cannot be {verb}.",
+            new WorkflowOffending(workflowId));
+
+    /// <summary>
+    /// Entry gate (2026-10-10) — the workflow has no entry step: the design save may store one (a design in progress),
+    /// but started it would be scheduled and dispatch nothing.
+    /// </summary>
+    public static OrchestrationValidationException NoEntryStep(Guid workflowId)
+        => new(
+            "noEntryStep",
+            "Workflow has no entry step",
+            $"Workflow '{workflowId}' has no entry step: wire a step from the workflow circle first.",
             new WorkflowOffending(workflowId));
 
     /// <summary>

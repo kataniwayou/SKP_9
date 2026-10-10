@@ -1,4 +1,10 @@
+using BaseApi.Service.Features.Orchestration;
+using BaseApi.Service.Features.Orchestration.Validation;
 using BaseApi.Service.Features.Workflow.Design;
+using Messaging.Transport;
+using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
+using StackExchange.Redis;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 using static BaseApi.Tests.WorkflowGraph.DesignBody;
@@ -8,7 +14,7 @@ namespace BaseApi.Tests.WorkflowGraph;
 /// <summary>
 /// Workspace › New workflow (2026-10-10): a workflow that exists only in the studio is created by its first design save,
 /// as the create stage before every other stage; its fields are the workflow CRUD's, its name is no other workflow's, and
-/// the workflow stage then holds it to the CRUD's rules (at least one entry step). A retry of a committed creation is an
+/// the workflow stage then holds it to the CRUD's rules, except that it may have no entry step yet (Start refuses that). A retry of a committed creation is an
 /// ordinary save; an id another workflow holds is refused.
 /// </summary>
 public sealed class DesignNewWorkflowTests
@@ -75,15 +81,26 @@ public sealed class DesignNewWorkflowTests
     }
 
     [Fact]
-    public async Task ABlankNewWorkflowIsRefusedByTheWorkflowCrudsOwnRuleOfAtLeastOneEntryStep()
+    public async Task ABlankNewWorkflowIsSavedWithNoEntryStepAndStartRefusesIt()
     {
         await using var h = new GraphHarness();
         var wf = Guid.NewGuid();
 
+        // a design in progress (2026-10-10): stored without an entry step
         var outcome = await h.Syncer().SaveAsync(wf, Of(newWorkflow: New("blank")), h.Ct);
 
-        Assert.False(outcome.Applied);
-        Assert.Contains(outcome.Errors, e => (e.Kind, e.Id, e.Stage, e.Field) == ("workflow", wf, "workflow", "entryStepIds"));
+        Assert.True(outcome.Applied, Describe(outcome));
+        Assert.Empty(outcome.Errors);
+        Assert.Empty((await h.Reader.ReadAsync(wf, h.Ct)).Workflow.EntryStepIds ?? []);
+
+        // started, it would dispatch nothing: Start refuses it before any other gate
+        var service = new OrchestrationService(
+            h.Db, h.Loader, new CycleDetector(), new SchemaEdgeValidator(), new PayloadConfigSchemaValidator(),
+            new ProcessorLivenessValidator(Substitute.For<IConnectionMultiplexer>(), h.Clock), Substitute.For<IQueueSender>(),
+            NullLogger<OrchestrationService>.Instance);
+        var refused = await Assert.ThrowsAsync<OrchestrationValidationException>(() => service.StartAsync(wf, h.Ct));
+        Assert.Equal("noEntryStep", refused.Gate);
+        Assert.Contains("no entry step", refused.Message);
     }
 
     [Fact]

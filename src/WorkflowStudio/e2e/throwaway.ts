@@ -256,6 +256,9 @@ function refusal(r: Request): string | null {
   if (method === 'POST' && created.workflowId !== undefined && created.tag?.startsWith('e2e-') && path === `/api/v1/workflows/${created.workflowId}/delete`) return null;
   if (method === 'POST' && (path === '/api/v1/orchestration/start' || path === '/api/v1/orchestration/stop')
     && created.workflowId !== undefined && created.tag?.startsWith('e2e-') && r.postDataJSON() === created.workflowId) return null;
+  // a workflow this run created through New (2026-10-10): Start and Stop of it too
+  if (method === 'POST' && (path === '/api/v1/orchestration/start' || path === '/api/v1/orchestration/stop')
+    && created.tag?.startsWith('e2e-') && (created.newWorkflowIds ?? []).includes(r.postDataJSON() as string)) return null;
   return `${method} ${path}`;
 }
 
