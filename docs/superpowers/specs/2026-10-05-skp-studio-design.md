@@ -356,6 +356,10 @@ Nothing polls per document any more.
 - A failed read (Redis or the database) is logged (the first in a row, then one in 30) and read again next tick; after
   2 in a row (`Liveness:UnknownAfterFailures`) the hub says `monitorStatus known: false`; the first good read after it
   says `known: true` plus the changes since the last good reading. Nothing a tick throws ends the host.
+- Every 10 s (`Liveness:SequenceEverySeconds`) the hub also sends **`livenessSequence { sequence }`**, the last number
+  handed out (not a change): a client that missed the last broadcast sees the difference and takes a snapshot.
+  Keep-alive: the hub pings every 15 s and drops a silent client after 3 min (a throttled background tab pings about
+  once a minute); the studio pings every 15 s and gives the hub 60 s.
 - Hub method **`Snapshot()`**: `{ sequence, known, runningWorkflowIds, processors[] }`, the sequence being the last
   change it includes. Right after BaseApi starts it waits up to 5 s for the first reading, else answers `known: false`.
 - `GET /orchestration/live` and `GET /processors/liveness` are unchanged (the start gate, and the studio's fallback).
@@ -370,10 +374,14 @@ Nothing polls per document any more.
   connection state (connecting / connected / reconnecting / offline) and the last sequence. On connect and reconnect
   it takes a `Snapshot()`; a change with the next sequence number is applied; a change at or below it is ignored; a
   gap (or a change while a snapshot is on its way) is held and a snapshot taken, after which held changes above it are
-  applied in order. `monitorStatus known: false` shows *status unknown* / undetermined; `known: true` takes a snapshot.
+  applied in order (at most 1000 held: past that they are dropped and a fresh snapshot covers them). A snapshot that
+  fails or cannot be read is asked for again with backoff. `monitorStatus known: false` shows *status unknown* /
+  undetermined; `known: true` takes a snapshot.
 - **Fallback:** while not connected, **one** app-wide poll of the two GETs every 5 s feeds the same store (a poll
   answer that lands once connected is dropped); the status area at the right of the menu strip shows a small
-  **"live updates reconnecting"** mark (`role=status`, "Live updates"). On reconnect a fresh snapshot replaces what
+  **"live updates reconnecting"** mark (`role=status`, "Live updates") once it has been down 4 s (a quicker reconnect
+  shows nothing). Each poll loop has its own token, so a drop while a poll is in flight never runs two loops, and a
+  poll asked before the latest snapshot never overwrites it. On reconnect a fresh snapshot replaces what
   the polls said, the mark goes and polling stops. Nothing shows while connecting at start.
 - **Everything reads the store:** the hub dial and the capsule's status pill, processor health on step art in every
   document (shown or hidden), Start / Stop enabling (`runBlocked`), the running / stopped confirmation of a press and

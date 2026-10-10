@@ -506,6 +506,25 @@ in §4.4, §5.1, §6.1; notes in the plan 8 spec and in plans 01b, 03c and 08.
   today's counts; cache the id list if it grows); bundle grew ~100 kB (signalr); Output's "running"/"stopped" for a
   workflow nobody watches can be noisy if many workflows start at once (no grouping).
 
+**Review of live push (2026-10-10) — BUILT, NOT DEPLOYED.** Fixes for the coordinator's findings 1, 2, 3 and 6
+(4 and 5 stay as documented above):
+- (1) Each fallback poll loop owns a token (`pollToken`, bumped on start and stop): a loop whose token is stale stops at
+  its next step, so a drop while a poll is in flight no longer starts a second loop; and a poll asked before the latest
+  hub snapshot (`hubEpoch`) never overwrites it (a second guard; the token alone already drops those answers).
+- (2) A snapshot that fails or cannot be read is asked for again with the connection backoff (1, 2, 5 s …) while
+  connected; held changes are bounded (`MAX_HELD` 1000: on overflow they are dropped and a fresh snapshot covers them).
+- (3) The monitor sends `livenessSequence { sequence }` every 10 s (`Liveness:SequenceEverySeconds`; no number of its
+  own): a client whose last applied sequence differs (a lost last broadcast) takes a snapshot.
+- (6) Hub `KeepAliveInterval` 15 s, `ClientTimeoutInterval` 3 min; the studio pings every 15 s and gives the server
+  60 s (`withKeepAliveInterval` / `withServerTimeout`), so a background tab whose timers Chrome throttles to once a
+  minute stays connected. The "live updates reconnecting" mark shows only after 4 s down (`LIVE_MARK_DELAY_MS`), so a
+  quick reconnect shows nothing.
+- Tests: hermetic 2043 + 71 skipped (+1: a lost last broadcast is revealed by the next sequence message; publisher
+  routes it); Release `--no-incremental` clean; Vitest 996 (+5: the flap repro, unreadable snapshot retry, held bound,
+  sequence gap, mark debounce with fake timers); tsc clean; against the branch BaseApi on :18090: live test 1/1,
+  live/live-processor/run specs 4/4, full Playwright 146 + 2 skips. Mutations: the poll tokens, snapshot retry, held
+  bound, sequence check and mark delay each fail a test (the epoch guard alone is masked by the tokens).
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed
