@@ -51,8 +51,8 @@ export function Picker({ items, anchor, onPick, onClose, note }: {
   const left = Math.max(8, Math.min(anchor.x, (view?.innerWidth ?? 1280) - 452));
 
   return createPortal(
-    <div ref={ref} className="picker" role="dialog" aria-label="Open workflow" style={{ left, top }}>
-      <div className="pk-h">Open workflow</div>
+    <div ref={ref} className="picker" role="dialog" aria-label="Load workflow" style={{ left, top }}>
+      <div className="pk-h">Load workflow</div>
       <input
         className="input"
         aria-label="Search workflows"

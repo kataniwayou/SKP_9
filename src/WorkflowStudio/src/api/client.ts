@@ -1,5 +1,5 @@
 import { ENTITY_PATH, type EntityKind, type ReadDtoOf, type UpdateDtoOf } from './entities';
-import type { AssignmentCreateDto, AssignmentReadDto, DesignOutcomeDto, DesignSaveRequest, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto } from './types';
+import type { AssignmentCreateDto, AssignmentReadDto, DesignOutcomeDto, DesignSaveRequest, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowDeleteOutcomeDto, WorkflowGraphDto, WorkflowReadDto } from './types';
 
 /**
  * Every way a request can fail, as data. The UI shows these in its status line (Output in plan 5);
@@ -53,6 +53,12 @@ export interface StudioApi {
   startWorkflow(workflowId: string): Promise<ApiResult<null>>;
   /** Stop: `POST /orchestration/stop`, the same way; 202, and the workflow leaves the live set a moment later. */
   stopWorkflow(workflowId: string): Promise<ApiResult<null>>;
+  /**
+   * Delete a workflow (2026-10-10): `POST /workflows/{id}/delete[?dryRun=true]`. BaseApi reads the live set itself, then
+   * deletes the workflow with its own steps and assignments in one transaction (never its caches or processors); a dry
+   * run rolls back and says what would be deleted. Refusals (running, shared) are a 200 with `applied: false`.
+   */
+  deleteWorkflow(workflowId: string, dryRun: boolean): Promise<ApiResult<WorkflowDeleteOutcomeDto>>;
 }
 
 interface Problem {
@@ -145,5 +151,6 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
     saveDesign: (workflowId, body) => request<DesignOutcomeDto>('PUT', `/workflows/${id(workflowId)}/design`, body),
     startWorkflow: (workflowId) => request<null>('POST', '/orchestration/start', workflowId),
     stopWorkflow: (workflowId) => request<null>('POST', '/orchestration/stop', workflowId),
+    deleteWorkflow: (workflowId, dryRun) => request<WorkflowDeleteOutcomeDto>('POST', `/workflows/${id(workflowId)}/delete${dryRun ? '?dryRun=true' : ''}`),
   };
 }

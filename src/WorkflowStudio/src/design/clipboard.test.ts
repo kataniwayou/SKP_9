@@ -352,6 +352,17 @@ describe('delete (2026-10-10)', () => {
     expect(deletePicked(base, EMPTY_EDITS, EMPTY_DRAFT, [node(SPHERE_NODE_ID)])).toBeNull();
   });
 
+  it('never deletes the workflow, picked with steps and their wires (a rectangle round them all, 2026-10-10): the hub stays, and stays picked', async () => {
+    const base = await chain();
+    const r = deletePicked(base, EMPTY_EDITS, EMPTY_DRAFT, [node(SPHERE_NODE_ID), node('s1'), node('s2'), wire('wf->s1'), wire('s1->s2')])!;
+    expect(r.draft.blocks.removed.steps).toEqual(['s1', 's2']);
+    expect(r.picks).toEqual([node(SPHERE_NODE_ID)]);
+    const shown = applyDesign(base, r.draft, EMPTY_EDITS);
+    expect(shown.graph.workflow.id).toBe(base.graph.workflow.id);
+    expect(shown.placement.sphere).toEqual(base.placement.sphere);
+    expect(shown.graph.steps.has('s3')).toBe(true);
+  });
+
   it('undo brings a deleted step back, redo deletes it again', async () => {
     const base = await chain();
     const r = deletePicked(base, EMPTY_EDITS, EMPTY_DRAFT, [node('s2')])!;

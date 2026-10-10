@@ -203,10 +203,24 @@ describe('DockShell', () => {
     for (const name of ['Inspector', 'Toolbox', 'Output']) expect(tab(name)).toBeInTheDocument();
   });
 
-  it('opens the picker from File, filters it, and opens the first match on Enter', () => {
+  it('Workspace holds Load workflow…, Close and Delete workflow…; Delete acts on the active document, disabled with none (2026-10-10)', () => {
+    const onDeleteWorkflow = vi.fn();
+    const { update } = setup({ onDeleteWorkflow });
+    expect(screen.queryByRole('menuitem', { name: 'File' })).toBeNull();
+    openMenu('Workspace');
+    expect(screen.getByRole('menuitem', { name: /Load workflow…/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Delete workflow…/ })).toHaveAttribute('aria-disabled', 'true');
+    openMenu('Workspace');
+    update({ documents: [doc('a')], activeDocumentId: 'a' });
+    openMenu('Workspace');
+    choose(/Delete workflow…/);
+    expect(onDeleteWorkflow).toHaveBeenCalledWith('a');
+  });
+
+  it('opens the picker from Workspace, filters it, and opens the first match on Enter', () => {
     const { props } = setup();
-    openMenu('File');
-    choose(/Open workflow/);
+    openMenu('Workspace');
+    choose(/Load workflow/);
     const search = screen.getByRole('textbox', { name: 'Search workflows' });
     expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['orders_1.0.0-aaaa', 'billing_2.0.0-bbbbopen — switch']);
 
@@ -214,14 +228,14 @@ describe('DockShell', () => {
     fireEvent.keyDown(search, { key: 'Enter' });
 
     expect(props.onOpenWorkflow).toHaveBeenCalledWith('b');
-    expect(screen.queryByRole('dialog', { name: 'Open workflow' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'Load workflow' })).toBeNull();
   });
 
-  it('leaves focus in the picker search box when File > Open workflow replaces the menu', () => {
+  it('leaves focus in the picker search box when Workspace > Load workflow replaces the menu', () => {
     setup();
-    screen.getByRole('menuitem', { name: 'File' }).focus();   // a real click focuses the trigger
-    openMenu('File');
-    choose(/Open workflow/);
+    screen.getByRole('menuitem', { name: 'Workspace' }).focus();   // a real click focuses the trigger
+    openMenu('Workspace');
+    choose(/Load workflow/);
     expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Search workflows' }));
   });
 
@@ -271,28 +285,28 @@ describe('DockShell', () => {
     } finally {
       dialog.remove();
     }
-    openMenu('File');
-    choose(/Open workflow/);
+    openMenu('Workspace');
+    choose(/Load workflow/);
     fireEvent.keyDown(window, { key: 'F5' });
     expect(onRunCommand).not.toHaveBeenCalled();
   });
 
   it('toggles a strip menu with its own button', () => {
     setup();
-    openMenu('File');
-    expect(screen.getByRole('menu', { name: 'File' })).toBeInTheDocument();
-    fireEvent.pointerDown(screen.getByRole('menuitem', { name: 'File' }));
-    openMenu('File');
+    openMenu('Workspace');
+    expect(screen.getByRole('menu', { name: 'Workspace' })).toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByRole('menuitem', { name: 'Workspace' }));
+    openMenu('Workspace');
     expect(screen.queryByRole('menu')).toBeNull();
   });
 
   it('focuses the first item of the menu switched to, and gives focus back to its own button (review Minor)', () => {
     setup();
-    const file = screen.getByRole('menuitem', { name: 'File' });
+    const file = screen.getByRole('menuitem', { name: 'Workspace' });
     const view = screen.getByRole('menuitem', { name: 'View' });
     file.focus();
     fireEvent.click(file);
-    expect(document.activeElement).toHaveTextContent('Open workflow');
+    expect(document.activeElement).toHaveTextContent('Load workflow');
     view.focus();
     fireEvent.click(view);
     const menu = screen.getByRole('menu', { name: 'View' });
@@ -442,8 +456,8 @@ describe('DockShell, pop-out windows', () => {
     fireEvent.keyDown(win, { key: 'Escape' });
 
     fireEvent.keyDown(win, { key: 'o', ctrlKey: true });
-    expect(inPopout(win).getByRole('dialog', { name: 'Open workflow' })).toBeInTheDocument();
-    expect(screen.queryByRole('dialog', { name: 'Open workflow' })).toBeNull();
+    expect(inPopout(win).getByRole('dialog', { name: 'Load workflow' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Load workflow' })).toBeNull();
     fireEvent.keyDown(win, { key: 'Escape' });
 
     fireEvent.keyDown(win, { key: 'F5', shiftKey: true });
@@ -548,7 +562,7 @@ describe.each(['main window', 'pop-out'] as const)('DockShell, the Esc order in 
     const shown = () => ({
       switcher: scope.queryByRole('dialog', { name: 'Switch window' }) !== null,
       menu: scope.queryByRole('menu') !== null,
-      picker: scope.queryByRole('dialog', { name: 'Open workflow' }) !== null,
+      picker: scope.queryByRole('dialog', { name: 'Load workflow' }) !== null,
       flyout: flyout() !== null,
     });
     const openMenuHere = () => {

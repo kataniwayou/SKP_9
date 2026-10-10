@@ -38,3 +38,7 @@
 .mbtns { display: flex; gap: 8px; align-items: center; }
 .mbtns .spacer { flex: 1; }
 .doc-msg .btn { margin-left: 10px; }
+
+/* the warning before a workflow is deleted (2026-10-10) */
+.delwarn p { margin: 0 0 6px; }
+.delwarn p:last-child { margin-bottom: 0; }

@@ -130,7 +130,7 @@ export function GroupActions({ group, panels, location }: IDockviewHeaderActions
     <div className="ghead">
       {where === 'grid' ? (
         <>
-          {documents && button('open', '+', 'Open workflow')}
+          {documents && button('open', '+', 'Load workflow')}
           {!documents && button('menu', '▾', 'Window position')}
           {!documents && button('hide', '⇥', 'Auto-hide to a side tab')}
           {panels.length > 0 && button('float', '⧉', 'Float this group (or Shift+drag a tab)')}
@@ -155,8 +155,8 @@ export function Watermark() {
     <div className="empty">
       <div>
         <div className="e1">No workflow open</div>
-        <div className="e2">File › Open workflow… or Ctrl+O</div>
-        <button type="button" className="btn primary" onClick={(e) => shell.openPicker(anchorBelow(e.currentTarget))}>Open workflow…</button>
+        <div className="e2">Workspace › Load workflow… or Ctrl+O</div>
+        <button type="button" className="btn primary" onClick={(e) => shell.openPicker(anchorBelow(e.currentTarget))}>Load workflow…</button>
       </div>
     </div>
   );

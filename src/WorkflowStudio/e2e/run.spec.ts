@@ -49,10 +49,10 @@ test('Start with an unsaved design notes it and starts the saved workflow; the s
   page.on('request', (r) => { if (r.method() === 'POST' && r.url().includes('/orchestration/')) presses.push(r.url()); });
   await page.keyboard.press('Control+F5');
   await page.keyboard.press('Control+o');
-  await expect(page.getByRole('dialog', { name: 'Open workflow' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Load workflow' })).toBeVisible();
   await page.keyboard.press('F5');
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Open workflow' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Load workflow' })).toHaveCount(0);
   await page.waitForTimeout(500);
   expect(presses).toEqual([]);
   await expect(page.getByRole('log', { name: 'Output' }).locator('.outl')).toHaveCount(0);

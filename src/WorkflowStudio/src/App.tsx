@@ -3,6 +3,7 @@ import { createApi, type StudioApi } from './api/client';
 import { describeError } from './api/describeError';
 import type { WorkflowReadDto } from './api/types';
 import { ConfirmDialog } from './app/ConfirmDialog';
+import { cancelDelete, commitDelete, prepareDelete, type DeletePlan } from './app/deleteWorkflow';
 import { DocumentPanel } from './app/DocumentPanel';
 import { createInspectorService } from './app/inspectorService';
 import { loadDocument } from './app/loadDocument';
@@ -146,7 +147,8 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
 
   type Prompt =
     | { kind: 'design'; workflowId: string; doc: Document }
-    | { kind: 'closeDesign'; workflowId: string; doc: Document; proceed: () => void };
+    | { kind: 'closeDesign'; workflowId: string; doc: Document; proceed: () => void }
+    | { kind: 'deleteWorkflow'; plan: DeletePlan; doc: Document };
   const [prompt, setPromptState] = useState<Prompt | null>(null);
   // the open question, read by the guard at once (state would lag a render behind)
   const asking = useRef<Prompt | null>(null);
@@ -172,6 +174,37 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
   useEffect(() => {
     for (const d of store.getState().docs) if (d.status.kind === 'loading') load(d.workflowId);
   }, []); // the restored documents only; later ones are loaded by openWorkflow
+
+  // Workspace › Delete workflow… (2026-10-10): a fresh liveness reading and BaseApi's dry run first; the warning only
+  // then, with Cancel as its default; nothing destructive is sent before Continue. One deletion at a time per workflow.
+  const deleting = useRef(new Set<string>());
+  const deleteWorkflow = useCallback((id: string) => {
+    if (deleting.current.has(id) || asking.current !== null) return;
+    const open = store.getState().docs.find((d) => d.workflowId === id);
+    if (!open || open.status.kind !== 'ready' || open.saving) {
+      store.dispatch({ type: 'log', workflowId: id, lines: [{ at: new Date().toISOString(), text: 'Not deleted: the workflow is still loading or saving', level: 'error' }] });
+      return;
+    }
+    deleting.current.add(id);
+    void prepareDelete(api, store, id).then((plan) => {
+      if (plan === null || asking.current !== null || !store.getState().docs.some((d) => d.workflowId === id)) {
+        deleting.current.delete(id);
+        return;
+      }
+      setPrompt({ kind: 'deleteWorkflow', plan, doc: document });
+    });
+  }, [api, store, setPrompt]);
+  const continueDelete = useCallback((plan: DeletePlan) => {
+    void commitDelete(api, store, plan).then((deleted) => {
+      deleting.current.delete(plan.workflowId);
+      if (!deleted) return;
+      // gone from BaseApi: from the picker, the views and every per-document memory too
+      views.current.delete(plan.workflowId);
+      opens.current.delete(plan.workflowId);
+      setWorkflows((list) => list.filter((w) => w.id !== plan.workflowId));
+      saver.flush();
+    });
+  }, [api, store]);
 
   // views and the dock change on every pan and drag, so they are kept outside React state
   const views = useRef(new Map<string, SavedView>(session?.docs.flatMap((d) => (d.view ? [[d.workflowId, d.view] as const] : [])) ?? []));
@@ -261,6 +294,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
           id: 'clear', icon: '⌫', label: 'Clear output', tip: 'Clear the messages; current problems stay',
           disabled: store.getState().output.length === 0, onSelect: () => store.dispatch({ type: 'clearOutput' }),
         }])}
+        onDeleteWorkflow={deleteWorkflow}
         onRunCommand={(op: RunOp) => {
           const open = store.getState().docs.find((d) => d.workflowId === store.getState().activeId);
           if (!open) return `${RUN_WORD[op]}: open a workflow first.`;
@@ -293,7 +327,27 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
             },
           ]} />
       )}
+      {prompt?.kind === 'deleteWorkflow' && (
+        <ConfirmDialog doc={prompt.doc} title={`Delete workflow '${prompt.plan.name}'?`} safe
+          onCancel={() => { setPrompt(null); deleting.current.delete(prompt.plan.workflowId); cancelDelete(store, prompt.plan.workflowId); }}
+          message={<DeleteWarning plan={prompt.plan} />}
+          buttons={[{ label: 'Continue', onClick: () => { setPrompt(null); continueDelete(prompt.plan); } }]} />
+      )}
     </StudioActionsProvider>
+  );
+}
+
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+
+/** The warning before a workflow's deletion (2026-10-10): what BaseApi's dry run says goes, and what stays. */
+function DeleteWarning({ plan }: { plan: DeletePlan }) {
+  return (
+    <div className="delwarn">
+      <p>Deleted for good: <b>the workflow, {plural(plan.steps, 'step')} and {plural(plan.assignments, 'assignment')}</b>. Its id is gone forever: nothing can address it again.</p>
+      <p>Kept: {plural(plan.caches, 'cache')} (only unlinked from it) and {plural(plan.processors, 'processor')} (untouched).</p>
+      {plan.dropsDraft && <p>Its unsaved design draft is dropped.</p>}
+      <p>It is not running now. Continue deletes it; BaseApi checks again that it is not running.</p>
+    </div>
   );
 }
 

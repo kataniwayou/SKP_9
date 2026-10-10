@@ -59,6 +59,11 @@ export interface DockShellProps {
    * as a toast), or null when it was pressed. Without it the keys say they are not available.
    */
   onRunCommand?: (op: 'start' | 'stop') => string | null;
+  /**
+   * Workspace › Delete workflow… (2026-10-10): deletes the active document's workflow from BaseApi, after a fresh liveness
+   * reading, a dry run and the user's Continue (the page does all of it). Without it the entry is disabled.
+   */
+  onDeleteWorkflow?: (id: string) => void;
   /** A tool pane's own entries at the top of its tab menu (e.g. Output's Clear, 2026-10-10). */
   toolMenu?: (id: ToolId) => MenuEntry[];
 }
@@ -67,7 +72,7 @@ const COMPONENTS = { document: DocumentHost, tool: ToolHost };
 const TAB_COMPONENTS = { studio: StudioTab };
 const TOAST_MS = 2600;
 const NOT_YET = 'Not available yet';
-const STRIP = ['File', 'Edit', 'View', 'Window'] as const;
+const STRIP = ['Workspace', 'Edit', 'View', 'Window'] as const;
 type StripMenu = (typeof STRIP)[number];
 
 const NO_RECT: Rect = { left: 0, top: 0, right: 0, bottom: 0 };
@@ -287,7 +292,7 @@ export function DockShell(props: DockShellProps) {
     latest.current.props.onPickerOpen?.();
   }, []);
   const fileAnchor = useCallback((): Anchor => {
-    const file = stripRefs.current.File;
+    const file = stripRefs.current.Workspace;
     return file ? anchorBelow(file) : { x: 8, y: 36, doc: document };
   }, []);
 
@@ -370,11 +375,18 @@ export function DockShell(props: DockShellProps) {
     const activePanel = api?.activePanel;
     const docked = activePanel?.group.api.location.type === 'grid';
     switch (name) {
-      case 'File':
+      case 'Workspace':
         return [
-          { id: 'open', icon: '⌂', label: 'Open workflow…', kbd: 'Ctrl+O', onSelect: () => openPicker(fileAnchor()) },
+          { id: 'open', icon: '⌂', label: 'Load workflow…', kbd: 'Ctrl+O', onSelect: () => openPicker(fileAnchor()) },
           'separator',
           { id: 'close', icon: '×', label: 'Close', kbd: 'Alt+W', disabled: activeDocumentId === null, onSelect: () => { if (activeDocumentId) props.onCloseDocument(activeDocumentId); } },
+          'separator',
+          {
+            id: 'delete', icon: '⌫', label: 'Delete workflow…',
+            disabled: activeDocumentId === null || !props.onDeleteWorkflow,
+            tip: activeDocumentId === null ? 'Load a workflow first: Delete acts on the active document' : undefined,
+            onSelect: () => { if (activeDocumentId) props.onDeleteWorkflow?.(activeDocumentId); },
+          },
         ];
       case 'Edit':
         return [

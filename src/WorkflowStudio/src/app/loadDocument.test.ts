@@ -23,6 +23,7 @@ function fakeApi(over: Partial<StudioApi> = {}): StudioApi {
     saveDesign: vi.fn().mockResolvedValue(notFound),
     startWorkflow: vi.fn().mockResolvedValue(notFound),
     stopWorkflow: vi.fn().mockResolvedValue(notFound),
+    deleteWorkflow: vi.fn().mockResolvedValue(notFound),
     ...over,
   };
 }

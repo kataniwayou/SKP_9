@@ -86,6 +86,11 @@ export type StudioAction =
   | { type: 'loaded'; workflowId: Id; doc: StudioDocument }
   | { type: 'failed'; workflowId: Id; message: string }
   | { type: 'close'; workflowId: Id }
+  /**
+   * BaseApi deleted the workflow (2026-10-10): its document closes, its draft dropped with it, and Output keeps the
+   * deletion's lines under its name. The clipboard keeps what was copied from it.
+   */
+  | { type: 'workflowDeleted'; workflowId: Id; name: string; lines: LineDraft[] }
   | { type: 'activate'; workflowId: Id }
   /** `picks`: what the canvas picked with it; absent, the selection's own block (or nothing). */
   | { type: 'select'; workflowId: Id; selection: Selection | null; picks?: Pick[] }
@@ -260,6 +265,10 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
         ? state.activeId
         : (docs[index] ?? docs[index - 1])?.workflowId ?? null;
       return { ...state, docs, activeId };
+    }
+    case 'workflowDeleted': {
+      const closed = reduce(state, { type: 'close', workflowId: action.workflowId });
+      return logged(closed, action.workflowId, action.name, action.lines);
     }
     case 'activate':
       return state.docs.some((d) => d.workflowId === action.workflowId) && state.activeId !== action.workflowId

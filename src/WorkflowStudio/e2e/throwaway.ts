@@ -238,6 +238,8 @@ function refusal(r: Request): string | null {
   if (method === 'GET' || method === 'HEAD') return null;
   if (method === 'PUT' && created.workflowId !== undefined && path === `/api/v1/workflows/${created.workflowId}/design`) return null;
   if (method === 'PUT' && (created.otherWorkflowIds ?? []).some((id) => path === `/api/v1/workflows/${id}/design`)) return null;
+  // Workspace › Delete workflow… (2026-10-10): the dry run and the real run of this run's throwaway only
+  if (method === 'POST' && created.workflowId !== undefined && created.tag?.startsWith('e2e-') && path === `/api/v1/workflows/${created.workflowId}/delete`) return null;
   if (method === 'POST' && (path === '/api/v1/orchestration/start' || path === '/api/v1/orchestration/stop')
     && created.workflowId !== undefined && created.tag?.startsWith('e2e-') && r.postDataJSON() === created.workflowId) return null;
   return `${method} ${path}`;

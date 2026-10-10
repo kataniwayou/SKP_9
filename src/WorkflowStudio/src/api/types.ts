@@ -21,4 +21,5 @@ export type AssignmentUpdateDto = Schemas['AssignmentUpdateDto'];
 export type CacheUpdateDto = Schemas['CacheUpdateDto'];
 export type DesignSaveRequest = Schemas['DesignSaveRequest'];
 export type DesignOutcomeDto = Schemas['DesignOutcomeDto'];
+export type WorkflowDeleteOutcomeDto = Schemas['WorkflowDeleteOutcomeDto'];
 export type DesignErrorDto = Schemas['DesignErrorDto'];

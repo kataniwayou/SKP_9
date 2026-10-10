@@ -1,5 +1,5 @@
 import type { Assignment, Audit, Cache, DesignError, Graph, Processor, Schema, Step, Workflow } from '../model/graph';
-import type { CacheReadDto, DesignOutcomeDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowGraphDto, WorkflowReadDto } from './types';
+import type { CacheReadDto, DesignOutcomeDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowDeleteOutcomeDto, WorkflowGraphDto, WorkflowReadDto } from './types';
 import type { DesignLogLine } from '../store/saveLog';
 
 // The generated DTO types mark almost every field optional (see api/types.ts). These helpers state
@@ -109,7 +109,8 @@ export function designErrorsFromDto(dto: DesignOutcomeDto): DesignError[] {
 }
 
 /** BaseApi's log of a design save (2026-10-09), in its order; null when it sent none (an older BaseApi). */
-export function designLogFromDto(dto: DesignOutcomeDto): DesignLogLine[] | null {
+/** BaseApi's log of a design save, or of a workflow's deletion (the same lines). */
+export function designLogFromDto(dto: DesignOutcomeDto | WorkflowDeleteOutcomeDto): DesignLogLine[] | null {
   if (!Array.isArray(dto.log)) return null;
   return dto.log.map((l) => ({
     stage: text(l.stage), level: l.level === 'error' ? 'error' : 'info', kind: text(l.kind), id: optional(l.id), message: text(l.message),

@@ -13,12 +13,17 @@ export interface DialogButton {
  * takes its window's keys first: Escape is Cancel wherever the focus is, and any other key outside it
  * is handled (default prevented), so the dock, which skips a handled key, never acts under the modal.
  */
-export function ConfirmDialog({ doc, title, message, buttons, onCancel }: {
+export function ConfirmDialog({ doc, title, message, buttons, onCancel, safe = false }: {
   doc: Document;
   title: string;
   message: ReactNode;
   buttons: readonly DialogButton[];
   onCancel: () => void;
+  /**
+   * Cancel is the default (2026-10-10, a destructive question): Cancel is the primary button and has focus, so Enter
+   * and Escape both cancel; the other buttons are never primary.
+   */
+  safe?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -63,10 +68,10 @@ export function ConfirmDialog({ doc, title, message, buttons, onCancel }: {
         <div className="mt" id={titleId}>{title}</div>
         <div className="mb" id={messageId}>{message}</div>
         <div className="mbtns">
-          <button type="button" className="btn" onClick={onCancel}>Cancel</button>
+          <button type="button" className={safe ? 'btn primary' : 'btn'} onClick={onCancel}>Cancel</button>
           <span className="spacer" />
           {buttons.map((b) => (
-            <button key={b.label} type="button" className={b.primary ? 'btn primary' : 'btn'} onClick={b.onClick}>{b.label}</button>
+            <button key={b.label} type="button" className={b.primary && !safe ? 'btn primary' : 'btn'} onClick={b.onClick}>{b.label}</button>
           ))}
         </div>
       </div>

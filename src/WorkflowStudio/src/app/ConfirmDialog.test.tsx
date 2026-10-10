@@ -59,4 +59,18 @@ describe('ConfirmDialog (final review 4)', () => {
     fireEvent.keyDown(input, { key: 'Tab' });
     expect(cancel).toHaveFocus();
   });
+
+  it('a destructive question (safe): Cancel is the default, focused and primary; Continue is never primary', () => {
+    const onCancel = vi.fn();
+    const go = vi.fn();
+    render(<ConfirmDialog doc={document} title="Delete workflow" message="m" onCancel={onCancel} safe
+      buttons={[{ label: 'Continue', primary: true, onClick: go }]} />);
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    expect(cancel).toHaveFocus();
+    expect(cancel).toHaveClass('primary');
+    expect(screen.getByRole('button', { name: 'Continue' })).not.toHaveClass('primary');
+    fireEvent.click(cancel);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(go).not.toHaveBeenCalled();
+  });
 });

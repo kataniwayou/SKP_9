@@ -26,6 +26,7 @@ function fakeApi(over: Partial<StudioApi> = {}): StudioApi {
     saveDesign: vi.fn().mockResolvedValue(notFound),
     startWorkflow: vi.fn().mockResolvedValue(notFound),
     stopWorkflow: vi.fn().mockResolvedValue(notFound),
+    deleteWorkflow: vi.fn().mockResolvedValue(notFound),
     listLive: vi.fn().mockResolvedValue({ ok: true, value: [] }),
     listLiveness: vi.fn().mockResolvedValue({ ok: true, value: [] }),
     ...over,
@@ -34,8 +35,8 @@ function fakeApi(over: Partial<StudioApi> = {}): StudioApi {
 
 
 const openPicker = () => {
-  fireEvent.click(screen.getByRole('menuitem', { name: 'File' }));
-  fireEvent.click(screen.getByRole('menuitem', { name: /Open workflow/ }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Workspace' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: /Load workflow/ }));
 };
 const pickWorkflow = async (label: string) => {
   openPicker();

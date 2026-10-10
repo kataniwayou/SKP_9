@@ -124,7 +124,7 @@ describe('keyboard and screen readers (plan 3d)', () => {
 
   it('the picker opens on screen near the bottom edge', () => {
     render(<Picker items={[]} anchor={{ x: 10, y: window.innerHeight - 5, doc: document }} onPick={vi.fn()} onClose={vi.fn()} />);
-    const top = parseFloat((screen.getByRole('dialog', { name: 'Open workflow' }) as HTMLElement).style.top);
+    const top = parseFloat((screen.getByRole('dialog', { name: 'Load workflow' }) as HTMLElement).style.top);
     expect(top).toBeLessThanOrEqual(window.innerHeight - 360);
   });
 
