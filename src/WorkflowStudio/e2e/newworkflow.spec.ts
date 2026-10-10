@@ -34,7 +34,7 @@ async function typeInto(page: Page, label: string, text: string): Promise<void> 
 /** Workspace › New workflow with the real mouse: the new document's panel. */
 async function newWorkflow(page: Page): Promise<Locator> {
   await menu(page, 'Workspace').click();
-  const item = menu(page, /^\W*New/);
+  const item = menu(page, /^\W*New\b/);
   await expect(item).toContainText('Ctrl+N');
   await item.click();
   const panel = newPanel(page);
