@@ -622,6 +622,15 @@ live 13/6/5 green):
   CRUD. After every run, BaseApi lists no `e2e-8-…` entities.
 - Every other spec fails on any request that is not a GET.
 
+**Removing a processor from a step (2026-10-10) — BUILT, NOT DEPLOYED** (plan 8 spec §4.5.1). A click on a step's
+processor picture picks the processor; Delete clears the step's processor in the design (`Blocks.unassigned`, a pasted
+step's `processorId: null`), never the entity; the slot is a dashed amber ⚠ on a transparent background; Inspector and
+step read-out say "none"; no picker (the toolbox will drag one). Save sends it and BaseApi's steps stage refuses it
+("No processor: drag one from the toolbox."), so the dry run fails; `DesignShape` no longer 400s a new step with no
+processor; steps take a `processorId` field (must exist). Tests: hermetic 2065 + 74 skipped (+4); Vitest 1051;
+Playwright against the branch BaseApi on :18090: 158 passed + 2 skipped (new `processor.spec.ts` 2). Deploy BaseApi
+before the studio (an old BaseApi 400s the `processorId` field).
+
 ### Rulings made along the way
 
 User:

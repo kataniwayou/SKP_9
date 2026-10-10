@@ -289,6 +289,27 @@ session and the stored design cover them like any drawing.
   used by workflow 'w' (an entry step there)" as error lines. A request naming one id in two of create / change /
   delete is malformed (400).
 
+#### 4.5.1 Removing a processor from a step (the user's rules, 2026-10-10)
+
+- A click on a step's processor picture picks the processor (`{ kind: 'processor', id: stepId }`, Ctrl toggles; the
+  die is marked, the block is not picked); the rubber band still picks blocks. Copy, paste, arrows and group drag
+  ignore a processor pick.
+- Delete with processors picked removes each from its step: the step points at no processor (`Step.processorId`
+  null) and stays with its wires, next steps, assignment and entry condition; the step becomes the pick. The
+  processor entity is never deleted (orphans: to discuss). Mixed picks: steps, caches and wires are deleted as before;
+  a picked processor whose step is deleted too is moot.
+- Kept in the draft (`Blocks.unassigned` for the workflow's steps; a pasted step's own `processorId: null`), so undo,
+  redo, refresh, a refused Save (the stored design's step change `processorId: null`) and copy/paste carry it.
+- No limit: a step may stay without a processor. It is drawn with an empty slot, a dashed amber (`--warn`) outline with
+  a ⚠ and a transparent background (nothing behind the glyph), tip "No processor: drag one from the toolbox. Save will
+  fail until this step has one." The Inspector's Processor row and the step read-out say "none". No processor picker
+  anywhere: the future toolbox drags one onto a step.
+- Save is not blocked in the studio: it sends the step (`steps[].fields.processorId: null`, or a pasted step's
+  `processorId: null`) and BaseApi's steps stage refuses it on `processorId`: "No processor: drag one from the
+  toolbox." The dry run fails, everything rolls back, the line is red in Output. A step's `processorId` field naming
+  another processor must name one that exists ("Its processor no longer exists."). The database rule is unchanged: a
+  stored step always has a processor, so Start never meets one without.
+
 ### 4.4 The schema copy's version
 
 Plan 1's atomic save bumps the copied version's patch (`1.2.3` → `1.2.4`); the design save copies it unchanged
