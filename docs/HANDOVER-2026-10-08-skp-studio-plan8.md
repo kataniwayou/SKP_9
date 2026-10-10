@@ -590,6 +590,13 @@ skipped (+4), live `WorkflowDesignLiveTests` 16/16 on Postgres via the branch Ba
 root, a taken root refused clearly), Release `--no-incremental` clean; Vitest 1032 (+5); copypaste.spec 9 (+3: cache
 paste and Save, cut and paste across workflows, a kept delete's stamp conflicting after B's change). Mutations: BaseApi
 3, Vitest 1, e2e 3, each fails.
+Final review tightening: a create counts as "already created" only when nothing took the row up since: the step has no
+incoming next-step link from a step outside this workflow (this workflow's steps and this design's new steps may lead to
+it, as the first, committed save wired them) and no other workflow lists it as an entry step; the assignment is linked to
+no other workflow. Otherwise "Not created: a different … with this id already exists." (hermetic test, mutation fails it).
+Known gap left as is (coordinator's ruling): delete ownership trusts the workflow's own stored layout and stored design,
+which a crafted client writes itself, so a crafted client can delete any step or cache no workflow uses; that is no more
+than the CRUD DELETE already allows.
 
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):

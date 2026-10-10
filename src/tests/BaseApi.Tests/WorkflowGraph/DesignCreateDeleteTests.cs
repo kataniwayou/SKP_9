@@ -395,6 +395,36 @@ public sealed class DesignCreateDeleteTests
     }
 
     [Fact]
+    public async Task ACreateSentAgainIsRefusedWhenItsRowsWereTakenUpElsewhereMeanwhile()
+    {
+        await using var h = new GraphHarness();
+        var proc = await h.ProcessorAsync();
+        var a = await h.StepAsync(proc, "a");
+        var wf = await h.WorkflowAsync("wf", [a]);
+        var loaded = await h.Reader.ReadAsync(wf, h.Ct);
+        h.Forget();
+        Guid n = Guid.NewGuid(), m = Guid.NewGuid(), k = Guid.NewGuid(), na = Guid.NewGuid();
+        DesignSaveRequest Body(DateTime stamp) => Of(
+            workflow: new DesignWorkflowDto(stamp, null, null, null),
+            newSteps: [new DesignNewStepDto(n, a, proc, StepFields("n"), null), new DesignNewStepDto(m, a, proc, StepFields("m"), null),
+                new DesignNewStepDto(k, a, proc, StepFields("k"), null)],
+            assignments: [new DesignAssignmentDto("create", na, k, null, F("""{"name":"x","version":"1.0.0","payload":"{}"}"""))]);
+        Assert.True((await h.Syncer().SaveAsync(wf, Body(loaded.Workflow.UpdatedAt), h.Ct)).Applied);
+
+        // meanwhile: a stranger's step leads to n, another workflow lists m as an entry step and links the assignment
+        var stranger = await h.StepAsync(proc, "stranger", n);
+        await h.WorkflowAsync("other", [m], [na]);
+        h.Forget();
+        var again = await h.Syncer().SaveAsync(wf, Body((await h.Db.Workflows.SingleAsync(w => w.Id == wf, h.Ct)).UpdatedAt), h.Ct);
+
+        Assert.False(again.Applied);
+        Assert.Contains(again.Errors, e => (e.Id, e.Message) == (n, "Not created: a different step with this id already exists."));
+        Assert.Contains(again.Errors, e => (e.Id, e.Message) == (m, "Not created: a different step with this id already exists."));
+        Assert.Contains(again.Errors, e => (e.Id, e.Message) == (na, "Not created: a different assignment with this id already exists."));
+        Assert.NotEqual(Guid.Empty, stranger);
+    }
+
+    [Fact]
     public async Task APastedAssignmentCarriesItsOwnFieldsSoItSavesWhenItsOriginalIsGone()
     {
         // cut and paste across workflows: the original row was deleted before the copy is saved

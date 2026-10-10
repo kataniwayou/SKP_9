@@ -59,7 +59,7 @@ internal sealed class AssignmentStage : IDesignStage
                         break;
                     }
                     var existed = false;
-                    if (await run.UnitAsync("assignment", a.Id, "assignments", () => CreateAsync(a, x => existed = x, ct), ct))
+                    if (await run.UnitAsync("assignment", a.Id, "assignments", () => CreateAsync(run.WorkflowId, a, x => existed = x, ct), ct))
                     {
                         run.CreatedAssignments.Add(a.Id);
                         if (existed) run.Unchanged(a.Id);
@@ -93,7 +93,7 @@ internal sealed class AssignmentStage : IDesignStage
     private static string? Text(Dictionary<string, System.Text.Json.JsonElement>? fields, string key) =>
         fields is not null && fields.TryGetValue(key, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
 
-    private async Task<List<FieldError>> CreateAsync(DesignAssignmentDto a, Action<bool> already, CancellationToken ct)
+    private async Task<List<FieldError>> CreateAsync(Guid workflowId, DesignAssignmentDto a, Action<bool> already, CancellationToken ct)
     {
         var errors = new List<FieldError>();
         // a pasted step's copy (2026-10-10) starts as its original's row; the fields it names win
@@ -105,8 +105,10 @@ internal sealed class AssignmentStage : IDesignStage
         var existing = await _db.Set<AssignmentEntity>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == a.Id, ct);
         if (existing is not null)
         {
-            // the same row this design creates (a Save sent again after its answer was lost): nothing to create
-            if ((existing.Name, existing.Version, existing.Description, existing.StepId, existing.Payload) == (dto.Name, dto.Version, dto.Description, dto.StepId, dto.Payload))
+            // the same row this design creates (a Save sent again after its answer was lost): nothing to create, unless
+            // another workflow has linked it since (final review 2026-10-10)
+            var elsewhere = await _db.Set<WorkflowAssignments>().AsNoTracking().AnyAsync(j => j.AssignmentId == a.Id && j.WorkflowId != workflowId, ct);
+            if (!elsewhere && (existing.Name, existing.Version, existing.Description, existing.StepId, existing.Payload) == (dto.Name, dto.Version, dto.Description, dto.StepId, dto.Payload))
             {
                 already(true);
                 return [];

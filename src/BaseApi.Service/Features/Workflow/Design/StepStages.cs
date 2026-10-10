@@ -95,9 +95,15 @@ internal sealed class StepStage : IDesignStage
             var existing = await _db.Set<StepEntity>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == n.Id, ct);
             if (existing is not null)
             {
-                // the same step this design creates (a Save sent again after its answer was lost): nothing to create
+                // the same step this design creates (a Save sent again after its answer was lost): nothing to create. Only
+                // when nothing else has taken it up since: no step outside this workflow leads to it, and no other
+                // workflow lists it as an entry step (final review 2026-10-10)
+                var own = run.WorkflowSteps.Concat(run.Request.NewSteps!.Select(x => x.Id)).ToHashSet();
+                var feeders = await _db.Set<StepNextSteps>().AsNoTracking().Where(j => j.NextStepId == n.Id).Select(j => j.StepId).ToListAsync(ct);
+                var entries = await _db.Set<WorkflowEntrySteps>().AsNoTracking().Where(j => j.StepId == n.Id).Select(j => j.WorkflowId).ToListAsync(ct);
                 if ((existing.Name, existing.Version, existing.Description, existing.ProcessorId, existing.EntryCondition)
-                    == (dto.Name, dto.Version, dto.Description, dto.ProcessorId, dto.EntryCondition))
+                    == (dto.Name, dto.Version, dto.Description, dto.ProcessorId, dto.EntryCondition)
+                    && feeders.All(own.Contains) && entries.All(w => w == run.WorkflowId))
                 {
                     already = true;
                     return [];
