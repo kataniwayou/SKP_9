@@ -113,7 +113,7 @@ test('a short circuit is pinned red at the top of Output, above the log; clickin
   await expect(row.locator('.pd')).toHaveCSS('color', RED);
   // pinned above the log, which goes on below it
   const pane = page.locator('[data-pane="output"]');
-  expect(await pane.evaluate((el) => [...el.children].map((c) => c.getAttribute('role')))).toEqual(['list', 'log']);
+  expect(await pane.evaluate((el) => [...el.children].map((c) => c.getAttribute('role')))).toEqual(['toolbar', 'list', 'log']);
   expect((await pinned.boundingBox())!.y).toBeLessThan((await pane.getByRole('log').boundingBox())!.y);
   await shot(page, '1-short-circuit-pinned');
 
@@ -193,4 +193,44 @@ test('a Save BaseApi refuses: the refused entity, its stage, the dry run and the
   await expect(documentPanel(page, t.workflow).locator('.react-flow__node').first()).toBeVisible();
   expect(await lines(page)).toEqual(before);
   await shot(page, '4-after-refresh');
+});
+
+test('Clear empties the log of every workflow, the pinned short circuit stays, a refresh keeps it empty; the tab menu has it too', async ({ page }) => {
+  const panel = await open(page);
+  const ab = `${t.a}->${t.b}`;
+  await shapeByHand(page, panel, ab);
+  const f = await freeWire(page, panel, t.c);
+  await layOn(page, panel, f, ab);
+  const clear = page.getByRole('button', { name: 'Clear output' });
+  await expect(clear).toBeDisabled();
+  // a Save logs (the design is stored as drawn, the short circuit held back)
+  await save(page);
+  await expect(await outputLines(page)).not.toHaveCount(0);
+  await expect(clear).toBeEnabled();
+  await expect(clear).toHaveAttribute('data-tip', 'Clear the messages; current problems stay');
+
+  await clear.click();
+  await expect(await outputLines(page)).toHaveCount(0);
+  await expect((await problems(page)).getByRole('listitem').filter({ hasText: 'overlaps' })).toHaveCount(1);
+  await expect(clear).toBeDisabled();
+  await shot(page, '8-output-cleared');
+
+  // the tab menu: Clear output, disabled while the log is empty
+  await tab(page, 'Output').click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: /Clear output/ })).toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('Escape');
+
+  await page.waitForTimeout(500); // the session is written 300 ms after the last change
+  await page.reload();
+  await expect(documentPanel(page, t.workflow).locator('.react-flow__node').first()).toBeVisible();
+  await expect(await outputLines(page)).toHaveCount(0);
+  await expect((await problems(page)).getByRole('listitem').filter({ hasText: 'overlaps' })).toHaveCount(1);
+
+  // a new line, then Clear from the tab menu
+  await typeInto(page, documentPanel(page, t.workflow), t.c, 'Description', 'again');
+  await save(page);
+  await expect(await outputLines(page)).not.toHaveCount(0);
+  await tab(page, 'Output').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: /Clear output/ }).click();
+  await expect(await outputLines(page)).toHaveCount(0);
 });

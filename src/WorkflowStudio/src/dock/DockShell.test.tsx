@@ -238,6 +238,18 @@ describe('DockShell', () => {
     expect(onRunCommand).toHaveBeenCalledTimes(2);
   });
 
+  it('puts a tool pane\'s own entries at the top of its tab menu (Output\'s Clear, 2026-10-10)', () => {
+    const onSelect = vi.fn();
+    setup({ toolMenu: (id) => (id === 'output' ? [{ id: 'clear', icon: '⌫', label: 'Clear output', onSelect }] : []) });
+    fireEvent.contextMenu(tab('Output'));
+    const items = screen.getAllByRole('menuitem').filter((m) => m.classList.contains('mi')).map((m) => m.textContent);
+    expect(items[0]).toContain('Clear output');
+    choose(/Clear output/);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    fireEvent.contextMenu(tab('Inspector'));
+    expect(screen.queryByRole('menuitem', { name: /Clear output/ })).toBeNull();
+  });
+
   it('ignores F5 while a dialog is open (a question, the picker)', () => {
     const onRunCommand = vi.fn(() => null);
     setup({ onRunCommand });

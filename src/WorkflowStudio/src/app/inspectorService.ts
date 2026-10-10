@@ -51,17 +51,21 @@ export function createInspectorService(api: StudioApi, store: StudioStore): Insp
     const target = doc === null ? null : shownTargetOf(doc);
     if (doc === null || target === null) return;
     const key = targetKey(target);
-    if (!again && (doc.inspector.saved?.key === key || reading.get(workflowId) === key)) return;
+    const gen = doc.generation;
+    // read once per entity and document generation: a Save's re-read makes a new one, so the shown entity is read again
+    const current = doc.inspector.saved?.key === key && (doc.inspector.saved.gen ?? gen) >= gen;
+    const reads = `${gen}|${key}`;
+    if (!again && (current || reading.get(workflowId) === reads)) return;
     const virtual = madeUp(doc, target);
     if (virtual !== null) {
-      store.dispatch({ type: 'read', workflowId, key, result: { ok: true, dto: virtual } });
+      store.dispatch({ type: 'read', workflowId, key, gen, result: { ok: true, dto: virtual } });
       return;
     }
-    reading.set(workflowId, key);
+    reading.set(workflowId, reads);
     void api.getEntity(target.kind, target.id).then((r) => {
-      if (reading.get(workflowId) === key) reading.delete(workflowId);
+      if (reading.get(workflowId) === reads) reading.delete(workflowId);
       store.dispatch({
-        type: 'read', workflowId, key,
+        type: 'read', workflowId, key, gen,
         result: r.ok ? { ok: true, dto: r.value }
           : { ok: false, message: r.error.kind === 'notFound' ? `This ${crumbLabel(target).toLowerCase()} no longer exists.` : `Could not read it. ${describeError(r.error)}` },
       });

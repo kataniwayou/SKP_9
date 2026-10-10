@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { assignmentDto, graphDto, processorDto, schemaDto, stepDto, workflowDto } from '../api/fixtures';
@@ -457,7 +457,7 @@ describe('Output and Toolbox', () => {
     act(() => store.dispatch({ type: 'log', workflowId: 'wf1', lines: [{ at: '2026-10-07T12:00:00Z', text: 'Saved; not applied: 1 error', level: 'error' }] }));
     wrap(store, <Output />);
     const pane = document.querySelector('[data-pane="output"]')!;
-    expect([...pane.children].map((c) => c.getAttribute('role'))).toEqual(['list', 'log']);
+    expect([...pane.children].map((c) => c.getAttribute('role'))).toEqual(['toolbar', 'list', 'log']);
     fireEvent.keyDown(within(pinned()!).getByRole('listitem'), { key: ' ' });
     expect(store.getState().docs[0]!.selection).toEqual({ kind: 'step', stepId: 's2' });
     expect(screen.getByRole('log', { name: 'Output' })).toHaveTextContent('Saved; not applied: 1 error');
@@ -466,5 +466,67 @@ describe('Output and Toolbox', () => {
   it('Toolbox is a real pane with one line', () => {
     render(<Toolbox />);
     expect(screen.getByText('The toolbox arrives in a later version.')).toBeInTheDocument();
+  });
+});
+
+describe('the Inspector shows the design graph\'s entity (2026-10-10: it kept the values from before a Save)', () => {
+  const graphWith = (description: string | null) => graphDto({ ...inspectorGraph, steps: [stepDto('s1', { name: 'fetch', nextStepIds: ['s2'], processorId: 'p1', description }), stepDto('s2', { name: 'store', processorId: 'p1' })] } as never);
+
+  it('an unsaved edit shows at once; after an applied Save the same value comes from BaseApi with no re-pick; Discard shows the base', async () => {
+    // the entity's own read lags behind on purpose: the form must not depend on it
+    const getEntity = vi.fn(async () => ok(stepDto('s1', { name: 'fetch', description: 'stale read' })));
+    const { store } = await renderInspector({ getEntity }, { selection: { kind: 'step', stepId: 's1' }, graph: graphWith(null) });
+    expect(await screen.findByLabelText('Description')).toHaveValue('');
+
+    act(() => store.dispatch({ type: 'editField', workflowId: 'wf1', key: 'description', value: 'e2e log', copyId: 'x' }));
+    expect(screen.getByLabelText('Description')).toHaveValue('e2e log');
+    expect(screen.getByText('● unsaved changes')).toBeInTheDocument();
+
+    const saved = await loadedDocument(graphWith('e2e log'));
+    act(() => store.dispatch({ type: 'saveAnswered', workflowId: 'wf1', at: '2026-10-10T09:00:00Z', applied: true, errors: [], doc: saved }));
+    expect(screen.getByLabelText('Description')).toHaveValue('e2e log');
+    expect(screen.queryByText('● unsaved changes')).toBeNull();
+    // the read that follows the re-read is one GET, and it cannot override the graph
+    await waitFor(() => expect(getEntity).toHaveBeenCalledTimes(2));
+    expect(screen.getByLabelText('Description')).toHaveValue('e2e log');
+
+    act(() => store.dispatch({ type: 'editField', workflowId: 'wf1', key: 'description', value: 'typed', copyId: 'x' }));
+    act(() => store.dispatch({ type: 'discardDesign', workflowId: 'wf1' }));
+    expect(screen.getByLabelText('Description')).toHaveValue('e2e log');
+  });
+
+  it('the workflow and a processor follow the graph too; a read made before the re-read is dropped', async () => {
+    const getEntity = vi.fn(async (kind: string) => ok(kind === 'workflow' ? workflowDto({ description: 'old' }) : processorDto('p1', { name: 'fetcher', description: 'old' })));
+    const { store } = await renderInspector({ getEntity }, { selection: { kind: 'workflow' } });
+    const next = graphDto({ ...inspectorGraph, workflow: workflowDto({ description: 'wf saved' }), processors: [processorDto('p1', { name: 'fetcher', configSchemaId: 'sc1', description: 'proc saved' })] } as never);
+    const reread = await loadedDocument(next);
+    act(() => store.dispatch({ type: 'saveAnswered', workflowId: 'wf1', at: '2026-10-10T09:00:00Z', applied: true, errors: [], doc: reread }));
+    expect(await screen.findByLabelText('Description')).toHaveValue('wf saved');
+    act(() => store.dispatch({ type: 'select', workflowId: 'wf1', selection: { kind: 'processor', processorId: 'p1', stepId: 's1' } }));
+    expect(await screen.findByLabelText('Description')).toHaveValue('proc saved');
+    const gen = store.getState().docs[0]!.generation;
+    act(() => store.dispatch({ type: 'read', workflowId: 'wf1', key: 'processor:p1', gen: gen - 1, result: { ok: true, dto: processorDto('p1', { description: 'older' }) } }));
+    expect(store.getState().docs[0]!.inspector.saved?.dto).not.toMatchObject({ description: 'older' });
+  });
+});
+
+describe('Output: Clear (2026-10-10)', () => {
+  it('clears the log of every workflow, keeps the pinned problems, and is disabled while the log is empty', async () => {
+    const store = await storeWith([{ kind: 'step', id: 's2', stage: 'steps', field: 'version', message: 'bad' }]);
+    wrap(store, <Output />);
+    expect(screen.getByRole('button', { name: 'Clear output' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Clear output' }).parentElement).toHaveAttribute('data-tip', 'Clear the messages; current problems stay');
+    act(() => {
+      store.dispatch({ type: 'log', workflowId: 'wf1', lines: [{ at: '2026-10-10T09:00:00Z', text: 'Save started: sending the layout only' }] });
+      store.dispatch({ type: 'log', workflowId: 'wf1', lines: [{ at: '2026-10-10T09:00:01Z', text: 'Saved; not applied: 1 error', level: 'error' }] });
+    });
+    const clear = screen.getByRole('button', { name: 'Clear output' });
+    expect(clear).toBeEnabled();
+    expect(clear).toHaveAttribute('data-tip', 'Clear the messages; current problems stay');
+    fireEvent.click(clear);
+    expect(store.getState().output).toEqual([]);
+    expect(document.querySelectorAll('.outl')).toHaveLength(0);
+    expect(within(pinned()!).getAllByRole('listitem')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Clear output' })).toBeDisabled();
   });
 });

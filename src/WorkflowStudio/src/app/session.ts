@@ -172,6 +172,7 @@ export function restoredState(session: Session | null): StudioState {
       errors: null,
       live: 'checking',
       run: null,
+      generation: 0,
     })),
     activeId: session.activeId,
     showDetails: session.showDetails,

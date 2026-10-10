@@ -216,6 +216,10 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
         storage={storage}
         restore={session?.dock ?? null}
         onLayoutChange={(dock) => { dockState.current = dock; saver.schedule(); }}
+        toolMenu={(id) => (id !== 'output' ? [] : [{
+          id: 'clear', icon: '⌫', label: 'Clear output', tip: 'Clear the messages; current problems stay',
+          disabled: store.getState().output.length === 0, onSelect: () => store.dispatch({ type: 'clearOutput' }),
+        }])}
         onRunCommand={(op: RunOp) => {
           const open = store.getState().docs.find((d) => d.workflowId === store.getState().activeId);
           if (!open) return `${RUN_WORD[op]}: open a workflow first.`;

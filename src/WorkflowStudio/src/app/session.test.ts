@@ -112,7 +112,7 @@ describe('sessionOf / restoredState', () => {
   it('keeps each open document with its selection and view, and drops views of closed documents', () => {
     const state: StudioState = {
       ...INITIAL_STATE,
-      docs: [{ workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'workflow' }, inspector: EMPTY_INSPECTOR, picks: [], design: historyOf(), edits: EMPTY_EDITS, stored: null, restored: false, saving: false, errors: null, live: 'checking', run: null }],
+      docs: [{ workflowId: 'a', name: 'orders', version: '1.0.0', status: { kind: 'loading' }, selection: { kind: 'workflow' }, inspector: EMPTY_INSPECTOR, picks: [], design: historyOf(), edits: EMPTY_EDITS, stored: null, restored: false, saving: false, errors: null, live: 'checking', run: null, generation: 0 }],
       activeId: 'a',
       showDetails: true,
     };

@@ -55,6 +55,12 @@ export interface OpenDocument {
   live: LiveStatus;
   /** A Start or Stop being sent or waiting for the live set (2026-10-09); not kept across a refresh. */
   run: RunState | null;
+  /**
+   * Counts the times the workflow was read from BaseApi (opened, or read again after a Save). The Inspector's read of
+   * the shown entity belongs to one; a newer one makes it read the entity again (2026-10-10: after a Save it showed the
+   * values from before).
+   */
+  generation: number;
 }
 
 /**
@@ -91,7 +97,8 @@ export type StudioAction =
   | { type: 'drill'; workflowId: Id; target: InspectorTarget }
   /** Keeps the first `depth` drill-downs (0: back to the selection). */
   | { type: 'back'; workflowId: Id; depth: number }
-  | { type: 'read'; workflowId: Id; key: string; result: { ok: true; dto: EntityReadDto } | { ok: false; message: string } }
+  /** `gen`: the document generation the read was made in (absent: the current one); an older read is dropped. */
+  | { type: 'read'; workflowId: Id; key: string; gen?: number; result: { ok: true; dto: EntityReadDto } | { ok: false; message: string } }
   /** A field typed into the shown entity: a design edit (spec §3.3). `copyId` names a schema copy if this edit makes one. */
   | { type: 'editField'; workflowId: Id; key: string; value: FieldValue; copyId: string }
   /** Drops the shown entity's design edits. */
@@ -101,6 +108,8 @@ export type StudioAction =
   /** Removes a step's assignment in the design. */
   | { type: 'removeAssignment'; workflowId: Id; stepId: Id }
   | { type: 'saving'; workflowId: Id }
+  /** Empties Output's log for every workflow (2026-10-10); the pinned problems are live state and stay. */
+  | { type: 'clearOutput' }
   /** Lines for Output, about this workflow (e.g. "Save started"). */
   | { type: 'log'; workflowId: Id; lines: LineDraft[] }
   /**
@@ -182,7 +191,7 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       const doc: OpenDocument = {
         workflowId: action.workflowId, name: action.name, version: action.version, status: { kind: 'loading' }, selection: null, inspector: EMPTY_INSPECTOR,
         picks: [], design: historyOf(), edits: EMPTY_EDITS, errors: null, stored: null, restored: false, saving: false,
-        live: 'checking', run: null,
+        live: 'checking', run: null, generation: 0,
       };
       return { ...state, docs: [...state.docs, doc], activeId: action.workflowId };
     }
@@ -194,7 +203,7 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
         const design = settled === null
           ? { design: historyOf(stored.draft), edits: stored.edits }
           : settled === d.design.draft ? {} : { design: historyOf(settled) };
-        return { ...d, ...design, name: action.doc.graph.workflow.name, version: action.doc.graph.workflow.version, status: { kind: 'ready', doc: action.doc }, stored, restored: false };
+        return { ...d, ...design, name: action.doc.graph.workflow.name, version: action.doc.graph.workflow.version, status: { kind: 'ready', doc: action.doc }, stored, restored: false, generation: d.generation + 1 };
       });
     case 'failed':
       return update(state, action.workflowId, (d) => ({ ...d, status: { kind: 'failed', message: action.message } }));
@@ -244,10 +253,11 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
     case 'read':
       // the key check is what drops a read for an entity no longer shown
       return inspect(state, action.workflowId, (i, d) => {
-        if (targetKey(shownTargetOf(d)) !== action.key) return i;
+        const gen = action.gen ?? d.generation;
+        if (targetKey(shownTargetOf(d)) !== action.key || gen < d.generation) return i;
         // a failed re-read keeps the form it had, with a note (spec §8); with nothing read, only why
         if (!action.result.ok) return { ...i, saved: i.saved?.key === action.key ? i.saved : null, readError: action.result.message };
-        return { ...i, saved: { key: action.key, dto: action.result.dto }, readError: null };
+        return { ...i, saved: { key: action.key, dto: action.result.dto, gen }, readError: null };
       });
     case 'editField':
       return update(state, action.workflowId, (d) => {
@@ -303,6 +313,8 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
         const status: DocStatus = action.doc ? { kind: 'ready', doc: action.doc } : d.status;
         const out: OpenDocument = {
           ...d, status, stored, restored: false, saving: false, errors: n === 0 ? null : action.errors,
+          // read again: the Inspector reads the shown entity anew (what BaseApi holds now)
+          generation: action.doc ? d.generation + 1 : d.generation,
           design: historyOf(stored.draft), edits: stored.edits,
           name: action.doc?.graph.workflow.name ?? d.name, version: action.doc?.graph.workflow.version ?? d.version,
         };
@@ -316,6 +328,8 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       const next = update(state, action.workflowId, (d) => ({ ...d, saving: false }));
       return logged(next, action.workflowId, doc.name, [{ at: action.at, text: `Not saved: ${action.message}`, level: 'error' }]);
     }
+    case 'clearOutput':
+      return state.output.length === 0 ? state : { ...state, output: [] };
     case 'log': {
       const doc = state.docs.find((d) => d.workflowId === action.workflowId);
       return doc ? logged(state, action.workflowId, doc.name, action.lines) : state;

@@ -10,7 +10,6 @@ import { errorPicks, errorTarget } from '../store/errorTarget';
 import { selectionKey } from '../store/selection';
 import { activeDocument, type OpenDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
-import { PaneNote } from './PaneNote';
 
 const timeOf = (iso: string): string => {
   const d = new Date(iso);
@@ -95,6 +94,21 @@ function PinnedProblems({ active, errors, shown }: { active: OpenDocument; error
  * the Problems pane listed them); below them the log of what Save, Start and Stop did, oldest first, each line with its
  * time and workflow, errors in red. The log is bounded and kept in the session.
  */
+/** Output's own toolbar: Clear empties the log (all workflows); the pinned problems stay. */
+const CLEAR_TIP = 'Clear the messages; current problems stay';
+
+function OutputBar({ empty }: { empty: boolean }) {
+  const store = useStudioStore();
+  return (
+    <div className="otools" role="toolbar" aria-label="Output">
+      {empty
+        // a disabled button shows no tip of its own: the span carries it
+        ? <span data-tip={CLEAR_TIP}><button type="button" className="qb" aria-label="Clear output" disabled>Clear</button></span>
+        : <button type="button" className="qb" aria-label="Clear output" data-tip={CLEAR_TIP} onClick={() => store.dispatch({ type: 'clearOutput' })}>Clear</button>}
+    </div>
+  );
+}
+
 export function Output() {
   const active = useStudio(activeDocument);
   const lines = useStudio((s) => s.output);
@@ -109,10 +123,16 @@ export function Output() {
   }, [last]);
 
   if (lines.length === 0 && errors.length === 0) {
-    return <PaneNote pane="output">Nothing yet. Each Save, Start and Stop says here what happened; current problems are pinned here.</PaneNote>;
+    return (
+      <div className="paneBody" data-pane="output">
+        <OutputBar empty />
+        <div className="pbody"><div className="note pane-note">Nothing yet. Each Save, Start and Stop says here what happened; current problems are pinned here.</div></div>
+      </div>
+    );
   }
   return (
     <div className="paneBody" data-pane="output">
+      <OutputBar empty={lines.length === 0} />
       {active && <PinnedProblems active={active} errors={errors} shown={shown} />}
       <div
         ref={log}

@@ -77,6 +77,8 @@ textarea.input.json { white-space: pre; overflow: auto; }
 .link:disabled { opacity: .45; cursor: default; }
 .arow { display: flex; align-items: center; gap: 12px; }
 fieldset.plain { border: 0; margin: 0; padding: 0; min-width: 0; }
+.otools { display: flex; justify-content: flex-end; padding: 3px 8px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+.otools .qb { font-size: 11.5px; }
 .outl { padding: 2px 10px; font-family: var(--mono); font-size: 12px; }
 .outl .t { color: var(--muted); }
 .outl.err { color: var(--error); }

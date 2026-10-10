@@ -8,8 +8,12 @@ export interface InspectorDraft {
 }
 
 export interface InspectorState extends InspectorDraft {
-  /** The shown entity's base (its GET, or made up for what the database does not hold yet) and the target key it belongs to. */
-  saved: { key: string; dto: EntityReadDto } | null;
+  /**
+   * The shown entity's base (its GET, or made up for what the database does not hold yet), the target key it belongs to,
+   * and the document generation it was read in (`OpenDocument.generation`): read in an older one, it is shown until the
+   * read in the current one lands (no blank form), then replaced.
+   */
+  saved: { key: string; dto: EntityReadDto; gen?: number } | null;
   /** Why the shown entity could not be read. */
   readError: string | null;
 }

@@ -57,6 +57,8 @@ export interface DockShellProps {
    * as a toast), or null when it was pressed. Without it the keys say they are not available.
    */
   onRunCommand?: (op: 'start' | 'stop') => string | null;
+  /** A tool pane's own entries at the top of its tab menu (e.g. Output's Clear, 2026-10-10). */
+  toolMenu?: (id: ToolId) => MenuEntry[];
 }
 
 const COMPONENTS = { document: DocumentHost, tool: ToolHost };
@@ -311,7 +313,9 @@ export function DockShell(props: DockShellProps) {
     const group = panel.group;
     const docked = group.api.location.type === 'grid';
     const isDoc = isDocPanelId(panelId);
+    const own = !isDocPanelId(panelId) && isToolId(panelId) ? latest.current.props.toolMenu?.(panelId) ?? [] : [];
     const entries: MenuEntry[] = [
+      ...own, ...(own.length > 0 ? ['separator' as const] : []),
       docked
         ? { id: 'float', icon: '⧉', label: 'Float', kbd: 'Ctrl+dbl-click', onSelect: () => floatPanel(api, memory, panel, dockRect()) }
         : { id: 'dock', icon: '⤓', label: 'Dock', kbd: 'Ctrl+dbl-click', onSelect: () => dockBack(api, memory, group) },

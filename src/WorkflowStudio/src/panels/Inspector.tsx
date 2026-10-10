@@ -12,7 +12,7 @@ import { crumbLabel, editTargetOf, rootTarget, targetKey, type InspectorTarget, 
 import { activeDocument, shownTargetOf, type OpenDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { FieldEditor } from './FieldEditor';
-import { detailRows, kindLabel, uniqueNameOf, type Row } from './inspectorView';
+import { detailRows, inspectorBaseOf, kindLabel, uniqueNameOf, type Row } from './inspectorView';
 import { PaneNote } from './PaneNote';
 import { GraphReadoutSection, StepGraphSection, WireReadoutPane } from './Readouts';
 
@@ -33,9 +33,11 @@ export function Inspector() {
   const key = targetKey(target);
   const workflowId = active?.workflowId ?? null;
   const ready = active?.status.kind === 'ready';
+  // a new generation (the workflow read again after a Save) reads the shown entity again
+  const generation = active?.generation ?? 0;
   useEffect(() => {
     if (workflowId !== null && ready && key !== 'none') service.read(workflowId);
-  }, [service, workflowId, ready, key]);
+  }, [service, workflowId, ready, key, generation]);
 
   if (active === null) return <PaneNote pane="inspector">Open a workflow to inspect it.</PaneNote>;
   if (active.status.kind === 'loading') return <PaneNote pane="inspector">Loading…</PaneNote>;
@@ -61,7 +63,9 @@ function EntityPane({ open, target }: { open: OpenDocument; target: InspectorTar
   const drill = (next: InspectorTarget) => store.dispatch({ type: 'drill', workflowId, target: next });
   const back = (depth: number) => store.dispatch({ type: 'back', workflowId, depth });
   const crumbs = [rootTarget(open.selection, workflowId)!, ...inspector.trail];
-  const saved = inspector.saved?.key === targetKey(target) ? inspector.saved.dto : null;
+  // the design graph's entity (2026-10-10): the loaded graph's values, the read only for what the graph does not carry
+  const read = inspector.saved?.key === targetKey(target) ? inspector.saved.dto : null;
+  const saved = inspectorBaseOf(base.graph, target, read);
   const fields = fieldsOf(open.edits, editTargetOf(target));
   // a stamp-only entry counts: it is sent on Save, and Revert is how a stale one is cleared (spec §6.2)
   const dirty = hasEdit(open.edits, editTargetOf(target));
@@ -90,7 +94,12 @@ function EntityPane({ open, target }: { open: OpenDocument; target: InspectorTar
       ) : (
         <>
           <div className="pbody">
-            {inspector.readError && <div className="sec"><p className="note warn">{inspector.readError}</p></div>}
+            {inspector.readError && (
+              <div className="sec">
+                <p className="note warn">{inspector.readError}</p>
+                <button type="button" className="btn" onClick={() => service.read(workflowId, true)}>Retry</button>
+              </div>
+            )}
             {/* read-only while a Save is in flight (spec §4.1) */}
             <fieldset className="plain" disabled={open.saving}>
               <EntityForm open={open} doc={doc} base={base} target={target} saved={saved} fields={fields} showDetails={showDetails} drill={drill} />
