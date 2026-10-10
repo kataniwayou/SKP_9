@@ -1,7 +1,10 @@
 namespace Processor.ArchiveExpander.Extractors;
 
 /// <summary>One entry pulled out of an archive.</summary>
-/// <param name="Name">The entry's own file name, without any directory the archive recorded.</param>
+/// <param name="Name">
+/// The entry's own file name, without any directory the archive recorded. Empty when the format
+/// recorded none (a gzip without FNAME); <c>FileContentBuilder</c> then names it after the archive.
+/// </param>
 /// <param name="Content">The entry's bytes, as the format yielded them.</param>
 /// <param name="ModifiedUtc">Null where the format records none.</param>
 public sealed record ExtractedEntry(string Name, byte[] Content, DateTime? ModifiedUtc);

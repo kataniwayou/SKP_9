@@ -68,6 +68,7 @@
     <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Resilience\Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="ArchiveExpander\Fixtures\*.rar" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="ArchiveExpander\Fixtures\*.gz" CopyToOutputDirectory="PreserveNewest" />
     <!-- Recorded Elasticsearch and Prometheus response payloads PanelTrustTests parses directly.
          No live system is contacted to produce these; each is a hand-built shape matching what those
          APIs actually return for the case its filename names. -->

@@ -3,9 +3,9 @@ using System.Formats.Tar;
 namespace Processor.ArchiveExpander.Extractors;
 
 /// <summary>
-/// Tar, on the in-box <c>System.Formats.Tar</c>. Uncompressed only — a <c>.tar.gz</c> has a
-/// different extension and would need its own extractor and its own decision about whether the
-/// double extension is one format or two.
+/// Tar, on the in-box <c>System.Formats.Tar</c>. Uncompressed only — a <c>.tar.gz</c> reaches this
+/// class one level down, after <see cref="GzipExtractor"/> has yielded the tar inside it; the
+/// double extension is two formats, not one.
 /// </summary>
 public sealed class TarExtractor : IArchiveExtractor
 {

@@ -16,3 +16,17 @@ Regenerate it with the WinRAR CLI:
 
 `-ep` stores bare names with no directory paths. If you regenerate with different content, update
 the byte lengths asserted in `RarExtractorTests`.
+
+## Gzip
+
+`named.csv.gz`, `unnamed.csv.gz`, `two-entries.tar.gz` — written by GNU gzip 1.13 / GNU tar, not
+built in the tests, because .NET's `GZipStream` never writes FNAME or MTIME and the real tool's
+default header is what an operator's files actually carry.
+
+    printf 'id,name\n1,a\n' > report.csv
+    touch -d '2026-09-08 10:58:00 UTC' report.csv
+    gzip -c report.csv > named.csv.gz        # records FNAME report.csv and MTIME
+    gzip -n -c report.csv > unnamed.csv.gz   # records neither
+    printf 'id\n' > a.csv
+    printf 'id,name\n' > b.csv
+    tar --format=ustar -czf two-entries.tar.gz a.csv b.csv
