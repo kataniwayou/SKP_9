@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { ReactFlow, ReactFlowProvider, useStore, useStoreApi, type EdgeMouseHandler, type EdgeTypes, type NodeMouseHandler, type NodeTypes, type Viewport } from '@xyflow/react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { ReactFlow, ReactFlowProvider, useReactFlow, useStore, useStoreApi, type EdgeMouseHandler, type EdgeTypes, type NodeMouseHandler, type NodeTypes, type Viewport } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
 import { shapedByHand } from '../circuit/circuit';
 import { applyDraft } from '../design/apply';
@@ -12,6 +12,9 @@ import { useBlockDrag } from '../design/useBlockDrag';
 import { isArrow, useDesignKeys } from '../design/useDesignKeys';
 import { useRubberBand } from '../design/useRubberBand';
 import { useWireGestures } from '../design/useWireGestures';
+import { registerDropTarget, useToolDrag } from '../design/toolDrag';
+import { landingBox, toolLabel, wireLanding } from '../design/toolDrop';
+import { cacheNodeId } from '../layout/nodeIds';
 import { Menu, anchorAt, type Anchor } from '../dock/Menu';
 import { togglePick, type Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
@@ -138,7 +141,34 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const onKeyDown = useDesignKeys(doc, shownRef, design, () => pressing() || wiring.running() || drag.dragging(), wiring.keys);
   // the block under a dragged wire end, outlined green or red (spec §4.4); a line gets a halo instead (plan 7); a wire
   // moved whole has one per end (rule B, 2026-10-09)
-  const shown = useMemo(() => wiring.hints.filter((h) => !h.line).reduce(withHint, selected), [selected, wiring.hints]);
+  // a Toolbox drag over this canvas (2026-10-11): where it lands, the step a processor goes to (or the cache already here)
+  const container = useRef<HTMLDivElement>(null);
+  const { screenToFlowPosition } = useReactFlow();
+  const designing = design !== undefined;
+  const workflowId = doc.graph.workflow.id;
+  useEffect(() => {
+    if (!designing || !container.current) return undefined;
+    return registerDropTarget({
+      workflowId, el: container.current, shown: () => shownRef.current,
+      toFlow: (c) => screenToFlowPosition(c, { snapToGrid: false }),
+    });
+  }, [designing, workflowId, screenToFlowPosition]);
+  const toolDrag = useToolDrag();
+  const toolOver = toolDrag?.over && toolDrag.over.target.el === container.current ? toolDrag.over : null;
+  const tool = useMemo(() => {
+    if (!toolDrag || !toolOver) return null;
+    const v = toolOver.verdict;
+    const label = toolLabel(v, toolOver.saving);
+    const box = v.kind === 'place' && !toolOver.saving ? landingBox(toolDrag.item, toolOver.flow) : null;
+    const line = v.kind === 'place' && !toolOver.saving && toolDrag.item.kind === 'wire' ? wireLanding(toolOver.flow) : null;
+    const node = v.kind === 'assign' || v.kind === 'replace' ? { id: v.stepId, tone: 'ok' as const }
+      : v.kind === 'linked' ? { id: cacheNodeId(v.cacheId), tone: 'no' as const } : null;
+    return { box, line, node, label: label && { ...label, at: toolOver.flow } };
+  }, [toolDrag, toolOver]);
+  const shown = useMemo(() => {
+    const marked = wiring.hints.filter((h) => !h.line).reduce(withHint, selected);
+    return tool?.node ? withHint(marked, tool.node) : marked;
+  }, [selected, wiring.hints, tool]);
   // a wire whose end is dragged follows the pointer: the wire, its handles and its runs (spec §4.4)
   const dragged = wiring.ghost?.wire ? { id: wiring.ghost.wire, points: wiring.ghost.points } : null;
   const edges = useMemo(() => marked.edges.map((e) => {
@@ -196,7 +226,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   return (
     <FollowFitContext.Provider value={followFit}>
       <LiveArtContext.Provider value={live}>
-        <div className={banding || wiring.active ? `studio-canvas gesture${wiring.resize ? ` gesture-${wiring.resize}` : ''}` : 'studio-canvas'} style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%', '--inv': String(1 / zoom) } as CSSProperties}
+        <div ref={container} className={banding || wiring.active ? `studio-canvas gesture${wiring.resize ? ` gesture-${wiring.resize}` : ''}` : 'studio-canvas'} style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%', '--inv': String(1 / zoom) } as CSSProperties}
           tabIndex={design ? 0 : undefined}
           onKeyDown={design ? onKeyDown : undefined}
           // an arrow let go drops the wires it held (the closed hand's release); so does leaving the canvas or a press
@@ -247,7 +277,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onMoveEnd={(_event, v) => report(v)}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost && !wiring.ghost.wire ? wiring.ghost.points : null} hints={wiring.hints} gone={wiring.ghost?.gone ?? null} />}
+              {design && <DesignOverlay band={band} guides={guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost && !wiring.ghost.wire ? wiring.ghost.points : null} hints={wiring.hints} gone={wiring.ghost?.gone ?? null} tool={tool} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize initial={savedSize} />

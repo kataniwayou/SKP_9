@@ -1,5 +1,5 @@
 import { ENTITY_PATH, type EntityKind, type ReadDtoOf, type UpdateDtoOf } from './entities';
-import type { AssignmentCreateDto, AssignmentReadDto, DesignOutcomeDto, DesignSaveRequest, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowDeleteOutcomeDto, WorkflowGraphDto, WorkflowReadDto } from './types';
+import type { AssignmentCreateDto, AssignmentReadDto, CacheReadDto, DesignOutcomeDto, DesignSaveRequest, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowDeleteOutcomeDto, WorkflowGraphDto, WorkflowReadDto } from './types';
 
 /**
  * Every way a request can fail, as data. The UI shows these in its status line (Output in plan 5);
@@ -21,6 +21,10 @@ export interface StudioApi {
   getStep(stepId: string): Promise<ApiResult<StepReadDto>>;
   getProcessor(processorId: string): Promise<ApiResult<ProcessorReadDto>>;
   getSchema(schemaId: string): Promise<ApiResult<SchemaReadDto>>;
+  /** The Toolbox's lists (2026-10-11): every processor, cache and schema BaseApi holds. Optional: a test's fake may lack them. */
+  listProcessors?(): Promise<ApiResult<ProcessorReadDto[]>>;
+  listCaches?(): Promise<ApiResult<CacheReadDto[]>>;
+  listSchemas?(): Promise<ApiResult<SchemaReadDto[]>>;
   /** `GET /{entity}/{id}`: the entity's read DTO, the Inspector's baseline (spec §7.1). */
   getEntity<K extends EntityKind>(kind: K, id: string): Promise<ApiResult<ReadDtoOf[K]>>;
   /** `PUT /{entity}/{id}` with the full update DTO; BaseApi answers 200 with the entity read back. */
@@ -138,6 +142,9 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
     getStep: (stepId) => get<StepReadDto>(`/steps/${id(stepId)}`),
     getProcessor: (processorId) => get<ProcessorReadDto>(`/processors/${id(processorId)}`),
     getSchema: (schemaId) => get<SchemaReadDto>(`/schemas/${id(schemaId)}`),
+    listProcessors: () => get<ProcessorReadDto[]>('/processors'),
+    listCaches: () => get<CacheReadDto[]>('/caches'),
+    listSchemas: () => get<SchemaReadDto[]>('/schemas'),
     getEntity<K extends EntityKind>(kind: K, entityId: string) {
       return get<ReadDtoOf[K]>(`/${ENTITY_PATH[kind]}/${id(entityId)}`);
     },

@@ -1,0 +1,139 @@
+import { describe, expect, it } from 'vitest';
+import { cacheDto, graphDto, processorDto, schemaDto, stepDto, workflowDto } from '../api/fixtures';
+import { cacheFromDto, processorFromDto, schemaFromDto } from '../api/toModel';
+import { loadedDocument } from '../app/fixtures';
+import { buildDesignRequest } from '../app/saveDesign';
+import { STEP_H, STEP_W } from '../layout/geometry';
+import { applyDesign } from './apply';
+import { parseBlocks } from './blocks';
+import { deletePicked } from './clipboard';
+import { EMPTY_EDITS, storedDesignOf } from './design';
+import { circuitOf, EMPTY_DRAFT } from './draft';
+import { layoutOf } from './layoutDesign';
+import { dropTool, judgeTool, uniqueName, type ToolItem } from './toolDrop';
+
+// s1 (processor p1), wired from the hub; cache k1 in the workflow
+const doc = () => loadedDocument(graphDto({
+  workflow: workflowDto({ entryStepIds: ['s1'], cacheIds: ['k1'] }),
+  steps: [stepDto('s1', { name: 'step' })],
+  caches: [cacheDto('k1', { root: 'cache' })],
+}));
+let n = 0;
+const ids = () => `n${++n}`;
+const at = { x: 1000, y: 600 };
+const p2 = processorFromDto(processorDto('p2', { name: 'parser', configSchemaId: 'sc' }));
+const procItem: ToolItem = { kind: 'processor', processor: p2, schemas: [schemaFromDto(schemaDto('sc'))] };
+
+describe('Toolbox drops (the user\'s rules, 2026-10-11)', () => {
+  it('an empty step: a new virtual step centred on the pointer, named step-2 (step is taken), no processor, picked', async () => {
+    const base = await doc();
+    const r = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'step' }, at, ids)!;
+    const [id, made] = Object.entries(r.draft.blocks.steps)[0]!;
+    expect(made).toMatchObject({ copyOf: null, name: 'step-2', version: '1.0.0', processorId: null, at: { x: at.x - STEP_W / 2, y: at.y - STEP_H / 2 } });
+    expect(r.picks).toEqual([{ kind: 'node', id }]);
+    // drawn with the empty slot; Save sends it as a new step with no processor (BaseApi's dry run refuses it)
+    const shown = applyDesign(base, r.draft, EMPTY_EDITS);
+    expect(shown.graph.steps.get(id)!.processorId).toBeNull();
+    expect(buildDesignRequest(base, shown, { draft: r.draft, edits: EMPTY_EDITS }).newSteps).toEqual([expect.objectContaining({ id, processorId: null })]);
+  });
+
+  it('a wire: a new free wire, open at both ends, 96 px horizontal from the pointer, picked', async () => {
+    const base = await doc();
+    const r = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'wire' }, at, ids)!;
+    const id = r.picks[0]!.id;
+    expect(r.picks[0]!.kind).toBe('wire');
+    const w = circuitOf(base, r.draft)[id]!;
+    expect([w.tail, w.head]).toEqual([{ on: 'open', x: 1000, y: 600 }, { on: 'open', x: 1096, y: 600 }]);
+    const drawn = applyDesign(base, r.draft, EMPTY_EDITS).wires.find((x) => x.id === id)!;
+    expect(drawn.points).toEqual([[1000, 600], [1096, 600]]);
+  });
+
+  it('an empty cache: a new virtual cache with a root no other cache has (cache, then cache-2…), saved as a new cache', async () => {
+    const base = await doc();
+    const r = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'newCache' }, at, ids, ['cache-2'])!;
+    const [id, made] = Object.entries(r.draft.blocks.caches)[0]!;
+    expect(made).toMatchObject({ copyOf: null, name: 'cache', version: '1.0.0', root: 'cache-3', items: '{}' });
+    const shown = applyDesign(base, r.draft, EMPTY_EDITS);
+    expect(shown.graph.workflow.cacheIds).toEqual(['k1', id]);
+    expect(buildDesignRequest(base, shown, { draft: r.draft, edits: EMPTY_EDITS }).newCaches).toEqual([expect.objectContaining({ id })]);
+  });
+
+  it('an existing cache: the same entity linked (no new cache), saved in the workflow\'s cache list; one already here is refused', async () => {
+    const base = await doc();
+    const other = cacheFromDto(cacheDto('k9', { name: 'rates', root: 'rates' }));
+    const r = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'cache', cache: other }, at, ids)!;
+    expect(r.picks).toEqual([{ kind: 'node', id: 'cache:k9' }]);
+    const shown = applyDesign(base, r.draft, EMPTY_EDITS);
+    expect(shown.graph.caches.get('k9')!.name).toBe('rates');
+    const body = buildDesignRequest(base, shown, { draft: r.draft, edits: EMPTY_EDITS });
+    expect(body.workflow.cacheIds).toEqual(['k1', 'k9']);
+    expect(body.newCaches).toBeUndefined();
+    // already in this workflow: refused
+    const here = cacheFromDto(cacheDto('k1'));
+    expect(judgeTool(base, { kind: 'cache', cache: here }, at)).toEqual({ kind: 'linked', cacheId: 'k1' });
+    expect(dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'cache', cache: here }, at, ids)).toBeNull();
+    // Delete of the linked cache drops only the link
+    const gone = deletePicked(base, EMPTY_EDITS, r.draft, [{ kind: 'node', id: 'cache:k9' }])!;
+    expect(gone.draft.blocks.linked).toEqual({});
+    expect(gone.draft.blocks.removed.caches).toEqual([]);
+  });
+
+  it('a processor: only on a step; there the step points at it (the same entity, never a copy), replacing its own', async () => {
+    const base = await doc();
+    const step = base.placement.steps.get('s1')!;
+    const on = { x: step.x + 20, y: step.y + 20 };
+    expect(judgeTool(base, procItem, on)).toEqual({ kind: 'replace', stepId: 's1' });
+    expect(judgeTool(base, procItem, at)).toEqual({ kind: 'noStep' });
+    expect(dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, procItem, at, ids)).toBeNull();
+    const r = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, procItem, on, ids)!;
+    expect(r.draft.blocks.assigned).toEqual({ s1: 'p2' });
+    expect(r.draft.blocks.refs.processors.p2).toBe(p2);
+    const shown = applyDesign(base, r.draft, EMPTY_EDITS);
+    expect(shown.graph.steps.get('s1')!.processorId).toBe('p2');
+    expect(shown.graph.processors.get('p2')).toBe(p2);
+    const body = buildDesignRequest(base, shown, { draft: r.draft, edits: EMPTY_EDITS });
+    expect(body.steps).toEqual([expect.objectContaining({ id: 's1', fields: { processorId: 'p2' } })]);
+    // the processor it was loaded with again: no change left
+    const back = dropTool(base, EMPTY_EDITS, r.draft, { kind: 'processor', processor: processorFromDto(processorDto('p1')), schemas: [] }, on, ids)!;
+    expect(back.draft.blocks.assigned).toEqual({});
+  });
+
+  it('a processor on a step with none (removed, or a new empty step) assigns it; a new step keeps it as its own', async () => {
+    const base = await doc();
+    const empty = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'step' }, at, ids)!;
+    const id = empty.picks[0]!.id;
+    const shown = applyDesign(base, empty.draft, EMPTY_EDITS);
+    const p = shown.placement.steps.get(id)!;
+    expect(judgeTool(shown, procItem, { x: p.x + 10, y: p.y + 10 })).toEqual({ kind: 'assign', stepId: id });
+    const r = dropTool(base, EMPTY_EDITS, empty.draft, procItem, { x: p.x + 10, y: p.y + 10 }, ids)!;
+    expect(r.draft.blocks.steps[id]!.processorId).toBe('p2');
+    expect(r.draft.blocks.assigned).toEqual({});
+    // a workflow step whose processor was removed takes it again: unassigned no more
+    const cleared = deletePicked(base, EMPTY_EDITS, EMPTY_DRAFT, [{ kind: 'processor', id: 's1' }])!;
+    const s1 = base.placement.steps.get('s1')!;
+    const again = dropTool(base, EMPTY_EDITS, cleared.draft, procItem, { x: s1.x + 10, y: s1.y + 10 }, ids)!;
+    expect(again.draft.blocks.unassigned).toEqual([]);
+    expect(again.draft.blocks.assigned).toEqual({ s1: 'p2' });
+  });
+
+  it('a refused Save\'s stored design brings the drops back: the assigned processor, the linked cache and the refs', async () => {
+    const base = await doc();
+    const s1 = base.placement.steps.get('s1')!;
+    let draft = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, procItem, { x: s1.x + 10, y: s1.y + 10 }, ids)!.draft;
+    draft = dropTool(base, EMPTY_EDITS, draft, { kind: 'cache', cache: cacheFromDto(cacheDto('k9', { root: 'rates' })) }, at, ids)!.draft;
+    const shown = applyDesign(base, draft, EMPTY_EDITS);
+    const { layout, ...stored } = buildDesignRequest(base, shown, { draft, edits: EMPTY_EDITS });
+    const read = storedDesignOf(JSON.parse(JSON.stringify(stored)), JSON.parse(JSON.stringify(layoutOf(shown, draft))));
+    expect(read.draft.blocks.assigned).toEqual({ s1: 'p2' });
+    expect(Object.keys(read.draft.blocks.linked)).toEqual(['k9']);
+    expect(read.draft.blocks.refs.processors.p2?.name).toBe('parser');
+    expect(applyDesign(base, read.draft, read.edits).graph.workflow.cacheIds).toEqual(['k1', 'k9']);
+    // and the session's copy of the blocks reads back the same
+    expect(parseBlocks(JSON.parse(JSON.stringify(draft.blocks)))).toEqual(draft.blocks);
+  });
+
+  it('names: the first of base, base-2, base-3 … not taken', () => {
+    expect(uniqueName('step', new Set())).toBe('step');
+    expect(uniqueName('step', new Set(['step', 'step-2']))).toBe('step-3');
+  });
+});

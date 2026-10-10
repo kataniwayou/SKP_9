@@ -9,6 +9,8 @@ import {
 import { circuitOf, EMPTY_DRAFT, type Draft } from '../design/draft';
 import { applyBlocks } from '../design/blocks';
 import { copyClip, deletePicked, pasteClip, type Clip } from '../design/clipboard';
+import { dropTool, type ToolItem } from '../design/toolDrop';
+import type { Point } from '../layout/geometry';
 import { commit, historyOf, redo, undo, type DesignHistory } from '../design/history';
 import { settleDesign } from '../design/settle';
 import { isShortCircuitError } from '../design/shortCircuits';
@@ -152,6 +154,11 @@ export type StudioAction =
   | { type: 'copy'; workflowId: Id }
   /** Ctrl+V: the clipboard pasted into this document with new ids (`newId`), one history step; the pasted items are picked. */
   | { type: 'paste'; workflowId: Id; newId: () => string }
+  /**
+   * A Toolbox tile dropped on this document's canvas at `at` (flow coordinates, 2026-10-11): a new step, cache or wire, an
+   * existing cache linked, or an existing processor given to the step there. `roots`: every cache root BaseApi listed.
+   */
+  | { type: 'toolDrop'; workflowId: Id; item: ToolItem; at: Point; newId: () => string; roots?: readonly string[] }
   /** Delete: the picked steps, caches and wires leave the design (the hub is skipped), one history step. */
   | { type: 'deletePicks'; workflowId: Id };
 
@@ -484,6 +491,12 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       const next = update(state, action.workflowId, (x) => blocksChanged(x, pasted.draft, pasted.picks));
       return { ...next, clipboard: { ...clip, pasted: clip.pasted + 1 } };
     }
+    case 'toolDrop':
+      return update(state, action.workflowId, (d) => {
+        if (d.status.kind !== 'ready' || d.saving) return d;
+        const dropped = dropTool(d.status.doc, d.edits, d.design.draft, action.item, action.at, action.newId, [...knownRoots(state), ...(action.roots ?? [])]);
+        return dropped === null ? d : blocksChanged(d, dropped.draft, dropped.picks);
+      });
     case 'deletePicks':
       return update(state, action.workflowId, (d) => {
         if (d.status.kind !== 'ready' || d.saving) return d;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { canDrop } from './dropRules';
-import { findHome, sideOf, toPosition } from './home';
+import { findHome, sideOf, spansEdge, toPosition } from './home';
 import { docPanelId, documentIdOf, isDocPanelId, isToolId } from './ids';
 import { keyCommand } from './keys';
 
@@ -93,5 +93,19 @@ describe('keyCommand (spec §6.2.6)', () => {
     expect(key('w', { ctrlKey: true })).toBeNull();
     expect(key('Tab', { ctrlKey: true })).toBeNull();
     expect(key('e')).toBeNull();
+  });
+});
+
+describe('spansEdge (2026-10-11: a column of the dock\'s whole height docks back at the layout\'s edge)', () => {
+  const dock = { left: 0, top: 34, right: 1600, bottom: 900 };
+  it('a full-height column on the left or right, a full-width row at the bottom', () => {
+    expect(spansEdge({ left: 0, top: 34, right: 290, bottom: 900 }, dock, 'left')).toBe(true);
+    expect(spansEdge({ left: 1260, top: 34, right: 1600, bottom: 900 }, dock, 'right')).toBe(true);
+    expect(spansEdge({ left: 0, top: 750, right: 1600, bottom: 900 }, dock, 'bottom')).toBe(true);
+  });
+  it('not one that shares its side with another group (shorter than the edge), nor one off the edge', () => {
+    expect(spansEdge({ left: 0, top: 34, right: 290, bottom: 750 }, dock, 'left')).toBe(false);
+    expect(spansEdge({ left: 290, top: 750, right: 1260, bottom: 900 }, dock, 'bottom')).toBe(false);
+    expect(spansEdge({ left: 300, top: 34, right: 590, bottom: 900 }, dock, 'left')).toBe(false);
   });
 });

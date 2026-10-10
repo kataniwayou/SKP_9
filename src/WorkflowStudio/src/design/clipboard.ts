@@ -360,10 +360,15 @@ export function deletePicked(base: StudioDocument, edits: EntityEdits, draft: Dr
   const stamps = copy(draft.blocks.stamps);
   const moved = copy(draft.steps), movedCaches = copy(draft.caches);
   const unassigned = draft.blocks.unassigned.filter((id) => !gone.has(id));
+  const assigned = copy(draft.blocks.assigned ?? {});
+  for (const id of gone) delete assigned[id];
   for (const id of cleared) {
     // a pasted step's own processor goes; one the workflow has is marked: the processor entity is never touched
     if (Object.hasOwn(steps, id)) steps[id] = { ...steps[id]!, processorId: null };
-    else if (!unassigned.includes(id)) unassigned.push(id);
+    else {
+      delete assigned[id];
+      if (!unassigned.includes(id)) unassigned.push(id);
+    }
   }
   for (const id of stepIds) {
     if (Object.hasOwn(steps, id)) delete steps[id];
@@ -375,19 +380,22 @@ export function deletePicked(base: StudioDocument, edits: EntityEdits, draft: Dr
     }
     delete moved[id];
   }
+  const linked = copy(draft.blocks.linked ?? {});
   for (const id of cacheIds) {
+    // an existing cache linked here (the Toolbox, 2026-10-11): only the link goes, never the entity
+    if (Object.hasOwn(linked, id)) { delete linked[id]; delete movedCaches[id]; continue; }
     if (Object.hasOwn(caches, id)) delete caches[id];
     else if (!removedCaches.includes(id)) removedCaches.push(id);
     delete movedCaches[id];
   }
   // what pasted steps still need from other workflows; nothing else is kept
-  const used = new Set(Object.values(steps).flatMap((s) => (s.processorId === null ? [] : [s.processorId])));
+  const used = new Set([...Object.values(steps).flatMap((s) => (s.processorId === null ? [] : [s.processorId])), ...Object.values(assigned)]);
   const processors = copy<Processor>({});
   for (const [pid, p] of Object.entries(draft.blocks.refs.processors)) if (used.has(pid)) processors[pid] = p;
   const slots = new Set(Object.values(processors).flatMap((p) => [p.inputSchemaId, p.outputSchemaId, p.configSchemaId]));
   const schemas = copy<Schema>({});
   for (const [sid, s] of Object.entries(draft.blocks.refs.schemas)) if (slots.has(sid)) schemas[sid] = s;
-  const blocks: Blocks = { steps, caches, removed: { steps: removedSteps, caches: removedCaches }, stamps, unassigned, refs: { processors, schemas } };
+  const blocks: Blocks = { steps, caches, removed: { steps: removedSteps, caches: removedCaches }, stamps, unassigned, assigned, linked, refs: { processors, schemas } };
 
   const after = removeCircuitWires(circuit, wires, endPointOf(shown.wires));
   const next = withCircuit({ ...draft, blocks, steps: moved, caches: movedCaches }, applyEdits(base, edits, blocks), after);

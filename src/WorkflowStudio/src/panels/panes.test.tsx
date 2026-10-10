@@ -8,7 +8,6 @@ import { createStudioStore, StudioStoreProvider, type StudioStore } from '../sto
 import { inspectorGraph, renderInspector } from '../test/inspector';
 import { liveStub } from '../test/liveStub';
 import { Output } from './Output';
-import { Toolbox } from './PaneNote';
 import type { DesignError } from '../model/graph';
 import { buildDesignRequest } from '../app/saveDesign';
 import { applyDesign } from '../design/apply';
@@ -452,7 +451,7 @@ describe('Output pins a wire lying on another net\'s wire (the user\'s rule 2, 2
   });
 });
 
-describe('Output and Toolbox', () => {
+describe('Output', () => {
   it('Output says nothing happened yet, then logs each line with its time and workflow, oldest first, errors red', async () => {
     const store = await storeWith();
     const { unmount } = wrap(store, <Output />);
@@ -480,11 +479,6 @@ describe('Output and Toolbox', () => {
     fireEvent.keyDown(within(pinned()!).getByRole('listitem'), { key: ' ' });
     expect(store.getState().docs[0]!.selection).toEqual({ kind: 'step', stepId: 's2' });
     expect(screen.getByRole('log', { name: 'Output' })).toHaveTextContent('Saved; not applied: 1 error');
-  });
-
-  it('Toolbox is a real pane with one line', () => {
-    render(<Toolbox />);
-    expect(screen.getByText('The toolbox arrives in a later version.')).toBeInTheDocument();
   });
 });
 

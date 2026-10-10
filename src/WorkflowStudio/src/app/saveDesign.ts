@@ -61,7 +61,9 @@ export function buildDesignRequest(base: StudioDocument, shown: StudioDocument, 
   const rewired = new Set([...g.steps.keys()].filter((id) => has(id) && !sameList(nextOf(id), g.steps.get(id)!.nextStepIds)));
   // steps whose processor the design removed (2026-10-10): sent with a null processorId, which BaseApi refuses on the step
   const unassigned = new Set(blocks.unassigned.filter(has));
-  const stepIds = [...new Set([...Object.keys(edits.steps), ...rewired, ...unassigned])].filter(has).sort();
+  // steps given another existing processor (a Toolbox drop, 2026-10-11): sent as the step's processorId, the same entity
+  const assigned = new Map(Object.entries(blocks.assigned ?? {}).filter(([id, pid]) => has(id) && !unassigned.has(id) && pid !== g.steps.get(id)!.processorId));
+  const stepIds = [...new Set([...Object.keys(edits.steps), ...rewired, ...unassigned, ...assigned.keys()])].filter(has).sort();
 
   const slots = new Map<Id, Partial<Record<SchemaSlot, Id>>>();
   const schemas: SchemaCopy[] = [];
@@ -111,11 +113,12 @@ export function buildDesignRequest(base: StudioDocument, shown: StudioDocument, 
     },
     steps: stepIds.map((id) => ({
       id, updatedAt: edits.steps[id]?.updatedAt ?? g.steps.get(id)!.updatedAt,
-      fields: { ...edits.steps[id]?.fields, ...(unassigned.has(id) ? { processorId: null } : {}) },
+      fields: { ...edits.steps[id]?.fields, ...(unassigned.has(id) ? { processorId: null } : assigned.has(id) ? { processorId: assigned.get(id)! } : {}) },
       nextStepIds: rewired.has(id) ? [...nextOf(id)] : null,
     })),
     processors: processorIds.map((id) => ({ id, fields: { ...edits.processors[id]?.fields }, slots: slots.get(id) ?? {} })),
-    caches: Object.entries(edits.caches).filter(([id]) => g.caches.has(id) && !removedCaches.has(id)).map(([id, e]) => ({ id, fields: { ...e.fields } })),
+    // a linked existing cache (the Toolbox, 2026-10-11) is the same entity: its Inspector edits are sent as any cache's
+    caches: Object.entries(edits.caches).filter(([id]) => (g.caches.has(id) || Object.hasOwn(blocks.linked ?? {}, id)) && !removedCaches.has(id)).map(([id, e]) => ({ id, fields: { ...e.fields } })),
     schemas,
     assignments: [
       ...Object.entries(edits.assignments).filter(([stepId]) => has(stepId)).map(([stepId, op]) => ({

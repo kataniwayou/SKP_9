@@ -42,7 +42,7 @@ const pickWorkflow = async (label: string) => {
   openPicker();
   fireEvent.click(await screen.findByRole('option', { name: new RegExp(label) }));
 };
-const inspector = () => screen.getByText(/Open a workflow to inspect it|Nothing selected|STEP|WORKFLOW|Loading/, { selector: '.paneBody *' }).closest('.paneBody') as HTMLElement;
+const inspector = () => screen.getByText(/Open a workflow to inspect it|Nothing selected|STEP|WORKFLOW|Loading/, { selector: '[data-pane="inspector"] *' }).closest('.paneBody') as HTMLElement;
 
 beforeEach(() => { vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null); });
 afterEach(() => { vi.restoreAllMocks(); });

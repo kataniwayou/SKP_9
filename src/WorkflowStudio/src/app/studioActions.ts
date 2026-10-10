@@ -1,10 +1,13 @@
 import { createContext, useContext } from 'react';
 import type { Id } from '../model/graph';
+import type { StudioApi } from '../api/client';
 import type { InspectorService } from './inspectorService';
 
 /** What the panes may ask of the page (slice 3b). Dock panels are React portals, so they see it too. */
 export interface StudioActions {
   service: InspectorService;
+  /** BaseApi, for panes that read lists of their own (the Toolbox, 2026-10-11). Absent in a pane's own tests. */
+  api?: StudioApi;
   /**
    * Runs `proceed` now; it waits only while a dialog is open (plan 8: Inspector edits live in the design,
    * so moving away loses nothing). `doc`: the window the action came from.

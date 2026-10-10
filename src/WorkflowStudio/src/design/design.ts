@@ -3,7 +3,7 @@ import type { Id } from '../model/graph';
 import { savedText } from '../store/entityForms';
 import type { SchemaSlot } from '../store/inspectorTarget';
 import { EMPTY_DRAFT, parseDraft, type Draft } from './draft';
-import { EMPTY_BLOCKS, isEmptyBlocks, type Blocks, type NewCache, type NewStep } from './blocks';
+import { EMPTY_BLOCKS, isEmptyBlocks, parseBlocks, type Blocks, type LinkedCache, type NewCache, type NewStep } from './blocks';
 
 /** A field's value as the update DTO carries it: text, the entry condition's number, or null. */
 export type FieldValue = string | number | null;
@@ -264,7 +264,24 @@ function storedBlocks(stored: Record<string, unknown>, layout: unknown): Blocks 
     const id = str(x.id);
     return id !== null && isRecord(x.fields) && Object.hasOwn(x.fields, 'processorId') && x.fields.processorId === null ? [id] : [];
   });
-  return { ...EMPTY_BLOCKS, steps, caches, removed: { steps: ids(stored.deletedSteps), caches: ids(stored.deletedCaches) }, stamps, unassigned };
+  // steps given another existing processor (a Toolbox drop, 2026-10-11): a step change naming a processor
+  const assigned = copy<Id>({});
+  for (const x of list(stored.steps)) {
+    const id = str(x.id);
+    const pid = id !== null && isRecord(x.fields) ? str(x.fields.processorId) : null;
+    if (id !== null && pid !== null) assigned[id] = pid;
+  }
+  // existing caches it linked (the Toolbox, 2026-10-11) and the processors and schemas its steps need: the stored layout's
+  const linked = copy<LinkedCache>({});
+  const lay = isRecord(layout) ? layout : {};
+  if (isRecord(lay.linked)) {
+    for (const [id, c] of Object.entries(lay.linked)) {
+      if (!isRecord(c) || typeof c.name !== 'string' || typeof c.version !== 'string' || typeof c.root !== 'string' || typeof c.items !== 'string') continue;
+      linked[id] = { name: c.name, version: c.version, description: typeof c.description === 'string' ? c.description : null, root: c.root, items: c.items, at: placed('caches', id) };
+    }
+  }
+  const refs = isRecord(lay.refs) ? parseBlocks({ refs: lay.refs }).refs : EMPTY_BLOCKS.refs;
+  return { ...EMPTY_BLOCKS, steps, caches, removed: { steps: ids(stored.deletedSteps), caches: ids(stored.deletedCaches) }, stamps, unassigned, assigned, linked, refs };
 }
 
 // ---- reading back: the session's edits and the server's stored design; anything malformed is dropped ----

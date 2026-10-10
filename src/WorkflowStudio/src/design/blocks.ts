@@ -43,6 +43,20 @@ export interface NewCache {
 }
 
 /**
+ * An existing cache the design links to this workflow (the Toolbox, 2026-10-11): the SAME entity (its id is the key), never
+ * a copy; a snapshot of its fields so the canvas and the Inspector can draw it, and where it was dropped. Save adds its id to
+ * the workflow's cache list.
+ */
+export interface LinkedCache {
+  name: string;
+  version: string;
+  description: string | null;
+  root: string;
+  items: string;
+  at: Point;
+}
+
+/**
  * The blocks the design creates and removes (2026-10-10): part of the canvas draft, so undo, redo, the session and Save
  * cover them like any drawing. A removed step or cache is one the workflow had; a pasted one deleted again is simply
  * gone from `steps` / `caches`. `refs`: processors and schemas a step pasted from another workflow needs and this
@@ -63,16 +77,26 @@ export interface Blocks {
    * stays, pointing at no processor; the processor entity is never touched. A pasted step's own `processorId` says it.
    */
   unassigned: Id[];
+  /**
+   * Steps the workflow has given another existing processor (a Toolbox processor dropped on the step, 2026-10-11): step id
+   * to processor id, the same processor entity, never a copy. A pasted step's own `processorId` says it.
+   */
+  assigned: Record<Id, Id>;
+  /** Existing caches linked to this workflow (the Toolbox, 2026-10-11), by cache id. */
+  linked: Record<Id, LinkedCache>;
   refs: { processors: Record<Id, Processor>; schemas: Record<Id, Schema> };
 }
 
-export const EMPTY_BLOCKS: Blocks = { steps: {}, caches: {}, removed: { steps: [], caches: [] }, stamps: {}, unassigned: [], refs: { processors: {}, schemas: {} } };
+export const EMPTY_BLOCKS: Blocks = {
+  steps: {}, caches: {}, removed: { steps: [], caches: [] }, stamps: {}, unassigned: [], assigned: {}, linked: {}, refs: { processors: {}, schemas: {} },
+};
 
 const none = (r: object) => Object.keys(r).length === 0;
 
 /** Nothing created or removed (refs alone change nothing). */
 export const isEmptyBlocks = (b: Blocks): boolean =>
-  none(b.steps) && none(b.caches) && b.removed.steps.length === 0 && b.removed.caches.length === 0 && b.unassigned.length === 0;
+  none(b.steps) && none(b.caches) && b.removed.steps.length === 0 && b.removed.caches.length === 0 && b.unassigned.length === 0
+  && none(b.assigned ?? {}) && none(b.linked ?? {});
 
 const NO_AUDIT = { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null };
 
@@ -97,12 +121,16 @@ export function applyBlocks(base: StudioDocument, blocks: Blocks): StudioDocumen
   const keep = (ids: readonly Id[]) => ids.filter((id) => !goneSteps.has(id));
 
   const unassigned = new Set(blocks.unassigned);
+  const assigned = blocks.assigned ?? {};
+  const linked = blocks.linked ?? {};
   const steps = new Map<Id, Step>();
   for (const [id, s] of g.steps) {
     if (goneSteps.has(id)) continue;
     let step = s.nextStepIds.some((n) => goneSteps.has(n)) ? { ...s, nextStepIds: keep(s.nextStepIds) } : s;
     // its processor removed in the design: the step points at none (the processor itself stays)
     if (unassigned.has(id)) step = { ...step, processorId: null };
+    // another existing processor dropped on it (the Toolbox): it points at that one (the same entity)
+    else if (Object.hasOwn(assigned, id)) step = { ...step, processorId: assigned[id]! };
     steps.set(id, step);
   }
   for (const [id, n] of Object.entries(blocks.steps)) {
@@ -123,6 +151,10 @@ export function applyBlocks(base: StudioDocument, blocks: Blocks): StudioDocumen
   for (const [id, c] of Object.entries(blocks.caches)) {
     if (!caches.has(id)) caches.set(id, { id, name: c.name, version: c.version, description: c.description, root: c.root, items: c.items, audit: NO_AUDIT });
   }
+  // an existing cache linked here (the Toolbox): the same entity, drawn from its snapshot
+  for (const [id, c] of Object.entries(linked)) {
+    if (!caches.has(id) && !goneCaches.has(id)) caches.set(id, { id, name: c.name, version: c.version, description: c.description, root: c.root, items: c.items, audit: NO_AUDIT });
+  }
 
   const assignments: Assignment[] = g.assignments.filter((a) => !goneSteps.has(a.stepId));
   for (const [stepId, n] of Object.entries(blocks.steps)) {
@@ -135,7 +167,10 @@ export function applyBlocks(base: StudioDocument, blocks: Blocks): StudioDocumen
     });
   }
 
-  const cacheIds = [...g.workflow.cacheIds.filter((id) => !goneCaches.has(id)), ...Object.keys(blocks.caches).filter((id) => !g.workflow.cacheIds.includes(id))];
+  const cacheIds = [
+    ...g.workflow.cacheIds.filter((id) => !goneCaches.has(id)),
+    ...[...Object.keys(blocks.caches), ...Object.keys(linked)].filter((id) => !g.workflow.cacheIds.includes(id) && !goneCaches.has(id)),
+  ];
   const workflow = { ...g.workflow, entryStepIds: keep(g.workflow.entryStepIds), cacheIds };
   const graph: Graph = { ...g, workflow, steps, processors, schemas, caches, assignments };
 
@@ -145,6 +180,7 @@ export function applyBlocks(base: StudioDocument, blocks: Blocks): StudioDocumen
   const placedCaches = new Map<Id, Point>();
   for (const [id, p] of base.placement.caches) if (!goneCaches.has(id)) placedCaches.set(id, p);
   for (const [id, c] of Object.entries(blocks.caches)) if (!placedCaches.has(id)) placedCaches.set(id, { x: snap(c.at.x), y: snap(c.at.y) });
+  for (const [id, c] of Object.entries(linked)) if (!placedCaches.has(id) && !goneCaches.has(id)) placedCaches.set(id, { x: snap(c.at.x), y: snap(c.at.y) });
   const placement = { sphere: base.placement.sphere, steps: placedSteps, caches: placedCaches };
 
   const parkedIds = [...base.parkedIds.filter((id) => !goneSteps.has(id)), ...Object.keys(blocks.steps).filter((id) => !base.parkedIds.includes(id))];
@@ -196,6 +232,13 @@ function parseCache(v: unknown): NewCache | null {
   return { copyOf: id(v.copyOf), name, version, description: text(v.description), root, items, at: point(v.at) };
 }
 
+function parseLinked(v: unknown): LinkedCache | null {
+  if (!isRecord(v)) return null;
+  const name = text(v.name), version = text(v.version), root = text(v.root), items = text(v.items);
+  if (name === null || version === null || root === null || items === null) return null;
+  return { name, version, description: text(v.description), root, items, at: point(v.at) };
+}
+
 function records<T>(v: unknown, parse: (x: unknown) => T | null): Record<string, T> {
   const out = copy<T>();
   if (!isRecord(v)) return out;
@@ -222,6 +265,8 @@ export function parseBlocks(v: unknown): Blocks {
     removed: { steps: ids(removed.steps), caches: ids(removed.caches) },
     stamps: records(v.stamps, (x) => (typeof x === 'string' && x !== '' ? x : null)),
     unassigned: ids(v.unassigned),
+    assigned: records(v.assigned, (x) => id(x)),
+    linked: records(v.linked, parseLinked),
     refs: { processors: records(refs.processors, ref<Processor>), schemas: records(refs.schemas, ref<Schema>) },
   };
 }

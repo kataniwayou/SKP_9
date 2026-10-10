@@ -71,7 +71,7 @@ export function schemaFromDto(dto: SchemaReadDto): Schema {
   };
 }
 
-function cacheFromDto(dto: CacheReadDto): Cache {
+export function cacheFromDto(dto: CacheReadDto): Cache {
   return {
     id: required(dto.id, 'cache id'), name: text(dto.name), version: text(dto.version),
     description: optional(dto.description), root: text(dto.root), items: text(dto.items), audit: audit(dto),

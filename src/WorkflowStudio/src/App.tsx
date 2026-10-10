@@ -25,7 +25,7 @@ import { statusOf } from './live/liveState';
 import { signalRHub } from './live/signalrHub';
 import { Inspector } from './panels/Inspector';
 import { Output } from './panels/Output';
-import { Toolbox } from './panels/PaneNote';
+import { Toolbox } from './panels/Toolbox';
 import type { Pick } from './store/picks';
 import { newId } from './design/ids';
 import { NOT_SAVED_YET, runBlocked, RUN_WORD, type RunOp } from './store/run';
@@ -163,13 +163,14 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
 
   const actions: StudioActions = useMemo(() => ({
     service,
+    api,
     // nothing is lost by moving away (plan 8): only an open question holds an action back
     guard: (_workflowId, proceed) => { if (asking.current === null) proceed(); },
     confirmDiscardDesign: (workflowId, doc = document) => {
       if (asking.current !== null) return;
       setPrompt({ kind: 'design', workflowId, doc });
     },
-  }), [service, setPrompt]);
+  }), [service, setPrompt, api]);
 
   const openWorkflow = useCallback((id: string) => {
     const known = workflows.find((w) => w.id === id);

@@ -17,7 +17,26 @@ export interface GroupBox { ref: string; left: number; top: number; width: numbe
  * which side of that neighbour it was on, its width (left/right) or height (above/below), and the
  * box of every docked group at that moment, so the whole layout can be put back as it was.
  */
-export interface Home { ref: string; direction: Direction; size: number; layout: GroupBox[] }
+export interface Home {
+  ref: string; direction: Direction; size: number; layout: GroupBox[];
+  /**
+   * The group ran the whole length of the dock's edge on that side (a full-height column on the left or right, a
+   * full-width row at the top or bottom, 2026-10-11): it goes back at the layout's own edge, not beside its neighbour
+   * (beside a document area that shares its column with Output, it would land inside that column).
+   */
+  edge?: boolean;
+}
+
+/** Whether a group spans the dock's whole edge on its side: a column of full height, or a row of full width. */
+export function spansEdge(group: Rect, dock: Rect, side: Side): boolean {
+  const near = (a: number, b: number) => Math.abs(a - b) < TOUCH;
+  switch (side) {
+    case 'left': return near(group.left, dock.left) && near(group.top, dock.top) && near(group.bottom, dock.bottom);
+    case 'right': return near(group.right, dock.right) && near(group.top, dock.top) && near(group.bottom, dock.bottom);
+    case 'top': return near(group.top, dock.top) && near(group.left, dock.left) && near(group.right, dock.right);
+    case 'bottom': return near(group.bottom, dock.bottom) && near(group.left, dock.left) && near(group.right, dock.right);
+  }
+}
 
 export const SIDE_DIRECTION: Readonly<Record<Side, Direction>> = { left: 'left', right: 'right', top: 'above', bottom: 'below' };
 

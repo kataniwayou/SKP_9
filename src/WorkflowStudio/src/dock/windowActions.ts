@@ -1,5 +1,5 @@
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
-import { findHome, SIDE_DIRECTION, sideOf, toPosition, type GroupBox, type Home, type Rect, type Side } from './home';
+import { findHome, SIDE_DIRECTION, sideOf, spansEdge, toPosition, type GroupBox, type Home, type Rect, type Side } from './home';
 import { docPanelId, documentIdOf, isDocPanelId, isToolId, TOOL_IDS, TOOL_TITLES, type ToolId } from './ids';
 import { gridHolds, sessionDock, stripDocuments, withDocuments, type SavedLayout } from './layoutPersistence';
 
@@ -16,7 +16,8 @@ export interface DockMemory {
 
 export const newMemory = (): DockMemory => ({ sides: {}, homes: {}, documentGroupId: null });
 
-export const DEFAULT_SIDES: Readonly<Record<ToolId, Side>> = { inspector: 'right', toolbox: 'right', output: 'bottom' };
+// the Toolbox on the left (2026-10-11): it is dragged from onto the documents, the Inspector reads them on the right
+export const DEFAULT_SIDES: Readonly<Record<ToolId, Side>> = { inspector: 'right', toolbox: 'left', output: 'bottom' };
 /** The default sizes (mockup v49 TOOLS): Inspector 340 wide, Toolbox 290 wide, Output 150 high. */
 const TOOL_SIZE: Readonly<Record<ToolId, number>> = { inspector: 340, toolbox: 290, output: 150 };
 /** Panes that share a group when they share a side (none since Problems went, 2026-10-09). */
@@ -160,9 +161,10 @@ export function recordHome(api: DockviewApi, memory: DockMemory, group: Dockview
   const staying = group.panels.find((p) => !leaving.includes(p));
   const beside = staying ? null : findHome(rect, layout.filter((b) => !group.panels.some((p) => p.id === b.ref))
     .map((b) => ({ ref: b.ref, rect: { left: b.left, top: b.top, right: b.left + b.width, bottom: b.top + b.height } })));
+  const edge = beside !== null && beside.direction === SIDE_DIRECTION[side] && spansEdge(rect, dock, side);
   const home: Home | null = staying
     ? { ref: staying.id, direction: 'within', size: 0, layout }
-    : beside ? { ...beside, layout } : null;
+    : beside ? { ...beside, layout, ...(edge ? { edge: true } : {}) } : null;
   for (const panel of leaving) {
     if (isToolId(panel.id)) memory.sides[panel.id] = side;
     if (home) memory.homes[panel.id] = home;
@@ -274,7 +276,13 @@ export function dockBack(api: DockviewApi, memory: DockMemory, group: DockviewGr
       first.api.setActive();
       return;
     }
-    first.api.moveTo({ group: ref.group, position: toPosition(home.direction) });
+    if (home.edge) {
+      // a whole edge's column or row: back at the layout's own edge, then sized as it was
+      const column = api.addGroup({ direction: home.direction });
+      first.api.moveTo({ group: column, position: 'center' });
+    } else {
+      first.api.moveTo({ group: ref.group, position: toPosition(home.direction) });
+    }
     const landed = first.group;
     for (const p of panels.slice(1)) p.api.moveTo({ group: landed, position: 'center' });
     restoreLayout(api, home.layout);
@@ -346,7 +354,7 @@ export function resetLayout(api: DockviewApi, memory: DockMemory, dockWidth: num
   }
   memory.documentGroupId = area.id;
   api.addPanel({ ...toolPanel('inspector'), position: { referenceGroup: area, direction: 'right' }, initialWidth: TOOL_SIZE.inspector });
-  api.addPanel({ ...toolPanel('toolbox'), position: { referencePanel: 'inspector', direction: 'right' }, initialWidth: TOOL_SIZE.toolbox });
+  api.addPanel({ ...toolPanel('toolbox'), position: { referenceGroup: area, direction: 'left' }, initialWidth: TOOL_SIZE.toolbox });
   api.addPanel({ ...toolPanel('output'), position: { referenceGroup: area, direction: 'below' }, initialHeight: TOOL_SIZE.output, inactive: true });
   // the document area takes what the panes leave (it takes the slack), but keeps 480 px at least
   markDocumentArea(api, memory);

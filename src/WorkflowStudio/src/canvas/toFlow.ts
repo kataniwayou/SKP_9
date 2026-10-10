@@ -127,7 +127,7 @@ function badge(payload: string | undefined): string | null {
   return n === 0 ? '◇ {}' : `◆ ${n} key${n > 1 ? 's' : ''}`;
 }
 
-function stepLabels(step: Step, fitter: TextFitter): { name: FittedText; version: FittedText } {
+export function stepLabels(step: Step, fitter: TextFitter): { name: FittedText; version: FittedText } {
   const versionX = 42;
   return {
     name: fitter.fit(step.name, STEP_W - 12 - 34, FONT.stepName),
@@ -141,7 +141,7 @@ const CACHE_NAME_ROOM = 132, CACHE_ROOT_ROOM = 112, PLATE_MAX = 128;
 const CACHE_LABEL_SPACING = 0.2 * 8;
 
 /** The cache's name split after `-`, `_` and `.` onto at most two lines, each fitted; the root fitted to its plate. */
-function cacheData(cache: Cache, fitter: TextFitter): CacheNodeData {
+export function cacheData(cache: Cache, fitter: TextFitter): CacheNodeData {
   const font = FONT.cacheName;
   const parts: string[] = [];
   let current = '';
@@ -167,7 +167,7 @@ function cacheData(cache: Cache, fitter: TextFitter): CacheNodeData {
 const TITLE_ROOM = 92;
 const VALUE_ROOM = 76;
 
-function processorView(p: Processor | undefined, graph: Graph, fitter: TextFitter): ProcessorView {
+export function processorView(p: Processor | undefined, graph: Pick<Graph, 'schemas'>, fitter: TextFitter): ProcessorView {
   const name = p?.name ?? '(missing processor)';
   const version = p?.version ?? '';
   // the name is drawn in the title face and the version after it in 9 px mono (Chip .nx-pv), so each is measured in its own
