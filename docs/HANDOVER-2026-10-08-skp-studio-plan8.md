@@ -417,6 +417,23 @@ session with the log trimmed, then without it; wire stage batches its reads. Tes
 Release no-incremental clean; Vitest 975 (83 files); tsc clean; Playwright on dev against the branch BaseApi 137 + 2
 skips (run.spec now also presses Ctrl+F5, F5 in the picker and Shift+F5). Mutations: 3 BaseApi, 8 Vitest, 2 e2e.
 
+**Inspector after Save, and Output's Clear (user, 2026-10-10) — BUILT, NOT DEPLOYED** (the deployed studio is
+2945e6d, bundle `index-BNs41JWd.js`). Spec: plan 8 spec §4.1 (amended).
+- Cause: the Inspector's form showed its own per-entity GET (`inspector.saved`), read once per picked entity
+  (`service.read` skipped when the key was already read) and never invalidated when a Save re-read the graph, so it
+  kept the values from before until re-picked. Fix (the user's ruling): the form's base is the design graph's entity
+  (`inspectorBaseOf` in `panels/inspectorView.ts`: the loaded graph's values, the read only for what the graph does
+  not carry), edits over it as before; `OpenDocument.generation` counts the workflow's reads ('loaded', a Save's
+  re-read), the read is keyed to it (an older read is dropped, the shown entity is read again once per generation, no
+  storm), and a failed read beside a graph-backed form shows its note with Retry. Other entities' edits are untouched.
+- Output's Clear: `OutputBar` (button "Clear output", tip, disabled while empty), `clearOutput` action, the session's
+  log emptied with it; DockShell `toolMenu` puts "Clear output" at the top of Output's tab menu.
+- Tests: Vitest 979 (83 files; graph-backed Inspector: edit shown at once, Save shows BaseApi's value with no re-pick
+  and one GET, Discard shows the base, workflow and processor, stale read dropped; Clear; tab menu entry); tsc clean.
+  Playwright on dev against the deployed BaseApi: 140 passed + 2 skips (new `inspector-save.spec.ts` 2: step, then
+  workflow and processor, Discard, refresh; `output.spec` Clear: log empty, pinned short circuit stays, refresh keeps it
+  empty, tab-menu Clear). Mutations: 5 Vitest, 2 e2e (the old Inspector behaviour; Clear doing nothing), each fails.
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed

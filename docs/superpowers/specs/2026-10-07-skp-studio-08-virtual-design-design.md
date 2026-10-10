@@ -126,6 +126,17 @@ Either way the design is now stored on the workflow, and the session's unsaved e
   "Not saved: …" in red. Every line has its time and workflow name. Output keeps the **last 500 lines** and is kept in
   the session (`output`, optional, version still 1), so a refresh keeps it. An older BaseApi without a log gives one
   line saying so and its errors as red lines.
+- **Amended 2026-10-10 (user):** Output has a **Clear** button (accessible name "Clear output", tooltip "Clear the
+  messages; current problems stay"; disabled while the log is empty), also at the top of the Output tab's menu. It
+  empties the log of every workflow (the log is shared) and the session's copy, so a refresh keeps it empty; the pinned
+  problems are live state and stay.
+- **Amended 2026-10-10 (user ruling): the Inspector shows the design graph's entity**, saved or not: each field is the
+  design's edit when there is one, else the entity as the loaded graph holds it (the graph the canvas and the read-outs
+  draw from). It never shows a copy of its own that could lag: after an applied Save the edits are cleared and the graph
+  read again, so it shows what BaseApi holds at once, with no re-pick; after a not-applied Save, a Discard or a Revert,
+  the design as it then stands. The entity's own GET only fills what the graph does not carry (a schema's definition, an
+  assignment's name, version and description) and is keyed to the document's read (`generation`): a read made before
+  the workflow was read again is dropped, and the shown entity is read once more after each re-read.
 
 ### 4.2 BaseApi: `PUT /workflows/{id}/design`
 
