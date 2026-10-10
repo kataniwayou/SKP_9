@@ -53,6 +53,7 @@ public sealed class DesignLogTests
             "info workflow: workflow: 1 workflow to update",
             "info workflow: workflow 'wf': entry steps e added",
             "info workflow: workflow: 1 updated",
+            "info deletes: deletes: nothing to do",
             "info outcome: dry run passed: 3 changes, no errors",
             "info outcome: committed: the entities hold the design; the stored design is emptied",
         }, Lines(outcome));

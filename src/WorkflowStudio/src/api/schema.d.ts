@@ -2408,6 +2408,8 @@ export interface components {
             fields?: {
                 [key: string]: unknown;
             } | null;
+            /** Format: uuid */
+            copyOf?: string | null;
         };
         DesignCacheDto: {
             /** Format: uuid */
@@ -2415,6 +2417,12 @@ export interface components {
             fields?: {
                 [key: string]: unknown;
             } | null;
+        };
+        DesignDeleteDto: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: date-time */
+            updatedAt?: string | null;
         };
         DesignErrorDto: {
             kind?: string | null;
@@ -2432,6 +2440,27 @@ export interface components {
             id?: string | null;
             message?: string | null;
             rolledBack?: boolean;
+        };
+        DesignNewCacheDto: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            copyOf?: string | null;
+            fields?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        DesignNewStepDto: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            copyOf?: string | null;
+            /** Format: uuid */
+            processorId?: string;
+            fields?: {
+                [key: string]: unknown;
+            } | null;
+            nextStepIds?: string[] | null;
         };
         DesignOutcomeDto: {
             applied?: boolean;
@@ -2456,6 +2485,10 @@ export interface components {
             schemas?: components["schemas"]["DesignSchemaDto"][] | null;
             assignments?: components["schemas"]["DesignAssignmentDto"][] | null;
             layout?: unknown;
+            newSteps?: components["schemas"]["DesignNewStepDto"][] | null;
+            newCaches?: components["schemas"]["DesignNewCacheDto"][] | null;
+            deletedSteps?: components["schemas"]["DesignDeleteDto"][] | null;
+            deletedCaches?: components["schemas"]["DesignDeleteDto"][] | null;
         };
         DesignSchemaDto: {
             /** Format: uuid */

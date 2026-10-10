@@ -3842,6 +3842,11 @@
             "type": "object",
             "additionalProperties": { },
             "nullable": true
+          },
+          "copyOf": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -3856,6 +3861,21 @@
           "fields": {
             "type": "object",
             "additionalProperties": { },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DesignDeleteDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
             "nullable": true
           }
         },
@@ -3913,6 +3933,58 @@
           },
           "rolledBack": {
             "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DesignNewCacheDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "copyOf": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": { },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "DesignNewStepDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "copyOf": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "processorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": { },
+            "nullable": true
+          },
+          "nextStepIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -4005,6 +4077,34 @@
             "nullable": true
           },
           "layout": {
+            "nullable": true
+          },
+          "newSteps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesignNewStepDto"
+            },
+            "nullable": true
+          },
+          "newCaches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesignNewCacheDto"
+            },
+            "nullable": true
+          },
+          "deletedSteps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesignDeleteDto"
+            },
+            "nullable": true
+          },
+          "deletedCaches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DesignDeleteDto"
+            },
             "nullable": true
           }
         },

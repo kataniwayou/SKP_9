@@ -74,6 +74,10 @@ internal static class DesignLogText
         return names;
     }
 
+    /// <summary>A text field of a design entity, when it is one (to name an entity the database does not hold yet).</summary>
+    public static string? Text(IReadOnlyDictionary<string, System.Text.Json.JsonElement>? fields, string key) =>
+        fields is not null && fields.TryGetValue(key, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
+
     /// <summary>An id as the log shows an entity it cannot name: its first eight characters.</summary>
     public static string Short(Guid id) => id.ToString("D")[..8];
 }

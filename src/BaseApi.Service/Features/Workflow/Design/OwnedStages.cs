@@ -37,9 +37,12 @@ internal sealed class AssignmentStage : IDesignStage
         var ids = assignments.Select(a => a.Id).ToList();
         var stored = await _db.Set<AssignmentEntity>().AsNoTracking().Where(x => ids.Contains(x.Id))
             .Select(x => new { x.Id, x.Name }).ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+        var copyIds = assignments.Where(a => a.CopyOf is not null).Select(a => a.CopyOf!.Value).ToList();
+        var copied = await _db.Set<AssignmentEntity>().AsNoTracking().Where(x => copyIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.Name }).ToDictionaryAsync(x => x.Id, x => x.Name, ct);
         foreach (var a in assignments)
         {
-            var name = stored.GetValueOrDefault(a.Id) ?? Text(a.Fields, "name");
+            var name = stored.GetValueOrDefault(a.Id) ?? Text(a.Fields, "name") ?? (a.CopyOf is { } of ? copied.GetValueOrDefault(of) : null);
             if (name is not null) run.AssignmentNames[a.Id] = name;
             run.Label(a.Id, name is null ? $"assignment on step '{steps[a.StepId]}'" : $"assignment '{name}' on step '{steps[a.StepId]}'");
         }
@@ -49,6 +52,12 @@ internal sealed class AssignmentStage : IDesignStage
             switch (a.Op)
             {
                 case "create":
+                    // a pasted step that was not created takes its assignment with it (2026-10-10)
+                    if (run.FailedSteps.Contains(a.StepId) && (run.Request.NewSteps ?? []).Any(n => n.Id == a.StepId))
+                    {
+                        run.Fail("assignment", a.Id, "assignments", null, "Not created: its step was not created.");
+                        break;
+                    }
                     if (await run.UnitAsync("assignment", a.Id, "assignments", () => CreateAsync(a, ct), ct))
                     {
                         run.CreatedAssignments.Add(a.Id);
@@ -84,8 +93,13 @@ internal sealed class AssignmentStage : IDesignStage
 
     private async Task<List<FieldError>> CreateAsync(DesignAssignmentDto a, CancellationToken ct)
     {
+        if (await _db.Set<AssignmentEntity>().AnyAsync(x => x.Id == a.Id, ct))
+            return [new FieldError(null, "Not created: an assignment with this id already exists.")];
         var errors = new List<FieldError>();
-        var fields = DesignFields.Apply(new AssignmentUpdateDto("", "", null, a.StepId, ""), a.Fields, errors);
+        // a pasted step's copy (2026-10-10) starts as its original's row; the fields it names win
+        var original = a.CopyOf is { } of ? await _db.Set<AssignmentEntity>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == of, ct) : null;
+        var start = original is null ? new AssignmentUpdateDto("", "", null, a.StepId, "") : DesignFields.UpdateOf(original) with { StepId = a.StepId };
+        var fields = DesignFields.Apply(start, a.Fields, errors);
         if (errors.Count > 0) return errors;
         var dto = new AssignmentCreateDto(fields.Name, fields.Version, fields.Description, a.StepId, fields.Payload);
         var problems = DesignFields.Failures(await _createValidator.ValidateAsync(dto, ct));

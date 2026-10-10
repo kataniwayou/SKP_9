@@ -28,6 +28,10 @@ internal static class DesignShape
         NoNulls(r.Caches, nameof(DesignSaveRequest.Caches), Fail);
         NoNulls(r.Schemas, nameof(DesignSaveRequest.Schemas), Fail);
         NoNulls(r.Assignments, nameof(DesignSaveRequest.Assignments), Fail);
+        NoNulls(r.NewSteps, nameof(DesignSaveRequest.NewSteps), Fail);
+        NoNulls(r.NewCaches, nameof(DesignSaveRequest.NewCaches), Fail);
+        NoNulls(r.DeletedSteps, nameof(DesignSaveRequest.DeletedSteps), Fail);
+        NoNulls(r.DeletedCaches, nameof(DesignSaveRequest.DeletedCaches), Fail);
         if (failures.Count > 0) throw new ValidationException(failures);
 
         Unique(r.Steps?.Select(s => s.Id), nameof(DesignSaveRequest.Steps), Fail);
@@ -36,6 +40,13 @@ internal static class DesignShape
         Unique(r.Schemas?.Select(s => s.Id), nameof(DesignSaveRequest.Schemas), Fail);
         Unique(r.Assignments?.Select(a => a.Id), nameof(DesignSaveRequest.Assignments), Fail);
         Unique(r.Assignments?.Select(a => a.StepId), "Assignments.StepId", Fail);
+        // a step (a cache) is created, changed or deleted, never two of them in one design
+        Unique(Ids(r.NewSteps?.Select(s => s.Id), r.Steps?.Select(s => s.Id), r.DeletedSteps?.Select(s => s.Id)),
+            "NewSteps, Steps and DeletedSteps", Fail);
+        Unique(Ids(r.NewCaches?.Select(c => c.Id), r.Caches?.Select(c => c.Id), r.DeletedCaches?.Select(c => c.Id)),
+            "NewCaches, Caches and DeletedCaches", Fail);
+        foreach (var s in r.NewSteps ?? [])
+            if (s.ProcessorId == Guid.Empty) Fail($"NewSteps[{s.Id}].ProcessorId", "ProcessorId must not be Guid.Empty.");
 
         var copies = (r.Schemas ?? []).Select(s => s.Id).ToHashSet();
         foreach (var p in r.Processors ?? [])
@@ -55,6 +66,8 @@ internal static class DesignShape
 
         if (failures.Count > 0) throw new ValidationException(failures);
     }
+
+    private static IEnumerable<Guid> Ids(params IEnumerable<Guid>?[] lists) => lists.SelectMany(l => l ?? []);
 
     private static void NoNulls<T>(List<T>? items, string property, Action<string, string> fail) where T : class
     {

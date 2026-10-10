@@ -16,6 +16,16 @@ namespace BaseApi.Service.Features.Workflow.Design;
 /// <param name="Schemas">Schema copies to insert (new ids).</param>
 /// <param name="Assignments">At most one create, update or delete per step of this workflow.</param>
 /// <param name="Layout">The canvas layout, loose wires included; required.</param>
+/// <param name="NewSteps">
+/// Steps to create (2026-10-10, copy and paste): new ids from the studio, inserted in the steps stage, their next
+/// steps written in the wires stage. Null or absent: none (older studios).
+/// </param>
+/// <param name="NewCaches">Caches to create in the caches stage; null or absent: none.</param>
+/// <param name="DeletedSteps">
+/// Steps to remove from this workflow and delete (the deletes stage, last); refused while another workflow still uses
+/// one. Null or absent: none.
+/// </param>
+/// <param name="DeletedCaches">Caches to delete (the deletes stage); refused while any workflow still lists one.</param>
 public sealed record DesignSaveRequest(
     DesignWorkflowDto? Workflow,
     List<DesignStepDto>? Steps,
@@ -23,7 +33,31 @@ public sealed record DesignSaveRequest(
     List<DesignCacheDto>? Caches,
     List<DesignSchemaDto>? Schemas,
     List<DesignAssignmentDto>? Assignments,
-    JsonElement? Layout);
+    JsonElement? Layout,
+    List<DesignNewStepDto>? NewSteps = null,
+    List<DesignNewCacheDto>? NewCaches = null,
+    List<DesignDeleteDto>? DeletedSteps = null,
+    List<DesignDeleteDto>? DeletedCaches = null);
+
+/// <summary>A step the design creates (a pasted copy): its own new id, the same processor as its original.</summary>
+/// <param name="Id">The new step's id, made by the studio; refused when a step with it already exists.</param>
+/// <param name="CopyOf">The step it is a copy of (for the log only; may itself be a step of this design); null: none.</param>
+/// <param name="ProcessorId">The processor it runs (processors are never copied).</param>
+/// <param name="Fields">Its fields by camelCase name (<c>name</c>, <c>version</c>, <c>description</c>, <c>entryCondition</c>).</param>
+/// <param name="NextStepIds">Its next steps (written in the wires stage); null or empty: none.</param>
+public sealed record DesignNewStepDto(
+    Guid Id, Guid? CopyOf, Guid ProcessorId, Dictionary<string, JsonElement>? Fields, List<Guid>? NextStepIds);
+
+/// <summary>A cache the design creates (a pasted copy), with a new id; the workflow's cache list links it.</summary>
+/// <param name="Id">The new cache's id; refused when a cache with it already exists.</param>
+/// <param name="CopyOf">The cache it is a copy of (for the log only); null: none.</param>
+/// <param name="Fields">Its fields by camelCase name (<c>name</c>, <c>version</c>, <c>description</c>, <c>root</c>, <c>items</c>).</param>
+public sealed record DesignNewCacheDto(Guid Id, Guid? CopyOf, Dictionary<string, JsonElement>? Fields);
+
+/// <summary>A step or cache the design deletes.</summary>
+/// <param name="Id">The entity.</param>
+/// <param name="UpdatedAt">A step's <c>updatedAt</c> the designer loaded (steps are owned); null for a cache (shared).</param>
+public sealed record DesignDeleteDto(Guid Id, DateTime? UpdatedAt);
 
 /// <param name="UpdatedAt">The workflow's <c>updatedAt</c> the designer loaded.</param>
 /// <param name="Fields">The changed fields by camelCase name; null: none.</param>
@@ -56,8 +90,12 @@ public sealed record DesignSchemaDto(Guid Id, string Name, string Version, strin
 /// <param name="UpdatedAt">The assignment's <c>updatedAt</c> the designer loaded.</param>
 /// <param name="Fields">The changed fields by camelCase name; null: none.</param>
 /// <param name="Op"><c>create</c> (a new row with this id, linked to the workflow), <c>update</c> or <c>delete</c>.</param>
+/// <param name="CopyOf">
+/// On create: the assignment this one copies (a pasted step's); the fields it does not name start as that row's.
+/// Null or absent: none.
+/// </param>
 public sealed record DesignAssignmentDto(
-    string Op, Guid Id, Guid StepId, DateTime? UpdatedAt, Dictionary<string, JsonElement>? Fields);
+    string Op, Guid Id, Guid StepId, DateTime? UpdatedAt, Dictionary<string, JsonElement>? Fields, Guid? CopyOf = null);
 
 /// <summary>The answer: applied exactly when there are no errors; the design is stored either way.</summary>
 /// <param name="Applied">True when the dry run found no errors and the transaction committed.</param>
@@ -84,6 +122,6 @@ public sealed record DesignLogDto(string Stage, string Level, string Kind, Guid?
 /// <param name="Id">The entity that failed.</param>
 /// <param name="Message">Why.</param>
 /// <param name="Kind"><c>schema</c>, <c>processor</c>, <c>cache</c>, <c>step</c>, <c>assignment</c> or <c>workflow</c>.</param>
-/// <param name="Stage"><c>schemas</c>, <c>processors</c>, <c>caches</c>, <c>steps</c>, <c>wires</c>, <c>assignments</c> or <c>workflow</c>.</param>
+/// <param name="Stage"><c>schemas</c>, <c>processors</c>, <c>caches</c>, <c>steps</c>, <c>wires</c>, <c>assignments</c>, <c>workflow</c> or <c>deletes</c>.</param>
 /// <param name="Field">The camelCase field, or null when the error is about the whole entity.</param>
 public sealed record DesignErrorDto(string Kind, Guid Id, string Stage, string? Field, string Message);

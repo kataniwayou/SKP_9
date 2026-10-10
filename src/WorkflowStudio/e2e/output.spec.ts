@@ -145,6 +145,7 @@ test('a Save with a change: Output logs it from "Save started" through BaseApi\'
     'BaseApi · wires: nothing to do',
     'BaseApi · assignments: nothing to do',
     'BaseApi · workflow: nothing to do',
+    'BaseApi · deletes: nothing to do',
     'BaseApi · dry run passed: 1 change, no errors',
     'BaseApi · committed: the entities hold the design; the stored design is emptied',
     'Saved and applied',
@@ -154,7 +155,7 @@ test('a Save with a change: Output logs it from "Save started" through BaseApi\'
   ]);
   expect(got.filter((l) => l.red)).toEqual([]);
   // the drawing was not touched: nothing for settling to change
-  expect(got[16]!.text).toMatch(/^drawing(: the workflow's own wires, nothing to settle| agrees with BaseApi's links)$/);
+  expect(got[17]!.text).toMatch(/^drawing(: the workflow's own wires, nothing to settle| agrees with BaseApi's links)$/);
   expect(new Set((await lines(page)).map((l) => l.name))).toEqual(new Set([t.tag]));
   expect((await request.get(`/api/v1/steps/${t.c}`).then((r) => r.json()) as { description: string }).description).toBe('e2e log');
   await shot(page, '2-save-log');

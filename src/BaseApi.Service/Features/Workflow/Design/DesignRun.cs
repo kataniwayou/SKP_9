@@ -36,6 +36,8 @@ internal sealed class DesignRun
     public List<DesignErrorDto> Errors { get; } = [];
     public HashSet<Guid> FailedSchemas { get; } = [];
     public HashSet<Guid> FailedSteps { get; } = [];
+    /// <summary>Steps the steps stage created (2026-10-10, paste): the wires stage writes their next steps.</summary>
+    public HashSet<Guid> CreatedSteps { get; } = [];
     public List<Guid> CreatedAssignments { get; } = [];
     public List<Guid> DeletedAssignments { get; } = [];
     /// <summary>Assignments the assignment stage unlinked from this workflow (deleted ones that it listed).</summary>
@@ -80,11 +82,16 @@ internal sealed class DesignRun
     /// One entity this stage changed, with what changed; counted under <paramref name="verb"/> (e.g. "updated"), unless
     /// this stage already refused it (then it is counted once, as refused, and the line still says what it changed).
     /// </summary>
-    public void Changed(string kind, Guid id, string verb, string message)
+    /// <param name="kind">The entity kind.</param>
+    /// <param name="id">The entity.</param>
+    /// <param name="verb">What the stage's counts call it ("updated", "created").</param>
+    /// <param name="message">What changed.</param>
+    /// <param name="sentence">The message goes on after the label as one sentence ("step 'x' created"), not after a colon.</param>
+    public void Changed(string kind, Guid id, string verb, string message, bool sentence = false)
     {
         var t = _tally ?? throw new InvalidOperationException("Changed outside a stage.");
         if (!t.Refused.Contains(id)) t.Done[verb] = t.Done.GetValueOrDefault(verb) + 1;
-        Log.Add(new DesignLogDto(t.Stage, "info", kind, id, $"{LabelOf(kind, id)}: {message}"));
+        Log.Add(new DesignLogDto(t.Stage, "info", kind, id, $"{LabelOf(kind, id)}{(sentence ? " " : ": ")}{message}"));
     }
 
     /// <summary>One entity this stage looked at and left as it was (no line of its own, only the count; refused wins).</summary>

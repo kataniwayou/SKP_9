@@ -165,6 +165,67 @@ public sealed class WorkflowDesignLiveTests : IAsyncLifetime
     private async Task<string> StepStampAsync(Guid id) => Stamp(await GetAsync($"steps/{id}"));
 
     [Fact]
+    public async Task APastedStepWithItsAssignmentIsCreatedAndTheStepItReplacesIsDeleted()
+    {
+        // 2026-10-10 (copy, paste, delete): created rows and the delete in one transaction, through the real foreign keys
+        RealStack.SkipUnlessEnabled();
+        var b = await StepAsync();
+        var a = await StepAsync(b);
+        var asg = await PostAsync("assignments", new { name = Tag(), version = "1.0.0", stepId = b, payload = """{"k":7}""" });
+        var wf = await WorkflowAsync([a], [asg]);
+        var bDto = await GetAsync($"steps/{b}");
+        Guid n = Guid.NewGuid(), nAsg = Guid.NewGuid();
+        _steps.Add(n);
+
+        var (applied, errors) = await PutDesignAsync(wf, new
+        {
+            workflow = new { updatedAt = Stamp(await GetAsync($"workflows/{wf}")) },
+            steps = new[] { new { id = a, updatedAt = await StepStampAsync(a), fields = (object?)null, nextStepIds = new[] { n } } },
+            newSteps = new[] { new { id = n, copyOf = b, processorId = _processor, fields = new { name = Text(bDto, "name"), version = "1.0.0", description = (string?)null, entryCondition = 1 }, nextStepIds = Array.Empty<Guid>() } },
+            assignments = new[] { new { op = "create", id = nAsg, stepId = n, updatedAt = (string?)null, fields = new { payload = """{"k":7}""" }, copyOf = asg } },
+            deletedSteps = new[] { new { id = b, updatedAt = Stamp(bDto) } },
+            layout = new { v = 1 },
+        });
+
+        Assert.True(applied, Describe(errors));
+        var made = await GetAsync($"steps/{n}");
+        Assert.Equal((Text(bDto, "name"), _processor), (Text(made, "name"), made.GetProperty("processorId").GetGuid()));
+        Assert.Equal([n], (await GetAsync($"steps/{a}")).GetProperty("nextStepIds").EnumerateArray().Select(x => x.GetGuid()));
+        var copied = await GetAsync($"assignments/{nAsg}");
+        Assert.Equal((n, """{"k":7}"""), (copied.GetProperty("stepId").GetGuid(), Text(copied, "payload")));
+        Assert.Equal([nAsg], (await GetAsync($"workflows/{wf}")).GetProperty("assignmentIds").EnumerateArray().Select(x => x.GetGuid()));
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/steps/{b}", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/assignments/{asg}", Ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task AStepAnotherWorkflowUsesIsRefusedAndThePastedStepIsRolledBack()
+    {
+        RealStack.SkipUnlessEnabled();
+        var shared = await StepAsync();
+        var a = await StepAsync(shared);
+        var wf = await WorkflowAsync([a]);
+        await WorkflowAsync([shared]);
+        var n = Guid.NewGuid();
+        _steps.Add(n);
+
+        var (applied, errors) = await PutDesignAsync(wf, new
+        {
+            steps = new[] { new { id = a, updatedAt = await StepStampAsync(a), fields = (object?)null, nextStepIds = new[] { n } } },
+            newSteps = new[] { new { id = n, copyOf = shared, processorId = _processor, fields = new { name = Tag(), version = "1.0.0", entryCondition = 1 }, nextStepIds = (Guid[]?)null } },
+            deletedSteps = new[] { new { id = shared, updatedAt = await StepStampAsync(shared) } },
+            layout = new { v = 1 },
+        });
+
+        Assert.False(applied);
+        var error = Assert.Single(errors);
+        Assert.True(Is(error, "step", shared, null), Describe(errors));
+        Assert.StartsWith("Not deleted: still used by workflow '", error.GetProperty("message").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/steps/{n}", Ct)).StatusCode);
+        Assert.Equal([shared], (await GetAsync($"steps/{a}")).GetProperty("nextStepIds").EnumerateArray().Select(x => x.GetGuid()));
+    }
+
+    [Fact]
     public async Task ADesignWithAnInvalidStepIsStoredLeavesTheRealEntitiesUntouchedAndReportsEveryError()
     {
         RealStack.SkipUnlessEnabled();
