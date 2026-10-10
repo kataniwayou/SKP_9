@@ -90,11 +90,11 @@ describe('toFlow', () => {
   it('shows the processor panel: id, name and version, In schema by name, empty slots as null', () => {
     const a = toFlow(doc(), fitter).nodes.find((n) => n.id === 'a')!.data as import('./nodes/StepNode').StepNodeData;
 
-    expect(a.processor.processorId).toBe('p1');
-    expect(a.processor.title.text).toBe('fetcher');
-    expect(a.processor.version).toBe('2.1.0');
-    expect(a.processor.rows.map((r) => [r.label, r.value?.text ?? null])).toEqual([['in', 'orders-in'], ['out', null], ['cfg', null]]);
-    expect([a.processor.inputLit, a.processor.outputLit]).toEqual([true, false]);
+    expect(a.processor!.processorId).toBe('p1');
+    expect(a.processor!.title.text).toBe('fetcher');
+    expect(a.processor!.version).toBe('2.1.0');
+    expect(a.processor!.rows.map((r) => [r.label, r.value?.text ?? null])).toEqual([['in', 'orders-in'], ['out', null], ['cfg', null]]);
+    expect([a.processor!.inputLit, a.processor!.outputLit]).toEqual([true, false]);
   });
 
   it('cuts a schema name to the panel (76 px) and drops the version when name and version pass 92 px (review focus 5)', () => {
@@ -103,12 +103,12 @@ describe('toFlow', () => {
     graph.graph.processors.set('p1', { ...graph.graph.processors.get('p1')!, name: 'a-processor-name' });
     const a = toFlow(graph, fitter).nodes.find((n) => n.id === 'a')!.data as import('./nodes/StepNode').StepNodeData;
 
-    const value = a.processor.rows[0]!.value!;
+    const value = a.processor!.rows[0]!.value!;
     expect(value.cut).toBe(true);
     expect(value.full).toBe('a-schema-name-that-is-far-too-long');
     expect(value.text.length * 7).toBeLessThanOrEqual(76);
-    expect(a.processor.version).toBeNull();
-    expect(a.processor.title.text.length * 7).toBeLessThanOrEqual(92);
+    expect(a.processor!.version).toBeNull();
+    expect(a.processor!.title.text.length * 7).toBeLessThanOrEqual(92);
   });
 
   it('measures the processor version in the mono face it is drawn in, not the title face', () => {
@@ -118,12 +118,12 @@ describe('toFlow', () => {
     graph.graph.processors.set('p1', { ...graph.graph.processors.get('p1')!, name: 'fetcher-proc' }); // 60 sans
     const b = toFlow(graph, fonts).nodes.find((n) => n.id === 'a')!.data as import('./nodes/StepNode').StepNodeData;
     // old measure: 'fetcher-proc 2.1.0' in sans = 90 <= 92, fits; drawn: 60 + 54 = 114 > 92, it does not
-    expect(b.processor.version).toBeNull();
-    expect(b.processor.title.text).toBe('fetcher-proc');
+    expect(b.processor!.version).toBeNull();
+    expect(b.processor!.title.text).toBe('fetcher-proc');
 
     graph.graph.processors.set('p1', { ...graph.graph.processors.get('p1')!, name: 'fetch' }); // 25 + 54 = 79
     const c = toFlow(graph, fonts).nodes.find((n) => n.id === 'a')!.data as import('./nodes/StepNode').StepNodeData;
-    expect(c.processor.version).toBe('2.1.0');
+    expect(c.processor!.version).toBe('2.1.0');
   });
 
   it('cuts a long cache version to the frame, counting its .2em letter spacing, and keeps it whole in the tooltip (review focus 5)', () => {

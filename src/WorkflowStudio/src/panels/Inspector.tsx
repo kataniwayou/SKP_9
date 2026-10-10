@@ -1,3 +1,4 @@
+import { EMPTY_SLOT_TIP } from '../canvas/nodes/Chip';
 import { Fragment, useEffect, useMemo } from 'react';
 import type { EntityReadDto } from '../api/entities';
 import type { StepReadDto } from '../api/types';
@@ -174,12 +175,21 @@ function EntityForm({ open, doc, base, target, saved, fields, showDetails, drill
         {FIELDS[target.kind].slice(2).map(editor)}
         {target.kind === 'step' && (() => {
           const step = saved as StepReadDto;
-          const p = graph.processors.get(step.processorId ?? '');
-          const label = p ? entityName(p.name, p.version, p.id) : step.processorId ?? '';
+          // removed in the design (2026-10-10): none, and no way to pick one here (the toolbox will drag one onto the step)
+          if (!step.processorId) {
+            return (
+              <div className="field">
+                <label>Processor</label>
+                <span className="ro processor-none" data-tip={EMPTY_SLOT_TIP}>none</span>
+              </div>
+            );
+          }
+          const p = graph.processors.get(step.processorId);
+          const label = p ? entityName(p.name, p.version, p.id) : step.processorId;
           return (
             <div className="field">
               <label>Processor</label>
-              <button type="button" className="drill" data-tipcut={label} onClick={() => drill({ kind: 'processor', id: step.processorId ?? '' })}>{label}</button>
+              <button type="button" className="drill" data-tipcut={label} onClick={() => drill({ kind: 'processor', id: step.processorId! })}>{label}</button>
             </div>
           );
         })()}

@@ -28,7 +28,7 @@ export interface DesignRequest {
   assignments: { op: 'create' | 'update' | 'delete'; id: Id; stepId: Id; updatedAt: string | null; fields: Fields; copyOf?: Id }[];
   layout: SavedLayout;
   /** Pasted steps (2026-10-10): sent only when there are some, so an older BaseApi never sees an empty list it does not know. */
-  newSteps?: { id: Id; copyOf: Id | null; processorId: Id; fields: Fields; nextStepIds: Id[] | null }[];
+  newSteps?: { id: Id; copyOf: Id | null; processorId: Id | null; fields: Fields; nextStepIds: Id[] | null }[];
   newCaches?: { id: Id; copyOf: Id | null; fields: Fields }[];
   /** Deleted steps with the stamp the designer loaded (steps are owned). */
   deletedSteps?: { id: Id; updatedAt: string | null }[];
@@ -57,7 +57,9 @@ export function buildDesignRequest(base: StudioDocument, shown: StudioDocument, 
   const nextOf = (id: Id) => written.nextOf(id).filter((t) => !removed.has(t));
   const entries = written.entries.filter((t) => !removed.has(t));
   const rewired = new Set([...g.steps.keys()].filter((id) => has(id) && !sameList(nextOf(id), g.steps.get(id)!.nextStepIds)));
-  const stepIds = [...new Set([...Object.keys(edits.steps), ...rewired])].filter(has).sort();
+  // steps whose processor the design removed (2026-10-10): sent with a null processorId, which BaseApi refuses on the step
+  const unassigned = new Set(blocks.unassigned.filter(has));
+  const stepIds = [...new Set([...Object.keys(edits.steps), ...rewired, ...unassigned])].filter(has).sort();
 
   const slots = new Map<Id, Partial<Record<SchemaSlot, Id>>>();
   const schemas: SchemaCopy[] = [];
@@ -101,7 +103,8 @@ export function buildDesignRequest(base: StudioDocument, shown: StudioDocument, 
       cacheIds: sameList(cacheIds, g.workflow.cacheIds) ? null : [...cacheIds],
     },
     steps: stepIds.map((id) => ({
-      id, updatedAt: edits.steps[id]?.updatedAt ?? g.steps.get(id)!.updatedAt, fields: { ...edits.steps[id]?.fields },
+      id, updatedAt: edits.steps[id]?.updatedAt ?? g.steps.get(id)!.updatedAt,
+      fields: { ...edits.steps[id]?.fields, ...(unassigned.has(id) ? { processorId: null } : {}) },
       nextStepIds: rewired.has(id) ? [...nextOf(id)] : null,
     })),
     processors: processorIds.map((id) => ({ id, fields: { ...edits.processors[id]?.fields }, slots: slots.get(id) ?? {} })),

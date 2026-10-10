@@ -40,7 +40,7 @@ export function selectionFromClick(node: { id: string; type?: string }, target: 
     case 'step': {
       const step = graph.steps.get(node.id);
       if (!step) return null;
-      if (target?.closest('.chipg') && graph.processors.has(step.processorId)) {
+      if (target?.closest('.chipg') && step.processorId !== null && graph.processors.has(step.processorId)) {
         return { kind: 'processor', processorId: step.processorId, stepId: step.id };
       }
       return { kind: 'step', stepId: step.id };
@@ -60,9 +60,15 @@ const withClass = (current: string | undefined, add: string) => (current ? `${cu
 export function withPicks(nodes: StudioNode[], edges: StudioEdge[], picks: readonly Pick[]): { nodes: StudioNode[]; edges: StudioEdge[] } {
   const ids = new Set(picks.filter((p) => p.kind === 'node').map((p) => p.id));
   const wires = new Set(picks.filter((p) => p.kind === 'wire').map((p) => p.id));
+  // a picked processor is marked on its step's die, as the selected one is (2026-10-10)
+  const dies = new Set(picks.filter((p) => p.kind === 'processor').map((p) => p.id));
+  const marked = (n: StudioNode) => {
+    const c = ids.has(n.id) ? withClass(n.className, PICK_CLASS) : n.className;
+    return dies.has(n.id) && !c?.split(' ').includes(DIE_SELECTED_CLASS) ? withClass(c, DIE_SELECTED_CLASS) : c;
+  };
   return {
     // `measured` too: React Flow's drag needs it, and the canvas never applies React Flow's own changes
-    nodes: nodes.map((n) => ({ ...n, draggable: true, measured: { width: n.width, height: n.height }, selected: ids.has(n.id), className: ids.has(n.id) ? withClass(n.className, PICK_CLASS) : n.className })) as StudioNode[],
+    nodes: nodes.map((n) => ({ ...n, draggable: true, measured: { width: n.width, height: n.height }, selected: ids.has(n.id), className: marked(n) })) as StudioNode[],
     edges: edges.map((e) => (e.type === 'cable' && e.data
       ? { ...e, zIndex: wires.has(e.id) ? 1 : 0, data: { ...e.data, picked: wires.has(e.id) } }
       : e)) as StudioEdge[],
@@ -84,8 +90,15 @@ export function selectionOfNode(id: string, graph: Graph): Selection | null {
  * stays the processor); a wire, several items or none show no entity.
  */
 export function selectionForPicks(picks: readonly Pick[], clicked: { id: string; selection: Selection | null } | null, graph: Graph): Selection | null {
-  if (picks.length !== 1 || picks[0]!.kind !== 'node') return null;
-  const id = picks[0]!.id;
+  if (picks.length !== 1) return null;
+  const only = picks[0]!;
+  if (only.kind === 'processor') {
+    // one picked processor: the Inspector shows it, as a click on the die did
+    const step = graph.steps.get(only.id);
+    return step && step.processorId !== null && graph.processors.has(step.processorId) ? { kind: 'processor', processorId: step.processorId, stepId: step.id } : null;
+  }
+  if (only.kind !== 'node') return null;
+  const id = only.id;
   return clicked && clicked.id === id ? clicked.selection : selectionOfNode(id, graph);
 }
 

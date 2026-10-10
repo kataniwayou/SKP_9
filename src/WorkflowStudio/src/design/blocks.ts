@@ -15,7 +15,8 @@ export interface NewStep {
   name: string;
   version: string;
   description: string | null;
-  processorId: Id;
+  /** null: it has none (copied from a step whose processor was removed, or removed since, 2026-10-10). */
+  processorId: Id | null;
   entryCondition: number;
   /** Its top-left corner where it was pasted; a later move is the draft's, as for any step. */
   at: Point;
@@ -57,16 +58,21 @@ export interface Blocks {
    * (never the stamp of a later re-read).
    */
   stamps: Record<Id, string>;
+  /**
+   * Steps the workflow has whose processor the design removed (Delete on a picked processor, 2026-10-10): the step
+   * stays, pointing at no processor; the processor entity is never touched. A pasted step's own `processorId` says it.
+   */
+  unassigned: Id[];
   refs: { processors: Record<Id, Processor>; schemas: Record<Id, Schema> };
 }
 
-export const EMPTY_BLOCKS: Blocks = { steps: {}, caches: {}, removed: { steps: [], caches: [] }, stamps: {}, refs: { processors: {}, schemas: {} } };
+export const EMPTY_BLOCKS: Blocks = { steps: {}, caches: {}, removed: { steps: [], caches: [] }, stamps: {}, unassigned: [], refs: { processors: {}, schemas: {} } };
 
 const none = (r: object) => Object.keys(r).length === 0;
 
 /** Nothing created or removed (refs alone change nothing). */
 export const isEmptyBlocks = (b: Blocks): boolean =>
-  none(b.steps) && none(b.caches) && b.removed.steps.length === 0 && b.removed.caches.length === 0;
+  none(b.steps) && none(b.caches) && b.removed.steps.length === 0 && b.removed.caches.length === 0 && b.unassigned.length === 0;
 
 const NO_AUDIT = { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null };
 
@@ -90,10 +96,14 @@ export function applyBlocks(base: StudioDocument, blocks: Blocks): StudioDocumen
   const goneCaches = new Set(blocks.removed.caches);
   const keep = (ids: readonly Id[]) => ids.filter((id) => !goneSteps.has(id));
 
+  const unassigned = new Set(blocks.unassigned);
   const steps = new Map<Id, Step>();
   for (const [id, s] of g.steps) {
     if (goneSteps.has(id)) continue;
-    steps.set(id, s.nextStepIds.some((n) => goneSteps.has(n)) ? { ...s, nextStepIds: keep(s.nextStepIds) } : s);
+    let step = s.nextStepIds.some((n) => goneSteps.has(n)) ? { ...s, nextStepIds: keep(s.nextStepIds) } : s;
+    // its processor removed in the design: the step points at none (the processor itself stays)
+    if (unassigned.has(id)) step = { ...step, processorId: null };
+    steps.set(id, step);
   }
   for (const [id, n] of Object.entries(blocks.steps)) {
     if (steps.has(id)) continue;
@@ -171,7 +181,8 @@ function parseAssignment(v: unknown): NewAssignment | null {
 function parseStep(v: unknown): NewStep | null {
   if (!isRecord(v)) return null;
   const name = text(v.name), version = text(v.version), processorId = id(v.processorId);
-  if (name === null || version === null || processorId === null || !isNum(v.entryCondition)) return null;
+  // a processor id, or null for a step with none (2026-10-10); anything else is not a step
+  if (name === null || version === null || (processorId === null && v.processorId !== null) || !isNum(v.entryCondition)) return null;
   return {
     copyOf: id(v.copyOf), name, version, description: text(v.description), processorId, entryCondition: v.entryCondition,
     at: point(v.at), assignment: parseAssignment(v.assignment),
@@ -210,6 +221,7 @@ export function parseBlocks(v: unknown): Blocks {
     caches: records(v.caches, parseCache),
     removed: { steps: ids(removed.steps), caches: ids(removed.caches) },
     stamps: records(v.stamps, (x) => (typeof x === 'string' && x !== '' ? x : null)),
+    unassigned: ids(v.unassigned),
     refs: { processors: records(refs.processors, ref<Processor>), schemas: records(refs.schemas, ref<Schema>) },
   };
 }

@@ -76,7 +76,8 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
         fanIn: ins.get(id)?.length ?? 0,
         ins: ins.get(id) ?? [],
         outs: outs.get(id) ?? [],
-        processor: processorView(graph.processors.get(step.processorId), graph, fitter),
+        // no processor (removed in the design, 2026-10-10): the empty slot is drawn instead
+        processor: step.processorId === null ? null : processorView(graph.processors.get(step.processorId), graph, fitter),
       },
     });
   }

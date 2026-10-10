@@ -6,7 +6,7 @@ import { CACHE_NODE_PREFIX, cacheNodeId, SPHERE_NODE_ID } from '../layout/nodeId
 import { isNum, shapeFromPoints } from '../layout/shape';
 import { assignmentByStep } from '../model/assignments';
 import type { Assignment, Id, Processor, Schema } from '../model/graph';
-import { nodePickIds, wirePickIds, type Pick } from '../store/picks';
+import { nodePickIds, processorPickIds, wirePickIds, type Pick } from '../store/picks';
 import { applyDraft, applyEdits } from './apply';
 import { parseFields, type Blocks, type NewStep } from './blocks';
 import type { EntityEdits, FieldValue } from './design';
@@ -18,7 +18,8 @@ export interface ClipStep {
   name: string;
   version: string;
   description: string | null;
-  processorId: Id;
+  /** null: the step had no processor (removed in the design, 2026-10-10); its copy has none either. */
+  processorId: Id | null;
   entryCondition: number;
   at: Point;
   /** Its assignment as copied: the real row it copies (`copyOf`) and the fields it showed (payload included). */
@@ -143,7 +144,7 @@ export function copyClip(base: StudioDocument, edits: EntityEdits, draft: Draft,
     const at = shown.placement.caches.get(id)!;
     return { id, name: c.name, version: c.version, description: c.description, root: c.root, items: c.items, at: { x: at.x, y: at.y } };
   });
-  const processors = [...new Set(clipSteps.map((s) => s.processorId))].flatMap((pid) => { const p = g.processors.get(pid); return p ? [p] : []; });
+  const processors = [...new Set(clipSteps.map((s) => s.processorId))].flatMap((pid) => { const p = pid === null ? undefined : g.processors.get(pid); return p ? [p] : []; });
   const schemaIds = new Set(processors.flatMap((p) => [p.inputSchemaId, p.outputSchemaId, p.configSchemaId].filter((x): x is Id => x !== null)));
   const schemas = [...schemaIds].flatMap((sid) => { const s = g.schemas.get(sid); return s ? [s] : []; });
   return { from, steps: clipSteps, caches: clipCaches, wires, processors, schemas, pasted: 0 };
@@ -333,7 +334,9 @@ export function pasteClip(
  * Delete (2026-10-10, the user's decision 6): the picked steps and caches leave the design with every wire that has an
  * end on a deleted step, and the picked wires go too; a wire joined on a wire that goes opens where it is drawn (plan 9
  * §2.2-6). The hub is never deleted (skipped). A pasted step or cache is simply gone; one the workflow has is removed
- * (Save deletes the entity). The picks left: the hub, if it was picked. Null when nothing is deleted.
+ * (Save deletes the entity). A picked processor (2026-10-10) leaves its step: the step points at none and stays, the
+ * processor entity is never touched. The picks left: the hub, if it was picked, and the steps whose processor went.
+ * Null when nothing is deleted.
  */
 export function deletePicked(base: StudioDocument, edits: EntityEdits, draft: Draft, picks: readonly Pick[]): { draft: Draft; picks: Pick[] } | null {
   const { saved, shown } = views(base, edits, draft);
@@ -348,12 +351,20 @@ export function deletePicked(base: StudioDocument, edits: EntityEdits, draft: Dr
     ...wirePickIds(picks).filter((id) => Object.hasOwn(circuit, id)),
     ...Object.entries(circuit).filter(([, w]) => onGone(w.tail) || onGone(w.head)).map(([id]) => id),
   ])];
-  if (stepIds.length + cacheIds.length + wires.length === 0) return null;
+  // picked processors (2026-10-10): each leaves its step, the step stays (one deleted too has nothing to clear)
+  const cleared = processorPickIds(picks).filter((id) => !gone.has(id) && (saved.graph.steps.get(id)?.processorId ?? null) !== null);
+  if (stepIds.length + cacheIds.length + wires.length + cleared.length === 0) return null;
 
   const steps = copy(draft.blocks.steps), caches = copy(draft.blocks.caches);
   const removedSteps = [...draft.blocks.removed.steps], removedCaches = [...draft.blocks.removed.caches];
   const stamps = copy(draft.blocks.stamps);
   const moved = copy(draft.steps), movedCaches = copy(draft.caches);
+  const unassigned = draft.blocks.unassigned.filter((id) => !gone.has(id));
+  for (const id of cleared) {
+    // a pasted step's own processor goes; one the workflow has is marked: the processor entity is never touched
+    if (Object.hasOwn(steps, id)) steps[id] = { ...steps[id]!, processorId: null };
+    else if (!unassigned.includes(id)) unassigned.push(id);
+  }
   for (const id of stepIds) {
     if (Object.hasOwn(steps, id)) delete steps[id];
     else if (!removedSteps.includes(id)) {
@@ -370,17 +381,18 @@ export function deletePicked(base: StudioDocument, edits: EntityEdits, draft: Dr
     delete movedCaches[id];
   }
   // what pasted steps still need from other workflows; nothing else is kept
-  const used = new Set(Object.values(steps).map((s) => s.processorId));
+  const used = new Set(Object.values(steps).flatMap((s) => (s.processorId === null ? [] : [s.processorId])));
   const processors = copy<Processor>({});
   for (const [pid, p] of Object.entries(draft.blocks.refs.processors)) if (used.has(pid)) processors[pid] = p;
   const slots = new Set(Object.values(processors).flatMap((p) => [p.inputSchemaId, p.outputSchemaId, p.configSchemaId]));
   const schemas = copy<Schema>({});
   for (const [sid, s] of Object.entries(draft.blocks.refs.schemas)) if (slots.has(sid)) schemas[sid] = s;
-  const blocks: Blocks = { steps, caches, removed: { steps: removedSteps, caches: removedCaches }, stamps, refs: { processors, schemas } };
+  const blocks: Blocks = { steps, caches, removed: { steps: removedSteps, caches: removedCaches }, stamps, unassigned, refs: { processors, schemas } };
 
   const after = removeCircuitWires(circuit, wires, endPointOf(shown.wires));
   const next = withCircuit({ ...draft, blocks, steps: moved, caches: movedCaches }, applyEdits(base, edits, blocks), after);
-  return { draft: next, picks: picks.filter((p) => p.kind === 'node' && p.id === SPHERE_NODE_ID) };
+  // the hub stays picked; a step whose processor went is picked itself (the Inspector shows it, "processor: none")
+  return { draft: next, picks: [...picks.filter((p) => p.kind === 'node' && p.id === SPHERE_NODE_ID), ...cleared.map((id): Pick => ({ kind: 'node', id }))] };
 }
 
 // ---- reading back (the session's clipboard); anything malformed is dropped ----
@@ -392,9 +404,10 @@ const pointOf = (v: unknown): Point | null => (isRecord(v) && isNum(v.x) && isNu
 function clipStep(v: unknown): ClipStep | null {
   if (!isRecord(v)) return null;
   const id = str(v.id), name = str(v.name), version = str(v.version), processorId = str(v.processorId), at = pointOf(v.at);
-  if (!id || name === null || version === null || !processorId || !isNum(v.entryCondition) || !at) return null;
+  // a processor id, or null for a step with none (2026-10-10)
+  if (!id || name === null || version === null || (!processorId && v.processorId !== null) || !isNum(v.entryCondition) || !at) return null;
   const a = isRecord(v.assignment) ? { copyOf: str(v.assignment.copyOf) || null, fields: parseFields(v.assignment.fields) } : null;
-  return { id, name, version, description: str(v.description), processorId, entryCondition: v.entryCondition, at, assignment: a };
+  return { id, name, version, description: str(v.description), processorId: processorId || null, entryCondition: v.entryCondition, at, assignment: a };
 }
 
 function clipCache(v: unknown): ClipCache | null {

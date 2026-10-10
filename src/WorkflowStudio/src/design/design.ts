@@ -234,7 +234,8 @@ function storedBlocks(stored: Record<string, unknown>, layout: unknown): Blocks 
   const steps = copy<NewStep>({});
   for (const s of list(stored.newSteps)) {
     const id = str(s.id), processorId = str(s.processorId);
-    if (id === null || processorId === null) continue;
+    // a pasted step with no processor (2026-10-10) is sent with a null one
+    if (id === null || (processorId === null && s.processorId !== null && s.processorId !== undefined)) continue;
     const f = toFields(s.fields);
     steps[id] = {
       copyOf: str(s.copyOf), name: text(f, 'name'), version: text(f, 'version'), description: typeof f.description === 'string' ? f.description : null,
@@ -258,7 +259,12 @@ function storedBlocks(stored: Record<string, unknown>, layout: unknown): Blocks 
     const id = str(d.id), at = str(d.updatedAt);
     if (id !== null && at !== null) stamps[id] = at;
   }
-  return { ...EMPTY_BLOCKS, steps, caches, removed: { steps: ids(stored.deletedSteps), caches: ids(stored.deletedCaches) }, stamps };
+  // steps whose processor the design removed (2026-10-10): sent as a step change with a null processorId
+  const unassigned = list(stored.steps).flatMap((x) => {
+    const id = str(x.id);
+    return id !== null && isRecord(x.fields) && Object.hasOwn(x.fields, 'processorId') && x.fields.processorId === null ? [id] : [];
+  });
+  return { ...EMPTY_BLOCKS, steps, caches, removed: { steps: ids(stored.deletedSteps), caches: ids(stored.deletedCaches) }, stamps, unassigned };
 }
 
 // ---- reading back: the session's edits and the server's stored design; anything malformed is dropped ----
@@ -339,7 +345,10 @@ export function storedDesignOf(stored: unknown, layout: unknown): Design {
   for (const s of list(stored.steps)) {
     const id = str(s.id);
     if (id === null) continue;
-    edits.steps[id] = toEdit(s)!;
+    const edit = toEdit(s)!;
+    // a removed processor is the canvas's (the blocks' `unassigned`), not an Inspector field
+    delete edit.fields.processorId;
+    edits.steps[id] = edit;
     const next = toIds(s.nextStepIds);
     if (next !== null) draft.next[id] = next;
   }

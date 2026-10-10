@@ -49,9 +49,10 @@ async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<StudioDoc
     const model = stepFromDto(step.value);
     graph.steps.set(id, model);
     parkedIds.push(id);
-    if (!graph.processors.has(model.processorId)) {
-      const processor = await api.getProcessor(model.processorId);
-      if (processor.ok) graph.processors.set(model.processorId, processorFromDto(processor.value));
+    const pid = model.processorId;
+    if (pid !== null && !graph.processors.has(pid)) {
+      const processor = await api.getProcessor(pid);
+      if (processor.ok) graph.processors.set(pid, processorFromDto(processor.value));
       else if (processor.error.kind !== 'notFound') return processor;
     }
   }

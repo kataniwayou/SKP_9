@@ -208,13 +208,21 @@ describe('graphReadout', () => {
 });
 
 describe('stepReadout', () => {
+  it('a step whose processor the design removed reads "none" (2026-10-10)', async () => {
+    const base = await chain();
+    const draft = { ...EMPTY_DRAFT, blocks: { ...EMPTY_DRAFT.blocks, unassigned: ['s2'] } };
+    const m = model(base, draft);
+    expect(stepReadout(m, 's2')!.processor).toBeNull();
+    expect(stepReadout(m, 's1')!.processor).not.toBeNull();
+  });
+
   const ins = (m: ReadoutModel, id: string) => stepReadout(m, id)!.in.map((l) => [l.id, l.held]);
   const outs = (m: ReadoutModel, id: string) => stepReadout(m, id)!.out.map((l) => [l.id, l.held]);
 
   it('an entry step: fed by the workflow, its next steps out, its wires counted, nothing flagged', async () => {
     const m = model(await chain());
     expect(stepReadout(m, 's1')).toEqual({
-      condition: 'Completed', in: [{ id: 'wf', name: 'workflow', held: false }], out: [{ id: 's2', name: S2, held: false }],
+      condition: 'Completed', processor: expect.any(String), in: [{ id: 'wf', name: 'workflow', held: false }], out: [{ id: 's2', name: S2, held: false }],
       heldBack: false, wireCount: 2, flagged: [],
     });
     expect(ins(m, 's2')).toEqual([['s1', false]]);
@@ -222,7 +230,7 @@ describe('stepReadout', () => {
   });
 
   it('a step with no wires: nothing in, nothing out, no wires; its own condition', async () => {
-    expect(stepReadout(model(await chain()), 's4')).toEqual({ condition: 'Failed', in: [], out: [], heldBack: false, wireCount: 0, flagged: [] });
+    expect(stepReadout(model(await chain()), 's4')).toEqual({ condition: 'Failed', processor: expect.any(String), in: [], out: [], heldBack: false, wireCount: 0, flagged: [] });
   });
 
   it('fan-in through a junction: both sources feed the step of the host', async () => {

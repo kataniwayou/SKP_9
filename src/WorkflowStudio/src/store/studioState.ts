@@ -186,6 +186,8 @@ function prunedPicks(d: OpenDocument, draft: Draft): Pick[] {
       if (p.id.startsWith(CACHE_NODE_PREFIX)) return saved.placement.caches.has(p.id.slice(CACHE_NODE_PREFIX.length));
       return saved.placement.steps.has(p.id);
     }
+    // a step's processor: while the step points at one (2026-10-10)
+    if (p.kind === 'processor') return (saved.graph.steps.get(p.id)?.processorId ?? null) !== null;
     // a wire keeps its id for life (plan 9): its pick stays while the circuit has it
     return Object.hasOwn(wires, p.id);
   };
@@ -202,7 +204,12 @@ function prunedSelection(d: OpenDocument, draft: Draft): OpenDocument {
   const { graph } = applyBlocks(d.status.doc, draft.blocks);
   const s = d.selection;
   const there = s.kind === 'workflow' || (s.kind === 'cache' ? graph.caches.has(s.cacheId) : graph.steps.has(s.stepId));
-  return there ? d : { ...d, selection: null, inspector: EMPTY_INSPECTOR };
+  if (!there) return { ...d, selection: null, inspector: EMPTY_INSPECTOR };
+  // a processor its step no longer points at (removed in the design, 2026-10-10): the Inspector shows the step
+  if (s.kind === 'processor' && graph.steps.get(s.stepId)!.processorId !== s.processorId) {
+    return { ...d, selection: { kind: 'step', stepId: s.stepId }, inspector: EMPTY_INSPECTOR };
+  }
+  return d;
 }
 
 const redesign = (d: OpenDocument, design: DesignHistory): OpenDocument =>

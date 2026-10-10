@@ -36,7 +36,8 @@ export interface Step {
   name: string;
   version: string;
   description: string | null;
-  processorId: Id;
+  /** null: the design removed its processor (2026-10-10; the step keeps its place, Save is refused on it until it has one). */
+  processorId: Id | null;
   nextStepIds: Id[];
   /** 0..5 on the wire; see model/entryConditions.ts. 0 is invalid but can still arrive. */
   entryCondition: number;

@@ -2,6 +2,7 @@ import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { Health } from '../../api/liveness';
 import { STEP_FRAME } from './nxShapes';
+import { EMPTY_SLOT_TIP } from './Chip';
 import { StepView, type StepNodeData } from './StepNode';
 
 const data: StepNodeData = {
@@ -93,5 +94,20 @@ describe('StepView', () => {
     const { container } = view();
     expect(container.querySelector('.blk > title')!.textContent).toBe('fetch-orders-from-the-api_1.0.0-s1\nentry C · Completed\nassignment ◆ 2 keys');
     expect(container.querySelector('.chipg > title')!.textContent).toBe('fetcher 2.1.0');
+  });
+
+  it('with no processor (removed in the design, 2026-10-10): the dashed amber empty slot with a ⚠ and its tip; no die; a transparent background', () => {
+    const { container } = view({ processor: null });
+    expect(container.querySelector('.chipg')).toBeNull();
+    const slot = container.querySelector('.chip-empty')!;
+    expect(slot.querySelector('title')!.textContent).toBe(EMPTY_SLOT_TIP);
+    expect(slot.querySelector('.chip-empty-mark')!.textContent).toBe('⚠');
+    // nothing behind the ⚠ (the user's addition): one outline, not filled, and the glyph; no plate, circle or path
+    const shapes = [...slot.querySelectorAll('rect, circle, ellipse, path, polygon')];
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0]!.getAttribute('fill')).toBe('none');
+    expect(shapes[0]!.classList.contains('chip-empty-line')).toBe(true);
+    // its sockets are not lit
+    expect(container.querySelectorAll('.nx-socket .nx-fh.nx-d2').length).toBeGreaterThan(0);
   });
 });

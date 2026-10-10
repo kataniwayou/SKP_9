@@ -90,3 +90,21 @@ export function ChipView({ p, ins, outs, health }: { p: ProcessorView; ins: numb
     </g>
   );
 }
+
+/** The tooltip of a step's empty processor slot (2026-10-10). */
+export const EMPTY_SLOT_TIP = 'No processor: drag one from the toolbox. Save will fail until this step has one.';
+
+/**
+ * Where a step's processor was, once the design removed it (2026-10-10): the panel's outline dashed in amber (warn) with
+ * a ⚠ in its centre, with a transparent background (no plate behind the glyph). Not a `.chipg`: a click on it picks the step, there is no processor to pick.
+ */
+export function EmptySlot() {
+  return (
+    <g className="chip-empty" transform="translate(24,56)" data-processor="">
+      <title>{EMPTY_SLOT_TIP}</title>
+      {/* transparent inside (the user's addition): only the dashed outline and the glyph are drawn, nothing behind the ⚠ */}
+      <rect className="chip-empty-line" width={W} height={H} rx={5} fill="none" />
+      <text className="chip-empty-mark" x={W / 2} y={H / 2 + 7} textAnchor="middle">⚠</text>
+    </g>
+  );
+}

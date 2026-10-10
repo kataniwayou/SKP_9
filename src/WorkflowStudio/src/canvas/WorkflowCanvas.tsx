@@ -166,7 +166,8 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     if (suppressNodeClick.current) { suppressNodeClick.current = false; return; }
     const clicked = selectionFromClick(node, event.target as Element, shownDoc.graph);
     if (!design) { onSelect(clicked); return; }
-    const pick: Pick = { kind: 'node', id: node.id };
+    // a click on a step's processor picture picks the processor (2026-10-10: Delete then removes it from the step)
+    const pick: Pick = clicked?.kind === 'processor' ? { kind: 'processor', id: node.id } : { kind: 'node', id: node.id };
     const picks = event.ctrlKey ? togglePick(design.picks, pick) : [pick];
     onSelect(selectionForPicks(picks, { id: node.id, selection: clicked }, shownDoc.graph), picks);
   };

@@ -1,3 +1,4 @@
+import { EMPTY_SLOT_TIP } from '../canvas/nodes/Chip';
 import { useMemo } from 'react';
 import { wireName } from '../design/wireName';
 import type { OpenDocument } from '../store/studioState';
@@ -121,6 +122,10 @@ export function StepGraphSection({ open, stepId }: { open: OpenDocument; stepId:
       <div className="sec-title">Graph</div>
       <dl>
         <div className="rrow" data-row="Entry condition"><dt>Entry condition</dt><dd>{g.condition}</dd></div>
+        <div className="rrow" data-row="Processor">
+          <dt>Processor</dt>
+          <dd>{g.processor === null ? <span className="none processor-none" data-tip={EMPTY_SLOT_TIP}>none</span> : g.processor}</dd>
+        </div>
         <div className="rrow" data-row="In">
           <dt>In</dt>
           <dd>

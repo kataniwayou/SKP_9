@@ -278,6 +278,8 @@ export interface StepWire {
 
 export interface StepReadout {
   condition: string;
+  /** Its processor's unique name, or null when the design removed it (2026-10-10: "none"). */
+  processor: string | null;
   /** What feeds it, the hub first, then steps by unique name: exactly the workflow Graph's links into it. */
   in: StepSource[];
   /** Its next steps as Save writes them, then those drawn but held back: its workflow Graph row. */
@@ -318,5 +320,8 @@ export function stepReadout(m: ReadoutModel, id: Id): StepReadout | null {
     ];
     if (notes.length > 0) flagged.push({ id: k, name: wireName(shown, k) ?? k, notes });
   }
-  return { condition: conditionName(m, id), in: into, out: linksOf(m, id), heldBack: m.written.held.steps.has(id), wireCount: touching.length, flagged };
+  const pid = shown.graph.steps.get(id)!.processorId;
+  const p = pid === null ? undefined : shown.graph.processors.get(pid);
+  const processor = pid === null ? null : p ? entityName(p.name, p.version, p.id) : pid;
+  return { condition: conditionName(m, id), processor, in: into, out: linksOf(m, id), heldBack: m.written.held.steps.has(id), wireCount: touching.length, flagged };
 }

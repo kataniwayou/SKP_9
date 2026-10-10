@@ -5,7 +5,7 @@ import { DesignContext } from '../../design/DesignContext';
 import { CHIP, PMID, STEP_H, STEP_W } from '../../layout/geometry';
 import type { FittedText } from '../fitText';
 import { useLiveArt } from '../liveArt';
-import { ChipView, type ProcessorView } from './Chip';
+import { ChipView, EmptySlot, type ProcessorView } from './Chip';
 import { Label } from './Label';
 import { STEP_CAP, STEP_FRAME, STEP_FRAME_IN, STEP_GLOSS } from './nxShapes';
 
@@ -24,7 +24,8 @@ export type StepNodeData = {
   /** Step-local heights where wires land (left edge) and leave (right edge). */
   ins: number[];
   outs: number[];
-  processor: ProcessorView;
+  /** null: the step has no processor (removed in the design, 2026-10-10): the empty slot is drawn instead. */
+  processor: ProcessorView | null;
 };
 export type StepNodeType = Node<StepNodeData, 'step'>;
 
@@ -50,6 +51,7 @@ export function StepView({ health, ...d }: StepNodeData & { health: Health }) {
   const outs = d.outs.length > 0 ? d.outs : [PMID];
   const versionX = 42;
   const p = d.processor;
+  const inputLit = p?.inputLit ?? false, outputLit = p?.outputLit ?? false;
 
   return (
     <g className="blk nx">
@@ -80,11 +82,13 @@ export function StepView({ health, ...d }: StepNodeData & { health: Health }) {
           <text className="badge" x={W - 41} y={2.5} textAnchor="middle" fill="var(--muted)">{`fan-in ×${d.fanIn}`}</text>
         </>
       )}
-      {ins.map((y, i) => <path key={`ti${i}`} className={p.inputLit ? 'nx-ln' : 'nx-ln nx-d3'} d={`M0 ${y}H${CHIP.x}`} />)}
-      {outs.map((y, i) => <path key={`to${i}`} className={p.outputLit ? 'nx-ln' : 'nx-ln nx-d3'} d={`M${CHIP.x + CHIP.w} ${y}H${W}`} />)}
-      {ins.map((y, i) => <Socket key={`si${i}`} x={0} y={y} lit={p.inputLit} />)}
-      {outs.map((y, i) => <Socket key={`so${i}`} x={W} y={y} lit={p.outputLit} />)}
-      <ChipView p={p} health={health} ins={ins.map((y) => y - CHIP.y)} outs={outs.map((y) => y - CHIP.y)} />
+      {ins.map((y, i) => <path key={`ti${i}`} className={inputLit ? 'nx-ln' : 'nx-ln nx-d3'} d={`M0 ${y}H${CHIP.x}`} />)}
+      {outs.map((y, i) => <path key={`to${i}`} className={outputLit ? 'nx-ln' : 'nx-ln nx-d3'} d={`M${CHIP.x + CHIP.w} ${y}H${W}`} />)}
+      {ins.map((y, i) => <Socket key={`si${i}`} x={0} y={y} lit={inputLit} />)}
+      {outs.map((y, i) => <Socket key={`so${i}`} x={W} y={y} lit={outputLit} />)}
+      {p === null
+        ? <EmptySlot />
+        : <ChipView p={p} health={health} ins={ins.map((y) => y - CHIP.y)} outs={outs.map((y) => y - CHIP.y)} />}
     </g>
   );
 }
@@ -99,7 +103,7 @@ export function StepNode({ id, data }: NodeProps<StepNodeType>) {
     <>
       <Handle id="in" type="target" position={Position.Left} isConnectable={false} style={{ top: PMID }} />
       <svg width={W} height={H} overflow="visible" style={{ display: 'block' }}>
-        <StepView {...data} health={health(data.processor.processorId)} />
+        <StepView {...data} health={health(data.processor?.processorId ?? '')} />
       </svg>
       <Handle id="out" type="source" position={Position.Right} isConnectable={false} style={{ top: PMID }} />
       {gestures && <div className="nx-port nodrag nopan" style={PORT} onPointerDown={(e) => gestures.portPointerDown(id, e)} />}
