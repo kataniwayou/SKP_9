@@ -449,7 +449,11 @@ describe('DocumentPanel Save', () => {
     expect(document.querySelector('.studio-canvas')!.getAttribute('tabindex')).toBe('0');
 
     act(() => store.dispatch({ type: 'saving', workflowId: 'wf1' }));
-    expect(screen.getByRole('button', { name: '⤓ Saving…' })).toBeDisabled();
+    // a spinner replaces the ⤓ while the Save runs (2026-10-10); the button is busy and disabled
+    const busy = screen.getByRole('button', { name: 'Saving…' });
+    expect(busy).toBeDisabled();
+    expect(busy).toHaveAttribute('aria-busy', 'true');
+    expect(busy.querySelector('.spin')).not.toBeNull();
     // read-only: the canvas is not in design mode while the answer is awaited
     expect(document.querySelector('.studio-canvas')!.getAttribute('tabindex')).toBeNull();
     await screen.findByText('■ stopped');

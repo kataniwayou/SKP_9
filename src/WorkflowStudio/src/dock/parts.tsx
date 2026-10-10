@@ -1,3 +1,4 @@
+import { Spinner, useMinShown } from '../app/Spinner';
 import { createContext, useContext, type ReactNode } from 'react';
 import type { DockviewGroupPanel, DockviewPanelApi, IDockviewHeaderActionsProps, IDockviewPanelHeaderProps, IDockviewPanelProps } from 'dockview-react';
 import { documentIdOf, isDocPanelId, isToolId, TOOL_TITLES, type ToolId } from './ids';
@@ -12,6 +13,8 @@ export interface DockDocument {
   tooltip: string;
   /** Unsaved changes: the tab shows the amber dot. */
   dirty?: boolean;
+  /** A Save of this workflow is running (2026-10-10): its tab shows a spinner, wherever the tab is. */
+  saving?: boolean;
 }
 
 export type GroupAction = 'open' | 'menu' | 'hide' | 'float' | 'popout' | 'maximize' | 'dock';
@@ -63,9 +66,11 @@ export function StudioTab({ api }: IDockviewPanelHeaderProps) {
   const documentId = documentIdOf(id);
   const info = documentId === null ? undefined : shell.documentInfo(documentId);
   const name = info?.name ?? (isToolId(id) ? TOOL_TITLES[id] : id);
+  const saving = useMinShown(info?.saving === true);
   return (
     <div
       className={info?.dirty ? 'doctab dirty' : 'doctab'}
+      aria-busy={info ? saving : undefined}
       data-tip={info?.tooltip}
       onContextMenu={(e) => { e.preventDefault(); shell.windowMenu(id, anchorAt(e)); }}
       onDoubleClick={(e) => {
@@ -78,6 +83,7 @@ export function StudioTab({ api }: IDockviewPanelHeaderProps) {
     >
       {info && <span className="ud" data-tip="unsaved changes" />}
       <span className="nm">{name}</span>
+      {saving && <span className="saving" data-tip="Saving…"><Spinner /></span>}
       {info && <span className="tv">{info.version}</span>}
       <span
         className="x"

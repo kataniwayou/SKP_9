@@ -3,6 +3,7 @@ import { ZoomControls } from '../canvas/ZoomControls';
 import { entityName } from '../model/entityNames';
 import type { Workflow } from '../model/graph';
 import type { RunOp } from '../store/run';
+import { Spinner, useMinShown } from './Spinner';
 
 const NOT_YET = 'Not available yet';
 
@@ -58,9 +59,7 @@ export function CapsuleToolbar({ workflow, status, save, design, run }: {
             <span className="qsep" />
           </>
         )}
-        {save && (save.enabled || save.saving)
-          ? <button type="button" className="qb" disabled={save.saving} onClick={save.onSave} data-tip="Store the design; BaseApi applies it when it finds no errors">{save.saving ? '⤓ Saving…' : '⤓ Save'}</button>
-          : <span data-tip="Nothing to save yet"><button type="button" className="qb" disabled>⤓ Save</button></span>}
+        <SaveButton save={save} />
         <span className="qsep" />
         <RunButton op="start" run={run} />
         <RunButton op="stop" run={run} />
@@ -80,4 +79,18 @@ function RunButton({ op, run }: { op: RunOp; run: Parameters<typeof CapsuleToolb
   }
   // a disabled button shows no tip of its own: the span carries it
   return <span data-tip={blocked ?? undefined}><button type="button" className={cls} disabled>{label}</button></span>;
+}
+
+/**
+ * Save (plan 8 §4.1). While a Save runs (from the click through BaseApi's answer, the re-read and the alignment) a
+ * spinner replaces the ⤓ and the button is busy; once shown it stays MIN_SPIN_MS so a fast Save does not flicker.
+ */
+function SaveButton({ save }: { save: Parameters<typeof CapsuleToolbar>[0]['save'] }) {
+  const busy = useMinShown(save?.saving === true);
+  if (!save || (!save.enabled && !busy)) return <span data-tip="Nothing to save yet"><button type="button" className="qb" disabled>⤓ Save</button></span>;
+  return (
+    <button type="button" className="qb" disabled={busy} aria-busy={busy} onClick={save.onSave} data-tip="Store the design; BaseApi applies it when it finds no errors">
+      {busy ? <><Spinner /> Saving…</> : '⤓ Save'}
+    </button>
+  );
 }

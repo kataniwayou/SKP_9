@@ -294,10 +294,10 @@ export async function get<T>(request: APIRequestContext, path: string): Promise<
   return (await r.json()) as T;
 }
 
-/** The capsule's Save, then wait for the answer (the button leaves "Saving…"). */
+/** The capsule's Save, then wait for the answer and the alignment (the button leaves "Saving…", its spinner gone). */
 export async function save(page: Page): Promise<void> {
   await page.getByRole('button', { name: '⤓ Save' }).click();
-  await expect(page.getByRole('button', { name: '⤓ Saving…' })).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByRole('button', { name: 'Saving…' })).toHaveCount(0, { timeout: 20_000 });
 }
 
 /** Opens a tool pane by its tab and returns its body. */

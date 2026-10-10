@@ -156,9 +156,9 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
   }, [saver]);
 
   // the dock only needs each document's identity and names; a selection change must not re-render every tab
-  const identity = docs.map((d) => `${d.workflowId}\u0000${d.name}\u0000${d.version}\u0000${designDirty(d)}`).join('\u0001');
+  const identity = docs.map((d) => `${d.workflowId}\u0000${d.name}\u0000${d.version}\u0000${designDirty(d)}\u0000${d.saving}`).join('\u0001');
   const documents: DockDocument[] = useMemo(
-    () => docs.map((d) => ({ id: d.workflowId, name: d.name, version: d.version, tooltip: entityName(d.name, d.version, d.workflowId), dirty: designDirty(d) })),
+    () => docs.map((d) => ({ id: d.workflowId, name: d.name, version: d.version, tooltip: entityName(d.name, d.version, d.workflowId), dirty: designDirty(d), saving: d.saving })),
     [identity], // the part of `docs` the dock shows; `docs` itself changes on every selection
 
   );
@@ -169,6 +169,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
 
   return (
     <StudioActionsProvider value={actions}>
+      <SaveAnnouncer />
       <DockShell
         documents={documents}
         notice={notice}
@@ -254,4 +255,27 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
       )}
     </StudioActionsProvider>
   );
+}
+
+/**
+ * A polite live region (2026-10-10): "Saving <name>…" when a Save starts, "Saved <name>" or "Not saved <name>" when it
+ * ends; what happened in detail is Output's log, not repeated here.
+ */
+export function SaveAnnouncer() {
+  const docs = useStudio((s) => s.docs);
+  const output = useStudio((s) => s.output);
+  const was = useRef(new Map<string, boolean>());
+  const [message, setMessage] = useState('');
+  useEffect(() => {
+    for (const d of docs) {
+      const before = was.current.get(d.workflowId) ?? false;
+      if (d.saving && !before) setMessage(`Saving ${d.name}…`);
+      if (!d.saving && before) {
+        const verdict = output.findLast((l) => l.workflowId === d.workflowId && /^(Saved|Not saved)/.test(l.text));
+        setMessage(verdict && verdict.text.startsWith('Saved') && !verdict.text.startsWith('Saved; not applied') ? `Saved ${d.name}` : `Not saved ${d.name}`);
+      }
+      was.current.set(d.workflowId, d.saving);
+    }
+  }, [docs, output]);
+  return <div className="sr-only" role="status" aria-live="polite" aria-label="Save status">{message}</div>;
 }

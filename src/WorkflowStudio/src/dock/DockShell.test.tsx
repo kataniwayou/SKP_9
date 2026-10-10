@@ -64,6 +64,15 @@ describe('DockShell', () => {
     expect(tabs[0]!.querySelector('.ud')).toHaveAttribute('data-tip', 'unsaved changes');
   });
 
+  it('a saving document’s tab shows a spinner and is busy, also while another tab is in front (2026-10-10)', () => {
+    setup({ documents: [{ ...doc('a'), saving: true }, doc('b')], activeDocumentId: 'b' });
+    const tabOf = (name: string) => [...document.querySelectorAll('.doctab')].find((t) => t.querySelector('.nm')?.textContent === name)!;
+    expect(tabOf('wf-a').getAttribute('aria-busy')).toBe('true');
+    expect(tabOf('wf-a').querySelector('.spin')).not.toBeNull();
+    expect(tabOf('wf-b').getAttribute('aria-busy')).toBe('false');
+    expect(tabOf('wf-b').querySelector('.spin')).toBeNull();
+  });
+
   it('shows a toast for each new notice', () => {
     const { update } = setup({ notice: { id: 1, text: 'first' } });
     expect(toast()).toHaveTextContent('first');
