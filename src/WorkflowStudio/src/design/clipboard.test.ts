@@ -58,6 +58,14 @@ describe('copy (2026-10-10)', () => {
     expect(clip.pasted).toBe(0);
   });
 
+  it('a copy of a pasted step keeps the real row its assignment copies (never the unsaved one)', async () => {
+    const base = await chain();
+    const first = copyClip(base, EMPTY_EDITS, EMPTY_DRAFT, [node('s1')], 'wf1')!;
+    const { draft } = paste(base, EMPTY_DRAFT, first);
+    const again = copyClip(base, EMPTY_EDITS, draft, [node('n1')], 'wf1')!;
+    expect(again.steps[0]!.assignment).toEqual({ copyOf: 'a1', fields: { payload: '{"k":1}' } });
+  });
+
   it('the hub alone copies nothing', async () => {
     const base = await chain();
     expect(copyClip(base, EMPTY_EDITS, EMPTY_DRAFT, [node(SPHERE_NODE_ID)], 'wf1')).toBeNull();

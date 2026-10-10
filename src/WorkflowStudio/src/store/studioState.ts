@@ -346,7 +346,8 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
         reread: graph
           ? { ok: true, steps: graph.steps.size, links: graph.workflow.entryStepIds.length + [...graph.steps.values()].reduce((k, s) => k + s.nextStepIds.length, 0) }
           : { ok: false, message: action.reread ?? 'no answer' },
-        settle: read && settled && action.doc ? settleReport(action.doc, read.draft, settled.draft) : null,
+        // compared on the workflow with the stored design's pasted and deleted blocks (2026-10-10), as the canvas draws it
+        settle: read && settled && action.doc ? settleReport(applyBlocks(action.doc, read.draft.blocks), read.draft, settled.draft) : null,
         stored: graph?.design != null,
       });
       const next = update(state, action.workflowId, (d) => {

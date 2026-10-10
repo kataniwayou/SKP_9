@@ -192,7 +192,8 @@ public sealed class WorkflowDesignLiveTests : IAsyncLifetime
         Assert.Equal((Text(bDto, "name"), _processor), (Text(made, "name"), made.GetProperty("processorId").GetGuid()));
         Assert.Equal([n], (await GetAsync($"steps/{a}")).GetProperty("nextStepIds").EnumerateArray().Select(x => x.GetGuid()));
         var copied = await GetAsync($"assignments/{nAsg}");
-        Assert.Equal((n, """{"k":7}"""), (copied.GetProperty("stepId").GetGuid(), Text(copied, "payload")));
+        // jsonb gives the payload back in its own spacing
+        Assert.Equal((n, 7), (copied.GetProperty("stepId").GetGuid(), JsonDocument.Parse(Text(copied, "payload")!).RootElement.GetProperty("k").GetInt32()));
         Assert.Equal([nAsg], (await GetAsync($"workflows/{wf}")).GetProperty("assignmentIds").EnumerateArray().Select(x => x.GetGuid()));
         Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/steps/{b}", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/assignments/{asg}", Ct)).StatusCode);

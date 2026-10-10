@@ -20,15 +20,18 @@ const KIND: Readonly<Record<string, string>> = {
   workflow: 'Workflow', step: 'Step', processor: 'Processor', cache: 'Cache', assignment: 'Assignment', schema: 'Schema', wire: 'Wire',
 };
 
-/** The entity a row names, by its unique name when this canvas holds it, else by its id; a wire as the Inspector names it. */
-function entityLabel(e: DesignError, graph: Graph, shown: StudioDocument | null): string {
+/**
+ * The entity a row names, by its unique name when this canvas holds it (or the workflow as loaded does: a step or cache
+ * deleted in the design, 2026-10-10), else by its id; a wire as the Inspector names it.
+ */
+function entityLabel(e: DesignError, graph: Graph, shown: StudioDocument | null, loaded: Graph): string {
   const named = (x: { name: string; version: string; id: string } | undefined) => (x ? entityName(x.name, x.version, x.id) : e.id);
   switch (e.kind) {
     case 'wire': return wireName(shown, e.id) ?? e.id;
     case 'workflow': return named(graph.workflow);
-    case 'step': return named(graph.steps.get(e.id));
+    case 'step': return named(graph.steps.get(e.id) ?? loaded.steps.get(e.id));
     case 'processor': return named(graph.processors.get(e.id));
-    case 'cache': return named(graph.caches.get(e.id));
+    case 'cache': return named(graph.caches.get(e.id) ?? loaded.caches.get(e.id));
     default: return e.id;
   }
 }
@@ -59,6 +62,7 @@ function PinnedProblems({ active, errors, shown }: { active: OpenDocument; error
   if (active.status.kind !== 'ready' || errors.length === 0) return null;
   // the drawing's graph: a pasted step's error is named as the canvas names it
   const { graph } = shown ?? active.status.doc;
+  const loaded = active.status.doc.graph;
   return (
     <div className="pinned" role="list" aria-label="Problems">
       {errors.map((error, i) => {
@@ -81,7 +85,7 @@ function PinnedProblems({ active, errors, shown }: { active: OpenDocument; error
             data-tip={select ? 'Select it' : undefined}
           >
             <span className="gate">{KIND[error.kind] ?? error.kind}</span>
-            <b>{entityLabel(error, graph, shown)}{error.field ? ` · ${error.field}` : ''}</b>
+            <b>{entityLabel(error, graph, shown, loaded)}{error.field ? ` · ${error.field}` : ''}</b>
             <div className="pd">{error.message}</div>
           </div>
         );

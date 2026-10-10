@@ -23,6 +23,8 @@ export interface Throwaway {
  */
 export const created: {
   workflowId?: string; stepId?: string; stepBId?: string; extraStepIds?: string[]; assignmentId?: string; processorId?: string; schemaId?: string; cacheId?: string; tag?: string;
+  /** More throwaway workflows of this run (copy and paste: a second one to paste into and to share a step with). */
+  otherWorkflowIds?: string[];
 } = {};
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -90,6 +92,38 @@ export async function createCircuitThrowaway(request: APIRequestContext): Promis
   return { workflow: { id: created.workflowId, name: tag, version: '1.0.0', label: label(tag, '1.0.0', created.workflowId) }, tag, a, b, c, d, cacheId: created.cacheId };
 }
 
+/**
+ * The copy and paste throwaway (2026-10-10, `e2e-cp-…`): a processor with a config schema, steps a -> b, an assignment on
+ * a (payload {"k":7}), the workflow (entry a), and a second workflow `{tag}-other` whose entry step is b, so b is used by
+ * another workflow (its delete is refused). Pasted copies keep their names, so cleanup finds them by the tag.
+ */
+export interface CopyThrowaway { workflow: LiveWorkflow; other: LiveWorkflow; tag: string; a: string; b: string; assignmentId: string; processorId: string }
+
+export async function createCopyThrowaway(request: APIRequestContext): Promise<CopyThrowaway> {
+  const tag = `e2e-cp-${Date.now().toString(36)}-${randomBytes(2).toString('hex')}`;
+  created.tag = tag;
+  created.schemaId = await post(request, 'schemas', { name: `${tag}-config`, version: '1.0.0', description: null, definition: '{"type":"object"}' });
+  created.processorId = await post(request, 'processors', {
+    name: `${tag}-proc`, version: '1.0.0', description: null, sourceHash: randomBytes(32).toString('hex'), instanceId: null,
+    inputSchemaId: null, outputSchemaId: null, configSchemaId: created.schemaId,
+  });
+  created.stepBId = await post(request, 'steps', { name: `${tag}-b`, version: '1.0.0', description: null, processorId: created.processorId, nextStepIds: [], entryCondition: 1 });
+  created.stepId = await post(request, 'steps', { name: `${tag}-a`, version: '1.0.0', description: null, processorId: created.processorId, nextStepIds: [created.stepBId], entryCondition: 1 });
+  created.assignmentId = await post(request, 'assignments', { name: `${tag}-asg`, version: '2.0.0', description: 'copied', stepId: created.stepId, payload: '{"k":7}' });
+  created.workflowId = await post(request, 'workflows', {
+    name: tag, version: '1.0.0', description: null, entryStepIds: [created.stepId], assignmentIds: [created.assignmentId], cacheIds: [], cronExpression: null,
+  });
+  const other = await post(request, 'workflows', {
+    name: `${tag}-other`, version: '1.0.0', description: null, entryStepIds: [created.stepBId], assignmentIds: [], cacheIds: [], cronExpression: null,
+  });
+  created.otherWorkflowIds = [other];
+  return {
+    workflow: { id: created.workflowId, name: tag, version: '1.0.0', label: label(tag, '1.0.0', created.workflowId) },
+    other: { id: other, name: `${tag}-other`, version: '1.0.0', label: label(`${tag}-other`, '1.0.0', other) },
+    tag, a: created.stepId, b: created.stepBId, assignmentId: created.assignmentId, processorId: created.processorId,
+  };
+}
+
 /** The Start/Stop throwaway (2026-10-09): one step on a live, schema-less processor of the cluster, unscheduled. */
 export interface RunThrowaway { workflow: LiveWorkflow; tag: string; stepId: string; processorId: string }
 
@@ -148,9 +182,16 @@ export async function removeThrowaway(request: APIRequestContext): Promise<void>
     if (!r.ok()) { failures.push(`${kind} (list: ${r.status()})`); return []; }
     return ((await r.json()) as T[]).filter(keep).map((x) => x.id);
   };
-  const { workflowId, stepId, stepBId, extraStepIds, processorId, schemaId, cacheId, tag } = created;
+  const { workflowId, stepId, stepBId, extraStepIds, processorId, schemaId, cacheId, tag, otherWorkflowIds } = created;
   const steps = [stepId, stepBId, ...(extraStepIds ?? [])].filter((id): id is string => id !== undefined);
   if (workflowId) await del(`workflows/${workflowId}`);
+  for (const id of otherWorkflowIds ?? []) await del(`workflows/${id}`);
+  // steps and caches a Save made by pasting (2026-10-10) keep the copied names: found by this run's tag
+  if (tag?.startsWith('e2e-')) {
+    await attempt(`steps named ${tag}…`, async () => {
+      for (const id of await listed<{ id: string; name: string }>('steps', (x) => x.name.startsWith(tag))) if (!steps.includes(id)) steps.push(id);
+    });
+  }
   if (steps.length > 0) {
     await attempt(`assignments of steps ${steps.join(', ')}`, async () => {
       for (const id of await listed<{ id: string; stepId: string }>('assignments', (a) => steps.includes(a.stepId))) await del(`assignments/${id}`);
@@ -176,6 +217,11 @@ export async function removeThrowaway(request: APIRequestContext): Promise<void>
     });
   } else if (schemaId) await del(`schemas/${schemaId}`);
   if (cacheId) await del(`caches/${cacheId}`);
+  if (tag?.startsWith('e2e-')) {
+    await attempt(`caches named ${tag}…`, async () => {
+      for (const id of await listed<{ id: string; name: string }>('caches', (x) => x.name.startsWith(tag) && x.id !== cacheId)) await del(`caches/${id}`);
+    });
+  }
   for (const k of Object.keys(created) as (keyof typeof created)[]) delete created[k];
   if (failures.length > 0) throw new Error(`could not remove the throwaway entities:\n  ${failures.join('\n  ')}`);
 }
@@ -189,6 +235,7 @@ function refusal(r: Request): string | null {
   const path = new URL(r.url()).pathname;
   if (method === 'GET' || method === 'HEAD') return null;
   if (method === 'PUT' && created.workflowId !== undefined && path === `/api/v1/workflows/${created.workflowId}/design`) return null;
+  if (method === 'PUT' && (created.otherWorkflowIds ?? []).some((id) => path === `/api/v1/workflows/${id}/design`)) return null;
   if (method === 'POST' && (path === '/api/v1/orchestration/start' || path === '/api/v1/orchestration/stop')
     && created.workflowId !== undefined && created.tag?.startsWith('e2e-') && r.postDataJSON() === created.workflowId) return null;
   return `${method} ${path}`;
