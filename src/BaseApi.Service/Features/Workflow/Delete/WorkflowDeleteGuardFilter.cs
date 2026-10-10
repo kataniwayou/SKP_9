@@ -23,7 +23,8 @@ internal sealed class WorkflowDeleteGuardFilter : IAsyncActionFilter
         {
             var ct = context.HttpContext.RequestAborted;
             if (await _guard.IsLiveAsync(id, ct)) throw OrchestrationValidationException.WorkflowRunning(id);
-            if (await _guard.IsDeletingAsync(id, ct)) throw OrchestrationValidationException.WorkflowDeleting(id);
+            // a deletion running now (an id already deleted is simply not found)
+            if (await _guard.IsDeletionRunningAsync(id, ct)) throw OrchestrationValidationException.WorkflowDeleting(id, "deleted again");
         }
         await next();
     }

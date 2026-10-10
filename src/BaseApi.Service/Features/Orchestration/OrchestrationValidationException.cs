@@ -90,11 +90,11 @@ public sealed class OrchestrationValidationException : Exception
     /// Deletion gate (2026-10-10) — the workflow is being deleted, or was: a start would make a live id with no row
     /// to stop it by.
     /// </summary>
-    public static OrchestrationValidationException WorkflowDeleting(Guid workflowId)
+    public static OrchestrationValidationException WorkflowDeleting(Guid workflowId, string verb = "started")
         => new(
             "workflowDeleting",
             "Workflow is being deleted",
-            $"Workflow '{workflowId}' is being deleted; it cannot be started.",
+            $"Workflow '{workflowId}' is being deleted; it cannot be {verb}.",
             new WorkflowOffending(workflowId));
 
     /// <summary>

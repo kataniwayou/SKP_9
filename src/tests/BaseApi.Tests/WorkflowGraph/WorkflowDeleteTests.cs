@@ -251,7 +251,8 @@ public sealed class WorkflowDeleteTests
         await r.Guard.BeginDeleteAsync(wf, r.H.Ct);
         Assert.Equal("workflowDeleting", (await Assert.ThrowsAsync<OrchestrationValidationException>(() => Run("DELETE"))).Gate);
 
-        await r.Guard.EndDeleteAsync(wf, deleted: false, [], r.H.Ct);
+        // ended: deleted, its tombstone does not refuse the CRUD delete (the id is simply not found there)
+        await r.Guard.EndDeleteAsync(wf, deleted: true, [], r.H.Ct);
         await Run("DELETE");
         Assert.Equal(2, nexts);
     }

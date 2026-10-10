@@ -17,6 +17,9 @@ public interface IWorkflowRunGuard
     /// <summary>Whether its deletion is running, or it was deleted: a start of it must not happen.</summary>
     Task<bool> IsDeletingAsync(Guid workflowId, CancellationToken ct);
 
+    /// <summary>Whether its deletion is running now (the marker only, not the tombstone of one that ended).</summary>
+    Task<bool> IsDeletionRunningAsync(Guid workflowId, CancellationToken ct);
+
     /// <summary>Marks its deletion as running (before the deletion's own live check), with a TTL.</summary>
     Task BeginDeleteAsync(Guid workflowId, CancellationToken ct);
 
@@ -59,6 +62,12 @@ internal sealed class RedisWorkflowRunGuard : IWorkflowRunGuard
         var db = _multiplexer.GetDatabase();
         return await db.KeyExistsAsync(Deleting(workflowId))
                || await db.KeyExistsAsync(Deleted(workflowId));
+    }
+
+    public async Task<bool> IsDeletionRunningAsync(Guid workflowId, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return await _multiplexer.GetDatabase().KeyExistsAsync(Deleting(workflowId));
     }
 
     public Task BeginDeleteAsync(Guid workflowId, CancellationToken ct)
