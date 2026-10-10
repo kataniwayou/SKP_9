@@ -310,6 +310,38 @@ session and the stored design cover them like any drawing.
   another processor must name one that exists ("Its processor no longer exists."). The database rule is unchanged: a
   stored step always has a processor, so Start never meets one without.
 
+#### 4.5.2 Deleting a workflow (the user's rules, 2026-10-10)
+
+- The menu strip's File is **Workspace**; Open workflow… is **Load workflow…** (Ctrl+O), in the menu, the picker's
+  title, the document area's + and the empty-area hint.
+- The canvas's Delete never deletes the workflow, picked alone or with steps and wires (the hub stays, and stays
+  picked). A workflow is deleted only by **Workspace › Delete workflow…**, on the active document.
+- The workflow is special (its id is how a running copy is stopped): it is never deleted while it runs, and a start
+  never races its deletion. The order:
+  1. A fresh liveness reading: `GET /orchestration/live` asked after the request (the status the studio shows never
+     counts). Running: refused in red ("Stop it first: deleted while running, it could never be stopped"); no reading
+     within 5 s: refused ("could not confirm it is stopped").
+  2. BaseApi's dry run, `POST /workflows/{id}/delete?dryRun=true`: it reads `skp:live` itself, then does the whole
+     deletion in one transaction and rolls it back. Its lines go to Output; any error stops here, in red.
+  3. Only then the warning: what goes (the workflow, N steps, M assignments: the dry run's counts), what stays (its
+     caches, only unlinked; its processors, untouched), that the id is gone forever, and that an unsaved draft of it
+     is dropped. Exactly two buttons, **Cancel** (the default: primary and focused; Escape too) and **Continue**.
+     Cancel sends nothing (Output: "Delete cancelled").
+  4. Continue: `POST /workflows/{id}/delete`. BaseApi sets `skp:deleting:{id}` (TTL 2 min) before it reads `skp:live`
+     again, deletes and commits, then sets the tombstone `skp:deleted:{id}` (TTL 7 days), removes what the workflow
+     projected (`skp:wf:{id}`, its cache dictionaries `skp:wf:{id}:cache:*`, its deleted steps' `skp:step:{id}`) and
+     drops the marker. A start is refused (422, gate `workflowDeleting`) while either key exists, and a start message
+     queued earlier is acknowledged without projecting.
+  5. Deleted: the document closes (its draft dropped, no save question), and the workflow leaves the picker, the
+     liveness state and the session; Output keeps the lines under its name; the clipboard keeps what was copied.
+- What goes with it: its own steps (those its entry steps reach and its layout places, as the design save's ownership
+  rule), their next-step links, its assignments (linked to it, or of its steps), its entry-step and cache links. Caches
+  and processors are never deleted. Refused, nothing deleted, when another workflow uses one of its steps or
+  assignments (its entry steps, its layout, a step of it listing it as a next step, its assignment link): the
+  designer never shares them, old data might.
+- The plain CRUD `DELETE /workflows/{id}` is refused (422, gate `workflowRunning`) while the workflow runs, and while
+  a deletion of it runs; it deletes the row only, as before.
+
 ### 4.4 The schema copy's version
 
 Plan 1's atomic save bumps the copied version's patch (`1.2.3` → `1.2.4`); the design save copies it unchanged

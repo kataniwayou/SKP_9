@@ -631,6 +631,17 @@ processor; steps take a `processorId` field (must exist). Tests: hermetic 2065 +
 Playwright against the branch BaseApi on :18090: 158 passed + 2 skipped (new `processor.spec.ts` 2). Deploy BaseApi
 before the studio (an old BaseApi 400s the `processorId` field).
 
+**Workspace menu and deleting a workflow (2026-10-10) — BUILT, NOT DEPLOYED** (plan 8 spec §4.5.2). File is
+Workspace, Open is Load. Workspace › Delete workflow…: a fresh `GET /orchestration/live`, BaseApi's dry run
+(`POST /workflows/{id}/delete?dryRun=true`), then a Cancel/Continue warning (Cancel the default) with the dry run's
+counts; Continue runs the real deletion, which holds `skp:deleting:{id}` from before its own live check, deletes the
+workflow with its own steps and assignments (never caches or processors), sets the tombstone `skp:deleted:{id}` and
+removes `skp:wf:{id}` with its cache keys and the deleted steps' name keys. Start (and a queued start message) is
+refused while either key exists; the CRUD DELETE is refused while the workflow runs or a deletion of it runs (a filter
+on the controller: BaseApi.Core is a pinned package). Tests: hermetic 2073 + 74 skipped (+8); Vitest 1061; Playwright
+against the branch BaseApi on :18090: 160 passed + 2 skipped (new `deleteworkflow.spec.ts` 2). Deploy BaseApi before
+the studio (an old BaseApi has no `/delete`).
+
 ### Rulings made along the way
 
 User:
