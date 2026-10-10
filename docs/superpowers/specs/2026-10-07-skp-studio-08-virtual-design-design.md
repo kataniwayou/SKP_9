@@ -342,6 +342,29 @@ session and the stored design cover them like any drawing.
 - The plain CRUD `DELETE /workflows/{id}` is refused (422, gate `workflowRunning`) while the workflow runs, and while
   a deletion of it runs; it deletes the row only, as before.
 
+#### 4.5.3 A new workflow (the user's rules, 2026-10-10)
+
+- **Workspace › New workflow** (Ctrl+N where the browser lets the page have it; Chrome keeps Ctrl+N for a new window,
+  so there the menu is the way) opens a blank document: only the workflow hub, at its usual spot on the left, shown at
+  100 % at the canvas's left (not a Fit, which would centre it). Its id is made by the studio; the workflow exists only
+  in the studio (a virtual workflow) until its first Save.
+- Its name starts as `untitled` (or `untitled-2`, … when a listed or open workflow has the name), its version 1.0.0;
+  both are edited in the Inspector like any workflow's fields. The Load picker does not list it.
+- Until the first Save that BaseApi applies: Start, Stop (F5, Shift+F5) and Workspace › Delete workflow… are
+  disabled ("Not saved yet: BaseApi has no such workflow"); it is always unsaved (the tab's dot; closing asks Save or
+  Discard, and Discard drops it entirely); a refresh keeps it (the session marks it `virtual` and the document is built
+  again locally, its design with it). Steps come into it by paste (and later the toolbox).
+- Save sends `newWorkflow: { fields: { name, version, description, cronExpression } }` with no workflow stamp. BaseApi
+  creates the workflow with the route's id in a first stage, **create**, inside the dry run's transaction, with the
+  design's layout; its fields are judged by the workflow CRUD's rules (its entry steps are the workflow stage's), and
+  its name must be no other workflow's ("Not created: a workflow named '…' already exists."). The workflow stage then
+  always runs for it, so the CRUD's own rule applies: at least one entry step. Any error rolls the creation back with
+  everything else, and nothing is stored (there is no row to store a design on); the studio keeps the design, unsaved,
+  and reads nothing back. A workflow with the id that already holds exactly these fields is this creation's retry (an
+  ordinary save from there, no stamp checked); one with other fields is refused before anything is stored.
+- Applied: the document is read again from BaseApi and is an ordinary workflow from then on (Start, Delete, the
+  picker's list).
+
 ### 4.4 The schema copy's version
 
 Plan 1's atomic save bumps the copied version's patch (`1.2.3` → `1.2.4`); the design save copies it unchanged

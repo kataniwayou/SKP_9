@@ -642,6 +642,18 @@ on the controller: BaseApi.Core is a pinned package). Tests: hermetic 2073 + 74 
 against the branch BaseApi on :18090: 160 passed + 2 skipped (new `deleteworkflow.spec.ts` 2). Deploy BaseApi before
 the studio (an old BaseApi has no `/delete`).
 
+**Workspace › New workflow (2026-10-10) — BUILT, NOT DEPLOYED** (plan 8 spec §4.5.3). A blank document with only the
+hub on the left, a studio-made id, named `untitled[-N]` and 1.0.0; virtual until its first Save (`OpenDocument.virtual`,
+`SessionDoc.virtual`; `app/newWorkflow.ts` builds it, on open and on restore). Start/Stop/Delete disabled until then;
+always unsaved; Discard on close drops it. Save sends `newWorkflow.fields`; BaseApi's new first stage
+`CreateWorkflowStage` (stage `create`) inserts it in the dry run's transaction (CRUD field rules minus entry steps, name
+unique), the workflow stage then always runs for it (at least one entry step); refused, nothing is created or stored
+and the studio keeps the design; a retry with the same fields is an ordinary save, another workflow's id is refused.
+Ctrl+N: Chrome never gives it to the page, so the menu item is the way there. Tests: hermetic 2078 + 75 skipped (+5);
+live `WorkflowDesignLiveTests` 17/17 (+1) against the branch BaseApi; Vitest 1068; Playwright against the branch BaseApi
+on :18090: 162 passed + 2 skipped (new `newworkflow.spec.ts` 2). Deploy BaseApi before the studio (an old BaseApi 404s
+the first Save: it has no workflow to store the design on).
+
 ### Rulings made along the way
 
 User:
