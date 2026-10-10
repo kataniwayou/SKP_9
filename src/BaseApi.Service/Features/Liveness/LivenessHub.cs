@@ -9,7 +9,8 @@ namespace BaseApi.Service.Features.Liveness;
 /// <summary>
 /// Live push of workflow and processor liveness (2026-10-10). Clients receive <c>workflowLive</c>,
 /// <c>processorLiveness</c> and <c>monitorStatus</c>, each with a sequence number one above the last, and call
-/// <see cref="Snapshot"/> on connect, on reconnect and whenever they see a gap. The GET endpoints stay (the start gate,
+/// <see cref="Snapshot"/> on connect, on reconnect and whenever they see a gap; <c>livenessSequence</c> (every 10 s)
+/// says the last number, so a lost last broadcast shows as a gap too. The GET endpoints stay (the start gate,
 /// and the studio's fallback while it is not connected).
 /// <para>
 /// <b>One replica, no backplane.</b> Every client is connected to the one BaseApi that runs the monitor. Scaling
@@ -48,7 +49,13 @@ internal static class LivenessServiceCollectionExtensions
 {
     public static IServiceCollection AddLivenessFeature(this IServiceCollection services, IConfiguration cfg)
     {
-        services.AddSignalR();
+        // A background browser tab whose timers Chrome throttles may ping only once a minute: the client gets 3 min before
+        // it is dropped. The server pings every 15 s; the studio gives the server 60 s (signalrHub.ts).
+        services.AddSignalR(o =>
+        {
+            o.KeepAliveInterval = TimeSpan.FromSeconds(15);
+            o.ClientTimeoutInterval = TimeSpan.FromMinutes(3);
+        });
         services.Configure<LivenessMonitorOptions>(cfg.GetSection(LivenessMonitorOptions.Section));
         services.AddSingleton<LivenessState>();
         services.AddSingleton<ILivenessSource, RedisLivenessSource>();

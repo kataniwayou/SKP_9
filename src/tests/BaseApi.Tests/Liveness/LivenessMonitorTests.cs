@@ -90,6 +90,24 @@ public sealed class LivenessMonitorTests
     }
 
     [Fact]
+    public async Task TheLastSequenceIsSentEveryFewSecondsSoALostLastBroadcastShowsAsAGap()
+    {
+        var monitor = Monitor();
+        _source.ReadAsync(Arg.Any<CancellationToken>()).Returns(Reading(false, true), Reading(true, true), Reading(true, true));
+
+        await monitor.TickAsync(Ct);                  // known (1), and the first sequence message
+        _published.FailChanges = true;
+        _clock.Advance(TimeSpan.FromSeconds(2));
+        await monitor.TickAsync(Ct);                  // "running" (2) is lost; too soon for another sequence message
+        _published.FailChanges = false;
+        _clock.Advance(TimeSpan.FromSeconds(8));
+        await monitor.TickAsync(Ct);                  // nothing changed, but 10 s on: the sequence says 2
+
+        Assert.Equal<object>([new MonitorStatusDto(true, null, 1)], _published.Changes);
+        Assert.Equal([1L, 2L], _published.Sequences);
+    }
+
+    [Fact]
     public async Task CancellationDuringARead_EndsTheTickWithoutLoggingAFailure()
     {
         using var cts = new CancellationTokenSource();
@@ -139,11 +157,22 @@ public sealed class LivenessMonitorTests
     private sealed class CapturingPublisher : ILivenessPublisher
     {
         private readonly List<object> _changes = [];
+        private readonly List<long> _sequences = [];
         public IReadOnlyList<object> Changes { get { lock (_changes) return [.. _changes]; } }
+        public IReadOnlyList<long> Sequences { get { lock (_sequences) return [.. _sequences]; } }
+        /// <summary>When set, change broadcasts throw (the sequence messages still go out).</summary>
+        public bool FailChanges { get; set; }
 
         public Task PublishAsync(IReadOnlyList<object> changes, CancellationToken ct)
         {
+            if (FailChanges) throw new InvalidOperationException("socket");
             lock (_changes) _changes.AddRange(changes);
+            return Task.CompletedTask;
+        }
+
+        public Task PublishSequenceAsync(long sequence, CancellationToken ct)
+        {
+            lock (_sequences) _sequences.Add(sequence);
             return Task.CompletedTask;
         }
     }
@@ -188,13 +217,15 @@ public sealed class LivenessHubTests
         all.WorkflowLive(Arg.Do<WorkflowLiveDto>(_ => calls.Add("workflow"))).Returns(Task.CompletedTask);
         all.ProcessorLiveness(Arg.Do<ProcessorLivenessChangeDto>(_ => calls.Add("processor"))).Returns(Task.CompletedTask);
         all.MonitorStatus(Arg.Do<MonitorStatusDto>(_ => calls.Add("monitor"))).Returns(Task.CompletedTask);
+        all.LivenessSequence(Arg.Do<LivenessSequenceDto>(s => calls.Add($"sequence {s.Sequence}"))).Returns(Task.CompletedTask);
 
         await new HubLivenessPublisher(hub).PublishAsync([
             new MonitorStatusDto(true, null, 1),
             new WorkflowLiveDto(Wf, true, 2),
             new ProcessorLivenessChangeDto(Wf, false, 0, 0, null, true, 3),
         ], TestContext.Current.CancellationToken);
+        await new HubLivenessPublisher(hub).PublishSequenceAsync(3, TestContext.Current.CancellationToken);
 
-        Assert.Equal(["monitor", "workflow", "processor"], calls);
+        Assert.Equal(["monitor", "workflow", "processor", "sequence 3"], calls);
     }
 }

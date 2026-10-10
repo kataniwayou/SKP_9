@@ -30,6 +30,13 @@ public sealed record ProcessorLivenessChangeDto(
 /// </summary>
 public sealed record MonitorStatusDto(bool Known, string? Reason, long Sequence);
 
+/// <summary>
+/// The last sequence number handed out, sent every <see cref="LivenessMonitorOptions.SequenceEverySeconds"/>. It is not
+/// a change and takes no number of its own: a client whose last applied sequence differs missed a broadcast (one that
+/// failed to send, with no later change to reveal the gap) and takes a snapshot.
+/// </summary>
+public sealed record LivenessSequenceDto(long Sequence);
+
 /// <summary>What one monitor tick read: the running workflow ids and every processor row's liveness.</summary>
 public sealed record LivenessReading(IReadOnlySet<Guid> Running, IReadOnlyDictionary<Guid, ProcessorLivenessStateDto> Processors);
 
@@ -42,6 +49,7 @@ public interface ILivenessClient
     Task WorkflowLive(WorkflowLiveDto change);
     Task ProcessorLiveness(ProcessorLivenessChangeDto change);
     Task MonitorStatus(MonitorStatusDto change);
+    Task LivenessSequence(LivenessSequenceDto sequence);
 }
 
 /// <summary>Monitor settings, bound from the <c>Liveness</c> configuration section.</summary>
@@ -57,4 +65,7 @@ public sealed class LivenessMonitorOptions
 
     /// <summary>How many processors are probed at once (default 16; each probe is two Redis round trips).</summary>
     public int ProbeParallelism { get; set; } = 16;
+
+    /// <summary>How often the last sequence number is sent, in seconds (default 10), so a lost broadcast is noticed.</summary>
+    public double SequenceEverySeconds { get; set; } = 10;
 }

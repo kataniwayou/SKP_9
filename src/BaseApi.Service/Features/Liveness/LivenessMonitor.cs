@@ -9,6 +9,9 @@ namespace BaseApi.Service.Features.Liveness;
 public interface ILivenessPublisher
 {
     Task PublishAsync(IReadOnlyList<object> changes, CancellationToken ct);
+
+    /// <summary>Sends the last sequence number (no change of its own).</summary>
+    Task PublishSequenceAsync(long sequence, CancellationToken ct);
 }
 
 /// <summary>Broadcasts through the hub to all clients (one BaseApi replica: no backplane).</summary>
@@ -33,6 +36,12 @@ internal sealed class HubLivenessPublisher : ILivenessPublisher
             });
         }
     }
+
+    public Task PublishSequenceAsync(long sequence, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return _hub.Clients.All.LivenessSequence(new LivenessSequenceDto(sequence));
+    }
 }
 
 /// <summary>
@@ -50,6 +59,7 @@ internal sealed class LivenessMonitor : BackgroundService
     private readonly LivenessMonitorOptions _options;
     private readonly ILogger<LivenessMonitor> _logger;
     private int _failures;
+    private DateTimeOffset _lastSequenceSent = DateTimeOffset.MinValue;
 
     public LivenessMonitor(
         ILivenessSource source, LivenessState state, ILivenessPublisher publisher, TimeProvider clock,
@@ -112,10 +122,20 @@ internal sealed class LivenessMonitor : BackgroundService
             changes = status is null ? [] : [status];
         }
 
-        if (changes.Count == 0) return;
         try
         {
-            await _publisher.PublishAsync(changes, ct).ConfigureAwait(false);
+            if (changes.Count > 0)
+            {
+                await _publisher.PublishAsync(changes, ct).ConfigureAwait(false);
+            }
+            // every so often the last sequence number, so a client that missed the last change (a failed broadcast, and
+            // nothing after it) sees the gap without waiting for the next change
+            var now = _clock.GetUtcNow();
+            if (now - _lastSequenceSent >= TimeSpan.FromSeconds(Math.Max(0.1, _options.SequenceEverySeconds)))
+            {
+                _lastSequenceSent = now;
+                await _publisher.PublishSequenceAsync(_state.Sequence, ct).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
