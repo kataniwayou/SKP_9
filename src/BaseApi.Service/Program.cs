@@ -1,6 +1,7 @@
 using BaseApi.Core.DependencyInjection;
 using BaseApi.Service;
 using BaseApi.Service.Composition;
+using BaseApi.Service.Features.Liveness;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddBaseApiObservability(builder.Configuration, source: "webapi");
@@ -12,6 +13,7 @@ builder.Services.AddBaseApiFallbackHandler();   // catch-all last, after every d
 var app = builder.Build();
 app.UseBaseApi();
 app.MapControllers();
+app.MapLivenessHub();   // live push of workflow and processor liveness (SignalR)
 app.Run();
 
 // Marker type so tests can target the host with WebApplicationFactory<Program>. Top-level

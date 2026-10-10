@@ -1,5 +1,6 @@
 using BaseApi.Service.Features.Assignment;
 using BaseApi.Service.Features.Cache;
+using BaseApi.Service.Features.Liveness;
 using BaseApi.Service.Features.Orchestration;
 using BaseApi.Service.Features.Processor;
 using BaseApi.Service.Features.Schema;
@@ -32,6 +33,7 @@ internal static class AppFeatures
         services.AddAssignmentFeature();
         services.AddWorkflowFeature();
         services.AddOrchestrationFeature();
+        services.AddLivenessFeature(cfg);
         return services;
     }
 }
