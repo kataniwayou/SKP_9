@@ -1,12 +1,12 @@
 import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { graphDto, stepDto } from '../api/fixtures';
+import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { applyDesign } from './apply';
 import { EMPTY_EDITS } from './design';
 import { circuitOf, EMPTY_DRAFT } from './draft';
 import type { DesignProps } from './designProps';
-import { nudgeWires, useDesignKeys } from './useDesignKeys';
+import { nudgeWires, useDesignKeys, type WireRun } from './useDesignKeys';
 
 function Probe({ design, saved, busy }: { design: DesignProps; saved: Awaited<ReturnType<typeof loadedDocument>>; busy?: () => boolean }) {
   const onKeyDown = useDesignKeys(saved, { current: saved }, design, busy);
@@ -151,44 +151,49 @@ describe('design keys', () => {
     expect(design.onCommit).not.toHaveBeenCalled();
   });
 
-  it('an arrow with only a wire picked moves it as the closed hand does: whole, detached, its links gone; one merged step (2026-10-10)', async () => {
+  it('arrows with only a wire picked move it as the closed hand does: an end pulled back onto its own step holds it there, nothing committed (2026-10-10)', async () => {
     const saved = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
     const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
     const { getByTestId } = render(<Probe design={design} saved={saved} />);
+    // left: its tail would go into s1, which takes it back onto its side, as a drag 8 px left does
     fireEvent.keyDown(getByTestId('c'), { key: 'ArrowLeft' });
-    expect(design.onCommit).toHaveBeenCalledWith(expect.anything(), { merge: 'nudge' });
-    const draft = (design.onCommit as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-    const w = circuitOf(saved, draft)['s1->s2']!;
-    const was = saved.wires.find((x) => x.id === 's1->s2')!.points;
-    expect([w.tail, w.head]).toEqual([
-      { on: 'open', x: was[0]![0] - 8, y: was[0]![1] },
-      { on: 'open', x: was.at(-1)![0] - 8, y: was.at(-1)![1] },
-    ]);
-    // drawn the same shape, 8 px to the left
-    const shown = applyDesign(saved, draft, EMPTY_EDITS);
-    expect(shown.wires.find((x) => x.id === 's1->s2')!.points).toEqual(was.map(([x, y]) => [x - 8, y]));
-    expect(shown.graph.steps.get('s1')!.nextStepIds).toEqual([]);
+    expect(design.onCommit).not.toHaveBeenCalled();
   });
 
-  it('a nudged wire whose ends land exactly on contacts connects there: back where it was, it is as it was', async () => {
-    const saved = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
-    const left = nudgeWires(saved, saved, EMPTY_DRAFT, ['s1->s2'], -8, 0)!;
-    const shown = applyDesign(saved, left, EMPTY_EDITS);
-    const back = nudgeWires(saved, shown, left, ['s1->s2'], 8, 0)!;
-    const w = circuitOf(saved, back)['s1->s2']!;
-    expect(w.tail).toMatchObject({ on: 'step', step: 's1' });
-    expect(w.head).toMatchObject({ on: 'step', step: 's2' });
-    expect(applyDesign(saved, back, EMPTY_EDITS).graph.steps.get('s1')!.nextStepIds).toEqual(['s2']);
+  it('a run of presses is one move from where it began: far down it is detached and grey, its links gone; back up it is exactly as it was', async () => {
+    const saved = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+    for (const id of ['s1->s2', 'wf->s1']) {
+      const was = saved.wires.find((x) => x.id === id)!.points;
+      let draft = EMPTY_DRAFT, run: WireRun | null = null;
+      const press = (dy: number) => {
+        const next = nudgeWires(saved, applyDesign(saved, draft, EMPTY_EDITS), draft, [id], 0, dy, run)!;
+        draft = next.draft;
+        run = next.run;
+      };
+      for (let i = 0; i < 40; i++) press(8);
+      const w = circuitOf(saved, draft)[id]!;
+      expect([w.tail.on, w.head.on]).toEqual(['open', 'open']);
+      const shown = applyDesign(saved, draft, EMPTY_EDITS);
+      expect(shown.wires.find((x) => x.id === id)!.points).toEqual(was.map(([x, y]) => [x, y + 320]));
+      expect(shown.graph.steps.get('s1')!.nextStepIds).toEqual(id === 's1->s2' ? [] : ['s2']);
+      // back up the same 40 presses: the draft it began from, the wire automatic and connected again
+      for (let i = 0; i < 40; i++) press(-8);
+      expect(draft).toBe(EMPTY_DRAFT);
+      // one down and one up (the user's case): the same
+      press(8);
+      press(-8);
+      expect(draft).toBe(EMPTY_DRAFT);
+    }
   });
 
-  it('a press that would only put an end into a block moves the wire the full step, open (no magnet back)', async () => {
+  it('a press after any other change (an undo) starts a new run from the wire as it is then', async () => {
     const saved = await loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
-    // right: the head goes 8 px into s2, the tail 8 px off s1's side
-    const right = nudgeWires(saved, saved, EMPTY_DRAFT, ['s1->s2'], 8, 0)!;
-    const w = circuitOf(saved, right)['s1->s2']!;
-    const was = saved.wires.find((x) => x.id === 's1->s2')!.points;
-    expect(w.head).toEqual({ on: 'open', x: was.at(-1)![0] + 8, y: was.at(-1)![1] });
-    expect(w.tail).toEqual({ on: 'open', x: was[0]![0] + 8, y: was[0]![1] });
+    let draft = EMPTY_DRAFT, run: WireRun | null = null;
+    for (let i = 0; i < 40; i++) ({ draft, run } = nudgeWires(saved, applyDesign(saved, draft, EMPTY_EDITS), draft, ['s1->s2'], 0, 8, run)!);
+    // undone: the draft is the one the run began from, not the one it left
+    const next = nudgeWires(saved, saved, EMPTY_DRAFT, ['s1->s2'], 0, 8, run)!;
+    expect([next.run.dx, next.run.dy]).toEqual([0, 8]);
+    expect(next.run.base).toBe(EMPTY_DRAFT);
   });
 
   it('with no wire or block picked an arrow does nothing', async () => {

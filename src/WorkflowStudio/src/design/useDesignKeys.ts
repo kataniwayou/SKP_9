@@ -1,9 +1,9 @@
-import type { KeyboardEvent as ReactKeyboardEvent, MutableRefObject } from 'react';
+import { useRef, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject } from 'react';
 import type { StudioDocument } from '../app/document';
-import { moveWire } from '../circuit/circuit';
+import type { Circuit, Side } from '../circuit/circuit';
 import { endPointOf } from '../layout/circuitRoute';
 import { GRID } from '../layout/geometry';
-import { translatePoints } from '../layout/wireMove';
+import type { Pt } from '../layout/router';
 import { nodePickIds, wirePickIds } from '../store/picks';
 import { landBody } from './bodyDrop';
 import type { DesignProps } from './designProps';
@@ -32,6 +32,8 @@ export function useDesignKeys(
   design: DesignProps | undefined,
   busy: () => boolean = () => false,
 ) {
+  // a run of arrow presses on picked wires: one closed-hand move, measured from where the run began
+  const runRef = useRef<WireRun | null>(null);
   return (e: ReactKeyboardEvent) => {
     if (!design) return;
     if ((e.target as Element).closest?.(NOT_CANVAS)) return;
@@ -52,10 +54,12 @@ export function useDesignKeys(
       }
       if (moved.size === 0) {
         // no block picked: the picked wires move as the closed hand moves them (the user's rule, 2026-10-10)
-        const draft = nudgeWires(saved, shown.current, design.draft, wirePickIds(design.picks), arrow[0] * GRID, arrow[1] * GRID);
-        if (draft === null) return;
+        const next = nudgeWires(saved, shown.current, design.draft, wirePickIds(design.picks), arrow[0] * GRID, arrow[1] * GRID, runRef.current);
+        if (next === null) return;
+        runRef.current = next.run;
         e.preventDefault();
-        design.onCommit(draft, { merge: 'nudge' });
+        // still held where it was (an end pulled back onto its contact, as a drag holds it): nothing to commit
+        if (next.draft !== design.draft) design.onCommit(next.draft, { merge: 'nudge' });
         return;
       }
       e.preventDefault();
@@ -79,28 +83,61 @@ export function useDesignKeys(
   };
 }
 
-/** How near a nudged end must come to a contact to take it: within half a grid step, so only one it lands on. */
-const NUDGE_REACH = GRID / 2;
+/** How near a nudged end must come to a contact to take it: the closed hand's drop reach (8 px at zoom 1). */
+const NUDGE_REACH = GRID;
 
 /**
- * The picked wires (no block picked) moved one grid step by an arrow, each as the closed hand moves it (rule B,
- * `landBody`; the user's rule, 2026-10-10): whole, its shape kept, detached from every contact, the ends joined on it
- * opened where they are drawn; an end that lands on a contact it may take connects there, the others stay open; one
- * that would make a new short circuit stays open. Null when no picked wire is in the circuit or drawn.
+ * A run of arrow presses on picked wires (no block picked): the draft and the wires as drawn before its first press, how
+ * far it has moved them so far, each wire's end that reached a contact first, and the wires as its last press left
+ * them (a press continues the run only while they are still so: an undo or any other change starts a new one).
  */
-export function nudgeWires(saved: StudioDocument, shown: StudioDocument, draft: Draft, ids: readonly string[], dx: number, dy: number): Draft | null {
-  let circuit = circuitOf(saved, draft);
-  const drawn = new Map(shown.wires.map((w) => [w.id, w.points]));
-  const drawnAt = endPointOf(shown.wires);
-  let moved = false;
+export interface WireRun {
+  ids: string;
+  base: Draft;
+  shown: StudioDocument;
+  dx: number;
+  dy: number;
+  first: Record<string, Side | null>;
+  after: string;
+}
+
+const wiresKey = (c: Readonly<Circuit>, ids: readonly string[]) => JSON.stringify(ids.map((id) => c[id] ?? null));
+
+/**
+ * The picked wires (no block picked) moved one more grid step by an arrow, exactly as the closed hand moves them (rule
+ * B, `landBody`; the user's rule, 2026-10-10): a run of presses is one move, measured from the wires as they were before
+ * its first press, as a drag is from where it began. Each moves whole, its shape kept, detached from every contact, the
+ * ends joined on it opened where they are drawn; an end over a contact it may take shifts the wire onto it and connects
+ * there (the end that got there first decides), the others stay open; connected, a new short circuit leaves its ends
+ * open. Moved back exactly where the run began, the draft is as it was. Null when no picked wire is in the circuit or
+ * drawn.
+ */
+export function nudgeWires(
+  saved: StudioDocument, shown: StudioDocument, draft: Draft, ids: readonly string[], ddx: number, ddy: number, last: WireRun | null = null,
+): { draft: Draft; run: WireRun } | null {
+  const key = JSON.stringify(ids);
+  const now = circuitOf(saved, draft);
+  const go = last !== null && last.ids === key && last.after === wiresKey(now, ids);
+  const run: WireRun = go ? last : { ids: key, base: draft, shown, dx: 0, dy: 0, first: {}, after: '' };
+  const dx = run.dx + ddx, dy = run.dy + ddy;
+  const from = run.shown;
+  const drawn = new Map(from.wires.map((w) => [w.id, w.points as readonly Pt[]]));
+  const drawnAt = endPointOf(from.wires);
+  let circuit = circuitOf(saved, run.base);
+  const first: Record<string, Side | null> = {};
+  let moved = false, still = true;
   for (const id of ids) {
     const points = drawn.get(id);
     if (!Object.hasOwn(circuit, id) || !points || points.length < 2) continue;
-    const landing = landBody(shown, circuit, id, points, drawnAt, dx, dy, null, NUDGE_REACH, overlapJudge(shown, id, circuit));
-    // only a contact it lands on exactly: one it would be shifted onto (a pointer's magnet) would undo the press, so
-    // the wire moves the full step, open
-    circuit = landing.dx === dx && landing.dy === dy ? landing.result : moveWire(circuit, id, translatePoints(points, dx, dy), drawnAt);
     moved = true;
+    const landing = landBody(from, circuit, id, points, drawnAt, dx, dy, run.first[id] ?? null, NUDGE_REACH, overlapJudge(from, id, circuit));
+    first[id] = landing.first;
+    // shifted back exactly where it was: as it was (a drag back to its start)
+    if (landing.dx === 0 && landing.dy === 0) continue;
+    still = false;
+    circuit = landing.result;
   }
-  return moved ? withCircuit(draft, saved, circuit) : null;
+  if (!moved) return null;
+  const next = still ? run.base : withCircuit(run.base, saved, circuit);
+  return { draft: next, run: { ...run, dx, dy, first, after: wiresKey(circuitOf(saved, next), ids) } };
 }
