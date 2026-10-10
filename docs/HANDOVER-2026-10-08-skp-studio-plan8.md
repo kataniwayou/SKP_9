@@ -434,6 +434,17 @@ skips (run.spec now also presses Ctrl+F5, F5 in the picker and Shift+F5). Mutati
   workflow and processor, Discard, refresh; `output.spec` Clear: log empty, pinned short circuit stays, refresh keeps it
   empty, tab-menu Clear). Mutations: 5 Vitest, 2 e2e (the old Inspector behaviour; Clear doing nothing), each fails.
 
+**Review of the Inspector fix (2026-10-10) — BUILT, NOT DEPLOYED.** An Inspector edit was still judged against the
+entity's own read (`setField` base: "typed back" and the `updatedAt` stamp) while the form showed the graph: after a Save
+with a stale or failed re-read, the next edit carried the pre-Save stamp (the next Save refused "changed by someone
+else") and typing the old value back was dropped; with no read yet, a step's keystrokes were lost. Now `editField` uses
+`editBaseOf` (`store/inspectorBase.ts`, shared with the Inspector): the graph's entity, its stamp included, with the read
+only of the current generation; an assignment or schema (not fully in the graph) takes no edit, and its form shows
+"Reading what BaseApi holds now…" with its fields disabled, until that read lands. Clear during a Save keeps that Save's
+"Save started" line. Tests: Vitest 985; tsc clean; Playwright on dev (deployed BaseApi) 141 + 2 skips; new e2e: rename a
+step, Save, rename it straight back with its re-read failing (page route), Save: both applied, no conflict. Mutations: 4
+Vitest (one survivor fixed with a graph-wins test), 1 e2e.
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed

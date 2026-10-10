@@ -136,7 +136,10 @@ Either way the design is now stored on the workflow, and the session's unsaved e
   read again, so it shows what BaseApi holds at once, with no re-pick; after a not-applied Save, a Discard or a Revert,
   the design as it then stands. The entity's own GET only fills what the graph does not carry (a schema's definition, an
   assignment's name, version and description) and is keyed to the document's read (`generation`): a read made before
-  the workflow was read again is dropped, and the shown entity is read once more after each re-read.
+  the workflow was read again is dropped, and the shown entity is read once more after each re-read. An edit is judged
+  against the same base (whether it is typed back, and the `updatedAt` stamp Save sends): the graph's entity, the read
+  only of the current generation; an entity the graph does not fully carry takes no edit, its fields disabled with
+  "Reading what BaseApi holds now…", until that read lands. Clear during a Save keeps that Save's "Save started" line.
 
 ### 4.2 BaseApi: `PUT /workflows/{id}/design`
 
