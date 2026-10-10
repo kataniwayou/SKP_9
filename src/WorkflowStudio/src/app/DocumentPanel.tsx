@@ -48,7 +48,7 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
   const fitter = useFitter(ownerDocument);
   const status = useWorkflowStatus(workflowId);
   const health = useHealthOf();
-  // an unknown status is "status unknown" in the capsule and on the hub pill, with not started's look (spec §5.1)
+  // an unknown status is "status unknown" in the capsule and inside the hub dial, with not started's look (spec §5.1)
   const live = useMemo<LiveArt>(() => ({ started: status === 'running', status, health }), [status, health]);
   // a background tab's canvas stays mounted; .bg hides its nodes (document.css says why)
   const cls = usePanelShown(panel) ? 'docpanel' : 'docpanel bg';

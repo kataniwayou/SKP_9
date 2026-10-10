@@ -6,7 +6,7 @@ import type { LiveStatus } from '../api/liveStatus';
 export interface LiveArt {
   /** The workflow's id is in `GET /orchestration/live`: the hub turns green and intact wires pulse. */
   started: boolean;
-  /** What the live poll said, for the hub pill's words only: unknown and checking look not started but say so. */
+  /** What the live poll said, for the hub's state words only: unknown and checking look not started but say so. */
   status: LiveStatus;
   health: HealthOf;
 }

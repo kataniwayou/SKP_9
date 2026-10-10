@@ -1,6 +1,7 @@
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { LiveStatus } from '../../api/liveStatus';
+import { SPHERE_R } from '../../layout/geometry';
 import { WorkflowView, type WorkflowNodeData } from './WorkflowNode';
 
 const data: WorkflowNodeData = { tip: 'orders_1.0.0-wf1' };
@@ -13,7 +14,7 @@ describe('WorkflowView', () => {
     expect([...container.querySelectorAll('text')].some((t) => t.textContent!.includes('orders'))).toBe(false);
   });
 
-  it('is grey, still and blinking when not started, with its state on its pill', () => {
+  it('is grey, still and blinking when not started, with its state inside the dial', () => {
     const { container } = render(<svg><WorkflowView {...data} started={false} status="stopped" /></svg>);
     const wf = container.querySelector('.wf')!;
     expect(wf.classList.contains('nx-idlewf')).toBe(true);
@@ -30,17 +31,17 @@ describe('WorkflowView', () => {
     expect(container.querySelector('.nx-state')!.textContent).toBe('● started');
   });
 
-  it('states on its pill only what the live poll knows: started, not started, status unknown or checking', () => {
-    const pill = (started: boolean, status: LiveStatus) => {
+  it('states inside the dial only what the live poll knows: started, not started, status unknown or checking', () => {
+    const said = (started: boolean, status: LiveStatus) => {
       const { container, unmount } = render(<svg><WorkflowView {...data} started={started} status={status} /></svg>);
       const text = container.querySelector('.nx-state tspan')!.textContent;
       unmount();
       return text;
     };
-    expect(pill(true, 'running')).toBe('● started');
-    expect(pill(false, 'stopped')).toBe('○ not started');
-    expect(pill(false, 'unknown')).toBe('? status unknown');
-    expect(pill(false, 'checking')).toBe('checking…');
+    expect(said(true, 'running')).toBe('● started');
+    expect(said(false, 'stopped')).toBe('○ not started');
+    expect(said(false, 'unknown')).toBe('? status unknown');
+    expect(said(false, 'checking')).toBe('checking…');
   });
 
   it('looks not started (grey, still, blinking) while the status is unknown or checking (spec §5.1)', () => {
@@ -62,9 +63,16 @@ describe('WorkflowView', () => {
     expect(fills).toEqual(ids.map((id) => `url(#${id})`));
   });
 
-  it('shows no cron on its pill', () => {
+  it('writes nothing outside the dial (its ring is for contact points): no pill, the state centred inside under WORKFLOW (2026-10-10)', () => {
     const { container } = render(<svg><WorkflowView {...data} started={false} status="stopped" /></svg>);
-    expect(container.querySelector('.nx-pill')!.textContent).not.toContain('⏱');
-    expect(container.querySelector('.nx-state')!.getAttribute('text-anchor')).toBe('middle');
+    expect(container.querySelector('.nx-pill')).toBeNull();
+    expect(container.querySelector('rect')).toBeNull();
+    const state = container.querySelector('.nx-state')!;
+    expect(state.getAttribute('text-anchor')).toBe('middle');
+    expect(state.textContent).not.toContain('⏱');
+    const word = Number(container.querySelector('.nx-wl')!.getAttribute('y')), y = Number(state.getAttribute('y'));
+    expect(y).toBeGreaterThan(word);
+    // inside the inner core (r - 22 around the centre r, r)
+    expect(Math.abs(y - SPHERE_R)).toBeLessThan(SPHERE_R - 22);
   });
 });

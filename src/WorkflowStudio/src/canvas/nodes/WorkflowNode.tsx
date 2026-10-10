@@ -16,10 +16,8 @@ export type WorkflowNodeType = Node<WorkflowNodeData, 'workflow'>;
 const R = SPHERE_R, C = SPHERE_R; // the node box is 2r × 2r, so the centre is (r, r)
 const SPINNER = closingDash(R - 9, [44, 14, 8, 14]);
 const TICKS = `1.5 ${(2 * Math.PI * R / 48 - 1.5).toFixed(2)}`;
-/** The pill (gallery wfPill, 200 wide at its r 80 hub, × 1.2): centred under the dial. */
-export const PILL_W = 240;
-/** The pill's state text for each run status, centred in the pill. Only a verdict says started or not started. */
-const PILL_STATES: Record<LiveStatus, string> = {
+/** The state written inside the dial, under WORKFLOW, for each run status. Only a verdict says started or not started. */
+const STATES: Record<LiveStatus, string> = {
   running: '● started',
   stopped: '○ not started',
   unknown: '? status unknown',
@@ -29,13 +27,12 @@ const PILL_STATES: Record<LiveStatus, string> = {
 /**
  * The workflow as the hub dial (spec §5.1; mockup v50 drawWorkflow, gallery hubDial). The two outer
  * rings are static and white. Inside them the state: started is green with the segment ring turning;
- * not started is grey, still and blinking slowly. The dial says only WORKFLOW; the pill under it
- * carries the state and never blinks. An unknown or unchecked status has not started's
- * look, but its pill says so rather than "not started" (spec §5.1).
+ * not started is grey, still and blinking slowly. Nothing is written outside the dial, whose outer ring is for the
+ * wires' contact points (the user's rule, 2026-10-10): inside it WORKFLOW, and under it the state, which never
+ * blinks. An unknown or unchecked status has not started's look, but its state says so rather than "not started".
  */
 export function WorkflowView({ tip, started, status }: WorkflowNodeData & { started: boolean; status: LiveStatus }) {
   const core = `nxcore${useId().replace(/[^\w-]/g, '')}`;
-  const pillX = C - PILL_W / 2, pillY = C + R + 14;
   return (
     <g className={started ? 'wf nx started' : 'wf nx nx-idlewf'} data-started={String(started)}>
       <title>{tip}</title>
@@ -56,12 +53,8 @@ export function WorkflowView({ tip, started, status }: WorkflowNodeData & { star
           <g className="nx-g"><circle className="nx-ln nx-core-dots" cx={C} cy={C} r={R - 22} /></g>
         </g>
       </g>
-      <text className="nx-wl" x={C} y={C + 4} textAnchor="middle">WORKFLOW</text>
-      <g className="nx-pill">
-        <rect className="nx-bd" x={pillX} y={pillY} width={PILL_W} height={18} rx={9} />
-        <rect className="nx-ln" x={pillX} y={pillY} width={PILL_W} height={18} rx={9} />
-        <text className="nx-state" x={C} y={pillY + 12.5} textAnchor="middle"><tspan>{PILL_STATES[status]}</tspan></text>
-      </g>
+      <text className="nx-wl" x={C} y={C - 2} textAnchor="middle">WORKFLOW</text>
+      <text className="nx-state" x={C} y={C + 16} textAnchor="middle"><tspan>{STATES[status]}</tspan></text>
     </g>
   );
 }
