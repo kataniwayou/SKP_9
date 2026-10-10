@@ -660,6 +660,13 @@ committed), a JSON toggle, and invalid stored text shown as text with the reason
 `panels/DictEditor.test.tsx`, `e2e/cacheitems.spec.ts`. Note: field edits are not in Undo (Revert drops them); jsonb
 reorders keys on Save.
 
+**Toolbox (2026-10-11) — BUILT, NOT DEPLOYED** (plan 8 spec §4.5.5). A dock pane, left by default: an empty step, an
+undecided wire, every processor (its liveness ring) and every cache, plus an empty cache, dragged with the pointer onto any
+open workflow's canvas. New or empty items are new virtual entities (as paste); an existing processor (only onto a step)
+or cache (linked) is the same entity. Studio only: BaseApi already takes the step's `processorId` field, `newSteps`,
+`newCaches` and the workflow's `cacheIds`. Tests: `design/toolDrop.test.ts`, `panels/Toolbox.test.tsx`,
+`e2e/toolbox.spec.ts`. A drag cannot cross browser windows.
+
 ### Rulings made along the way
 
 User:

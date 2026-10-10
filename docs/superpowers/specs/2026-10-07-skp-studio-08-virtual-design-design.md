@@ -381,6 +381,38 @@ as a key/value table (field kind `dict`, `panels/DictEditor.tsx`, `store/dict.ts
   twice) is shown as text with the reason; the table toggle is off until it is one.
 - Postgres keeps `items` as jsonb: after a Save the keys come back in jsonb's own order.
 
+#### 4.5.5 The Toolbox (the user's decisions, 2026-10-11)
+
+A dock pane, docked left by default (`panels/Toolbox.tsx`): what can be dragged onto a workflow's canvas. With the Toolbox on
+the left and the Inspector on the right, each is a column of the dock's whole height beside the document area (which
+shares its own column with Output): floated or popped out and docked back, such a pane returns at the layout's edge
+(`Home.edge`, `spansEdge`), not beside the document area, where it would land inside that column. Each tile is
+drawn with the canvas's own art. Lists come from BaseApi (`GET /processors`, `/caches`, `/schemas`), read when the pane
+opens and after every Save that was answered; a search box filters processors and caches by name (caches by root too).
+- **Blocks:** an empty step and an undecided wire. **Processors:** every processor, drawn as a step draws it, with its
+  liveness ring in its health colour (the SignalR liveness store, live). **Caches:** an empty cache and every cache.
+- **The drag** is the pointer's (`design/toolDrag.ts`, not the browser's drag and drop): a ghost follows it; over a
+  workflow's canvas (every open one, a new unsaved workflow too) a dashed box shows where a block lands (centred on the
+  pointer, on the 8 px grid), a dashed line where a wire lands; release there drops, release elsewhere or Escape cancels.
+  A canvas refuses drops while its Save runs ("saving: wait for the answer"). A drag cannot cross browser windows: a
+  canvas in a pop-out window takes drops from a Toolbox in that same window only.
+- **New or empty is a new virtual entity** (`design/toolDrop.ts`, as a paste makes; one history step; it becomes the pick):
+  - an empty step: name `step` (`step-2`, … when taken), version 1.0.0, no processor (the amber ⚠ slot; Save's dry run
+    refuses it until it has one), sent in `newSteps`;
+  - an empty cache: name `cache` (numbered when taken), version 1.0.0, a root no known cache has (`cache`, `cache-2`, …;
+    every cache BaseApi listed and every open workflow's), items `{}`, sent in `newCaches`;
+  - a wire: a free wire, open at both ends, 96 px horizontal from the pointer.
+- **An existing processor or cache is the same entity, never a copy:**
+  - a processor drops only on a step: over one the step lights green, "assign processor" ("replace processor" when it
+    has one); anywhere else "drop on a step", red, and the release does nothing. A new step keeps it as its own
+    `processorId`; a workflow step is marked in the blocks' `assigned` (step to processor; dropping the processor it was
+    loaded with clears the mark; a removed processor's `unassigned` mark goes). Save sends the step's `processorId` field.
+  - a cache is linked: the blocks' `linked` holds its snapshot and place, the workflow's cache list gains its id (Save's
+    `cacheIds`), no cache row is created; its Inspector edits are sent as any cache's. One already in the workflow is
+    refused, "already in this workflow", and that cache lights red. Delete of a linked cache drops only the link.
+- The processor and schemas a drop needs are kept in the blocks' `refs`. A Save BaseApi refused keeps them: the stored
+  layout carries `linked` (the caches' snapshots) and `refs`; the stored body's step change names the assigned processor.
+
 ### 4.4 The schema copy's version
 
 Plan 1's atomic save bumps the copied version's patch (`1.2.3` → `1.2.4`); the design save copies it unchanged
