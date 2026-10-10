@@ -208,19 +208,19 @@ describe('DockShell', () => {
     const { update } = setup({ onDeleteWorkflow });
     expect(screen.queryByRole('menuitem', { name: 'File' })).toBeNull();
     openMenu('Workspace');
-    expect(screen.getByRole('menuitem', { name: /Load workflow…/ })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /Delete workflow…/ })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('menuitem', { name: /Load…/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Delete…/ })).toHaveAttribute('aria-disabled', 'true');
     openMenu('Workspace');
     update({ documents: [doc('a')], activeDocumentId: 'a' });
     openMenu('Workspace');
-    choose(/Delete workflow…/);
+    choose(/Delete…/);
     expect(onDeleteWorkflow).toHaveBeenCalledWith('a');
   });
 
   it('opens the picker from Workspace, filters it, and opens the first match on Enter', () => {
     const { props } = setup();
     openMenu('Workspace');
-    choose(/Load workflow/);
+    choose(/Load…/);
     const search = screen.getByRole('textbox', { name: 'Search workflows' });
     expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['orders_1.0.0-aaaa', 'billing_2.0.0-bbbbopen — switch']);
 
@@ -235,7 +235,7 @@ describe('DockShell', () => {
     setup();
     screen.getByRole('menuitem', { name: 'Workspace' }).focus();   // a real click focuses the trigger
     openMenu('Workspace');
-    choose(/Load workflow/);
+    choose(/Load…/);
     expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Search workflows' }));
   });
 
@@ -286,7 +286,7 @@ describe('DockShell', () => {
       dialog.remove();
     }
     openMenu('Workspace');
-    choose(/Load workflow/);
+    choose(/Load…/);
     fireEvent.keyDown(window, { key: 'F5' });
     expect(onRunCommand).not.toHaveBeenCalled();
   });
@@ -306,7 +306,7 @@ describe('DockShell', () => {
     const view = screen.getByRole('menuitem', { name: 'View' });
     file.focus();
     fireEvent.click(file);
-    expect(document.activeElement).toHaveTextContent('Load workflow');
+    expect(document.activeElement).toHaveTextContent('Load…');
     view.focus();
     fireEvent.click(view);
     const menu = screen.getByRole('menu', { name: 'View' });

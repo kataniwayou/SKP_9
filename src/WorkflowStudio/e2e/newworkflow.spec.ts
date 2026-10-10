@@ -34,7 +34,7 @@ async function typeInto(page: Page, label: string, text: string): Promise<void> 
 /** Workspace › New workflow with the real mouse: the new document's panel. */
 async function newWorkflow(page: Page): Promise<Locator> {
   await menu(page, 'Workspace').click();
-  const item = menu(page, /New workflow/);
+  const item = menu(page, /^\W*New/);
   await expect(item).toContainText('Ctrl+N');
   await item.click();
   const panel = newPanel(page);
@@ -83,7 +83,7 @@ test('New: a blank document with the hub on the left; renamed in the Inspector; 
   await expect(panel.getByRole('button', { name: /Stop/ })).toBeDisabled();
   await expect(panel.getByRole('button', { name: /Start/ }).locator('..')).toHaveAttribute('data-tip', 'Not saved yet: BaseApi has no such workflow');
   await menu(page, 'Workspace').click();
-  await expect(menu(page, /Delete workflow/)).toBeDisabled();
+  await expect(menu(page, /Delete…/)).toBeDisabled();
   await page.keyboard.press('Escape');
 
   // renamed in the Inspector, as any workflow
@@ -116,7 +116,7 @@ test('New: a blank document with the hub on the left; renamed in the Inspector; 
   const saved = page.locator('.docpanel').filter({ has: page.locator(`.crumb[data-tip^="${name}"]`) });
   await expect(saved.getByRole('button', { name: /Start/ })).toBeEnabled();
   await menu(page, 'Workspace').click();
-  await expect(menu(page, /Delete workflow/)).toBeEnabled();
+  await expect(menu(page, /Delete…/)).toBeEnabled();
   await page.keyboard.press('Escape');
   await page.keyboard.press('Control+o');
   await page.getByRole('textbox', { name: 'Search workflows' }).fill(name);

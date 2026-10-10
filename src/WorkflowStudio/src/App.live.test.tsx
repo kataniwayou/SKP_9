@@ -49,7 +49,7 @@ async function connectedApp(running: string[] = []) {
 const logLines = () => [...document.querySelectorAll('[role="log"] .outl')].map((l) => l.textContent!.replace(/^\S+\s+/, ''));
 const openPicker = () => {
   fireEvent.click(screen.getByRole('menuitem', { name: 'Workspace' }));
-  fireEvent.click(screen.getByRole('menuitem', { name: /Load workflow/ }));
+  fireEvent.click(screen.getByRole('menuitem', { name: /Load…/ }));
 };
 
 beforeEach(() => { vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null); });

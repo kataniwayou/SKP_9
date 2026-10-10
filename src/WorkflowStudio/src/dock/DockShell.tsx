@@ -384,13 +384,13 @@ export function DockShell(props: DockShellProps) {
     switch (name) {
       case 'Workspace':
         return [
-          { id: 'new', icon: '+', label: 'New workflow', kbd: 'Ctrl+N', disabled: !props.onNewWorkflow, onSelect: () => props.onNewWorkflow?.() },
-          { id: 'open', icon: '⌂', label: 'Load workflow…', kbd: 'Ctrl+O', onSelect: () => openPicker(fileAnchor()) },
+          { id: 'new', icon: '+', label: 'New', kbd: 'Ctrl+N', disabled: !props.onNewWorkflow, onSelect: () => props.onNewWorkflow?.() },
+          { id: 'open', icon: '⌂', label: 'Load…', kbd: 'Ctrl+O', onSelect: () => openPicker(fileAnchor()) },
           'separator',
           { id: 'close', icon: '×', label: 'Close', kbd: 'Alt+W', disabled: activeDocumentId === null, onSelect: () => { if (activeDocumentId) props.onCloseDocument(activeDocumentId); } },
           'separator',
           {
-            id: 'delete', icon: '⌫', label: 'Delete workflow…',
+            id: 'delete', icon: '⌫', label: 'Delete…',
             disabled: activeDocumentId === null || !props.onDeleteWorkflow || (props.deleteBlocked?.(activeDocumentId) ?? null) !== null,
             tip: activeDocumentId === null ? 'Load a workflow first: Delete acts on the active document' : props.deleteBlocked?.(activeDocumentId) ?? undefined,
             onSelect: () => { if (activeDocumentId) props.onDeleteWorkflow?.(activeDocumentId); },

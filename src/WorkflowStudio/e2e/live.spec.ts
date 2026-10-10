@@ -63,7 +63,7 @@ test('a workflow started and stopped elsewhere: its hidden tab, its hub, the pic
 
   // the picker marks it running (real mouse: Workspace › Load workflow…)
   await page.getByRole('menuitem', { name: 'Workspace' }).click();
-  await page.getByRole('menuitem', { name: /Load workflow/ }).click();
+  await page.getByRole('menuitem', { name: /Load…/ }).click();
   await page.getByRole('textbox', { name: 'Search workflows' }).fill(wf.label);
   const option = page.getByRole('option', { name: new RegExp(wf.label) });
   await expect(option.getByRole('img', { name: 'running' })).toBeVisible();

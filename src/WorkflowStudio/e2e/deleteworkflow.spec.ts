@@ -20,7 +20,7 @@ const texts = async (page: Page) => page.locator('[data-pane="output"]').getByRo
 })));
 const deleteMenu = async (page: Page) => {
   await page.getByRole('menuitem', { name: 'Workspace' }).click();
-  await page.getByRole('menuitem', { name: /Delete workflow…/ }).click();
+  await page.getByRole('menuitem', { name: /Delete…/ }).click();
 };
 
 test('a stopped workflow: the warning after the fresh reading and the dry run; Cancel sends nothing; Continue deletes it with its steps and assignment, never its cache or processor', async ({ page, request }) => {
@@ -29,8 +29,8 @@ test('a stopped workflow: the warning after the fresh reading and the dry run; C
     // the menu strip: Workspace, not File; Load workflow…, not Open
     await expect(page.getByRole('menuitem', { name: 'File' })).toHaveCount(0);
     await page.getByRole('menuitem', { name: 'Workspace' }).click();
-    await expect(page.getByRole('menuitem', { name: /Load workflow…/ })).toBeVisible();
-    await expect(page.getByRole('menuitem', { name: /Delete workflow…/ })).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.getByRole('menuitem', { name: /Load…/ })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: /Delete…/ })).toHaveAttribute('aria-disabled', 'true');
     await page.keyboard.press('Escape');
     await openWorkflow(page, t.workflow);
     await expect(documentPanel(page, t.workflow)).toBeVisible();
@@ -86,7 +86,7 @@ test('a stopped workflow: the warning after the fresh reading and the dry run; C
     expect(await status(request, `caches/${t.cacheId}`)).toBe(200);
     expect(await status(request, `processors/${t.processorId}`)).toBe(200);
     await page.getByRole('menuitem', { name: 'Workspace' }).click();
-    await page.getByRole('menuitem', { name: /Load workflow…/ }).click();
+    await page.getByRole('menuitem', { name: /Load…/ }).click();
     await page.getByRole('textbox', { name: 'Search workflows' }).fill(t.tag);
     await expect(page.getByRole('listbox', { name: 'Workflows' }).getByText(t.workflow.label, { exact: true })).toHaveCount(0);
     await page.keyboard.press('Escape');

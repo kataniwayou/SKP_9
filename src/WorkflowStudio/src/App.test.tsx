@@ -36,7 +36,7 @@ function fakeApi(over: Partial<StudioApi> = {}): StudioApi {
 
 const openPicker = () => {
   fireEvent.click(screen.getByRole('menuitem', { name: 'Workspace' }));
-  fireEvent.click(screen.getByRole('menuitem', { name: /Load workflow/ }));
+  fireEvent.click(screen.getByRole('menuitem', { name: /Load…/ }));
 };
 const pickWorkflow = async (label: string) => {
   openPicker();
