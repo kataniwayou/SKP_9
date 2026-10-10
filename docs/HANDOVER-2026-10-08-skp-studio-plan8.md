@@ -13,6 +13,8 @@ BaseApi `localhost:18080`. Do not stop them by hand.
 - **Output / Save log / Start-Stop (2026-10-09) is BUILT, NOT DEPLOYED** (section below the step read-out).
 - **Live push over SignalR (2026-10-10) is BUILT, NOT DEPLOYED** (section after the Save spinner): BaseApi needs a
   redeploy and the studio (bundle and nginx.conf) too.
+- **Copy, paste, delete and whole-selection drag (2026-10-10) are BUILT, NOT DEPLOYED** (section after the live push
+  review): BaseApi first, then the studio.
 - **Plan 8 (virtual design) is BUILT and DEPLOYED.** Spec
   `docs/superpowers/specs/2026-10-07-skp-studio-08-virtual-design-design.md`; plan
   `docs/superpowers/plans/2026-10-07-skp-studio-08-virtual-design.md`. Executed subagent-driven (16 tasks, each
@@ -524,6 +526,56 @@ in §4.4, §5.1, §6.1; notes in the plan 8 spec and in plans 01b, 03c and 08.
   sequence gap, mark debounce with fake timers); tsc clean; against the branch BaseApi on :18090: live test 1/1,
   live/live-processor/run specs 4/4, full Playwright 146 + 2 skips. Mutations: the poll tokens, snapshot retry, held
   bound, sequence check and mark delay each fail a test (the epoch guard alone is masked by the tokens).
+
+**Copy, paste, delete and whole-selection drag (user decisions, 2026-10-10) — BUILT, NOT DEPLOYED.** Commits `433efc7`
+(BaseApi + regenerated client), `c181c18` (studio model, keys, Save), `60cf59d` (e2e, Output naming, settle report), and
+the docs commit that adds this paragraph. Spec: plan 8 spec §4.5 (new) with notes in §1, §2, §4.2, §4.3; notes in the
+plan 9 spec §6, §9 and the plan 4 spec.
+- **Studio.** `design/blocks.ts`: `Draft.blocks` (pasted steps and caches with new ids, removed ones, processor/schema
+  refs for a paste from another workflow); `applyEdits(base, edits, blocks)` lays them over the base first
+  (`applyBlocks`, memoised), so everything downstream treats a pasted step as the workflow's own; undo/redo, the
+  session and the stored design carry them. `design/clipboard.ts`: `copyClip` (hub skipped; wires between copied items
+  with their junctions; a wire picked alone copied free), `pasteClip` (new ids; offset +32/+32 per paste as a cascade,
+  else `freeOffset`: the nearest free spot on the 32 px grid for the group as one rigid unit, rings nearest first, right
+  and down first, a 256 px bucket index; obstacles every block plus, in the workflow copied in, the originals' area),
+  `deletePicked`. Store actions `copy` / `paste` / `deletePicks`, `StudioState.clipboard` (in the session). Keys on the
+  focused canvas only: Ctrl/Cmd+C, Ctrl/Cmd+V, Delete; Backspace does nothing; nothing from input/textarea/select.
+  `moveGroup` / `shiftWires`: block drag and nudge shift picked wires' bends, open and held ends. Save sends `newSteps`,
+  `newCaches` (+ the workflow's cache list), pasted assignments as creates with `copyOf`, `deletedSteps` (stamps),
+  `deletedCaches`; `storedDesignOf` reads them back (positions from the layout); the loader GETs processors of stored
+  pasted steps; the Inspector reads a pasted assignment through its original row.
+- **BaseApi.** Optional `NewSteps`, `NewCaches`, `DeletedSteps`, `DeletedCaches`, `DesignAssignmentDto.CopyOf`. Creates
+  in the caches and steps stages (id taken → "Not created: a step with this id already exists."; processor missing;
+  CRUD create rules), new steps' next steps in the wires stage, a pasted step's assignment from its `copyOf` row; a new
+  last stage `deletes` (step: stamp, refused while any workflow lists it as an entry step, any step lists it as a next
+  step (steps deleted together excepted), or another workflow has an assignment for it; else its assignments of this
+  workflow go with it; cache: refused while any workflow lists it). Log: "step 'x' created (copy of 'y')", "cache 'z'
+  created (copy of 'c')", "step 'x' deleted[, with its assignment 'a']", "cache 'z' deleted", refusals as error lines,
+  "deletes: nothing to do" on every save (output.spec updated). Shape: an id in two of create / change / delete is 400.
+- **Judgement calls** (cost if wrong in brackets): the free-space rule avoids the originals' area only in the workflow
+  copied in, so a paste into another workflow lands at +32/+32 when free (small: one condition in `pasteClip`); in the
+  workflow copied in +32/+32 always lies on the originals, so the group lands beside or below them; unpicked wires
+  between copied items come along, a picked wire with one end on a copied item and one outside is left out (small); a
+  copied assignment's name/version/description come from its original row in BaseApi (`copyOf`), the studio sends its
+  payload and any Inspector edits; deleting a step deletes its assignments of this workflow server-side (the studio sends
+  no assignment op for it); a step used by a step of the same workflow that Save does not rewire (a held-back short
+  circuit) is refused like an outside use; the `deletes` stage line appears on every Save; pasted processors from
+  another workflow are kept only as drawing refs (pruned when their last pasted step is deleted); Inspector edits of a
+  pasted step stay outside the undo history, so a pasted step deleted and brought back by Undo keeps them.
+- **Tests.** BaseApi hermetic 2056 passed + 73 skipped (+13 `DesignCreateDeleteTests`), Release `--no-incremental`
+  clean; live `WorkflowDesignLiveTests` 15/15 against this branch's BaseApi on :18090 (+2: paste + delete applied
+  through the real foreign keys; a refused delete rolls the pasted step back). Vitest 1027 (86 files; +28
+  `clipboard.test.ts`, +3 keys tests); tsc clean. Playwright on the dev server against the local BaseApi: 152 passed + 2
+  skipped (new `copypaste.spec.ts` 6). Mutations: BaseApi 4, Vitest 12 (one survivor: the defensive filter of deleted
+  ids out of a held-back source's list in `buildDesignRequest`, only reachable with a short circuit on that source), e2e
+  4 (Backspace deleting, no free-space search, wires not moved with the group, deleted step named by id); each other
+  fails. Screenshots: scratchpad `copypaste\`.
+- **Deploy steps:** BaseApi image (no migration; the request additions are optional), then the studio image. Order:
+  BaseApi first — an old BaseApi ignores the new lists (System.Text.Json skips unknown members), so a paste or delete
+  saved against it would be "applied" without creating or deleting anything.
+- **Follow-ups:** wire-only nudge (no block picked) still does nothing; the pasted assignment's Inspector name shows the
+  original's only once its read lands; a paste does not route pasted automatic wires around blocks beyond what the
+  router does; large clipboards are kept whole in the session (quota trimming drops Output first, not the clipboard).
 
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):

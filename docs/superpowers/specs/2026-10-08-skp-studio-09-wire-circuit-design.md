@@ -292,6 +292,9 @@ same day, below.)
   either end and for both; no "needs one end").
 - **Run squares** drag runs; the shape is kept (stored bends), as today. Right-click Reset route; Delete removes the
   wire; Undo/Redo cover every change.
+  *2026-10-10 (plan 8 spec §4.5): Delete also removes picked steps and caches with every wire on them; Backspace no
+  longer deletes; picked wires move with picked blocks in a group drag or nudge (bends, open and held ends shifted);
+  Ctrl+C / Ctrl+V copy and paste, a wire picked alone pasting as a free (direction-less) wire.*
 - A head or tail moved along its own side slides its contact point.
 - **End square over nothing** (the user's rule, 2026-10-08): the end follows the pointer with exactly one corner (an
   L). The run at that end keeps its axis up to the pointer's coordinate on that axis, then one perpendicular run goes
@@ -351,6 +354,7 @@ derives them from the circuit:
 
 Creating new wires (deferred); deleting or creating steps; start checks (BaseApi's validators run on Start); live
 current animation along junctions (today's flow pulse stays per wire).
+*(2026-10-10: steps and caches are created by paste and deleted by Delete, plan 8 spec §4.5.)*
 
 ## 10. Testing
 

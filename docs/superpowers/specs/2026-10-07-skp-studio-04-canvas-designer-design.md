@@ -28,6 +28,7 @@ once they approve it. Some rules (§4.4) were chosen to be tried first and may c
 - **Entity business logic.** No creating, deleting or editing entities, and no Inspector changes
   beyond the multi-selection note (§3.3).
 - **The Toolbox.** Nothing is added to or removed from the canvas; Delete on a block does nothing.
+  *Superseded (2026-10-10, plan 8 spec §4.5): Delete removes picked steps and caches; Ctrl+V pastes copies.*
 - **Validating the draft.** Problems and the broken-wire marks stay those of the saved workflow.
 - **Cache links.** A cache tag can be moved; which caches the workflow uses cannot be changed.
 - **Junctions** (main spec §5.2, plan 7).
@@ -131,6 +132,7 @@ step's processor band. This section follows the main spec's §5.5, without junct
 - **Dragging from a step's output side, or from the hub,** draws a new wire. Dropped on an allowed step
   it is added; dropped anywhere else, or refused, nothing is added. A new wire is automatic.
 - **Delete** removes every selected wire. Double-click on a wire does nothing.
+  *2026-10-10 (plan 8 spec §4.5): and every selected step and cache with its wires; Backspace does nothing.*
 
 ### 4.6 What a drop may not create
 

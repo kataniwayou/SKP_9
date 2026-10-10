@@ -24,6 +24,8 @@ Decisions taken with the user (2026-10-07):
    giving every new one a new id). Processors, schemas and caches are shared: **last write wins**.
 4. **For now, update only** — except assignments, which are created, updated and deleted. No step, processor,
    cache or schema is created or deleted from the designer in this plan.
+   *Superseded in part (2026-10-10, copy, paste and delete, §4.5): steps and caches are created by Ctrl+V and deleted
+   by Delete; processors and schemas still never are.*
 5. **A schema edit is a background copy.** Editing a processor's schema makes a virtual schema with a new id,
    copying the original's **name and version**, holding the edited definition; Save inserts it and re-points that
    processor's slot. The designer does not notice. Other processors keep the original.
@@ -49,6 +51,7 @@ update / delete on it, the schema background copy, free wire drops and the no-af
 
 Out: creating or deleting steps, processors, caches or schemas; start checks; SignalR; the Toolbox; deleting a
 workflow; several designers on one workflow at once beyond the per-entity conflict check (§6.3).
+*(2026-10-10: steps and caches are now created and deleted, §4.5.)*
 
 ## 3. The virtual design
 
@@ -160,6 +163,9 @@ whole stored design, every change of the virtual entities relative to the real o
 - `schemas`: the schema copies (new rows: id, name, version, description, definition);
 - `assignments`: per step, create / update (payload) or delete;
 - `layout`: the canvas layout, including loose wires.
+- *(2026-10-10, §4.5, all optional, so older studios and older stored designs read as before)* `newSteps` (id from the
+  studio, `copyOf`, `processorId`, `fields`, `nextStepIds`), `newCaches` (id, `copyOf`, `fields`), `deletedSteps` (id,
+  the loaded `updatedAt`), `deletedCaches` (id); an assignment `create` may carry `copyOf`.
 
 ### 4.3 Store, dry run, then align
 
@@ -183,7 +189,11 @@ The stages:
 6. **Assignments**: create (new row, linked to this workflow), update in place, delete (unlink, then delete the
    row).
 7. **Workflow**: fields, entry step ids, cache ids and the assignment links stage 6 produced.
+8. **Deletes** *(2026-10-10, §4.5)*: the steps and caches the design deletes, last.
 (The layout was already stored in the first step.)
+*2026-10-10:* stage 3 first creates `newCaches`, stage 4 first creates `newSteps`, stage 5 also writes the new steps'
+next steps (every step exists by then), stage 6 creates a pasted step's assignment (its fields over its `copyOf`
+row's), stage 7 links new caches through the cache list the studio sends.
 
 Rules for every stage:
 
@@ -211,6 +221,57 @@ Rules for every stage:
   values (a description over 40 characters, a payload) read "description changed"; ids the log cannot name show
   their first 8 characters. `kind` is the entity kind, `stage` for a stage's lines, `outcome` for the verdict; `id` is
   null on those.
+
+### 4.5 Copy, paste and delete (the user's decisions, 2026-10-10)
+
+All on the design graph only, virtual until Save, and part of the canvas draft (`Draft.blocks`), so undo, redo, the
+session and the stored design cover them like any drawing.
+
+- **Keys**, only while the canvas has focus (never from the Inspector or any text field): **Ctrl+C** copies, **Ctrl+V**
+  pastes, **Delete** deletes (Cmd on a Mac). **Backspace no longer deletes anything.** No menu entries or buttons.
+- **What is copied**: a single pick or a multi-select. The workflow (hub) is never copied, pasted or deleted: in the
+  selection it is skipped silently and the rest proceeds. Steps are copied with the fields the design shows and their
+  assignment (its fields, payload included); caches with their fields. Wires: every wire running between copied items
+  (each end on a copied step or joined on a copied wire, none on anything left out; junctions among them keep their
+  `at`; an open end stays open) comes along, picked or not; a picked wire with no end on a copied item is copied as a
+  **free wire**: both ends open where it is drawn, its drawn shape kept (direction-less and grey when pasted, rule D;
+  laid on another wire it is an overlap short circuit like any hand-placed wire). A picked wire with one end on a copied
+  item and one on something left out is left out (judgement call).
+- **Paste** gives every replica a **new id**: a step is a new step entity on the **same processor** (processors are never
+  copied), its assignment a new assignment entity with the original's fields (BaseApi starts it from the original's row,
+  `copyOf`, so name, version and description come along), a cache a new cache entity, a wire a new design wire
+  (`w:{guid}`). Names and versions stay the same (unique names differ by id). The pasted items become the selection.
+- **Where it lands** (the user's rule as amended the same day): the group's offset from the originals is first
+  +32 / +32 (4 grid steps), then +64 / +64 for the next paste of the same clipboard, and so on (the cascade). When any
+  pasted block, grown by one grid step, would overlap a block already on the canvas (steps, caches, the hub) or, pasted
+  into the workflow it was copied in, the area of its originals, the group moves as one rigid unit to the nearest free
+  offset from there on the 32 px grid: rings of growing size, nearest first, then right and down before left and up
+  (deterministic), through a box index over the blocks. In the workflow it was copied in, +32 / +32 always lies on the
+  originals, so the copies land beside or below them. Copied wires keep their shapes moved by the same offset.
+- **The clipboard** is the studio's own (one for every open workflow: copy in one document, paste in another) and is
+  kept in the session, so a refresh keeps it. A step pasted into a workflow whose graph does not carry its processor
+  brings that processor (and its schemas) along for drawing only.
+- **Delete** removes the picked steps and caches from the design with every wire that has an end on a deleted step;
+  picked wires go as before; a wire joined on a wire that goes opens where it is drawn. A pasted block deleted again is
+  simply gone. **Save** then deletes the entity (a step's assignments of this workflow with it), but **refuses** with an
+  error (red in Output, pinned and logged) while anything still uses it: another workflow's entry steps, any step's next
+  steps, another workflow's assignment for the step, or (a cache) any workflow's cache list. Like every other refusal,
+  the whole Save rolls back. A step is owned: a stale stamp conflicts. Undo restores.
+- **Group drag** (and arrow nudge): picked wires move with the picked blocks as one unit: their bends, open ends and held
+  ends shift by the same amount; a fully automatic wire keeps being routed as before; a wire not picked keeps today's
+  behaviour.
+- **Save** sends `newSteps` (fields as copied with the Inspector's edits over them, next steps from the circuit),
+  `newCaches` (and the workflow's cache list with them), the pasted assignments as creates with `copyOf`,
+  `deletedSteps` (with the loaded stamps) and `deletedCaches`; deleted steps leave every list sent. The layout places
+  the pasted blocks (its `parked` lists them), so a reload draws them where they were pasted; a stored design that was
+  not applied reads its blocks back (positions from its layout), and the loader reads the processors its pasted steps
+  run.
+- **BaseApi** (backward compatible): new ids are refused when taken ("Not created: a step with this id already
+  exists."), a pasted step needs its processor, the CRUD's create rules judge the fields; a pasted step that was not
+  created fails its wires and its assignment. Log lines "step 'x' created (copy of 'y')", "cache 'z' created (copy of
+  'c')", "step 'x' deleted" (", with its assignment 'a'"), "cache 'z' deleted"; refusals "step 'b': Not deleted: still
+  used by workflow 'w' (an entry step there)" as error lines. A request naming one id in two of create / change /
+  delete is malformed (400).
 
 ### 4.4 The schema copy's version
 
