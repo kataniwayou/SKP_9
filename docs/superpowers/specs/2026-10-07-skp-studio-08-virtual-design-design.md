@@ -126,6 +126,11 @@ Either way the design is now stored on the workflow, and the session's unsaved e
   "Not saved: …" in red. Every line has its time and workflow name. Output keeps the **last 500 lines** and is kept in
   the session (`output`, optional, version still 1), so a refresh keeps it. An older BaseApi without a log gives one
   line saying so and its errors as red lines.
+- **Amended 2026-10-10 (user): a Save spinner.** While a Save runs (from the click through BaseApi's answer, the re-read
+  and the alignment) the Save button shows a small CSS spinner in place of ⤓ ("Saving…", disabled, `aria-busy`), and
+  the workflow's document tab shows one beside its name wherever the tab is. Once shown it stays at least 300 ms (the
+  visual only). With reduced motion it pulses instead of turning. A polite live region says "Saving <name>…" and then
+  "Saved <name>" or "Not saved <name>" (the details stay in Output).
 - **Amended 2026-10-10 (user):** Output has a **Clear** button (accessible name "Clear output", tooltip "Clear the
   messages; current problems stay"; disabled while the log is empty), also at the top of the Output tab's menu. It
   empties the log of every workflow (the log is shared) and the session's copy, so a refresh keeps it empty; the pinned

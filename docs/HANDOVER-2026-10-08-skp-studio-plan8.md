@@ -445,6 +445,17 @@ only of the current generation; an assignment or schema (not fully in the graph)
 step, Save, rename it straight back with its re-read failing (page route), Save: both applied, no conflict. Mutations: 4
 Vitest (one survivor fixed with a graph-wins test), 1 e2e.
 
+**Save spinner (user, 2026-10-10) — BUILT, NOT DEPLOYED** (deployed studio is 9fbb8a5, `index-CAfPNaTe.js`). For the
+whole Save (`open.saving`: click through answer, re-read, alignment) the Save button shows a CSS spinner in place of ⤓
+("Saving…", disabled, `aria-busy`), and the workflow's tab shows one beside its name (`DockDocument.saving`, also behind
+another tab, floating or popped out). Once shown it stays 300 ms (`useMinShown`, the visual only; the Save button stays
+"Saving…" for that tail). Reduced motion: a pulse (`.spin.reduced` from `useReducedMotion`, and the CSS media query).
+`SaveAnnouncer` (`role=status`, polite, "Save status"): "Saving <name>…", then "Saved <name>" / "Not saved <name>".
+Tests: Vitest 989 (84 files; min 300 ms, reduced class, announcer, tab spinner, busy button); tsc clean; Playwright on
+dev (deployed BaseApi) 143 + 2 skips; new `spinner.spec.ts` (PUT held 1.5 s by page.route: button and tab spinner,
+another tab in front, gone after alignment, announcements; reduced motion via emulateMedia). Mutations: 4 Vitest, 2
+e2e.
+
 **Final whole-branch review fixes** (redeployed BaseApi and studio after them; deployed e2e 58 passed + 2 skips,
 live 13/6/5 green):
 - `c970732`: Revert and the Inspector's unsaved mark follow any edit entry, so a stale stamp with no changed
