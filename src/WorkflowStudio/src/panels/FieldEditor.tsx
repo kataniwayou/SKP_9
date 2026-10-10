@@ -1,5 +1,6 @@
 import { useId, useLayoutEffect, useRef } from 'react';
 import { ConditionPicker } from './ConditionPicker';
+import { DictEditor } from './DictEditor';
 import { jsonProblem, type FieldSpec } from '../store/entityForms';
 
 /** A multi-line field opens as tall as its whole text (two lines at least), up to this share of the window, then scrolls. */
@@ -33,6 +34,8 @@ export function FieldEditor({ spec, value, saved, errors, onChange }: {
   const id = useId();
   const area = useRef<HTMLTextAreaElement>(null);
   useFitToText(area, value, spec.kind === 'multiline');
+  // a dictionary is a table of its own (2026-10-10)
+  if (spec.kind === 'dict') return <DictEditor spec={spec} value={value} errors={errors} onChange={onChange} />;
   const json = spec.kind === 'json' ? jsonProblem(value) : null;
   const common = {
     id,

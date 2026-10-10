@@ -106,3 +106,25 @@ fieldset.plain { border: 0; margin: 0; padding: 0; min-width: 0; }
 .ro.liveness.healthy { color: var(--healthy); }
 .ro.liveness.unhealthy { color: var(--unhealthy); }
 .ro.liveness.undetermined { color: var(--undetermined); }
+
+/* a dictionary field as a key/value table (2026-10-10, a cache's items) */
+.field.dict { display: block; }
+.dict-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.dict-head label { color: var(--muted); }
+.dict-count { font-size: 11px; color: var(--faint); }
+.dict-tog { margin-left: auto; font-family: var(--mono); font-size: 10px; letter-spacing: .08em; padding: 1px 6px; border-radius: 3px; background: none; border: 1px solid var(--line-2); color: var(--muted); cursor: pointer; }
+.dict-tog.on { color: var(--accent); border-color: var(--accent); }
+.dict-tog:disabled { opacity: .45; cursor: default; }
+.dict-tog:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.dict-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-family: var(--mono); font-size: 12px; }
+.dict-table th { text-align: left; font: 400 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); padding: 2px 4px; border-bottom: 1px solid var(--line); }
+.dict-table th:nth-child(1) { width: 38%; }
+.dict-table th:nth-child(3) { width: 20px; }
+.dict-table td { padding: 1px 2px; border-bottom: 1px solid var(--line); }
+.dict-cell { width: 100%; box-sizing: border-box; font: 400 12px var(--mono); color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 3px; padding: 3px 4px; min-width: 0; }
+.dict-cell:hover:not([readonly]) { border-color: var(--line-2); }
+.dict-cell:focus { outline: none; border-color: var(--accent); background: var(--ground-2); }
+.dict-table tr.bad .dict-cell[aria-invalid="true"] { border-color: var(--error); color: var(--error); }
+.dict-why td { border-bottom: 0; padding: 0 4px 3px; font-size: 11px; color: var(--error); }
+.dict-x { text-align: center; }
+.dict-add { margin-top: 5px; }

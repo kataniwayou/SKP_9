@@ -1,7 +1,8 @@
 import type { EntityKind, EntityReadDto } from '../api/entities';
 import type { FieldValue } from '../design/design';
 
-export type FieldKind = 'text' | 'multiline' | 'json' | 'condition';
+/** `dict`: a string-to-string dictionary kept as a JSON object, edited as a key/value table (2026-10-10, a cache's items). */
+export type FieldKind = 'text' | 'multiline' | 'json' | 'dict' | 'condition';
 
 /** One writable field of the Inspector (spec §7.1's table). */
 export interface FieldSpec {
@@ -25,7 +26,7 @@ export const FIELDS: Record<EntityKind, readonly FieldSpec[]> = {
   assignment: [NAME, VERSION, DESCRIPTION, { key: 'payload', label: 'Payload', kind: 'json' }],
   processor: [NAME, VERSION, DESCRIPTION, { key: 'sourceHash', label: 'Source hash', kind: 'text' }, { key: 'instanceId', label: 'Instance id', kind: 'text', nullable: true }],
   schema: [NAME, VERSION, DESCRIPTION, { key: 'definition', label: 'Definition', kind: 'json' }],
-  cache: [NAME, VERSION, DESCRIPTION, { key: 'root', label: 'Root', kind: 'text' }, { key: 'items', label: 'Items', kind: 'json' }],
+  cache: [NAME, VERSION, DESCRIPTION, { key: 'root', label: 'Root', kind: 'text' }, { key: 'items', label: 'Items', kind: 'dict' }],
 };
 
 const field = (dto: EntityReadDto, key: string): unknown => (dto as Record<string, unknown>)[key];
