@@ -181,7 +181,7 @@ export function Toolbox() {
         )}
       </div>
       {ghost && drag && doc.body && createPortal(
-        <div className="tb-ghost" style={{ left: drag.client.x + 10, top: drag.client.y + 10 }} aria-hidden="true">{ghost}</div>, doc.body,
+        <div className="tb-ghost" style={{ left: drag.client.x, top: drag.client.y }} aria-hidden="true">{ghost}</div>, doc.body,
       )}
     </div>
   );

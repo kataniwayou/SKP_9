@@ -66,6 +66,12 @@ test('Toolbox: an empty step, the throwaway\'s processor onto it, a wire, an emp
   // held over the canvas: the landing box is drawn; nothing committed yet
   await expect(panel.locator('.design-tool-landing')).toHaveCount(1);
   await expect(page.locator('.tb-ghost')).toHaveCount(1);
+  // the ghost sits on the pointer, inside the landing box: both centred on it
+  const ghostBox = (await page.locator('.tb-ghost').boundingBox())!, landBox = (await panel.locator('.design-tool-landing').boundingBox())!;
+  expect(Math.abs(ghostBox.x + ghostBox.width / 2 - spot.x)).toBeLessThan(2);
+  expect(Math.abs(ghostBox.y + ghostBox.height / 2 - spot.y)).toBeLessThan(2);
+  expect(Math.abs(landBox.x + landBox.width / 2 - spot.x)).toBeLessThan(12);
+  expect(Math.abs(landBox.y + landBox.height / 2 - spot.y)).toBeLessThan(12);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/toolbox-drag.png` });
   await page.mouse.up();
   await expect(panel.locator('.design-tool-landing')).toHaveCount(0);

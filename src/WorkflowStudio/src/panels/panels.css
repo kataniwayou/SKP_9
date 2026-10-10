@@ -156,6 +156,7 @@ fieldset.plain { border: 0; margin: 0; padding: 0; min-width: 0; }
 .tb-wire .lg-undecided { fill: none; stroke: #8A97A8; stroke-width: 2; stroke-dasharray: 6 4; }
 .tb-wire .lg-arrow { fill: none; stroke: #8A97A8; stroke-width: 2; stroke-linejoin: miter; }
 /* follows the pointer while a tile is dragged; never under the pointer itself (the canvas below is what it is over) */
-.tb-ghost { position: fixed; z-index: var(--z-tip); pointer-events: none; opacity: .8; width: 120px; filter: drop-shadow(0 4px 10px rgba(0, 0, 0, .5)); }
+/* centred on the pointer, as the canvas's landing box is (toolDrop.landingBox) */
+.tb-ghost { position: fixed; z-index: var(--z-tip); pointer-events: none; opacity: .8; width: 120px; transform: translate(-50%, -50%); filter: drop-shadow(0 4px 10px rgba(0, 0, 0, .5)); }
 .tb-ghost .tb-art { width: 120px; height: auto; max-height: none; }
-.tb-ghost .tb-cache { width: 72px; }
+.tb-ghost .tb-cache { width: 72px; display: block; margin: 0 auto; }
