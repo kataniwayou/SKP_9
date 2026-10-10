@@ -38,6 +38,9 @@ export const POLL_MS = 5000;
 export const RETRY_MS: readonly number[] = [0, 1000, 2000, 5000, 10_000, 20_000, 30_000];
 export const retryDelay = (attempt: number): number => RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)]!;
 
+/** Changes held while a snapshot is awaited; past this they are dropped and a fresh snapshot covers them. */
+export const MAX_HELD = 1000;
+
 const BROWSER_TIMERS: Timers = {
   setTimeout: (run, ms) => globalThis.setTimeout(run, ms),
   clearTimeout: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
@@ -101,12 +104,19 @@ export function createLiveStore({ api, hub, timers = BROWSER_TIMERS, pollMs = PO
   let retryTimer: unknown = null;
   let pollTimer: unknown = null;
   let polling = false;
+  // each poll loop owns a token: a loop whose token is not the current one (stopped, or replaced) ends at its next step
+  let pollToken = 0;
+  // counts the hub snapshots applied: a poll asked before the latest one never overwrites what it brought
+  let hubEpoch = 0;
   let attempts = 0;
   let snapshotting = false;
   let snapshotAgain = false;
+  let snapshotFailures = 0;
+  let snapshotTimer: unknown = null;
   let held: Sequenced[] = [];
 
   const dispatch = (event: LiveEvent) => {
+    if (event.type === 'snapshot') hubEpoch++;
     const { state: next, changes } = liveReduce(state, event);
     if (next !== state) {
       state = next;
@@ -124,21 +134,23 @@ export function createLiveStore({ api, hub, timers = BROWSER_TIMERS, pollMs = PO
   const startPolling = () => {
     if (polling || !running) return;
     polling = true;
-    const gen = generation;
+    const token = ++pollToken;
     const poll = async () => {
+      const epoch = hubEpoch;
       const [live, liveness] = await Promise.all([
         Promise.resolve().then(() => api.listLive()).catch(network),
         Promise.resolve().then(() => api.listLiveness()).catch(network),
       ]);
-      if (gen !== generation || !polling) return;
-      // connected meanwhile: the hub's snapshot is what counts
-      if (state.connection !== 'connected') dispatch({ type: 'poll', live, liveness });
-      pollTimer = timers.setTimeout(() => void poll(), pollMs);
+      if (token !== pollToken) return;
+      // connected meanwhile, or a hub snapshot landed while it was asked: the hub's data is newer
+      if (state.connection !== 'connected' && epoch === hubEpoch) dispatch({ type: 'poll', live, liveness });
+      pollTimer = timers.setTimeout(() => { if (token === pollToken) void poll(); }, pollMs);
     };
     void poll();
   };
   const stopPolling = () => {
     polling = false;
+    pollToken++;
     if (pollTimer !== null) timers.clearTimeout(pollTimer);
     pollTimer = null;
   };
@@ -170,30 +182,52 @@ export function createLiveStore({ api, hub, timers = BROWSER_TIMERS, pollMs = PO
     if (snapshotting) { snapshotAgain = true; return; }
     snapshotting = true;
     const gen = generation;
+    // a failed or unreadable snapshot is asked for again with backoff while the connection stays up
+    const failed = () => {
+      snapshotting = false;
+      snapshotAgain = false;
+      if (snapshotTimer !== null) timers.clearTimeout(snapshotTimer);
+      snapshotTimer = timers.setTimeout(() => {
+        snapshotTimer = null;
+        if (gen === generation && conn === connection && state.connection === 'connected') takeSnapshot();
+      }, retryDelay(++snapshotFailures));
+    };
     void conn.invoke<unknown>('Snapshot').then((value) => {
       if (gen !== generation || conn !== connection) return;
-      snapshotting = false;
       const snapshot = snapshotOf(value);
-      if (snapshot !== null) dispatch({ type: 'snapshot', snapshot });
+      if (snapshot === null) { failed(); return; }
+      snapshotting = false;
+      snapshotFailures = 0;
+      dispatch({ type: 'snapshot', snapshot });
       if (snapshotAgain) { snapshotAgain = false; takeSnapshot(); return; }
       drain();
     }, () => {
       if (gen !== generation || conn !== connection) return;
-      snapshotting = false;
-      snapshotAgain = false;
-      // the connection is likely going down; if it stays up, ask again shortly
-      timers.setTimeout(() => { if (gen === generation && conn === connection && state.connection === 'connected') takeSnapshot(); }, 1000);
+      failed();
     });
+  };
+
+  /** Holds a change for after the snapshot; past MAX_HELD the held changes are dropped and a fresh snapshot covers them. */
+  const hold = (event: Sequenced) => {
+    if (held.length >= MAX_HELD) { held = []; takeSnapshot(); return; }
+    held.push(event);
   };
 
   const onEvent = (method: string) => (arg: unknown) => {
     const event = eventOf(method, arg);
     if (event === null || state.connection !== 'connected') return;
-    if (snapshotting || state.seq === null) { held.push(event); return; }
+    if (snapshotting || state.seq === null) { hold(event); return; }
     if (event.sequence <= state.seq) return;
     if (event.sequence === state.seq + 1) { apply(event); return; }
-    held.push(event);
+    hold(event);
     takeSnapshot();
+  };
+
+  /** The hub's periodic "last sequence is N": a change this client missed (a lost broadcast) shows as a difference. */
+  const onSequence = (arg: unknown) => {
+    const sequence = asRecord(arg).sequence;
+    if (typeof sequence !== 'number' || state.connection !== 'connected' || snapshotting || state.seq === null) return;
+    if (sequence !== state.seq) takeSnapshot();
   };
 
   const connect = () => {
@@ -205,6 +239,7 @@ export function createLiveStore({ api, hub, timers = BROWSER_TIMERS, pollMs = PO
     snapshotting = false;
     snapshotAgain = false;
     for (const method of ['workflowLive', 'processorLiveness', 'monitorStatus']) conn.on(method, onEvent(method));
+    conn.on('livenessSequence', onSequence);
     conn.onreconnecting(() => { if (gen === generation && conn === connection) { held = []; setConnection('reconnecting'); } });
     conn.onreconnected(() => {
       if (gen !== generation || conn !== connection) return;
@@ -256,6 +291,8 @@ export function createLiveStore({ api, hub, timers = BROWSER_TIMERS, pollMs = PO
       connection = null;
       held = [];
       snapshotting = false;
+      if (snapshotTimer !== null) timers.clearTimeout(snapshotTimer);
+      snapshotTimer = null;
       if (conn) void conn.stop().catch(() => undefined);
     },
   };

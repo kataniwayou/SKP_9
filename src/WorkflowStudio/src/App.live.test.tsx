@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from './api/client';
 import { workflowDto } from './api/fixtures';
-import { App } from './App';
+import { App, LIVE_MARK_DELAY_MS } from './App';
 import { fakeHub, snap } from './test/fakeHub';
 import { memoryStorage } from './test/memoryStorage';
 
@@ -91,14 +91,14 @@ describe('live push in the studio (2026-10-10)', () => {
     render(<App api={api} storage={memoryStorage()} hub={hub.factory} />);
     expect(screen.queryByRole('status', { name: 'Live updates' })).toBeNull();   // still connecting at start: no mark yet
     await act(async () => { hub.last().starting.reject(new Error('refused')); });
-    expect(screen.getByRole('status', { name: 'Live updates' })).toHaveTextContent('live updates reconnecting');
+    await waitFor(() => expect(screen.getByRole('status', { name: 'Live updates' })).toHaveTextContent('live updates reconnecting'), { timeout: LIVE_MARK_DELAY_MS + 2000 });
     expect(api.listLive).toHaveBeenCalled();
     openPicker();
     expect(within(await screen.findByRole('option', { name: /zeta/ })).getByRole('img', { name: 'running' })).toBeInTheDocument();   // from the poll
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
 
-    // the retry (1 s) connects; its snapshot replaces what the poll said
-    await waitFor(() => expect(hub.conns).toHaveLength(2), { timeout: 3000 });
+    // a retry connects; its snapshot replaces what the poll said
+    await waitFor(() => expect(hub.conns.length).toBeGreaterThan(1), { timeout: 3000 });
     await act(async () => { hub.last().starting.resolve(); });
     await act(async () => { hub.last().snapshots.shift()!.resolve(snap(9, [])); });
     expect(screen.queryByRole('status', { name: 'Live updates' })).toBeNull();
@@ -110,5 +110,27 @@ describe('live push in the studio (2026-10-10)', () => {
     render(<App api={api} storage={memoryStorage()} />);
     await waitFor(() => expect(api.listLive).toHaveBeenCalledTimes(1));
     expect(api.listLiveness).toHaveBeenCalledTimes(1);
+  });
+
+  it("a drop that reconnects within a few seconds shows no mark (a background tab's throttled keep-alive, 2026-10-10)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { hub } = await connectedApp();
+      act(() => hub.last().lose());
+      await act(async () => { await vi.advanceTimersByTimeAsync(LIVE_MARK_DELAY_MS - 500); });
+      expect(screen.queryByRole('status', { name: 'Live updates' })).toBeNull();
+      act(() => hub.last().regain());
+      await act(async () => { await vi.advanceTimersByTimeAsync(LIVE_MARK_DELAY_MS * 2); });
+      expect(screen.queryByRole('status', { name: 'Live updates' })).toBeNull();
+
+      // down for longer: the mark shows, and goes as soon as it is back
+      act(() => hub.last().lose());
+      await act(async () => { await vi.advanceTimersByTimeAsync(LIVE_MARK_DELAY_MS); });
+      expect(screen.getByRole('status', { name: 'Live updates' })).toHaveTextContent('live updates reconnecting');
+      act(() => hub.last().regain());
+      expect(screen.queryByRole('status', { name: 'Live updates' })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

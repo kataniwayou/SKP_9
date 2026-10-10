@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApiResult } from '../api/client';
 import { FakeConnection, snap } from '../test/fakeHub';
-import { createLiveStore, POLL_MS, RETRY_MS } from './liveClient';
+import { createLiveStore, MAX_HELD, POLL_MS, RETRY_MS } from './liveClient';
 import { statusOf } from './liveState';
 
 const flush = () => vi.advanceTimersByTimeAsync(0);
@@ -205,5 +205,83 @@ describe('the liveness store and its hub connection (2026-10-10)', () => {
     t.conn().emit('processorLiveness', 'nonsense');
     expect(t.store.getState().seq).toBe(5);
     expect(t.conn().snapshots).toHaveLength(0);
+  });
+
+  // review 2026-10-10 (coordinator's repro scratchpad vt4/flap.test.ts)
+  it('a drop while a poll is in flight runs one poll loop, and that late answer never overwrites a newer hub snapshot', async () => {
+    const t = setup();
+    const answers: ((v: ApiResult<unknown>) => void)[] = [];
+    t.api.listLive.mockImplementation(() => new Promise((r) => { answers.push(r); }));
+    t.store.start();                                   // connecting: poll 1 in flight
+    t.conn().starting.resolve();
+    await flush();
+    t.conn().snapshots.shift()!.resolve(snap(5, ['a']));
+    await flush();
+    t.conn().lose();                                   // poll 2 starts while poll 1 is in flight
+    await flush();
+    expect(t.api.listLive).toHaveBeenCalledTimes(2);
+    t.conn().regain();
+    t.conn().snapshots.shift()!.resolve(snap(6, ['a']));
+    await flush();
+    t.conn().lose();                                   // poll 3; polls 1 and 2 were asked before snapshot 6
+    await flush();
+    for (const r of answers.splice(0, 2)) r({ ok: true, value: [] });   // stale: "a" stopped
+    await flush();
+    expect(statusOf(t.store.getState(), 'a')).toBe('running');
+    expect(t.changes).toEqual([]);
+    // one loop: only poll 3 re-arms
+    answers.splice(0).forEach((r) => r({ ok: true, value: ['a'] }));
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    expect(t.api.listLive).toHaveBeenCalledTimes(4);
+    answers.splice(0).forEach((r) => r({ ok: true, value: ['a'] }));
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    expect(t.api.listLive).toHaveBeenCalledTimes(5);
+  });
+
+  it('a snapshot it cannot read is asked for again with backoff; changes held meanwhile are applied after it', async () => {
+    const t = setup();
+    t.store.start();
+    t.conn().starting.resolve();
+    await flush();
+    t.conn().snapshots.shift()!.resolve({ nonsense: true });
+    await flush();
+    t.conn().emit('workflowLive', { workflowId: 'a', running: true, sequence: 6 });
+    expect(t.conn().snapshots).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(RETRY_MS[1]!);
+    expect(t.conn().snapshots).toHaveLength(1);
+    t.conn().snapshots.shift()!.reject(new Error('timeout'));
+    await vi.advanceTimersByTimeAsync(RETRY_MS[2]! - 1);
+    expect(t.conn().snapshots).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    t.conn().snapshots.shift()!.resolve(snap(5));
+    await flush();
+    expect(statusOf(t.store.getState(), 'a')).toBe('running');
+    expect(t.store.getState().seq).toBe(6);
+  });
+
+  it('held changes are bounded: past MAX_HELD they are dropped and a fresh snapshot covers them', async () => {
+    const t = await connected();
+    t.conn().emit('workflowLive', { workflowId: 'x', running: true, sequence: 7 });   // gap: snapshot asked
+    for (let i = 0; i < MAX_HELD + 5; i++) t.conn().emit('workflowLive', { workflowId: `w${i}`, running: true, sequence: 8 + i });
+    t.conn().snapshots.shift()!.resolve(snap(7, ['x']));
+    await flush();
+    // the overflow asked for another snapshot instead of keeping everything
+    expect(t.conn().snapshots).toHaveLength(1);
+    t.conn().snapshots.shift()!.resolve(snap(8 + MAX_HELD + 4, ['x', 'w0']));
+    await flush();
+    expect(t.store.getState().seq).toBe(8 + MAX_HELD + 4);
+    expect(statusOf(t.store.getState(), 'w0')).toBe('running');
+  });
+
+  it('the hub\'s periodic sequence takes a snapshot when this client missed the last change, and nothing when it did not', async () => {
+    const t = await connected(['a']);
+    t.conn().emit('livenessSequence', { sequence: 5 });
+    expect(t.conn().snapshots).toHaveLength(0);
+    t.conn().emit('livenessSequence', { sequence: 6 });   // change 6 never arrived
+    expect(t.conn().snapshots).toHaveLength(1);
+    t.conn().snapshots.shift()!.resolve(snap(6, []));
+    await flush();
+    expect(statusOf(t.store.getState(), 'a')).toBe('stopped');
+    expect(t.changes).toEqual([{ workflowId: 'a', running: false }]);
   });
 });

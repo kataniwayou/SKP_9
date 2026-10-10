@@ -297,13 +297,24 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
   );
 }
 
+/** How long live updates must stay down before the mark shows: a reconnect that succeeds sooner shows nothing. */
+export const LIVE_MARK_DELAY_MS = 4000;
+
 /**
  * The status area's mark while live updates are not reaching the studio from the hub (2026-10-10): the studio polls
- * meanwhile, and the mark goes when the hub is back. Nothing while connected or still connecting at start.
+ * meanwhile, and the mark goes when the hub is back. Nothing while connected or still connecting at start, and nothing
+ * for a drop that reconnects within LIVE_MARK_DELAY_MS (e.g. a background tab's throttled timers).
  */
 export function LiveMark() {
   const connection = useLive((s) => s.connection);
-  if (connection === 'connected' || connection === 'connecting') return null;
+  const down = connection === 'reconnecting' || connection === 'offline';
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!down) { setShown(false); return; }
+    const timer = setTimeout(() => setShown(true), LIVE_MARK_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [down]);
+  if (!down || !shown) return null;
   return (
     <span className="livemark" role="status" aria-label="Live updates"
       data-tip="Live updates from BaseApi are not connected; the studio reads the status every 5 s until they are back">
