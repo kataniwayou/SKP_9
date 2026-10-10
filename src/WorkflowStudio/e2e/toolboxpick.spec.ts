@@ -5,7 +5,7 @@ import { createThrowaway, expect, removeThrowaway, test, type Throwaway } from '
 // The Toolbox's tiles clicked (the user's rules, 2026-10-11), with the real mouse: a processor or cache is shown in the
 // Inspector read-only (the Toolbox only drags), one tile at a time; a hidden Inspector stays hidden but its content
 // switches; a click on a canvas takes the Inspector back. An entity the active design changed shows the design's values on
-// its tile, marked unsaved. An empty cache is drawn with a dashed muted rectangle. Only this run's throwaway is written.
+// its tile, marked unsaved. An empty cache is drawn with a dashed amber rectangle (no ⚠). Only this run's throwaway is written.
 test.describe.configure({ mode: 'serial', retries: 0 });
 let t: Throwaway;
 test.beforeAll(async ({ request }) => { t = await createThrowaway(request); });
@@ -61,7 +61,7 @@ test('a click on a processor or cache tile shows it read-only in the Inspector, 
   await expect(pill(page)).toHaveText('STEP');
   await expect(toolbox(page).locator('.tb-tile.picked')).toHaveCount(0);
 
-  // a drag still drags after the clicks: an empty cache dropped is drawn dashed, muted, no ⚠
+  // a drag still drags after the clicks: an empty cache dropped is drawn dashed amber, no ⚠
   const known = new Set(await panel.locator('.react-flow__node-cache').evaluateAll((els) => els.map((e) => e.getAttribute('data-id')!)));
   const spot = await emptySpot(panel);
   const from = await centre(tileOf(page, 'newCache'));
@@ -76,7 +76,7 @@ test('a click on a processor or cache tile shows it read-only in the Inspector, 
   const fresh = panel.locator(`.react-flow__node-cache[data-id="${id}"]`);
   await expect(fresh.locator('.cache-empty-line')).toHaveCount(1);
   await expect(fresh.locator('.cache-empty-line')).toHaveCSS('stroke-dasharray', /5/);
-  await expect(fresh.locator('.cache-empty-line')).toHaveCSS('stroke', 'rgb(129, 147, 174)');
+  await expect(fresh.locator('.cache-empty-line')).toHaveCSS('stroke', 'rgb(245, 184, 65)');
   await expect(fresh.locator('.nx-hex')).toHaveCount(0);
   await expect(fresh).not.toContainText('⚠');
   if (SHOTS) await fresh.screenshot({ path: `${SHOTS}/empty-cache.png` });
