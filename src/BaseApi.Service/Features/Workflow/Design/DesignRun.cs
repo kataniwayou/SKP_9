@@ -36,8 +36,12 @@ internal sealed class DesignRun
     public List<DesignErrorDto> Errors { get; } = [];
     public HashSet<Guid> FailedSchemas { get; } = [];
     public HashSet<Guid> FailedSteps { get; } = [];
-    /// <summary>Steps the steps stage created (2026-10-10, paste): the wires stage writes their next steps.</summary>
-    public HashSet<Guid> CreatedSteps { get; } = [];
+    /// <summary>
+    /// The steps and caches of this workflow before the save (2026-10-10, review): what its entry steps reached, what its
+    /// stored layout placed, and its cache list. A design deletes only these.
+    /// </summary>
+    public HashSet<Guid> WorkflowSteps { get; } = [];
+    public HashSet<Guid> WorkflowCaches { get; } = [];
     public List<Guid> CreatedAssignments { get; } = [];
     public List<Guid> DeletedAssignments { get; } = [];
     /// <summary>Assignments the assignment stage unlinked from this workflow (deleted ones that it listed).</summary>

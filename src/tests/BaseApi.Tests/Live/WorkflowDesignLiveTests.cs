@@ -200,6 +200,41 @@ public sealed class WorkflowDesignLiveTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task APastedCacheWithItsOwnRootIsCreatedAndATakenRootIsRefusedClearly()
+    {
+        // review 2026-10-10: Root is unique (uq_cache_root); InMemory never shows it
+        RealStack.SkipUnlessEnabled();
+        var c = await CacheAsync();
+        var root = Text(await GetAsync($"caches/{c}"), "root")!;
+        var wf = await WorkflowAsync([await StepAsync()]);
+        Guid n = Guid.NewGuid(), taken = Guid.NewGuid();
+        _caches.Add(n);
+        _caches.Add(taken);
+        object Cache(Guid id, string r) => new { id, copyOf = c, fields = new { name = Tag(), version = "1.0.0", description = (string?)null, root = r, items = "{}" } };
+
+        var (applied, errors) = await PutDesignAsync(wf, new
+        {
+            workflow = new { updatedAt = Stamp(await GetAsync($"workflows/{wf}")), cacheIds = new[] { n } },
+            newCaches = new[] { Cache(n, root + "-copy") },
+            layout = new { v = 1 },
+        });
+        Assert.True(applied, Describe(errors));
+        Assert.Equal(root + "-copy", Text(await GetAsync($"caches/{n}"), "root"));
+
+        var (again, refused) = await PutDesignAsync(wf, new
+        {
+            workflow = new { updatedAt = Stamp(await GetAsync($"workflows/{wf}")), cacheIds = new[] { n, taken } },
+            newCaches = new[] { Cache(taken, root) },
+            layout = new { v = 1 },
+        });
+        Assert.False(again);
+        // (the workflow's cache list then names a cache that was not created: its own error)
+        var error = refused.Single(e => Is(e, "cache", taken, "root"));
+        Assert.Equal($"Root '{root}' is already used by cache '{Text(await GetAsync($"caches/{c}"), "name")}'.", error.GetProperty("message").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/caches/{taken}", Ct)).StatusCode);
+    }
+
+    [Fact]
     public async Task AStepAnotherWorkflowUsesIsRefusedAndThePastedStepIsRolledBack()
     {
         RealStack.SkipUnlessEnabled();

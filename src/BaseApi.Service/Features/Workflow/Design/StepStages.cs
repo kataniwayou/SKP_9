@@ -84,17 +84,28 @@ internal sealed class StepStage : IDesignStage
     /// <summary>One new step (a pasted copy): the same processor as its original, its own id and fields.</summary>
     private async Task CreateAsync(DesignRun run, DesignNewStepDto n, IReadOnlyDictionary<Guid, string> names, CancellationToken ct)
     {
+        var already = false;
         var applied = await run.UnitAsync("step", n.Id, "steps", async () =>
         {
-            if (await _db.Set<StepEntity>().AnyAsync(x => x.Id == n.Id, ct))
-                return [new FieldError(null, "Not created: a step with this id already exists.")];
-            if (!await _db.Set<BaseApi.Service.Features.Processor.ProcessorEntity>().AnyAsync(p => p.Id == n.ProcessorId, ct))
-                return [new FieldError("processorId", "Not created: its processor no longer exists.")];
             var errors = new List<FieldError>();
             // no field means its empty value: the CRUD's rules then say what is missing (an omitted entry condition is refused)
             var fields = DesignFields.Apply(new StepUpdateDto("", "", null, n.ProcessorId, null, default), n.Fields, errors);
             if (errors.Count > 0) return errors;
             var dto = new StepCreateDto(fields.Name, fields.Version, fields.Description, n.ProcessorId, null, fields.EntryCondition);
+            var existing = await _db.Set<StepEntity>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == n.Id, ct);
+            if (existing is not null)
+            {
+                // the same step this design creates (a Save sent again after its answer was lost): nothing to create
+                if ((existing.Name, existing.Version, existing.Description, existing.ProcessorId, existing.EntryCondition)
+                    == (dto.Name, dto.Version, dto.Description, dto.ProcessorId, dto.EntryCondition))
+                {
+                    already = true;
+                    return [];
+                }
+                return [new FieldError(null, "Not created: a different step with this id already exists.")];
+            }
+            if (!await _db.Set<BaseApi.Service.Features.Processor.ProcessorEntity>().AnyAsync(p => p.Id == n.ProcessorId, ct))
+                return [new FieldError("processorId", "Not created: its processor no longer exists.")];
             var problems = DesignFields.Failures(await _createValidator.ValidateAsync(dto, ct));
             if (problems.Count > 0) return problems;
             var entity = _mapper.ToEntity(dto);
@@ -107,7 +118,11 @@ internal sealed class StepStage : IDesignStage
             run.FailedSteps.Add(n.Id);
             return;
         }
-        run.CreatedSteps.Add(n.Id);
+        if (already)
+        {
+            run.Unchanged(n.Id);
+            return;
+        }
         var copy = n.CopyOf is { } of ? $" (copy of '{(names.TryGetValue(of, out var name) ? name : DesignLogText.Short(of))}')" : "";
         run.Changed("step", n.Id, "created", $"created{copy}", sentence: true);
     }

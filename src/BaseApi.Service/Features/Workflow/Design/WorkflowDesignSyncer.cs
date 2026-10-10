@@ -40,6 +40,8 @@ internal sealed class WorkflowDesignSyncer : IWorkflowDesignSyncer
     public async Task<DesignOutcomeDto> SaveAsync(Guid workflowId, DesignSaveRequest request, CancellationToken ct)
     {
         DesignShape.ThrowIfMalformed(workflowId, request);
+        // what this workflow holds before the store replaces its layout: the only steps and caches a design may delete
+        var (ownSteps, ownCaches) = await DesignOwnership.ReadAsync(_db, workflowId, ct);
 
         // ---- 1. Store: always, on its own commit; the layout goes to Layout, the rest to Design. ----
         var design = JsonSerializer.Serialize(request with { Layout = null }, StoredJson);
@@ -50,6 +52,8 @@ internal sealed class WorkflowDesignSyncer : IWorkflowDesignSyncer
         // ---- 2. The stages, in one transaction, collecting every error. ----------------------------
         await using var tx = await _transactions.BeginAsync(ct);
         var run = new DesignRun(workflowId, request, _db, tx);
+        run.WorkflowSteps.UnionWith(ownSteps);
+        run.WorkflowCaches.UnionWith(ownCaches);
         run.Note("store", "workflow", "design stored on the workflow (the design and its layout), whatever the dry run finds");
         run.Note("outcome", "outcome", "dry run started: every stage in one transaction, each entity in its own savepoint");
         try

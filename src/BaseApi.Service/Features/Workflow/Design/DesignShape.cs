@@ -46,7 +46,14 @@ internal static class DesignShape
         Unique(Ids(r.NewCaches?.Select(c => c.Id), r.Caches?.Select(c => c.Id), r.DeletedCaches?.Select(c => c.Id)),
             "NewCaches, Caches and DeletedCaches", Fail);
         foreach (var s in r.NewSteps ?? [])
+        {
             if (s.ProcessorId == Guid.Empty) Fail($"NewSteps[{s.Id}].ProcessorId", "ProcessorId must not be Guid.Empty.");
+            if (s.CopyOf == Guid.Empty) Fail($"NewSteps[{s.Id}].CopyOf", "CopyOf must not be Guid.Empty.");
+        }
+        foreach (var c in r.NewCaches ?? [])
+            if (c.CopyOf == Guid.Empty) Fail($"NewCaches[{c.Id}].CopyOf", "CopyOf must not be Guid.Empty.");
+        foreach (var a in r.Assignments ?? [])
+            if (a.CopyOf == Guid.Empty) Fail($"Assignments[{a.Id}].CopyOf", "CopyOf must not be Guid.Empty.");
 
         var copies = (r.Schemas ?? []).Select(s => s.Id).ToHashSet();
         foreach (var p in r.Processors ?? [])

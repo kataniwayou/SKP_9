@@ -85,7 +85,7 @@ public sealed class DesignCreateDeleteTests
             assignments: [new DesignAssignmentDto("create", asg2, a, null, F("""{"name":"x","version":"1.0.0","payload":"{}"}"""))]), h.Ct);
 
         Assert.False(outcome.Applied);
-        Assert.Contains(outcome.Errors, e => (e.Kind, e.Id, e.Stage, e.Message) == ("step", a, "steps", "Not created: a step with this id already exists."));
+        Assert.Contains(outcome.Errors, e => (e.Kind, e.Id, e.Stage, e.Message) == ("step", a, "steps", "Not created: a different step with this id already exists."));
         Assert.Contains(outcome.Errors, e => (e.Kind, e.Id, e.Stage) == ("step", a, "wires"));
         Assert.Contains(outcome.Errors, e => (e.Kind, e.Id, e.Stage, e.Message) == ("assignment", asg2, "assignments", "Not created: its step was not created."));
         h.Forget();
@@ -128,12 +128,13 @@ public sealed class DesignCreateDeleteTests
 
         var outcome = await h.Syncer().SaveAsync(wf, Of(
             workflow: new DesignWorkflowDto(loaded.Workflow.UpdatedAt, null, null, [cache, copy]),
-            newCaches: [new DesignNewCacheDto(copy, cache, F("""{"name":"cache","version":"1.0.0","description":null,"root":"root-a","items":"{}"}"""))]), h.Ct);
+            newCaches: [new DesignNewCacheDto(copy, cache, F("""{"name":"cache","version":"1.0.0","description":null,"root":"root-a-copy","items":"{}"}"""))]), h.Ct);
 
         Assert.True(outcome.Applied, Describe(outcome));
         h.Forget();
         var made = await h.Db.Caches.SingleAsync(c => c.Id == copy, h.Ct);
-        Assert.Equal(("cache", "root-a"), (made.Name, made.Root));
+        Assert.Equal(("cache", "root-a-copy"), (made.Name, made.Root));
+        Assert.NotEqual((await h.Db.Caches.SingleAsync(c => c.Id == cache, h.Ct)).Root, made.Root);
         Assert.Equal(2, await h.Db.WorkflowCaches.CountAsync(j => j.WorkflowId == wf, h.Ct));
         var lines = Lines(outcome);
         Assert.Contains("info caches: caches: 1 cache to create", lines);
@@ -319,7 +320,7 @@ public sealed class DesignCreateDeleteTests
             workflow: new DesignWorkflowDto(loaded.Workflow.UpdatedAt, null, null, [nc]),
             steps: [new DesignStepDto(a, stamp(a), null, [n])],
             newSteps: [new DesignNewStepDto(n, b, proc, StepFields("b"), null)],
-            newCaches: [new DesignNewCacheDto(nc, cache, F("""{"name":"cache","version":"1.0.0","root":"root","items":"{}"}"""))],
+            newCaches: [new DesignNewCacheDto(nc, cache, F("""{"name":"cache","version":"1.0.0","root":"root-copy","items":"{}"}"""))],
             deletedSteps: [new DesignDeleteDto(b, stamp(b))],
             deletedCaches: [new DesignDeleteDto(cache, null)]), h.Ct);
 
@@ -346,6 +347,110 @@ public sealed class DesignCreateDeleteTests
     }
 
     [Fact]
+    public async Task ARootAnotherCacheUsesIsRefusedClearlyOnCreateAndOnUpdate()
+    {
+        // uq_cache_root: InMemory does not enforce it, so the stage says so itself (WorkflowDesignLiveTests checks Postgres)
+        await using var h = new GraphHarness();
+        var proc = await h.ProcessorAsync();
+        var cache = await h.CacheAsync("root-a");
+        var other = await h.CacheAsync("root-b");
+        var wf = await h.WorkflowAsync("wf", [await h.StepAsync(proc, "a")]);
+        var copy = Guid.NewGuid();
+
+        var outcome = await h.Syncer().SaveAsync(wf, Of(
+            caches: [new DesignCacheDto(other, F("""{"root":"root-a"}"""))],
+            newCaches: [new DesignNewCacheDto(copy, cache, F("""{"name":"cache","version":"1.0.0","root":"root-a","items":"{}"}"""))]), h.Ct);
+
+        Assert.False(outcome.Applied);
+        Assert.Contains(outcome.Errors, e => (e.Id, e.Stage, e.Field, e.Message) == (copy, "caches", "root", "Root 'root-a' is already used by cache 'cache'."));
+        Assert.Contains(outcome.Errors, e => (e.Id, e.Stage, e.Field, e.Message) == (other, "caches", "root", "Root 'root-a' is already used by cache 'cache'."));
+    }
+
+    [Fact]
+    public async Task ACreateSentAgainAfterALostAnswerFindsItsOwnRowsAndAppliesAsUnchanged()
+    {
+        await using var h = new GraphHarness();
+        var proc = await h.ProcessorAsync();
+        var a = await h.StepAsync(proc, "a");
+        var wf = await h.WorkflowAsync("wf", [a]);
+        var loaded = await h.Reader.ReadAsync(wf, h.Ct);
+        h.Forget();
+        Guid n = Guid.NewGuid(), nc = Guid.NewGuid(), na = Guid.NewGuid();
+        DesignSaveRequest Body(DateTime stamp) => Of(
+            workflow: new DesignWorkflowDto(stamp, null, null, [nc]),
+            newSteps: [new DesignNewStepDto(n, a, proc, StepFields("a"), null)],
+            newCaches: [new DesignNewCacheDto(nc, null, F("""{"name":"c","version":"1.0.0","root":"r-copy","items":"{}"}"""))],
+            assignments: [new DesignAssignmentDto("create", na, n, null, F("""{"name":"x","version":"1.0.0","payload":"{}"}"""))]);
+
+        Assert.True((await h.Syncer().SaveAsync(wf, Body(loaded.Workflow.UpdatedAt), h.Ct)).Applied);
+        h.Forget();
+        var again = await h.Syncer().SaveAsync(wf, Body((await h.Db.Workflows.SingleAsync(w => w.Id == wf, h.Ct)).UpdatedAt), h.Ct);
+
+        Assert.True(again.Applied, Describe(again));
+        Assert.Contains("info steps: steps: 1 unchanged", Lines(again));
+        Assert.Contains("info caches: caches: 1 unchanged", Lines(again));
+        Assert.Contains("info assignments: assignments: 1 unchanged", Lines(again));
+        h.Forget();
+        Assert.Equal(2, await h.Db.Steps.CountAsync(h.Ct));
+    }
+
+    [Fact]
+    public async Task APastedAssignmentCarriesItsOwnFieldsSoItSavesWhenItsOriginalIsGone()
+    {
+        // cut and paste across workflows: the original row was deleted before the copy is saved
+        await using var h = new GraphHarness();
+        var proc = await h.ProcessorAsync();
+        var wf = await h.WorkflowAsync("wf", [await h.StepAsync(proc, "a")]);
+        Guid n = Guid.NewGuid(), na = Guid.NewGuid(), gone = Guid.NewGuid();
+        var loaded = await h.Reader.ReadAsync(wf, h.Ct);
+        h.Forget();
+
+        var outcome = await h.Syncer().SaveAsync(wf, Of(
+            workflow: new DesignWorkflowDto(loaded.Workflow.UpdatedAt, null, null, null),
+            newSteps: [new DesignNewStepDto(n, null, proc, StepFields("cut"), null)],
+            assignments: [new DesignAssignmentDto("create", na, n, null,
+                F("""{"name":"asg","version":"2.0.0","description":"kept","payload":"{\"k\":1}"}"""), CopyOf: gone)]), h.Ct);
+
+        Assert.True(outcome.Applied, Describe(outcome));
+        h.Forget();
+        var made = await h.Db.Assignments.SingleAsync(x => x.Id == na, h.Ct);
+        Assert.Equal(("asg", "2.0.0", "kept", n), (made.Name, made.Version, made.Description, made.StepId));
+    }
+
+    [Fact]
+    public async Task OnlyTheWorkflowsOwnStepsAndCachesAreDeletedAndARefusedDeleteStaysItsOwn()
+    {
+        await using var h = new GraphHarness();
+        var proc = await h.ProcessorAsync();
+        var a = await h.StepAsync(proc, "a");
+        var parked = await h.StepAsync(proc, "parked");
+        var stranger = await h.StepAsync(proc, "stranger");
+        var foreign = await h.CacheAsync("foreign");
+        var wf = await h.WorkflowAsync("wf", [a], layout: $$"""{"v":2,"parked":["{{parked}}"]}""");
+        var other = await h.WorkflowAsync("other", [parked]);
+        h.Forget();
+        var stamp = (Guid id) => h.Db.Steps.AsNoTracking().Single(s => s.Id == id).UpdatedAt;
+
+        // the parked step is this workflow's (its layout places it) but another workflow uses it: refused for that
+        var outcome = await h.Syncer().SaveAsync(wf, Of(
+            deletedSteps: [new DesignDeleteDto(stranger, stamp(stranger)), new DesignDeleteDto(parked, stamp(parked))],
+            deletedCaches: [new DesignDeleteDto(foreign, null)]), h.Ct);
+
+        Assert.Contains(outcome.Errors, e => (e.Id, e.Message) == (stranger, "Not deleted: not a step of this workflow."));
+        Assert.Contains(outcome.Errors, e => (e.Id, e.Message) == (foreign, "Not deleted: not a cache of this workflow."));
+        Assert.Contains(outcome.Errors, e => (e.Id, e.Message) == (parked, "Not deleted: still used by workflow 'other' (an entry step there)."));
+
+        // the stored layout no longer places it, but the stored design's delete keeps it this workflow's own
+        h.Db.RemoveRange(h.Db.WorkflowEntrySteps.Where(j => j.WorkflowId == other));
+        await h.Db.SaveChangesAsync(h.Ct);
+        h.Forget();
+        var next = await h.Syncer().SaveAsync(wf, Of(deletedSteps: [new DesignDeleteDto(parked, stamp(parked))]), h.Ct);
+        Assert.True(next.Applied, Describe(next));
+        h.Forget();
+        Assert.False(await h.Db.Steps.AnyAsync(s => s.Id == parked, h.Ct));
+    }
+
+    [Fact]
     public void AnIdCreatedAndDeletedOrChangedInOneDesignIsMalformed()
     {
         var id = Guid.NewGuid();
@@ -360,6 +465,12 @@ public sealed class DesignCreateDeleteTests
             newSteps: [new DesignNewStepDto(Guid.Empty, null, proc, null, null)])));
         Assert.Throws<ValidationException>(() => DesignShape.ThrowIfMalformed(Guid.NewGuid(), Of(
             newSteps: [new DesignNewStepDto(id, null, Guid.Empty, null, null)])));
+        Assert.Throws<ValidationException>(() => DesignShape.ThrowIfMalformed(Guid.NewGuid(), Of(
+            newCaches: [new DesignNewCacheDto(Guid.Empty, null, null)])));
+        Assert.Throws<ValidationException>(() => DesignShape.ThrowIfMalformed(Guid.NewGuid(), Of(
+            newSteps: [new DesignNewStepDto(id, Guid.Empty, proc, null, null)])));
+        Assert.Throws<ValidationException>(() => DesignShape.ThrowIfMalformed(Guid.NewGuid(), Of(
+            assignments: [new DesignAssignmentDto("create", id, proc, null, null, Guid.Empty)])));
         Assert.Null(Record.Exception(() => DesignShape.ThrowIfMalformed(Guid.NewGuid(), Of(
             newSteps: [new DesignNewStepDto(id, null, proc, null, null)], deletedSteps: [new DesignDeleteDto(Guid.NewGuid(), null)]))));
     }

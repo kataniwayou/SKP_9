@@ -58,10 +58,12 @@ internal sealed class AssignmentStage : IDesignStage
                         run.Fail("assignment", a.Id, "assignments", null, "Not created: its step was not created.");
                         break;
                     }
-                    if (await run.UnitAsync("assignment", a.Id, "assignments", () => CreateAsync(a, ct), ct))
+                    var existed = false;
+                    if (await run.UnitAsync("assignment", a.Id, "assignments", () => CreateAsync(a, x => existed = x, ct), ct))
                     {
                         run.CreatedAssignments.Add(a.Id);
-                        run.Changed("assignment", a.Id, "created", "created (linked to the workflow in the workflow stage)");
+                        if (existed) run.Unchanged(a.Id);
+                        else run.Changed("assignment", a.Id, "created", "created (linked to the workflow in the workflow stage)");
                     }
                     break;
                 case "update":
@@ -91,10 +93,8 @@ internal sealed class AssignmentStage : IDesignStage
     private static string? Text(Dictionary<string, System.Text.Json.JsonElement>? fields, string key) =>
         fields is not null && fields.TryGetValue(key, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
 
-    private async Task<List<FieldError>> CreateAsync(DesignAssignmentDto a, CancellationToken ct)
+    private async Task<List<FieldError>> CreateAsync(DesignAssignmentDto a, Action<bool> already, CancellationToken ct)
     {
-        if (await _db.Set<AssignmentEntity>().AnyAsync(x => x.Id == a.Id, ct))
-            return [new FieldError(null, "Not created: an assignment with this id already exists.")];
         var errors = new List<FieldError>();
         // a pasted step's copy (2026-10-10) starts as its original's row; the fields it names win
         var original = a.CopyOf is { } of ? await _db.Set<AssignmentEntity>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == of, ct) : null;
@@ -102,6 +102,17 @@ internal sealed class AssignmentStage : IDesignStage
         var fields = DesignFields.Apply(start, a.Fields, errors);
         if (errors.Count > 0) return errors;
         var dto = new AssignmentCreateDto(fields.Name, fields.Version, fields.Description, a.StepId, fields.Payload);
+        var existing = await _db.Set<AssignmentEntity>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == a.Id, ct);
+        if (existing is not null)
+        {
+            // the same row this design creates (a Save sent again after its answer was lost): nothing to create
+            if ((existing.Name, existing.Version, existing.Description, existing.StepId, existing.Payload) == (dto.Name, dto.Version, dto.Description, dto.StepId, dto.Payload))
+            {
+                already(true);
+                return [];
+            }
+            return [new FieldError(null, "Not created: a different assignment with this id already exists.")];
+        }
         var problems = DesignFields.Failures(await _createValidator.ValidateAsync(dto, ct));
         if (problems.Count > 0) return problems;
         var entity = _mapper.ToEntity(dto);

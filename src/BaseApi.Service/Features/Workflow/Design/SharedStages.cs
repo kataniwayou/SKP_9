@@ -157,22 +157,38 @@ internal sealed class CacheStage : IDesignStage
         foreach (var (id, name) in names) run.Label(id, $"cache '{name}'");
         foreach (var n in created)
         {
+            var already = false;
             var applied = await run.UnitAsync("cache", n.Id, "caches", async () =>
             {
-                if (await _db.Set<CacheEntity>().AnyAsync(x => x.Id == n.Id, ct))
-                    return [new FieldError(null, "Not created: a cache with this id already exists.")];
                 var errors = new List<FieldError>();
                 var fields = DesignFields.Apply(new CacheUpdateDto("", "", null, "", ""), n.Fields, errors);
                 if (errors.Count > 0) return errors;
                 var dto = new CacheCreateDto(fields.Name, fields.Version, fields.Description, fields.Root, fields.Items);
+                var existing = await _db.Set<CacheEntity>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == n.Id, ct);
+                if (existing is not null)
+                {
+                    // the same row this design creates (a Save sent again after its answer was lost): nothing to do
+                    if ((existing.Name, existing.Version, existing.Description, existing.Root, existing.Items) == (dto.Name, dto.Version, dto.Description, dto.Root, dto.Items))
+                    {
+                        already = true;
+                        return [];
+                    }
+                    return [new FieldError(null, "Not created: a different cache with this id already exists.")];
+                }
                 var problems = DesignFields.Failures(await _createValidator.ValidateAsync(dto, ct));
                 if (problems.Count > 0) return problems;
+                if (await RootTakenAsync(dto.Root, n.Id, ct) is { } taken) return [taken];
                 var entity = _mapper.ToEntity(dto);
                 entity.Id = n.Id;
                 _db.Add(entity);
                 return problems;
             }, ct);
             if (!applied) continue;
+            if (already)
+            {
+                run.Unchanged(n.Id);
+                continue;
+            }
             var copy = n.CopyOf is { } of ? $" (copy of '{(names.TryGetValue(of, out var name) ? name : DesignLogText.Short(of))}')" : "";
             run.Changed("cache", n.Id, "created", $"created{copy}", sentence: true);
         }
@@ -189,6 +205,7 @@ internal sealed class CacheStage : IDesignStage
                 if (errors.Count > 0) return errors;
                 var problems = DesignFields.Failures(await _validator.ValidateAsync(dto, ct));
                 if (problems.Count > 0) return problems;
+                if (dto.Root != before.Root && await RootTakenAsync(dto.Root, c.Id, ct) is { } taken) return [taken];
                 _mapper.Update(dto, entity);
                 change = DesignLogText.Join(DesignLogText.Fields(
                     ("name", before.Name, dto.Name), ("version", before.Version, dto.Version), ("description", before.Description, dto.Description),
@@ -200,5 +217,16 @@ internal sealed class CacheStage : IDesignStage
             else run.Changed("cache", c.Id, "updated", change);
         }
         run.EndStage();
+    }
+
+    /// <summary>
+    /// Root is unique (<c>uq_cache_root</c>: the root is the cache's L2 address): another cache that already uses it is a
+    /// clear refusal here rather than the database's error.
+    /// </summary>
+    private async Task<FieldError?> RootTakenAsync(string root, Guid self, CancellationToken ct)
+    {
+        var other = await _db.Set<CacheEntity>().AsNoTracking().Where(x => x.Root == root && x.Id != self)
+            .Select(x => new { x.Name }).FirstOrDefaultAsync(ct);
+        return other is null ? null : new FieldError("root", $"Root '{root}' is already used by cache '{other.Name}'.");
     }
 }

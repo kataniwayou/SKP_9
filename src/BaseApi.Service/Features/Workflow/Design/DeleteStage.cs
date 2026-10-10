@@ -58,6 +58,7 @@ internal sealed class DeleteStage : IDesignStage
                     gone = true;
                     return [];
                 }
+                if (!run.WorkflowSteps.Contains(d.Id)) return [new FieldError(null, "Not deleted: not a step of this workflow.")];
                 if (DesignRun.IsStale(entity.UpdatedAt, d.UpdatedAt)) return [new FieldError(null, DesignRun.Conflict)];
 
                 var assignments = await _db.Set<AssignmentEntity>().Where(a => a.StepId == d.Id).ToListAsync(ct);
@@ -92,6 +93,7 @@ internal sealed class DeleteStage : IDesignStage
                     gone = true;
                     return [];
                 }
+                if (!run.WorkflowCaches.Contains(d.Id)) return [new FieldError(null, "Not deleted: not a cache of this workflow.")];
                 var users = await _db.Set<WorkflowCaches>().AsNoTracking().Where(j => j.CacheId == d.Id).Select(j => j.WorkflowId).Distinct().ToListAsync(ct);
                 if (users.Count > 0)
                 {
