@@ -95,7 +95,7 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
         <CapsuleToolbar workflow={open.status.doc.graph.workflow} status={status}
           save={onSave ? { enabled: canSave(open), saving: open.saving, onSave } : undefined}
           run={onRun ? {
-            blocked: { start: runBlocked(open, status, 'start'), stop: runBlocked(open, status, 'stop') }, pending: open.run?.op ?? null,
+            blocked: { start: runBlocked(open), stop: runBlocked(open) }, pending: open.run?.op ?? null,
             onStart: () => onRun('start'), onStop: () => onRun('stop'),
           } : undefined}
           design={actions ? {

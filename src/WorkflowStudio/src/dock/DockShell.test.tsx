@@ -234,14 +234,14 @@ describe('DockShell', () => {
   });
 
   it('F5 starts and Shift+F5 stops through the page; a reason it cannot is a toast (2026-10-09)', () => {
-    const onRunCommand = vi.fn((op: 'start' | 'stop') => (op === 'stop' ? 'Stop is not available: It is not running' : null));
+    const onRunCommand = vi.fn((op: 'start' | 'stop') => (op === 'stop' ? 'Stop is not available: Saving…' : null));
     setup({ onRunCommand });
     fireEvent.keyDown(window, { key: 'F5' });
     expect(onRunCommand).toHaveBeenLastCalledWith('start');
     expect(toast()?.textContent ?? '').toBe('');
     fireEvent.keyDown(window, { key: 'F5', shiftKey: true });
     expect(onRunCommand).toHaveBeenLastCalledWith('stop');
-    expect(toast()).toHaveTextContent('Stop is not available: It is not running');
+    expect(toast()).toHaveTextContent('Stop is not available: Saving…');
     // Ctrl+F5 is the browser's; nothing reaches the page
     fireEvent.keyDown(window, { key: 'F5', ctrlKey: true });
     expect(onRunCommand).toHaveBeenCalledTimes(2);

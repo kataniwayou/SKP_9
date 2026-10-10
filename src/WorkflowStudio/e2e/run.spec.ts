@@ -32,8 +32,9 @@ test('Start with an unsaved design notes it and starts the saved workflow; the s
   const start = panel.getByRole('button', { name: /Start/ });
   const stop = panel.getByRole('button', { name: /Stop/ });
   await expect(status).toHaveText('■ stopped', { timeout: 15_000 });
+  // both enabled whatever the live status: BaseApi's Start and Stop are idempotent (the user's rule, 2026-10-10)
   await expect(start).toBeEnabled();
-  await expect(stop).toBeDisabled();
+  await expect(stop).toBeEnabled();
 
   // an unsaved design: the step block dragged with the real mouse
   const box = (await node(panel, t!.stepId).boundingBox())!;
@@ -61,7 +62,7 @@ test('Start with an unsaved design notes it and starts the saved workflow; the s
   await start.click();
   expect((await sent).postDataJSON()).toBe(wf.id);
   await expect(status).toHaveText('▶ running', { timeout: 30_000 });
-  await expect(start).toBeDisabled();
+  await expect(start).toBeEnabled();
   await expect(stop).toBeEnabled();
   expect((await request.get('/api/v1/orchestration/live').then((r) => r.json())) as string[]).toContain(wf.id);
   const started = (await texts(page)).map((l) => l.text);
@@ -78,18 +79,34 @@ test('Start with an unsaved design notes it and starts the saved workflow; the s
   await expect(page.getByText('● design draft')).toBeVisible();
   await shot(page, '5-started');
 
+  // Start again while it runs: sent (BaseApi re-projects what it holds), the 202 ends it at once, still running
+  const again = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/orchestration/start'));
+  await start.click();
+  await again;
+  await expect.poll(async () => (await texts(page)).map((l) => l.text).slice(-1)[0]).toBe('Start accepted by BaseApi (202)');
+  await expect(status).toHaveText('▶ running');
+  await expect(start).toBeEnabled();
+  const before = (await texts(page)).length;
+
   // Stop from the keyboard: Shift+F5 on the active document
   await page.keyboard.press('Shift+F5');
   await expect(status).toHaveText('■ stopped', { timeout: 30_000 });
   await expect(start).toBeEnabled();
-  await expect(stop).toBeDisabled();
+  await expect(stop).toBeEnabled();
   expect((await request.get('/api/v1/orchestration/live').then((r) => r.json())) as string[]).not.toContain(wf.id);
-  const stopped = (await texts(page)).map((l) => l.text).slice(4);
+  const stopped = (await texts(page)).map((l) => l.text).slice(before);
   expect(stopped[0]).toBe('Stop requested: POST /orchestration/stop for the workflow BaseApi holds');
   expect([
     ['Stop accepted by BaseApi (202): stopping… waiting for the workflow to leave the live set', 'stopped'],
     ['stopped', 'Stop accepted by BaseApi (202)'],
   ]).toContainEqual(stopped.slice(1));
-  expect((await texts(page)).filter((l) => l.red)).toEqual([]);
   await shot(page, '6-stopped');
+
+  // Stop again while stopped: sent, the 202 ends it at once, still stopped
+  const twice = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/orchestration/stop'));
+  await stop.click();
+  await twice;
+  await expect.poll(async () => (await texts(page)).map((l) => l.text).slice(-1)[0]).toBe('Stop accepted by BaseApi (202)');
+  await expect(status).toHaveText('■ stopped');
+  expect((await texts(page)).filter((l) => l.red)).toEqual([]);
 });

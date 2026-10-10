@@ -264,7 +264,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
         onRunCommand={(op: RunOp) => {
           const open = store.getState().docs.find((d) => d.workflowId === store.getState().activeId);
           if (!open) return `${RUN_WORD[op]}: open a workflow first.`;
-          const why = runBlocked(open, liveOf(open.workflowId), op);
+          const why = runBlocked(open);
           if (why !== null) return `${RUN_WORD[op]} is not available: ${why}`;
           void runWorkflow(api, store, open.workflowId, op, liveOf);
           return null;

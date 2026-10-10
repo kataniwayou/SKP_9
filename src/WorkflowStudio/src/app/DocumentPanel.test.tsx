@@ -69,7 +69,7 @@ describe('DocumentPanel', () => {
     expect(screen.getByRole('button', { name: '▶ Start' }).parentElement).toHaveAttribute('data-tip', 'Not available yet');
   });
 
-  it('Start and Stop follow the liveness store: Start only while stopped, Stop only while running; a press shows starting… (2026-10-09)', async () => {
+  it('Start and Stop are enabled running or stopped (idempotent, the user\'s rule 2026-10-10); a press shows starting… (2026-10-09)', async () => {
     const live = running(['wf1']);
     const store = createStudioStore();
     store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
@@ -80,8 +80,7 @@ describe('DocumentPanel', () => {
     const stop = () => screen.getByRole('button', { name: /Stop/ });
 
     expect(await screen.findByText('▶ running')).toBeInTheDocument();
-    expect(start()).toBeDisabled();
-    expect(start().parentElement).toHaveAttribute('data-tip', 'It is running');
+    expect(start()).toBeEnabled();
     expect(stop()).toBeEnabled();
     fireEvent.click(stop());
     expect(onRun).toHaveBeenCalledWith('stop');
@@ -90,7 +89,7 @@ describe('DocumentPanel', () => {
     expect(await screen.findByText('■ stopped')).toBeInTheDocument();
     expect(start()).toBeEnabled();
     expect(start()).toHaveAttribute('data-tip', 'Start the saved workflow (what BaseApi holds, not the drawing) (F5)');
-    expect(stop()).toBeDisabled();
+    expect(stop()).toBeEnabled();
     fireEvent.click(start());
     expect(onRun).toHaveBeenLastCalledWith('start');
 

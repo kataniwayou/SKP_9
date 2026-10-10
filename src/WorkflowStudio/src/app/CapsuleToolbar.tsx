@@ -69,7 +69,7 @@ export function CapsuleToolbar({ workflow, status, save, design, run }: {
   );
 }
 
-/** Start or Stop: enabled only when the live status allows it and no press is in progress. */
+/** Start or Stop: enabled whatever the live status (both idempotent); only while loaded, not saving, no press in progress. */
 function RunButton({ op, run }: { op: RunOp; run: Parameters<typeof CapsuleToolbar>[0]['run'] }) {
   const label = op === 'start' ? (run?.pending === 'start' ? '▶ Starting…' : '▶ Start') : (run?.pending === 'stop' ? '■ Stopping…' : '■ Stop');
   const cls = op === 'start' ? 'qb run' : 'qb stop';

@@ -31,18 +31,15 @@ const apiWith = (start: unknown, stop: unknown = accepted) =>
 const doc = (store: ReturnType<typeof createStudioStore>) => store.getState().docs[0]!;
 const texts = (store: ReturnType<typeof createStudioStore>) => store.getState().output.map((l) => [l.level, l.text]);
 
-describe('Start and Stop follow the live status (2026-10-09; the liveness store, 2026-10-10)', () => {
-  it('Start only while stopped, Stop only while running; neither while checking, unknown or a press is in progress', async () => {
+describe('Start and Stop, whatever the live status (2026-10-09; enabled whatever it is: the user\'s rule, 2026-10-10)', () => {
+  it('both can be pressed running, stopped, checking or unknown (BaseApi is idempotent); not while loading, saving or a press is in progress', async () => {
     const base = { status: { kind: 'ready' }, run: null, saving: false };
-    expect([runBlocked(base, 'stopped', 'start'), runBlocked(base, 'stopped', 'stop')]).toEqual([null, 'It is not running']);
-    expect([runBlocked(base, 'running', 'start'), runBlocked(base, 'running', 'stop')]).toEqual(['It is running', null]);
-    expect(runBlocked(base, 'checking', 'start')).toBe('Checking whether it runs…');
-    expect(runBlocked(base, 'unknown', 'stop')).toBe('BaseApi could not say whether it runs');
-    expect(runBlocked({ ...base, run: { op: 'start', phase: 'waiting', token: 't' } }, 'stopped', 'start')).toBe('Starting…');
-    expect(runBlocked({ status: { kind: 'loading' }, run: null, saving: false }, 'stopped', 'start')).toBe('The workflow is not loaded');
+    expect(runBlocked(base)).toBeNull();
+    expect(runBlocked({ ...base, run: { op: 'start', phase: 'waiting', token: 't' } })).toBe('Starting…');
+    expect(runBlocked({ ...base, run: { op: 'stop', phase: 'sending', token: 't' } })).toBe('Stopping…');
+    expect(runBlocked({ status: { kind: 'loading' }, run: null, saving: false })).toBe('The workflow is not loaded');
     // a Save in flight blocks both (review 2026-10-09)
-    expect(runBlocked({ ...base, saving: true }, 'stopped', 'start')).toBe('Saving…');
-    expect(runBlocked({ ...base, saving: true }, 'running', 'stop')).toBe('Saving…');
+    expect(runBlocked({ ...base, saving: true })).toBe('Saving…');
   });
 
   it('Start: request, accepted, then "running" once the live set lists it; Output logs each step', async () => {
@@ -54,7 +51,7 @@ describe('Start and Stop follow the live status (2026-10-09; the liveness store,
 
     expect(api.startWorkflow).toHaveBeenCalledWith('wf1');
     expect(doc(store).run).toMatchObject({ op: 'start', phase: 'waiting' });
-    expect(runBlocked(doc(store), liveOf(), 'start')).toBe('Starting…');
+    expect(runBlocked(doc(store))).toBe('Starting…');
     expect(later).toHaveBeenCalledWith(expect.any(Function), RUN_TIMEOUT_MS);
     change(true);
     expect(doc(store).run).toBeNull();
@@ -67,7 +64,7 @@ describe('Start and Stop follow the live status (2026-10-09; the liveness store,
     const before = store.getState();
     later.mock.calls[0]![0]();
     expect(store.getState()).toBe(before);
-    expect([runBlocked(doc(store), liveOf(), 'start'), runBlocked(doc(store), liveOf(), 'stop')]).toEqual(['It is running', null]);
+    expect(runBlocked(doc(store))).toBeNull();
   });
 
   it('Start with an unsaved design says the design is not part of the run, and still starts', async () => {
@@ -88,7 +85,7 @@ describe('Start and Stop follow the live status (2026-10-09; the liveness store,
 
     expect(doc(store).run).toBeNull();
     expect(texts(store).at(-1)).toEqual(['error', 'Start refused by BaseApi: 422: Processor p is not live.']);
-    expect(runBlocked(doc(store), liveOf(), 'start')).toBeNull();
+    expect(runBlocked(doc(store))).toBeNull();
   });
 
   it('an accepted Start the live set never lists (a parked message) ends in red after the timeout', async () => {
@@ -102,15 +99,13 @@ describe('Start and Stop follow the live status (2026-10-09; the liveness store,
     expect(doc(store).run).toBeNull();
     expect(texts(store).at(-1)![0]).toBe('error');
     expect(texts(store).at(-1)![1]).toMatch(/^Start accepted, but the workflow is not in the live set after 30 s: its start message may have been parked/);
-    expect(runBlocked(doc(store), liveOf(), 'start')).toBeNull();
+    expect(runBlocked(doc(store))).toBeNull();
   });
 
-  it('Stop: request, accepted, then "stopped" once the live set drops it; a press not allowed sends nothing', async () => {
+  it('Stop: request, accepted, then "stopped" once the live set drops it', async () => {
     const { store, liveOf, change } = await storeWith('running');
     const api = apiWith(accepted);
 
-    await runWorkflow(api, store, 'wf1', 'start', liveOf, NOW, vi.fn());
-    expect(api.startWorkflow).not.toHaveBeenCalled();
     await runWorkflow(api, store, 'wf1', 'stop', liveOf, NOW, vi.fn());
     change(false);
 
@@ -121,6 +116,29 @@ describe('Start and Stop follow the live status (2026-10-09; the liveness store,
       ['info', 'Stop accepted by BaseApi (202): stopping… waiting for the workflow to leave the live set'],
       ['info', 'stopped'],
     ]);
+  });
+
+  it('Start of a running workflow is sent (it re-projects what BaseApi holds) and the 202 ends it at once; Stop of a stopped one likewise', async () => {
+    const running = await storeWith('running');
+    const api = apiWith(accepted);
+    await runWorkflow(api, running.store, 'wf1', 'start', running.liveOf, NOW, vi.fn());
+    expect(api.startWorkflow).toHaveBeenCalledWith('wf1');
+    expect(doc(running.store).run).toBeNull();
+    expect(texts(running.store).at(-1)).toEqual(['info', 'Start accepted by BaseApi (202)']);
+
+    const stopped = await storeWith('stopped');
+    await runWorkflow(api, stopped.store, 'wf1', 'stop', stopped.liveOf, NOW, vi.fn());
+    expect(api.stopWorkflow).toHaveBeenCalledWith('wf1');
+    expect(doc(stopped.store).run).toBeNull();
+    expect(texts(stopped.store).at(-1)).toEqual(['info', 'Stop accepted by BaseApi (202)']);
+  });
+
+  it('a press while another is in progress sends nothing', async () => {
+    const { store, liveOf } = await storeWith('stopped');
+    const api = apiWith(accepted);
+    await runWorkflow(api, store, 'wf1', 'start', liveOf, NOW, vi.fn());
+    await runWorkflow(api, store, 'wf1', 'stop', liveOf, NOW, vi.fn());
+    expect(api.stopWorkflow).not.toHaveBeenCalled();
   });
 
   it('a change seen while the request was on its way is logged once, and the answer finishes the press', async () => {

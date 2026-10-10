@@ -21,7 +21,7 @@ export async function runWorkflow(
   now: () => Date = () => new Date(), later: (run: () => void, ms: number) => void = (run, ms) => { setTimeout(run, ms); },
 ): Promise<void> {
   const doc = store.getState().docs.find((d) => d.workflowId === workflowId);
-  if (!doc || runBlocked(doc, liveOf(workflowId), op) !== null) return;
+  if (!doc || runBlocked(doc) !== null) return;
   const token = `${op}-${++presses}-${now().getTime()}`;
   const note = op === 'start' ? startNote(doc) : null;
   store.dispatch({ type: 'runRequested', workflowId, op, token, at: now().toISOString(), ...(note ? { note } : {}) });
