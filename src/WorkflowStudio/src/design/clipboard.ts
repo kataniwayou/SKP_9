@@ -175,6 +175,8 @@ function assignmentClip(stepId: Id, a: Assignment | undefined, blocks: Blocks, e
  * `<root>-copy-2`, `-copy-3`, …
  */
 export function uniqueRoot(root: string, taken: ReadonlySet<string>): string {
+  // no root yet (2026-10-11): a copy has none either, and is drawn and refused as its original is
+  if (root.trim() === '') return '';
   const first = `${root}-copy`;
   if (!taken.has(first)) return first;
   for (let n = 2; ; n++) if (!taken.has(`${first}-${n}`)) return `${first}-${n}`;

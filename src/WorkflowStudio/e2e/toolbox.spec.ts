@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
-import { box, documentPanel, emptySpot, get, labelsOf, node, openWorkflow, pane, save, type Pt } from './studio';
+import { box, documentPanel, emptySpot, get, inspector, labelsOf, node, openWorkflow, pane, save, type Pt } from './studio';
 import { created, createThrowaway, expect, removeThrowaway, test, type Throwaway } from './throwaway';
 
 // The Toolbox (the user's rules, 2026-10-11), with the real mouse: its tiles dragged onto a workflow's canvas. New or empty
@@ -125,6 +125,14 @@ test('Toolbox: an empty step, the throwaway\'s processor onto it, a wire, an emp
   const newCacheId = (await caches.evaluateAll((els, k) => els.map((e) => e.getAttribute('data-id')!).find((id) => id !== `cache:${k}`), t.cacheId))!.slice('cache:'.length);
   extra.caches.push(newCacheId);
   extra.steps.push(stepId);
+  // no root yet: dashed with a ⚠; the Inspector sets one (the user's rule, 2026-10-11), and it draws as any cache
+  const madeCache = panel.locator(`.react-flow__node-cache[data-id="cache:${newCacheId}"]`);
+  await expect(madeCache.locator('.cache-empty-mark')).toHaveText('⚠');
+  await madeCache.click();
+  await inspector(page).getByLabel('Root', { exact: true }).click();
+  await page.keyboard.type(`${t.tag}-r2`);
+  await page.keyboard.press('Tab');
+  await expect(madeCache.locator('.cache-empty-line')).toHaveCount(0);
 
   // Save: the new step with the same processor (no new processor), the new cache, linked to the workflow
   const procsBefore = (await get<{ id: string }[]>(request, 'processors')).length;
@@ -133,7 +141,7 @@ test('Toolbox: an empty step, the throwaway\'s processor onto it, a wire, an emp
   const step = await get<{ processorId: string }>(request, `steps/${stepId}`);
   expect(step.processorId).toBe(t.processorId);
   const cache = await get<{ root: string; items: string }>(request, `caches/${newCacheId}`);
-  expect(cache.root).toMatch(/^cache(-\d+)?$/);
+  expect(cache.root).toBe(`${t.tag}-r2`);
   expect(JSON.parse(cache.items)).toEqual({});
   expect((await get<{ cacheIds: string[] }>(request, `workflows/${t.workflow.id}`)).cacheIds).toEqual(expect.arrayContaining([t.cacheId, newCacheId]));
   expect((await get<{ id: string }[]>(request, 'processors')).length).toBe(procsBefore);

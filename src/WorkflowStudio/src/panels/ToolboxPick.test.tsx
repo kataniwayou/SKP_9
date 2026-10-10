@@ -6,7 +6,7 @@ import { loadedDocument } from '../app/fixtures';
 import { StudioActionsProvider, type StudioActions } from '../app/studioActions';
 import { createTextFitter } from '../canvas/fitText';
 import { CacheView } from '../canvas/nodes/CacheNode';
-import { cacheData, emptyItems } from '../canvas/toFlow';
+import { cacheData, emptyRoot } from '../canvas/toFlow';
 import { toolDrag } from '../design/toolDrag';
 import { INITIAL_STATE, reduce } from '../store/studioState';
 import { createStudioStore, StudioStoreProvider } from '../store/studioStore';
@@ -123,9 +123,9 @@ describe('an entity the active design changed is shown as that design has it, ma
 });
 
 describe('an empty cache is drawn with the empty step\'s dashed amber rectangle and ⚠ (2026-10-11)', () => {
-  it('no items: the dashed rectangle instead of the honeycomb and the root plate; with an item: as usual', () => {
-    expect([emptyItems('{}'), emptyItems(' '), emptyItems('{"a":"1"}'), emptyItems('not json'), emptyItems('[]')]).toEqual([true, true, false, false, false]);
-    const empty = cacheFromDto(cacheDto('k1', { items: '{}' }));
+  it('no root: the dashed rectangle instead of the honeycomb and the root plate; with a root: as usual, whatever its items', () => {
+    expect([emptyRoot(''), emptyRoot('  '), emptyRoot('rates')]).toEqual([true, true, false]);
+    const empty = cacheFromDto(cacheDto('k1', { root: '', items: '{"a":"1"}' }));
     const { container, rerender } = render(<svg><CacheView {...cacheData(empty, fitter)} /></svg>);
     expect(container.querySelector('.cache-empty-line')).not.toBeNull();
     expect(container.querySelector('.cache-empty-line')).toHaveAttribute('fill', 'none');
@@ -133,7 +133,7 @@ describe('an empty cache is drawn with the empty step\'s dashed amber rectangle 
     expect(container.querySelector('.nx-plate')).toBeNull();
     expect(container.querySelector('.cache-empty-mark')?.textContent).toBe('⚠');
     expect(container.querySelector('.nx-cl')).not.toBeNull();
-    rerender(<svg><CacheView {...cacheData({ ...empty, items: '{"a":"1"}' }, fitter)} /></svg>);
+    rerender(<svg><CacheView {...cacheData({ ...empty, root: 'rates', items: '{}' }, fitter)} /></svg>);
     expect(container.querySelector('.cache-empty-line')).toBeNull();
     expect(container.querySelector('.cache-empty-mark')).toBeNull();
     expect(container.querySelector('.nx-hex')).not.toBeNull();

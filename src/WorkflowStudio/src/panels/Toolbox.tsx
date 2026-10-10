@@ -26,7 +26,7 @@ interface Lists { processors: Processor[]; caches: Cache[]; schemas: Map<Id, Sch
 const NO_AUDIT = { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null };
 /** The empty step tile's step: a new one has this name and no processor (the amber ⚠ slot). */
 const EMPTY_STEP: Step = { id: '', name: 'empty step', version: '1.0.0', description: null, processorId: null, nextStepIds: [], entryCondition: 1, updatedAt: '', audit: NO_AUDIT };
-const EMPTY_CACHE: Cache = { id: '', name: 'empty cache', version: '1.0.0', description: null, root: 'new root', items: '{}', audit: NO_AUDIT };
+const EMPTY_CACHE: Cache = { id: '', name: 'empty cache', version: '1.0.0', description: null, root: '', items: '{}', audit: NO_AUDIT };
 
 /** The empty step as the canvas draws a step with no processor. */
 function StepArt({ fitter }: { fitter: TextFitter }) {
@@ -229,7 +229,7 @@ export function Toolbox() {
             {processors.map(({ p, shown }) => tile(`p:${p.id}`, { kind: 'processor', processor: p, schemas: schemasOf(p) }, `processor ${shown.value.name} ${shown.value.version}`,
               <ProcessorArt p={shown.value} schemas={lists!.schemas} fitter={fitter} health={healthOf(p.id)} />, null, shown.unsaved))}
             <div className="tb-h">Caches <span className="tb-count">{lists ? caches.length : '…'}</span></div>
-            {tile('newCache', { kind: 'newCache' }, 'an empty cache', <CacheArt c={EMPTY_CACHE} fitter={fitter} />, <><b>Empty cache</b><span>a new cache, no items</span></>)}
+            {tile('newCache', { kind: 'newCache' }, 'an empty cache', <CacheArt c={EMPTY_CACHE} fitter={fitter} />, <><b>Empty cache</b><span>a new cache, no root yet</span></>)}
             {caches.map(({ c, shown: { value: v, unsaved } }) => tile(`c:${c.id}`, { kind: 'cache', cache: c }, `cache ${v.name} ${v.version}`, <CacheArt c={v} fitter={fitter} />,
               <><b>{v.name}</b><span>{v.version}</span><span className="tb-root">root {v.root}</span></>, unsaved))}
           </>

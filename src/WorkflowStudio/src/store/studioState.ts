@@ -515,7 +515,7 @@ function reduceDocs(state: StudioState, action: StudioAction): StudioState {
     case 'toolDrop':
       return update(state, action.workflowId, (d) => {
         if (d.status.kind !== 'ready' || d.saving) return d;
-        const dropped = dropTool(d.status.doc, d.edits, d.design.draft, action.item, action.at, action.newId, [...knownRoots(state), ...(action.roots ?? [])]);
+        const dropped = dropTool(d.status.doc, d.edits, d.design.draft, action.item, action.at, action.newId);
         return dropped === null ? d : blocksChanged(d, dropped.draft, dropped.picks);
       });
     case 'deletePicks':

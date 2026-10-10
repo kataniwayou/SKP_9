@@ -48,11 +48,11 @@ describe('Toolbox drops (the user\'s rules, 2026-10-11)', () => {
     expect(drawn.points).toEqual([[1000, 600], [1096, 600]]);
   });
 
-  it('an empty cache: a new virtual cache with a root no other cache has (cache, then cache-2…), saved as a new cache', async () => {
+  it('an empty cache: a new virtual cache with no root yet (drawn dashed with a ⚠ until one is set), saved as a new cache', async () => {
     const base = await doc();
-    const r = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'newCache' }, at, ids, ['cache-2'])!;
+    const r = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'newCache' }, at, ids)!;
     const [id, made] = Object.entries(r.draft.blocks.caches)[0]!;
-    expect(made).toMatchObject({ copyOf: null, name: 'cache', version: '1.0.0', root: 'cache-3', items: '{}' });
+    expect(made).toMatchObject({ copyOf: null, name: 'cache', version: '1.0.0', root: '', items: '{}' });
     const shown = applyDesign(base, r.draft, EMPTY_EDITS);
     expect(shown.graph.workflow.cacheIds).toEqual(['k1', id]);
     expect(buildDesignRequest(base, shown, { draft: r.draft, edits: EMPTY_EDITS }).newCaches).toEqual([expect.objectContaining({ id })]);

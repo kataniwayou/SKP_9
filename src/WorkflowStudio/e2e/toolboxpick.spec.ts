@@ -82,14 +82,14 @@ test('a click on a processor or cache tile shows it read-only in the Inspector, 
   await expect(fresh.locator('.cache-empty-mark')).toHaveCSS('fill', 'rgb(245, 184, 65)');
   if (SHOTS) await fresh.screenshot({ path: `${SHOTS}/empty-cache.png` });
 
-  // an item added in the Inspector: drawn as any cache
+  // a root set in the Inspector (the user's rule, 2026-10-11): drawn as any cache, the dashed rectangle and ⚠ gone
   await expect(pill(page)).toHaveText('CACHE');
-  await inspector(page).getByRole('button', { name: '+ Add item' }).click();
-  await page.keyboard.type('usd');
+  const root = inspector(page).getByLabel('Root', { exact: true });
+  await root.click();
+  await page.keyboard.type(`${t.tag}-r2`);
   await page.keyboard.press('Tab');
-  await page.keyboard.type('3.7');
-  await page.keyboard.press('Enter');
   await expect(fresh.locator('.cache-empty-line')).toHaveCount(0);
+  await expect(fresh.locator('.cache-empty-mark')).toHaveCount(0);
   await expect(fresh.locator('.nx-hex')).toHaveCount(1);
   // the dropped cache is not saved: dropped from the design
   await page.getByRole('button', { name: 'Discard design' }).click();

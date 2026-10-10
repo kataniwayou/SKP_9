@@ -83,12 +83,12 @@ const NEW_STEP_CONDITION = 1;
 
 /**
  * A Toolbox drop on a workflow's canvas (2026-10-11), as a paste is: one history step, the new item picked. `base` is the
- * workflow as loaded, `edits` and `draft` the design over it; `knownRoots` every cache root the studio knows (the open
- * workflows', and every cache BaseApi listed), so a new cache's root is no other's. Null when the drop is refused
+ * workflow as loaded, `edits` and `draft` the design over it; a new cache has no root yet (set in the Inspector). Null
+ * when the drop is refused
  * (`judgeTool`): a processor not on a step, or a cache already in this workflow.
  */
 export function dropTool(
-  base: StudioDocument, edits: EntityEdits, draft: Draft, item: ToolItem, p: Point, newId: () => string, knownRoots: Iterable<string> = [],
+  base: StudioDocument, edits: EntityEdits, draft: Draft, item: ToolItem, p: Point, newId: () => string,
 ): { draft: Draft; picks: Pick[] } | null {
   const saved = applyEdits(base, edits, draft.blocks);
   const shown = applyDraft(saved, draft);
@@ -110,9 +110,9 @@ export function dropTool(
       const id = newId();
       const box = landingBox(item, p)!;
       const name = uniqueName('cache', new Set([...shown.graph.caches.values()].map((c) => c.name)));
-      const root = uniqueName('cache', new Set([...knownRoots, ...[...shown.graph.caches.values()].map((c) => c.root)]));
+      // no root yet (the user's rule, 2026-10-11): drawn dashed with a ⚠ until the Inspector sets one; Save fails until then
       const caches = copy(b.caches);
-      caches[id] = { copyOf: null, name, version: '1.0.0', description: null, root, items: '{}', at: { x: box.x, y: box.y } };
+      caches[id] = { copyOf: null, name, version: '1.0.0', description: null, root: '', items: '{}', at: { x: box.x, y: box.y } };
       return { draft: withBlocks({ ...b, caches }), picks: [{ kind: 'node', id: cacheNodeId(id) }] };
     }
     case 'cache': {
