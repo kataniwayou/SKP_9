@@ -13,6 +13,8 @@ export type CacheNodeData = {
   /** The root plate's width: the root's text plus its margin, never past 128. */
   plateWidth: number;
   tooltip: string;
+  /** No items (2026-10-11): the honeycomb and the root plate give way to a dashed muted rectangle, as an empty step's slot. */
+  empty?: boolean;
 };
 export type CacheNodeType = Node<CacheNodeData, 'cache'>;
 
@@ -23,10 +25,10 @@ const W = CACHE_W, H = CACHE_H, MID = CACHE_W / 2;
  * Inside, stacked and centred: a hex mark, the name, CACHE and version, and the root on a plate.
  * Static: a cache is shared data, not a process, so nothing on it moves.
  */
-export function CacheView({ lines, versionLine, root, plateWidth, tooltip }: CacheNodeData) {
+export function CacheView({ lines, versionLine, root, plateWidth, tooltip, empty = false }: CacheNodeData) {
   const one = lines.length === 1;
   return (
-    <g className="cachetag nx">
+    <g className={empty ? 'cachetag nx cache-empty' : 'cachetag nx'} data-empty={empty ? '' : undefined}>
       <title>{tooltip}</title>
       <path className="nx-bd" d={CACHE_FRAME} />
       <g className="nx-g"><path className="nx-hl nx-brk" d={CACHE_FRAME} /></g>
@@ -39,13 +41,24 @@ export function CacheView({ lines, versionLine, root, plateWidth, tooltip }: Cac
           <rect className="nx-fc nx-d1" x={155} y={64 + i * 7} width={3} height={3} />
         </Fragment>
       ))}
-      <g className="nx-g"><polygon className="nx-hl nx-bd nx-hex" points={hexPoints(MID, 46, 20)} /></g>
-      <g className="nx-g"><polygon className="nx-fh" points={hexPoints(MID, 46, 10)} /></g>
+      {empty ? (
+        // an empty cache (2026-10-11): the content area dashed in muted grey, transparent inside, no ⚠ (it saves fine)
+        <rect className="cache-empty-line" x={14} y={14} width={W - 28} height={H - 28} rx={5} fill="none" />
+      ) : (
+        <>
+          <g className="nx-g"><polygon className="nx-hl nx-bd nx-hex" points={hexPoints(MID, 46, 20)} /></g>
+          <g className="nx-g"><polygon className="nx-fh" points={hexPoints(MID, 46, 10)} /></g>
+        </>
+      )}
       {lines.map((line, k) => <text key={k} className="nx-cn" x={MID} y={one ? 95 : 88 + k * 14} textAnchor="middle">{line}</text>)}
       <text className="nx-cl" x={MID} y={116} textAnchor="middle">{versionLine.text}</text>
-      <rect className="nx-bd" x={MID - plateWidth / 2} y={126} width={plateWidth} height={18} rx={3} />
-      <rect className="nx-hl nx-g nx-plate" x={MID - plateWidth / 2} y={126} width={plateWidth} height={18} rx={3} />
-      <text className="nx-root" x={MID} y={138.5} textAnchor="middle">{root.text}</text>
+      {!empty && (
+        <>
+          <rect className="nx-bd" x={MID - plateWidth / 2} y={126} width={plateWidth} height={18} rx={3} />
+          <rect className="nx-hl nx-g nx-plate" x={MID - plateWidth / 2} y={126} width={plateWidth} height={18} rx={3} />
+          <text className="nx-root" x={MID} y={138.5} textAnchor="middle">{root.text}</text>
+        </>
+      )}
     </g>
   );
 }

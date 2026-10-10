@@ -141,6 +141,17 @@ const CACHE_NAME_ROOM = 132, CACHE_ROOT_ROOM = 112, PLATE_MAX = 128;
 const CACHE_LABEL_SPACING = 0.2 * 8;
 
 /** The cache's name split after `-`, `_` and `.` onto at most two lines, each fitted; the root fitted to its plate. */
+/** A cache with no items (2026-10-11): blank text or an empty JSON object. Text that is no object is not "empty": it draws as usual. */
+export function emptyItems(items: string): boolean {
+  if (items.trim() === '') return true;
+  try {
+    const v: unknown = JSON.parse(items);
+    return v !== null && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0;
+  } catch {
+    return false;
+  }
+}
+
 export function cacheData(cache: Cache, fitter: TextFitter): CacheNodeData {
   const font = FONT.cacheName;
   const parts: string[] = [];
@@ -159,7 +170,8 @@ export function cacheData(cache: Cache, fitter: TextFitter): CacheNodeData {
     versionLine: spaced.fit(`CACHE · v${cache.version}`, CACHE_NAME_ROOM, FONT.cacheLabel),
     root,
     plateWidth: Math.min(PLATE_MAX, fitter.width(root.text, FONT.cacheRoot) + 22),
-    tooltip: `${cache.name} ${cache.version}\nroot ${cache.root}`,
+    tooltip: `${cache.name} ${cache.version}\nroot ${cache.root}${emptyItems(cache.items) ? '\nno items yet' : ''}`,
+    empty: emptyItems(cache.items),
   };
 }
 

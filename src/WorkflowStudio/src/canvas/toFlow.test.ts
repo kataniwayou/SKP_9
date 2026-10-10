@@ -185,7 +185,8 @@ describe('toFlow', () => {
 
   it('wraps a cache name at its separators onto at most two lines, and plates the root (review focus 5)', () => {
     const cacheOf = (name: string, root: string) => {
-      const graph = doc({ caches: new Map([['c1', { id: 'c1', name, version: '1.0.0', description: null, root, items: '{}', audit: AUDIT }]]) });
+      // one item: drawn as usual (an empty cache draws a dashed rectangle instead of the plate, 2026-10-11)
+      const graph = doc({ caches: new Map([['c1', { id: 'c1', name, version: '1.0.0', description: null, root, items: '{"k":"v"}', audit: AUDIT }]]) });
       return toFlow(graph, fitter).nodes.find((n) => n.id === cacheNodeId('c1'))!.data as import('./nodes/CacheNode').CacheNodeData;
     };
 

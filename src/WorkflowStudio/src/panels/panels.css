@@ -141,6 +141,11 @@ fieldset.plain { border: 0; margin: 0; padding: 0; min-width: 0; }
 .tb-tile { display: flex; align-items: center; gap: 8px; padding: 6px; margin-bottom: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); cursor: grab; user-select: none; touch-action: none; }
 .tb-tile:hover { border-color: var(--accent); }
 .tb-tile:active { cursor: grabbing; }
+/* the one tile picked for the Inspector (2026-10-11): the selection's blue, as a picked block's frame */
+.tb-tile { position: relative; }
+.tb-tile.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 8px rgba(125, 211, 252, .35); }
+/* changed in the active design, not saved yet: the Inspector's "unsaved changes" orange */
+.tb-unsaved { position: absolute; top: 4px; right: 6px; font-size: 10px; line-height: 1; color: var(--x); pointer-events: none; }
 .tb-art { display: block; flex: none; overflow: visible; }
 .tb-step { width: 100%; height: auto; max-height: 72px; }
 .tb-wire { width: 100%; height: 32px; }

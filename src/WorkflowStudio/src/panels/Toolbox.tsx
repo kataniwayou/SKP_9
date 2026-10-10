@@ -16,6 +16,8 @@ import type { ToolItem } from '../design/toolDrop';
 import { useHealthOf } from '../live/LiveContext';
 import { conditionInfo } from '../model/entryConditions';
 import type { Cache, Id, Processor, Schema, Step } from '../model/graph';
+import type { ToolboxPick } from '../store/studioState';
+import { overlayCache, overlayProcessor, useActiveDesignGraph } from './toolboxView';
 import { useStudio, useStudioStore } from '../store/studioStore';
 
 /** What the Toolbox lists (2026-10-11): every processor, cache and schema BaseApi holds, read when it opens and after each Save. */
@@ -66,6 +68,25 @@ function CacheArt({ c, fitter }: { c: Cache; fitter: TextFitter }) {
   );
 }
 
+/** A press that moves less than this (screen px) before it is let go is a click, not a drag. */
+const DRAG_START = 4;
+
+/** The schemas a processor's slots name, as the lists hold them. */
+const schemasOfList = (p: Processor, schemas: ReadonlyMap<Id, Schema>): Schema[] => [p.inputSchemaId, p.outputSchemaId, p.configSchemaId]
+  .flatMap((id) => { const s = id ? schemas.get(id) : undefined; return s ? [s] : []; });
+
+/** What a click on a tile picks for the Inspector: an existing processor or cache; a template picks nothing (null). */
+export function pickOf(item: ToolItem): ToolboxPick | null {
+  switch (item.kind) {
+    case 'processor': return { kind: 'processor', processor: item.processor, schemas: item.schemas };
+    case 'cache': return { kind: 'cache', cache: item.cache };
+    default: return null;
+  }
+}
+
+const pickKeyOf = (item: ToolItem): string | null =>
+  item.kind === 'processor' ? `processor:${item.processor.id}` : item.kind === 'cache' ? `cache:${item.cache.id}` : null;
+
 const matches = (q: string, ...texts: (string | null)[]) => q === '' || texts.some((t) => t !== null && t.toLowerCase().includes(q));
 
 /**
@@ -109,18 +130,46 @@ export function Toolbox() {
     return () => { live = false; };
   }, [api, generations]);
 
-  const needle = q.trim().toLowerCase();
-  const processors = useMemo(() => (lists?.processors ?? []).filter((p) => matches(needle, p.name, p.version)), [lists, needle]);
-  const caches = useMemo(() => (lists?.caches ?? []).filter((c) => matches(needle, c.name, c.version, c.root)), [lists, needle]);
+  const toolboxPick = useStudio((s) => s.toolboxPick);
+  const picked = toolboxPick === null ? null : toolboxPick.kind === 'processor' ? `processor:${toolboxPick.processor.id}` : `cache:${toolboxPick.cache.id}`;
+  // the lists read again: the picked entity's snapshot follows them (gone from BaseApi, the pick goes)
+  useEffect(() => {
+    const pick = store.getState().toolboxPick;
+    if (!lists || pick === null) return;
+    const fresh: ToolboxPick | null = pick.kind === 'processor'
+      ? (() => { const p = lists.processors.find((x) => x.id === pick.processor.id); return p ? { kind: 'processor', processor: p, schemas: schemasOfList(p, lists.schemas) } : null; })()
+      : (() => { const c = lists.caches.find((x) => x.id === pick.cache.id); return c ? { kind: 'cache', cache: c } : null; })();
+    store.dispatch({ type: 'toolboxPick', pick: fresh });
+  }, [lists, store]);
 
-  /** A press on a tile starts the drag; the window it runs in follows the pointer until it is let go (or Escape). */
+  const needle = q.trim().toLowerCase();
+  // an entity the active document's design changed is shown as that design has it, marked unsaved (2026-10-11)
+  const design = useActiveDesignGraph();
+  const processors = useMemo(() => (lists?.processors ?? []).map((p) => ({ p, shown: overlayProcessor(p, design) }))
+    .filter(({ shown }) => matches(needle, shown.value.name, shown.value.version)), [lists, design, needle]);
+  const caches = useMemo(() => (lists?.caches ?? []).map((c) => ({ c, shown: overlayCache(c, design) }))
+    .filter(({ shown }) => matches(needle, shown.value.name, shown.value.version, shown.value.root)), [lists, design, needle]);
+
+  /**
+   * A press on a tile: once the pointer has moved DRAG_START px it is a drag, which the window it runs in follows until
+   * it is let go (or Escape); let go before that, it is a click (2026-10-11): an existing processor or cache is picked for
+   * the Inspector (read-only, one at a time), a template (empty step, wire, empty cache) picks nothing.
+   */
   const begin = (item: ToolItem) => (e: ReactPointerEvent<HTMLElement>) => {
     if (e.button !== 0) return;
     e.preventDefault();
     const win = e.currentTarget.ownerDocument.defaultView ?? window;
     const isSaving = (id: Id) => store.getState().docs.find((d) => d.workflowId === id)?.saving ?? false;
-    toolDrag.start(item, { x: e.clientX, y: e.clientY });
-    const move = (ev: PointerEvent) => toolDrag.move(win.document, { x: ev.clientX, y: ev.clientY }, isSaving);
+    const from = { x: e.clientX, y: e.clientY };
+    let dragging = false;
+    const move = (ev: PointerEvent) => {
+      if (!dragging) {
+        if (Math.hypot(ev.clientX - from.x, ev.clientY - from.y) < DRAG_START) return;
+        dragging = true;
+        toolDrag.start(item, from);
+      }
+      toolDrag.move(win.document, { x: ev.clientX, y: ev.clientY }, isSaving);
+    };
     const stop = () => {
       win.removeEventListener('pointermove', move);
       win.removeEventListener('pointerup', up);
@@ -128,14 +177,19 @@ export function Toolbox() {
       win.removeEventListener('keydown', key, true);
     };
     const up = (ev: PointerEvent) => {
-      toolDrag.move(win.document, { x: ev.clientX, y: ev.clientY }, isSaving);
       stop();
+      if (!dragging) {
+        // a click: the Inspector shows the tile's entity (the Inspector pane stays as it is, shown or hidden)
+        store.dispatch({ type: 'toolboxPick', pick: pickOf(item) });
+        return;
+      }
+      toolDrag.move(win.document, { x: ev.clientX, y: ev.clientY }, isSaving);
       const drop = toolDrag.end();
       if (!drop) return;
       store.dispatch({ type: 'activate', workflowId: drop.workflowId });
       store.dispatch({ type: 'toolDrop', workflowId: drop.workflowId, item: drop.item, at: drop.at, newId, roots: (lists?.caches ?? []).map((c) => c.root) });
     };
-    const cancel = () => { stop(); toolDrag.cancel(); };
+    const cancel = () => { stop(); if (dragging) toolDrag.cancel(); };
     const key = (ev: KeyboardEvent) => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); cancel(); } };
     win.addEventListener('pointermove', move);
     win.addEventListener('pointerup', up);
@@ -143,17 +197,18 @@ export function Toolbox() {
     win.addEventListener('keydown', key, true);
   };
 
-  const tile = (key: string, item: ToolItem, label: string, art: ReactNode, text: ReactNode) => (
-    <div key={key} className="tb-tile" role="button" tabIndex={-1} aria-label={`Drag ${label}`} data-tool={item.kind}
+  const tile = (key: string, item: ToolItem, label: string, art: ReactNode, text: ReactNode, unsaved = false) => (
+    <div key={key} className={picked !== null && picked === pickKeyOf(item) ? 'tb-tile picked' : 'tb-tile'} role="button" tabIndex={-1}
+      aria-label={`Drag ${label}`} aria-pressed={picked !== null && picked === pickKeyOf(item)} data-tool={item.kind}
       data-id={item.kind === 'processor' ? item.processor.id : item.kind === 'cache' ? item.cache.id : undefined}
       onPointerDown={begin(item)}>
       {art}
       <div className="tb-text">{text}</div>
+      {unsaved && <span className="tb-unsaved" title="Changed in this workflow's design, not saved yet" aria-label="unsaved changes">●</span>}
     </div>
   );
 
-  const schemasOf = (p: Processor): Schema[] => [p.inputSchemaId, p.outputSchemaId, p.configSchemaId]
-    .flatMap((id) => { const s = id ? lists?.schemas.get(id) : undefined; return s ? [s] : []; });
+  const schemasOf = (p: Processor): Schema[] => schemasOfList(p, lists?.schemas ?? new Map());
   const ghost = drag && fitter ? ghostArt(drag.item, fitter, lists?.schemas ?? new Map(), healthOf) : null;
 
   return (
@@ -171,12 +226,12 @@ export function Toolbox() {
             </div>
             <div className="tb-h">Processors <span className="tb-count">{lists ? processors.length : '…'}</span></div>
             {error && <div className="note tb-error">Could not read the lists: {error}</div>}
-            {processors.map((p) => tile(`p:${p.id}`, { kind: 'processor', processor: p, schemas: schemasOf(p) }, `processor ${p.name} ${p.version}`,
-              <ProcessorArt p={p} schemas={lists!.schemas} fitter={fitter} health={healthOf(p.id)} />, null))}
+            {processors.map(({ p, shown }) => tile(`p:${p.id}`, { kind: 'processor', processor: p, schemas: schemasOf(p) }, `processor ${shown.value.name} ${shown.value.version}`,
+              <ProcessorArt p={shown.value} schemas={lists!.schemas} fitter={fitter} health={healthOf(p.id)} />, null, shown.unsaved))}
             <div className="tb-h">Caches <span className="tb-count">{lists ? caches.length : '…'}</span></div>
             {tile('newCache', { kind: 'newCache' }, 'an empty cache', <CacheArt c={EMPTY_CACHE} fitter={fitter} />, <><b>Empty cache</b><span>a new cache, no items</span></>)}
-            {caches.map((c) => tile(`c:${c.id}`, { kind: 'cache', cache: c }, `cache ${c.name} ${c.version}`, <CacheArt c={c} fitter={fitter} />,
-              <><b>{c.name}</b><span>{c.version}</span><span className="tb-root">root {c.root}</span></>))}
+            {caches.map(({ c, shown: { value: v, unsaved } }) => tile(`c:${c.id}`, { kind: 'cache', cache: c }, `cache ${v.name} ${v.version}`, <CacheArt c={v} fitter={fitter} />,
+              <><b>{v.name}</b><span>{v.version}</span><span className="tb-root">root {v.root}</span></>, unsaved))}
           </>
         )}
       </div>

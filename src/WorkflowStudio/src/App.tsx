@@ -293,6 +293,8 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
             initialView={views.current.get(id) ?? null}
             onViewChange={(v) => { views.current.set(id, v); saver.schedule(); }}
             onSelect={(selection: Selection | null, doc: Document, picks?: Pick[]) => {
+              // a click on this canvas takes the Inspector back from the Toolbox, even on what was already selected
+              if (store.getState().toolboxPick !== null) store.dispatch({ type: 'toolboxPick', pick: null });
               store.dispatch({ type: 'activate', workflowId: id });
               const open = store.getState().docs.find((d) => d.workflowId === id);
               // the same entity: only the picks change, and the Inspector has nothing to ask

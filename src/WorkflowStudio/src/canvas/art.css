@@ -47,6 +47,8 @@
 /* a step with no processor (removed in the design, 2026-10-10): the empty slot, dashed amber with a ⚠ */
 .chip-empty .chip-empty-line { fill: none; stroke: var(--warn); stroke-width: 1.2; stroke-dasharray: 5 4; }
 .chip-empty .chip-empty-mark { font: 400 20px var(--sans); fill: var(--warn); }
+/* an empty cache (2026-10-11): the empty step's dashed rectangle, muted grey, no ⚠ (it saves fine) */
+.cache-empty .cache-empty-line { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 5 4; }
 .chipg .nx-dots { stroke-dasharray: .6 1.75; stroke-width: 2.9; opacity: .6; }
 .chipg .nx-spinner { stroke-width: .95; opacity: .8; }
 .chipg .nx-pins { stroke-width: 1.1; stroke-linecap: butt; }

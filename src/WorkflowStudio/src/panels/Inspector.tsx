@@ -19,6 +19,7 @@ import { editBaseOf } from '../store/inspectorBase';
 import { detailRows, inspectorBaseOf, kindLabel, uniqueNameOf, type Row } from './inspectorView';
 import { PaneNote } from './PaneNote';
 import { GraphReadoutSection, StepGraphSection, WireReadoutPane } from './Readouts';
+import { ToolboxEntityPane } from './ToolboxEntityPane';
 
 /** Read-only text: one line, cut with an ellipsis, its full text a tooltip only when cut (spec §7). */
 const readOnly = (row: Row) => (
@@ -32,6 +33,7 @@ const readOnly = (row: Row) => (
  */
 export function Inspector() {
   const active = useStudio(activeDocument);
+  const toolboxPick = useStudio((s) => s.toolboxPick);
   const { service } = useStudioActions();
   const target = active === null ? null : shownTargetOf(active);
   const key = targetKey(target);
@@ -43,6 +45,8 @@ export function Inspector() {
     if (workflowId !== null && ready && key !== 'none') service.read(workflowId);
   }, [service, workflowId, ready, key, generation]);
 
+  // a processor or cache picked in the Toolbox (2026-10-11), read-only, until a canvas is clicked
+  if (toolboxPick !== null) return <ToolboxEntityPane pick={toolboxPick} />;
   if (active === null) return <PaneNote pane="inspector">Open a workflow to inspect it.</PaneNote>;
   if (active.status.kind === 'loading') return <PaneNote pane="inspector">Loading…</PaneNote>;
   if (active.status.kind === 'failed') return <PaneNote pane="inspector">{active.status.message}</PaneNote>;
@@ -256,7 +260,7 @@ export function livenessText(known: 'checking' | 'known' | 'unknown', p: { live:
   return `not live · ${p.reason ?? 'no healthy replica'}`;
 }
 
-function ProcessorLivenessSection({ processorId }: { processorId: string }) {
+export function ProcessorLivenessSection({ processorId }: { processorId: string }) {
   const { known, processor } = useProcessorLive(processorId);
   const text = livenessText(known, processor);
   const tone = known !== 'known' || processor === null ? 'undetermined' : processor.live ? 'healthy' : 'unhealthy';

@@ -190,6 +190,7 @@ export function restoredState(session: Session | null): StudioState {
     showDetails: session.showDetails,
     output: session.output ?? [],
     clipboard: session.clipboard ?? null,
+    toolboxPick: null,
   };
 }
 

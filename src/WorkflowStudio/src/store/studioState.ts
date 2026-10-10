@@ -1,7 +1,7 @@
 import type { StudioDocument } from '../app/document';
 import type { EntityReadDto } from '../api/entities';
 import type { LiveStatus } from '../api/liveStatus';
-import type { DesignError, Id } from '../model/graph';
+import type { Cache, DesignError, Id, Processor, Schema } from '../model/graph';
 import {
   createAssignment, EMPTY_DESIGN, EMPTY_EDITS, hasGraphChanges, removeAssignment, revertEntity, sameDesign, setField, storedDesignOf,
   type Design, type EntityEdits, type FieldValue,
@@ -86,7 +86,17 @@ export interface StudioState {
   output: OutputLine[];
   /** What Ctrl+C last copied, in any document (2026-10-10); Ctrl+V pastes it into the active one. Kept in the session. */
   clipboard: Clip | null;
+  /**
+   * The Toolbox's one picked tile (2026-10-11): an existing processor or cache the Inspector shows read-only, whatever
+   * document is active. A click on a canvas (a selection or a pick there) or a drop clears it. Not kept in the session.
+   */
+  toolboxPick: ToolboxPick | null;
 }
+
+/** An existing processor (with the schemas its slots name) or cache picked in the Toolbox: a snapshot of its list entry. */
+export type ToolboxPick =
+  | { kind: 'processor'; processor: Processor; schemas: Schema[] }
+  | { kind: 'cache'; cache: Cache };
 
 export type StudioAction =
   | { type: 'open'; workflowId: Id; name: string; version: string }
@@ -160,9 +170,11 @@ export type StudioAction =
    */
   | { type: 'toolDrop'; workflowId: Id; item: ToolItem; at: Point; newId: () => string; roots?: readonly string[] }
   /** Delete: the picked steps, caches and wires leave the design (the hub is skipped), one history step. */
-  | { type: 'deletePicks'; workflowId: Id };
+  | { type: 'deletePicks'; workflowId: Id }
+  /** A Toolbox tile clicked (2026-10-11): the Inspector shows it read-only; null clears it. */
+  | { type: 'toolboxPick'; pick: ToolboxPick | null };
 
-export const INITIAL_STATE: StudioState = { docs: [], activeId: null, showDetails: false, output: [], clipboard: null };
+export const INITIAL_STATE: StudioState = { docs: [], activeId: null, showDetails: false, output: [], clipboard: null, toolboxPick: null };
 
 const update = (state: StudioState, id: Id, change: (doc: OpenDocument) => OpenDocument): StudioState => {
   const index = state.docs.findIndex((d) => d.workflowId === id);
@@ -249,7 +261,16 @@ function blocksChanged(d: OpenDocument, draft: Draft, picks: Pick[]): OpenDocume
 
 /** Pure: every change to the studio's state goes through here. Unknown ids leave the state as it was. */
 export function reduce(state: StudioState, action: StudioAction): StudioState {
+  const next = reduceDocs(state, action);
+  // a click on a canvas (a selection or a pick there) or a drop takes the Inspector back from the Toolbox (2026-10-11)
+  return next.toolboxPick !== null && (action.type === 'select' || action.type === 'pick' || action.type === 'toolDrop')
+    ? { ...next, toolboxPick: null } : next;
+}
+
+function reduceDocs(state: StudioState, action: StudioAction): StudioState {
   switch (action.type) {
+    case 'toolboxPick':
+      return state.toolboxPick === action.pick ? state : { ...state, toolboxPick: action.pick };
     case 'open': {
       if (state.docs.some((d) => d.workflowId === action.workflowId)) return { ...state, activeId: action.workflowId };
       const doc: OpenDocument = {
