@@ -25,6 +25,8 @@ export const created: {
   workflowId?: string; stepId?: string; stepBId?: string; extraStepIds?: string[]; assignmentId?: string; processorId?: string; schemaId?: string; cacheId?: string; tag?: string;
   /** More throwaway workflows of this run (copy and paste: a second one to paste into and to share a step with). */
   otherWorkflowIds?: string[];
+  /** New workflows a Save of this run created or tried to (Workspace › New workflow, 2026-10-10), recorded as the guard lets them through. */
+  newWorkflowIds?: string[];
 } = {};
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -188,6 +190,7 @@ export async function removeThrowaway(request: APIRequestContext): Promise<void>
   const steps = [stepId, stepBId, ...(extraStepIds ?? [])].filter((id): id is string => id !== undefined);
   if (workflowId) await del(`workflows/${workflowId}`);
   for (const id of otherWorkflowIds ?? []) await del(`workflows/${id}`);
+  for (const id of created.newWorkflowIds ?? []) await del(`workflows/${id}`);
   // steps and caches a Save made by pasting (2026-10-10) keep the copied names: found by this run's tag
   if (tag?.startsWith('e2e-')) {
     await attempt(`steps named ${tag}…`, async () => {
@@ -238,6 +241,17 @@ function refusal(r: Request): string | null {
   if (method === 'GET' || method === 'HEAD') return null;
   if (method === 'PUT' && created.workflowId !== undefined && path === `/api/v1/workflows/${created.workflowId}/design`) return null;
   if (method === 'PUT' && (created.otherWorkflowIds ?? []).some((id) => path === `/api/v1/workflows/${id}/design`)) return null;
+  // Workspace › New workflow (2026-10-10): the Save that creates a workflow named after this run's tag, and its later Saves
+  const design = /^\/api\/v1\/workflows\/([0-9a-f-]{36})\/design$/i.exec(path);
+  if (method === 'PUT' && design && created.tag?.startsWith('e2e-')) {
+    const id = design[1]!;
+    if ((created.newWorkflowIds ?? []).includes(id)) return null;
+    const name = (r.postDataJSON() as { newWorkflow?: { fields?: { name?: unknown } } } | null)?.newWorkflow?.fields?.name;
+    if (typeof name === 'string' && name.startsWith(created.tag)) {
+      (created.newWorkflowIds ??= []).push(id);
+      return null;
+    }
+  }
   // Workspace › Delete workflow… (2026-10-10): the dry run and the real run of this run's throwaway only
   if (method === 'POST' && created.workflowId !== undefined && created.tag?.startsWith('e2e-') && path === `/api/v1/workflows/${created.workflowId}/delete`) return null;
   if (method === 'POST' && (path === '/api/v1/orchestration/start' || path === '/api/v1/orchestration/stop')

@@ -35,7 +35,7 @@ export interface SaveFacts {
   shorts: number;
   held: number;
   /** The read after the answer: what came back, or why it failed. */
-  reread: { ok: true; steps: number; links: number } | { ok: false; message: string };
+  reread: { ok: true; steps: number; links: number } | { ok: false; message: string } | { ok: false; created: false };
   /** What settling did; null when the drawing has no circuit of its own (the workflow's own wires). */
   settle: SettleReport | null;
   /** The workflow read back still stores a design (not applied). */
@@ -54,11 +54,14 @@ export interface SentDesign {
   newCaches?: unknown[];
   deletedSteps?: unknown[];
   deletedCaches?: unknown[];
+  newWorkflow?: unknown;
 }
 
 /** "Save started": what goes to BaseApi in the request. */
 export function saveStartText(sent: SentDesign): string {
   const parts: string[] = [];
+  // a new workflow (2026-10-10): BaseApi creates it first
+  if (sent.newWorkflow !== undefined) parts.push('the new workflow to create');
   const wf = sent.workflow;
   if (Object.keys(wf.fields).length > 0) parts.push('the workflow\'s fields');
   if (wf.entryStepIds !== null) parts.push('the entry steps');
@@ -99,7 +102,10 @@ export function saveAnswerLines(f: SaveFacts): { text: string; level: OutputLeve
     for (const e of f.errors) out.push({ text: `BaseApi · ${e.kind} ${e.id}: ${e.field ? `${e.field}: ` : ''}${e.message}`, level: 'error' });
   }
   out.push({ text: saveVerdict(f.applied, f.errors.length + f.shorts, f.shorts, f.held), level: f.applied ? 'info' : 'error' });
-  if (!f.reread.ok) {
+  if (!f.reread.ok && 'created' in f.reread) {
+    // a new workflow BaseApi did not create (2026-10-10): nothing to read back, nothing stored
+    out.push({ text: 'the new workflow was not created: nothing is stored in BaseApi; its design stays in the studio, unsaved', level: 'error' });
+  } else if (!f.reread.ok) {
     out.push({ text: `graph could not be read again: ${f.reread.message}; the drawing keeps the design as it was sent`, level: 'error' });
   } else {
     out.push({ text: `graph re-read: ${plural(f.reread.steps, 'step')}, ${plural(f.reread.links, 'link')}`, level: 'info' });

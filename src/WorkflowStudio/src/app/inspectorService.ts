@@ -29,6 +29,14 @@ export interface InspectorService {
 
 /** A base for what the database does not hold yet (spec §3.2): a created assignment, an empty slot's schema. */
 function madeUp(doc: OpenDocument, target: InspectorTarget): EntityReadDto | null {
+  // a new workflow (2026-10-10) BaseApi does not have yet: its own graph is all there is to read
+  if (target.kind === 'workflow' && doc.virtual && doc.status.kind === 'ready') {
+    const w = doc.status.doc.graph.workflow;
+    return {
+      id: w.id, name: w.name, version: w.version, description: w.description, cronExpression: w.cronExpression,
+      entryStepIds: w.entryStepIds, assignmentIds: w.assignmentIds, cacheIds: w.cacheIds, updatedAt: w.updatedAt,
+    } as unknown as EntityReadDto;
+  }
   if (target.kind === 'assignment') {
     const op = doc.edits.assignments[target.stepId];
     if (op?.op === 'create' && op.id === target.id) {

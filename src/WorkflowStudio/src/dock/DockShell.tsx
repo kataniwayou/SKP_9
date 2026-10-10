@@ -64,6 +64,13 @@ export interface DockShellProps {
    * reading, a dry run and the user's Continue (the page does all of it). Without it the entry is disabled.
    */
   onDeleteWorkflow?: (id: string) => void;
+  /** Why the workflow cannot be deleted now (e.g. a new one BaseApi does not have yet), or null: the entry is disabled with it. */
+  deleteBlocked?: (id: string) => string | null;
+  /**
+   * Workspace › New workflow (2026-10-10, Ctrl+N where the browser lets the page have it): a blank document for a workflow
+   * that exists only in the studio until its first Save. Without it the entry is disabled.
+   */
+  onNewWorkflow?: () => void;
   /** A tool pane's own entries at the top of its tab menu (e.g. Output's Clear, 2026-10-10). */
   toolMenu?: (id: ToolId) => MenuEntry[];
 }
@@ -377,14 +384,15 @@ export function DockShell(props: DockShellProps) {
     switch (name) {
       case 'Workspace':
         return [
+          { id: 'new', icon: '+', label: 'New workflow', kbd: 'Ctrl+N', disabled: !props.onNewWorkflow, onSelect: () => props.onNewWorkflow?.() },
           { id: 'open', icon: '⌂', label: 'Load workflow…', kbd: 'Ctrl+O', onSelect: () => openPicker(fileAnchor()) },
           'separator',
           { id: 'close', icon: '×', label: 'Close', kbd: 'Alt+W', disabled: activeDocumentId === null, onSelect: () => { if (activeDocumentId) props.onCloseDocument(activeDocumentId); } },
           'separator',
           {
             id: 'delete', icon: '⌫', label: 'Delete workflow…',
-            disabled: activeDocumentId === null || !props.onDeleteWorkflow,
-            tip: activeDocumentId === null ? 'Load a workflow first: Delete acts on the active document' : undefined,
+            disabled: activeDocumentId === null || !props.onDeleteWorkflow || (props.deleteBlocked?.(activeDocumentId) ?? null) !== null,
+            tip: activeDocumentId === null ? 'Load a workflow first: Delete acts on the active document' : props.deleteBlocked?.(activeDocumentId) ?? undefined,
             onSelect: () => { if (activeDocumentId) props.onDeleteWorkflow?.(activeDocumentId); },
           },
         ];
@@ -471,6 +479,10 @@ export function DockShell(props: DockShellProps) {
         e.preventDefault(); if (now.props.activeDocumentId) now.props.onCloseDocument(now.props.activeDocumentId, doc); break;
       case 'open':
         e.preventDefault(); openPicker(doc === document ? fileAnchor() : { x: 8, y: 8, doc }); break;
+      case 'new':
+        // most browsers keep Ctrl+N (a new window) and never send it to the page; where it arrives, it is ours
+        if (latest.current.props.onNewWorkflow) { e.preventDefault(); latest.current.props.onNewWorkflow(); }
+        break;
       case 'start': case 'stop': {
         e.preventDefault();
         // a dialog (a question, the picker, the switcher) is open: the key does nothing

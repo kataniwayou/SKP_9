@@ -33,6 +33,8 @@ export interface DesignRequest {
   /** Deleted steps with the stamp the designer loaded (steps are owned). */
   deletedSteps?: { id: Id; updatedAt: string | null }[];
   deletedCaches?: { id: Id; updatedAt: null }[];
+  /** A new workflow (2026-10-10): BaseApi creates it, with these fields, before everything else. Absent: it exists. */
+  newWorkflow?: { fields: Fields };
 }
 
 /**
@@ -45,7 +47,7 @@ export interface DesignRequest {
  * the stamp the design kept, else the base's. A wire with an open end makes no link: it lives only in the layout.
  * Entities the base no longer has are left out.
  */
-export function buildDesignRequest(base: StudioDocument, shown: StudioDocument, { draft, edits }: Design): DesignRequest {
+export function buildDesignRequest(base: StudioDocument, shown: StudioDocument, { draft, edits }: Design, virtual = false): DesignRequest {
   const g = base.graph;
   const { blocks } = draft;
   // deleted steps and caches (2026-10-10): sent to be deleted, and out of every list and change
@@ -96,9 +98,14 @@ export function buildDesignRequest(base: StudioDocument, shown: StudioDocument, 
   });
   const cacheIds = shown.graph.workflow.cacheIds;
 
+  // a new workflow (2026-10-10): its fields as the design shows them; the workflow stage then sets its lists
+  const w = shown.graph.workflow;
+  const created = virtual ? { newWorkflow: { fields: { name: w.name, version: w.version, description: w.description, cronExpression: w.cronExpression } } } : {};
+
   return {
+    ...created,
     workflow: {
-      updatedAt: edits.workflow?.updatedAt ?? g.workflow.updatedAt, fields: { ...edits.workflow?.fields },
+      updatedAt: virtual ? null : edits.workflow?.updatedAt ?? g.workflow.updatedAt, fields: { ...edits.workflow?.fields },
       entryStepIds: sameList(entries, g.workflow.entryStepIds) ? null : [...entries],
       cacheIds: sameList(cacheIds, g.workflow.cacheIds) ? null : [...cacheIds],
     },
@@ -142,12 +149,21 @@ export async function saveDesign(api: StudioApi, store: StudioStore, workflowId:
   const shown = applyDesign(base, design.draft, design.edits);
   const shorts = shortCircuitErrors(shown, design.draft);
   const held = heldLinkCount(base, shown, design.draft);
-  const body = buildDesignRequest(base, shown, design);
+  const virtual = open.virtual === true;
+  const body = buildDesignRequest(base, shown, design, virtual);
   store.dispatch({ type: 'saving', workflowId });
   store.dispatch({ type: 'log', workflowId, lines: [{ at: now().toISOString(), text: saveStartText(body) }] });
   const answer = await api.saveDesign(workflowId, body as unknown as DesignSaveRequest);
   if (!answer.ok) {
     store.dispatch({ type: 'saveFailed', workflowId, at: now().toISOString(), message: describeError(answer.error) });
+    return;
+  }
+  // a new workflow BaseApi did not create (2026-10-10): there is nothing to read back; the design stays the studio's
+  if (virtual && answer.value.applied !== true) {
+    store.dispatch({
+      type: 'saveAnswered', workflowId, at: now().toISOString(), applied: false, held,
+      errors: [...shorts, ...designErrorsFromDto(answer.value)], doc: null, log: designLogFromDto(answer.value),
+    });
     return;
   }
   const reread = await loadDocument(api, workflowId);

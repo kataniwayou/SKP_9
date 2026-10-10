@@ -17,7 +17,7 @@ import { designDirty, INITIAL_STATE, type StudioState } from '../store/studioSta
  * (it survives a refresh and is not shared between tabs), and every write is mirrored to
  * localStorage under the same key, to seed a new tab or a browser restart. Separate from Window ›
  * Save's named layout. Documents are fetched again on load: where things were is kept, and the
- * unsaved design (plan 8 §3.2).
+ * unsaved design (plan 8 §3.2). A new workflow's document (2026-10-10) is built again locally, with its design.
  */
 export const SESSION_KEY = 'skp.studio.session';
 export const SESSION_VERSION = 1;
@@ -35,6 +35,8 @@ export interface SessionDoc {
   design?: Draft;
   /** The unsaved entity edits (plan 8): absent when there are none. */
   edits?: EntityEdits;
+  /** A new workflow BaseApi does not have yet (2026-10-10): built again locally, never read. Absent: an ordinary one. */
+  virtual?: true;
 }
 
 export interface Session {
@@ -75,6 +77,7 @@ export function readSession(storage: Storage | null): Session | null {
       view: isView(d.view) ? d.view : null,
       ...(isDraft(d.draft) ? { draft: { trail: d.draft.trail } } : {}),
       ...designParts(d.design, d.edits),
+      ...(d.virtual === true ? { virtual: true as const } : {}),
     });
   }
   const activeId = typeof value.activeId === 'string' && docs.some((d) => d.workflowId === value.activeId)
@@ -156,6 +159,7 @@ export function sessionOf(state: StudioState, views: ReadonlyMap<string, SavedVi
       workflowId: d.workflowId, name: d.name, version: d.version, selection: d.selection, view: views.get(d.workflowId) ?? null,
       ...(d.inspector.trail.length > 0 ? { draft: { trail: d.inspector.trail } } : {}),
       ...(designDirty(d) ? { design: d.design.draft, edits: d.edits } : {}),
+      ...(d.virtual === true ? { virtual: true as const } : {}),
     })),
     activeId: state.activeId,
     showDetails: state.showDetails,
@@ -180,6 +184,7 @@ export function restoredState(session: Session | null): StudioState {
       errors: null,
       run: null,
       generation: 0,
+      ...(d.virtual === true ? { virtual: true } : {}),
     })),
     activeId: session.activeId,
     showDetails: session.showDetails,

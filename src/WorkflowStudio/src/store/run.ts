@@ -13,14 +13,19 @@ export interface RunState { op: RunOp; phase: 'sending' | 'waiting'; token: stri
  */
 export const RUN_TIMEOUT_MS = 30_000;
 
+/** Why a new workflow (2026-10-10) cannot be started, stopped or deleted before its first Save creates it. */
+export const NOT_SAVED_YET = 'Not saved yet: BaseApi has no such workflow';
+
 export const RUN_WORD: Readonly<Record<RunOp, string>> = { start: 'Start', stop: 'Stop' };
 
 /**
  * Why Start or Stop cannot be pressed now, or null when it can. Never the live status (the user's rule, 2026-10-10):
  * both are idempotent in BaseApi, and a Start of a running workflow re-projects what BaseApi holds now (a Save takes
- * effect without a Stop). Only a loaded workflow, no Save under way, one press at a time.
+ * effect without a Stop). Only a loaded workflow BaseApi has (a new one waits for its first Save, 2026-10-10), no Save
+ * under way, one press at a time.
  */
-export function runBlocked(doc: { status: { kind: string }; run: RunState | null; saving: boolean }): string | null {
+export function runBlocked(doc: { status: { kind: string }; run: RunState | null; saving: boolean; virtual?: boolean }): string | null {
+  if (doc.virtual) return NOT_SAVED_YET;
   if (doc.status.kind !== 'ready') return 'The workflow is not loaded';
   if (doc.saving) return 'Saving…';
   if (doc.run !== null) return doc.run.op === 'start' ? 'Starting…' : 'Stopping…';

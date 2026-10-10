@@ -7,6 +7,7 @@ import { cancelDelete, commitDelete, prepareDelete, type DeletePlan } from './ap
 import { DocumentPanel } from './app/DocumentPanel';
 import { createInspectorService } from './app/inspectorService';
 import { loadDocument } from './app/loadDocument';
+import { newWorkflowDocument, untitledName } from './app/newWorkflow';
 import { runWorkflow } from './app/runWorkflow';
 import { saveDesign } from './app/saveDesign';
 import { browserTabStorage, createSaver, keepSession, readTabSession, restoredState, sessionOf, type Session } from './app/session';
@@ -26,7 +27,8 @@ import { Inspector } from './panels/Inspector';
 import { Output } from './panels/Output';
 import { Toolbox } from './panels/PaneNote';
 import type { Pick } from './store/picks';
-import { runBlocked, RUN_WORD, type RunOp } from './store/run';
+import { newId } from './design/ids';
+import { NOT_SAVED_YET, runBlocked, RUN_WORD, type RunOp } from './store/run';
 import { selectionKey, type Selection } from './store/selection';
 import { designDirty, inspectorKey } from './store/studioState';
 import { createStudioStore, StudioStoreProvider, useStudio, useStudioStore } from './store/studioStore';
@@ -131,7 +133,12 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
   const load = useCallback((id: string) => {
     const token = (opens.current.get(id) ?? 0) + 1;
     opens.current.set(id, token);
-    void loadDocument(api, id).then((r) => {
+    // a new workflow (2026-10-10) BaseApi does not have yet: built again here, never read
+    const doc = store.getState().docs.find((d) => d.workflowId === id);
+    const reading = doc?.virtual
+      ? newWorkflowDocument(id, doc.name, doc.version).then((value) => ({ ok: true as const, value }))
+      : loadDocument(api, id);
+    void reading.then((r) => {
       const current = store.getState().docs.find((d) => d.workflowId === id);
       if (opens.current.get(id) !== token || current?.status.kind !== 'loading') return;
       store.dispatch(r.ok
@@ -174,6 +181,24 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
   useEffect(() => {
     for (const d of store.getState().docs) if (d.status.kind === 'loading') load(d.workflowId);
   }, []); // the restored documents only; later ones are loaded by openWorkflow
+
+  // Workspace › New workflow (2026-10-10): a blank document with only the hub, a workflow that exists only in the studio
+  // until its first Save creates it; named untitled (or untitled-2, …) so no listed or open workflow has its name
+  const newWorkflow = useCallback(() => {
+    const id = newId();
+    const name = untitledName([...workflows.map((w) => w.name ?? ''), ...store.getState().docs.map((d) => d.name)]);
+    // the hub on the left of the canvas, at 100 %, clear of the capsule toolbar: a Fit would centre a lone hub
+    views.current.set(id, { x: 0, y: 64, zoom: 1, followFit: false });
+    void newWorkflowDocument(id, name).then((doc) => store.dispatch({ type: 'new', workflowId: id, doc }));
+  }, [store, workflows]);
+
+  // Save; a new workflow it created is listed by BaseApi from now on: the picker's list is read again
+  const save = useCallback((id: string) => {
+    const wasNew = store.getState().docs.find((d) => d.workflowId === id)?.virtual === true;
+    return saveDesign(api, store, id).then(() => {
+      if (wasNew && store.getState().docs.find((d) => d.workflowId === id)?.virtual === false) readList();
+    });
+  }, [api, store, readList]);
 
   // Workspace › Delete workflow… (2026-10-10): a fresh liveness reading and BaseApi's dry run first; the warning only
   // then, with Cancel as its default; nothing destructive is sent before Continue. One deletion at a time per workflow.
@@ -276,7 +301,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
               }
               actions.guard(id, () => store.dispatch({ type: 'select', workflowId: id, selection, picks }), doc);
             }}
-            onSave={() => void saveDesign(api, store, id)}
+            onSave={() => void save(id)}
             onRun={(op) => void runWorkflow(api, store, id, op, liveOf)}
             onRetry={() => { store.dispatch({ type: 'retry', workflowId: id }); load(id); }} />
         )}
@@ -295,6 +320,8 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
           disabled: store.getState().output.length === 0, onSelect: () => store.dispatch({ type: 'clearOutput' }),
         }])}
         onDeleteWorkflow={deleteWorkflow}
+        deleteBlocked={(id) => (store.getState().docs.find((d) => d.workflowId === id)?.virtual ? NOT_SAVED_YET : null)}
+        onNewWorkflow={newWorkflow}
         onRunCommand={(op: RunOp) => {
           const open = store.getState().docs.find((d) => d.workflowId === store.getState().activeId);
           if (!open) return `${RUN_WORD[op]}: open a workflow first.`;
@@ -311,7 +338,9 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
       )}
       {prompt?.kind === 'closeDesign' && (
         <ConfirmDialog doc={prompt.doc} title="Save design changes?" onCancel={() => setPrompt(null)}
-          message="This workflow has design changes that are not saved. Save stores them on the workflow (BaseApi applies them when it finds no errors); Discard drops them."
+          message={store.getState().docs.find((d) => d.workflowId === prompt.workflowId)?.virtual
+            ? 'This new workflow is not saved yet: BaseApi has no such workflow. Save creates it (when BaseApi finds no errors); Discard drops it entirely.'
+            : 'This workflow has design changes that are not saved. Save stores them on the workflow (BaseApi applies them when it finds no errors); Discard drops them.'}
           buttons={[
             { label: 'Discard', onClick: () => { setPrompt(null); prompt.proceed(); } },
             {
@@ -319,7 +348,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
               onClick: () => {
                 setPrompt(null);
                 // closed once the design is stored; a Save that got no answer keeps the document open with its edits
-                void saveDesign(api, store, prompt.workflowId).then(() => {
+                void save(prompt.workflowId).then(() => {
                   const still = store.getState().docs.find((d) => d.workflowId === prompt.workflowId);
                   if (still && !designDirty(still)) prompt.proceed();
                 });

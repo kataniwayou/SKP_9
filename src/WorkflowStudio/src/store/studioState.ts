@@ -3,7 +3,7 @@ import type { EntityReadDto } from '../api/entities';
 import type { LiveStatus } from '../api/liveStatus';
 import type { DesignError, Id } from '../model/graph';
 import {
-  createAssignment, EMPTY_EDITS, hasGraphChanges, removeAssignment, revertEntity, sameDesign, setField, storedDesignOf,
+  createAssignment, EMPTY_DESIGN, EMPTY_EDITS, hasGraphChanges, removeAssignment, revertEntity, sameDesign, setField, storedDesignOf,
   type Design, type EntityEdits, type FieldValue,
 } from '../design/design';
 import { circuitOf, EMPTY_DRAFT, type Draft } from '../design/draft';
@@ -62,6 +62,11 @@ export interface OpenDocument {
    * values from before).
    */
   generation: number;
+  /**
+   * A new workflow (2026-10-10, Workspace › New workflow): it exists only in the studio until its first Save creates it in
+   * BaseApi. Its document is built locally, never read; Start, Stop and Delete workflow wait for that Save. Absent: false.
+   */
+  virtual?: boolean;
 }
 
 /**
@@ -83,6 +88,8 @@ export interface StudioState {
 
 export type StudioAction =
   | { type: 'open'; workflowId: Id; name: string; version: string }
+  /** Workspace › New workflow (2026-10-10): a new workflow's document, ready at once and active; nothing in BaseApi yet. */
+  | { type: 'new'; workflowId: Id; doc: StudioDocument }
   | { type: 'loaded'; workflowId: Id; doc: StudioDocument }
   | { type: 'failed'; workflowId: Id; message: string }
   | { type: 'close'; workflowId: Id }
@@ -245,6 +252,16 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
       };
       return { ...state, docs: [...state.docs, doc], activeId: action.workflowId };
     }
+    case 'new': {
+      if (state.docs.some((d) => d.workflowId === action.workflowId)) return { ...state, activeId: action.workflowId };
+      const w = action.doc.graph.workflow;
+      const doc: OpenDocument = {
+        workflowId: action.workflowId, name: w.name, version: w.version, status: { kind: 'ready', doc: action.doc },
+        selection: null, inspector: EMPTY_INSPECTOR, picks: [], design: historyOf(), edits: EMPTY_EDITS, errors: null,
+        stored: EMPTY_DESIGN, restored: false, saving: false, run: null, generation: 1, virtual: true,
+      };
+      return { ...state, docs: [...state.docs, doc], activeId: action.workflowId };
+    }
     case 'loaded':
       return update(state, action.workflowId, (d) => {
         const stored = settleDesign(storedDesignOf(action.doc.graph.design, action.doc.graph.layout), action.doc);
@@ -361,11 +378,16 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
         shorts, held: action.held ?? 0,
         reread: graph
           ? { ok: true, steps: graph.steps.size, links: graph.workflow.entryStepIds.length + [...graph.steps.values()].reduce((k, s) => k + s.nextStepIds.length, 0) }
-          : { ok: false, message: action.reread ?? 'no answer' },
+          : doc.virtual && !action.applied ? { ok: false, created: false } : { ok: false, message: action.reread ?? 'no answer' },
         // compared on the workflow with the stored design's pasted and deleted blocks (2026-10-10), as the canvas draws it
         settle: read && settled && action.doc ? settleReport(applyBlocks(action.doc, read.draft.blocks), read.draft, settled.draft) : null,
         stored: graph?.design != null,
       });
+      // a new workflow BaseApi did not create (2026-10-10): nothing was stored, so the design stays the studio's, unsaved
+      if (doc.virtual && !(action.applied && action.doc)) {
+        const kept = update(state, action.workflowId, (d) => ({ ...d, saving: false, errors: n === 0 ? null : action.errors }));
+        return logged(kept, action.workflowId, doc.name, lines.map((l) => ({ at: action.at, ...l })));
+      }
       const next = update(state, action.workflowId, (d) => {
         // either way the design is now stored on the workflow and the session's edits are cleared (spec §4.1)
         const stored = settled ?? designOf(d);
@@ -376,6 +398,8 @@ export function reduce(state: StudioState, action: StudioAction): StudioState {
           generation: action.doc ? d.generation + 1 : d.generation,
           design: historyOf(stored.draft), edits: stored.edits,
           name: action.doc?.graph.workflow.name ?? d.name, version: action.doc?.graph.workflow.version ?? d.version,
+          // created by this Save: an ordinary workflow from now on
+          virtual: false,
         };
         return { ...out, picks: prunedPicks(out, stored.draft) };
       });
@@ -501,7 +525,9 @@ export function startNote(d: OpenDocument): string | null {
 export const designOf = (d: OpenDocument): Design => ({ draft: d.design.draft, edits: d.edits });
 
 /** The design differs from the last saved one (spec §3.2): the tab is marked, closing asks, the session keeps it. */
-export const designDirty = (d: OpenDocument): boolean => (d.stored === null ? d.restored : !sameDesign(designOf(d), d.stored));
+/** A new workflow (2026-10-10) is unsaved until its first Save creates it, whatever its design holds. */
+export const designDirty = (d: OpenDocument): boolean =>
+  d.virtual === true || (d.stored === null ? d.restored : !sameDesign(designOf(d), d.stored));
 
 /** Save is offered (spec §4.1): the design differs from the stored one, or the stored one is not applied yet. */
 export const canSave = (d: OpenDocument): boolean =>
