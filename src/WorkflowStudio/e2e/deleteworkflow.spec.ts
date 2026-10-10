@@ -124,3 +124,30 @@ test('a running workflow: refused in red at the fresh reading, no warning, still
     await removeThrowaway(request);
   }
 });
+
+test('Delete with the workflow picked, alone or with steps, is Workspace › Delete…: the same warning; Cancel leaves every pick in place (2026-10-10)', async ({ page, request }) => {
+  const t = await createThrowaway(request);
+  try {
+    await openWorkflow(page, t.workflow);
+    const panel = documentPanel(page, t.workflow);
+    const hub = panel.locator('.react-flow__node-workflow');
+    // picked: blue rings, as a picked step's frame is blue
+    await hub.click();
+    await expect(hub.locator('.nx-rim')).toHaveCSS('stroke', 'rgb(125, 211, 252)');
+    // the hub and a step picked together (Ctrl+click), then the Delete key
+    await panel.locator(`.react-flow__node[data-id="${t.stepId}"] .nx-sn`).click({ modifiers: ['Control'] });
+    await page.keyboard.press('Delete');
+    const dialog = page.getByRole('alertdialog', { name: `Delete workflow '${t.tag}'?` });
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    await expect(dialog.getByRole('button')).toHaveText(['Cancel', 'Continue']);
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    // nothing deleted, not even the picked step from the design
+    await expect(panel.locator(`.react-flow__node[data-id="${t.stepId}"]`)).toBeVisible();
+    await expect(page.getByText('● design draft')).toHaveCount(0);
+    expect(await status(request, `workflows/${t.workflow.id}`)).toBe(200);
+    expect(await status(request, `steps/${t.stepId}`)).toBe(200);
+  } finally {
+    await removeThrowaway(request);
+  }
+});
+

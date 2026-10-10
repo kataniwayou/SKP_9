@@ -288,7 +288,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
         onPickerOpen={readList}
         onOpenWorkflow={openWorkflow}
         renderDocument={(id, panel) => (
-          <DocumentPanel workflowId={id} panel={panel}
+          <DocumentPanel workflowId={id} panel={panel} onDeleteWorkflow={() => deleteWorkflow(id)}
             initialView={views.current.get(id) ?? null}
             onViewChange={(v) => { views.current.set(id, v); saver.schedule(); }}
             onSelect={(selection: Selection | null, doc: Document, picks?: Pick[]) => {

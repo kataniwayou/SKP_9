@@ -4,7 +4,8 @@ import type { SavedView } from '../canvas/savedView';
 import { useFitter } from '../canvas/useFitter';
 import { WorkflowCanvas } from '../canvas/WorkflowCanvas';
 import type { Pick } from '../store/picks';
-import { runBlocked, type RunOp } from '../store/run';
+import { NOT_SAVED_YET, runBlocked, type RunOp } from '../store/run';
+import { SPHERE_NODE_ID } from '../layout/nodeIds';
 import type { Selection } from '../store/selection';
 import { canSave, designDirty } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
@@ -22,7 +23,7 @@ import { useOwnerDocument, usePanelShown, type PanelLike } from './panelHooks';
  * are measured in the document the panel is drawn in, so a pop-out keeps its fonts (spec §6.3). The run status and
  * processor health come from the app's one liveness store (2026-10-10), shown or hidden alike: nothing here polls.
  */
-export function DocumentPanel({ workflowId, panel, initialView, onViewChange, onSelect, onRetry, onSave, onRun }: {
+export function DocumentPanel({ workflowId, panel, initialView, onViewChange, onSelect, onRetry, onSave, onRun, onDeleteWorkflow }: {
   workflowId: string;
   panel: PanelLike;
   /** Where this document's view was when the page was left (the session); null: fit it. */
@@ -40,6 +41,8 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
   onSave?: () => void;
   /** Starts or stops the saved workflow (2026-10-09); without it Start and Stop stay disabled. */
   onRun?: (op: RunOp) => void;
+  /** Delete with the workflow picked (2026-10-10): Workspace › Delete…'s own path (fresh liveness, dry run, Cancel/Continue). */
+  onDeleteWorkflow?: () => void;
 }) {
   const open = useStudio((s) => s.docs.find((d) => d.workflowId === workflowId) ?? null);
   const store = useStudioStore();
@@ -85,7 +88,17 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
           // copy, paste and delete (2026-10-10): the store does them, so the clipboard is shared by every document
           onCopy: () => store.dispatch({ type: 'copy', workflowId }),
           onPaste: () => store.dispatch({ type: 'paste', workflowId, newId }),
-          onDelete: () => store.dispatch({ type: 'deletePicks', workflowId }),
+          // the workflow picked, alone or with others (2026-10-10): Delete is Workspace › Delete…, nothing else; a new workflow
+          // not saved yet has none in BaseApi, so it is not deleted (as the menu item waits)
+          onDelete: () => {
+            const doc = store.getState().docs.find((d) => d.workflowId === workflowId);
+            if (!doc?.picks.some((p) => p.kind === 'node' && p.id === SPHERE_NODE_ID)) { store.dispatch({ type: 'deletePicks', workflowId }); return; }
+            if (doc.virtual) {
+              store.dispatch({ type: 'log', workflowId, lines: [{ at: new Date().toISOString(), text: `Delete… is not available: ${NOT_SAVED_YET}`, level: 'error' }] });
+              return;
+            }
+            onDeleteWorkflow?.();
+          },
         }}
         onSelect={onSelect ? (selection, picks) => onSelect(selection, ownerDocument, picks) : (selection, picks) => {
           store.dispatch({ type: 'activate', workflowId });

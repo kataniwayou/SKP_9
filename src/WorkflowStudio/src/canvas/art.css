@@ -74,6 +74,9 @@
 .wf.nx:hover .sphere { filter: brightness(1.08); }
 /* (0,4,0) like the hover rule above and later, so a selected hub keeps its glow while hovered */
 .studio-sel .wf.nx .sphere { filter: url(#glow); }
+/* selected or picked, the hub's outer rings take the selection's blue border, as a step's frame and a cache's bracket do */
+.studio-sel .wf.nx .hub-outer, .studio-pick .wf.nx .hub-outer { --nc: var(--accent); }
+.studio-sel .wf.nx .nx-rim, .studio-pick .wf.nx .nx-rim { stroke: var(--accent); stroke-width: 2; }
 
 /* cache: static, structure white */
 .cachetag .nx-brk { stroke-width: 1.1; }
