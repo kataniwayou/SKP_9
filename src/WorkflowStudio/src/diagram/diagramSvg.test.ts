@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { cacheDto, graphDto, processorDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
+import { createTextFitter } from '../canvas/fitText';
 import { applyDraft } from '../design/apply';
 import { EMPTY_DRAFT } from '../design/draft';
 import { diagramSvg } from './diagramSvg';
+
+const fitter = createTextFitter((text) => text.length * 6);
 
 // s1 -> s2 (Completed), s1 -> f (Failed); a cache on the workflow
 const doc = () => loadedDocument(graphDto({
@@ -13,43 +16,29 @@ const doc = () => loadedDocument(graphDto({
   caches: [cacheDto('c1', { name: 'chain-artists', root: 'chain-artists' })],
 }));
 
-describe('the published drawing (2026-10-11)', () => {
-  it('is one well-formed SVG: every block, every wire as drawn, arrow heads, names escaped, a legend of the families used', async () => {
+describe('the published drawing: the canvas art (2026-10-11)', () => {
+  it('is one well-formed, self-contained SVG of the canvas components: every wire as drawn, the blocks, the legend', async () => {
     const shown = applyDraft(await doc(), EMPTY_DRAFT);
-    const svg = diagramSvg(shown);
+    const svg = diagramSvg(shown, fitter);
     const parsed = new DOMParser().parseFromString(svg, 'image/svg+xml');
     expect(parsed.querySelector('parsererror')).toBeNull();
-    const root = parsed.documentElement;
-    expect(root.getAttribute('viewBox')).toMatch(/^-?\d+ -?\d+ \d+ \d+$/);
-    // the canvas's own routes: one polyline per wire, through the same points
-    for (const w of shown.wires) expect(svg).toContain(`points="${w.points.map(([x, y]) => `${x},${y}`).join(' ')}"`);
-    // three steps, the hub, the cache
-    expect(svg).toContain('>importer<');
-    expect(svg).toContain('>kafka-importer<');
-    expect(svg).toContain('chain-artists');
-    expect(svg).toContain('WORKFLOW');
-    // escaped, never raw
-    expect(svg).toContain('chain &lt;&amp;&gt; &quot;x&quot;');
+    expect(parsed.documentElement.getAttribute('viewBox')).toMatch(/^-?\d+ -?\d+ \d+ \d+$/);
+    // the canvas's own art: its classes, its styles and its gradient, nothing fetched
+    expect(parsed.querySelectorAll('g.blk.nx')).toHaveLength(3);
+    expect(parsed.querySelectorAll('g.wf.nx')).toHaveLength(1);
+    expect(parsed.querySelectorAll('g.cachetag')).toHaveLength(1);
+    expect(parsed.querySelectorAll('g.wire')).toHaveLength(shown.wires.length);
+    expect(parsed.querySelector('linearGradient#nxCap')).not.toBeNull();
+    // (the canvas styles themselves are checked in e2e/diagram.spec.ts: the test runner empties every .css import)
+    expect(svg).toMatch(/@font-face\{font-family:"IBM Plex Sans Condensed";font-weight:400;src:url\(data:font\/woff2;base64,/);
+    expect(svg).not.toMatch(/(href|src)="https?:/);
+    // a snapshot: no run state in the dial, nothing moves
+    expect(parsed.querySelector('.nx-state')).toBeNull();
+    expect(svg).toContain('animation:none!important');
+    // the title, escaped; the legend: every family, undecided, short circuit
+    expect(parsed.querySelector('.dg-title')!.textContent).toBe('chain <&> "x"2.1.0');
     expect(svg).not.toContain('chain <&>');
-    // a head on a step has an arrow; the legend lists the families drawn
-    expect(parsed.querySelectorAll('polygon').length).toBeGreaterThanOrEqual(2);
-    expect(svg).toContain('>Completed<');
-    expect(svg).toContain('>Failed<');
-    expect(svg).not.toContain('>Never<');
-  });
-
-  it('draws a step without a processor and a cache without a root as the canvas does: dashed amber, with a ⚠', async () => {
-    const d = await loadedDocument(graphDto({
-      workflow: workflowDto({ entryStepIds: ['s1'], cacheIds: ['c1'] }),
-      steps: [stepDto('s1')],
-      caches: [cacheDto('c1', { root: '' })],
-    }));
-    // the processor removed in the design (2026-10-10): the step's processorId is null
-    const shown = applyDraft(d, EMPTY_DRAFT);
-    const steps = new Map(shown.graph.steps);
-    steps.set('s1', { ...steps.get('s1')!, processorId: null });
-    const svg = diagramSvg({ ...shown, graph: { ...shown.graph, steps } });
-    expect(svg).toContain('⚠ no processor');
-    expect(svg).toContain('⚠ no root');
+    const legend = [...parsed.querySelectorAll('.dg-lg')].map((t) => t.textContent);
+    expect(legend).toEqual(['Completed', 'Failed', 'Cancelled', 'Always', 'Never', 'undecided', 'short circuit']);
   });
 });

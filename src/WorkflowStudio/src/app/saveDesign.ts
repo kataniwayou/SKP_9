@@ -3,6 +3,7 @@ import { describeError } from '../api/describeError';
 import { designErrorsFromDto, designLogFromDto } from '../api/toModel';
 import type { DesignSaveRequest } from '../api/types';
 import { applyDesign } from '../design/apply';
+import { fitterFor } from '../canvas/useFitter';
 import { diagramSvg } from '../diagram/diagramSvg';
 import { parseSlotKey, type Design, type FieldValue, type SchemaCopy } from '../design/design';
 import { sameList } from '../design/draft';
@@ -187,7 +188,9 @@ export async function saveDesign(api: StudioApi, store: StudioStore, workflowId:
 export async function publishDrawing(api: StudioApi, store: StudioStore, workflowId: Id, now: () => Date = () => new Date()): Promise<void> {
   const d = store.getState().docs.find((x) => x.workflowId === workflowId);
   if (!d || d.status.kind !== 'ready') return;
-  const svg = diagramSvg(applyDesign(d.status.doc, d.design.draft, d.edits));
+  // labels fitted as the canvas fits them, with the page's fonts
+  const fitter = await fitterFor(document);
+  const svg = diagramSvg(applyDesign(d.status.doc, d.design.draft, d.edits), fitter);
   const r = await api.publishDiagram(workflowId, svg);
   store.dispatch({ type: 'log', workflowId, lines: [r.ok
     ? { at: now().toISOString(), text: 'Diagram published: the dashboard shows this drawing' }

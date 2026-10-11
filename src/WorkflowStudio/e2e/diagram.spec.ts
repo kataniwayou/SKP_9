@@ -40,8 +40,13 @@ test('an applied Save publishes the drawing for the dashboard; the next Save is 
   await expect(lines.filter({ hasText: 'Diagram published: the dashboard shows this drawing' })).toHaveCount(1);
   const first = await svgOf();
   expect(first).not.toContain('No diagram published');
+  // the canvas's own art (2026-10-11): its blocks and wires, its styles and faces built in, the legend
   expect(first).toContain('WORKFLOW');
-  expect(first).toContain(`>${t.stepName}<`);
+  expect(first).toContain('class="blk nx"');
+  expect(first).toContain('.wire path.w');
+  expect(first).toContain('.blk .nx-sn');
+  expect(first).toMatch(/@font-face\{font-family:"IBM Plex Mono";font-weight:400;src:url\(data:font\/woff2;base64,/);
+  expect(first).toContain('>short circuit<');
 
   // the publish left the workflow's stamp alone: a second Save is applied, not a conflict, and publishes again
   await moveDown(page, panel, t.stepBId, 96);
