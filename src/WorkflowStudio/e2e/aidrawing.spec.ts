@@ -37,8 +37,8 @@ test('a drawing that keeps every relation is applied as one step: the block move
   const before = await posOf(panel, t.stepBId);
   const to = [before[0] + 64, before[1] + 160];
   const sent = await mockModel(page, { content: JSON.stringify({ blocks: { [t.stepBId]: { x: to[0], y: to[1] } } }) });
-  // the button: a wand and "AI", named "AI drawing"
-  await expect(panel.getByRole('button', { name: 'AI drawing', exact: true })).toHaveText('AI');
+  // the button: only a wand (2026-10-11), named "AI drawing"
+  await expect(panel.getByRole('button', { name: 'AI drawing', exact: true })).toHaveText('');
   await expect(panel.getByRole('button', { name: 'AI drawing', exact: true }).locator('svg')).toHaveCount(1);
   await panel.getByRole('button', { name: 'AI drawing', exact: true }).click();
   await expect.poll(() => posOf(panel, t.stepBId)).toEqual(to);
@@ -46,6 +46,10 @@ test('a drawing that keeps every relation is applied as one step: the block move
   await expect(line).toContainText('AI drawing applied: 1 block moved, 0 wires reshaped');
   await expect(line).not.toHaveClass(/err/);
   await expect(page.getByText('● design draft')).toBeVisible();
+  // only a valid saved workflow is drawn (2026-10-11): with the drawing unsaved the wand is off and says why
+  const wand = panel.getByRole('button', { name: 'AI drawing', exact: true });
+  await expect(wand).toBeDisabled();
+  await expect(wand).toHaveAttribute('data-tip', 'Save your changes first');
   // what went to the model: kimi-k3, the rules, the graph with this workflow's steps
   const body = sent[0] as { model: string; messages: { role: string; content: string }[] };
   expect(body.model).toBe('kimi-k3');
@@ -55,6 +59,8 @@ test('a drawing that keeps every relation is applied as one step: the block move
   await panel.locator('.studio-canvas').focus();
   await page.keyboard.press('Control+z');
   await expect.poll(() => posOf(panel, t.stepBId)).toEqual(before);
+  // back to the saved drawing: the wand is on again
+  await expect(wand).toBeEnabled();
 });
 
 test('an answer naming a wire the design does not have (a dropped or invented wire) is refused in red; nothing changes', async ({ page }) => {

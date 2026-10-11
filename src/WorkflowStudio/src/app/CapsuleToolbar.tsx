@@ -41,7 +41,7 @@ export function CapsuleToolbar({ workflow, status, save, design, run, ai }: {
   /** The design draft (plan 4): its mark, Undo, Redo and Discard. */
   design?: { dirty: boolean; /** A Save is in flight. */ locked: boolean; canUndo: boolean; canRedo: boolean; onUndo: () => void; onRedo: () => void; onDiscard: () => void };
   /** AI drawing (2026-10-11): the model redraws the design; applied only if the relations stay the same. */
-  ai?: { running: boolean; onDraw: () => void; onCancel: () => void };
+  ai?: { running: boolean; blocked: string | null; onDraw: () => void; onCancel: () => void };
 }) {
   return (
     <div className="docbar" role="toolbar" aria-label="Workflow">
@@ -60,9 +60,9 @@ export function CapsuleToolbar({ workflow, status, save, design, run, ai }: {
             <button type="button" className="qb" disabled={design.locked || !design.dirty} onClick={design.onDiscard} data-tip="Drop every design change in this workflow">Discard design</button>
             <span className="qsep" />
             {ai && (ai.running
-              ? <button type="button" className="qb" aria-busy aria-label="AI drawing: cancel" onClick={ai.onCancel} data-tip="The model is drawing; click to cancel"><Spinner /> AI… Cancel</button>
-              : <button type="button" className="qb" aria-label="AI drawing" disabled={design.locked} onClick={ai.onDraw}
-                data-tip="AI drawing: redraw the workflow by the drawing rules (applied only if every relation between the steps stays the same)"><WandIcon /> AI</button>)}
+              ? <button type="button" className="qb" aria-busy aria-label="AI drawing: cancel" onClick={ai.onCancel} data-tip="The model is drawing; click to cancel"><Spinner /> Cancel</button>
+              : <button type="button" className="qb" aria-label="AI drawing" disabled={design.locked || ai.blocked !== null} onClick={ai.onDraw}
+                data-tip={ai.blocked ?? 'AI drawing: redraw the workflow by the drawing rules (applied only if every relation between the steps stays the same)'}><WandIcon /></button>)}
             {ai && <span className="qsep" />}
           </>
         )}
