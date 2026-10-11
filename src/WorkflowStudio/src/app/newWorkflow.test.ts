@@ -76,10 +76,13 @@ describe('Workspace › New workflow (2026-10-10)', () => {
       saveDesign: vi.fn().mockResolvedValue({ ok: true, value: { applied: true, errors: [] } }),
       getGraph: vi.fn().mockResolvedValue({ ok: true, value: after }),
       getStep: vi.fn(), getProcessor: vi.fn(), getSchema: vi.fn(),
+      publishDiagram: vi.fn().mockResolvedValue({ ok: true, value: null }),
     } as unknown as StudioApi;
     await saveDesign(applied, store, ID, NOW);
     d = store.getState().docs[0]!;
     expect([d.virtual, designDirty(d), runBlocked(d)]).toEqual([false, false, null]);
+    // its first Save created it, so its drawing goes to the dashboard too (2026-10-11)
+    expect(applied.publishDiagram).toHaveBeenCalledWith(ID, expect.stringContaining('<svg'));
   });
 
   it('a refresh keeps it: the session marks it new, and the restored document is built again, its draft kept', async () => {

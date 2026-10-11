@@ -232,8 +232,8 @@ export async function removeThrowaway(request: APIRequestContext): Promise<void>
 }
 
 /**
- * Why a request may not reach BaseApi, or null when it may: GETs, Save of this run's workflow (plan 8 §8), and Start
- * or Stop of this run's workflow, an `e2e-` throwaway (2026-10-09), never of any other.
+ * Why a request may not reach BaseApi, or null when it may: GETs, Save of this run's workflow (plan 8 §8) and the
+ * drawing it publishes, and Start or Stop of this run's workflow, an `e2e-` throwaway (2026-10-09), never of any other.
  */
 function refusal(r: Request): string | null {
   const method = r.method();
@@ -252,6 +252,10 @@ function refusal(r: Request): string | null {
       return null;
     }
   }
+  // the drawing an applied Save publishes for the dashboard (2026-10-11): only of a workflow whose Save this guard lets through
+  const diagram = /^\/api\/v1\/workflows\/([0-9a-f-]{36})\/diagram$/i.exec(path);
+  if (method === 'PUT' && diagram && created.tag?.startsWith('e2e-')
+    && [created.workflowId, ...(created.otherWorkflowIds ?? []), ...(created.newWorkflowIds ?? [])].includes(diagram[1]!)) return null;
   // Workspace › Delete workflow… (2026-10-10): the dry run and the real run of this run's throwaway only
   if (method === 'POST' && created.workflowId !== undefined && created.tag?.startsWith('e2e-') && path === `/api/v1/workflows/${created.workflowId}/delete`) return null;
   if (method === 'POST' && (path === '/api/v1/orchestration/start' || path === '/api/v1/orchestration/stop')

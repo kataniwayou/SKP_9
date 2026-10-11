@@ -122,11 +122,10 @@ public sealed class WorkflowsController :
     /// Publishes or replaces the workflow's diagram. The body is raw SVG, not JSON.
     /// </summary>
     /// <remarks>
-    /// <b>Enriching a workflow is the operator's choice, not a step in any pipeline.</b> Nothing
-    /// calls this automatically: an operator runs the diagram task when they want a picture, and a
-    /// workflow that never gets one keeps serving the placeholder indefinitely. That is why this is
-    /// a separate verb rather than a field the create or update DTO could carry — those would make
-    /// the diagram something every caller has to think about.
+    /// <b>The studio publishes its drawing here after every applied Save (2026-10-11)</b>, so the dashboard shows the
+    /// workflow as it is drawn in the studio; <c>kibana/publish-diagram.py</c> can still publish one by hand. It stays a
+    /// separate verb rather than a field the create or update DTO could carry — those would make the diagram something
+    /// every caller has to think about. Writing it leaves <c>UpdatedAt</c> where it was.
     /// <para>
     /// The only validation is that the body looks like SVG. A deeper check belongs in the diagram
     /// task, which renders and measures the drawing before it ever gets here; repeating it would be
@@ -146,13 +145,13 @@ public sealed class WorkflowsController :
         if (string.IsNullOrWhiteSpace(svg) || !svg.Contains("<svg", StringComparison.Ordinal))
             return BadRequest("Body must be SVG source.");
 
-        var workflow = await _db.Set<WorkflowEntity>().FirstOrDefaultAsync(w => w.Id == id, ct);
-        if (workflow is null)
-            return NotFound();
-
-        workflow.Diagram = svg;
-        await _db.SaveChangesAsync(ct);
-        return NoContent();
+        // The diagram is a picture of the workflow, not a change to it (2026-10-11: the studio publishes its drawing on
+        // every Save): one column is written in place, outside the change tracker, so the audit stamp does not move. A
+        // moved UpdatedAt would make the studio's next Save, which is checked against the stamp it loaded, a 409.
+        var written = await _db.Set<WorkflowEntity>()
+            .Where(w => w.Id == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(w => w.Diagram, svg), ct);
+        return written == 0 ? NotFound() : NoContent();
     }
 
     /// <summary>

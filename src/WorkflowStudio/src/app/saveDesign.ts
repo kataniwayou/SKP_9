@@ -3,6 +3,7 @@ import { describeError } from '../api/describeError';
 import { designErrorsFromDto, designLogFromDto } from '../api/toModel';
 import type { DesignSaveRequest } from '../api/types';
 import { applyDesign } from '../design/apply';
+import { diagramSvg } from '../diagram/diagramSvg';
 import { parseSlotKey, type Design, type FieldValue, type SchemaCopy } from '../design/design';
 import { sameList } from '../design/draft';
 import { layoutOf, type SavedLayout } from '../design/layoutDesign';
@@ -175,4 +176,20 @@ export async function saveDesign(api: StudioApi, store: StudioStore, workflowId:
     errors: [...shorts, ...designErrorsFromDto(answer.value)], doc: reread.ok ? reread.value : null,
     log: designLogFromDto(answer.value), ...(reread.ok ? {} : { reread: describeError(reread.error) }),
   });
+  if (answer.value.applied === true && reread.ok) await publishDrawing(api, store, workflowId, now);
+}
+
+/**
+ * The saved drawing published for the dashboard (the user's rule, 2026-10-11): after an applied Save, the document as
+ * read back and drawn is rendered to SVG and put on the workflow row, which the Kibana diagram panel shows. The Save
+ * stands either way; Output says whether the dashboard has the new drawing.
+ */
+export async function publishDrawing(api: StudioApi, store: StudioStore, workflowId: Id, now: () => Date = () => new Date()): Promise<void> {
+  const d = store.getState().docs.find((x) => x.workflowId === workflowId);
+  if (!d || d.status.kind !== 'ready') return;
+  const svg = diagramSvg(applyDesign(d.status.doc, d.design.draft, d.edits));
+  const r = await api.publishDiagram(workflowId, svg);
+  store.dispatch({ type: 'log', workflowId, lines: [r.ok
+    ? { at: now().toISOString(), text: 'Diagram published: the dashboard shows this drawing' }
+    : { at: now().toISOString(), text: `Saved, but the dashboard diagram was not updated: ${describeError(r.error)}`, level: 'error' }] });
 }

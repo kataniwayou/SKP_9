@@ -196,6 +196,7 @@ describe('saveDesign (plan 8 §4.1)', () => {
     saveDesign: vi.fn().mockResolvedValue(answer),
     getGraph: vi.fn().mockResolvedValue({ ok: true, value: after }),
     getStep: vi.fn().mockResolvedValue(notFound), getProcessor: vi.fn().mockResolvedValue(notFound), getSchema: vi.fn().mockResolvedValue(notFound),
+    publishDiagram: vi.fn().mockResolvedValue({ ok: true, value: null }),
   }) as unknown as StudioApi;
 
   it('applied: the workflow is read again with GETs, no errors; Output logs the save from start to alignment', async () => {
@@ -220,7 +221,13 @@ describe('saveDesign (plan 8 §4.1)', () => {
       'graph re-read: 1 step, 1 link',
       'drawing: the workflow\'s own wires, nothing to settle',
       'nothing left stored: the entities hold the design, the layout is kept',
+      'Diagram published: the dashboard shows this drawing',
     ]);
+    // the drawing as saved went to the dashboard (2026-10-11): one SVG, on this workflow
+    expect(api.publishDiagram).toHaveBeenCalledTimes(1);
+    const [id, svg] = (api.publishDiagram as unknown as ReturnType<typeof vi.fn>).mock.calls[0]! as [string, string];
+    expect(id).toBe('wf1');
+    expect(svg).toMatch(/^<svg xmlns="http:\/\/www.w3.org\/2000\/svg"/);
     expect(store.getState().output[0]).toEqual({ at: '2026-10-07T12:00:00.000Z', workflowId: 'wf1', name: 'orders', text: 'Save started: sending the layout only', level: 'info' });
   });
 
@@ -236,6 +243,19 @@ describe('saveDesign (plan 8 §4.1)', () => {
     expect(d.edits.steps['s1']!.fields).toEqual({ version: 'abc' });
     expect(designDirty(d)).toBe(false);
     expect(verdict(store)).toEqual({ text: 'Saved; not applied: 1 error', level: 'error' });
+    // not applied: the dashboard keeps the drawing of what the workflow is
+    expect(api.publishDiagram).not.toHaveBeenCalled();
+  });
+
+  it('applied, but the diagram could not be published: the Save stands; Output says so in red', async () => {
+    const store = await storeWithChange();
+    const api = apiWith({ ok: true, value: { applied: true, errors: [] } });
+    (api.publishDiagram as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, error: { kind: 'network', message: 'down' } });
+
+    await saveDesign(api, store, 'wf1', NOW);
+
+    expect(designDirty(store.getState().docs[0]!)).toBe(false);
+    expect(store.getState().output.at(-1)).toMatchObject({ text: expect.stringMatching(/^Saved, but the dashboard diagram was not updated: /), level: 'error' });
   });
 
   it('a request that never got an answer stores nothing: Output says why, the edits stay, nothing is read', async () => {

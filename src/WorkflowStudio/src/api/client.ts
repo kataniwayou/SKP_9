@@ -63,6 +63,11 @@ export interface StudioApi {
    * run rolls back and says what would be deleted. Refusals (running, shared) are a 200 with `applied: false`.
    */
   deleteWorkflow(workflowId: string, dryRun: boolean): Promise<ApiResult<WorkflowDeleteOutcomeDto>>;
+  /**
+   * Publishes the workflow's drawing (2026-10-11): `PUT /workflows/{id}/diagram` with raw SVG, which the Kibana
+   * dashboard's diagram panel shows (`GET /workflows/{id}.svg`). Leaves the workflow's `updatedAt` where it was. 204.
+   */
+  publishDiagram(workflowId: string, svg: string): Promise<ApiResult<null>>;
 }
 
 interface Problem {
@@ -158,6 +163,15 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
     saveDesign: (workflowId, body) => request<DesignOutcomeDto>('PUT', `/workflows/${id(workflowId)}/design`, body),
     startWorkflow: (workflowId) => request<null>('POST', '/orchestration/start', workflowId),
     stopWorkflow: (workflowId) => request<null>('POST', '/orchestration/stop', workflowId),
+    publishDiagram: async (workflowId, svg) => {
+      let response: Response;
+      try {
+        response = await fetchImpl(`${base}/workflows/${id(workflowId)}/diagram`, { method: 'PUT', headers: { 'Content-Type': 'image/svg+xml' }, body: svg });
+      } catch (e) {
+        return { ok: false, error: { kind: 'network', message: e instanceof Error ? e.message : String(e) } };
+      }
+      return response.ok ? { ok: true, value: null } : { ok: false, error: await toError(response) };
+    },
     deleteWorkflow: (workflowId, dryRun) => request<WorkflowDeleteOutcomeDto>('POST', `/workflows/${id(workflowId)}/delete${dryRun ? '?dryRun=true' : ''}`),
   };
 }

@@ -27,6 +27,7 @@ function fakeApi(over: Partial<StudioApi> = {}): StudioApi {
     startWorkflow: vi.fn().mockResolvedValue(notFound),
     stopWorkflow: vi.fn().mockResolvedValue(notFound),
     deleteWorkflow: vi.fn().mockResolvedValue(notFound),
+    publishDiagram: vi.fn().mockResolvedValue({ ok: true, value: null }),
     listLive: vi.fn().mockResolvedValue({ ok: true, value: [] }),
     listLiveness: vi.fn().mockResolvedValue({ ok: true, value: [] }),
     ...over,
