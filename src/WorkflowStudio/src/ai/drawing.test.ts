@@ -215,6 +215,31 @@ describe('AI drawing (2026-10-11)', () => {
     if (!out.ok) expect(out.reason).toMatch(/a lane is only for/);
   });
 
+  it('a wire joining a trunk meets it as a clean T: out of its step, then straight down onto the junction (rule 10)', async () => {
+    const d = await doc();
+    const snap = relationsOf(d, EMPTY_DRAFT);
+    // f far to the right and below: s1 -> f runs a level trunk under s2; s2 -> f joins it
+    const moved = parsePlan('{"blocks":{"f":{"x":1600,"y":480}}}', d, EMPTY_DRAFT);
+    const placed = applyPlan(d, EMPTY_DRAFT, moved);
+    const trunk = pointsOf(d, placed, 's1->f');
+    const out2 = pointsOf(d, placed, 's2->f')[0]!;
+    const level = trunk.findIndex((p, i) => i > 0 && p[1] === trunk[i - 1]![1] && Math.max(p[0], trunk[i - 1]![0]) > out2[0] + 64 && p[1] > out2[1]);
+    expect(level).toBeGreaterThan(0);
+    const at = [out2[0] + 48, trunk[level]![1]];
+    const out = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ blocks: { f: { x: 1600, y: 480 } }, wires: { 's2->f': { head: { junction: { host: 's1->f', x: at[0], y: at[1] } } } } }));
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    const pts = pointsOf(d, out.draft, 's2->f');
+    // out of the step level, one turn, straight down onto the junction on the trunk: [output, above the junction, the junction]
+    const tee = pts.at(-1)!;
+    expect(pts).toEqual([out2, [tee[0], out2[1]], tee]);
+    expect(tee[1]).toBeGreaterThan(out2[1]);
+    const host = pointsOf(d, out.draft, 's1->f');
+    expect(host.some((p, i) => i > 0 && p[1] === tee[1] && host[i - 1]![1] === tee[1] && Math.min(p[0], host[i - 1]![0]) < tee[0] && Math.max(p[0], host[i - 1]![0]) > tee[0])).toBe(true);
+    expect(out.crossings).toBe(0);
+    expect(circuitOf(d, out.draft)['s2->f']!.bends).toEqual({ xs: [tee[0]], ys: [] });
+  });
+
   it('counts crossings: perpendicular runs meeting inside both; touching ends do not count', () => {
     expect(crossingsOf([{ id: 'a', points: [[0, 50], [100, 50]] }, { id: 'b', points: [[50, 0], [50, 100]] }])).toBe(1);
     expect(crossingsOf([{ id: 'a', points: [[0, 50], [100, 50]] }, { id: 'b', points: [[100, 0], [100, 50]] }])).toBe(0);

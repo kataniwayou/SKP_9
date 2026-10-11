@@ -261,6 +261,39 @@ export function applyPlan(edited: StudioDocument, draft: Draft, plan: DrawingPla
     c = setEnd(c, j.id, j.side, { on: 'wire', host: j.host, at });
     d = withCircuit(d, edited, c);
   }
+  return cleanTees(edited, d, new Set([...plan.wires].filter(([, w]) => w.lane !== undefined).map(([id]) => id)));
+}
+
+/**
+ * Clean T junctions (rule 10, 2026-10-11): a wire joining a level run of its trunk from a step meets it square, its
+ * vertical run right at the junction (the router alone puts it midway, leaving a hook). Every such wire without a lane,
+ * hosts first; kept only when the drawn wire really ends (or starts) square on the junction, else left to the router.
+ */
+export function cleanTees(edited: StudioDocument, draft: Draft, laned: ReadonlySet<string> = new Set()): Draft {
+  let d = draft;
+  let c: Circuit = circuitOf(edited, d);
+  const joining = Object.entries(c)
+    .filter(([id, w]) => !laned.has(id) && !w.bends && ((w.head.on === 'wire' && w.tail.on === 'step') || (w.tail.on === 'wire' && w.head.on === 'step')))
+    .map(([id]) => id);
+  const hostOf = (id: string) => { const w = c[id]!; return w.head.on === 'wire' ? w.head.host : w.tail.on === 'wire' ? w.tail.host : ''; };
+  const pending = [...joining];
+  while (pending.length > 0) {
+    const k = Math.max(0, pending.findIndex((id) => !pending.includes(hostOf(id))));
+    const id = pending.splice(k, 1)[0]!;
+    const atHead = c[id]!.head.on === 'wire';
+    const drawn = applyDraft(edited, d).wires.find((w) => w.id === id)?.points;
+    if (!drawn || drawn.length < 2) continue;
+    const j = atHead ? drawn.at(-1)! : drawn[0]!;
+    const step = atHead ? drawn[0]! : drawn.at(-1)!;
+    // only from a step that lies before (fan-in) or after (fan-out) the junction by more than a jog, off the trunk's level
+    if (j[1] === step[1] || (atHead ? j[0] - step[0] : step[0] - j[0]) < JOG) continue;
+    const tried = setBends(c, id, { xs: [j[0]], ys: [] });
+    const nd = withCircuit(d, edited, tried);
+    const pts = applyDraft(edited, nd).wires.find((w) => w.id === id)?.points;
+    const end = pts && (atHead ? [pts.at(-2)!, pts.at(-1)!] : [pts[0]!, pts[1]!]);
+    const square = !!end && end[0]![0] === j[0] && end[1]![0] === j[0] && (atHead ? pts!.at(-1)! : pts![0]!)[1] === j[1];
+    if (square) { c = tried; d = nd; }
+  }
   return d;
 }
 
