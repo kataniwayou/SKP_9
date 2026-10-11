@@ -4,7 +4,7 @@ import { loadedDocument } from '../app/fixtures';
 import { setBends, setEnd } from '../circuit/circuit';
 import { applyDraft } from '../design/apply';
 import { circuitOf, EMPTY_DRAFT, withCircuit, type Draft } from '../design/draft';
-import { applyPlan, correctionMessages, crossingsOf, DRAWING_RULES, firstMessages, judgeDrawing, nearestAlong, parsePlan, promptOf, readStream, relationsOf, requestDrawing } from './drawing';
+import { applyPlan, changeOf, correctionMessages, crossingsOf, DRAWING_RULES, firstMessages, judgeDrawing, nearestAlong, parsePlan, promptOf, readStream, relationsOf, requestDrawing } from './drawing';
 
 // s1 -> s2 -> s3 (Completed), s1 -> f and s2 -> f (Failed)
 const doc = () => loadedDocument(graphDto({
@@ -56,7 +56,8 @@ describe('AI drawing (2026-10-11)', () => {
     expect(bad('{"wires":{"s9->s1":{}}}')).toMatch(/unknown wire/);
     expect(bad('{"blocks":{"s1":{"x":"0","y":0}}}')).toMatch(/not a number/);
     expect(bad('{"blocks":{"s1":{"x":1e9,"y":0}}}')).toMatch(/not a number/);
-    expect(bad('{"wires":{"s1->s2":{"head":{"junction":{"host":"s1->f","x":0,"y":0}}}}}')).toMatch(/cannot become a junction/);
+    expect(bad('{"wires":{"s1->s2":{"head":{"junction":{"host":"s1->f","x":0,"y":0}}}}}')).toBeNull();
+    expect(bad('{"wires":{"wf->s1":{"tail":{"junction":{"host":"s1->f","x":0,"y":0}}}}}')).toMatch(/cannot become a junction/);
     expect(bad('{"wires":{"wf->s1":{"tail":{"y":100}}}}')).toBeNull();
     expect((() => { try { parsePlan('{"wires":{"s2->f":{"head":{"y":100}}}}', d, joined(d)); return null; } catch (e) { return (e as Error).message; } })())
       .toMatch(/not on a step or the workflow circle/);
@@ -133,6 +134,49 @@ describe('AI drawing (2026-10-11)', () => {
     await expect(readStream(stream(ev({ error: { message: 'overloaded' } })))).rejects.toThrow(/overloaded/);
     const sse = vi.fn(async () => new Response(stream(all), { status: 200, headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
     expect(await requestDrawing(firstMessages({ system: 's', user: 'u' }), new AbortController().signal, sse)).toBe('{"blocks":{}}');
+  });
+
+  it('merges wires into a trunk (2026-10-11): a fan-in of one family into one step is applied; the meaning is unchanged', async () => {
+    const d = await doc();
+    const snap = relationsOf(d, EMPTY_DRAFT);
+    const host = pointsOf(d, EMPTY_DRAFT, 's1->f');
+    const out = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ wires: { 's2->f': { head: { junction: { host: 's1->f', x: host[1]![0], y: host[1]![1] } } } } }));
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(circuitOf(d, out.draft)['s2->f']!.head).toMatchObject({ on: 'wire', host: 's1->f' });
+    expect(changeOf(snap, relationsOf(d, out.draft))).toBeNull();
+    expect(applyDraft(d, out.draft).graph.steps.get('s2')!.nextStepIds).toEqual(applyDraft(d, EMPTY_DRAFT).graph.steps.get('s2')!.nextStepIds);
+  });
+
+  it('merges a fan-out: one step feeding two through one trunk', async () => {
+    const d = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['a'] }),
+      steps: [stepDto('a', { nextStepIds: ['b', 'c'] }), stepDto('b'), stepDto('c')],
+    }));
+    const snap = relationsOf(d, EMPTY_DRAFT);
+    const host = pointsOf(d, EMPTY_DRAFT, 'a->b');
+    const out = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ wires: { 'a->c': { tail: { junction: { host: 'a->b', x: host[0]![0] + 24, y: host[0]![1] } } } } }));
+    expect(out).toMatchObject({ ok: true });
+    if (out.ok) expect(circuitOf(d, out.draft)['a->c']!.tail).toMatchObject({ on: 'wire', host: 'a->b' });
+  });
+
+  it('refuses a merge that changes the meaning: wires of one family into different steps', async () => {
+    const d = await doc();
+    const snap = relationsOf(d, EMPTY_DRAFT);
+    const host = pointsOf(d, EMPTY_DRAFT, 's1->s2');
+    // s2 -> s3 joining s1 -> s2 would make s1 reach s3 too (and s2 reach s2)
+    const out = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ wires: { 's2->s3': { head: { junction: { host: 's1->s2', x: host[0]![0] + 40, y: host[0]![1] } } } } }));
+    expect(out).toMatchObject({ ok: false });
+    if (!out.ok) expect(out.reason).toMatch(/would have changed the workflow/);
+  });
+
+  it('nets may merge, never split or mix kinds', () => {
+    const rel = (nets: { wires: string[]; families: number[] }[]) => JSON.stringify({ next: {}, entries: [], caches: [], nets });
+    const before = rel([{ wires: ['a'], families: [2] }, { wires: ['b'], families: [2] }, { wires: ['c'], families: [1] }]);
+    expect(changeOf(before, rel([{ wires: ['a', 'b'], families: [2] }, { wires: ['c'], families: [1] }]))).toBeNull();
+    expect(changeOf(before, rel([{ wires: ['a', 'b', 'c'], families: [1, 2] }]))).toMatch(/another kind/);
+    expect(changeOf(rel([{ wires: ['a', 'b'], families: [2] }]), rel([{ wires: ['a'], families: [2] }, { wires: ['b'], families: [2] }]))).toMatch(/no longer form one net/);
+    expect(changeOf(rel([{ wires: ['u'], families: [] }, { wires: ['b'], families: [2] }]), rel([{ wires: ['b', 'u'], families: [2] }]))).toMatch(/another kind/);
   });
 
   it('counts crossings: perpendicular runs meeting inside both; touching ends do not count', () => {

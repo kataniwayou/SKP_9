@@ -34,7 +34,7 @@ Readability
 6. Centre inputs with equal gaps: a step's inputs are centred on its middle (step y + 96), 16 px apart, ordered top to bottom by where they come from: 1 input at the centre, 2 at +-8, 3 at -16, 0, +16.
 7. Symmetric hub contact points: with more than one entry step, each entry step gets its own wire from the workflow circle (never one fan-out trunk from the circle), and their contact points are symmetric about the circle's centre (centreY), 16 px apart and ordered top to bottom like the entry steps: 2 at +-8, 3 at -16, 0, +16. Place the entry steps so each of these wires runs straight into its input.
 8. Outputs are placed by the forward inputs: each output takes the height of the input it feeds, so it is straight and centred at once. Outputs that feed no step input (e.g. drops onto a trunk) take the next slots below, 16 px apart.
-9. Fan-in and fan-out through one trunk: several wires of the same family into one step become one trunk with each wire joining it at a junction; the same for one step feeding several steps.
+9. Fan-in and fan-out through one trunk: several wires of the same family into one step become one trunk with each wire joining it at a junction; the same for one step feeding several steps. To merge, keep one wire as the trunk and turn the other wires' ends on that step into junctions on it (head for a fan-in, tail for a fan-out).
 10. Clean T junctions: a joining wire runs straight into the trunk at a right angle, with no hook before the junction.
 11. No staircases: no wire segment shorter than 16 px; arrowheads stay clean.
 
@@ -64,6 +64,7 @@ export const ANSWER_SCHEMA = `Answer with ONE JSON object and nothing else:
 - An end on a step: "y" is the flow y where it meets the step's side (within the side's landing range); "auto" lets the router choose. It stays on the same step.
 - A tail on the workflow circle: "y" is the flow y where it leaves the circle's right side (within its "tailsRange"); "auto" spaces the circle's tails symmetrically about its centre, 16 px apart.
 - An end on a wire (a junction): "junction" names the host wire and the point where it should join; the studio puts it at the nearest point of the host's line.
+- Merging into a trunk: an end on a step may become a junction on another wire of the same family that ends on the same step (a head, fan-in) or starts on the same step (a tail, fan-out). Never join wires of different families or different steps; a wire on the workflow circle stays separate.
 - You do not draw the wires' routes: the studio's router draws every wire from its ends, square and around blocks. Choose block positions, end heights and junction points so the routes come out straight and uncrossed. Omit a key to leave it as it is.
 - Leave out blocks and wires you do not change. Never invent ids.`;
 
@@ -172,7 +173,8 @@ export function parsePlan(text: string, edited: StudioDocument, draft: Draft): D
         if (!isObj(e)) throw new DrawingError(`wire ${id} ${side} is not an object`);
         const now = c[side];
         if ('junction' in e) {
-          if (now.on !== 'wire') throw new DrawingError(`wire ${id} ${side} is not on a wire: it cannot become a junction`);
+          // an end on a wire moves along; an end on a step may join a wire of its own kind (a fan-in or fan-out trunk, 2026-10-11)
+          if (now.on !== 'wire' && now.on !== 'step') throw new DrawingError(`wire ${id} ${side} is not on a wire or a step: it cannot become a junction`);
           const j = e.junction;
           if (!isObj(j) || typeof j.host !== 'string' || !Object.hasOwn(circuit, j.host) || j.host === id) throw new DrawingError(`wire ${id} ${side}: unknown host`);
           entry[side] = { junction: { host: j.host, x: num(j.x, `wire ${id} ${side} x`), y: num(j.y, `wire ${id} ${side} y`) } };
@@ -219,14 +221,16 @@ export function applyPlan(edited: StudioDocument, draft: Draft, plan: DrawingPla
     }
   }
   d = withCircuit(d, edited, c);
-  if (junctions.length > 0) {
-    const drawn = applyDraft(edited, d);
-    for (const j of junctions) {
-      const host = drawn.wires.find((w) => w.id === j.host);
-      const at = host ? nearestAlong(host.points, j.at) : null;
-      if (at === null) throw new DrawingError(`wire ${j.id} ${j.side}: wire ${j.host} is not drawn`);
-      c = setEnd(c, j.id, j.side, { on: 'wire', host: j.host, at });
-    }
+  // host first: a wire that joins a trunk which itself joins another is placed once the trunk is drawn where it goes
+  const pending = [...junctions];
+  while (pending.length > 0) {
+    const k = pending.findIndex((j) => !pending.some((o) => o.id === j.host));
+    if (k < 0) throw new DrawingError(`the junctions of wires ${pending.map((j) => j.id).join(', ')} host each other`);
+    const j = pending.splice(k, 1)[0]!;
+    const host = applyDraft(edited, d).wires.find((w) => w.id === j.host);
+    const at = host ? nearestAlong(host.points, j.at) : null;
+    if (at === null) throw new DrawingError(`wire ${j.id} ${j.side}: wire ${j.host} is not drawn`);
+    c = setEnd(c, j.id, j.side, { on: 'wire', host: j.host, at });
     d = withCircuit(d, edited, c);
   }
   return d;
@@ -286,20 +290,35 @@ export function judgeDrawing(edited: StudioDocument, draft: Draft, snapshot: str
     return { ok: false, reason: e instanceof DrawingError ? e.message : 'the answer could not be applied' };
   }
   const after = relationsOf(edited, candidate);
-  if (after !== snapshot) return { ok: false, reason: `it would have changed the workflow: ${diffRelations(snapshot, after)}` };
+  const changed = changeOf(snapshot, after);
+  if (changed !== null) return { ok: false, reason: `it would have changed the workflow: ${changed}` };
   const before = applyDraft(edited, draft), shown = applyDraft(edited, candidate);
   if (shortedOf(shown) > shortedOf(before)) return { ok: false, reason: 'it would have added a short circuit' };
   return { ok: true, draft: candidate, moved: plan.blocks.size, rerouted: shown.wires.length, crossings: crossingsOf(shown.wires), shorted: shortedOf(shown) };
 }
 
-/** The first relation two snapshots disagree on, in words. */
-function diffRelations(a: string, b: string): string {
-  const A = JSON.parse(a) as { next: Record<string, string[]>; entries: string[]; caches: string[]; nets: unknown[] };
-  const B = JSON.parse(b) as typeof A;
+/**
+ * What a drawing changes in the workflow's meaning, in words; null when nothing. Every step's next steps, the entry steps
+ * and the caches stay exactly; nets may only merge (a fan-in or fan-out trunk, 2026-10-11): each net before lies wholly
+ * in one net after, of the very same family. So a net never splits, and never takes another kind of wire or an undecided one.
+ */
+export function changeOf(a: string, b: string): string | null {
+  type Rel = { next: Record<string, string[]>; entries: string[]; caches: string[]; nets: { wires: string[]; families: number[] }[] };
+  const A = JSON.parse(a) as Rel, B = JSON.parse(b) as Rel;
   for (const id of Object.keys(A.next)) if (JSON.stringify(A.next[id]) !== JSON.stringify(B.next[id])) return `${id.slice(0, 8)}… next steps ${JSON.stringify(A.next[id])} → ${JSON.stringify(B.next[id])}`;
   if (JSON.stringify(A.entries) !== JSON.stringify(B.entries)) return 'the entry steps';
   if (JSON.stringify(A.caches) !== JSON.stringify(B.caches)) return 'the caches';
-  return 'how the wires join (a junction moved to another net)';
+  const netOf = new Map<string, number>();
+  B.nets.forEach((n, i) => n.wires.forEach((w) => netOf.set(w, i)));
+  for (const n of A.nets) {
+    const into = new Set(n.wires.map((w) => netOf.get(w)));
+    if (into.size !== 1) return `wire ${n.wires[0]} and the wires joined to it no longer form one net`;
+    const after = B.nets[[...into][0]!]!;
+    if (JSON.stringify(after.wires) === JSON.stringify(n.wires)) continue;
+    // merged: only a net of one family, into a net of that same family
+    if (n.families.length !== 1 || JSON.stringify(after.families) !== JSON.stringify(n.families)) return `wire ${n.wires[0]} would join a wire of another kind`;
+  }
+  return null;
 }
 
 /** The model the studio draws with, and how hard it thinks (the analyst's convention: low | high | max). */
