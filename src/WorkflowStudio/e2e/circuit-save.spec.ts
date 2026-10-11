@@ -149,7 +149,13 @@ test('a direction-less wire writes nothing, nor does a wire joined on one: Save 
   }
   // and a wire from c poured into the one joined on a -> d: it carries nothing, so c gains no link into d
   const fed = await newWire(page, panel, t.c, await emptySpot(panel, [spot, spot2]));
-  expect(await dragEnd(page, panel, fed, 'head', await pointOnWire(panel, joined, 0.5, 12))).toBe('join here');
+  // its head's leg may lie on another net's wire on its way (rule 2: a short circuit, refused): then another point on the line
+  let reading: string | null = null;
+  for (const at of [0.5, 0.95, 0.25, 0.75, 0.05]) {
+    reading = await dragEnd(page, panel, fed, 'head', await pointOnWire(panel, joined, at, 12));
+    if (reading === 'join here') break;
+  }
+  expect(reading).toBe('join here');
   await save(page);
   await expect(await pane(page, 'Output')).toContainText('Saved');
   expect(await lists()).toEqual(before);

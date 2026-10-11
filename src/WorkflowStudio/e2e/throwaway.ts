@@ -94,6 +94,34 @@ export async function createCircuitThrowaway(request: APIRequestContext): Promis
   return { workflow: { id: created.workflowId, name: tag, version: '1.0.0', label: label(tag, '1.0.0', created.workflowId) }, tag, a, b, c, d, cacheId: created.cacheId };
 }
 
+/** A chain of steps s1 -> s2 -> … (Completed), entry s1, no cache (2026-10-11). */
+export interface ChainThrowaway { workflow: LiveWorkflow; tag: string; steps: string[] }
+
+/**
+ * Creates a chain of `n` steps through BaseApi's CRUD (`e2e-ch-…`): a schema, a processor, the steps and the workflow;
+ * no assignment. Laid out automatically in one row, so `n` sets how wide it is drawn (a fit below 100% needs 4 or more).
+ */
+export async function createChainThrowaway(request: APIRequestContext, n: number): Promise<ChainThrowaway> {
+  const tag = `e2e-ch-${Date.now().toString(36)}-${randomBytes(2).toString('hex')}`;
+  created.tag = tag;
+  created.schemaId = await post(request, 'schemas', { name: `${tag}-config`, version: '1.0.0', description: null, definition: '{"type":"object"}' });
+  created.processorId = await post(request, 'processors', {
+    name: `${tag}-proc`, version: '1.0.0', description: null, sourceHash: randomBytes(32).toString('hex'), instanceId: null,
+    inputSchemaId: null, outputSchemaId: null, configSchemaId: created.schemaId,
+  });
+  // the last first: a step's next steps exist before it
+  const steps: string[] = [];
+  for (let i = n; i >= 1; i--) {
+    const id = await post(request, 'steps', { name: `${tag}-s${i}`, version: '1.0.0', description: null, processorId: created.processorId, nextStepIds: steps.slice(0, 1), entryCondition: 1 });
+    created.extraStepIds = [...(created.extraStepIds ?? []), id];
+    steps.unshift(id);
+  }
+  created.workflowId = await post(request, 'workflows', {
+    name: tag, version: '1.0.0', description: null, entryStepIds: [steps[0]!], assignmentIds: [], cacheIds: [], cronExpression: null,
+  });
+  return { workflow: { id: created.workflowId, name: tag, version: '1.0.0', label: label(tag, '1.0.0', created.workflowId) }, tag, steps };
+}
+
 /**
  * The copy and paste throwaway (2026-10-10, `e2e-cp-…`): a processor with a config schema, steps a -> b, an assignment on
  * a (payload {"k":7}), the workflow (entry a), and a second workflow `{tag}-other` whose entry step is b, so b is used by

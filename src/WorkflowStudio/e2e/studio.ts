@@ -363,12 +363,13 @@ export async function blocks(panel: Locator): Promise<{ x: number; y: number; w:
     return { x: Number(m[1]), y: Number(m[2]), w: e.offsetWidth, h: e.offsetHeight };
   }));
 }
-/** Presses `from` and moves the real mouse to `to` in small steps (by way of `via` first); the button stays down. */
-export async function pressTo(page: Page, from: Pt, to: Pt, via?: Pt): Promise<void> {
+/** Presses `from` and moves the real mouse to `to` in small steps (by way of `via` first, one corner or several); the button stays down. */
+export async function pressTo(page: Page, from: Pt, to: Pt, via?: Pt | Pt[]): Promise<void> {
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
-  const start = via ?? from;
-  if (via) await page.mouse.move(via.x, via.y, { steps: 8 });
+  const corners = via === undefined ? [] : Array.isArray(via) ? via : [via];
+  for (const c of corners) await page.mouse.move(c.x, c.y, { steps: 8 });
+  const start = corners[corners.length - 1] ?? from;
   await page.mouse.move((start.x + to.x) / 2, (start.y + to.y) / 2, { steps: 6 });
   await page.mouse.move(to.x, to.y, { steps: 6 });
   await frames(page);

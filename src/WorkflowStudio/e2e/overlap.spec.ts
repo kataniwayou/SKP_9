@@ -119,12 +119,15 @@ test('rule 2: an end square whose drawn leg lies on another net\'s wire is refus
   const panel = await open(page);
   const ab = `${t.a}->${t.b}`, bc = `${t.b}->${t.c}`;
   // a -> b shaped by hand (its upright run a grid step across): it stays where it is
-  await shapeByHand(page, panel, ab);
+  const b = await shapeByHand(page, panel, ab);
   const was = await pointsOf(panel, bc);
   expect(was).toEqual([[800, 352], [864, 352]]);
-  // b -> c's tail drawn straight left past b: its leg runs along y 352, over the run a -> b goes into b by
+  expect(b.lo < 240 && b.hi >= 352, 'a -> b comes down past y 240 into b').toBe(true);
+  // b -> c's tail drawn up off b's output, over b, then down along a -> b's upright run past where it turns into b
+  // (a leg drawn through a step goes around it, spec §4.2, so the leg is drawn clear of b)
   await pickWire(page, panel, bc);
-  await pressTo(page, await centreOf(endSquare(panel, bc, 'tail')), await flowToPage(panel, [520, 352]));
+  const tail = await centreOf(endSquare(panel, bc, 'tail'));
+  await pressTo(page, tail, await flowToPage(panel, [b.x, b.hi + 48]), [await flowToPage(panel, [800, 240]), await flowToPage(panel, [b.x, 240])]);
   expect(await labelsOf(panel)).toEqual(['short circuit']);
   await shot(page, '5-end-square-refused');
   await page.mouse.up();

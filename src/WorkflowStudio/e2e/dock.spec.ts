@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import { box, documentPanel, esc, expect, floatOver, groupOf, inspector, liveWorkflows, openWorkflow, overlap, selectProcessor, tab, test, type LiveWorkflow } from './studio';
+import { createChainThrowaway, removeThrowaway } from './throwaway';
 
 // Spec §9, slice 3a. Read-only against the live BaseApi: GETs only.
 let workflows: LiveWorkflow[];
@@ -118,10 +119,20 @@ test('a background document draws nothing and takes no clicks', async ({ page })
   expect(hit).not.toBe(a!.label);
 });
 
-test('the canvas follows its size: re-fits until zoomed, then keeps its centre', async ({ page }) => {
-  const [wf] = workflows;
-  await openWorkflow(page, wf!);
-  const panel = documentPanel(page, wf!);
+test('the canvas follows its size: re-fits until zoomed, then keeps its centre', async ({ page, request }) => {
+  // a chain wide enough to fit below 100% (the fit's cap) even with the side panes closed: a small live workflow is
+  // already at 100% with them open and cannot grow (2026-10-11)
+  const t = await createChainThrowaway(request, 5);
+  try {
+    await canvasFollowsItsSize(page, t.workflow);
+  } finally {
+    await removeThrowaway(request);
+  }
+});
+
+async function canvasFollowsItsSize(page: Page, wf: LiveWorkflow): Promise<void> {
+  await openWorkflow(page, wf);
+  const panel = documentPanel(page, wf);
   // the graph's centre minus the canvas's centre, and the graph's width
   const view = () => panel.evaluate((p) => {
     const c = p.querySelector('.react-flow__pane')!.getBoundingClientRect();
@@ -152,7 +163,7 @@ test('the canvas follows its size: re-fits until zoomed, then keeps its centre',
   await expect(panel.getByLabel('Zoom level')).toHaveText(zoom!);
   await expect.poll(async () => Math.abs((await view()).dy - zoomed.dy)).toBeLessThanOrEqual(4);
   expect(Math.abs((await view()).dx - zoomed.dx)).toBeLessThanOrEqual(4);
-});
+}
 
 test('scroll bars appear only when needed, and dragging or clicking them pans', async ({ page }) => {
   const [wf] = workflows;

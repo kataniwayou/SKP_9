@@ -4,6 +4,7 @@ import {
   labelsOf, settledView, tab, test,
   workflowsWithSteps, type LiveWorkflow,
 } from './studio';
+import { createCircuitThrowaway, removeThrowaway } from './throwaway';
 
 // Plan 4: the designer is a trial; nothing it does may write (studio.ts's read-only guard checks every
 // request). Each test starts from an empty session and works on a live workflow with a chain a -> b -> c
@@ -194,22 +195,29 @@ test('closing a designed workflow asks; Cancel keeps it', async ({ page }) => {
   await expect(tab(page, chain!.workflow.name)).toHaveCount(1);
 });
 
-test('arrow keys nudge the picked step on the focused canvas; Ctrl+Z puts it back', async ({ page }) => {
-  const panel = await open(page);
-  const { a, b } = chain!;
-  const id = `${a}->${b}`;
-  const before = await pathOf(panel, id);
-  // the press on the step picks it and gives the canvas focus
-  await node(panel, b).locator('.nx-sn').click();
-  await expect(panel.locator('.studio-canvas')).toBeFocused();
-  await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('ArrowDown');
-  await expect.poll(() => pathOf(panel, id)).not.toBe(before);
-  await expect(page.getByText('● design draft')).toBeVisible();
-  // the two nudges are one step
-  await page.keyboard.press('Control+z');
-  await expect.poll(() => pathOf(panel, id)).toBe(before);
-  await expect(page.getByText('● design draft')).toHaveCount(0);
+test('arrow keys nudge the picked step on the focused canvas; Ctrl+Z puts it back', async ({ page, request }) => {
+  // a throwaway laid out automatically (2026-10-11): b -> c runs straight at the processor middle (step-local 96)
+  const t = await createCircuitThrowaway(request);
+  try {
+    await openWorkflow(page, t.workflow);
+    const panel = documentPanel(page, t.workflow);
+    const id = `${t.b}->${t.c}`;
+    const before = await pathOf(panel, id);
+    // the press on the step picks it and gives the canvas focus
+    await node(panel, t.c).locator('.nx-sn').click();
+    await expect(panel.locator('.studio-canvas')).toBeFocused();
+    // a straight wire stays straight while its height is inside the step's band (step-local 62 to 130, spec §5.2): five
+    // nudges of 8 take c 40 down, its band past 96, so the wire bends
+    for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowDown');
+    await expect.poll(() => pathOf(panel, id)).not.toBe(before);
+    await expect(page.getByText('● design draft')).toBeVisible();
+    // the nudges are one step
+    await page.keyboard.press('Control+z');
+    await expect.poll(() => pathOf(panel, id)).toBe(before);
+    await expect(page.getByText('● design draft')).toHaveCount(0);
+  } finally {
+    await removeThrowaway(request);
+  }
 });
 
 test('arrow keys with only a wire picked drag it as the closed hand does: its hints while held, dropped when let go; down until detached and grey, back up exactly as it was (2026-10-10)', async ({ page }) => {
@@ -256,18 +264,29 @@ test('arrow keys with only a wire picked drag it as the closed hand does: its hi
   await expect(page.getByText('● design draft')).toHaveCount(0);
 });
 
-test('dragging the last run of a picked wire up and down slides where its arrow lands', async ({ page }) => {
-  const panel = await open(page);
-  const id = `${chain!.a}->${chain!.b}`;
-  await zoomInOn(page, panel, id);
-  const p = await pointOnWire(panel, id);
-  await page.mouse.click(p.x, p.y);
-  const before = await arrowEndOf(panel, id);
-  const last = panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg`).last();
-  const at = await centreOf(last);
-  await drag(page, at, { x: at.x, y: at.y - 24 });
-  await expect.poll(() => arrowEndOf(panel, id)).not.toBe(before);
-  await expect(page.getByText('● design draft')).toBeVisible();
+test('dragging the last run of a picked wire up and down slides where its arrow lands', async ({ page, request }) => {
+  // a throwaway (2026-10-11) whose a fans out to b and d: one of the two wires is bent, its last run the one into its
+  // arrow (a straight wire has one run, and dragging that one jogs it, both ends staying)
+  const t = await createCircuitThrowaway(request);
+  try {
+    await openWorkflow(page, t.workflow);
+    const panel = documentPanel(page, t.workflow);
+    const bent = async (w: string) => ((await pathOf(panel, w)) ?? '').split('L').length > 2;
+    const id = (await bent(`${t.a}->${t.b}`)) ? `${t.a}->${t.b}` : `${t.a}->${t.d}`;
+    expect(await bent(id), 'neither a -> b nor a -> d is bent').toBe(true);
+    // zoomed in on the last run (short: 24 px into the step), so its square is on screen and clear of the end dots
+    await zoomInOn(page, panel, await pointOnWire(panel, id, 0.95));
+    const p = await pointOnWire(panel, id, 0.95);
+    await page.mouse.click(p.x, p.y);
+    const before = await arrowEndOf(panel, id);
+    const last = panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg`).last();
+    const at = await centreOf(last);
+    await drag(page, at, { x: at.x, y: at.y - 24 });
+    await expect.poll(() => arrowEndOf(panel, id)).not.toBe(before);
+    await expect(page.getByText('● design draft')).toBeVisible();
+  } finally {
+    await removeThrowaway(request);
+  }
 });
 
 test('the arrow head of a picked wire dropped on another step connects it there; the wire keeps its id (plan 9)', async ({ page }) => {
@@ -804,7 +823,8 @@ test('a wire\'s tail released on empty canvas leaves it open there: dashed in it
   await expect(edge.locator('.nx-head')).toHaveCount(1);
   const bb = (await node(panel, b).boundingBox())!;
   const tip = (await edge.locator('.nx-head').boundingBox())!;
-  expect(Math.abs(tip.x + tip.width - bb.x)).toBeLessThan(6);
+  // within 6 canvas units of b's left border (the arrow tip overlaps the border a little), at whatever zoom it is drawn
+  expect(Math.abs(tip.x + tip.width - bb.x)).toBeLessThan(6 * bb.width / 224);
   // still picked, with the squares of a wire
   await expect(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end`)).toHaveCount(2);
   await expect(page.getByText('● design draft')).toBeVisible();

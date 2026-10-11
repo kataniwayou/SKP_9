@@ -90,9 +90,11 @@ function search(s: Pt, e: Pt, din: number, dout: number | null, notOut: number |
 /**
  * A right-angled path that leaves (sx, sy) and lands on (tx, ty) heading +x, kept clear of `boxes`: each
  * run that crosses a block is replaced by a detour around it (spec §4.2, the user's rule: a dragged wire
- * goes around a step, never through it). A run whose detour cannot be found stays as it is.
+ * goes around a step, never through it). A run whose detour cannot be found stays as it is. `from` and `to`
+ * are the headings out of the first point and into the last (0: +x, 1: +y, 2: -x, 3: -y; `to` null: any way, an end
+ * left open), the wire's port ends by default.
  */
-export function clearPath(points: readonly Pt[], boxes: Box[]): Pt[] {
+export function clearPath(points: readonly Pt[], boxes: Box[], from = 0, to: number | null = 0): Pt[] {
   // a bend inside a block cannot be kept: its neighbours are joined around the block instead
   const all = simplify([...points]);
   const pts = all.filter((p, i) => i === 0 || i === all.length - 1 || !boxes.some((box) => inside(p, box)));
@@ -102,15 +104,15 @@ export function clearPath(points: readonly Pt[], boxes: Box[]): Pt[] {
     const last = i === pts.length - 2;
     // a wire leaves its source's port and enters its target's landing straight, heading right: only that
     // crossing of the border is allowed, never a run back through either block
-    const right = dirOf(a, b) === 0;
-    const blocked = boxes.some((box) => hits(a, b, box) && !(i === 0 && right && inside(a, box)) && !(last && right && inside(b, box)));
+    const d = dirOf(a, b);
+    const blocked = boxes.some((box) => hits(a, b, box) && !(i === 0 && d === from && inside(a, box)) && !(last && d === to && inside(b, box)));
     const square = a[0] === b[0] || a[1] === b[1];
     if (!blocked && square) { out.push(b); continue; }
-    // the heading into this run: the run before it, or +x from the source port
-    const din = out.length > 1 ? dirOf(out[out.length - 2]!, a) : 0;
+    // the heading into this run: the run before it, or out of the first point
+    const din = out.length > 1 ? dirOf(out[out.length - 2]!, a) : from;
     const next = pts[i + 2];
     const notOut = last || !next || (next[0] !== b[0] && next[1] !== b[1]) ? null : (dirOf(b, next) + 2) % 4;
-    const way = search(a, b, i === 0 ? 0 : din, last ? 0 : null, notOut, boxes);
+    const way = search(a, b, i === 0 ? from : din, last ? to : null, notOut, boxes);
     if (way) out.push(...way.slice(1));
     else if (square) out.push(b);
     else {
@@ -170,6 +172,24 @@ export function clearRun(bends: Bends, ends: Ends, run: { vertical: boolean; ind
 /** A manual shape kept clear of the blocks: its runs detour around any block they would cross. */
 export function clearBends(ends: Ends, bends: Bends, boxes: Box[]): Bends {
   return shapeFromPoints(clearPath(pointsOfShape(ends, bends), boxes));
+}
+
+/**
+ * An end dragged open (the pen's path, `oriented` from the end that stays) kept clear of the blocks (spec §4.2): its
+ * first `kept` points, the corners the wire keeps, stay; the leg after them goes around any block it would cross,
+ * leaving the last kept point the way the run into it heads (from the end that stays: `out`, the way the wire left it)
+ * and reaching the open end any way.
+ */
+export function clearDragged(oriented: Pt[], kept: number, out: number, boxes: Box[]): Pt[] {
+  const k = Math.max(1, kept);
+  const leg = oriented.slice(k - 1);
+  // a leg along a block's border (an end slid down its own step's side) is not through it: drawn as the pen drew it
+  // (the same array, so a caller can tell nothing was changed)
+  const through = (a: Pt, b: Pt, box: Box) => Math.max(a[0], b[0]) > box.x && Math.min(a[0], b[0]) < box.x + box.w
+    && Math.max(a[1], b[1]) > box.y && Math.min(a[1], b[1]) < box.y + box.h;
+  if (!leg.some((a, i) => i > 0 && boxes.some((box) => through(leg[i - 1]!, a, box)))) return oriented;
+  const heading = k >= 2 ? dirOf(oriented[k - 2]!, oriented[k - 1]!) : out;
+  return simplify([...oriented.slice(0, k - 1), ...clearPath(leg, boxes, heading, null)]);
 }
 
 /**

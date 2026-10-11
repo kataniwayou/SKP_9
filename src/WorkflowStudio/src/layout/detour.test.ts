@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clearBends, clearPath, clearRun, legPath } from './detour';
+import { clearBends, clearDragged, clearPath, clearRun, legPath } from './detour';
 import { LineIndex } from './overlaps';
 import type { Box, Pt } from './router';
 import { pointsOfShape } from './shape';
@@ -93,6 +93,39 @@ describe('clearBends', () => {
     const mid = box('m', 288, 288);
     const bends = clearBends(ends, { xs: [48], ys: [] }, [box('s', -224, 0), mid, box('t', 800, 304)]);
     expect(crosses(pointsOfShape(ends, bends), mid)).toBe(false);
+  });
+});
+
+describe('clearDragged (an end dragged open; e2e designer.spec.ts:785, 2026-10-11)', () => {
+  it('a tail released above its wire\'s own step goes around the step: out of its input heading left, the head landing heading right', () => {
+    const b = box('b', 1440, 64);
+    // drawn from the head that stays (on b's input) to the tail released above b: the pen's L runs right through b
+    const out = clearDragged([[1440, 160], [1592, 160], [1592, 0]], 1, 2, [b]);
+    expect(crosses(out, b)).toBe(false);
+    expect(rightAngled(out)).toBe(true);
+    expect([out[0], out.at(-1)]).toEqual([[1440, 160], [1592, 0]]);
+    expect(out[1]![1]).toBe(160);
+    expect(out[1]![0]).toBeLessThan(1440);
+  });
+
+  it('a leg that crosses no block is drawn as the pen drew it', () => {
+    const pts: Pt[] = [[1440, 160], [1376, 160], [1376, 0]];
+    expect(clearDragged(pts, 1, 2, [box('b', 1440, 64)])).toEqual(pts);
+  });
+
+  it('a leg along a block\'s border is not through it: a head slid down its own step\'s input side stays an L', () => {
+    const pts: Pt[] = [[512, 160], [576, 160], [576, 256]];
+    expect(clearDragged(pts, 1, 0, [box('s1', 288, 64), box('s2', 576, 64)])).toEqual(pts);
+  });
+
+  it('the corners the wire keeps stay; only the leg after them goes around a block', () => {
+    const m = box('m', 288, 288);
+    // kept: the staying tail and its corners at (48, 96) and (48, 200); the leg from there runs down through m
+    const out = clearDragged([[0, 96], [48, 96], [48, 200], [400, 200], [400, 600]], 3, 0, [box('s', -224, 0), m]);
+    expect(out.slice(0, 3)).toEqual([[0, 96], [48, 96], [48, 200]]);
+    expect(crosses(out, m)).toBe(false);
+    expect(out.at(-1)).toEqual([400, 600]);
+    expect(rightAngled(out)).toBe(true);
   });
 });
 

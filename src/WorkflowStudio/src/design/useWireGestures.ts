@@ -6,7 +6,7 @@ import { togglePick, type Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
 import { addCircuitWire, freeWithout, NEW_WIRE_PREFIX, openJoinedOn, sameEnd, setBends, setEnd, type Circuit, type End, type Side } from '../circuit/circuit';
 import { endPointOf, hubStart, type WireRoute } from '../layout/circuitRoute';
-import { clearBends, clearRun, legPath } from '../layout/detour';
+import { clearBends, clearDragged, clearRun, legPath } from '../layout/detour';
 import { clampLanding, PMID, snap, STEP_W, type Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import { simplify, type Box, type Pt } from '../layout/router';
@@ -324,10 +324,26 @@ export function useWireGestures(
     const stored = (pts: readonly Pt[]): Pt[] => (side === 'head' ? [...pts] : [...pts].reverse());
     let legs: Legs = startLegs(stored(wire.points), flowPointOf(e));
     const boxes = blockBoxes(shown.current.placement);
+    // released open, the leg drawn goes around the blocks (spec §4.2): out of the end that stays the way the wire left it
+    const out = legs.axis === 'h' ? (legs.dir > 0 ? 0 : 2) : (legs.dir > 0 ? 1 : 3);
     // the leg the router draws into a contact keeps off the other wires (rule 2), as the router does
     const others = new LineIndex();
     for (const x of shown.current.wires) if (x.id !== wire.id) others.add(x.id, x.points);
     const avoid = (pts: Pt[]): number => others.count(pts, () => true);
+    /**
+     * The path an end released open lies on, from the end that stays: as the pen drew it, its leg around any block it
+     * would go through (2026-10-11); when that way lies on another wire, the leg routed as into a contact (on a track
+     * no other wire lies on, rule 2) if that one lies on fewer.
+     */
+    const openPath = (): Pt[] => {
+      const pen = legsPath(legs);
+      const around = clearDragged(pen, legs.floor, out, boxes);
+      if (around === pen || avoid(around) === 0) return around;
+      const [ax, ay] = keepShape() ? legs.path[legs.path.length - 1]! : [sx, sy];
+      const leg = ghostPath({ x: ax, y: ay }, { x: legs.end[0], y: legs.end[1] }, side, boxes, avoid);
+      const routed = simplify([...(keepShape() ? legs.path : [[sx, sy] as Pt]), ...(side === 'head' ? leg : [...leg].reverse())]);
+      return avoid(routed) < avoid(around) ? routed : around;
+    };
     /** The bends of a path drawn from the end that stays (`oriented`), its lead before the core left out. */
     const bendsOf = (oriented: readonly Pt[]) => shapeFromPoints(stored(coreFrom(oriented, fixed)));
     // an automatic wire with no corner fixed in this drag is routed again onto a step, the hub or a line (as before)
@@ -381,7 +397,7 @@ export function useWireGestures(
       let next: Circuit;
       if (t.on === 'open') {
         next = setEnd(circuit, wire.id, side, end);
-        const bends = bendsOf(legsPath(legs));
+        const bends = bendsOf(openPath());
         next = setBends(next, wire.id, bends.xs.length > 0 ? bends : null);
         // the other end stays where it is drawn: an automatic end on a step or the hub is held there (`held`), or
         // the fan-out or the landing rule would move it once this end has gone (the user's rule: the other points
@@ -407,7 +423,7 @@ export function useWireGestures(
       id: wire.id, ghost: wire.id, side, circuit, own, overlaps,
       step: (p) => { legs = moveLegs(legs, p); },
       path: (t) => {
-        if (t.on === 'open') return stored(legsPath(legs));
+        if (t.on === 'open') return stored(openPath());
         const { core, lead } = into(t);
         return stored(simplify([...core, ...lead]));
       },
