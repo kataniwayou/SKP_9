@@ -7,6 +7,8 @@ import { nodeBox } from '../design/hit';
 import { writtenLists } from '../design/shortCircuits';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { clampLanding, GRID, PMID, PORT_GAP, snap, STEP_H, STEP_W } from '../layout/geometry';
+import { JOG } from '../layout/shape';
+import { blockBoxes } from '../layout/wires';
 import type { Pt } from '../layout/router';
 import { CONDITIONS } from '../model/entryConditions';
 
@@ -42,7 +44,7 @@ Layout
 12. Left to right by depth: the workflow circle on the far left, steps in columns in order of execution, aligned on the 8 px grid.
 13. The main path (the Completed chain) is one straight row.
 14. Failure handling sits below the row: the Failed trunk under the row, the steps it feeds at its end.
-15. Skips go over the row: a wire that jumps past steps arcs above the row, clear of the drops below.
+15. Skips go over the row: a wire that jumps past steps arcs above the row, clear of the drops below. Give it a "lane" above the row and put its ends on the top slots of both steps (above the row's own wires there), or it crosses them.
 16. Place blocks so the rules agree (e.g. a step's height so a trunk enters it straight at its centre).
 17. Caches sit under the workflow circle, out of the wiring's way.
 
@@ -56,7 +58,8 @@ export const ANSWER_SCHEMA = `Answer with ONE JSON object and nothing else:
   "wires": {
     "<wire id>": {
       "tail": { "y": <number> } | { "auto": true } | { "junction": { "host": "<wire id>", "x": <number>, "y": <number> } },
-      "head": (same as tail)
+      "head": (same as tail),
+      "lane": <number>
     }
   }
 }
@@ -65,6 +68,7 @@ export const ANSWER_SCHEMA = `Answer with ONE JSON object and nothing else:
 - A tail on the workflow circle: "y" is the flow y where it leaves the circle's right side (within its "tailsRange"); "auto" spaces the circle's tails symmetrically about its centre, 16 px apart.
 - An end on a wire (a junction): "junction" names the host wire and the point where it should join; the studio puts it at the nearest point of the host's line.
 - Merging into a trunk: an end on a step may become a junction on another wire of the same family that ends on the same step (a head, fan-in) or starts on the same step (a tail, fan-out). Never join wires of different families or different steps; a wire on the workflow circle stays separate.
+- lane (optional): for a wire that cannot run straight (a skip past steps, a loop back), the flow y of its middle run; the studio draws it out of the tail, along the lane, and into the head. Use it to send skips over the row (rule 15), clear of every block. Only for a wire whose ends are on steps or the workflow circle.
 - You do not draw the wires' routes: the studio's router draws every wire from its ends, square and around blocks. Choose block positions, end heights and junction points so the routes come out straight and uncrossed. Omit a key to leave it as it is.
 - Leave out blocks and wires you do not change. Never invent ids.`;
 
@@ -131,7 +135,7 @@ export type EndPlan = { y: number } | { auto: true } | { junction: { host: strin
 /** A drawing as the answer gives it, checked: known ids, finite numbers, well-formed bends. */
 export interface DrawingPlan {
   blocks: Map<string, { x: number; y: number }>;
-  wires: Map<string, { tail?: EndPlan; head?: EndPlan }>;
+  wires: Map<string, { tail?: EndPlan; head?: EndPlan; lane?: number }>;
 }
 
 export class DrawingError extends Error {}
@@ -166,7 +170,7 @@ export function parsePlan(text: string, edited: StudioDocument, draft: Draft): D
       const c = circuit[id];
       if (!Object.hasOwn(circuit, id) || !c) throw new DrawingError(`unknown wire "${id.slice(0, 60)}"`);
       if (!isObj(w)) throw new DrawingError(`wire ${id} is not an object`);
-      const entry: { tail?: EndPlan; head?: EndPlan } = {};
+      const entry: { tail?: EndPlan; head?: EndPlan; lane?: number } = {};
       for (const side of ['tail', 'head'] as const) {
         const e = w[side];
         if (e === undefined) continue;
@@ -187,6 +191,8 @@ export function parsePlan(text: string, edited: StudioDocument, draft: Draft): D
         }
       }
       // no routes from the model (2026-10-11): the router draws every wire, so a stray "bends" is ignored
+      // a lane (2026-10-11): the height of the wire's middle run, for a wire that cannot run straight (a skip, a loop back)
+      if (w.lane !== undefined && w.lane !== null) entry.lane = snap(num(w.lane, `wire ${id} lane`));
       plan.wires.set(id, entry);
     }
   }
@@ -221,6 +227,28 @@ export function applyPlan(edited: StudioDocument, draft: Draft, plan: DrawingPla
     }
   }
   d = withCircuit(d, edited, c);
+  // lanes, before junctions so a trunk on a lane is drawn there first: out of the tail, along the lane, into the head
+  const laned = [...plan.wires].filter(([, w]) => w.lane !== undefined);
+  if (laned.length > 0) {
+    const drawn = applyDraft(edited, d);
+    for (const [id, w] of laned) {
+      const cw = c[id]!;
+      if (cw.tail.on === 'wire' || cw.head.on === 'wire' || cw.tail.on === 'open' || cw.head.on === 'open' || junctions.some((j) => j.id === id)) {
+        throw new DrawingError(`wire ${id}: a lane is only for a wire from a step or the workflow circle to a step`);
+      }
+      const pts = drawn.wires.find((x) => x.id === id)?.points;
+      if (!pts || pts.length < 2) throw new DrawingError(`wire ${id} is not drawn`);
+      c = setBends(c, id, { xs: [snap(pts[0]![0] + JOG), snap(pts.at(-1)![0] - JOG)], ys: [w.lane!] });
+    }
+    d = withCircuit(d, edited, c);
+    const after = applyDraft(edited, d);
+    const boxes = blockBoxes(after.placement);
+    for (const [id] of laned) {
+      const pts = after.wires.find((x) => x.id === id)!.points;
+      const hit = boxes.find((b) => runsThrough(pts, b));
+      if (hit) throw new DrawingError(`wire ${id}: its lane at y ${plan.wires.get(id)!.lane} runs through a block (${hit.id})`);
+    }
+  }
   // host first: a wire that joins a trunk which itself joins another is placed once the trunk is drawn where it goes
   const pending = [...junctions];
   while (pending.length > 0) {
@@ -234,6 +262,17 @@ export function applyPlan(edited: StudioDocument, draft: Draft, plan: DrawingPla
     d = withCircuit(d, edited, c);
   }
   return d;
+}
+
+/** A drawn line passing through a block's inside (its own ends touch the sides, which is not through). */
+function runsThrough(points: readonly Pt[], b: { x: number; y: number; w: number; h: number }): boolean {
+  const inside = (v: number, lo: number, hi: number) => v > lo + 0.5 && v < hi - 0.5;
+  for (let i = 0; i + 1 < points.length; i++) {
+    const [p, q] = [points[i]!, points[i + 1]!];
+    if (p[1] === q[1] && inside(p[1], b.y, b.y + b.h) && Math.max(p[0], q[0]) > b.x + 0.5 && Math.min(p[0], q[0]) < b.x + b.w - 0.5) return true;
+    if (p[0] === q[0] && inside(p[0], b.x, b.x + b.w) && Math.max(p[1], q[1]) > b.y + 0.5 && Math.min(p[1], q[1]) < b.y + b.h - 0.5) return true;
+  }
+  return false;
 }
 
 /** How far along a drawn line its point nearest to `p` lies; null for a line with no segment. */

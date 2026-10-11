@@ -179,6 +179,42 @@ describe('AI drawing (2026-10-11)', () => {
     expect(changeOf(rel([{ wires: ['u'], families: [] }, { wires: ['b'], families: [2] }]), rel([{ wires: ['b', 'u'], families: [2] }]))).toMatch(/another kind/);
   });
 
+  it('a lane sends a skip over the row: out of the tail, along the lane, into the head; through a block it is refused', async () => {
+    const d = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['a'] }),
+      steps: [stepDto('a', { nextStepIds: ['b', 'c'] }), stepDto('b', { nextStepIds: ['c'] }), stepDto('c')],
+    }));
+    const snap = relationsOf(d, EMPTY_DRAFT);
+    const b = applyDraft(d, EMPTY_DRAFT).placement.steps.get('b')!;
+    const lane = b.y - 64;
+    // the lane alone, with the router's end order (the skip below at both ends): over the row it crosses both row wires
+    const alone = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ wires: { 'a->c': { lane } } }));
+    expect(alone).toMatchObject({ ok: true, crossings: 2 });
+    // with the skip on top at both ends (rule 6's order): no crossing
+    const out = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ wires: {
+      'a->c': { lane, tail: { y: 144 }, head: { y: 152 } }, 'a->b': { tail: { y: 160 } }, 'b->c': { head: { y: 168 } },
+    } }));
+    expect(out).toMatchObject({ ok: true, crossings: 0 });
+    if (!out.ok) return;
+    const pts = pointsOf(d, out.draft, 'a->c');
+    expect(pts.some((p, i) => i > 0 && p[1] === lane && pts[i - 1]![1] === lane)).toBe(true);
+    // the lane only shapes the middle: the ends are where the answer put them
+    expect(pts[0]![1]).toBe(144);
+    expect(pts.at(-1)![1]).toBe(152);
+    // a lane through b's middle: refused, nothing applied
+    const through = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ wires: { 'a->c': { lane: b.y + 96 } } }));
+    expect(through).toMatchObject({ ok: false });
+    if (!through.ok) expect(through.reason).toMatch(/runs through a block/);
+  });
+
+  it('a lane is only for a wire between terminals, not one joined at a junction', async () => {
+    const d = await doc();
+    const draft = joined(d);
+    const out = judgeDrawing(d, draft, relationsOf(d, draft), '{"wires":{"s2->f":{"lane":-200}}}');
+    expect(out).toMatchObject({ ok: false });
+    if (!out.ok) expect(out.reason).toMatch(/a lane is only for/);
+  });
+
   it('counts crossings: perpendicular runs meeting inside both; touching ends do not count', () => {
     expect(crossingsOf([{ id: 'a', points: [[0, 50], [100, 50]] }, { id: 'b', points: [[50, 0], [50, 100]] }])).toBe(1);
     expect(crossingsOf([{ id: 'a', points: [[0, 50], [100, 50]] }, { id: 'b', points: [[100, 0], [100, 50]] }])).toBe(0);
