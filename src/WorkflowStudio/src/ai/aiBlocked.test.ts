@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { moveBlocks, EMPTY_DRAFT } from '../design/draft';
-import { canSave, designLocked, INITIAL_STATE, reduce, type OpenDocument, type StudioAction } from '../store/studioState';
+import { canSave, designLocked, hasChanges, INITIAL_STATE, reduce, saveBlocked, type OpenDocument, type StudioAction } from '../store/studioState';
 import { AI_DRAWING, runBlocked } from '../store/run';
 import { aiBlocked } from './useAiDrawing';
 
@@ -59,5 +59,17 @@ describe('while the AI draws, its document is locked (the user’s rule, 2026-10
     const free = reduce(locked, { type: 'drawing', workflowId: 'w', on: false });
     expect(designLocked(free.docs[0]!)).toBe(false);
     expect(reduce(free, { type: 'undo', workflowId: 'w' }).docs[0]!.design.draft).not.toBe(doc.design.draft);
+  });
+});
+
+describe('Save is always offered once loaded and idle; otherwise it says why (the user\'s rule, 2026-10-11)', () => {
+  it('names what stops it', async () => {
+    const d = await opened();
+    expect(saveBlocked(d)).toBeNull();
+    expect(hasChanges(d)).toBe(false);
+    expect(saveBlocked({ ...d, saving: true })).toBe('Saving…');
+    expect(saveBlocked({ ...d, drawing: true })).toBe(AI_DRAWING);
+    expect(saveBlocked({ ...d, status: { kind: 'loading' } })).toBe('The workflow is still loading');
+    expect(saveBlocked({ ...d, status: { kind: 'failed', message: 'x' } })).toBe('The workflow could not be loaded');
   });
 });

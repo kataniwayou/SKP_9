@@ -270,10 +270,24 @@ describe('saveDesign (plan 8 §4.1)', () => {
     expect(store.getState().output.map((l) => [l.level, l.text])).toEqual([['info', 'Save started: sending the layout only'], ['error', 'Not saved: Network error: down']]);
   });
 
-  it('sends nothing when there is nothing to save', async () => {
+  it('an unchanged design is saved too (2026-10-11): the layout alone, and its drawing published to the dashboard', async () => {
     const store = createStudioStore();
     store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
     store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graphDto()) });
+    const api = apiWith({ ok: true, value: { applied: true, errors: [] } });
+
+    await saveDesign(api, store, 'wf1', NOW);
+
+    expect(api.saveDesign).toHaveBeenCalledTimes(1);
+    expect(store.getState().output[0]!.text).toBe('Save started: sending the layout only');
+    expect(api.publishDiagram).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends nothing while a Save runs or the AI draws', async () => {
+    const store = createStudioStore();
+    store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
+    store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graphDto()) });
+    store.dispatch({ type: 'drawing', workflowId: 'wf1', on: true });
     const api = apiWith({ ok: true, value: { applied: true, errors: [] } });
 
     await saveDesign(api, store, 'wf1', NOW);

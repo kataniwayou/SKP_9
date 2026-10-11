@@ -21,7 +21,7 @@ import { currentTarget, editTargetOf, rootTarget, targetKey, type InspectorTarge
 import { picksOf, samePicks, type Pick } from './picks';
 import { selectionKey, type Selection } from './selection';
 import { appendOutput, capLine, type LineDraft, type OutputLine } from './output';
-import { RUN_TIMEOUT_MS, RUN_WORD, type RunOp, type RunState } from './run';
+import { AI_DRAWING, RUN_TIMEOUT_MS, RUN_WORD, type RunOp, type RunState } from './run';
 import { saveAnswerLines, settleReport, type DesignLogLine } from './saveLog';
 
 export type { OutputLine } from './output';
@@ -573,9 +573,24 @@ export const designLocked = (d: { saving: boolean; drawing?: boolean }): boolean
 export const designDirty = (d: OpenDocument): boolean =>
   d.virtual === true || (d.stored === null ? d.restored : !sameDesign(designOf(d), d.stored));
 
-/** Save is offered (spec §4.1): the design differs from the stored one, or the stored one is not applied yet. */
-export const canSave = (d: OpenDocument): boolean =>
-  d.status.kind === 'ready' && !designLocked(d) && d.stored !== null && (designDirty(d) || hasGraphChanges(d.stored));
+/**
+ * Why Save cannot be pressed now, or null when it can (the user's rule, 2026-10-11): always, once the workflow is loaded and
+ * nothing is running on it. An unchanged design may be saved too: it stores the same design and publishes its drawing to
+ * the dashboard, which is how an unchanged workflow gets its diagram.
+ */
+export function saveBlocked(d: OpenDocument): string | null {
+  if (d.status.kind === 'failed') return 'The workflow could not be loaded';
+  if (d.status.kind !== 'ready' || d.stored === null) return 'The workflow is still loading';
+  if (d.saving) return 'Saving…';
+  if (d.drawing === true) return AI_DRAWING;
+  return null;
+}
+
+/** Save is offered (spec §4.1; 2026-10-11: whether or not anything changed). */
+export const canSave = (d: OpenDocument): boolean => saveBlocked(d) === null;
+
+/** Save has something new to store: the design differs from the stored one, or the stored one is not applied yet. */
+export const hasChanges = (d: OpenDocument): boolean => d.stored !== null && (designDirty(d) || hasGraphChanges(d.stored));
 
 export function activeDocument(state: StudioState): OpenDocument | null {
   return state.docs.find((d) => d.workflowId === state.activeId) ?? null;

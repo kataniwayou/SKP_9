@@ -7,7 +7,7 @@ import { addCircuitWire, setEnd } from '../circuit/circuit';
 import { circuitOf, EMPTY_DRAFT, withCircuit } from '../design/draft';
 import { EMPTY_EDITS } from '../design/design';
 import { restoredState } from '../app/session';
-import { activeDocument, canSave, designDirty, INITIAL_STATE, inspectorKey, reduce, shownTargetOf, type StudioAction, type StudioState } from './studioState';
+import { activeDocument, canSave, designDirty, hasChanges, INITIAL_STATE, inspectorKey, reduce, shownTargetOf, type StudioAction, type StudioState } from './studioState';
 
 const doc = { graph: { workflow: { name: 'wf', version: '1.0.0' } } } as StudioDocument;
 const run = (...actions: StudioAction[]): StudioState => actions.reduce(reduce, INITIAL_STATE);
@@ -384,7 +384,8 @@ describe('opening a design (plan 9 §8)', () => {
     expect(d.design.draft.wires).toBeNull();
     expect(circuitOf(doc4, d.design.draft)['s3->s4']!.head).toEqual({ on: 'step', step: 's4', y: null });
     expect(designDirty(d)).toBe(false);
-    expect(canSave(d)).toBe(false);
+    // nothing new to store, yet Save is offered (2026-10-11): it publishes the drawing to the dashboard
+    expect([hasChanges(d), canSave(d)]).toEqual([false, true]);
   });
 
   it('a stored version 2 design keeps a self-link the workflow has: no list changes, not dirty (final review I1)', async () => {
@@ -409,7 +410,7 @@ describe('opening a design (plan 9 §8)', () => {
     } as never));
     const d = run(open('wf1'), { type: 'loaded', workflowId: 'wf1', doc: plain }).docs[0]!;
     expect(d.design.draft.wires).toBeNull();
-    expect([designDirty(d), canSave(d)]).toEqual([false, false]);
+    expect([designDirty(d), hasChanges(d), canSave(d)]).toEqual([false, false, true]);
 
     // a tail moved round the hub is a visible layout change: dirty
     const angled = withCircuit(EMPTY_DRAFT, plain, setEnd(circuitOf(plain, EMPTY_DRAFT), 'wf->s1', 'tail', { on: 'hub', angle: 90 }));

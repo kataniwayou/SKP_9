@@ -7,7 +7,7 @@ import type { Pick } from '../store/picks';
 import { NOT_SAVED_YET, runBlocked, type RunOp } from '../store/run';
 import { SPHERE_NODE_ID } from '../layout/nodeIds';
 import type { Selection } from '../store/selection';
-import { canSave, designDirty, designLocked } from '../store/studioState';
+import { designDirty, designLocked, hasChanges, saveBlocked } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { applyDraft, applyEdits } from '../design/apply';
 import { canRedo, canUndo } from '../design/history';
@@ -110,7 +110,7 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
         }}
       >
         <CapsuleToolbar workflow={open.status.doc.graph.workflow} status={status}
-          save={onSave ? { enabled: canSave(open), saving: open.saving, onSave } : undefined}
+          save={onSave ? { blocked: saveBlocked(open), changed: hasChanges(open), saving: open.saving, onSave } : undefined}
           run={onRun ? {
             blocked: { start: runBlocked(open), stop: runBlocked(open) }, pending: open.run?.op ?? null,
             onStart: () => onRun('start'), onStop: () => onRun('stop'),

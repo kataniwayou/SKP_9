@@ -51,3 +51,15 @@ test('an applied Save publishes the drawing for the dashboard; the next Save is 
   const second = await svgOf();
   expect(second).not.toBe(first);
 });
+
+test('Save is offered with nothing changed: its tooltip says so, and it publishes the drawing again', async ({ page }) => {
+  await openWorkflow(page, t.workflow);
+  const button = page.getByRole('button', { name: '⤓ Save' });
+  await expect(button).toBeEnabled();
+  await expect(button).toHaveAttribute('data-tip', /^Nothing changed since the last Save/);
+  await save(page);
+  const lines = await outputLines(page);
+  await expect(lines.filter({ hasText: 'Save started: sending the layout only' })).toHaveCount(1);
+  await expect(lines.filter({ hasText: 'Saved and applied' })).toHaveCount(1);
+  await expect(lines.filter({ hasText: 'Diagram published' })).toHaveCount(1);
+});

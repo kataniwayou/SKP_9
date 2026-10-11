@@ -69,7 +69,10 @@ test('the spinner shows on the Save button and the tab for the whole Save, on th
   await expect(tab(page, t.workflow.name)).toHaveAttribute('aria-busy', 'false');
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText(`Saved ${t.workflow.name}`);
   await tab(page, t.workflow.name).click();
-  await expect((await outputLines(page)).last()).toContainText('nothing left stored');
+  // the Save's own last line; the drawing published for the dashboard follows it (2026-10-11)
+  const lines = await outputLines(page);
+  await expect(lines.filter({ hasText: 'nothing left stored' })).toHaveCount(1);
+  await expect(lines.last()).toContainText('Diagram published');
   await expect(button).toHaveText('⤓ Save');
   await expect(button.locator('.spin')).toHaveCount(0);
 });

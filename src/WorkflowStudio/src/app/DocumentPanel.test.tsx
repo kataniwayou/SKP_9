@@ -208,7 +208,7 @@ describe('DocumentPanel', () => {
 });
 
 describe('DocumentPanel Save', () => {
-  it('offers Save once the design differs from the base, and is read-only while it runs (plan 8 §4.1)', async () => {
+  it('offers Save once loaded, changed or not (2026-10-11), the tooltip saying which; read-only while it runs (plan 8 §4.1)', async () => {
     const store = createStudioStore();
     store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
     store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] })) });
@@ -216,8 +216,11 @@ describe('DocumentPanel Save', () => {
     const onSave = vi.fn();
     render(inStores(store, live, <DocumentPanel workflowId="wf1" panel={fakePanel().panel} onSave={onSave} />));
 
-    expect(await screen.findByRole('button', { name: '⤓ Save' })).toBeDisabled();
+    const unchanged = await screen.findByRole('button', { name: '⤓ Save' });
+    expect(unchanged).toBeEnabled();
+    expect(unchanged.getAttribute('data-tip')).toMatch(/^Nothing changed since the last Save/);
     act(() => store.dispatch({ type: 'design', workflowId: 'wf1', draft: { ...EMPTY_DRAFT, sphere: { x: 400, y: 400 } } }));
+    expect(screen.getByRole('button', { name: '⤓ Save' }).getAttribute('data-tip')).toMatch(/^Store the design/);
     fireEvent.click(screen.getByRole('button', { name: '⤓ Save' }));
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(document.querySelector('.studio-canvas')!.getAttribute('tabindex')).toBe('0');

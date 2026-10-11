@@ -37,7 +37,7 @@ export function CapsuleToolbar({ workflow, status, save, design, run, ai }: {
    */
   run?: { blocked: Readonly<Record<RunOp, string | null>>; pending: RunOp | null; onStart: () => void; onStop: () => void };
   /** The design's Save (plan 8 §4.1): enabled when the design differs from the base; read-only while it runs. */
-  save?: { enabled: boolean; saving: boolean; onSave: () => void };
+  save?: { blocked: string | null; changed: boolean; saving: boolean; onSave: () => void };
   /** The design draft (plan 4): its mark, Undo, Redo and Discard. */
   design?: { dirty: boolean; /** A Save is in flight. */ locked: boolean; canUndo: boolean; canRedo: boolean; onUndo: () => void; onRedo: () => void; onDiscard: () => void };
   /** AI drawing (2026-10-11): the model redraws the design; applied only if the relations stay the same. */
@@ -94,9 +94,14 @@ function RunButton({ op, run }: { op: RunOp; run: Parameters<typeof CapsuleToolb
  */
 function SaveButton({ save }: { save: Parameters<typeof CapsuleToolbar>[0]['save'] }) {
   const busy = useMinShown(save?.saving === true);
-  if (!save || (!save.enabled && !busy)) return <span data-tip="Nothing to save yet"><button type="button" className="qb" disabled>⤓ Save</button></span>;
+  // the tooltip says why (2026-10-11): what stops it, or what this Save will do
+  if (!save) return <span data-tip={NOT_YET}><button type="button" className="qb" disabled>⤓ Save</button></span>;
+  if (save.blocked !== null && !busy) return <span data-tip={save.blocked}><button type="button" className="qb" disabled>⤓ Save</button></span>;
+  const tip = save.changed
+    ? 'Store the design; BaseApi applies it when it finds no errors, and the dashboard gets its drawing'
+    : 'Nothing changed since the last Save: Save stores it again and publishes its drawing to the dashboard';
   return (
-    <button type="button" className="qb" disabled={busy} aria-busy={busy} onClick={save.onSave} data-tip="Store the design; BaseApi applies it when it finds no errors">
+    <button type="button" className="qb" disabled={busy} aria-busy={busy} onClick={save.onSave} data-tip={busy ? 'Saving…' : tip}>
       {busy ? <><Spinner /> Saving…</> : '⤓ Save'}
     </button>
   );
