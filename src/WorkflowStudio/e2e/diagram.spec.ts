@@ -50,7 +50,7 @@ test('an applied Save publishes the drawing for the dashboard; the next Save is 
   // light for the light dashboard (2026-10-11), while the studio's own canvas stays dark
   expect(first).toContain('fill="#FFFFFF"/>');
   await expect(panel.locator('.react-flow')).toBeVisible();
-  expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--ground').trim())).toBe('#0A1220');
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--ground').trim())).toMatch(/^#0a1220$/i); // a production build lowercases it
 
   // the publish left the workflow's stamp alone: a second Save is applied, not a conflict, and publishes again
   await moveDown(page, panel, t.stepBId, 96);
