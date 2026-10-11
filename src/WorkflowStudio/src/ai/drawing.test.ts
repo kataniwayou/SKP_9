@@ -57,8 +57,32 @@ describe('AI drawing (2026-10-11)', () => {
     expect(bad('{"blocks":{"s1":{"x":"0","y":0}}}')).toMatch(/not a number/);
     expect(bad('{"blocks":{"s1":{"x":1e9,"y":0}}}')).toMatch(/not a number/);
     expect(bad('{"wires":{"s1->s2":{"head":{"junction":{"host":"s1->f","x":0,"y":0}}}}}')).toMatch(/cannot become a junction/);
-    expect(bad('{"wires":{"wf->s1":{"tail":{"y":100}}}}')).toMatch(/not on a step/);
+    expect(bad('{"wires":{"wf->s1":{"tail":{"y":100}}}}')).toBeNull();
+    expect((() => { try { parsePlan('{"wires":{"s2->f":{"head":{"y":100}}}}', d, joined(d)); return null; } catch (e) { return (e as Error).message; } })())
+      .toMatch(/not on a step or the workflow circle/);
     expect(bad('{"wires":{"s1->s2":{"bends":{"xs":[1,2],"ys":[]}}}}')).toMatch(/one more entry/);
+  });
+
+  it('sets the workflow circle’s tails where the answer puts them (symmetric hub contact points, 2026-10-11); auto spaces them about its centre', async () => {
+    const d = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['a', 'b'] }),
+      steps: [stepDto('a'), stepDto('b')],
+    }));
+    const { cy } = applyDraft(d, EMPTY_DRAFT).placement.sphere;
+    const startY = (draft: Draft, id: string) => pointsOf(d, draft, id)[0]![1];
+    // automatic: already symmetric, 16 px apart
+    expect([startY(EMPTY_DRAFT, 'wf->a'), startY(EMPTY_DRAFT, 'wf->b')].map((y) => y - cy).sort((x, y) => x - y)).toEqual([-8, 8]);
+    const snap = relationsOf(d, EMPTY_DRAFT);
+    const out = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ wires: { 'wf->a': { tail: { y: cy - 16 } }, 'wf->b': { tail: { y: cy + 16 } } } }));
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(startY(out.draft, 'wf->a')).toBe(cy - 16);
+    expect(startY(out.draft, 'wf->b')).toBe(cy + 16);
+    // held within the circle's reach, and auto lets go again
+    const far = applyPlan(d, out.draft, parsePlan(JSON.stringify({ wires: { 'wf->a': { tail: { y: cy - 500 } }, 'wf->b': { tail: { auto: true } } } }), d, out.draft));
+    expect(startY(far, 'wf->a')).toBe(cy - 64);
+    // the only automatic tail left: on the centre (a held tail is not in the router's spacing)
+    expect(startY(far, 'wf->b')).toBe(cy);
   });
 
   it('applies a drawing whose relations are the snapshot\'s; refuses one that moves a junction onto another net, unchanged', async () => {

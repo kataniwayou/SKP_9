@@ -11,6 +11,9 @@ import type { Pt } from '../layout/router';
 import type { Bends } from '../layout/shape';
 import { CONDITIONS } from '../model/entryConditions';
 
+/** How far above or below its centre a tail may leave the workflow circle's right side. */
+const HUB_REACH = 64;
+
 /**
  * AI drawing (the user's design, 2026-10-11): the model (Kimi K3, behind the studio's own nginx route `/ai/`) gets the
  * drawing rules and the design graph and answers with a new drawing; the studio applies it to a candidate draft and
@@ -30,21 +33,22 @@ Readability
 4. Don't cross: a wire crosses no other wire of any colour (a crossing can be misread as a junction).
 5. Straight lines: a wire keeps the height it leaves at and runs straight to its target. Straight comes before centred; no small jogs just to reach a centre.
 6. Centre inputs with equal gaps: a step's inputs are centred on its middle (step y + 96), 16 px apart, ordered top to bottom by where they come from: 1 input at the centre, 2 at +-8, 3 at -16, 0, +16.
-7. Outputs are placed by the forward inputs: each output takes the height of the input it feeds, so it is straight and centred at once. Outputs that feed no step input (e.g. drops onto a trunk) take the next slots below, 16 px apart.
-8. Fan-in and fan-out through one trunk: several wires of the same family into one step become one trunk with each wire joining it at a junction; the same for one step feeding several steps.
-9. Clean T junctions: a joining wire runs straight into the trunk at a right angle, with no hook before the junction.
-10. No staircases: no wire segment shorter than 16 px; arrowheads stay clean.
+7. Symmetric hub contact points: with more than one entry step, each entry step gets its own wire from the workflow circle (never one fan-out trunk from the circle), and their contact points are symmetric about the circle's centre (centreY), 16 px apart and ordered top to bottom like the entry steps: 2 at +-8, 3 at -16, 0, +16. Place the entry steps so each of these wires runs straight into its input.
+8. Outputs are placed by the forward inputs: each output takes the height of the input it feeds, so it is straight and centred at once. Outputs that feed no step input (e.g. drops onto a trunk) take the next slots below, 16 px apart.
+9. Fan-in and fan-out through one trunk: several wires of the same family into one step become one trunk with each wire joining it at a junction; the same for one step feeding several steps.
+10. Clean T junctions: a joining wire runs straight into the trunk at a right angle, with no hook before the junction.
+11. No staircases: no wire segment shorter than 16 px; arrowheads stay clean.
 
 Layout
-11. Left to right by depth: the workflow circle on the far left, steps in columns in order of execution, aligned on the 8 px grid.
-12. The main path (the Completed chain) is one straight row.
-13. Failure handling sits below the row: the Failed trunk under the row, the steps it feeds at its end.
-14. Skips go over the row: a wire that jumps past steps arcs above the row, clear of the drops below.
-15. Place blocks so the rules agree (e.g. a step's height so a trunk enters it straight at its centre).
-16. Caches sit under the workflow circle, out of the wiring's way.
+12. Left to right by depth: the workflow circle on the far left, steps in columns in order of execution, aligned on the 8 px grid.
+13. The main path (the Completed chain) is one straight row.
+14. Failure handling sits below the row: the Failed trunk under the row, the steps it feeds at its end.
+15. Skips go over the row: a wire that jumps past steps arcs above the row, clear of the drops below.
+16. Place blocks so the rules agree (e.g. a step's height so a trunk enters it straight at its centre).
+17. Caches sit under the workflow circle, out of the wiring's way.
 
 Finish
-17. Zero crossings, no bent main-path wire, no segment shorter than 16 px, no short circuit.`;
+18. Zero crossings, no bent main-path wire, no segment shorter than 16 px, no short circuit.`;
 
 /** The answer's shape, as the model is told it. */
 export const ANSWER_SCHEMA = `Answer with ONE JSON object and nothing else:
@@ -60,6 +64,7 @@ export const ANSWER_SCHEMA = `Answer with ONE JSON object and nothing else:
 }
 - blocks: the new top-left corner of any block you move (ids as given: "wf", step ids, "cache:<id>"); multiples of 8.
 - An end on a step: "y" is the flow y where it meets the step's side (within the side's landing range); "auto" lets the router choose. It stays on the same step.
+- A tail on the workflow circle: "y" is the flow y where it leaves the circle's right side (within its "tailsRange"); "auto" spaces the circle's tails symmetrically about its centre, 16 px apart.
 - An end on a wire (a junction): "junction" names the host wire and a point exactly on the host's drawn line after your changes.
 - bends: the wire's own route from its tail: it leaves horizontally, turns vertical at xs[0], horizontal at ys[0], vertical at xs[1], ... and arrives horizontally; xs has one more entry than ys. null: the router draws it. Omit a key to leave it as it is.
 - Leave out blocks and wires you do not change. Never invent ids.`;
@@ -72,7 +77,7 @@ export function graphOf(edited: StudioDocument, draft: Draft): object {
   const circuit = circuitOf(edited, draft);
   const blocks: object[] = [];
   const hub = nodeBox(shown, SPHERE_NODE_ID)!;
-  blocks.push({ id: SPHERE_NODE_ID, kind: 'workflow', ...hub, tailsLeave: { x: hub.x + hub.w, centreY: hub.y + hub.h / 2 } });
+  blocks.push({ id: SPHERE_NODE_ID, kind: 'workflow', ...hub, tailsLeave: { x: hub.x + hub.w, centreY: hub.y + hub.h / 2 }, tailsRange: [hub.y + hub.h / 2 - HUB_REACH, hub.y + hub.h / 2 + HUB_REACH] });
   for (const [id, p] of shown.placement.steps) {
     const s = shown.graph.steps.get(id);
     blocks.push({
@@ -84,7 +89,7 @@ export function graphOf(edited: StudioDocument, draft: Draft): object {
   const endOf = (e: End, at: Pt | undefined, side: Side) => {
     switch (e.on) {
       case 'step': return { on: 'step', step: e.step, side: side === 'tail' ? 'output' : 'input', y: at?.[1], held: e.y !== null };
-      case 'hub': return { on: 'workflow' };
+      case 'hub': return { on: 'workflow', y: at?.[1], held: e.angle !== null || e.dy !== undefined };
       case 'wire': return { on: 'junction', host: e.host, x: at?.[0], y: at?.[1] };
       case 'open': return { on: 'open', x: e.x, y: e.y };
     }
@@ -173,8 +178,8 @@ export function parsePlan(text: string, edited: StudioDocument, draft: Draft): D
           const j = e.junction;
           if (!isObj(j) || typeof j.host !== 'string' || !Object.hasOwn(circuit, j.host) || j.host === id) throw new DrawingError(`wire ${id} ${side}: unknown host`);
           entry[side] = { junction: { host: j.host, x: num(j.x, `wire ${id} ${side} x`), y: num(j.y, `wire ${id} ${side} y`) } };
-        } else if (now.on !== 'step') {
-          throw new DrawingError(`wire ${id} ${side} is not on a step: only its junction may move`);
+        } else if (now.on !== 'step' && !(now.on === 'hub' && side === 'tail')) {
+          throw new DrawingError(`wire ${id} ${side} is not on a step or the workflow circle: only its junction may move`);
         } else if (e.auto === true) {
           entry[side] = { auto: true };
         } else {
@@ -228,6 +233,10 @@ export function applyPlan(edited: StudioDocument, draft: Draft, plan: DrawingPla
         const top = placed.placement.steps.get(now.step)?.y;
         if (top === undefined) throw new DrawingError(`wire ${id} ${side}: its step is not on the canvas`);
         c = setEnd(c, id, side, { on: 'step', step: now.step, y: 'auto' in e ? null : clampLanding(e.y - top) });
+      } else if (now.on === 'hub') {
+        // a hub tail (the user's rule, 2026-10-11): leaves the circle's right side at that height; auto spaces the tails symmetrically
+        const dy = 'auto' in e ? undefined : Math.max(-HUB_REACH, Math.min(HUB_REACH, e.y - placed.placement.sphere.cy));
+        c = setEnd(c, id, side, dy === undefined ? { on: 'hub', angle: null } : { on: 'hub', angle: null, dy });
       }
     }
   }
