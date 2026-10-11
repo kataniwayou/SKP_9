@@ -4,7 +4,7 @@ import { loadedDocument } from '../app/fixtures';
 import { createTextFitter } from '../canvas/fitText';
 import { applyDraft } from '../design/apply';
 import { EMPTY_DRAFT } from '../design/draft';
-import { diagramSvg } from './diagramSvg';
+import { diagramSvg, LIGHT_GROUND, LIGHT_WIRE } from './diagramSvg';
 
 const fitter = createTextFitter((text) => text.length * 6);
 
@@ -40,5 +40,20 @@ describe('the published drawing: the canvas art (2026-10-11)', () => {
     expect(svg).not.toContain('chain <&>');
     const legend = [...parsed.querySelectorAll('.dg-lg')].map((t) => t.textContent);
     expect(legend).toEqual(['Completed', 'Failed', 'Cancelled', 'Always', 'Never', 'undecided', 'short circuit']);
+  });
+
+  it('is light for the dashboard (2026-10-11): white ground, deeper wire strokes, bright badges, the canvas left dark', async () => {
+    const shown = applyDraft(await doc(), EMPTY_DRAFT);
+    const svg = diagramSvg(shown, fitter);
+    const parsed = new DOMParser().parseFromString(svg, 'image/svg+xml');
+    expect(parsed.querySelector(':scope > rect')!.getAttribute('fill')).toBe(LIGHT_GROUND);
+    expect(svg).not.toContain('#0A1220"/>');
+    // the Completed wire is stroked in its deeper colour; the step's C badge keeps the bright one
+    const completed = [...parsed.querySelectorAll('g.wire path.w')].map((p) => p.getAttribute('stroke'));
+    expect(completed).toContain(LIGHT_WIRE['#2DD4BF']);
+    expect(completed).not.toContain('#2DD4BF');
+    expect(svg).toContain('fill="#2DD4BF"');
+    // the cap is the opaque silver, not the canvas's white gloss
+    expect(parsed.querySelector('#nxCap stop')!.getAttribute('stop-color')).toBe('#F4F7FB');
   });
 });
