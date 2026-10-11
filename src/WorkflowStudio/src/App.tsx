@@ -28,7 +28,7 @@ import { Output } from './panels/Output';
 import { Toolbox } from './panels/Toolbox';
 import type { Pick } from './store/picks';
 import { newId } from './design/ids';
-import { NOT_SAVED_YET, runBlocked, RUN_WORD, type RunOp } from './store/run';
+import { AI_DRAWING, NOT_SAVED_YET, runBlocked, RUN_WORD, type RunOp } from './store/run';
 import { selectionKey, type Selection } from './store/selection';
 import { designDirty, inspectorKey } from './store/studioState';
 import { createStudioStore, StudioStoreProvider, useStudio, useStudioStore } from './store/studioStore';
@@ -211,6 +211,10 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
       store.dispatch({ type: 'log', workflowId: id, lines: [{ at: new Date().toISOString(), text: 'Not deleted: the workflow is still loading or saving', level: 'error' }] });
       return;
     }
+    if (open.drawing) {
+      store.dispatch({ type: 'log', workflowId: id, lines: [{ at: new Date().toISOString(), text: `Not deleted: ${AI_DRAWING}`, level: 'error' }] });
+      return;
+    }
     deleting.current.add(id);
     void prepareDelete(api, store, id).then((plan) => {
       if (plan === null || asking.current !== null || !store.getState().docs.some((d) => d.workflowId === id)) {
@@ -280,6 +284,11 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
           };
           // a design draft is asked about first: Discard closes, dropping the draft with the document
           const open = store.getState().docs.find((d) => d.workflowId === id);
+          // the AI is drawing it (2026-10-11): it stays open until the drawing lands or is cancelled
+          if (open?.drawing) {
+            store.dispatch({ type: 'log', workflowId: id, lines: [{ at: new Date().toISOString(), text: `Not closed: ${AI_DRAWING}`, level: 'error' }] });
+            return;
+          }
           if (open && designDirty(open) && asking.current === null) setPrompt({ kind: 'closeDesign', workflowId: id, doc: doc ?? document, proceed: close });
           else close();
         }}

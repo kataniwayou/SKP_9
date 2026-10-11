@@ -56,6 +56,8 @@ export interface OpenDocument {
   restored: boolean;
   /** A Save is in flight: the design is read-only (spec §4.1). */
   saving: boolean;
+  /** The AI is drawing this document (2026-10-11): its design is read-only until the drawing lands or is cancelled; never kept across a refresh. */
+  drawing?: boolean;
   /** A Start or Stop being sent or waiting for the live set (2026-10-09); not kept across a refresh. */
   run: RunState | null;
   /**
@@ -135,6 +137,8 @@ export type StudioAction =
   /** Removes a step's assignment in the design. */
   | { type: 'removeAssignment'; workflowId: Id; stepId: Id }
   | { type: 'saving'; workflowId: Id }
+  /** The AI drawing of a document started or ended (2026-10-11): its design is locked meanwhile. */
+  | { type: 'drawing'; workflowId: Id; on: boolean }
   /** Empties Output's log for every workflow (2026-10-10); the pinned problems are live state and stay. */
   | { type: 'clearOutput' }
   /** Lines for Output, about this workflow (e.g. "Save started"). */
@@ -331,15 +335,18 @@ function reduceDocs(state: StudioState, action: StudioAction): StudioState {
     case 'pick':
       return update(state, action.workflowId, (d) => (samePicks(d.picks, action.picks) ? d : withPicks(d, action.picks)));
     case 'design':
-      return update(state, action.workflowId, (d) => ({
+      return update(state, action.workflowId, (d) => (designLocked(d) ? d : {
         ...d, design: commit(d.design, action.draft, action.merge ?? null), picks: action.picks ?? d.picks,
       }));
     case 'undo':
-      return update(state, action.workflowId, (d) => redesign(d, undo(d.design)));
+      return update(state, action.workflowId, (d) => (designLocked(d) ? d : redesign(d, undo(d.design))));
     case 'redo':
-      return update(state, action.workflowId, (d) => redesign(d, redo(d.design)));
+      return update(state, action.workflowId, (d) => (designLocked(d) ? d : redesign(d, redo(d.design))));
+    case 'drawing':
+      return update(state, action.workflowId, (d) => ((d.drawing === true) === action.on ? d : { ...d, drawing: action.on }));
     case 'discardDesign':
       return update(state, action.workflowId, (d) => {
+        if (designLocked(d)) return d;
         const back = redesign(d, historyOf(d.stored?.draft ?? EMPTY_DRAFT));
         return { ...back, edits: d.stored?.edits ?? EMPTY_EDITS, errors: null };
       });
@@ -361,7 +368,7 @@ function reduceDocs(state: StudioState, action: StudioAction): StudioState {
     case 'editField':
       return update(state, action.workflowId, (d) => {
         const target = shownTargetOf(d);
-        if (d.saving || target === null || d.status.kind !== 'ready') return d;
+        if (designLocked(d) || target === null || d.status.kind !== 'ready') return d;
         // judged against what the form shows: the graph's entity (its stamp too), the read only of this generation; a
         // pasted step or cache is the graph's like any other (2026-10-10)
         const graph = applyBlocks(d.status.doc, d.design.draft.blocks).graph;
@@ -372,18 +379,18 @@ function reduceDocs(state: StudioState, action: StudioAction): StudioState {
     case 'revertEntity':
       return update(state, action.workflowId, (d) => {
         const target = shownTargetOf(d);
-        return d.saving || target === null ? d : { ...d, edits: revertEntity(d.edits, editTargetOf(target)) };
+        return designLocked(d) || target === null ? d : { ...d, edits: revertEntity(d.edits, editTargetOf(target)) };
       });
     case 'createAssignment':
       return update(state, action.workflowId, (d) => {
-        if (d.saving) return d;
+        if (designLocked(d)) return d;
         const edits = createAssignment(d.edits, action.stepId, action.stepName, action.id);
         const shown = edits.assignments[action.stepId]!;
         return { ...d, edits, inspector: { ...EMPTY_INSPECTOR, trail: [...d.inspector.trail, { kind: 'assignment', id: shown.id, stepId: action.stepId }] } };
       });
     case 'removeAssignment':
       return update(state, action.workflowId, (d) => {
-        if (d.saving) return d;
+        if (designLocked(d)) return d;
         const base = d.status.kind === 'ready' ? applyBlocks(d.status.doc, d.design.draft.blocks).graph.assignments.find((a) => a.stepId === action.stepId) : undefined;
         const edits = removeAssignment(d.edits, action.stepId, base && { id: base.id, updatedAt: base.updatedAt });
         const shown = shownTargetOf(d);
@@ -504,7 +511,7 @@ function reduceDocs(state: StudioState, action: StudioAction): StudioState {
     case 'paste': {
       const clip = state.clipboard;
       const d = state.docs.find((x) => x.workflowId === action.workflowId);
-      if (!clip || !d || d.status.kind !== 'ready' || d.saving) return state;
+      if (!clip || !d || d.status.kind !== 'ready' || designLocked(d)) return state;
       // a pasted cache gets a root no open workflow uses (review 2026-10-10)
       const pasted = pasteClip(d.status.doc, d.edits, d.design.draft, clip, action.newId, d.workflowId, knownRoots(state));
       if (pasted === null) return state;
@@ -514,13 +521,13 @@ function reduceDocs(state: StudioState, action: StudioAction): StudioState {
     }
     case 'toolDrop':
       return update(state, action.workflowId, (d) => {
-        if (d.status.kind !== 'ready' || d.saving) return d;
+        if (d.status.kind !== 'ready' || designLocked(d)) return d;
         const dropped = dropTool(d.status.doc, d.edits, d.design.draft, action.item, action.at, action.newId);
         return dropped === null ? d : blocksChanged(d, dropped.draft, dropped.picks);
       });
     case 'deletePicks':
       return update(state, action.workflowId, (d) => {
-        if (d.status.kind !== 'ready' || d.saving) return d;
+        if (d.status.kind !== 'ready' || designLocked(d)) return d;
         const r = deletePicked(d.status.doc, d.edits, d.design.draft, d.picks);
         return r === null ? d : prunedSelection(blocksChanged(d, r.draft, r.picks), r.draft);
       });
@@ -558,6 +565,9 @@ export function startNote(d: OpenDocument): string | null {
 /** The design as it stands: the canvas draft and the entity edits. */
 export const designOf = (d: OpenDocument): Design => ({ draft: d.design.draft, edits: d.edits });
 
+/** The design is read-only (2026-10-11): a Save is in flight, or the AI is drawing it. Selecting and viewing still work. */
+export const designLocked = (d: { saving: boolean; drawing?: boolean }): boolean => d.saving || d.drawing === true;
+
 /** The design differs from the last saved one (spec §3.2): the tab is marked, closing asks, the session keeps it. */
 /** A new workflow (2026-10-10) is unsaved until its first Save creates it, whatever its design holds. */
 export const designDirty = (d: OpenDocument): boolean =>
@@ -565,7 +575,7 @@ export const designDirty = (d: OpenDocument): boolean =>
 
 /** Save is offered (spec §4.1): the design differs from the stored one, or the stored one is not applied yet. */
 export const canSave = (d: OpenDocument): boolean =>
-  d.status.kind === 'ready' && !d.saving && d.stored !== null && (designDirty(d) || hasGraphChanges(d.stored));
+  d.status.kind === 'ready' && !designLocked(d) && d.stored !== null && (designDirty(d) || hasGraphChanges(d.stored));
 
 export function activeDocument(state: StudioState): OpenDocument | null {
   return state.docs.find((d) => d.workflowId === state.activeId) ?? null;

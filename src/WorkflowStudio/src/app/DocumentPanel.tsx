@@ -7,7 +7,7 @@ import type { Pick } from '../store/picks';
 import { NOT_SAVED_YET, runBlocked, type RunOp } from '../store/run';
 import { SPHERE_NODE_ID } from '../layout/nodeIds';
 import type { Selection } from '../store/selection';
-import { canSave, designDirty } from '../store/studioState';
+import { canSave, designDirty, designLocked } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { applyDraft, applyEdits } from '../design/apply';
 import { canRedo, canUndo } from '../design/history';
@@ -64,8 +64,10 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
   const blocks = open?.design.draft.blocks;
   const edited = useMemo(() => (base && edits ? applyEdits(base, edits, blocks) : null), [base, edits, blocks]);
 
-  // while a Save runs the design is read-only (spec §4.1): the canvas draws it whole, with no design mode
-  const frozen = useMemo(() => (edited && open?.saving ? applyDraft(edited, open.design.draft) : null), [edited, open?.saving, open?.design.draft]);
+  // while a Save runs or the AI draws (2026-10-11) the design is read-only (spec §4.1): the canvas draws it whole, with no
+  // design mode; clicking still selects and the Inspector shows it, read-only
+  const locked = open !== null && designLocked(open);
+  const frozen = useMemo(() => (edited && locked ? applyDraft(edited, open!.design.draft) : null), [edited, locked, open?.design.draft]);
 
   if (open === null) return null;
   if (open.status.kind === 'failed') return <div className={cls}><div className="doc-msg error" role="alert">{open.status.message}{onRetry && <button type="button" className="btn" onClick={onRetry}>Retry</button>}</div></div>;
@@ -80,7 +82,7 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
         live={live}
         initialView={initialView}
         onViewChange={onViewChange}
-        design={open.saving ? undefined : {
+        design={locked ? undefined : {
           draft: open.design.draft,
           picks: open.picks,
           onPick: (picks) => store.dispatch({ type: 'pick', workflowId, picks }),
@@ -114,7 +116,7 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
             onStart: () => onRun('start'), onStop: () => onRun('stop'),
           } : undefined}
           design={actions ? {
-            dirty: designDirty(open), locked: open.saving, canUndo: canUndo(open.design), canRedo: canRedo(open.design),
+            dirty: designDirty(open), locked, canUndo: canUndo(open.design), canRedo: canRedo(open.design),
             onUndo: () => store.dispatch({ type: 'undo', workflowId }),
             onRedo: () => store.dispatch({ type: 'redo', workflowId }),
             onDiscard: () => actions.confirmDiscardDesign(workflowId, ownerDocument),

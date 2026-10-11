@@ -1,5 +1,5 @@
 import type { Locator, Page, Route } from '@playwright/test';
-import { documentPanel, openWorkflow, pane } from './studio';
+import { documentPanel, esc, inspector, openWorkflow, pane } from './studio';
 import { createThrowaway, expect, removeThrowaway, test, type Throwaway } from './throwaway';
 
 // AI drawing (the user's design, 2026-10-11), with the real mouse: the toolbar button asks the model through the studio's
@@ -74,6 +74,43 @@ test('a drawing that keeps every relation is applied as one step: the block move
   await expect.poll(() => posOf(panel, t.stepBId)).toEqual(before);
   // back to the saved drawing: the wand is on again
   await expect(wand).toBeEnabled();
+});
+
+test('while the AI draws, its document is locked: no drag, Delete, Undo, edits, Save, Start or Close; selecting still shows it read-only', async ({ page }) => {
+  await openWorkflow(page, t.workflow);
+  const panel = documentPanel(page, t.workflow);
+  const before = await posOf(panel, t.stepBId);
+  const to = [before[0] + 64, before[1] + 160];
+  await mockModel(page, { content: JSON.stringify({ blocks: { [t.stepBId]: { x: to[0], y: to[1] } } }), delayMs: 9000 });
+  await panel.getByRole('button', { name: 'AI drawing', exact: true }).click();
+  await expect(panel.getByRole('button', { name: 'AI drawing: cancel' })).toBeVisible();
+  // a drag by the step's name does not move it
+  const grip = (await panel.locator(`.react-flow__node[data-id="${t.stepBId}"] .nx-sn`).boundingBox())!;
+  await page.mouse.move(grip.x + 10, grip.y + grip.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(grip.x + 130, grip.y + grip.height / 2 + 90, { steps: 10 });
+  await page.mouse.up();
+  expect(await posOf(panel, t.stepBId)).toEqual(before);
+  // a click selects it and the Inspector shows it, read-only
+  await panel.locator(`.react-flow__node[data-id="${t.stepId}"] .nx-sn`).click();
+  await expect(inspector(page).locator('fieldset input').first()).toBeDisabled();
+  // Delete and Ctrl+Z change nothing
+  await page.keyboard.press('Delete');
+  await page.keyboard.press('Control+z');
+  await expect(panel.locator(`.react-flow__node[data-id="${t.stepId}"]`)).toHaveCount(1);
+  expect(await posOf(panel, t.stepBId)).toEqual(before);
+  // Save and Start wait; Undo and Discard design are off
+  await expect(panel.getByRole('button', { name: /Save/ })).toBeDisabled();
+  await expect(panel.getByRole('button', { name: /Undo/ })).toBeDisabled();
+  await expect(panel.locator('span[data-tip="The AI is drawing this workflow; Cancel it first"]').first()).toBeVisible();
+  // Close is refused, in red
+  await page.getByRole('button', { name: new RegExp(`^Close ${esc(t.workflow.name)}`) }).first().click();
+  await expect((await pane(page, 'Output')).locator('.outl').last()).toContainText('Not closed: The AI is drawing this workflow');
+  await expect(panel).toBeVisible();
+  // the drawing lands: unlocked, and the Inspector is editable again
+  await expect.poll(() => posOf(panel, t.stepBId), { timeout: 20_000 }).toEqual(to);
+  await expect(inspector(page).locator('fieldset input').first()).toBeEnabled();
+  await expect(panel.getByRole('button', { name: /Undo/ })).toBeEnabled();
 });
 
 test('a refused answer gets one correction round: the model hears why, and its corrected drawing is applied', async ({ page }) => {

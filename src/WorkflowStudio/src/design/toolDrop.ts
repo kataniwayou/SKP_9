@@ -48,7 +48,7 @@ export function judgeTool(shown: StudioDocument, item: ToolItem, p: Point): Tool
 
 /** The label a verdict shows by the pointer, and its tone (green: the drop does it; red: refused). */
 export function toolLabel(v: ToolVerdict, saving = false): { text: string; tone: 'ok' | 'no' } | null {
-  if (saving) return { text: 'saving: wait for the answer', tone: 'no' };
+  if (saving) return { text: 'locked: a Save or the AI drawing is under way', tone: 'no' };
   switch (v.kind) {
     case 'place': return null;
     case 'assign': return { text: 'assign processor', tone: 'ok' };

@@ -16,7 +16,7 @@ import type { ToolItem } from '../design/toolDrop';
 import { useHealthOf } from '../live/LiveContext';
 import { conditionInfo } from '../model/entryConditions';
 import type { Cache, Id, Processor, Schema, Step } from '../model/graph';
-import type { ToolboxPick } from '../store/studioState';
+import { designLocked, type ToolboxPick } from '../store/studioState';
 import { overlayCache, overlayProcessor, useActiveDesignGraph } from './toolboxView';
 import { useStudio, useStudioStore } from '../store/studioStore';
 
@@ -159,7 +159,8 @@ export function Toolbox() {
     if (e.button !== 0) return;
     e.preventDefault();
     const win = e.currentTarget.ownerDocument.defaultView ?? window;
-    const isSaving = (id: Id) => store.getState().docs.find((d) => d.workflowId === id)?.saving ?? false;
+    // a Save or the AI drawing (2026-10-11) locks that document: nothing lands on it
+    const isSaving = (id: Id) => { const d = store.getState().docs.find((x) => x.workflowId === id); return d ? designLocked(d) : false; };
     const from = { x: e.clientX, y: e.clientY };
     let dragging = false;
     const move = (ev: PointerEvent) => {

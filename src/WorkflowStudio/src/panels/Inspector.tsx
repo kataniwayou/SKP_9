@@ -11,7 +11,7 @@ import { assignmentByStep, payloadKeyCount } from '../model/assignments';
 import { entityName } from '../model/entityNames';
 import { FIELDS, savedText, type FieldSpec } from '../store/entityForms';
 import { crumbLabel, editTargetOf, rootTarget, targetKey, type InspectorTarget, type SchemaSlot } from '../store/inspectorTarget';
-import { activeDocument, shownTargetOf, type OpenDocument } from '../store/studioState';
+import { activeDocument, designLocked, shownTargetOf, type OpenDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { useProcessorLive } from '../live/LiveContext';
 import { FieldEditor } from './FieldEditor';
@@ -115,7 +115,7 @@ function EntityPane({ open, target }: { open: OpenDocument; target: InspectorTar
             )}
             {/* read-only while a Save is in flight (spec §4.1) */}
             {!editable && <div className="sec"><p className="note">Reading what BaseApi holds now…</p></div>}
-            <fieldset className="plain" disabled={open.saving || !editable}>
+            <fieldset className="plain" disabled={designLocked(open) || !editable}>
               <EntityForm open={open} doc={doc} base={base} target={target} saved={saved} fields={fields} showDetails={showDetails} drill={drill} />
             </fieldset>
             {/* the drawing's graph read as text, read-only (the user's request, 2026-10-09) */}
@@ -124,10 +124,10 @@ function EntityPane({ open, target }: { open: OpenDocument; target: InspectorTar
           </div>
           <div className="savebar">
             {target.kind === 'assignment' && (
-              <button type="button" className="link danger" disabled={open.saving}
+              <button type="button" className="link danger" disabled={designLocked(open)}
                 onClick={() => service.removeAssignment(workflowId, target.stepId)}>Remove assignment</button>
             )}
-            <button type="button" className="btn" disabled={!dirty || open.saving} onClick={() => service.revert(workflowId)}>Revert</button>
+            <button type="button" className="btn" disabled={!dirty || designLocked(open)} onClick={() => service.revert(workflowId)}>Revert</button>
           </div>
         </>
       )}

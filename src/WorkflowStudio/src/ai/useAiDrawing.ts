@@ -61,6 +61,9 @@ export function useAiDrawing(workflowId: Id, fetchFn?: typeof fetch) {
     const c = new AbortController();
     ctl.current = c;
     setRunning(true);
+    // the document is locked while the model draws (the user's rule, 2026-10-11): its canvas, Inspector, Toolbox drops,
+    // Undo, Save, Start, Stop, Close and Delete wait; selecting and viewing still work
+    store.dispatch({ type: 'drawing', workflowId, on: true });
     let timedOut = false, timer: ReturnType<typeof setTimeout> | undefined;
     /** One answer, under its own time limit. */
     const ask = async (messages: ChatMessage[]) => {
@@ -86,6 +89,7 @@ export function useAiDrawing(workflowId: Id, fetchFn?: typeof fetch) {
         log(`AI drawing not applied: ${out.reason}`, 'error');
         return;
       }
+      store.dispatch({ type: 'drawing', workflowId, on: false });
       store.dispatch({ type: 'design', workflowId, draft: out.draft });
       log(`AI drawing applied: ${out.moved} block${out.moved === 1 ? '' : 's'} moved, ${out.rerouted} wire${out.rerouted === 1 ? '' : 's'} routed; crossings ${out.crossings}, short circuits ${out.shorted}`);
     } catch (e) {
@@ -95,6 +99,7 @@ export function useAiDrawing(workflowId: Id, fetchFn?: typeof fetch) {
     } finally {
       clearTimeout(timer);
       ctl.current = null;
+      store.dispatch({ type: 'drawing', workflowId, on: false });
       setRunning(false);
     }
   }, [store, workflowId, log, fetchFn]);
