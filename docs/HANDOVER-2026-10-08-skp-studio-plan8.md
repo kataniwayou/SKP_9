@@ -674,6 +674,17 @@ clears it. Tiles show the active design's values of an entity it changed, with t
 An empty cache draws a dashed muted rectangle (`CacheView` `empty`, `toFlow.emptyItems`). Tests:
 `panels/ToolboxPick.test.tsx`, `e2e/toolboxpick.spec.ts`.
 
+AI drawing (2026-10-11, the user's design): **✦ AI drawing** in the capsule toolbar (`ai/drawing.ts`,
+`ai/useAiDrawing.ts`). The model (Kimi K3) is reached through nginx's `location = /ai/chat/completions` (POST only, 2 MB,
+180 s, upstream resolved per request via `NGINX_LOCAL_RESOLVERS`); nginx.conf is now an envsubst template
+(`/etc/nginx/templates/default.conf.template`, filter `KIMI_API_KEY|NGINX_LOCAL_RESOLVERS`). The key comes from the
+optional Secret `skp-ai` (key `api-key`) as env `KIMI_API_KEY`; create it with
+`kubectl -n skp create secret generic skp-ai --from-literal=api-key=<KIMI_API_KEY>` and roll the studio. Without it /ai
+answers 503. The relations snapshot (`relationsOf`) must match after applying or nothing is applied. Dev: set
+`KIMI_API_KEY` in the dev shell to proxy /ai (vite.config.ts); e2e mocks /ai (`e2e/aidrawing.spec.ts`).
+Note: k8s/43-processor-analyst.yaml carries its Kimi key inline (tracked in git); rotating it and moving it to a Secret
+is the user's call.
+
 ### Rulings made along the way
 
 User:

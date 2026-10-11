@@ -426,6 +426,27 @@ opens and after every Save that was answered; a search box filters processors an
   dashed rectangle, in the muted grey and with no ⚠ (it saves fine), in place of the honeycomb and the root plate; with
   an item it is drawn as usual.
 
+#### 4.5.6 AI drawing (the user's design, 2026-10-11)
+
+A toolbar button, **✦ AI drawing**, asks a model (Kimi K3, `kimi-k3`, at Moonshot) to redraw the document's design by the
+drawing rules (17, in priority order: correctness — the meaning, no short circuits, nothing through a block; readability —
+don't cross, straight lines, centred inputs with equal gaps, outputs placed by the forward inputs, one trunk per fan-in or
+fan-out, clean T junctions, no staircases; layout; finish). The flow:
+
+1. The studio snapshots the relations: every step's next steps and the entry steps as Save writes them (`writtenLists`),
+   the caches, and the nets with their families (`relationsOf`).
+2. It sends the rules, the answer schema and the graph (blocks with boxes, step sides, centres and landing ranges; wires
+   with ends, families, drawn points and bends) to `POST /ai/chat/completions`, the studio's own nginx route: nginx adds
+   the key from the `skp-ai` Secret, so it never reaches the browser. BaseApi is not involved.
+3. The answer (JSON only: `blocks` top-left corners; per wire `tail`/`head` as `{y}` on its step, `{auto:true}` or a
+   `{junction:{host,x,y}}` on a host's drawn line; `bends` or `null`) is checked (known ids, finite numbers, an end
+   stays on its own step, a junction only for an end already on a wire) and applied to a candidate draft.
+4. Applied as one history step only when the candidate's relations equal the snapshot and no short circuit is added;
+   otherwise a red Output line says why and the draft is unchanged. Never partially. Output reports blocks moved, wires
+   reshaped, crossings and short circuits. A design changed while the model was drawing is not overwritten.
+
+No key: the route answers 503 and the studio says "AI drawing is not configured". Cancel aborts; 180 s at most.
+
 ### 4.4 The schema copy's version
 
 Plan 1's atomic save bumps the copied version's patch (`1.2.3` → `1.2.4`); the design save copies it unchanged
