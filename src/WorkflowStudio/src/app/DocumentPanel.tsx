@@ -12,6 +12,7 @@ import { useStudio, useStudioStore } from '../store/studioStore';
 import { applyDraft, applyEdits } from '../design/apply';
 import { canRedo, canUndo } from '../design/history';
 import { newId } from '../design/ids';
+import { useAiDrawing } from '../ai/useAiDrawing';
 import { CapsuleToolbar } from './CapsuleToolbar';
 import { useStudioActionsOrNull } from './studioActions';
 import { useHealthOf, useWorkflowStatus } from '../live/LiveContext';
@@ -48,6 +49,7 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
   const store = useStudioStore();
   const actions = useStudioActionsOrNull();
   const ownerDocument = useOwnerDocument(panel);
+  const aiDrawing = useAiDrawing(workflowId);
   const fitter = useFitter(ownerDocument);
   const status = useWorkflowStatus(workflowId);
   const health = useHealthOf();
@@ -116,7 +118,8 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
             onUndo: () => store.dispatch({ type: 'undo', workflowId }),
             onRedo: () => store.dispatch({ type: 'redo', workflowId }),
             onDiscard: () => actions.confirmDiscardDesign(workflowId, ownerDocument),
-          } : undefined} />
+          } : undefined}
+          ai={actions ? { running: aiDrawing.running, onDraw: () => { void aiDrawing.draw(); }, onCancel: aiDrawing.cancel } : undefined} />
       </WorkflowCanvas>
     </div>
   );

@@ -49,6 +49,14 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
+          env:
+            # AI drawing (2026-10-11): the model key for nginx's /ai/ route, from the skp-ai Secret. Optional: without it the
+            # studio runs and /ai answers 503 ("AI drawing is not configured"). Create it with
+            #   kubectl -n skp create secret generic skp-ai --from-literal=api-key=<KIMI_API_KEY>
+            # then roll the studio (env is read at start). Never put the key in this file.
+            - name: KIMI_API_KEY
+              valueFrom:
+                secretKeyRef: { name: skp-ai, key: api-key, optional: true }
           startupProbe:
             httpGet: { path: /healthz, port: 8080 }
             initialDelaySeconds: 2

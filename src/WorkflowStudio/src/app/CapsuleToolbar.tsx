@@ -29,7 +29,7 @@ const RUN_TIP: Readonly<Record<RunOp, string>> = {
  * Start and Stop, and its own zoom and Fit. Save stores the design (plan 8 §4.1); Start and Stop act on the
  * saved workflow (2026-10-09). It must be rendered inside the document's WorkflowCanvas, for ZoomControls.
  */
-export function CapsuleToolbar({ workflow, status, save, design, run }: {
+export function CapsuleToolbar({ workflow, status, save, design, run, ai }: {
   workflow: Workflow; status: LiveStatus;
   /**
    * Start and Stop (2026-10-09): why each cannot be pressed now (null: it can), the press in progress, and the
@@ -40,6 +40,8 @@ export function CapsuleToolbar({ workflow, status, save, design, run }: {
   save?: { enabled: boolean; saving: boolean; onSave: () => void };
   /** The design draft (plan 4): its mark, Undo, Redo and Discard. */
   design?: { dirty: boolean; /** A Save is in flight. */ locked: boolean; canUndo: boolean; canRedo: boolean; onUndo: () => void; onRedo: () => void; onDiscard: () => void };
+  /** AI drawing (2026-10-11): the model redraws the design; applied only if the relations stay the same. */
+  ai?: { running: boolean; onDraw: () => void; onCancel: () => void };
 }) {
   return (
     <div className="docbar" role="toolbar" aria-label="Workflow">
@@ -57,6 +59,11 @@ export function CapsuleToolbar({ workflow, status, save, design, run }: {
             <button type="button" className="qb" disabled={design.locked || !design.canRedo} onClick={design.onRedo} data-tip="Redo (Ctrl+Y)">↷ Redo</button>
             <button type="button" className="qb" disabled={design.locked || !design.dirty} onClick={design.onDiscard} data-tip="Drop every design change in this workflow">Discard design</button>
             <span className="qsep" />
+            {ai && (ai.running
+              ? <button type="button" className="qb" aria-busy aria-label="AI drawing: cancel" onClick={ai.onCancel} data-tip="The model is drawing; click to cancel"><Spinner /> AI… Cancel</button>
+              : <button type="button" className="qb" aria-label="AI drawing" disabled={design.locked} onClick={ai.onDraw}
+                data-tip="AI drawing: redraw the workflow by the drawing rules (applied only if every relation between the steps stays the same)"><WandIcon /> AI</button>)}
+            {ai && <span className="qsep" />}
           </>
         )}
         <SaveButton save={save} />
@@ -94,3 +101,15 @@ function SaveButton({ save }: { save: Parameters<typeof CapsuleToolbar>[0]['save
     </button>
   );
 }
+
+/** The AI drawing button's magic wand (2026-10-11): a small stroke icon in the toolbar's own colour. */
+function WandIcon() {
+  return (
+    <svg className="qicon" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 4 }}>
+      <path d="M2.5 13.5 10 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+      <path d="M10 6l1.6-1.6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" fill="none" />
+      <path d="M12.5 1.2v2.2M11.4 2.3h2.2M14.3 6.1v1.6M13.5 6.9h1.6M7.2 1.6v1.4M6.5 2.3h1.4" stroke="currentColor" strokeWidth="1" strokeLinecap="round" fill="none" />
+    </svg>
+  );
+}
+
