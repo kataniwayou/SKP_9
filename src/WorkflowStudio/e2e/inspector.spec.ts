@@ -124,3 +124,25 @@ test('a Description opens sized to its whole text, with no inner scroll bar', as
   expect(size.client).toBeGreaterThan(80); // six lines, not the two-row default
   await inspector(page).screenshot({ path: 'C:/Users/UserL/AppData/Local/Temp/claude/C--Users-UserL-source-repos-SK-P10/cf954b91-a84b-487f-9613-5ccf0e8dee60/scratchpad/inspector-description.png' });
 });
+
+test('the Cron field says its schedule in a few words, as it is typed (2026-10-11)', async ({ page }) => {
+  const panel = await open(page);
+  await panel.locator('.react-flow__node-workflow').click();
+  await expect(pill(page)).toHaveText('WORKFLOW');
+  const cron = field(page, 'Cron');
+  const wording = inspector(page).locator('input[aria-describedby] ~ .fhint, input[aria-describedby] ~ .ferr');
+  await typeInto(page, 'Cron', '*/30 * * * * *');
+  await expect(wording).toHaveText('Every 30 seconds');
+  await expect(wording).toHaveClass('fhint');
+  await typeInto(page, 'Cron', '30 9 * * 1-5');
+  await expect(wording).toHaveText('At 09:30, Monday through Friday');
+  await typeInto(page, 'Cron', '0 75 * * * *');
+  await expect(wording).toHaveText('Minute 75 is out of range (0–59)');
+  await expect(wording).toHaveClass('ferr');
+  await expect(cron).toHaveAttribute('aria-invalid', 'true');
+  await typeInto(page, 'Cron', '');
+  await page.keyboard.press('Backspace');
+  await expect(wording).toHaveText('Not scheduled');
+  // blank is the throwaway's saved value: nothing left to revert
+  await expect(inspector(page).getByRole('button', { name: 'Revert' })).toBeDisabled();
+});

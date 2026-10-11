@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useRef } from 'react';
 import { ConditionPicker } from './ConditionPicker';
 import { DictEditor } from './DictEditor';
+import { cronText } from '../model/cronText';
 import { jsonProblem, type FieldSpec } from '../store/entityForms';
 
 /** A multi-line field opens as tall as its whole text (two lines at least), up to this share of the window, then scrolls. */
@@ -37,15 +38,20 @@ export function FieldEditor({ spec, value, saved, errors, onChange }: {
   // a dictionary is a table of its own (2026-10-10)
   if (spec.kind === 'dict') return <DictEditor spec={spec} value={value} errors={errors} onChange={onChange} />;
   const json = spec.kind === 'json' ? jsonProblem(value) : null;
+  // the cron in a few words (2026-10-11); one it cannot read is named in red, though only the server rejects it
+  const cron = spec.kind === 'cron' ? cronText(value) : null;
+  const cronProblem = cron && 'problem' in cron ? cron.problem : null;
   const common = {
     id,
     className: spec.kind === 'json' ? 'input json' : 'input',
-    'aria-invalid': errors.length > 0 || json !== null ? true : undefined,
+    'aria-invalid': errors.length > 0 || json !== null || cronProblem !== null ? true : undefined,
+    'aria-describedby': cron ? `${id}-cron` : undefined,
     spellCheck: false,
   };
   let control;
   switch (spec.kind) {
     case 'text':
+    case 'cron':
       control = <input {...common} type="text" value={value} placeholder={spec.required ? saved : undefined} onChange={(e) => onChange(e.target.value)} />;
       break;
     case 'multiline':
@@ -64,6 +70,7 @@ export function FieldEditor({ spec, value, saved, errors, onChange }: {
       <div className="fval">
         {control}
         {json !== null && <div className="fnote">{json}</div>}
+        {cron && ('text' in cron ? <div id={`${id}-cron`} className="fhint">{cron.text}</div> : <div id={`${id}-cron`} className="ferr">{cron.problem}</div>)}
         {errors.map((message, i) => <div key={i} className="ferr">{message}</div>)}
       </div>
     </div>

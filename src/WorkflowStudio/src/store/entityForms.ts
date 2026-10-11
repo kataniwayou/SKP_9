@@ -1,8 +1,11 @@
 import type { EntityKind, EntityReadDto } from '../api/entities';
 import type { FieldValue } from '../design/design';
 
-/** `dict`: a string-to-string dictionary kept as a JSON object, edited as a key/value table (2026-10-10, a cache's items). */
-export type FieldKind = 'text' | 'multiline' | 'json' | 'dict' | 'condition';
+/**
+ * `dict`: a string-to-string dictionary kept as a JSON object, edited as a key/value table (2026-10-10, a cache's items).
+ * `cron`: one line of text with the expression in a few words under it (2026-10-11).
+ */
+export type FieldKind = 'text' | 'multiline' | 'json' | 'dict' | 'condition' | 'cron';
 
 /** One writable field of the Inspector (spec §7.1's table). */
 export interface FieldSpec {
@@ -21,7 +24,7 @@ const DESCRIPTION: FieldSpec = { key: 'description', label: 'Description', kind:
 
 /** The writable fields, in the order the Inspector shows them; the first two are the head. */
 export const FIELDS: Record<EntityKind, readonly FieldSpec[]> = {
-  workflow: [NAME, VERSION, DESCRIPTION, { key: 'cronExpression', label: 'Cron', kind: 'text', nullable: true }],
+  workflow: [NAME, VERSION, DESCRIPTION, { key: 'cronExpression', label: 'Cron', kind: 'cron', nullable: true }],
   step: [NAME, VERSION, DESCRIPTION, { key: 'entryCondition', label: 'Entry condition', kind: 'condition' }],
   assignment: [NAME, VERSION, DESCRIPTION, { key: 'payload', label: 'Payload', kind: 'json' }],
   processor: [NAME, VERSION, DESCRIPTION, { key: 'sourceHash', label: 'Source hash', kind: 'text' }, { key: 'instanceId', label: 'Instance id', kind: 'text', nullable: true }],
