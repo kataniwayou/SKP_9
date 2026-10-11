@@ -19,13 +19,23 @@ const posOf = (panel: Locator, id: string) => panel.locator(`.react-flow__node[d
   const m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec((e as HTMLElement).style.transform)!;
   return [Number(m[1]), Number(m[2])] as [number, number];
 });
-/** The /ai route answering `content` as the model's message (or an HTTP status), recording what was sent. */
-async function mockModel(page: Page, answer: { content?: string; status?: number }): Promise<unknown[]> {
+/**
+ * The /ai route answering `content` as the model's message (or an HTTP status), recording what was sent; a list answers
+ * each call in turn (the last one repeats). Streamed (2026-10-11): an event stream as Kimi sends it, after `delayMs`.
+ */
+async function mockModel(page: Page, answer: { content?: string | string[]; status?: number; delayMs?: number }): Promise<unknown[]> {
   const sent: unknown[] = [];
   await page.route('**/ai/chat/completions', async (route: Route) => {
     sent.push(route.request().postDataJSON());
-    if (answer.status) await route.fulfill({ status: answer.status, contentType: 'application/json', body: '{"error":"no"}' });
-    else await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: answer.content } }] }) });
+    if (answer.delayMs) await new Promise((r) => setTimeout(r, answer.delayMs));
+    if (answer.status) { await route.fulfill({ status: answer.status, contentType: 'application/json', body: '{"error":"no"}' }); return; }
+    const all = Array.isArray(answer.content) ? answer.content : [answer.content ?? ''];
+    const content = all[Math.min(sent.length - 1, all.length - 1)]!;
+    const ev = (o: unknown) => `data: ${JSON.stringify(o)}\n\n`;
+    const half = Math.floor(content.length / 2);
+    const body = ev({ choices: [{ delta: { reasoning_content: 'thinking' } }] }) + ev({ choices: [{ delta: { content: content.slice(0, half) } }] })
+      + ev({ choices: [{ delta: { content: content.slice(half) } }] }) + 'data: [DONE]\n\n';
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body });
   });
   return sent;
 }
@@ -36,14 +46,16 @@ test('a drawing that keeps every relation is applied as one step: the block move
   const panel = documentPanel(page, t.workflow);
   const before = await posOf(panel, t.stepBId);
   const to = [before[0] + 64, before[1] + 160];
-  const sent = await mockModel(page, { content: JSON.stringify({ blocks: { [t.stepBId]: { x: to[0], y: to[1] } } }) });
+  const sent = await mockModel(page, { content: JSON.stringify({ blocks: { [t.stepBId]: { x: to[0], y: to[1] } } }), delayMs: 2500 });
   // the button: only a wand (2026-10-11), named "AI drawing"
   await expect(panel.getByRole('button', { name: 'AI drawing', exact: true })).toHaveText('');
   await expect(panel.getByRole('button', { name: 'AI drawing', exact: true }).locator('svg')).toHaveCount(1);
   await panel.getByRole('button', { name: 'AI drawing', exact: true }).click();
+  // while the model thinks: a spinner and Cancel with the seconds counting
+  await expect(panel.getByRole('button', { name: 'AI drawing: cancel' })).toHaveText(/Cancel · [1-9] s/);
   await expect.poll(() => posOf(panel, t.stepBId)).toEqual(to);
   const line = await lastLine(page);
-  await expect(line).toContainText('AI drawing applied: 1 block moved, 0 wires reshaped');
+  await expect(line).toContainText('AI drawing applied: 1 block moved');
   await expect(line).not.toHaveClass(/err/);
   await expect(page.getByText('● design draft')).toBeVisible();
   // only a valid saved workflow is drawn (2026-10-11): with the drawing unsaved the wand is off and says why
@@ -51,8 +63,9 @@ test('a drawing that keeps every relation is applied as one step: the block move
   await expect(wand).toBeDisabled();
   await expect(wand).toHaveAttribute('data-tip', 'Save your changes first');
   // what went to the model: kimi-k3, the rules, the graph with this workflow's steps
-  const body = sent[0] as { model: string; messages: { role: string; content: string }[] };
-  expect(body.model).toBe('kimi-k3');
+  const body = sent[0] as { model: string; stream: boolean; messages: { role: string; content: string }[] };
+  expect(body).toMatchObject({ model: 'kimi-k3', stream: true });
+  expect(sent).toHaveLength(1);
   expect(body.messages[0]!.content).toContain('1. The drawing must mean the workflow');
   expect(body.messages[1]!.content).toContain(t.stepBId);
   // one history step
@@ -63,14 +76,35 @@ test('a drawing that keeps every relation is applied as one step: the block move
   await expect(wand).toBeEnabled();
 });
 
-test('an answer naming a wire the design does not have (a dropped or invented wire) is refused in red; nothing changes', async ({ page }) => {
+test('a refused answer gets one correction round: the model hears why, and its corrected drawing is applied', async ({ page }) => {
   await openWorkflow(page, t.workflow);
   const panel = documentPanel(page, t.workflow);
   const before = await posOf(panel, t.stepBId);
-  await mockModel(page, { content: JSON.stringify({ blocks: { [t.stepBId]: { x: before[0] + 64, y: before[1] } }, wires: { [`${t.stepId}->gone`]: { bends: null } } }) });
+  const to = [before[0] + 64, before[1]];
+  const sent = await mockModel(page, { content: [
+    JSON.stringify({ blocks: { [t.stepBId]: { x: to[0], y: to[1] } }, wires: { [`${t.stepId}->gone`]: {} } }),
+    JSON.stringify({ blocks: { [t.stepBId]: { x: to[0], y: to[1] } } }),
+  ] });
+  await panel.getByRole('button', { name: 'AI drawing', exact: true }).click();
+  await expect.poll(() => posOf(panel, t.stepBId)).toEqual(to);
+  expect(sent).toHaveLength(2);
+  const fix = (sent[1] as { messages: { role: string; content: string }[] }).messages;
+  expect(fix.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
+  expect(fix[3]!.content).toContain('unknown wire');
+  const out = (await pane(page, 'Output')).locator('.outl');
+  await expect(out.filter({ hasText: 'asking kimi-k3 once to correct it' })).toHaveCount(1);
+  await expect(out.last()).toContainText('AI drawing applied: 1 block moved');
+});
+
+test('an answer refused twice (a dropped or invented wire, then again) is red; nothing changes', async ({ page }) => {
+  await openWorkflow(page, t.workflow);
+  const panel = documentPanel(page, t.workflow);
+  const before = await posOf(panel, t.stepBId);
+  const sent = await mockModel(page, { content: JSON.stringify({ blocks: { [t.stepBId]: { x: before[0] + 64, y: before[1] } }, wires: { [`${t.stepId}->gone`]: {} } }) });
   await panel.getByRole('button', { name: 'AI drawing', exact: true }).click();
   const line = await lastLine(page);
   await expect(line).toContainText('AI drawing not applied: unknown wire');
+  expect(sent).toHaveLength(2);
   await expect(line).toHaveClass(/err/);
   expect(await posOf(panel, t.stepBId)).toEqual(before);
   await expect(page.getByText('● design draft')).toHaveCount(0);

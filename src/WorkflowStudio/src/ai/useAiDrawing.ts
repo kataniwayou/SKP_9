@@ -6,7 +6,7 @@ import type { Id } from '../model/graph';
 import type { OutputLevel } from '../store/output';
 import { designDirty, type OpenDocument } from '../store/studioState';
 import { useStudioStore } from '../store/studioStore';
-import { AI_MODEL, AI_TIMEOUT_MS, DrawingError, judgeDrawing, promptOf, relationsOf, requestDrawing } from './drawing';
+import { AI_MODEL, AI_TIMEOUT_MS, correctionMessages, DrawingError, firstMessages, judgeDrawing, promptOf, relationsOf, requestDrawing, type ChatMessage } from './drawing';
 
 /**
  * Why the AI drawing is off for a document, or null when it may draw (the user's rule, 2026-10-11): only a valid saved
@@ -26,14 +26,24 @@ export function aiBlocked(d: OpenDocument): string | null {
 }
 
 /**
- * The toolbar's AI drawing for one document (2026-10-11): snapshot the relations, ask the model, judge its drawing on a
- * candidate draft, and apply it as one history step only when the relations are unchanged. One at a time; Cancel aborts.
+ * The toolbar's AI drawing for one document (2026-10-11): snapshot the relations, ask the model (streamed), judge its
+ * drawing on a candidate draft, and apply it as one history step only when the relations are unchanged. A refused answer
+ * gets one correction round: the model hears exactly why and answers again; refused twice, nothing is applied. One at a
+ * time; Cancel aborts; `seconds` counts while it runs.
  */
 export function useAiDrawing(workflowId: Id, fetchFn?: typeof fetch) {
   const store = useStudioStore();
   const [running, setRunning] = useState(false);
+  const [seconds, setSeconds] = useState(0);
   const ctl = useRef<AbortController | null>(null);
   useEffect(() => () => ctl.current?.abort(), []);
+  useEffect(() => {
+    if (!running) return undefined;
+    const started = Date.now();
+    setSeconds(0);
+    const tick = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(tick);
+  }, [running]);
 
   const log = useCallback((text: string, level: OutputLevel = 'info') => {
     store.dispatch({ type: 'log', workflowId, lines: [{ at: new Date().toISOString(), text, level }] });
@@ -47,27 +57,37 @@ export function useAiDrawing(workflowId: Id, fetchFn?: typeof fetch) {
     const draft = d.design.draft, edits = d.edits;
     const edited = applyEdits(d.status.doc, edits, draft.blocks);
     const snapshot = relationsOf(edited, draft);
-    const prompt = promptOf(edited, draft);
+    const first = firstMessages(promptOf(edited, draft));
     const c = new AbortController();
     ctl.current = c;
     setRunning(true);
-    let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; c.abort(); }, AI_TIMEOUT_MS);
+    let timedOut = false, timer: ReturnType<typeof setTimeout> | undefined;
+    /** One answer, under its own time limit. */
+    const ask = async (messages: ChatMessage[]) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { timedOut = true; c.abort(); }, AI_TIMEOUT_MS);
+      return requestDrawing(messages, c.signal, fetchFn);
+    };
     log(`AI drawing: asking ${AI_MODEL} to redraw the design; it is applied only if every relation between the steps stays the same`);
     try {
-      const text = await requestDrawing(prompt, c.signal, fetchFn);
+      let text = await ask(first);
+      let out = judgeDrawing(edited, draft, snapshot, text);
+      if (!out.ok) {
+        log(`AI drawing: the answer was refused (${out.reason}); asking ${AI_MODEL} once to correct it`);
+        text = await ask(correctionMessages(first, text, out.reason));
+        out = judgeDrawing(edited, draft, snapshot, text);
+      }
       const now = store.getState().docs.find((x) => x.workflowId === workflowId);
       if (!now || now.design.draft !== draft || now.edits !== edits) {
         log('AI drawing not applied: the design changed while the model was drawing', 'error');
         return;
       }
-      const out = judgeDrawing(edited, draft, snapshot, text);
       if (!out.ok) {
         log(`AI drawing not applied: ${out.reason}`, 'error');
         return;
       }
       store.dispatch({ type: 'design', workflowId, draft: out.draft });
-      log(`AI drawing applied: ${out.moved} block${out.moved === 1 ? '' : 's'} moved, ${out.reshaped} wire${out.reshaped === 1 ? '' : 's'} reshaped; crossings ${out.crossings}, short circuits ${out.shorted}`);
+      log(`AI drawing applied: ${out.moved} block${out.moved === 1 ? '' : 's'} moved, ${out.rerouted} wire${out.rerouted === 1 ? '' : 's'} routed; crossings ${out.crossings}, short circuits ${out.shorted}`);
     } catch (e) {
       const why = e instanceof DrawingError ? e.message : 'unexpected error';
       if (why === 'cancelled') log(timedOut ? `AI drawing failed: no answer in ${AI_TIMEOUT_MS / 1000} s` : 'AI drawing cancelled', timedOut ? 'error' : 'info');
@@ -80,5 +100,5 @@ export function useAiDrawing(workflowId: Id, fetchFn?: typeof fetch) {
   }, [store, workflowId, log, fetchFn]);
 
   const cancel = useCallback(() => ctl.current?.abort(), []);
-  return { running, draw, cancel };
+  return { running, seconds, draw, cancel };
 }

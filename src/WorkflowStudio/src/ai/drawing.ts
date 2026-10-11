@@ -8,7 +8,6 @@ import { writtenLists } from '../design/shortCircuits';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { clampLanding, GRID, PMID, PORT_GAP, snap, STEP_H, STEP_W } from '../layout/geometry';
 import type { Pt } from '../layout/router';
-import type { Bends } from '../layout/shape';
 import { CONDITIONS } from '../model/entryConditions';
 
 /** How far above or below its centre a tail may leave the workflow circle's right side. */
@@ -57,16 +56,15 @@ export const ANSWER_SCHEMA = `Answer with ONE JSON object and nothing else:
   "wires": {
     "<wire id>": {
       "tail": { "y": <number> } | { "auto": true } | { "junction": { "host": "<wire id>", "x": <number>, "y": <number> } },
-      "head": (same as tail),
-      "bends": { "xs": [<number>...], "ys": [<number>...] } | null
+      "head": (same as tail)
     }
   }
 }
 - blocks: the new top-left corner of any block you move (ids as given: "wf", step ids, "cache:<id>"); multiples of 8.
 - An end on a step: "y" is the flow y where it meets the step's side (within the side's landing range); "auto" lets the router choose. It stays on the same step.
 - A tail on the workflow circle: "y" is the flow y where it leaves the circle's right side (within its "tailsRange"); "auto" spaces the circle's tails symmetrically about its centre, 16 px apart.
-- An end on a wire (a junction): "junction" names the host wire and a point exactly on the host's drawn line after your changes.
-- bends: the wire's own route from its tail: it leaves horizontally, turns vertical at xs[0], horizontal at ys[0], vertical at xs[1], ... and arrives horizontally; xs has one more entry than ys. null: the router draws it. Omit a key to leave it as it is.
+- An end on a wire (a junction): "junction" names the host wire and the point where it should join; the studio puts it at the nearest point of the host's line.
+- You do not draw the wires' routes: the studio's router draws every wire from its ends, square and around blocks. Choose block positions, end heights and junction points so the routes come out straight and uncrossed. Omit a key to leave it as it is.
 - Leave out blocks and wires you do not change. Never invent ids.`;
 
 const conditionName = (n: number | undefined) => CONDITIONS.find((c) => c.value === n)?.name ?? 'undecided';
@@ -98,7 +96,7 @@ export function graphOf(edited: StudioDocument, draft: Draft): object {
     const c = circuit[w.id]!;
     return {
       id: w.id, family: conditionName(w.condition ?? undefined), tail: endOf(c.tail, w.points[0], 'tail'), head: endOf(c.head, w.points.at(-1), 'head'),
-      points: w.points, bends: c.bends ?? null,
+      points: w.points,
     };
   });
   return { grid: GRID, portGap: PORT_GAP, blocks, wires };
@@ -132,7 +130,7 @@ export type EndPlan = { y: number } | { auto: true } | { junction: { host: strin
 /** A drawing as the answer gives it, checked: known ids, finite numbers, well-formed bends. */
 export interface DrawingPlan {
   blocks: Map<string, { x: number; y: number }>;
-  wires: Map<string, { tail?: EndPlan; head?: EndPlan; bends?: Bends | null }>;
+  wires: Map<string, { tail?: EndPlan; head?: EndPlan }>;
 }
 
 export class DrawingError extends Error {}
@@ -167,7 +165,7 @@ export function parsePlan(text: string, edited: StudioDocument, draft: Draft): D
       const c = circuit[id];
       if (!Object.hasOwn(circuit, id) || !c) throw new DrawingError(`unknown wire "${id.slice(0, 60)}"`);
       if (!isObj(w)) throw new DrawingError(`wire ${id} is not an object`);
-      const entry: { tail?: EndPlan; head?: EndPlan; bends?: Bends | null } = {};
+      const entry: { tail?: EndPlan; head?: EndPlan } = {};
       for (const side of ['tail', 'head'] as const) {
         const e = w[side];
         if (e === undefined) continue;
@@ -186,44 +184,24 @@ export function parsePlan(text: string, edited: StudioDocument, draft: Draft): D
           entry[side] = { y: snap(num(e.y, `wire ${id} ${side} y`)) };
         }
       }
-      if (w.bends !== undefined) {
-        if (w.bends === null) entry.bends = null;
-        else {
-          const b = w.bends;
-          if (!isObj(b) || !Array.isArray(b.xs) || !Array.isArray(b.ys)) throw new DrawingError(`wire ${id} bends are not {xs, ys}`);
-          const xs = b.xs.map((x, i) => snap(num(x, `wire ${id} bends xs[${i}]`))), ys = b.ys.map((y, i) => snap(num(y, `wire ${id} bends ys[${i}]`)));
-          if (xs.length === 0 || xs.length !== ys.length + 1 || xs.length > 32) throw new DrawingError(`wire ${id} bends: xs must have one more entry than ys`);
-          entry.bends = { xs, ys };
-        }
-      }
+      // no routes from the model (2026-10-11): the router draws every wire, so a stray "bends" is ignored
       plan.wires.set(id, entry);
     }
   }
   return plan;
 }
 
-/** How far along a drawn line a point lies, or null when it is not on it. */
-export function distanceAlong(points: readonly Pt[], p: Pt): number | null {
-  let d = 0;
-  for (let i = 0; i + 1 < points.length; i++) {
-    const [a, b] = [points[i]!, points[i + 1]!];
-    const len = Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
-    const on = (a[0] === b[0] && Math.abs(p[0] - a[0]) < 0.5 && p[1] >= Math.min(a[1], b[1]) - 0.5 && p[1] <= Math.max(a[1], b[1]) + 0.5)
-      || (a[1] === b[1] && Math.abs(p[1] - a[1]) < 0.5 && p[0] >= Math.min(a[0], b[0]) - 0.5 && p[0] <= Math.max(a[0], b[0]) + 0.5);
-    if (on) return d + Math.abs(p[0] - a[0]) + Math.abs(p[1] - a[1]);
-    d += len;
-  }
-  return null;
-}
-
-/** The plan drawn over the draft: blocks moved, ends slid, bends set, then junctions placed on their hosts as drawn. */
+/**
+ * The plan drawn over the draft: blocks moved, every wire's route given back to the router (the model only places,
+ * 2026-10-11), ends slid, then each junction put at the nearest point of its host as drawn.
+ */
 export function applyPlan(edited: StudioDocument, draft: Draft, plan: DrawingPlan): Draft {
   let d = moveBlocks(draft, edited, plan.blocks);
   const placed = applyDraft(edited, d);
   let c: Circuit = circuitOf(edited, d);
+  for (const id of Object.keys(c)) if (c[id]!.bends) c = setBends(c, id, null);
   const junctions: { id: string; side: Side; host: string; at: Pt }[] = [];
   for (const [id, w] of plan.wires) {
-    if (w.bends !== undefined) c = setBends(c, id, w.bends);
     for (const side of ['tail', 'head'] as const) {
       const e = w[side];
       const now = c[id]![side];
@@ -245,13 +223,28 @@ export function applyPlan(edited: StudioDocument, draft: Draft, plan: DrawingPla
     const drawn = applyDraft(edited, d);
     for (const j of junctions) {
       const host = drawn.wires.find((w) => w.id === j.host);
-      const at = host ? distanceAlong(host.points, j.at) : null;
-      if (at === null) throw new DrawingError(`wire ${j.id} ${j.side}: (${j.at[0]}, ${j.at[1]}) is not on wire ${j.host} as drawn`);
+      const at = host ? nearestAlong(host.points, j.at) : null;
+      if (at === null) throw new DrawingError(`wire ${j.id} ${j.side}: wire ${j.host} is not drawn`);
       c = setEnd(c, j.id, j.side, { on: 'wire', host: j.host, at });
     }
     d = withCircuit(d, edited, c);
   }
   return d;
+}
+
+/** How far along a drawn line its point nearest to `p` lies; null for a line with no segment. */
+export function nearestAlong(points: readonly Pt[], p: Pt): number | null {
+  let best: { gap: number; at: number } | null = null, d = 0;
+  for (let i = 0; i + 1 < points.length; i++) {
+    const [a, b] = [points[i]!, points[i + 1]!];
+    const len = Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
+    const t = len === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1])) / (len * len)));
+    const q: Pt = [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+    const gap = Math.hypot(p[0] - q[0], p[1] - q[1]);
+    if (!best || gap < best.gap) best = { gap, at: d + t * len };
+    d += len;
+  }
+  return best && Math.round(best.at);
 }
 
 /** Every crossing between two drawn wires: perpendicular runs meeting strictly inside both. */
@@ -276,7 +269,7 @@ export const shortedOf = (doc: StudioDocument): number => doc.wires.filter((w) =
 
 /** The outcome of one drawing: the candidate draft and what to tell the user. */
 export type DrawingOutcome =
-  | { ok: true; draft: Draft; moved: number; reshaped: number; crossings: number; shorted: number }
+  | { ok: true; draft: Draft; moved: number; rerouted: number; crossings: number; shorted: number }
   | { ok: false; reason: string };
 
 /**
@@ -296,7 +289,7 @@ export function judgeDrawing(edited: StudioDocument, draft: Draft, snapshot: str
   if (after !== snapshot) return { ok: false, reason: `it would have changed the workflow: ${diffRelations(snapshot, after)}` };
   const before = applyDraft(edited, draft), shown = applyDraft(edited, candidate);
   if (shortedOf(shown) > shortedOf(before)) return { ok: false, reason: 'it would have added a short circuit' };
-  return { ok: true, draft: candidate, moved: plan.blocks.size, reshaped: plan.wires.size, crossings: crossingsOf(shown.wires), shorted: shortedOf(shown) };
+  return { ok: true, draft: candidate, moved: plan.blocks.size, rerouted: shown.wires.length, crossings: crossingsOf(shown.wires), shorted: shortedOf(shown) };
 }
 
 /** The first relation two snapshots disagree on, in words. */
@@ -311,19 +304,38 @@ function diffRelations(a: string, b: string): string {
 
 /** The model the studio draws with, and how hard it thinks (the analyst's convention: low | high | max). */
 export const AI_MODEL = 'kimi-k3';
-const AI_EFFORT = 'high';
-/** How long a drawing may take before it is given up. */
-export const AI_TIMEOUT_MS = 180_000;
+/** Low by default (2026-10-11): about 2 minutes a drawing, where high took about 5. */
+const AI_EFFORT = 'low';
+/** How long one answer may take before it is given up; the answer streams, so a slow model is not cut off before. */
+export const AI_TIMEOUT_MS = 360_000;
 
-/** Asks the model through the studio's own route; the text of its answer, or a DrawingError saying why not. */
-export async function requestDrawing(prompt: { system: string; user: string }, signal: AbortSignal, fetchFn: typeof fetch = fetch): Promise<string> {
+/** One message of the conversation with the model. */
+export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string }
+
+/** The first round's messages: the rules and schema, then the graph. */
+export const firstMessages = (prompt: { system: string; user: string }): ChatMessage[] =>
+  [{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }];
+
+/** The one correction round (2026-10-11): the refused answer and exactly why, and a request for the whole answer again. */
+export const correctionMessages = (first: readonly ChatMessage[], answer: string, reason: string): ChatMessage[] => [
+  ...first,
+  { role: 'assistant', content: answer },
+  { role: 'user', content: `The studio refused that answer: ${reason}. Answer again with the whole corrected JSON object, following the schema exactly.` },
+];
+
+/**
+ * Asks the model through the studio's own route, streamed (2026-10-11) so a long think is never cut off; `onChunk` hears
+ * each piece as it arrives. The text of its answer, or a DrawingError saying why not. A plain JSON reply is read too.
+ */
+export async function requestDrawing(
+  messages: readonly ChatMessage[], signal: AbortSignal, fetchFn: typeof fetch = fetch, onChunk?: () => void,
+): Promise<string> {
   let r: Response;
   try {
     r = await fetchFn('/ai/chat/completions', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
       body: JSON.stringify({
-        model: AI_MODEL, reasoning_effort: AI_EFFORT, response_format: { type: 'json_object' },
-        messages: [{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }],
+        model: AI_MODEL, reasoning_effort: AI_EFFORT, response_format: { type: 'json_object' }, stream: true, messages,
       }),
     });
   } catch (e) {
@@ -333,9 +345,45 @@ export async function requestDrawing(prompt: { system: string; user: string }, s
   if (r.status === 503 || r.status === 404) throw new DrawingError('AI drawing is not configured: the studio has no model key (Secret skp-ai)');
   if (r.status === 401 || r.status === 403) throw new DrawingError(`AI drawing is not configured: the model refused the key (HTTP ${r.status})`);
   if (!r.ok) throw new DrawingError(`the model answered HTTP ${r.status}`);
-  let body: unknown;
-  try { body = await r.json(); } catch { throw new DrawingError('the model\'s reply is not JSON'); }
-  const content = isObj(body) && Array.isArray(body.choices) && isObj(body.choices[0]) && isObj(body.choices[0].message) ? body.choices[0].message.content : undefined;
+  let content: unknown;
+  try {
+    content = (r.headers.get('content-type') ?? '').includes('text/event-stream') && r.body
+      ? await readStream(r.body, onChunk)
+      : messageOf(await r.json());
+  } catch (e) {
+    if (signal.aborted) throw new DrawingError('cancelled');
+    if (e instanceof DrawingError) throw e;
+    throw new DrawingError('the model\'s reply is not JSON');
+  }
   if (typeof content !== 'string' || content.trim() === '') throw new DrawingError('the model gave no drawing');
   return content;
+}
+
+const messageOf = (body: unknown): unknown =>
+  (isObj(body) && Array.isArray(body.choices) && isObj(body.choices[0]) && isObj(body.choices[0].message) ? body.choices[0].message.content : undefined);
+
+/** The answer's text from an OpenAI-style event stream: every `data:` line's delta content, until `[DONE]`. */
+export async function readStream(body: ReadableStream<Uint8Array>, onChunk?: () => void): Promise<string> {
+  const reader = body.getReader(), decoder = new TextDecoder();
+  let buffer = '', text = '';
+  const line = (l: string): boolean => {
+    const t = l.trim();
+    if (!t.startsWith('data:')) return false;
+    const data = t.slice(5).trim();
+    if (data === '[DONE]') return true;
+    const v: unknown = JSON.parse(data);
+    if (isObj(v) && isObj(v.error)) throw new DrawingError(`the model failed: ${String(v.error.message ?? 'error').slice(0, 200)}`);
+    const delta = isObj(v) && Array.isArray(v.choices) && isObj(v.choices[0]) && isObj(v.choices[0].delta) ? v.choices[0].delta : undefined;
+    if (delta && typeof delta.content === 'string') text += delta.content;
+    onChunk?.();
+    return false;
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (value) buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = done ? '' : lines.pop()!;
+    for (const l of lines) if (line(l)) { void reader.cancel(); return text; }
+    if (done) return text;
+  }
 }
