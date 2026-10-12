@@ -4,7 +4,7 @@ import { loadedDocument } from '../app/fixtures';
 import { setBends, setEnd } from '../circuit/circuit';
 import { applyDraft } from '../design/apply';
 import { circuitOf, EMPTY_DRAFT, withCircuit, type Draft } from '../design/draft';
-import { applyPlan, changeOf, correctionMessages, crossingPairsOf, crossingsOf, DRAWING_RULES, firstMessages, judgeDrawing, mainPathOf, movedBlocksOf, nearestAlong, parsePlan, promptOf, readStream, refinementMessages, relationsOf, remainingProblemsOf, requestDrawing } from './drawing';
+import { applyPlan, changeOf, correctionMessages, crossingPairsOf, crossingsOf, DRAWING_RULES, firstMessages, judgeDrawing, mainPathOf, modelOf, movedBlocksOf, nearestAlong, parsePlan, promptOf, readStream, refinementMessages, relationsOf, remainingProblemsOf, requestDrawing } from './drawing';
 
 // s1 -> s2 -> s3 (Completed), s1 -> f and s2 -> f (Failed)
 const doc = () => loadedDocument(graphDto({
@@ -143,7 +143,7 @@ describe('AI drawing (2026-10-11)', () => {
     expect(chunks.mock.calls.map((c) => c[0])).toEqual([{ thinking: 3, writing: 0 }, { thinking: 3, writing: 5 }, { thinking: 3, writing: 13 }]);
     await expect(readStream(stream(ev({ error: { message: 'overloaded' } })))).rejects.toThrow(/overloaded/);
     const sse = vi.fn(async () => new Response(stream(all), { status: 200, headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
-    expect(await requestDrawing(firstMessages({ system: 's', user: 'u' }), new AbortController().signal, sse)).toBe('{"blocks":{}}');
+    expect(await requestDrawing('kimi-k3', firstMessages({ system: 's', user: 'u' }), new AbortController().signal, sse)).toBe('{"blocks":{}}');
   });
 
   it('merges wires into a trunk (2026-10-11): a fan-in of one family into one step is applied; the meaning is unchanged', async () => {
@@ -263,18 +263,31 @@ describe('AI drawing (2026-10-11)', () => {
     const prompt = firstMessages({ system: 's', user: 'u' });
     const reply = (status: number, body: unknown = {}) => vi.fn(async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
     const ok = reply(200, { choices: [{ message: { content: '{"blocks":{}}' } }] });
-    expect(await requestDrawing(prompt, new AbortController().signal, ok)).toBe('{"blocks":{}}');
+    expect(await requestDrawing('kimi-k3', prompt, new AbortController().signal, ok)).toBe('{"blocks":{}}');
     const sent = JSON.parse(((ok as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit).body as string) as { model: string; stream: boolean; reasoning_effort: string };
     expect(sent).toMatchObject({ model: 'kimi-k3', stream: true, reasoning_effort: 'low' });
     expect((ok as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toBe('/ai/chat/completions');
-    await expect(requestDrawing(prompt, new AbortController().signal, reply(503))).rejects.toThrow(/not configured/);
-    await expect(requestDrawing(prompt, new AbortController().signal, reply(401))).rejects.toThrow(/refused the key/);
-    await expect(requestDrawing(prompt, new AbortController().signal, reply(500))).rejects.toThrow(/HTTP 500/);
-    await expect(requestDrawing(prompt, new AbortController().signal, reply(200, { choices: [] }))).rejects.toThrow(/no drawing/);
+    await expect(requestDrawing('kimi-k3', prompt, new AbortController().signal, reply(503))).rejects.toThrow(/not configured/);
+    await expect(requestDrawing('kimi-k3', prompt, new AbortController().signal, reply(401))).rejects.toThrow(/refused the key/);
+    await expect(requestDrawing('kimi-k3', prompt, new AbortController().signal, reply(500))).rejects.toThrow(/HTTP 500/);
+    await expect(requestDrawing('kimi-k3', prompt, new AbortController().signal, reply(200, { choices: [] }))).rejects.toThrow(/no drawing/);
     const c = new AbortController();
     c.abort();
     const abort = vi.fn(async () => { throw new DOMException('aborted', 'AbortError'); }) as unknown as typeof fetch;
-    await expect(requestDrawing(prompt, c.signal, abort)).rejects.toThrow('cancelled');
+    await expect(requestDrawing('kimi-k3', prompt, c.signal, abort)).rejects.toThrow('cancelled');
+  });
+
+  it('draws with the model the studio\'s environment names (KIMI_MODEL_ID, read from /ai/config)', async () => {
+    const reply = (status: number, body: unknown = {}) => vi.fn(async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
+    const ok = reply(200, { model: 'kimi-k3-preview' });
+    expect(await modelOf(new AbortController().signal, ok)).toBe('kimi-k3-preview');
+    expect((ok as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toBe('/ai/config');
+    await expect(modelOf(new AbortController().signal, reply(503))).rejects.toThrow(/not configured.*KIMI_MODEL_ID/);
+    await expect(modelOf(new AbortController().signal, reply(200, { model: '' }))).rejects.toThrow(/not configured/);
+    const c = new AbortController();
+    c.abort();
+    const abort = vi.fn(async () => { throw new DOMException('aborted', 'AbortError'); }) as unknown as typeof fetch;
+    await expect(modelOf(c.signal, abort)).rejects.toThrow('cancelled');
   });
 });
 

@@ -531,9 +531,7 @@ export function changeOf(a: string, b: string): string | null {
   return null;
 }
 
-/** The model the studio draws with, and how hard it thinks (the analyst's convention: low | high | max). */
-export const AI_MODEL = 'kimi-k3';
-/** Low by default (2026-10-11): about 2 minutes a drawing, where high took about 5. */
+/** How hard the model thinks (the analyst's convention: low | high | max). Low by default (2026-10-11): about 2 minutes a drawing, where high took about 5. */
 const AI_EFFORT = 'low';
 /**
  * How long the model may stay silent, no byte of its stream arriving, before the round is given up (2026-10-12): a model
@@ -576,27 +574,46 @@ export const correctionMessages = (first: readonly ChatMessage[], answer: string
 /** How much of one answer has arrived (2026-10-12): the characters of the model's thinking and of its answer. */
 export interface StreamProgress { thinking: number; writing: number }
 
+const NOT_CONFIGURED = 'AI drawing is not configured: the studio has no model (env KIMI_API_KEY, KIMI_BASE_URL, KIMI_MODEL_ID)';
+
+/**
+ * The model the studio draws with (2026-10-12): KIMI_MODEL_ID in the studio's environment (k8s/31-workflow-studio.yaml in
+ * the cluster, the dev server's environment in dev), which /ai/config reports; the key and the base URL never leave nginx.
+ */
+export async function modelOf(signal: AbortSignal, fetchFn: typeof fetch = fetch): Promise<string> {
+  let r: Response;
+  try {
+    r = await fetchFn('/ai/config', { signal });
+  } catch (e) {
+    if (signal.aborted) throw new DrawingError('cancelled');
+    throw new DrawingError(`the studio's model settings could not be read (${e instanceof Error ? e.message : 'network error'})`);
+  }
+  const model: unknown = r.ok ? ((await r.json().catch(() => null)) as { model?: unknown } | null)?.model : null;
+  if (typeof model !== 'string' || model.trim() === '') throw new DrawingError(NOT_CONFIGURED);
+  return model;
+}
+
 /**
  * Asks the model through the studio's own route, streamed (2026-10-11) so a long think is never cut off; `onChunk` hears
  * each piece as it arrives, with the progress so far. The text of its answer, or a DrawingError saying why not. A plain
  * JSON reply is read too.
  */
 export async function requestDrawing(
-  messages: readonly ChatMessage[], signal: AbortSignal, fetchFn: typeof fetch = fetch, onChunk?: (p: StreamProgress) => void,
+  model: string, messages: readonly ChatMessage[], signal: AbortSignal, fetchFn: typeof fetch = fetch, onChunk?: (p: StreamProgress) => void,
 ): Promise<string> {
   let r: Response;
   try {
     r = await fetchFn('/ai/chat/completions', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
       body: JSON.stringify({
-        model: AI_MODEL, reasoning_effort: AI_EFFORT, response_format: { type: 'json_object' }, stream: true, messages,
+        model, reasoning_effort: AI_EFFORT, response_format: { type: 'json_object' }, stream: true, messages,
       }),
     });
   } catch (e) {
     if (signal.aborted) throw new DrawingError('cancelled');
     throw new DrawingError(`the model could not be reached (${e instanceof Error ? e.message : 'network error'})`);
   }
-  if (r.status === 503 || r.status === 404) throw new DrawingError('AI drawing is not configured: the studio has no model key (Secret skp-ai)');
+  if (r.status === 503 || r.status === 404) throw new DrawingError(NOT_CONFIGURED);
   if (r.status === 401 || r.status === 403) throw new DrawingError(`AI drawing is not configured: the model refused the key (HTTP ${r.status})`);
   if (!r.ok) throw new DrawingError(`the model answered HTTP ${r.status}`);
   let content: unknown;

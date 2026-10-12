@@ -25,6 +25,8 @@ const posOf = (panel: Locator, id: string) => panel.locator(`.react-flow__node[d
  */
 async function mockModel(page: Page, answer: { content?: string | string[]; status?: number; delayMs?: number }): Promise<unknown[]> {
   const sent: unknown[] = [];
+  // the model the studio's environment names (KIMI_MODEL_ID, 2026-10-12)
+  await page.route('**/ai/config', (route: Route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{"model":"kimi-k3"}' }));
   await page.route('**/ai/chat/completions', async (route: Route) => {
     sent.push(route.request().postDataJSON());
     if (answer.delayMs) await new Promise((r) => setTimeout(r, answer.delayMs));

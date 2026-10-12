@@ -7,7 +7,7 @@ import type { OutputLevel } from '../store/output';
 import { designDirty, type OpenDocument } from '../store/studioState';
 import { useStudioStore } from '../store/studioStore';
 import {
-  AI_MODEL, AI_SILENCE_MS, AI_TOTAL_MS, correctionMessages, DrawingError, firstMessages, graphOf, judgeDrawing, movedBlocksOf, promptOf,
+  AI_SILENCE_MS, AI_TOTAL_MS, correctionMessages, DrawingError, firstMessages, graphOf, judgeDrawing, modelOf, movedBlocksOf, promptOf,
   refinementMessages, relationsOf, remainingProblemsOf, requestDrawing, type ChatMessage, type StreamProgress,
 } from './drawing';
 
@@ -98,24 +98,26 @@ export function useAiDrawing(workflowId: Id, fetchFn?: typeof fetch) {
     };
     const timeoutText = () => (timedOut === 'total' ? `no drawing in ${AI_TOTAL_MS / 60_000} min` : `no word from the model for ${AI_SILENCE_MS / 1000} s`);
     /** One answer, given up when the model falls silent. */
+    let model = '';
     const ask = async (messages: ChatMessage[], name: Round) => {
       if (timedOut === 'total') throw new DrawingError('cancelled');
       round = new AbortController();
       progress.current = { round: name, p: null };
       quiet();
       try {
-        return await requestDrawing(messages, round.signal, fetchFn, (p) => { progress.current = { round: name, p }; quiet(); });
+        return await requestDrawing(model, messages, round.signal, fetchFn, (p) => { progress.current = { round: name, p }; quiet(); });
       } finally {
         clearTimeout(silence);
       }
     };
-    log(`AI drawing: asking ${AI_MODEL} to redraw the design; it is applied only if every relation between the steps stays the same`);
     try {
+      model = await modelOf(c.signal, fetchFn);
+      log(`AI drawing: asking ${model} to redraw the design; it is applied only if every relation between the steps stays the same`);
       let messages = first;
       let text = await ask(messages, 'drawing');
       let out = judgeDrawing(edited, draft, snapshot, text);
       if (!out.ok) {
-        log(`AI drawing: the answer was refused (${out.reason}); asking ${AI_MODEL} once to correct it`);
+        log(`AI drawing: the answer was refused (${out.reason}); asking ${model} once to correct it`);
         messages = correctionMessages(first, text, out.reason);
         text = await ask(messages, 'correcting');
         out = judgeDrawing(edited, draft, snapshot, text);
@@ -123,7 +125,7 @@ export function useAiDrawing(workflowId: Id, fetchFn?: typeof fetch) {
       // the refinement round (2026-10-12): what a second press of the wand did by hand
       let left = out.ok ? remainingProblemsOf(edited, out.draft) : [];
       if (out.ok && left.length > 0) {
-        log(`AI drawing: ${left.length} problem${left.length === 1 ? '' : 's'} left (${left.slice(0, 3).join('; ')}${left.length > 3 ? '; …' : ''}); asking ${AI_MODEL} once to refine it`);
+        log(`AI drawing: ${left.length} problem${left.length === 1 ? '' : 's'} left (${left.slice(0, 3).join('; ')}${left.length > 3 ? '; …' : ''}); asking ${model} once to refine it`);
         try {
           const again = await ask(refinementMessages(messages, text, graphOf(edited, out.draft), left), 'refining');
           const refined = judgeDrawing(edited, out.draft, snapshot, again);
