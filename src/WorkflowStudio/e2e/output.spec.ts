@@ -235,3 +235,28 @@ test('Clear empties the log of every workflow, the pinned short circuit stays, a
   await page.getByRole('menuitem', { name: /Clear output/ }).click();
   await expect(await outputLines(page)).toHaveCount(0);
 });
+
+test('every new line scrolls the log to its end, even after the mouse wheel scrolled it up to read', async ({ page }) => {
+  const panel = await open(page);
+  const log = page.locator('[data-pane="output"]').getByRole('log');
+  const atEnd = () => log.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight < 2);
+  // two Saves: more lines than the log shows
+  await typeInto(page, panel, t.c, 'Description', 'scroll 1');
+  await save(page);
+  await typeInto(page, panel, t.c, 'Description', 'scroll 2');
+  await save(page);
+  await expect.poll(() => log.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  await expect.poll(atEnd).toBe(true);
+
+  // read back up with the real wheel, then a new Save's lines arrive
+  const box = (await log.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -100_000);
+  await expect.poll(() => log.evaluate((el) => el.scrollTop)).toBe(0);
+  const count = await (await outputLines(page)).count();
+  await typeInto(page, panel, t.c, 'Description', 'scroll 3');
+  await save(page);
+  await expect.poll(async () => (await outputLines(page)).count()).toBeGreaterThan(count);
+  await expect.poll(atEnd).toBe(true);
+  await expect((await outputLines(page)).last()).toBeInViewport();
+});

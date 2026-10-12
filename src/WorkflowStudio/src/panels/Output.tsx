@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useGuard } from '../app/studioActions';
 import type { StudioDocument } from '../app/document';
 import { applyDesign } from '../design/apply';
@@ -119,14 +119,19 @@ export function Output() {
   const active = useStudio(activeDocument);
   const lines = useStudio((s) => s.output);
   const { errors, shown } = useProblems(active);
-  const log = useRef<HTMLDivElement>(null);
-  // the newest line is at the bottom: keep it in view as lines arrive, unless the user scrolled up to read
+  const [log, setLog] = useState<HTMLDivElement | null>(null);
+  // the newest line is at the bottom: every new line scrolls the log to its end (the user, 2026-10-12), even when it was
+  // scrolled up to read; so does the log being shown or resized (a hidden tab brought forward, the pinned problems growing)
   const last = lines.length === 0 ? '' : `${lines.length}|${lines[lines.length - 1]!.at}|${lines[lines.length - 1]!.text}`;
-  const follow = useRef(true);
   useEffect(() => {
-    const el = log.current;
-    if (el && follow.current) el.scrollTop = el.scrollHeight;
-  }, [last]);
+    if (log) log.scrollTop = log.scrollHeight;
+  }, [log, last]);
+  useEffect(() => {
+    if (!log) return undefined;
+    const seen = new ResizeObserver(() => { log.scrollTop = log.scrollHeight; });
+    seen.observe(log);
+    return () => seen.disconnect();
+  }, [log]);
 
   if (lines.length === 0 && errors.length === 0) {
     return (
@@ -141,11 +146,10 @@ export function Output() {
       <OutputBar empty={lines.length === 0} />
       {active && <PinnedProblems active={active} errors={errors} shown={shown} />}
       <div
-        ref={log}
+        ref={setLog}
         className="pbody"
         role="log"
         aria-label="Output"
-        onScroll={(e) => { const el = e.currentTarget; follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 8; }}
       >
         {lines.map((l, i) => (
           <div key={i} className={l.level === 'error' ? 'outl err' : 'outl'} data-level={l.level}>
