@@ -332,10 +332,16 @@ export function nearestAlong(points: readonly Pt[], p: Pt): number | null {
 
 /** Every crossing between two drawn wires: perpendicular runs meeting strictly inside both. */
 export function crossingsOf(wires: readonly { id: string; points: readonly Pt[] }[]): number {
-  let n = 0;
+  return crossingPairsOf(wires).reduce((n, c) => n + c.times, 0);
+}
+
+/** The pairs of drawn wires that cross, and how often each pair does (2026-10-12: named in the refinement round). */
+export function crossingPairsOf(wires: readonly { id: string; points: readonly Pt[] }[]): { a: string; b: string; times: number }[] {
+  const out: { a: string; b: string; times: number }[] = [];
   const inside = (v: number, a: number, b: number) => v > Math.min(a, b) && v < Math.max(a, b);
   for (let i = 0; i < wires.length; i++) for (let j = i + 1; j < wires.length; j++) {
     const A = wires[i]!.points, B = wires[j]!.points;
+    let n = 0;
     for (let a = 0; a + 1 < A.length; a++) for (let b = 0; b + 1 < B.length; b++) {
       const [p, q, r, s] = [A[a]!, A[a + 1]!, B[b]!, B[b + 1]!];
       const ah = p[1] === q[1], bh = r[1] === s[1];
@@ -343,8 +349,9 @@ export function crossingsOf(wires: readonly { id: string; points: readonly Pt[] 
       const [h0, h1, v0, v1] = ah ? [p, q, r, s] : [r, s, p, q];
       if (inside(v0[0], h0[0], h1[0]) && inside(h0[1], v0[1], v1[1])) n++;
     }
+    if (n > 0) out.push({ a: wires[i]!.id, b: wires[j]!.id, times: n });
   }
-  return n;
+  return out;
 }
 
 /** How many wires are in a short circuit (a junction across families, or a stretch shared with another net). */
@@ -407,26 +414,68 @@ const commonest = (xs: readonly number[]): number => {
  * and the model's one correction round hears why. Steps it leaves where they are are not judged.
  */
 export function layoutProblemOf(edited: StudioDocument, draft: Draft, moved: ReadonlySet<string>): string | null {
+  return layoutIssuesOf(edited, draft, moved)[0] ?? null;
+}
+
+/** The layout issues of the steps in `moved`, or of every step ('all': the refinement round, 2026-10-12). */
+function layoutIssuesOf(edited: StudioDocument, draft: Draft, moved: ReadonlySet<string> | 'all'): string[] {
   const shown = applyDraft(edited, draft);
   const lists = writtenLists(edited, shown, draft);
   const path = mainPathOf(shown, lists.nextOf, lists.entries);
   const at = (id: string) => shown.placement.steps.get(id);
   const name = (id: string) => `step "${shown.graph.steps.get(id)?.name ?? id}"`;
-  if (path.length < 2 || path.some((id) => !at(id))) return null;
+  const all = moved === 'all';
+  const judged = (id: string) => moved === 'all' || moved.has(id);
+  if (path.length < 2 || path.some((id) => !at(id))) return [];
+  const out: string[] = [];
   const row = commonest(path.map((id) => at(id)!.y));
   const gaps = path.slice(1).map((id, i) => at(id)!.x - at(path[i]!)!.x).filter((g) => g > 0);
   const x0 = at(path[0]!)!.x, pitch = gaps.length ? commonest(gaps) : 0;
   for (const [i, id] of path.entries()) {
-    if (!moved.has(id)) continue;
+    if (!judged(id)) continue;
     const p = at(id)!;
-    if (p.y !== row) return `${name(id)} is on the main path, so it stays on the row: it was moved to y ${p.y}, the row is at y ${row} (rule 16)`;
-    if (i > 0 && p.x <= at(path[i - 1]!)!.x) return `${name(id)} was moved left of ${name(path[i - 1]!)}, the step before it on the main path (rule 15)`;
+    if (p.y !== row) out.push(`${name(id)} is on the main path, so it stays on the row: it ${all ? 'is at' : 'was moved to'} y ${p.y}, the row is at y ${row} (rule 16)`);
+    if (i > 0 && p.x <= at(path[i - 1]!)!.x) out.push(`${name(id)} ${all ? 'is' : 'was moved'} left of ${name(path[i - 1]!)}, the step before it on the main path (rule 15)`);
   }
-  if (pitch <= 0) return null;
+  if (pitch <= 0) return out;
   for (const [id, p] of shown.placement.steps) {
-    if (moved.has(id) && (p.x - x0) % pitch !== 0) return `${name(id)} was moved off the columns: x ${p.x}, the columns are at x ${x0} + k × ${pitch} (rule 5)`;
+    if (judged(id) && (p.x - x0) % pitch !== 0) out.push(`${name(id)} ${all ? 'is' : 'was moved'} off the columns: x ${p.x}, the columns are at x ${x0} + k × ${pitch} (rule 5)`);
   }
-  return null;
+  return out;
+}
+
+/** The shortest a wire's segment may be (rule 14). */
+const MIN_SEGMENT = 16;
+
+/**
+ * What is still wrong with an applied drawing (the user, 2026-10-12), in words, for the refinement round: every step's
+ * layout (rules 5, 15, 16), each pair of crossing wires (rule 4), each bent main-path wire (rules 8, 16) and each wire
+ * with a segment shorter than 16 px (rule 14). Empty when the drawing keeps them all.
+ */
+export function remainingProblemsOf(edited: StudioDocument, draft: Draft): string[] {
+  const shown = applyDraft(edited, draft);
+  const out = layoutIssuesOf(edited, draft, 'all');
+  for (const c of crossingPairsOf(shown.wires)) out.push(`wires ${c.a} and ${c.b} cross${c.times > 1 ? ` ${c.times} times` : ''} (rule 4)`);
+  const lists = writtenLists(edited, shown, draft);
+  const path = mainPathOf(shown, lists.nextOf, lists.entries);
+  for (let i = 0; i + 1 < path.length; i++) {
+    const w = shown.wires.find((x) => x.id === `${path[i]}->${path[i + 1]}`);
+    if (w && w.points.some((p) => p[1] !== w.points[0]![1])) out.push(`the main-path wire ${w.id} is bent: it should run straight along the row (rules 8 and 16)`);
+  }
+  for (const w of shown.wires) {
+    const lens = w.points.slice(1).map((p, i) => Math.abs(p[0] - w.points[i]![0]) + Math.abs(p[1] - w.points[i]![1]));
+    const short = lens.find((len) => len > 0 && len < MIN_SEGMENT);
+    if (short !== undefined) out.push(`wire ${w.id} has a segment of ${short} px, shorter than ${MIN_SEGMENT} px (rule 14)`);
+  }
+  return out;
+}
+
+/** How many blocks stand elsewhere in `b` than in `a`: the steps, the caches and the workflow circle. */
+export function movedBlocksOf(edited: StudioDocument, a: Draft, b: Draft): number {
+  const pa = applyDraft(edited, a).placement, pb = applyDraft(edited, b).placement;
+  const differ = (m: ReadonlyMap<string, { x: number; y: number }>, n: ReadonlyMap<string, { x: number; y: number }>) =>
+    [...m].filter(([id, p]) => { const q = n.get(id); return !q || q.x !== p.x || q.y !== p.y; }).length;
+  return differ(pa.steps, pb.steps) + differ(pa.caches, pb.caches) + (JSON.stringify(pa.sphere) === JSON.stringify(pb.sphere) ? 0 : 1);
 }
 
 /** The outcome of one drawing: the candidate draft and what to tell the user. */
@@ -436,7 +485,8 @@ export type DrawingOutcome =
 
 /**
  * The model's answer judged (step 5 of the user's flow): parsed and applied to a candidate; refused unless the relations
- * are exactly the snapshot's and no short circuit is added. Never a partial drawing.
+ * are exactly the snapshot's, no short circuit is added and no step is moved off the row or the columns. Never a partial
+ * drawing. `draft` is what the answer was drawn against: the design, or the first drawing in the refinement round.
  */
 export function judgeDrawing(edited: StudioDocument, draft: Draft, snapshot: string, text: string): DrawingOutcome {
   let candidate: Draft;
@@ -485,8 +535,13 @@ export function changeOf(a: string, b: string): string | null {
 export const AI_MODEL = 'kimi-k3';
 /** Low by default (2026-10-11): about 2 minutes a drawing, where high took about 5. */
 const AI_EFFORT = 'low';
-/** How long one answer may take before it is given up; the answer streams, so a slow model is not cut off before. */
-export const AI_TIMEOUT_MS = 360_000;
+/**
+ * How long the model may stay silent, no byte of its stream arriving, before the round is given up (2026-10-12): a model
+ * still thinking keeps streaming, so only a dead one is cut off.
+ */
+export const AI_SILENCE_MS = 60_000;
+/** How long one press may take in all, every round together (2026-10-12). */
+export const AI_TOTAL_MS = 15 * 60_000;
 
 /** One message of the conversation with the model. */
 export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string }
@@ -495,6 +550,22 @@ export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: s
 export const firstMessages = (prompt: { system: string; user: string }): ChatMessage[] =>
   [{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }];
 
+/**
+ * The refinement round (the user, 2026-10-12): the model's applied drawing as the studio now draws it (its blocks and the
+ * router's routes, which the model could not see while it answered) and what is still wrong with it, for one more answer
+ * against that drawing. A second press of the wand did this by hand.
+ */
+export const refinementMessages = (before: readonly ChatMessage[], answer: string, graph: object, problems: readonly string[]): ChatMessage[] => [
+  ...before,
+  { role: 'assistant', content: answer },
+  {
+    role: 'user',
+    content: `The studio applied your drawing. This is how it is drawn now, with the router's routes:\n${JSON.stringify(graph)}\n\n`
+      + `These problems remain:\n${problems.map((p) => `- ${p}`).join('\n')}\n\n`
+      + 'Fix them by the rules, changing as little else as you can. Answer with ONE JSON object in the same schema, against this drawing: leave out the blocks and wires you do not change.',
+  },
+];
+
 /** The one correction round (2026-10-11): the refused answer and exactly why, and a request for the whole answer again. */
 export const correctionMessages = (first: readonly ChatMessage[], answer: string, reason: string): ChatMessage[] => [
   ...first,
@@ -502,12 +573,16 @@ export const correctionMessages = (first: readonly ChatMessage[], answer: string
   { role: 'user', content: `The studio refused that answer: ${reason}. Answer again with the whole corrected JSON object, following the schema exactly.` },
 ];
 
+/** How much of one answer has arrived (2026-10-12): the characters of the model's thinking and of its answer. */
+export interface StreamProgress { thinking: number; writing: number }
+
 /**
  * Asks the model through the studio's own route, streamed (2026-10-11) so a long think is never cut off; `onChunk` hears
- * each piece as it arrives. The text of its answer, or a DrawingError saying why not. A plain JSON reply is read too.
+ * each piece as it arrives, with the progress so far. The text of its answer, or a DrawingError saying why not. A plain
+ * JSON reply is read too.
  */
 export async function requestDrawing(
-  messages: readonly ChatMessage[], signal: AbortSignal, fetchFn: typeof fetch = fetch, onChunk?: () => void,
+  messages: readonly ChatMessage[], signal: AbortSignal, fetchFn: typeof fetch = fetch, onChunk?: (p: StreamProgress) => void,
 ): Promise<string> {
   let r: Response;
   try {
@@ -541,10 +616,13 @@ export async function requestDrawing(
 const messageOf = (body: unknown): unknown =>
   (isObj(body) && Array.isArray(body.choices) && isObj(body.choices[0]) && isObj(body.choices[0].message) ? body.choices[0].message.content : undefined);
 
-/** The answer's text from an OpenAI-style event stream: every `data:` line's delta content, until `[DONE]`. */
-export async function readStream(body: ReadableStream<Uint8Array>, onChunk?: () => void): Promise<string> {
+/**
+ * The answer's text from an OpenAI-style event stream: every `data:` line's delta content, until `[DONE]`; `onChunk`
+ * hears each line with the characters of thinking (Kimi's reasoning_content) and of answer so far.
+ */
+export async function readStream(body: ReadableStream<Uint8Array>, onChunk?: (p: StreamProgress) => void): Promise<string> {
   const reader = body.getReader(), decoder = new TextDecoder();
-  let buffer = '', text = '';
+  let buffer = '', text = '', thinking = 0;
   const line = (l: string): boolean => {
     const t = l.trim();
     if (!t.startsWith('data:')) return false;
@@ -554,7 +632,8 @@ export async function readStream(body: ReadableStream<Uint8Array>, onChunk?: () 
     if (isObj(v) && isObj(v.error)) throw new DrawingError(`the model failed: ${String(v.error.message ?? 'error').slice(0, 200)}`);
     const delta = isObj(v) && Array.isArray(v.choices) && isObj(v.choices[0]) && isObj(v.choices[0].delta) ? v.choices[0].delta : undefined;
     if (delta && typeof delta.content === 'string') text += delta.content;
-    onChunk?.();
+    if (delta && typeof delta.reasoning_content === 'string') thinking += delta.reasoning_content.length;
+    onChunk?.({ thinking, writing: text.length });
     return false;
   };
   for (;;) {

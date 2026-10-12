@@ -4,7 +4,7 @@ import { loadedDocument } from '../app/fixtures';
 import { setBends, setEnd } from '../circuit/circuit';
 import { applyDraft } from '../design/apply';
 import { circuitOf, EMPTY_DRAFT, withCircuit, type Draft } from '../design/draft';
-import { applyPlan, changeOf, correctionMessages, crossingsOf, DRAWING_RULES, firstMessages, judgeDrawing, mainPathOf, nearestAlong, parsePlan, promptOf, readStream, relationsOf, requestDrawing } from './drawing';
+import { applyPlan, changeOf, correctionMessages, crossingPairsOf, crossingsOf, DRAWING_RULES, firstMessages, judgeDrawing, mainPathOf, movedBlocksOf, nearestAlong, parsePlan, promptOf, readStream, refinementMessages, relationsOf, remainingProblemsOf, requestDrawing } from './drawing';
 
 // s1 -> s2 -> s3 (Completed), s1 -> f and s2 -> f (Failed)
 const doc = () => loadedDocument(graphDto({
@@ -139,6 +139,8 @@ describe('AI drawing (2026-10-11)', () => {
       + ev({ choices: [{ delta: { content: 'cks":{}}' } }] }) + 'data: [DONE]\n\n';
     expect(await readStream(stream(all.slice(0, 37), all.slice(37, 90), all.slice(90)), chunks)).toBe('{"blocks":{}}');
     expect(chunks).toHaveBeenCalledTimes(3);
+    // the progress so far with every line (2026-10-12): thinking, then the answer's characters
+    expect(chunks.mock.calls.map((c) => c[0])).toEqual([{ thinking: 3, writing: 0 }, { thinking: 3, writing: 5 }, { thinking: 3, writing: 13 }]);
     await expect(readStream(stream(ev({ error: { message: 'overloaded' } })))).rejects.toThrow(/overloaded/);
     const sse = vi.fn(async () => new Response(stream(all), { status: 200, headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
     expect(await requestDrawing(firstMessages({ system: 's', user: 'u' }), new AbortController().signal, sse)).toBe('{"blocks":{}}');
@@ -331,5 +333,59 @@ describe('the main row and the columns, checked by the Studio (the user, 2026-10
     expect(judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ blocks: { f: { x: at('a').x + 5 * pitch + 40, y: 480 } } }))).toMatchObject({ ok: false });
     // nothing moved: applied, whatever the automatic layout's rows
     expect(judgeDrawing(d, EMPTY_DRAFT, snap, '{}')).toMatchObject({ ok: true });
+  });
+});
+
+describe('the refinement round (the user, 2026-10-12)', () => {
+  it('names what is still wrong: main-path steps off the row, wherever they were put, and a bent main-path wire', async () => {
+    const d = await chain();
+    const at = (id: string) => applyDraft(d, EMPTY_DRAFT).placement.steps.get(id)!;
+    const left = remainingProblemsOf(d, EMPTY_DRAFT);
+    // the automatic layout steps the chain down and up; the row is the y most main-path steps share
+    const ys = ['a', 'b', 'c', 'd'].map((id) => at(id).y);
+    const row = ys.reduce((best, y) => (ys.filter((v) => v === y).length > ys.filter((v) => v === best).length ? y : best), ys[0]!);
+    const off = ['a', 'b', 'c', 'd'].filter((id) => at(id).y !== row);
+    expect(off.length).toBeGreaterThan(0);
+    // each step off the row is named as it is, not as moved
+    for (const id of off) expect(left).toContain(`step "step-${id}" is on the main path, so it stays on the row: it is at y ${at(id).y}, the row is at y ${row} (rule 16)`);
+    if (at('a').y !== at('b').y) expect(left).toContain('the main-path wire a->b is bent: it should run straight along the row (rules 8 and 16)');
+    // and the Failed wires the layout crosses, by pair
+    expect(left.some((l) => /^wires \S+ and \S+ cross( \d+ times)? \(rule 4\)$/.test(l))).toBe(true);
+  });
+
+  it('a drawing with the main path on one row, on the columns, leaves none of those problems', async () => {
+    const d = await chain();
+    const snap = relationsOf(d, EMPTY_DRAFT);
+    const at = (id: string) => applyDraft(d, EMPTY_DRAFT).placement.steps.get(id)!;
+    const row = at('a').y, pitch = at('b').x - at('a').x;
+    const out = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ blocks: {
+      b: { x: at('a').x + pitch, y: row }, c: { x: at('a').x + 2 * pitch, y: row }, d: { x: at('a').x + 3 * pitch, y: row }, f: { x: at('a').x + 4 * pitch, y: row + 336 },
+    } }));
+    expect(out).toMatchObject({ ok: true });
+    if (!out.ok) return;
+    const left = remainingProblemsOf(d, out.draft);
+    expect(left.filter((l) => /rule (5|15|16)\)$|is bent/.test(l))).toEqual([]);
+    expect(movedBlocksOf(d, EMPTY_DRAFT, out.draft)).toBe(4);
+    expect(movedBlocksOf(d, out.draft, out.draft)).toBe(0);
+  });
+
+  it('names each pair of crossing wires and how often they cross', () => {
+    const wires = [
+      { id: 'h', points: [[0, 50], [100, 50]] as [number, number][] },
+      { id: 'v', points: [[50, 0], [50, 100]] as [number, number][] },
+      { id: 'u', points: [[20, 0], [20, 100], [80, 100], [80, 0]] as [number, number][] },
+    ];
+    expect(crossingPairsOf(wires)).toEqual([{ a: 'h', b: 'v', times: 1 }, { a: 'h', b: 'u', times: 2 }]);
+    expect(crossingsOf(wires)).toBe(3);
+  });
+
+  it('asks against the drawing as routed: the answer, the graph now and every problem, then the schema reminder', () => {
+    const first = firstMessages({ system: 's', user: 'u' });
+    const next = refinementMessages(first, '{"blocks":{}}', { blocks: [], wires: [] }, ['step "x" is off the columns', 'wires a and b cross (rule 4)']);
+    expect(next.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
+    expect(next[2]!.content).toBe('{"blocks":{}}');
+    expect(next[3]!.content).toContain('{"blocks":[],"wires":[]}');
+    expect(next[3]!.content).toContain('- step "x" is off the columns\n- wires a and b cross (rule 4)');
+    expect(next[3]!.content).toMatch(/against this drawing: leave out the blocks and wires you do not change\.$/);
   });
 });

@@ -121,7 +121,7 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
             onRedo: () => store.dispatch({ type: 'redo', workflowId }),
             onDiscard: () => actions.confirmDiscardDesign(workflowId, ownerDocument),
           } : undefined}
-          ai={actions ? { running: aiDrawing.running, seconds: aiDrawing.seconds, blocked: aiBlocked(open), onDraw: () => { void aiDrawing.draw(); }, onCancel: aiDrawing.cancel } : undefined} />
+          ai={actions ? { running: aiDrawing.running, seconds: aiDrawing.seconds, activity: aiDrawing.activity, blocked: aiBlocked(open), onDraw: () => { void aiDrawing.draw(); }, onCancel: aiDrawing.cancel } : undefined} />
       </WorkflowCanvas>
     </div>
   );

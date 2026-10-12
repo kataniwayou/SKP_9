@@ -155,6 +155,61 @@ test('an answer refused twice (a dropped or invented wire, then again) is red; n
   await expect(page.getByText('● design draft')).toHaveCount(0);
 });
 
+// The refinement round (the user, 2026-10-12): a drawing applied with problems left is shown to the model as routed, with
+// the problems, once more; what a second press of the wand did by hand.
+test('a drawing with a problem left gets one refinement round: the model sees it routed and the problem; the refined drawing is applied', async ({ page }) => {
+  await openWorkflow(page, t.workflow);
+  const panel = documentPanel(page, t.workflow);
+  const before = await posOf(panel, t.stepBId);
+  const to = await nextColumn(panel, before);
+  const ab = `${t.stepId}->${t.stepBId}`;
+  // first: b on a's row, but a -> b leaving a low and entering b at its centre, so the main-path wire is bent; then: both ends back to the router
+  const sent = await mockModel(page, { delayMs: 2500, content: [
+    JSON.stringify({ blocks: { [t.stepBId]: { x: to[0], y: to[1] } }, wires: { [ab]: { tail: { y: to[1] + 128 }, head: { y: to[1] + 96 } } } }),
+    JSON.stringify({ wires: { [ab]: { tail: { auto: true }, head: { auto: true } } } }),
+  ] });
+  await panel.getByRole('button', { name: 'AI drawing', exact: true }).click();
+  // the button says what is arriving, and names the round
+  await expect(panel.getByRole('button', { name: 'AI drawing: cancel' })).toHaveText(/Cancel · \d+ s · refining · /, { timeout: 15_000 });
+  const out = (await pane(page, 'Output')).locator('.outl');
+  await expect(out.last()).toContainText('AI drawing applied: 1 block moved', { timeout: 15_000 });
+  await expect(out.last()).toContainText('problems left 0');
+  await expect(out.filter({ hasText: `1 problem left (the main-path wire ${ab} is bent` })).toHaveCount(1);
+  await expect(out.filter({ hasText: 'asking kimi-k3 once to refine it' })).toHaveCount(1);
+  await expect(out.filter({ hasText: 'AI drawing: refined, problems 1 → 0' })).toHaveCount(1);
+  expect(await posOf(panel, t.stepBId)).toEqual(to);
+  // the refinement asked against the drawing as routed: the first answer, then the graph now and the problem
+  expect(sent).toHaveLength(2);
+  const ask = (sent[1] as { messages: { role: string; content: string }[] }).messages;
+  expect(ask.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
+  expect(ask[3]!.content).toContain('This is how it is drawn now');
+  expect(ask[3]!.content).toContain(`- the main-path wire ${ab} is bent`);
+  // applied as one step: Ctrl+Z takes both rounds back
+  await panel.locator('.studio-canvas').focus();
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => posOf(panel, t.stepBId)).toEqual(before);
+});
+
+test('a refused refinement keeps the first drawing: applied, with its problem left', async ({ page }) => {
+  await openWorkflow(page, t.workflow);
+  const panel = documentPanel(page, t.workflow);
+  const to = await nextColumn(panel, await posOf(panel, t.stepBId));
+  const ab = `${t.stepId}->${t.stepBId}`;
+  const sent = await mockModel(page, { content: [
+    JSON.stringify({ blocks: { [t.stepBId]: { x: to[0], y: to[1] } }, wires: { [ab]: { tail: { y: to[1] + 128 }, head: { y: to[1] + 96 } } } }),
+    JSON.stringify({ wires: { [`${t.stepId}->gone`]: {} } }),
+  ] });
+  await panel.getByRole('button', { name: 'AI drawing', exact: true }).click();
+  const out = (await pane(page, 'Output')).locator('.outl');
+  await expect(out.last()).toContainText('AI drawing applied: 1 block moved');
+  await expect(out.last()).toContainText('problems left 1');
+  await expect(out.last()).not.toHaveClass(/err/);
+  await expect(out.filter({ hasText: 'the refinement was refused (unknown wire' })).toHaveCount(1);
+  await expect(out.filter({ hasText: 'keeping the first drawing' })).toHaveCount(1);
+  expect(sent).toHaveLength(2);
+  expect(await posOf(panel, t.stepBId)).toEqual(to);
+});
+
 test('the model refusing the key (HTTP 401) is red: AI drawing is not configured; nothing changes', async ({ page }) => {
   await openWorkflow(page, t.workflow);
   const panel = documentPanel(page, t.workflow);
