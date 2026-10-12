@@ -39,13 +39,21 @@ async function mockModel(page: Page, answer: { content?: string | string[]; stat
   });
   return sent;
 }
+/**
+ * Where b may move (the Studio's own check, the user, 2026-10-12): b is on the main path a -> b, so it stays on a's row
+ * and lands on a column, the next one along the row.
+ */
+const nextColumn = async (panel: Locator, b: [number, number]): Promise<[number, number]> => {
+  const a = await posOf(panel, t.stepId);
+  return [b[0] + (b[0] - a[0]), a[1]];
+};
 const lastLine = async (page: Page) => (await pane(page, 'Output')).locator('.outl').last();
 
 test('a drawing that keeps every relation is applied as one step: the block moves, Output says so, Ctrl+Z puts it back', async ({ page }) => {
   await openWorkflow(page, t.workflow);
   const panel = documentPanel(page, t.workflow);
   const before = await posOf(panel, t.stepBId);
-  const to = [before[0] + 64, before[1] + 160];
+  const to = await nextColumn(panel, before);
   const sent = await mockModel(page, { content: JSON.stringify({ blocks: { [t.stepBId]: { x: to[0], y: to[1] } } }), delayMs: 2500 });
   // the button: only a wand (2026-10-11), named "AI drawing"
   await expect(panel.getByRole('button', { name: 'AI drawing', exact: true })).toHaveText('');
@@ -80,7 +88,7 @@ test('while the AI draws, its document is locked: no drag, Delete, Undo, edits, 
   await openWorkflow(page, t.workflow);
   const panel = documentPanel(page, t.workflow);
   const before = await posOf(panel, t.stepBId);
-  const to = [before[0] + 64, before[1] + 160];
+  const to = await nextColumn(panel, before);
   await mockModel(page, { content: JSON.stringify({ blocks: { [t.stepBId]: { x: to[0], y: to[1] } } }), delayMs: 9000 });
   await panel.getByRole('button', { name: 'AI drawing', exact: true }).click();
   await expect(panel.getByRole('button', { name: 'AI drawing: cancel' })).toBeVisible();
@@ -117,7 +125,7 @@ test('a refused answer gets one correction round: the model hears why, and its c
   await openWorkflow(page, t.workflow);
   const panel = documentPanel(page, t.workflow);
   const before = await posOf(panel, t.stepBId);
-  const to = [before[0] + 64, before[1]];
+  const to = await nextColumn(panel, before);
   const sent = await mockModel(page, { content: [
     JSON.stringify({ blocks: { [t.stepBId]: { x: to[0], y: to[1] } }, wires: { [`${t.stepId}->gone`]: {} } }),
     JSON.stringify({ blocks: { [t.stepBId]: { x: to[0], y: to[1] } } }),

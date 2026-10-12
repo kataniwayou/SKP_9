@@ -4,7 +4,7 @@ import { loadedDocument } from '../app/fixtures';
 import { setBends, setEnd } from '../circuit/circuit';
 import { applyDraft } from '../design/apply';
 import { circuitOf, EMPTY_DRAFT, withCircuit, type Draft } from '../design/draft';
-import { applyPlan, changeOf, correctionMessages, crossingsOf, DRAWING_RULES, firstMessages, judgeDrawing, nearestAlong, parsePlan, promptOf, readStream, relationsOf, requestDrawing } from './drawing';
+import { applyPlan, changeOf, correctionMessages, crossingsOf, DRAWING_RULES, firstMessages, judgeDrawing, mainPathOf, nearestAlong, parsePlan, promptOf, readStream, relationsOf, requestDrawing } from './drawing';
 
 // s1 -> s2 -> s3 (Completed), s1 -> f and s2 -> f (Failed)
 const doc = () => loadedDocument(graphDto({
@@ -30,7 +30,10 @@ describe('AI drawing (2026-10-11)', () => {
     const at = (rule: string) => { const i = p.system.indexOf(rule); expect(i).toBeGreaterThan(-1); return i; };
     const order = ['4. Don\'t cross', '5. Equal gaps', '6. Vertical symmetry', '7. Horizontal symmetry', '8. Straight lines', '17. Failure handling', '18. Skips go over', '21. Zero crossings'].map(at);
     expect(order).toEqual([...order].sort((a, b) => a - b));
-    expect(p.system).toContain('balance wins over rules 17 and 18');
+    // rule 6 never moves a main-path step, and the final check asks for the one row (the user, 2026-10-12)
+    expect(p.system).toContain('This rule never moves a main-path step');
+    expect(p.system).not.toContain('balance wins');
+    expect(p.system).toContain('every main-path step on the one row');
     expect(p.system).toContain('"blocks"');
     const g = JSON.parse(p.user.slice(p.user.indexOf('{'))) as { blocks: { id: string }[]; wires: { id: string; family: string }[] };
     expect(g.blocks.map((b) => b.id).sort()).toEqual(['f', 's1', 's2', 's3', 'wf']);
@@ -93,9 +96,10 @@ describe('AI drawing (2026-10-11)', () => {
     const d = await doc();
     const draft = joined(d);
     const snap = relationsOf(d, draft);
-    const good = judgeDrawing(d, draft, snap, '{"blocks":{"s3":{"x":1200,"y":96}}}');
+    // s3 moved along the row, onto a column (x 288 + k × 288, the user's check, 2026-10-12)
+    const good = judgeDrawing(d, draft, snap, '{"blocks":{"s3":{"x":1152,"y":96}}}');
     expect(good.ok).toBe(true);
-    if (good.ok) expect(applyDraft(d, good.draft).placement.steps.get('s3')).toEqual({ x: 1200, y: 96 });
+    if (good.ok) expect(applyDraft(d, good.draft).placement.steps.get('s3')).toEqual({ x: 1152, y: 96 });
     // the junction moved onto s1 -> s2 (a Completed wire): another net, so another meaning
     const other = pointsOf(d, draft, 's1->s2');
     const mid = [(other[0]![0] + other[other.length - 1]![0]) / 2, other[0]![1]];
@@ -222,15 +226,15 @@ describe('AI drawing (2026-10-11)', () => {
   it('a wire joining a trunk meets it as a clean T: out of its step, then straight down onto the junction (rule 13)', async () => {
     const d = await doc();
     const snap = relationsOf(d, EMPTY_DRAFT);
-    // f far to the right and below: s1 -> f runs a level trunk under s2; s2 -> f joins it
-    const moved = parsePlan('{"blocks":{"f":{"x":1600,"y":480}}}', d, EMPTY_DRAFT);
+    // f far to the right and below, on a column (the user's check, 2026-10-12): s1 -> f runs a level trunk under s2; s2 -> f joins it
+    const moved = parsePlan('{"blocks":{"f":{"x":1728,"y":480}}}', d, EMPTY_DRAFT);
     const placed = applyPlan(d, EMPTY_DRAFT, moved);
     const trunk = pointsOf(d, placed, 's1->f');
     const out2 = pointsOf(d, placed, 's2->f')[0]!;
     const level = trunk.findIndex((p, i) => i > 0 && p[1] === trunk[i - 1]![1] && Math.max(p[0], trunk[i - 1]![0]) > out2[0] + 64 && p[1] > out2[1]);
     expect(level).toBeGreaterThan(0);
     const at = [out2[0] + 48, trunk[level]![1]];
-    const out = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ blocks: { f: { x: 1600, y: 480 } }, wires: { 's2->f': { head: { junction: { host: 's1->f', x: at[0], y: at[1] } } } } }));
+    const out = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ blocks: { f: { x: 1728, y: 480 } }, wires: { 's2->f': { head: { junction: { host: 's1->f', x: at[0], y: at[1] } } } } }));
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     const pts = pointsOf(d, out.draft, 's2->f');
@@ -269,5 +273,63 @@ describe('AI drawing (2026-10-11)', () => {
     c.abort();
     const abort = vi.fn(async () => { throw new DOMException('aborted', 'AbortError'); }) as unknown as typeof fetch;
     await expect(requestDrawing(prompt, c.signal, abort)).rejects.toThrow('cancelled');
+  });
+});
+
+// a -> b -> c -> d (Completed), every step -> f (Failed): the end of the main path, as split-exporter was (the user, 2026-10-12)
+const chain = () => loadedDocument(graphDto({
+  workflow: workflowDto({ entryStepIds: ['a'] }),
+  steps: [stepDto('a', { nextStepIds: ['b', 'f'] }), stepDto('b', { nextStepIds: ['c', 'f'] }), stepDto('c', { nextStepIds: ['d', 'f'] }),
+    stepDto('d', { nextStepIds: ['f'] }), stepDto('f', { entryCondition: 2 })],
+}));
+
+describe('the main row and the columns, checked by the Studio (the user, 2026-10-12)', () => {
+  const nextOf = (d: Doc) => (id: string) => d.graph.steps.get(id)?.nextStepIds ?? [];
+
+  it('the main path is the longest Completed chain; a skip does not end it, parallel branches do', async () => {
+    const d = await chain();
+    expect(mainPathOf(d, nextOf(d), ['a'])).toEqual(['a', 'b', 'c', 'd']);
+    const skip = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['a'] }),
+      steps: [stepDto('a', { nextStepIds: ['b', 'c'] }), stepDto('b', { nextStepIds: ['c'] }), stepDto('c')],
+    }));
+    expect(mainPathOf(skip, nextOf(skip), ['a'])).toEqual(['a', 'b', 'c']);
+    const fork = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['a'] }),
+      steps: [stepDto('a', { nextStepIds: ['b', 'c'] }), stepDto('b', { nextStepIds: ['d'] }), stepDto('c', { nextStepIds: ['d'] }), stepDto('d')],
+    }));
+    expect(mainPathOf(fork, nextOf(fork), ['a'])).toEqual(['a']);
+  });
+
+  it('a main-path step moved off the row is refused, the reason naming the step and the row; on the row and a column it is applied', async () => {
+    const d = await chain();
+    const snap = relationsOf(d, EMPTY_DRAFT);
+    const at = (id: string) => applyDraft(d, EMPTY_DRAFT).placement.steps.get(id)!;
+    const row = at('a').y, next = at('c').x + 2 * (at('b').x - at('a').x);
+    // lifted above the row, as the wand put split-exporter
+    const above = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ blocks: { d: { x: next, y: row - 472 } } }));
+    expect(above).toMatchObject({ ok: false });
+    if (!above.ok) expect(above.reason).toBe(`step "step-d" is on the main path, so it stays on the row: it was moved to y ${row - 472}, the row is at y ${row} (rule 16)`);
+    // on the row but between columns
+    const between = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ blocks: { d: { x: next - 64, y: row } } }));
+    expect(between).toMatchObject({ ok: false });
+    if (!between.ok) expect(between.reason).toMatch(/^step "step-d" was moved off the columns: x \d+, the columns are at x \d+ \+ k × \d+ \(rule 5\)$/);
+    // on the row, behind the step before it
+    const behind = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ blocks: { d: { x: at('b').x, y: row } } }));
+    expect(behind).toMatchObject({ ok: false });
+    if (!behind.ok) expect(behind.reason).toMatch(/^step "step-d" was moved left of step "step-c"/);
+    // on the row, on a column: applied
+    expect(judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ blocks: { d: { x: next, y: row } } }))).toMatchObject({ ok: true });
+  });
+
+  it('a step off the main path may move to any row, but onto a column; steps left where they are are not judged', async () => {
+    const d = await chain();
+    const snap = relationsOf(d, EMPTY_DRAFT);
+    const at = (id: string) => applyDraft(d, EMPTY_DRAFT).placement.steps.get(id)!;
+    const pitch = at('b').x - at('a').x;
+    expect(judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ blocks: { f: { x: at('a').x + 5 * pitch, y: 480 } } }))).toMatchObject({ ok: true });
+    expect(judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ blocks: { f: { x: at('a').x + 5 * pitch + 40, y: 480 } } }))).toMatchObject({ ok: false });
+    // nothing moved: applied, whatever the automatic layout's rows
+    expect(judgeDrawing(d, EMPTY_DRAFT, snap, '{}')).toMatchObject({ ok: true });
   });
 });

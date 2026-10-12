@@ -33,10 +33,10 @@ Correctness (never broken)
 Crossings
 4. Don't cross: a wire crosses no other wire of any colour (a crossing can be misread as a junction).
 
-Symmetry (it wins over every rule below)
+Symmetry
 5. Equal gaps: every column is the same distance from the next, and every row the same distance from the next. Blocks in one column share one x; blocks in one row share one y.
-6. Vertical symmetry: the steps a step branches to (a fan-out) sit symmetrically above and below their source's row: 2 branches at -1 and +1 row, 3 at -1, 0 and +1. This holds for failure handling and skips too: balance wins over rules 17 and 18.
-7. Horizontal symmetry: a fan-out and the fan-in that closes it mirror each other about the middle column between them; the whole drawing is balanced about the main row.
+6. Vertical symmetry: parallel branches sit symmetrically above and below their source's row: 2 branches at -1 and +1 row, 3 at -1, 0 and +1. Parallel branches are next steps of one step in the same family (same colour) that do not lead into each other. This rule never moves a main-path step: the main path stays on its row (rule 16), a Failed branch goes below (rule 17), and a skip is not a branch (rule 18).
+7. Horizontal symmetry: parallel branches that split from one step and join again into one step mirror each other about the middle column between the split and the join.
 
 Readability
 8. Straight lines: a wire keeps the height it leaves at and runs straight to its target. Straight comes before centred; no small jogs just to reach a centre.
@@ -50,13 +50,13 @@ Readability
 Layout
 15. Left to right by depth: the workflow circle on the far left, steps in columns in order of execution, aligned on the 8 px grid.
 16. The main path (the Completed chain) is one straight row.
-17. Failure handling sits below the row: the Failed trunk under the row, the steps it feeds at its end (unless rule 6 balances it above).
+17. Failure handling sits below the row: the Failed trunk under the row, the steps it feeds at its end.
 18. Skips go over the row: a wire that jumps past steps arcs above the row, clear of the drops below. Give it a "lane" above the row and put its ends on the top slots of both steps (above the row's own wires there), or it crosses them.
 19. Place blocks so the rules agree (e.g. a step's height so a trunk enters it straight at its centre).
 20. Caches sit under the workflow circle, out of the wiring's way.
 
 Finish
-21. Zero crossings, equal gaps, balanced branches, no bent main-path wire, no segment shorter than 16 px, no short circuit.`;
+21. Zero crossings, every main-path step on the one row, every step on a column with equal gaps, balanced parallel branches, no bent main-path wire, no segment shorter than 16 px, no short circuit.`;
 
 /** The answer's shape, as the model is told it. */
 export const ANSWER_SCHEMA = `Answer with ONE JSON object and nothing else:
@@ -350,6 +350,85 @@ export function crossingsOf(wires: readonly { id: string; points: readonly Pt[] 
 /** How many wires are in a short circuit (a junction across families, or a stretch shared with another net). */
 export const shortedOf = (doc: StudioDocument): number => doc.wires.filter((w) => w.short || (w.shortWith?.length ?? 0) > 0).length;
 
+const COMPLETED = 1;
+
+/**
+ * The main path (rule 16, 2026-10-12): from an entry step, the longest chain of Completed links. It ends at a step whose
+ * Completed next steps split into parallel branches (two that do not lead into each other); a skip (one leading into the
+ * other) does not end it. Of several entry steps, the one with the longest chain.
+ */
+export function mainPathOf(doc: StudioDocument, nextOf: (id: string) => string[], entries: readonly string[]): string[] {
+  const completed = (id: string) => nextOf(id).filter((n) => doc.graph.steps.get(n)?.entryCondition === COMPLETED);
+  const reach = new Map<string, Set<string>>();
+  const reachOf = (id: string, seen = new Set<string>()): Set<string> => {
+    const known = reach.get(id);
+    if (known) return known;
+    const out = new Set<string>();
+    seen.add(id);
+    for (const n of completed(id)) {
+      if (seen.has(n)) continue;
+      out.add(n);
+      for (const m of reachOf(n, seen)) out.add(m);
+    }
+    seen.delete(id);
+    reach.set(id, out);
+    return out;
+  };
+  const longest = new Map<string, string[]>();
+  const chainOf = (id: string, seen = new Set<string>()): string[] => {
+    const known = longest.get(id);
+    if (known) return known;
+    const nexts = completed(id).filter((n) => !seen.has(n));
+    const parallel = nexts.some((a) => nexts.some((b) => a !== b && !reachOf(a).has(b) && !reachOf(b).has(a)));
+    seen.add(id);
+    let best: string[] = [];
+    if (!parallel) for (const n of nexts) { const c = chainOf(n, seen); if (c.length > best.length) best = c; }
+    seen.delete(id);
+    const chain = [id, ...best];
+    longest.set(id, chain);
+    return chain;
+  };
+  let path: string[] = [];
+  for (const e of entries) { const c = chainOf(e); if (c.length > path.length) path = c; }
+  return path;
+}
+
+/** The value most of `xs` share; on a tie, the first of them. */
+const commonest = (xs: readonly number[]): number => {
+  const n = new Map<number, number>();
+  for (const x of xs) n.set(x, (n.get(x) ?? 0) + 1);
+  return xs.reduce((best, x) => (n.get(x)! > n.get(best)! ? x : best), xs[0]!);
+};
+
+/**
+ * Where a step the drawing moves may not land (the user, 2026-10-12), in words; null when nowhere. The row is the y most
+ * main-path steps share, the columns the main path's commonest gap from its first step. A main-path step moved off the
+ * row (rule 16), behind the step before it (rule 15), or any step moved off the columns (rule 5) refuses the drawing,
+ * and the model's one correction round hears why. Steps it leaves where they are are not judged.
+ */
+export function layoutProblemOf(edited: StudioDocument, draft: Draft, moved: ReadonlySet<string>): string | null {
+  const shown = applyDraft(edited, draft);
+  const lists = writtenLists(edited, shown, draft);
+  const path = mainPathOf(shown, lists.nextOf, lists.entries);
+  const at = (id: string) => shown.placement.steps.get(id);
+  const name = (id: string) => `step "${shown.graph.steps.get(id)?.name ?? id}"`;
+  if (path.length < 2 || path.some((id) => !at(id))) return null;
+  const row = commonest(path.map((id) => at(id)!.y));
+  const gaps = path.slice(1).map((id, i) => at(id)!.x - at(path[i]!)!.x).filter((g) => g > 0);
+  const x0 = at(path[0]!)!.x, pitch = gaps.length ? commonest(gaps) : 0;
+  for (const [i, id] of path.entries()) {
+    if (!moved.has(id)) continue;
+    const p = at(id)!;
+    if (p.y !== row) return `${name(id)} is on the main path, so it stays on the row: it was moved to y ${p.y}, the row is at y ${row} (rule 16)`;
+    if (i > 0 && p.x <= at(path[i - 1]!)!.x) return `${name(id)} was moved left of ${name(path[i - 1]!)}, the step before it on the main path (rule 15)`;
+  }
+  if (pitch <= 0) return null;
+  for (const [id, p] of shown.placement.steps) {
+    if (moved.has(id) && (p.x - x0) % pitch !== 0) return `${name(id)} was moved off the columns: x ${p.x}, the columns are at x ${x0} + k × ${pitch} (rule 5)`;
+  }
+  return null;
+}
+
 /** The outcome of one drawing: the candidate draft and what to tell the user. */
 export type DrawingOutcome =
   | { ok: true; draft: Draft; moved: number; rerouted: number; crossings: number; shorted: number }
@@ -373,6 +452,8 @@ export function judgeDrawing(edited: StudioDocument, draft: Draft, snapshot: str
   if (changed !== null) return { ok: false, reason: `it would have changed the workflow: ${changed}` };
   const before = applyDraft(edited, draft), shown = applyDraft(edited, candidate);
   if (shortedOf(shown) > shortedOf(before)) return { ok: false, reason: 'it would have added a short circuit' };
+  const layout = layoutProblemOf(edited, candidate, new Set(plan.blocks.keys()));
+  if (layout !== null) return { ok: false, reason: layout };
   return { ok: true, draft: candidate, moved: plan.blocks.size, rerouted: shown.wires.length, crossings: crossingsOf(shown.wires), shorted: shortedOf(shown) };
 }
 
