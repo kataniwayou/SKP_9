@@ -22,7 +22,7 @@ const HUB_REACH = 64;
  * remove or reconnect a wire to another step.
  */
 
-/** The drawing rules, highest priority first (the user's list, 2026-10-11). */
+/** The drawing rules, highest priority first (the user's list, 2026-10-11; symmetry and equal gaps after rule 4, 2026-10-12). */
 export const DRAWING_RULES = `Drawing rules for SKP Studio, highest priority first. When two rules conflict, the higher one wins.
 
 Correctness (never broken)
@@ -30,26 +30,33 @@ Correctness (never broken)
 2. No short circuits: a wire never lies on top of (shares a stretch of line with) a wire of another net. Wires of different families are never joined at a junction.
 3. Nothing runs through a block.
 
-Readability
+Crossings
 4. Don't cross: a wire crosses no other wire of any colour (a crossing can be misread as a junction).
-5. Straight lines: a wire keeps the height it leaves at and runs straight to its target. Straight comes before centred; no small jogs just to reach a centre.
-6. Centre inputs with equal gaps: a step's inputs are centred on its middle (step y + 96), 16 px apart, ordered top to bottom by where they come from: 1 input at the centre, 2 at +-8, 3 at -16, 0, +16.
-7. Symmetric hub contact points: with more than one entry step, each entry step gets its own wire from the workflow circle (never one fan-out trunk from the circle), and their contact points are symmetric about the circle's centre (centreY), 16 px apart and ordered top to bottom like the entry steps: 2 at +-8, 3 at -16, 0, +16. Place the entry steps so each of these wires runs straight into its input.
-8. Outputs are placed by the forward inputs: each output takes the height of the input it feeds, so it is straight and centred at once. Outputs that feed no step input (e.g. drops onto a trunk) take the next slots below, 16 px apart.
-9. Fan-in and fan-out through one trunk: several wires of the same family into one step become one trunk with each wire joining it at a junction; the same for one step feeding several steps. To merge, keep one wire as the trunk and turn the other wires' ends on that step into junctions on it (head for a fan-in, tail for a fan-out).
-10. Clean T junctions: a joining wire runs straight into the trunk at a right angle, with no hook before the junction.
-11. No staircases: no wire segment shorter than 16 px; arrowheads stay clean.
+
+Symmetry (it wins over every rule below)
+5. Equal gaps: every column is the same distance from the next, and every row the same distance from the next. Blocks in one column share one x; blocks in one row share one y.
+6. Vertical symmetry: the steps a step branches to (a fan-out) sit symmetrically above and below their source's row: 2 branches at -1 and +1 row, 3 at -1, 0 and +1. This holds for failure handling and skips too: balance wins over rules 17 and 18.
+7. Horizontal symmetry: a fan-out and the fan-in that closes it mirror each other about the middle column between them; the whole drawing is balanced about the main row.
+
+Readability
+8. Straight lines: a wire keeps the height it leaves at and runs straight to its target. Straight comes before centred; no small jogs just to reach a centre.
+9. Centre inputs with equal gaps: a step's inputs are centred on its middle (step y + 96), 16 px apart, ordered top to bottom by where they come from: 1 input at the centre, 2 at +-8, 3 at -16, 0, +16.
+10. Symmetric hub contact points: with more than one entry step, each entry step gets its own wire from the workflow circle (never one fan-out trunk from the circle), and their contact points are symmetric about the circle's centre (centreY), 16 px apart and ordered top to bottom like the entry steps: 2 at +-8, 3 at -16, 0, +16. Place the entry steps so each of these wires runs straight into its input.
+11. Outputs are placed by the forward inputs: each output takes the height of the input it feeds, so it is straight and centred at once. Outputs that feed no step input (e.g. drops onto a trunk) take the next slots below, 16 px apart.
+12. Fan-in and fan-out through one trunk: several wires of the same family into one step become one trunk with each wire joining it at a junction; the same for one step feeding several steps. To merge, keep one wire as the trunk and turn the other wires' ends on that step into junctions on it (head for a fan-in, tail for a fan-out).
+13. Clean T junctions: a joining wire runs straight into the trunk at a right angle, with no hook before the junction.
+14. No staircases: no wire segment shorter than 16 px; arrowheads stay clean.
 
 Layout
-12. Left to right by depth: the workflow circle on the far left, steps in columns in order of execution, aligned on the 8 px grid.
-13. The main path (the Completed chain) is one straight row.
-14. Failure handling sits below the row: the Failed trunk under the row, the steps it feeds at its end.
-15. Skips go over the row: a wire that jumps past steps arcs above the row, clear of the drops below. Give it a "lane" above the row and put its ends on the top slots of both steps (above the row's own wires there), or it crosses them.
-16. Place blocks so the rules agree (e.g. a step's height so a trunk enters it straight at its centre).
-17. Caches sit under the workflow circle, out of the wiring's way.
+15. Left to right by depth: the workflow circle on the far left, steps in columns in order of execution, aligned on the 8 px grid.
+16. The main path (the Completed chain) is one straight row.
+17. Failure handling sits below the row: the Failed trunk under the row, the steps it feeds at its end (unless rule 6 balances it above).
+18. Skips go over the row: a wire that jumps past steps arcs above the row, clear of the drops below. Give it a "lane" above the row and put its ends on the top slots of both steps (above the row's own wires there), or it crosses them.
+19. Place blocks so the rules agree (e.g. a step's height so a trunk enters it straight at its centre).
+20. Caches sit under the workflow circle, out of the wiring's way.
 
 Finish
-18. Zero crossings, no bent main-path wire, no segment shorter than 16 px, no short circuit.`;
+21. Zero crossings, equal gaps, balanced branches, no bent main-path wire, no segment shorter than 16 px, no short circuit.`;
 
 /** The answer's shape, as the model is told it. */
 export const ANSWER_SCHEMA = `Answer with ONE JSON object and nothing else:
@@ -68,7 +75,7 @@ export const ANSWER_SCHEMA = `Answer with ONE JSON object and nothing else:
 - A tail on the workflow circle: "y" is the flow y where it leaves the circle's right side (within its "tailsRange"); "auto" spaces the circle's tails symmetrically about its centre, 16 px apart.
 - An end on a wire (a junction): "junction" names the host wire and the point where it should join; the studio puts it at the nearest point of the host's line.
 - Merging into a trunk: an end on a step may become a junction on another wire of the same family that ends on the same step (a head, fan-in) or starts on the same step (a tail, fan-out). Never join wires of different families or different steps; a wire on the workflow circle stays separate.
-- lane (optional): for a wire that cannot run straight (a skip past steps, a loop back), the flow y of its middle run; the studio draws it out of the tail, along the lane, and into the head. Use it to send skips over the row (rule 15), clear of every block. Only for a wire whose ends are on steps or the workflow circle.
+- lane (optional): for a wire that cannot run straight (a skip past steps, a loop back), the flow y of its middle run; the studio draws it out of the tail, along the lane, and into the head. Use it to send skips over the row (rule 18), clear of every block. Only for a wire whose ends are on steps or the workflow circle.
 - You do not draw the wires' routes: the studio's router draws every wire from its ends, square and around blocks. Choose block positions, end heights and junction points so the routes come out straight and uncrossed. Omit a key to leave it as it is.
 - Leave out blocks and wires you do not change. Never invent ids.`;
 
@@ -265,7 +272,7 @@ export function applyPlan(edited: StudioDocument, draft: Draft, plan: DrawingPla
 }
 
 /**
- * Clean T junctions (rule 10, 2026-10-11): a wire joining a level run of its trunk from a step meets it square, its
+ * Clean T junctions (rule 13, 2026-10-11): a wire joining a level run of its trunk from a step meets it square, its
  * vertical run right at the junction (the router alone puts it midway, leaving a hook). Every such wire without a lane,
  * hosts first; kept only when the drawn wire really ends (or starts) square on the junction, else left to the router.
  */

@@ -26,7 +26,11 @@ describe('AI drawing (2026-10-11)', () => {
     const d = await doc();
     const p = promptOf(d, EMPTY_DRAFT);
     expect(p.system).toContain(DRAWING_RULES);
-    expect(p.system.indexOf('4. Don\'t cross')).toBeLessThan(p.system.indexOf('5. Straight lines'));
+    // symmetry and equal gaps come right after no crossings, ahead of straight lines (the user, 2026-10-12)
+    const at = (rule: string) => { const i = p.system.indexOf(rule); expect(i).toBeGreaterThan(-1); return i; };
+    const order = ['4. Don\'t cross', '5. Equal gaps', '6. Vertical symmetry', '7. Horizontal symmetry', '8. Straight lines', '17. Failure handling', '18. Skips go over', '21. Zero crossings'].map(at);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(p.system).toContain('balance wins over rules 17 and 18');
     expect(p.system).toContain('"blocks"');
     const g = JSON.parse(p.user.slice(p.user.indexOf('{'))) as { blocks: { id: string }[]; wires: { id: string; family: string }[] };
     expect(g.blocks.map((b) => b.id).sort()).toEqual(['f', 's1', 's2', 's3', 'wf']);
@@ -190,7 +194,7 @@ describe('AI drawing (2026-10-11)', () => {
     // the lane alone, with the router's end order (the skip below at both ends): over the row it crosses both row wires
     const alone = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ wires: { 'a->c': { lane } } }));
     expect(alone).toMatchObject({ ok: true, crossings: 2 });
-    // with the skip on top at both ends (rule 6's order): no crossing
+    // with the skip on top at both ends (rule 9's order): no crossing
     const out = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ wires: {
       'a->c': { lane, tail: { y: 144 }, head: { y: 152 } }, 'a->b': { tail: { y: 160 } }, 'b->c': { head: { y: 168 } },
     } }));
@@ -215,7 +219,7 @@ describe('AI drawing (2026-10-11)', () => {
     if (!out.ok) expect(out.reason).toMatch(/a lane is only for/);
   });
 
-  it('a wire joining a trunk meets it as a clean T: out of its step, then straight down onto the junction (rule 10)', async () => {
+  it('a wire joining a trunk meets it as a clean T: out of its step, then straight down onto the junction (rule 13)', async () => {
     const d = await doc();
     const snap = relationsOf(d, EMPTY_DRAFT);
     // f far to the right and below: s1 -> f runs a level trunk under s2; s2 -> f joins it
