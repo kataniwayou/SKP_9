@@ -36,6 +36,8 @@ public sealed class ExecutionRoundTripTests
     private static readonly Guid PA = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid PB = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid PC = Guid.Parse("55555555-5555-5555-5555-555555555555");
+    private static readonly Guid R = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+    private static readonly Guid PR = Guid.Parse("99999999-9999-9999-9999-999999999999");
     private static readonly Guid Corr = Guid.Parse("66666666-6666-6666-6666-666666666666");
     private static readonly Guid Exec = Guid.Parse("77777777-7777-7777-7777-777777777777");
     private static readonly Guid Entry = Guid.Parse("88888888-8888-8888-8888-888888888888");
@@ -582,6 +584,56 @@ public sealed class ExecutionRoundTripTests
         Assert.Equal(EntryIds.Successor(Entry, Corr, A, B), failed.EntryId);
         Assert.Contains(h.PreLog.Records, r => r.Message.Contains("could not start the step", StringComparison.Ordinal));
         Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
+    }
+
+    [Fact]
+    public async Task ASuccessorWhoseKeyCannotBeWrittenIsStillReportedSoItsFailureBranchRuns()
+    {
+        // The report must name a key that exists: a Failed outcome naming a never-written data:{S}
+        // would be dropped as a duplicate and B's failure branch (R) would never run.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}", R), Step(R, PR, 2, "{}"));
+        Seed(h, Entry, Output);
+        h.L2.Db.KeyCopyAsync(Arg.Any<RedisKey>(), Arg.Any<RedisKey>(), Arg.Any<int>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .ThrowsAsync(new RedisServerException("NOPERM this user has no permissions to run the 'copy' command"));
+        var keyB = EntryIds.Successor(Entry, Corr, A, B);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        var failed = h.Bus.OfType<StepOutcome>(MessageTypes.StepOutcome).Single();
+        Assert.Equal(StepResult.Failed, failed.Result);
+        Assert.Equal(B, failed.StepId);
+        Assert.Equal(keyB, failed.EntryId);
+        Assert.Equal("", h.L2.Value(L2ProjectionKeys.ExecutionData(keyB)));
+
+        await h.Deliver(MessageTypes.StepOutcome, failed);
+
+        Assert.Equal(R, h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Single().StepId);
+        Assert.DoesNotContain(
+            h.PreLog.Records,
+            r => r.Message.Contains("duplicate delivery", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ASuccessorWhoseKeyCannotBeWrittenAtAllIsReportedWithNoKey()
+    {
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}", R), Step(R, PR, 2, "{}"));
+        Seed(h, Entry, Output);
+        var keyB = EntryIds.Successor(Entry, Corr, A, B);
+        var refused = new RedisServerException("NOPERM this user has no permissions to run the 'set' command");
+        h.L2.Db.KeyCopyAsync(Arg.Any<RedisKey>(), Arg.Any<RedisKey>(), Arg.Any<int>(), Arg.Any<bool>(), Arg.Any<CommandFlags>())
+            .ThrowsAsync(refused);
+        h.L2.Db.StringSetAsync(
+                Arg.Is<RedisKey>(k => k == L2ProjectionKeys.ExecutionData(keyB)), Arg.Any<RedisValue>(),
+                Arg.Any<TimeSpan?>(), Arg.Any<When>(), Arg.Any<CommandFlags>())
+            .ThrowsAsync(refused);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        var failed = h.Bus.OfType<StepOutcome>(MessageTypes.StepOutcome).Single();
+        Assert.Equal(StepResult.Failed, failed.Result);
+        Assert.Equal(B, failed.StepId);
+        Assert.Equal(Guid.Empty, failed.EntryId);
+        Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(keyB)));
     }
 
     [Fact]

@@ -298,9 +298,12 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
                 continue;
             }
 
+            var materialized = false;
+
             try
             {
                 await MaterializeAsync(db, m, successorId).ConfigureAwait(false);
+                materialized = true;
 
                 // A dispatch STARTS a step, so the clock starts here rather than being inherited from
                 // the outcome being handled.
@@ -332,14 +335,39 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
                 // its siblings. The message is logged, never sent.
                 _logger.LogError(ex, "could not start the step — reporting it failed");
 
+                var reportedId = successorId;
+
                 try
                 {
+                    // AN OUTCOME MUST NAME A KEY THAT EXISTS, OR NONE. If the materialization itself
+                    // failed (NOPERM on COPY, an old Redis without COPY, CROSSSLOT), data:{S} was never
+                    // written, and a Failed outcome naming it would meet "EXISTS data:{S}" = false on
+                    // delivery and be dropped as a duplicate — the successor's failure branch would
+                    // never run. So write the empty key first, best effort. If even that write is
+                    // deterministically refused, name Guid.Empty (no key at all, which skips the check);
+                    // a recoverable fault from it propagates and requeues like any other.
+                    if (!materialized)
+                    {
+                        try
+                        {
+                            await db.StringSetAsync(
+                                    L2ProjectionKeys.ExecutionData(successorId), RedisValue.EmptyString, null,
+                                    When.NotExists, CommandFlags.None)
+                                .ConfigureAwait(false);
+                        }
+                        catch (Exception write) when (!IsRecoverable(write))
+                        {
+                            _logger.LogError(write, "could not write the step's empty input either — reporting no key");
+                            reportedId = Guid.Empty;
+                        }
+                    }
+
                     await _sender.SendTransientAsync(
                             OrchestratorQueues.Result,
                             MessageTypes.StepOutcome,
                             new StepOutcome(
                                 m.CorrelationId, m.ExecutionId, m.WorkflowId, next.StepId, next.ProcessorId,
-                                successorId, StepResult.Failed),
+                                reportedId, StepResult.Failed),
                             ct)
                         .ConfigureAwait(false);
 
@@ -350,7 +378,11 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
                     // Nothing will ever name this key: reclaim it and park, after the siblings.
                     _logger.LogError(
                         report, "could not report the failed step either — reclaiming its input and parking");
-                    unreported.Add(successorId);
+                    if (reportedId != Guid.Empty)
+                    {
+                        unreported.Add(reportedId);
+                    }
+
                     park ??= ExceptionDispatchInfo.Capture(report);
                 }
             }
