@@ -119,8 +119,9 @@ public sealed class SampleProcessor(ILogger<SampleProcessor> logger) : BaseProce
                 // dispatch to the queue and replays every branch. Wrapping it, or throwing something new,
                 // falls through to the general catch — which reports the step failed and acknowledges the
                 // message, recording a business outcome that never happened while the work is silently
-                // lost. The replay re-sends the branches that did land, under fresh ids; that is the
-                // accepted cost of a transient here, and it is why this transform stays side-effect free.
+                // lost. The replay re-sends the branches that did land: under fresh ids for the entry
+                // step, which mints them, but a downstream step's replay rewrites the same derived keys;
+                // that is the accepted cost of a transient here, and it is why this transform stays side-effect free.
                 throw;
             }
         }

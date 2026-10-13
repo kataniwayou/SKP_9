@@ -18,8 +18,8 @@ namespace Processor.OutcomeRecorder;
 /// The reason lives in the failing or cancelling step's own log line, resolved by correlation id.
 /// </para>
 /// <para>
-/// <b>It reads nothing and queries nothing.</b> The orchestrator hands it the predecessor's input
-/// blob, because a hop relocates its payload; this processor ignores those bytes entirely. It does
+/// <b>It reads nothing and queries nothing.</b> It no longer receives the predecessor's input blob:
+/// a Failed or Cancelled predecessor's successors get an empty key (<c>""</c> — no data). It does
 /// not query Elasticsearch either — it runs milliseconds after the outcome, and the line carrying
 /// the reason is the last one the predecessor's pod writes and the furthest from being indexed.
 /// </para>

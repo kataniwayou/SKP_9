@@ -183,17 +183,17 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         // it exists for the same reason: orchestrator-result is an addressable queue on a shared
         // broker, this handler is resolved by message type across the whole container, and
         // everything below acts on the ids in the body — it checks the key under EntryId exists,
-        // copies it to the successors' keys, dispatches them, and reclaims. Until now nothing compared the message against anything but
-        // the existence of its workflow and step, so an outcome naming a real workflow and a real
+        // copies it to the successors' keys, dispatches them, and reclaims. Until now nothing
+        // compared the message against anything but the existence of its workflow and step, so an outcome naming a real workflow and a real
         // step could be minted by anyone and would advance that workflow.
         //
         // L1 is the authority the processor's own identity is on the other side: StepL1.ProcessorId
         // is "the processor that executes this step", and every legitimate outcome carries it. All
-        // three senders are covered — ProcessedDataHandler's two sends carry p.ProcessorId, which
-        // WR-02 has already proven equal to that processor's own identity, and the dispatch that
-        // named it was addressed to processor-{L1.ProcessorId}; this handler's own failure outcome
-        // (below) carries the id read from this same field, and NextStepHandoffHandler's, while it
-        // drains release-1 hand-offs, the id this orchestrator put in the hand-off.
+        // senders are covered — BranchFinisher (the processors' outcomes) carries its own processor
+        // identity, and the dispatch that named it was addressed to processor-{L1.ProcessorId};
+        // ProcessDispatchHandler's Failed/Cancelled outcomes and this handler's own per-successor
+        // failure reports (below) carry the id read from this same field; NextStepHandoffHandler's,
+        // while it drains release-1 hand-offs, the id this orchestrator put in the hand-off.
         //
         // NOT RECLAIMED BEFORE PARKING, and that is the one place this deliberately departs from the
         // L1-miss branch above. That branch reclaims to avoid leaking a blob. Here the message has
@@ -494,7 +494,8 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
     /// <b>Only a Completed outcome's blob is data (spec D6)</b>: copied inside Redis, never loaded
     /// here. COPY without REPLACE: <c>false</c> means an earlier attempt made the key, or the source is
     /// already gone (a concurrent replica finished this outcome and reclaimed it); dispatching is still
-    /// correct either way, because that replica dispatched every successor before its DEL. Anything else — Failed, Cancelled, or an outcome naming no key — gets
+    /// correct either way, because that replica dispatched every successor before its DEL. Anything
+    /// else — Failed, Cancelled, or an outcome naming no key — gets
     /// <c>""</c>, written NX for the same reason.
     /// </para>
     /// </summary>

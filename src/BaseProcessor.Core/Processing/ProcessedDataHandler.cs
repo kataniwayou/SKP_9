@@ -11,6 +11,11 @@ using StackExchange.Redis;
 namespace BaseProcessor.Core.Processing;
 
 /// <summary>
+/// <b>DRAIN-ONLY.</b> Since the in-process post hop (<c>BranchFinisher</c>) nothing sends
+/// ProcessedData any more; this handler only drains messages the previous build queued, under their
+/// old semantics (random entry ids, <see cref="Guid.Empty"/> for no data). Part 3 deletes it. The
+/// description below is of that old flow.
+/// <para>
 /// Finishes one branch: validate the output, persist it, report the outcome.
 /// <para>
 /// <b>A branch with no data</b> is how an author reports Completed with nothing to hand on. It skips
