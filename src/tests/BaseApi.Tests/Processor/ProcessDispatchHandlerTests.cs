@@ -110,6 +110,41 @@ public sealed class ProcessDispatchHandlerTests
     }
 
     [Fact]
+    public async Task RunsTheAuthorOnEmptyDataWhenTheInputKeyHoldsNoData()
+    {
+        // Empty is not absent. The orchestrator hands a no-data successor a real key holding "" —
+        // reading it as "already reclaimed" would drop a step that has not run yet, silently.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns(RedisValue.EmptyString);
+        var probe = new Probe((d, p) => p.Send(d));
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        Assert.True(probe.Ran);
+        Assert.Empty(probe.SawData!);
+        await h.Db.Received(1).KeyDeleteAsync(L2ProjectionKeys.ExecutionData(E), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
+    public async Task SkipsTheInputSchemaWhenTheInputKeyHoldsNoData()
+    {
+        // No document, nothing to validate: parsing "" against a schema would fail a step that was
+        // never wrong, exactly as it would for an entry step.
+        var h = new Harness("""{"type":"object","properties":{"number":{"type":"integer"}},"required":["number"]}""");
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns(RedisValue.EmptyString);
+        var outcomes = new List<StepOutcome>();
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(outcomes.Add),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+        var probe = new Probe((d, p) => p.Send(d));
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        Assert.True(probe.Ran);
+        Assert.DoesNotContain(outcomes, o => o.Result == StepResult.Failed);
+        Assert.DoesNotContain(h.Log.Records, r => r.Message.Contains("failed its schema", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ReportsFailedWhenTheAuthorReturnsWithoutSendingABranch()
     {
         // Spec D3 as amended: forgetting to send is the one output rule. The outcome names the INPUT

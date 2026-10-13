@@ -125,53 +125,27 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
                 .StringGetAsync(L2ProjectionKeys.ExecutionData(d.EntryId))
                 .ConfigureAwait(false);
 
-            if (raw.IsNullOrEmpty)
+            // IsNull, NOT IsNullOrEmpty: absent and empty are different answers. Redis keeps "" as a
+            // value and returns Null only for a missing key. An empty key is a real input that holds
+            // no data — a no-data predecessor, or a failed one whose successors run on nothing — and
+            // the author runs on it. See §4 of the in-process post design.
+            if (raw.IsNull)
             {
                 // Read as "an earlier attempt at this dispatch already reclaimed this key", and
                 // returning is right for that reading: reporting a failure would overwrite a finished
-                // workflow's outcome. The reclaim runs only once the WHOLE author has returned — see the
-                // reclaim at the end of RunAsync — so an absent key never means a fan-out was caught
-                // mid-flight with some branches sent and others lost; that state cannot arise.
+                // workflow's outcome. The reclaim runs only once the WHOLE author has returned — see
+                // the reclaim at the end of RunAsync — so an absent key never means a fan-out was
+                // caught mid-flight with some branches sent and others lost; that state cannot arise.
                 //
-                // THIS BRANCH IS NOW THE PRIMARY IDEMPOTENCE MECHANISM, not a safety net. While branch
-                // ids were derived from the dispatch, a re-run of the author converged — the same seeds
-                // produced the same keys and the writes were rewrites. Ids are minted with NewGuid now
-                // (see SendToPostAsync), so a re-run produces DIFFERENT keys and a second outcome, and
-                // the successor subtree runs twice. Returning here is what stops that, which makes the
-                // ordering above load-bearing: the reclaim runs only once the WHOLE author has returned,
-                // so an absent key can be read as "already done" and never as "caught mid-fan-out".
+                // A replay of the author no longer forks the run: branch keys are derived from this
+                // input key and the execution id (EntryIds.Branch), so a re-run rewrites the same keys
+                // with the same bytes. Returning here still saves the re-run itself, which is free for
+                // a pure transform and is not for a step with side effects.
                 //
-                // Two reachable cases sit outside its reach, and they are the accepted cost of the
-                // NewGuid decision rather than gaps to be closed here. The reclaim below can itself fail
-                // — Redis reachable for the read and not for the delete — leaving the key present for a
-                // redelivery that then re-runs the author. And a source step has no key at all, so this
-                // branch never executes for one, and a lost acknowledgement alone is enough to re-run it.
-                // Neither loses data and neither leaks: the orchestrator reclaims every output blob it
-                // relocates. What they cost is a second run of the author's own code, which is free for a
-                // pure transform and is not for a step with side effects.
-                //
-                // A SEPARATE CASE THIS DOES NOT COVER: several successor steps dispatched against the
-                // one shared entry key.
-                //
-                // Each would carry its own ProcessDispatch message rather than a
-                // branch raised from inside a single author invocation. A step with more than one
-                // successor still hands every successor the same EntryId, and the first successor's own
-                // RunAsync reclaims that key once ITS author returns. Every other successor then reads
-                // absent here — not a redelivery of anything, but a step that has not run yet, finding a
-                // key a different step already consumed. Returning in that case means the successor's
-                // author never runs at all: a silent loss, not a safe duplicate, because nothing
-                // downstream reports it and nothing retries it. Preventing this is the orchestrator's
-                // job — copying the blob into one key per successor under derived ids before dispatch,
-                // or refcounting the shared key so only the last reader deletes it — and nothing in this
-                // assembly defends against it. That is a decision, not an oversight: this handler trusts
-                // EntryId to name a key it alone is entitled to delete, and multi-successor fan-out is
-                // the one case where that trust does not hold until the orchestrator exists to make it
-                // hold.
-                //
-                // With execution blobs carrying no TTL, this branch now has exactly two readings, not
-                // three: reclaimed, or never written. It can no longer mean expired.
-                // StepOutcomeHandler meets the same condition — the key its message names is gone —
-                // and also acks, logging it at Warning.
+                // Every successor has a key of its own — the orchestrator derives one per successor
+                // and copies the blob into it — so the absent key is never a sibling's input that
+                // someone else consumed. With no TTL on execution blobs, this branch has exactly two
+                // readings: reclaimed, or never written.
                 _logger.LogInformation("entry absent — treating as a duplicate delivery");
                 return;
             }
@@ -182,8 +156,9 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         // Skipped for a source step as a branch decision, not as a side effect of a source processor
         // having no input schema. A null definition skips validation anyway, so this works by accident
         // today — but a source step that did carry one would have empty bytes parsed, throw, and fail a
-        // step that was never wrong.
+        // step that was never wrong. An input key holding "" skips it for the same reason.
         if (!isSource
+            && data.Length > 0
             && !ProcessorJsonSchemaValidator.TryValidate(identity.InputDefinition, data, out var errors))
         {
             // Logged here because it is no longer carried anywhere else. StepOutcome has no text
