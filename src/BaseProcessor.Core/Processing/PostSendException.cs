@@ -3,7 +3,7 @@ using Messaging.Transport;
 namespace BaseProcessor.Core.Processing;
 
 /// <summary>
-/// A branch could not be handed to the post queue.
+/// A branch could not be finished: its outcome could not be sent to the orchestrator inside the in-process post hop.
 /// <para>
 /// <b>It carries the branch's ids so an author fanning out can tell which one was lost</b> — that is
 /// the only reason it exists rather than the plain <see cref="TransientSendException"/> it derives
@@ -20,7 +20,7 @@ namespace BaseProcessor.Core.Processing;
 public sealed class PostSendException : TransientSendException
 {
     public PostSendException(Guid entryId, Guid executionId, Exception inner)
-        : base($"send of branch {entryId:D} to the post queue failed", inner)
+        : base($"branch {entryId:D} could not be finished: its outcome could not be sent", inner)
     {
         EntryId = entryId;
         ExecutionId = executionId;
