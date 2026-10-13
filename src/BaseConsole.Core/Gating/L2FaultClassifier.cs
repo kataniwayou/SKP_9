@@ -23,13 +23,30 @@ public static class L2FaultClassifier
     /// work, which is the most expensive mistake available here.
     /// </para>
     /// <para>
-    /// <b>A server-side error is deliberately excluded.</b> It covers genuine command errors as well
-    /// as transient server states, and treating a rejected command as transient would requeue a
-    /// message the store will refuse every time.
+    /// <b>A server-side error is transient only for the four states that clear on their own</b>:
+    /// <c>OOM</c> (maxmemory reached under <c>noeviction</c>), <c>READONLY</c> (a failover in
+    /// progress), <c>LOADING</c> and <c>BUSY</c>. Every other server error is a rejected command —
+    /// <c>NOPERM</c>, <c>WRONGTYPE</c>, an unknown command — and requeueing it would retry a message
+    /// the store will refuse every time. The match is on the first word of the reply, so
+    /// <c>BUSYGROUP</c> is not <c>BUSY</c>.
     /// </para>
     /// </summary>
     public static bool IsTransient(Exception ex) =>
-        Unwrap(ex).Any(e => e is RedisConnectionException or RedisTimeoutException);
+        Unwrap(ex).Any(e => e is RedisConnectionException or RedisTimeoutException || IsTransientServerState(e));
+
+    private static readonly string[] TransientServerStates = ["OOM", "READONLY", "LOADING", "BUSY"];
+
+    private static bool IsTransientServerState(Exception e)
+    {
+        if (e is not RedisServerException server)
+        {
+            return false;
+        }
+
+        var space = server.Message.IndexOf(' ', StringComparison.Ordinal);
+        var word = space < 0 ? server.Message : server.Message[..space];
+        return TransientServerStates.Contains(word, StringComparer.Ordinal);
+    }
 
     /// <summary>Flattens aggregates and walks inner exceptions, yielding every exception in the chain.</summary>
     private static IEnumerable<Exception> Unwrap(Exception ex)
