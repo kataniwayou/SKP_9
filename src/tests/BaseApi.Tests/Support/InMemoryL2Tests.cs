@@ -74,4 +74,32 @@ public sealed class InMemoryL2Tests
 
         Assert.Contains("hash skp:step:s.name = step-a", l2.Snapshot());
     }
+
+    [Fact]
+    public async Task CopyWithoutReplaceCopiesOnceAndNeverOverwrites()
+    {
+        var l2 = new InMemoryL2();
+        await l2.Db.StringSetAsync("skp:data:a", "bytes");
+
+        Assert.True(await l2.Db.KeyCopyAsync("skp:data:a", "skp:data:b"));
+        await l2.Db.StringSetAsync("skp:data:a", "changed");
+        Assert.False(await l2.Db.KeyCopyAsync("skp:data:a", "skp:data:b"));
+        Assert.False(await l2.Db.KeyCopyAsync("skp:data:absent", "skp:data:c"));
+
+        Assert.Equal("bytes", l2.Value("skp:data:b"));
+        Assert.False(l2.Has("skp:data:c"));
+    }
+
+    [Fact]
+    public async Task SetNotExistsWritesOnlyAnAbsentKey()
+    {
+        var l2 = new InMemoryL2();
+
+        Assert.True(await l2.Db.StringSetAsync("skp:data:a", "", null, When.NotExists, CommandFlags.None));
+        Assert.False(await l2.Db.StringSetAsync("skp:data:a", "x", null, When.NotExists, CommandFlags.None));
+
+        Assert.Equal("", l2.Value("skp:data:a"));
+        Assert.True((await l2.Db.StringGetAsync("skp:data:a")).IsNullOrEmpty);
+        Assert.False((await l2.Db.StringGetAsync("skp:data:a")).IsNull);
+    }
 }

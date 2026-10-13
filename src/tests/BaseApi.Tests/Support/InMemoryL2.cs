@@ -149,8 +149,9 @@ internal sealed class InMemoryL2
 
     /// <summary>
     /// Backs the string, set, hash, key-existence, delete and expire operations these paths use onto
-    /// the dictionaries (both string-set overloads, GET and MGET, SADD/SREM/SMEMBERS/SISMEMBER, both
-    /// HSET overloads and HGET, EXISTS, single- and multi-key DEL, EXPIRE). <see cref="IBatch"/> derives
+    /// the dictionaries (both string-set overloads, including SET NX/XX, GET and MGET, COPY without
+    /// REPLACE, SADD/SREM/SMEMBERS/SISMEMBER, both HSET overloads and HGET, EXISTS, single- and
+    /// multi-key DEL, EXPIRE). <see cref="IBatch"/> derives
     /// from <see cref="IDatabaseAsync"/>, so the database and its batches are wired by one method and
     /// cannot drift apart.
     /// </summary>
@@ -176,6 +177,14 @@ internal sealed class InMemoryL2
             .Returns(ci =>
             {
                 var key = ci.ArgAt<RedisKey>(0).ToString();
+                var when = ci.ArgAt<When>(3);
+
+                // NX / XX, as a real server answers them: false and no write when the condition fails.
+                if ((when == When.NotExists && Exists(key)) || (when == When.Exists && !Exists(key)))
+                {
+                    return Task.FromResult(false);
+                }
+
                 _strings[key] = ci.ArgAt<RedisValue>(1).ToString();
                 if (ci.ArgAt<TimeSpan?>(2) is { } ttl)
                 {
@@ -198,6 +207,26 @@ internal sealed class InMemoryL2
 
         target.KeyExistsAsync(Arg.Any<RedisKey>())
             .Returns(ci => Exists(ci.ArgAt<RedisKey>(0).ToString()));
+
+        // COPY, strings only — the one shape the orchestrator copies (an execution blob). Without
+        // REPLACE a real server refuses when the destination exists, and answers false for an absent
+        // source; both are modelled because the hand-off's convergence depends on the first.
+        target.KeyCopyAsync(Arg.Any<RedisKey>(), Arg.Any<RedisKey>(), Arg.Any<int>(), Arg.Any<bool>(),
+                            Arg.Any<CommandFlags>())
+            .Returns(ci =>
+            {
+                var source = ci.ArgAt<RedisKey>(0).ToString();
+                var destination = ci.ArgAt<RedisKey>(1).ToString();
+                var replace = ci.ArgAt<bool>(3);
+
+                if (!_strings.TryGetValue(source, out var value) || (!replace && Exists(destination)))
+                {
+                    return Task.FromResult(false);
+                }
+
+                _strings[destination] = value;
+                return Task.FromResult(true);
+            });
 
         target.KeyDeleteAsync(Arg.Any<RedisKey>())
             .Returns(ci => Delete(ci.ArgAt<RedisKey>(0).ToString()));
