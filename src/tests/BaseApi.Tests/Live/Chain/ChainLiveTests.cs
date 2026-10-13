@@ -396,6 +396,7 @@ public sealed class ChainLiveTests
         // refused by KafkaImporter's own output validation and the lineage ends at the first hop.
         var result = await producer.ProduceAsync(RealStack.KafkaTopic, new Message<Null, string>
         {
+            Headers = LiveKafka.ExecutionHeaders(),
             Value = JsonSerializer.Serialize(new { filePath = path }),
         });
 

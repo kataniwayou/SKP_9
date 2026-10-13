@@ -143,6 +143,7 @@ public sealed class FileFetcherLiveTests
 
         var result = await producer.ProduceAsync(RealStack.KafkaTopic, new Message<Null, string>
         {
+            Headers = LiveKafka.ExecutionHeaders(),
             // filePath ALONE. This carried providerName = "acme-feed" until 2026-09-11, on the
             // grounds that the org's records carry it and the reader must ignore it -- true of
             // FileLocator, which binds case-insensitively and drops unknowns, and false of the

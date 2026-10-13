@@ -291,6 +291,7 @@ public sealed class OutcomeRecorderLiveTests
 
         var result = await producer.ProduceAsync(RealStack.KafkaTopic, new Message<Null, string>
         {
+            Headers = LiveKafka.ExecutionHeaders(),
             Value = JsonSerializer.Serialize(new { filePath = path }),
         });
 

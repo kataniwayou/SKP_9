@@ -173,7 +173,7 @@ public sealed class ArchiveCollapserLiveTests
         using var producer = new ProducerBuilder<Null, string>(
             new ProducerConfig { BootstrapServers = RealStack.KafkaBrokers }).Build();
 
-        var result = await producer.ProduceAsync(InTopic, new Message<Null, string> { Value = json });
+        var result = await producer.ProduceAsync(InTopic, new Message<Null, string> { Value = json, Headers = LiveKafka.ExecutionHeaders() });
 
         Assert.True(result.Status == PersistenceStatus.Persisted,
             $"produce to {InTopic} did not persist: status was {result.Status}");
