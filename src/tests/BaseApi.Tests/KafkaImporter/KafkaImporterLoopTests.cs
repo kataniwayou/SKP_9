@@ -213,11 +213,11 @@ public sealed class KafkaImporterLoopTests
     }
 
     /// <summary>
-    /// Spec D2: the framework has no executionId rules and this author chose to ignore its input
-    /// id. Every record still opens its own lineage.
+    /// The record's header is the lineage (§7): a producer contract, and what makes a re-read record
+    /// derive the same key instead of opening a second lineage. The inbound id is still ignored.
     /// </summary>
     [Fact]
-    public async Task IgnoresAnInboundExecutionIdAndMintsPerRecord()
+    public async Task UsesEachRecordsExecutionIdHeaderAsItsLineage()
     {
         var inbound = Guid.Parse("99999999-9999-9999-9999-999999999999");
         var consumer = new FakeRecordConsumer().WithRecords("value-a", "value-b");
@@ -229,9 +229,82 @@ public sealed class KafkaImporterLoopTests
 
         await processor.ExecuteAsync([], Payload(2), inbound, CancellationToken.None);
 
-        Assert.Equal(2, sends.Count);
-        Assert.DoesNotContain(inbound, sends.Select(s => s.ExecutionId));
-        Assert.Equal(2, sends.Select(s => s.ExecutionId).Distinct().Count());
+        Assert.Equal(
+            [Guid.Parse(FakeRecordConsumer.IdAt(0)), Guid.Parse(FakeRecordConsumer.IdAt(1))],
+            sends.Select(s => s.ExecutionId).ToArray());
+    }
+
+    [Fact]
+    public async Task AReReadRecordDerivesTheSameBranchKey()
+    {
+        // The point of the header: a record read again after a commit fault, by a replay or a later
+        // fire, names the same key and is absorbed, rather than forking a second lineage.
+        async Task<Guid> ReadOnce()
+        {
+            var consumer = new FakeRecordConsumer().WithRecords("value-a");
+            var (processor, sender, _) = Build(new FakeRecordConsumerFactory(consumer));
+            return (await Run(processor, sender, messageCount: 1)).Single().EntryId;
+        }
+
+        Assert.Equal(await ReadOnce(), await ReadOnce());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not-a-guid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public async Task RefusesARecordWithoutAValidExecutionIdCommittingItAndFailingTheDispatch(string? header)
+    {
+        // The producer's contract with the importer (§7, limit 5). Commit FIRST, or the record is
+        // re-read and refused on every fire — a poison record that stops the partition.
+        var consumer = new FakeRecordConsumer().WithRecord("value-a", header);
+        var (processor, sender, log) = Build(new FakeRecordConsumerFactory(consumer));
+        var sends = new List<ProcessedData>();
+        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
+                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        var failed = await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
+
+        Assert.Empty(sends);
+        Assert.Equal(["value-a"], consumer.Committed);
+        Assert.Contains("execution-id", failed.Message, StringComparison.Ordinal);
+        Assert.Contains("stopped because Refused", Summary(log));
+    }
+
+    [Fact]
+    public async Task ARefusedRecordFailsTheDispatchEvenAfterEarlierRecordsWereSent()
+    {
+        // The records before it were sent and committed and carry on; the dispatch still reports the
+        // refusal, so the recorder on the PreviousFailed edge records it. The rest wait for the next fire.
+        var consumer = new FakeRecordConsumer()
+            .WithRecords("value-a")
+            .WithRecord("value-b", null)
+            .WithRecords("value-c");
+        var (processor, sender, _) = Build(new FakeRecordConsumerFactory(consumer));
+        var sends = new List<ProcessedData>();
+        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
+                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
+
+        Assert.Equal(["value-a"], sends.Select(ValueIn).ToArray());
+        Assert.Equal(["value-a", "value-b"], consumer.Committed);
+    }
+
+    [Fact]
+    public async Task ARefusedRecordWhoseCommitFaultsIsStillRefused()
+    {
+        // A commit fault before the throw only means the next fire refuses it again.
+        var consumer = new FakeRecordConsumer { CommitThrowsOnCall = 1 }.WithRecord("value-a", null);
+        var (processor, _, log) = Build(new FakeRecordConsumerFactory(consumer));
+
+        await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
+
+        Assert.Empty(consumer.Committed);
+        Assert.Contains("stopped because Faulted", Summary(log));
     }
 
     // ---- As is -----------------------------------------------------------------------------

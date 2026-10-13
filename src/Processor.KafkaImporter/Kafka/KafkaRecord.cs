@@ -27,5 +27,14 @@ namespace Processor.KafkaImporter.Kafka;
 /// as null. The importer skips it, and skips an empty value too, committing the offset so the record
 /// is never read again.
 /// </para>
+/// <para>
+/// <b><paramref name="ExecutionId"/> is the record's <c>execution-id</c> header</b>, decoded as UTF-8
+/// text, or null when the record carries none. Text rather than a <c>Guid</c> so the importer, not
+/// the adapter, decides what an invalid one means.
+/// </para>
 /// </summary>
-public sealed record KafkaRecord(byte[]? Value, string Offset);
+public sealed record KafkaRecord(byte[]? Value, string Offset, string? ExecutionId = null)
+{
+    /// <summary>The header a producer stamps the record's lineage in (§7 of the in-process post design).</summary>
+    public const string ExecutionIdHeader = "execution-id";
+}

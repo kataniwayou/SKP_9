@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using Confluent.Kafka;
 
 namespace Processor.KafkaImporter.Kafka;
@@ -119,7 +120,14 @@ public sealed class KafkaRecordConsumer : IRecordConsumer
         }
 
         _lastConsumed = result;
-        return new KafkaRecord(result.Message.Value, result.TopicPartitionOffset.ToString());
+        // The lineage rides a header, never the value: the value is forwarded byte for byte and its
+        // schema refuses any key but filePath.
+        var executionId = result.Message.Headers is { } headers
+                          && headers.TryGetLastBytes(KafkaRecord.ExecutionIdHeader, out var header)
+            ? Encoding.UTF8.GetString(header)
+            : null;
+
+        return new KafkaRecord(result.Message.Value, result.TopicPartitionOffset.ToString(), executionId);
     }
 
     /// <summary>

@@ -23,8 +23,10 @@ namespace Processor.KafkaImporter;
 /// with a Warning, and the lineages already sent carry on.
 /// </para>
 /// <para>
-/// <b>The input execution id is ignored</b>, by this author's choice: every record is the origin of
-/// its own lineage.
+/// <b>Each record's lineage is its <c>execution-id</c> header</b>, a contract between the producer and
+/// this processor (§7 of the in-process post design): a record re-read after a commit fault derives
+/// the same key and is absorbed instead of forking. A record without a valid one is committed, not
+/// imported, and the dispatch reports Failed. The input execution id is ignored.
 /// </para>
 /// </summary>
 public sealed class KafkaImporterProcessor(
@@ -38,6 +40,7 @@ public sealed class KafkaImporterProcessor(
         Completed,
         Drained,
         Faulted,
+        Refused, // A record carried no valid execution-id header.
     }
 
     private IRecordConsumer? _consumer;
@@ -106,10 +109,11 @@ public sealed class KafkaImporterProcessor(
 
         // PART TWO: the loop. Once a branch has been sent nothing in it fails the step.
         var read = 0;       // every record consumed, sent or skipped; bounds the dispatch
-        var sent = 0;       // branches that reached the post queue
+        var sent = 0;       // branches finished (in L2, outcome confirmed)
         var imported = 0;   // sent AND committed; the {Consumed} the summary has always reported
         var reason = StopReason.Completed;
         KafkaException? fault = null;
+        string? refused = null;
 
         try
         {
@@ -162,7 +166,34 @@ public sealed class KafkaImporterProcessor(
                     continue;
                 }
 
-                var lineage = NewExecutionId();
+                // THE PRODUCER'S CONTRACT. Missing, not a GUID, or empty: refuse the record. Commit it
+                // FIRST, or it is re-read and refused on every fire — a poison record that stops the
+                // partition. Nothing is sent for it, so nothing is written to L2.
+                if (!Guid.TryParse(record.ExecutionId, out var lineage) || lineage == Guid.Empty)
+                {
+                    refused = record.Offset;
+                    reason = StopReason.Refused;
+
+                    try
+                    {
+                        consumer.Commit(record);
+                    }
+                    catch (KafkaException ex)
+                    {
+                        logger.LogWarning(ex,
+                            "committing a refused record from {Source} faulted after {Imported} item(s); "
+                            + "it will be read and refused again",
+                            config.Topic, imported);
+
+                        fault = ex;
+                        reason = StopReason.Faulted;
+                    }
+
+                    logger.LogWarning(
+                        "refused the record at {Origin}: it carries no valid {Header} header", record.Offset,
+                        KafkaRecord.ExecutionIdHeader);
+                    break;
+                }
 
                 // Logged BEFORE the send, so a send that throws still leaves the lineage it was opening.
                 // The value is rendered verbatim: it is the business identifier an operator searches for.
@@ -211,6 +242,15 @@ public sealed class KafkaImporterProcessor(
             reason == StopReason.Faulted ? LogLevel.Warning : LogLevel.Information,
             "consumed {Consumed}/{Requested} records; stopped because {Reason}",
             imported, config.MessageCount, reason);
+
+        // Even after earlier records were sent: they carry on, and the refusal is reported so the
+        // PreviousFailed edge records it.
+        if (refused is not null)
+        {
+            throw new FailedException(
+                $"the record at {refused} carries no valid {KafkaRecord.ExecutionIdHeader} header; "
+                + "it was committed and not imported");
+        }
 
         if (sent > 0)
         {

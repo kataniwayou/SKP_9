@@ -44,22 +44,37 @@ internal sealed class FakeRecordConsumer : IRecordConsumer
 
     public Error Fault { get; set; } = new(ErrorCode.Local_Transport);
 
+    /// <summary>
+    /// The execution id the fake stamps on the record at <paramref name="position"/>: distinct per
+    /// record and valid, as the feeds' producer contract requires.
+    /// </summary>
+    public static string IdAt(int position) => $"00000000-0000-0000-0000-{position + 1:D12}";
+
     /// <summary>Queues records whose values are the UTF-8 encoding of these strings.</summary>
     public FakeRecordConsumer WithRecords(params string[] values)
         => WithRecords(values.Select(Encoding.UTF8.GetBytes).ToArray());
 
     /// <summary>
-    /// Queues records with exactly these bytes. The overload exists so a test can queue a value that
-    /// is not valid UTF-8 and prove the loop hands it through untouched — the one fact the
-    /// string-based overload above cannot express.
+    /// Queues records with exactly these bytes, each carrying its own valid <c>execution-id</c>. The
+    /// overload exists so a test can queue a value that is not valid UTF-8 and prove the loop hands it
+    /// through untouched — the one fact the string-based overload above cannot express.
     /// </summary>
     public FakeRecordConsumer WithRecords(params byte[][] values)
     {
-        for (var i = 0; i < values.Length; i++)
+        foreach (var value in values)
         {
-            _records.Enqueue(new KafkaRecord(values[i], $"records [0] @{i}"));
+            var position = _records.Count;
+            _records.Enqueue(new KafkaRecord(value, $"records [0] @{position}", IdAt(position)));
         }
 
+        return this;
+    }
+
+    /// <summary>One record with exactly this header value — null for a record with no header.</summary>
+    public FakeRecordConsumer WithRecord(string value, string? executionId)
+    {
+        _records.Enqueue(new KafkaRecord(
+            Encoding.UTF8.GetBytes(value), $"records [0] @{_records.Count}", executionId));
         return this;
     }
 
