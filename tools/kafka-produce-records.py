@@ -24,6 +24,10 @@ docstring here used to argue that a provider name was invisible to the processor
 another field tomorrow would need no change -- true of the reader, which binds case-insensitively
 and drops unknowns, and false of the edge, which now refuses the record before the reader sees it.
 
+THE LINEAGE RIDES A HEADER. Each record carries `execution-id: uuid5(NS_FEED, filePath)`. The
+importer refuses a record without one -- commits it, imports nothing, fails the dispatch -- so a
+record produced by anything other than this script must carry it too.
+
 THE PATHS MUST ALREADY EXIST ON THE NODE. This seeds paths, not files: FileFetcher opens what the
 record names, inside the cluster, and a path nothing backs fails the fetch. Put a file there first --
 
@@ -62,11 +66,23 @@ Usage:
 import argparse
 import json
 import sys
+import uuid
 
 try:
     from confluent_kafka import Producer
 except ImportError:  # pragma: no cover - a setup error, not a runtime one
     sys.exit("confluent-kafka is not installed. Run: python -m pip install confluent-kafka")
+
+
+# The importer's lineage contract: every record carries an `execution-id` header, a GUID unique per
+# file. Derived from the path, so re-seeding a path names the same lineage and a record re-read
+# after a commit fault is absorbed instead of forking. NEVER change this namespace: the same path
+# would then open a new lineage. Must match NS_FEED in simulate-endless-feed.py.
+NS_FEED = uuid.UUID("5d0e7c2a-9f41-4b6e-8a3d-1e2f6c9b7a40")
+
+
+def execution_id(path):
+    return str(uuid.uuid5(NS_FEED, path)).encode("utf-8")
 
 
 DEFAULT_BROKERS = "localhost:19092"
@@ -141,7 +157,12 @@ def main():
             delivered.append(msg.offset())
 
     for path in paths:
-        producer.produce(args.topic, value=record(path), on_delivery=on_delivery)
+        producer.produce(
+            args.topic,
+            value=record(path),
+            headers=[("execution-id", execution_id(path))],
+            on_delivery=on_delivery,
+        )
 
     remaining = producer.flush(timeout=30)
     if remaining:

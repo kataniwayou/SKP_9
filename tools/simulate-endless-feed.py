@@ -96,6 +96,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import uuid
 import wave
 import zipfile
 from datetime import datetime, timezone
@@ -106,6 +107,17 @@ try:
     from confluent_kafka import Consumer, Producer, TopicPartition
 except ImportError:  # pragma: no cover - a setup error, not a runtime one
     sys.exit("confluent-kafka is not installed. Run: python -m pip install confluent-kafka")
+
+
+# The importer's lineage contract: every record carries an `execution-id` header, a GUID unique per
+# file. Derived from the path, so re-seeding a path names the same lineage and a record re-read
+# after a commit fault is absorbed instead of forking. NEVER change this namespace: the same path
+# would then open a new lineage. Must match NS_FEED in kafka-produce-records.py.
+NS_FEED = uuid.UUID("5d0e7c2a-9f41-4b6e-8a3d-1e2f6c9b7a40")
+
+
+def execution_id(path):
+    return str(uuid.uuid5(NS_FEED, path)).encode("utf-8")
 
 
 DEFAULT_BROKERS = "localhost:19092"
@@ -394,7 +406,12 @@ def produce(producer, topic, paths):
 
     for path in paths:
         value = json.dumps({"filePath": path}, separators=(",", ":")).encode("utf-8")
-        producer.produce(topic, value=value, on_delivery=on_delivery)
+        producer.produce(
+            topic,
+            value=value,
+            headers=[("execution-id", execution_id(path))],
+            on_delivery=on_delivery,
+        )
 
     remaining = producer.flush(timeout=30)
     if remaining:
