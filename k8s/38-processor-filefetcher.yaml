@@ -18,14 +18,13 @@
 #
 # See §13 of docs/superpowers/specs/2026-09-09-file-reader-design.md.
 #
-# THE MEMORY LIMIT IS 512Mi, HALFWAY BETWEEN THE OTHER PROCESSORS' 384Mi AND ArchiveExpander's 768Mi,
-# AND IT IS A STARTING NUMBER RATHER THAN A DERIVED ONE. A file does not cost its own size in flight:
-# the raw file bytes, the serialized envelope (~1.33x the file — base64 is 4 bytes per 3), the broker
-# message body (that envelope base64'd again inside the ProcessedData envelope, ~1.78x), and a
-# JsonDocument DOM at output validation can all coexist — and the work and post consumers are the SAME
-# process, so a dispatch and a branch overlap. At the 32MiB ceiling below that is roughly 200MB
-# transient. MEASURE IT before trusting it. Lower FileFetcher__MaxFileSizeBytes or raise this limit;
-# do not move one without the other.
+# THE MEMORY LIMIT IS 512Mi, HALFWAY BETWEEN THE OTHER PROCESSORS' 384Mi AND ArchiveExpander's
+# 768Mi, AND IT IS A STARTING NUMBER RATHER THAN A DERIVED ONE. A file does not cost its own size in
+# flight: the raw file bytes, the serialized envelope (~1.33x the file — base64 is 4 bytes per 3),
+# the bytes written to L2 (no broker copy since the in-process post hop), and a JsonDocument DOM at
+# output validation can all coexist inside one dispatch. At the 32MiB ceiling below that is roughly
+# 200MB transient. MEASURE IT before trusting it. Lower FileFetcher__MaxFileSizeBytes or raise this
+# limit; do not move one without the other.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -30,11 +30,10 @@
 # next dispatch for that name overwrites it, and nothing else reads it.
 #
 # THE MEMORY LIMIT IS 512Mi, MATCHING FileFetcher, AND FOR THE SAME REASON RUN BACKWARDS. The
-# envelope arrives base64'd inside a ProcessedData message, is decoded to the raw bytes, and both
-# coexist with a JsonDocument DOM at input validation — and the work and post consumers are the SAME
-# process, so a dispatch and a branch overlap. There is no FilePersister__MaxFileSizeBytes to pair
-# this with, deliberately: FileFetcher's ceiling already bounded these bytes on the way in, one whole
-# workflow ago, and a second ceiling here would be a number that can disagree with the first.
+# envelope is read from L2, decoded to the raw bytes, and both coexist with a JsonDocument DOM at
+# input validation. There is no FilePersister__MaxFileSizeBytes to pair this with, deliberately:
+# FileFetcher's ceiling already bounded these bytes on the way in, one whole workflow ago, and a
+# second ceiling here would be a number that can disagree with the first.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

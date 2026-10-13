@@ -8,6 +8,12 @@
 # rebuildable from L3 on demand, so RDB/AOF are dead weight. Do NOT re-enable
 # persistence. The compose `6380:6379` host publish is dropped; it re-emerges only
 # at port-forward (D-14).
+#
+# MAXMEMORY 144mb, noeviction, below the 192Mi container limit. Since the in-process post hop no step
+# output rides a RabbitMQ message: every branch and every successor input lives here, so this store
+# is the pipeline's only data-size limit. Full, it refuses writes with OOM, which the processors and
+# the orchestrator classify transient (requeue and trip the L2 gate) — instead of the container being
+# OOM-killed and taking every in-flight blob with it. Eviction would silently delete a live input.
 apiVersion: v1
 kind: Service
 metadata:
@@ -46,7 +52,7 @@ spec:
       containers:
         - name: redis
           image: redis:7.4.9-alpine       # verbatim (public image)
-          command: ["redis-server", "--save", "", "--appendonly", "no"]   # D-12 — carried BYTE-FOR-BYTE (ephemeral by design)
+          command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "144mb", "--maxmemory-policy", "noeviction"]   # D-12 persistence args unchanged; maxmemory: see header
           ports:
             - containerPort: 6379
           # compose healthcheck 5s/3s/10/5s → readiness exec
