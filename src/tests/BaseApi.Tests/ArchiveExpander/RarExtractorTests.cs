@@ -112,7 +112,7 @@ public sealed class RarExtractorTests
             new RecordingLogger<ArchiveExpanderProcessor>(),
             new FileContentBuilder([new RarExtractor()], Options.Create(new ArchiveExpanderOptions())));
         processor.BeginDispatch(
-            new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
+            TestDispatch.State(Substitute.For<IQueueSender>(), C, W, S, P));
 
         var envelope = JsonSerializer.SerializeToUtf8Bytes(
             new

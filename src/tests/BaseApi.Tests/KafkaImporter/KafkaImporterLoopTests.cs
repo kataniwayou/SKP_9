@@ -29,7 +29,7 @@ public sealed class KafkaImporterLoopTests
         var log = new RecordingLogger<KafkaImporterProcessor>();
         var sender = Substitute.For<IQueueSender>();
         var processor = new KafkaImporterProcessor(factory, log);
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
         return (processor, sender, log);
     }
 

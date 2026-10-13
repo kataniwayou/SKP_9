@@ -27,6 +27,7 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
     private readonly IQueueSender _sender;
     private readonly IProcessorContext _context;
     private readonly BaseProcessor _processor;
+    private readonly IBranchSink _sink;
     private readonly ILogger<ProcessDispatchHandler> _logger;
 
     public ProcessDispatchHandler(
@@ -34,12 +35,14 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         IQueueSender sender,
         IProcessorContext context,
         BaseProcessor processor,
+        IBranchSink sink,
         ILogger<ProcessDispatchHandler> logger)
     {
         _redis     = redis ?? throw new ArgumentNullException(nameof(redis));
         _sender    = sender ?? throw new ArgumentNullException(nameof(sender));
         _context   = context ?? throw new ArgumentNullException(nameof(context));
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
+        _sink      = sink ?? throw new ArgumentNullException(nameof(sink));
         _logger    = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -191,7 +194,7 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         // read what the author actually did with it. BaseProcessor exposes no accessor for this and
         // does not need one: this handler is what constructs the state.
         var state = new DispatchState(
-            _sender, d.CorrelationId, d.WorkflowId, d.StepId, d.ProcessorId);
+            _sink, d.EntryId, d.CorrelationId, d.WorkflowId, d.StepId, d.ProcessorId);
 
         _processor.BeginDispatch(state);
 

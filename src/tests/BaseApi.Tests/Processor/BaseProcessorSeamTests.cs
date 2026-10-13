@@ -1,3 +1,4 @@
+using BaseApi.Tests.Support;
 using System.Text;
 using BaseProcessor.Core.Configuration;
 using BaseProcessor.Core.Processing;
@@ -39,7 +40,7 @@ public sealed class BaseProcessorSeamTests
     {
         var sender = Substitute.For<IQueueSender>();
         var processor = new Probe(body);
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
         return (processor, sender);
     }
 
@@ -82,9 +83,8 @@ public sealed class BaseProcessorSeamTests
         Assert.Equal(C, sent.CorrelationId);
         Assert.Equal(E, sent.ExecutionId);
 
-        // The entry id is the one field NOT carried over from the dispatch — it is minted here and
-        // names the key this branch's output will be written to, which is the successor's input.
-        Assert.NotEqual(Guid.Empty, sent.EntryId);
+        // The entry id is derived, never random: no input key here, so it is the entry-step formula.
+        Assert.Equal(EntryIds.Branch(Guid.Empty, W, S, E), sent.EntryId);
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public sealed class BaseProcessorSeamTests
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => sent = p),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
         var processor = new Probe((_, _, _, self) => self.Send(Encoding.UTF8.GetBytes("{}"), E));
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await processor.ExecuteAsync([], "", E, CancellationToken.None);
 
@@ -106,8 +106,35 @@ public sealed class BaseProcessorSeamTests
     }
 
     [Fact]
-    public async Task GivesEachBranchOfAFanOutItsOwnEntryId()
+    public async Task GivesEachBranchOfAFanOutTheKeyItsExecutionIdDerives()
     {
+        // The author's contract (§5.1): every output carries a distinct execution id, and the key
+        // follows it. Distinct ids, distinct keys.
+        var ids = new List<Guid>();
+        var sender = Substitute.For<IQueueSender>();
+        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => ids.Add(p.EntryId)),
+                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
+        var x1 = Guid.Parse("a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1");
+        var x2 = Guid.Parse("a2a2a2a2-a2a2-a2a2-a2a2-a2a2a2a2a2a2");
+        var input = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        var processor = new Probe(async (_, _, _, self) =>
+        {
+            await self.Send(Encoding.UTF8.GetBytes("{}"), x1);
+            await self.Send(Encoding.UTF8.GetBytes("{}"), x2);
+        });
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P, input));
+
+        await processor.ExecuteAsync([], "", E, CancellationToken.None);
+
+        Assert.Equal([EntryIds.Branch(input, W, S, x1), EntryIds.Branch(input, W, S, x2)], ids);
+    }
+
+    [Fact]
+    public async Task TwoOutputsUnderOneExecutionIdShareOneKey()
+    {
+        // The other half of the contract, pinned so it stays a documented cost rather than a
+        // surprise: an author that reuses one execution id for two outputs writes both to one key,
+        // and the second overwrites the first.
         var ids = new List<Guid>();
         var sender = Substitute.For<IQueueSender>();
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => ids.Add(p.EntryId)),
@@ -116,27 +143,21 @@ public sealed class BaseProcessorSeamTests
         {
             await self.Send(Encoding.UTF8.GetBytes("{}"), E);
             await self.Send(Encoding.UTF8.GetBytes("{}"), E);
-            await self.Send(Encoding.UTF8.GetBytes("{}"), E);
         });
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await processor.ExecuteAsync([], "", E, CancellationToken.None);
 
-        Assert.Equal(3, ids.Distinct().Count());
+        Assert.Single(ids.Distinct());
     }
-
     [Fact]
-    public async Task ReplayingADispatchProducesFreshBranchIds()
+    public async Task ReplayingADispatchRewritesTheSameBranchKey()
     {
-        // The cost of minting with NewGuid, pinned so that it stays a decision on the record rather
-        // than a surprise: a second run of the same dispatch writes DIFFERENT keys than the first, so
-        // the replay is a second set of branches and the successor subtree runs twice.
-        //
-        // It is not often reached. The pre handler reclaims the input key once the author returns, and
-        // a redelivery that finds the key gone returns without calling the author at all — so this
-        // matters only where that token is missing: a failed reclaim, and a source step, which has no
-        // key to reclaim. Deriving the ids from the dispatch is what made a replay converge instead,
-        // and it is a four-line change in SendToPostAsync if an author with side effects ever lands.
+        // INVERTED from "replaying produces fresh ids". Keys are derived from the input key and the
+        // execution id now, so a replay of the same dispatch names the same keys: L2 converges and
+        // the successor subtree is absorbed rather than forked.
+        var input = Guid.Parse("99999999-9999-9999-9999-999999999999");
+
         async Task<List<Guid>> RunOnce()
         {
             var ids = new List<Guid>();
@@ -144,35 +165,27 @@ public sealed class BaseProcessorSeamTests
             await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(),
                                    Arg.Do<ProcessedData>(p => ids.Add(p.EntryId)),
                                    Arg.Any<CancellationToken>(), Arg.Any<string?>());
-            var processor = new Probe(async (_, _, _, self) =>
-            {
-                await self.Send(Encoding.UTF8.GetBytes("{}"), E);
-                await self.Send(Encoding.UTF8.GetBytes("{}"), E);
-            });
-            processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+            var processor = new Probe((_, _, x, self) => self.Send(Encoding.UTF8.GetBytes("{}"), x));
+            processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P, input));
             await processor.ExecuteAsync([], "", E, CancellationToken.None);
             return ids;
         }
 
-        Assert.NotEqual(await RunOnce(), await RunOnce());
+        Assert.Equal(await RunOnce(), await RunOnce());
     }
 
     [Fact]
-    public async Task SendsToTheProcessorsOwnPostQueueUnderTheProcessedDataType()
+    public async Task RefusesAnEmptyExecutionId()
     {
-        var (processor, sender) = Build((_, _, _, self) => self.Send(Encoding.UTF8.GetBytes("{}"), E));
+        // Every output sent under Guid.Empty would share one key. An author error, so it fails loudly
+        // inside the dispatch and the framework reports the step Failed.
+        var processor = new Probe((_, _, _, self) => self.Send(Encoding.UTF8.GetBytes("{}"), Guid.Empty));
+        processor.BeginDispatch(TestDispatch.State(Substitute.For<IQueueSender>(), C, W, S, P));
 
-        await processor.ExecuteAsync([], "", E, CancellationToken.None);
+        var thrown = await Assert.ThrowsAsync<ArgumentException>(
+            () => processor.ExecuteAsync([], "", E, CancellationToken.None));
 
-        // The POST queue, and asserted against Work(P) too so the two can never quietly become the
-        // same string again. A branch on the work queue would be consumed on the lane an author
-        // occupies, which is the starvation shape the split exists to remove.
-        await sender.Received(1).SendAsync(
-            ProcessorQueues.Post(P), MessageTypes.ProcessedData, Arg.Any<ProcessedData>(),
-            Arg.Any<CancellationToken>(), Arg.Any<string?>());
-        await sender.DidNotReceive().SendAsync(
-            ProcessorQueues.Work(P), MessageTypes.ProcessedData, Arg.Any<ProcessedData>(),
-            Arg.Any<CancellationToken>(), Arg.Any<string?>());
+        Assert.Contains("execution id", thrown.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -183,13 +196,13 @@ public sealed class BaseProcessorSeamTests
                          Arg.Any<CancellationToken>(), Arg.Any<string?>())
               .ThrowsAsync(new IOException("socket closed"));
         var processor = new Probe((_, _, _, self) => self.Send(Encoding.UTF8.GetBytes("{}"), E));
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         var thrown = await Assert.ThrowsAsync<PostSendException>(
             () => processor.ExecuteAsync([], "", E, CancellationToken.None));
 
         Assert.Equal(E, thrown.ExecutionId);
-        Assert.NotEqual(Guid.Empty, thrown.EntryId);
+        Assert.Equal(EntryIds.Branch(Guid.Empty, W, S, E), thrown.EntryId);
         // It must stay classifiable as transient, or the consumer parks the dispatch instead of
         // returning it and the branch is lost for good.
         Assert.IsAssignableFrom<TransientSendException>(thrown);
@@ -208,13 +221,33 @@ public sealed class BaseProcessorSeamTests
                          Arg.Any<CancellationToken>(), Arg.Any<string?>())
               .ThrowsAsync(deterministic);
         var processor = new Probe((_, _, _, self) => self.Send(Encoding.UTF8.GetBytes("{}"), E));
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         var thrown = await Assert.ThrowsAnyAsync<Exception>(
             () => processor.ExecuteAsync([], "", E, CancellationToken.None));
 
         Assert.Same(deterministic, thrown);
         Assert.IsNotAssignableFrom<TransientSendException>(thrown);
+    }
+
+    [Fact]
+    public async Task LetsAnUnresolvedOutputSchemaThroughUnwrapped()
+    {
+        // OutputSchemaPendingException is already the requeue type; renaming it PostSendException
+        // would claim a send failed when none was attempted.
+        var sink = new PendingSchemaSink();
+        var processor = new Probe((_, _, _, self) => self.Send(Encoding.UTF8.GetBytes("{}"), E));
+        processor.BeginDispatch(new DispatchState(sink, Guid.Empty, C, W, S, P));
+
+        await Assert.ThrowsAsync<OutputSchemaPendingException>(
+            () => processor.ExecuteAsync([], "", E, CancellationToken.None));
+    }
+
+    /// <summary>IBranchSink is internal, so NSubstitute cannot proxy it from this assembly.</summary>
+    private sealed class PendingSchemaSink : IBranchSink
+    {
+        public Task FinishAsync(ProcessedData branch, CancellationToken ct)
+            => Task.FromException(new OutputSchemaPendingException(Guid.NewGuid()));
     }
 
     [Fact]
@@ -226,7 +259,7 @@ public sealed class BaseProcessorSeamTests
         Guid RunOnce()
         {
             var processor = new Probe((_, _, _, _) => Task.CompletedTask);
-            processor.BeginDispatch(new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
+            processor.BeginDispatch(TestDispatch.State(Substitute.For<IQueueSender>(), C, W, S, P));
             return processor.NextExecution();
         }
 

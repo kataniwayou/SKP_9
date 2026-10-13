@@ -80,7 +80,7 @@ public sealed class ArchiveExpanderDepthTests
             new FileContentBuilder(
                 [new ZipExtractor(), new TarExtractor()],
                 Options.Create(new ArchiveExpanderOptions { MaxExpandedBytes = maxExpandedBytes })));
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
         return (processor, sender, log);
     }
 

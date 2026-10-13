@@ -259,6 +259,21 @@ public sealed class ProcessorHostWiringTests
         Assert.NotSame(liveness, queueDepth);
     }
 
+    [Fact]
+    public async Task TheBranchSinkIsOneFinisherSharedByEveryDispatch()
+    {
+        // The post hop is an awaited call now. Its dependencies are all singletons, so one instance
+        // serves every scope — and the dispatch handler must resolve with it.
+        await using var sp = BuildWithIdentity();
+        await using var scope = sp.CreateAsyncScope();
+
+        var sink = sp.GetRequiredService<BaseProcessor.Core.Processing.IBranchSink>();
+        Assert.IsType<BaseProcessor.Core.Processing.BranchFinisher>(sink);
+        Assert.Same(sink, scope.ServiceProvider.GetRequiredService<BaseProcessor.Core.Processing.IBranchSink>());
+        Assert.Contains(scope.ServiceProvider.GetServices<IQueueMessageHandler>(),
+                        h => h is BaseProcessor.Core.Processing.ProcessDispatchHandler);
+    }
+
     private sealed record WiringStubConfig : BaseProcessor.Core.Configuration.ProcessorConfig;
 
     /// <summary>An author that does nothing, present only so the graph can resolve one.</summary>

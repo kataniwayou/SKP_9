@@ -255,8 +255,16 @@ public static class BaseProcessorServiceCollectionExtensions
         services.AddScoped<IQueueMessageHandler, ProcessDispatchHandler>();
         services.AddScoped<IQueueMessageHandler, ProcessedDataHandler>();
 
+        // The post hop as an awaited call (BranchFinisher). A singleton: its dependencies are all
+        // singletons and it holds no per-dispatch state. ProcessedDataHandler and the post queue's
+        // consumer below stay for release 1 ONLY, to drain branches already queued by the previous
+        // processor build; Part 3 of the in-process post plan removes them once the queue reads zero.
+        services.TryAddSingleton<BranchFinisher>();
+        services.TryAddSingleton<IBranchSink>(sp => sp.GetRequiredService<BranchFinisher>());
+
         services.AddBaseConsoleGating(cfg, ProcessorQueues.Work(processorId));
 
+        // DRAIN-ONLY since the in-process post hop: nothing sends here any more.
         // The post queue's own consumer, reusing the gate and the probe the call above registered --
         // the same two-call shape OrchestratorHost uses for its shared execution queues. It has to
         // come second: AddBaseConsoleGating registers the gate, its probe and the first consumer,

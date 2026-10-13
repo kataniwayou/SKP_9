@@ -63,7 +63,7 @@ public sealed class ProcessorSKNormalizerTests
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
         await processor.ExecuteAsync(data, payload, E, CancellationToken.None);
 
         return Assert.Single(sends);
@@ -74,7 +74,7 @@ public sealed class ProcessorSKNormalizerTests
         var (processor, _) = Build(new SampleHandler());
 
         var sender = Substitute.For<IQueueSender>();
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         return await Assert.ThrowsAsync<FailedException>(
             () => processor.ExecuteAsync(data, payload, E, CancellationToken.None));
@@ -163,7 +163,7 @@ public sealed class ProcessorSKNormalizerTests
         var (processor, _) = Build(new Throwing());
 
         var sender = Substitute.For<IQueueSender>();
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         var ex = await Assert.ThrowsAsync<FailedException>(
             () => processor.ExecuteAsync(
@@ -197,7 +197,7 @@ public sealed class ProcessorSKNormalizerTests
         var (processor, log) = Build(new SampleHandler());
 
         var sender = Substitute.For<IQueueSender>();
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await Assert.ThrowsAsync<FailedException>(
             () => processor.ExecuteAsync([], "", E, CancellationToken.None));
@@ -214,7 +214,7 @@ public sealed class ProcessorSKNormalizerTests
         var (processor, log) = Build(new SampleHandler());
 
         var sender = Substitute.For<IQueueSender>();
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await processor.ExecuteAsync(
             Document(Archive("in.zip", Leaf("secret-entry-name.csv", "id"), Leaf("b.csv", "id"))),

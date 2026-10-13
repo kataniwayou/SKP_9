@@ -29,7 +29,7 @@ public sealed class KafkaImporterCacheTests
         var processor = new KafkaImporterProcessor(
             factory, new RecordingLogger<KafkaImporterProcessor>());
         processor.BeginDispatch(
-            new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
+            TestDispatch.State(Substitute.For<IQueueSender>(), C, W, S, P));
         return processor;
     }
 

@@ -178,7 +178,7 @@ public sealed class TarExtractorTests
             new RecordingLogger<ArchiveExpanderProcessor>(),
             new FileContentBuilder([new TarExtractor()], Options.Create(new ArchiveExpanderOptions())));
         processor.BeginDispatch(
-            new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
+            TestDispatch.State(Substitute.For<IQueueSender>(), C, W, S, P));
 
         var envelope = JsonSerializer.SerializeToUtf8Bytes(
             new

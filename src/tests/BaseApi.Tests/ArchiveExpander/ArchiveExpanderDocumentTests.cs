@@ -39,7 +39,7 @@ public sealed class ArchiveExpanderDocumentTests
         var processor = new ArchiveExpanderProcessor(
             new RecordingLogger<ArchiveExpanderProcessor>(),
             new FileContentBuilder([], Options.Create(new ArchiveExpanderOptions())));
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
         return (processor, sender);
     }
 

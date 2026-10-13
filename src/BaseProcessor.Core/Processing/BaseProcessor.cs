@@ -105,61 +105,61 @@ public abstract class BaseProcessor
     internal abstract Type ConfigType { get; }
 
     /// <summary>
-    /// Hands one branch of output to the post queue.
+    /// Hands one branch of output on, and returns once it is in L2 and its outcome is confirmed.
     /// <para>
     /// The framework stamps every id: the dispatch's correlation, workflow, step and processor ids,
-    /// plus a fresh entry id naming the L2 key this branch's output will be written to. The author
-    /// supplies the bytes and the execution id and nothing else — an author cannot influence the ids
-    /// on its own output, and the four it does not supply are the dispatch's own, passed through
-    /// unchanged.
+    /// plus an entry id naming the L2 key this branch's output is written to. The author supplies the
+    /// bytes and the execution id and nothing else.
     /// </para>
     /// <para>
-    /// <b>No data is a branch too.</b> <paramref name="processedData"/> null or empty sends a branch
-    /// with <see cref="Guid.Empty"/> as its entry id: nothing is written to L2, the output schema is
-    /// not applied, and the step reports Completed. It still counts as having sent a branch. An
-    /// author that intends to pass data on must check that it is non-empty first.
+    /// <b>The entry id is derived, not random</b> (<see cref="EntryIds.Branch"/>): from the dispatch's
+    /// input key and <paramref name="executionId"/>, or for an entry step from the workflow, the step
+    /// and <paramref name="executionId"/>. A redelivered dispatch replays this call, names the same
+    /// key, rewrites the same bytes and reports the same outcome — L2 converges.
     /// </para>
     /// <para>
-    /// <b>Never catch <see cref="PostSendException"/>.</b> Nothing stops an author catching it, but it
-    /// must propagate: the framework redelivers the dispatch and replays the author, which is a
-    /// duplicate. Swallowing it, or rethrowing it as <see cref="FailedException"/>, reports a
-    /// success as a failure and runs the workflow's PreviousFailed successors. This system always
-    /// takes the duplicate.
+    /// <b>The author's contract: every output carries a distinct, non-empty execution id.</b> A
+    /// one-output transform passes on the execution id it received. A splitter or an entry step opens
+    /// one per output. Two outputs under one id share one key and the second overwrites the first;
+    /// <see cref="Guid.Empty"/> is refused outright.
     /// </para>
     /// <para>
-    /// <b>The entry id is random, and that is a decision with a cost.</b> A redelivered dispatch
-    /// replays this call and mints a <i>different</i> id, so the replay writes a second blob and
-    /// reports a second outcome — the successor subtree runs twice. Two things keep that narrow. The
-    /// input-key delete in <see cref="ProcessDispatchHandler"/> is an idempotence token: once it lands,
-    /// a redelivery reads the key absent and returns without re-running the author at all. And the
-    /// orchestrator reclaims each output blob it relocates, so the duplicate leaks nothing. What is
-    /// left is two reachable cases — the delete itself failing, and a source step, which has no key to
-    /// read or delete and therefore no token — where the author genuinely runs twice.
+    /// <b>An id minted in-process does not converge.</b> <see cref="NewExecutionId"/> is random, so a
+    /// replay of the same input opens a different lineage under a different key. A crash between this
+    /// call's write and its outcome then leaves the first key with no outcome naming it — an orphan
+    /// nothing ever deletes — and a replay after the outcome runs the successor subtree twice. An author
+    /// that wants convergence derives the id from what it received: the input's lineage, a record
+    /// header, a stable business key. See limit 4 of the in-process post design.
     /// </para>
     /// <para>
-    /// <b>That is safe exactly as far as authors are pure transforms.</b> A duplicate run of a
-    /// transform computes the same answer twice and wastes cycles; a duplicate run of a step that
-    /// writes a row or calls an API does it twice, and nothing here records that it did. Deriving the
-    /// id from the dispatch instead would make the replay rewrite the same key and converge — that is
-    /// what this used to do — and it is the change to make if an author with side effects ever lands.
-    /// It is four lines in this method and no author code.
+    /// <b>No data is a branch too.</b> <paramref name="processedData"/> null or empty writes <c>""</c>
+    /// under the branch's key, skips the output schema and reports Completed. It still counts as
+    /// having sent a branch. An author that intends to pass data on must check that it is non-empty.
     /// </para>
     /// <para>
-    /// The author supplies <paramref name="executionId"/>, because how many lineages a fan-out opens
-    /// is a decision only they can make. <see cref="NewExecutionId"/> mints one.
+    /// <b>Never catch <see cref="PostSendException"/>.</b> It must propagate: the framework redelivers
+    /// the dispatch and replays the author, which is a duplicate. Swallowing it, or rethrowing it as
+    /// <see cref="FailedException"/>, reports a success as a failure. This system always takes the
+    /// duplicate.
     /// </para>
     /// </summary>
     protected async Task SendToPostAsync(byte[]? processedData, Guid executionId, CancellationToken ct)
     {
-        // NO DATA IS A LEGAL BRANCH (spec D4). Null and empty are the same thing, and null never
-        // reaches the wire. A no-data branch names no L2 key: Guid.Empty is the sentinel every hop
-        // already reads as "no blob", so the post handler writes nothing and the orchestrator reads
-        // nothing. An author that means to pass data on must check it is non-empty BEFORE calling
-        // this -- an empty document sent by mistake is a Completed step with no output.
+        // Every output under Guid.Empty would derive one shared key. An author error, raised inside
+        // the dispatch so the framework reports the step Failed and the log names the cause.
+        if (executionId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "SendToPostAsync needs a non-empty execution id: pass on the one the dispatch carries, "
+                + "or open one per output (NewExecutionId, a record header, a business key).",
+                nameof(executionId));
+        }
+
+        // NO DATA IS A LEGAL BRANCH (spec D4). Null and empty are the same thing.
         var data = processedData ?? [];
 
         var state = Current;
-        var entryId = data.Length == 0 ? Guid.Empty : Guid.NewGuid();
+        var entryId = EntryIds.Branch(state.InputEntryId, state.WorkflowId, state.StepId, executionId);
 
         var branch = new ProcessedData(
             state.CorrelationId, executionId, state.WorkflowId, state.StepId, state.ProcessorId,
@@ -167,44 +167,37 @@ public abstract class BaseProcessor
 
         try
         {
-            // The POST queue, not the work queue. A branch is the idempotent half of this hop -- the
-            // handler that takes it writes L2[EntryId] = Data from the message alone -- so it gets its
-            // own delivery, its own retry and its own dead-letter queue. It also keeps branch work off
-            // the lane an author occupies: prefetch is 1 per consumer, and an author is the one stage
-            // here with no bound on how long it holds its slot. See ProcessorQueues.Post.
-            await state.Sender
-                .SendTransientAsync(ProcessorQueues.Post(state.ProcessorId), MessageTypes.ProcessedData, branch, ct)
-                .ConfigureAwait(false);
+            // AWAITED, IN-PROCESS. The post queue carried the whole output in a message, which the
+            // organisation's message-size cap no longer allows. The dispatch reclaims its input and
+            // acks only after the author returns, so this call returning — branch in L2, outcome
+            // confirmed — replaces the durable copy the queue used to hold.
+            await state.Sink.FinishAsync(branch, ct).ConfigureAwait(false);
 
-            // AFTER the send returns, never before it, and inside the try rather than after the catch.
-            // The flag means "a branch reached the post queue", which is the only thing that makes a
-            // StepOutcome eventually arrive -- a send that threw produced no branch and must not mark
-            // one, or a dispatch whose every send failed would look, to the check in
+            // AFTER the call returns, never before it. The flag means "this branch's outcome is on its
+            // way", which is the only thing that makes the orchestrator advance — a call that threw
+            // must not mark one, or a dispatch whose every branch failed would look, to the check in
             // ProcessDispatchHandler, exactly like one that worked.
             state.MarkBranchSent();
         }
-        catch (TransientSendException ex)
+        catch (TransientSendException ex) when (ex is not OutputSchemaPendingException)
         {
-            // ONLY the already-classified fault is renamed. Naming it lets an author fanning out see
-            // which branch was lost, and it stays a TransientSendException, so the consumer still
-            // returns the dispatch to the queue.
-            //
-            // Catching Exception here instead would defeat the classification entirely: every
-            // TransientSendException maps to Requeue, so wrapping a deterministic fault — one
-            // SendFaultClassifier's allow-list deliberately declined to recognise — would requeue a
-            // branch that fails identically on every redelivery, forever. An unrecognised fault has
-            // to leave here raw so the dispatch parks where someone can look at it.
+            // ONLY the already-classified send fault is renamed. Naming it lets an author fanning out
+            // see which branch was lost, and it stays a TransientSendException, so the consumer still
+            // returns the dispatch to the queue. An unresolved output schema is already the requeue
+            // type and is not a send failure. A store fault is not caught at all: it must reach
+            // L2FaultClassifier raw, or the L2 gate would never close.
             throw new PostSendException(entryId, executionId, ex);
         }
     }
 
     /// <summary>
-    /// A fresh execution id for a branch. Use it wherever <c>Guid.NewGuid()</c> would otherwise go —
-    /// it is that call today, and keeping the seam means changing how a lineage is opened stays a
-    /// change to this one method rather than to every author.
+    /// A fresh, random execution id for a branch.
     /// <para>
-    /// It does not survive a replay, for the same reason and with the same consequences as the entry
-    /// id above: a redelivered dispatch opens a second lineage rather than reopening the first.
+    /// <b>It does not survive a replay.</b> A redelivered dispatch gets a different id, so its branch
+    /// gets a different key: a crash between the branch's write and its outcome orphans the first key
+    /// for good (no TTL, no sweeper), and a replay after the outcome runs the successor subtree twice.
+    /// Use it only where that is acceptable; an author that wants a replay to converge derives the id
+    /// from what it received instead. See <see cref="SendToPostAsync"/>.
     /// </para>
     /// </summary>
     protected Guid NewExecutionId()

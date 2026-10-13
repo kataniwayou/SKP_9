@@ -69,8 +69,10 @@ public sealed class ProcessDispatchHandlerTests
         // using directive and outranks the class of the same name pulled in by "using
         // BaseProcessor.Core.Processing;" — CS0118 otherwise. The generic form BaseProcessor<T> used
         // elsewhere in this test suite is unaffected because arity disambiguates it.
+        public RecordingLogger<BranchFinisher> FinisherLog { get; } = new();
+
         public ProcessDispatchHandler Build(BaseProcessor.Core.Processing.BaseProcessor processor)
-            => new(Redis, Sender, Context, processor, Log);
+            => new(Redis, Sender, Context, processor, new BranchFinisher(Redis, Sender, Context, FinisherLog), Log);
     }
 
     private static byte[] Body(ProcessDispatch d)
@@ -210,41 +212,57 @@ public sealed class ProcessDispatchHandlerTests
     }
 
     [Fact]
-    public async Task SendsANoDataBranchUnderAnEmptyEntryId()
+    public async Task ANoDataBranchWritesAnEmptyKeyAndReportsCompletedUnderIt()
     {
-        // D4: a send with no data names no L2 key. Guid.Empty is the sentinel every hop already reads
-        // as "no blob", so nothing downstream reads or writes L2 for this branch.
+        // §4: a no-data branch has a real key holding "". The key is derived from the input key and
+        // the execution id, like every branch.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
-        ProcessedData? branch = null;
-        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => branch = p),
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
         var probe = new Probe((_, p) => p.Send([]));
 
         await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
 
-        Assert.NotNull(branch);
-        Assert.Equal(Guid.Empty, branch.EntryId);
-        Assert.Empty(branch.Data);
-        Assert.Equal(E, branch.ExecutionId);
+        var key = EntryIds.Branch(E, W, S, E);
+        await h.Db.Received(1).StringSetAsync(
+            L2ProjectionKeys.ExecutionData(key), RedisValue.EmptyString, null, When.Always, CommandFlags.None);
+        Assert.Equal(StepResult.Completed, sent!.Result);
+        Assert.Equal(key, sent.EntryId);
     }
 
     [Fact]
-    public async Task TreatsANullSendAsNoDataAndPutsAnEmptyArrayOnTheWire()
+    public async Task TreatsANullSendAsNoData()
     {
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
-        ProcessedData? branch = null;
-        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => branch = p),
-                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
         var probe = new Probe((_, p) => p.SendNullable(null));
 
         await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
 
-        Assert.NotNull(branch);
-        Assert.NotNull(branch.Data);
-        Assert.Empty(branch.Data);
-        Assert.Equal(Guid.Empty, branch.EntryId);
+        await h.Db.Received(1).StringSetAsync(
+            L2ProjectionKeys.ExecutionData(EntryIds.Branch(E, W, S, E)), RedisValue.EmptyString,
+            null, When.Always, CommandFlags.None);
+    }
+
+    [Fact]
+    public async Task FinishesTheBranchBeforeReclaimingTheInput()
+    {
+        // The in-process hop replaces the durable post queue only if the input outlives it: the
+        // input is deleted after the branch is in L2 and its outcome confirmed, never before.
+        var h = new Harness();
+        h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
+        var order = new List<string>();
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(_ => order.Add("outcome")),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
+        h.Db.KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
+            .Returns(_ => { order.Add("reclaim"); return Task.FromResult(true); });
+        var probe = new Probe((d, p) => p.Send(d));
+
+        await h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None);
+
+        Assert.Equal(["outcome", "reclaim"], order);
     }
 
     [Fact]
@@ -385,9 +403,11 @@ public sealed class ProcessDispatchHandlerTests
         await Assert.ThrowsAsync<RedisConnectionException>(
             () => h.Build(probe).HandleAsync(Body(Dispatch(E)), CancellationToken.None));
 
-        // Only the branch send landed; the reclaim's fault escaped before any StepOutcome could be sent.
+        // The branch's own outcome was sent by the finisher, before the reclaim, and it is Completed;
+        // the reclaim's fault escaped without a Failed outcome being reported on top of it.
         await h.Sender.DidNotReceive().SendAsync(
-            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<StepOutcome>(), Arg.Any<CancellationToken>(),
+            Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Is<StepOutcome>(o => o.Result == StepResult.Failed), Arg.Any<CancellationToken>(),
             Arg.Any<string?>());
     }
 
@@ -642,7 +662,7 @@ public sealed class ProcessDispatchHandlerTests
         // Reporting failure here would acknowledge the dispatch, and the branch would never be sent.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
-        h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<ProcessedData>(),
+        h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<StepOutcome>(),
                            Arg.Any<CancellationToken>(), Arg.Any<string?>())
                 .ThrowsAsync(new IOException("socket closed"));
         var probe = new Probe((_, self) => self.Send(Encoding.UTF8.GetBytes("{}")));
@@ -676,15 +696,12 @@ public sealed class ProcessDispatchHandlerTests
     }
 
     [Fact]
-    public async Task CarriesTheDispatchsProcessorIdOntoEveryBranch()
+    public async Task CarriesTheDispatchsProcessorIdOntoEveryBranchsOutcome()
     {
-        // The same pass-through on the branch path, which also decides where the branch is SENT:
-        // SendToPostAsync addresses ProcessorQueues.Post(state.ProcessorId). That is the one place the
-        // substitution is observable rather than cosmetic, so it is pinned separately.
         var h = new Harness();
         h.Db.StringGetAsync(L2ProjectionKeys.ExecutionData(E)).Returns((RedisValue)"{}");
-        ProcessedData? sent = null;
-        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(p => sent = p),
+        StepOutcome? sent = null;
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<StepOutcome>(o => sent = o),
                                  Arg.Any<CancellationToken>(), Arg.Any<string?>());
         var probe = new Probe((_, self) => self.Send(Encoding.UTF8.GetBytes("{}")));
 
@@ -692,9 +709,8 @@ public sealed class ProcessDispatchHandlerTests
         await h.Build(probe).HandleAsync(Body(Dispatch(E) with { ProcessorId = foreign }), CancellationToken.None);
 
         Assert.Equal(foreign, sent!.ProcessorId);
-        await h.Sender.Received(1).SendAsync(ProcessorQueues.Post(foreign), MessageTypes.ProcessedData,
-                                             Arg.Any<ProcessedData>(), Arg.Any<CancellationToken>(),
-                                             Arg.Any<string?>());
+        await h.Sender.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<ProcessedData>(),
+                                                 Arg.Any<CancellationToken>(), Arg.Any<string?>());
     }
 
     [Fact]

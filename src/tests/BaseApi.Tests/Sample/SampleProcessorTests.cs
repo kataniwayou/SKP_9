@@ -28,7 +28,7 @@ public sealed class SampleProcessorTests
     {
         var sender = Substitute.For<IQueueSender>();
         var processor = new SampleProcessor(Log);
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
         return (processor, sender);
     }
 

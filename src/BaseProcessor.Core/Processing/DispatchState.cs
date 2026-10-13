@@ -1,28 +1,26 @@
-using Messaging.Transport;
-
 namespace BaseProcessor.Core.Processing;
 
 /// <summary>
-/// Everything the seam helpers need about the dispatch currently being handled: the sender to reach
-/// the post queue with, and the four ids every branch is stamped with.
+/// Everything the seam helpers need about the dispatch currently being handled: where a finished
+/// branch goes, the input key branch ids are derived from, and the four ids every branch is stamped
+/// with.
 /// <para>
-/// <b>The dispatch's own entry id is not here, and its absence is load-bearing information.</b> It
-/// used to be, as the seed a branch's derived id was built from. Branch ids are now minted with
-/// <see cref="Guid.NewGuid"/>, so nothing in the seam reads it — and the reclaim that <i>does</i> read
-/// it takes it straight off the <c>ProcessDispatch</c> in
-/// <see cref="ProcessDispatchHandler"/>, never from here. Carrying it anyway would leave a field that
-/// looks like it feeds the ids on the way out, which is exactly what it no longer does.
+/// <b>The dispatch's own entry id is back, and it is load-bearing again.</b> A branch's key is
+/// <see cref="Messaging.Contracts.EntryIds.Branch"/> of this input key and the branch's execution id,
+/// so a replayed dispatch derives the same keys and L2 converges. <see cref="Guid.Empty"/> means an
+/// entry step dispatched by the fire, which has no input key; the formula then falls back to the
+/// workflow and step ids. The reclaim still takes the key straight off the <c>ProcessDispatch</c> in
+/// <see cref="ProcessDispatchHandler"/>.
 /// </para>
 /// <para>
-/// <b>No sequence counters either, for the same reason.</b> Two of them lived here so that a branch's
-/// position in the call sequence could separate one derived id from the next without either counter
-/// depending on the other's history. Randomness separates the branches now, at the cost that a
-/// replayed dispatch mints new ids rather than the ones it minted before — see
-/// <see cref="BaseProcessor.SendToPostAsync"/> for what that costs and why it is accepted.
+/// <b>No sequence counters.</b> The execution id separates one branch from the next — the author's
+/// contract is a distinct execution id per output — so a position counter would add nothing but a
+/// dependency on call order.
 /// </para>
 /// </summary>
 internal sealed class DispatchState(
-    IQueueSender sender,
+    IBranchSink sink,
+    Guid inputEntryId,
     Guid correlationId,
     Guid workflowId,
     Guid stepId,
@@ -30,7 +28,8 @@ internal sealed class DispatchState(
 {
     private bool _branchSent;
 
-    public IQueueSender Sender { get; } = sender;
+    public IBranchSink Sink { get; } = sink;
+    public Guid InputEntryId { get; } = inputEntryId;
     public Guid CorrelationId { get; } = correlationId;
     public Guid WorkflowId { get; } = workflowId;
     public Guid StepId { get; } = stepId;
@@ -57,6 +56,6 @@ internal sealed class DispatchState(
     /// </summary>
     public bool BranchSent => Volatile.Read(ref _branchSent);
 
-    /// <summary>Records that a branch reached the post queue. Called only after the send returns.</summary>
+    /// <summary>Records that a branch was finished. Called only after the sink returns.</summary>
     internal void MarkBranchSent() => Volatile.Write(ref _branchSent, true);
 }

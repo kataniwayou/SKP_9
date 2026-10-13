@@ -29,7 +29,7 @@ public sealed class ArchiveExpanderEnvelopeTests
         var processor = new ArchiveExpanderProcessor(
             new RecordingLogger<ArchiveExpanderProcessor>(),
             new FileContentBuilder([], Options.Create(new ArchiveExpanderOptions())));
-        processor.BeginDispatch(new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(Substitute.For<IQueueSender>(), C, W, S, P));
         return processor;
     }
 

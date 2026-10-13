@@ -81,7 +81,7 @@ public sealed class FilePersisterTests : IDisposable
         var processor = new FilePersisterProcessor(
             new RecordingLogger<FilePersisterProcessor>(),
             Options.Create(options ?? new FilePersisterOptions()));
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         // payload! because the NULL case is exactly what one test here exercises: ExecuteAsync
         // declares it non-nullable, and the processor's own guard is what must answer for it.
@@ -323,7 +323,7 @@ public sealed class FilePersisterTests : IDisposable
         var fetched = new List<ProcessedData>();
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(fetched.Add),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
-        fetcher.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        fetcher.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await fetcher.ExecuteAsync(
             JsonSerializer.SerializeToUtf8Bytes(new { filePath = source }),

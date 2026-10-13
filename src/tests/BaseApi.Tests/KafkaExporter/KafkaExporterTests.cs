@@ -30,7 +30,7 @@ public sealed class KafkaExporterTests
         var log = new RecordingLogger<KafkaExporterProcessor>();
         var sender = Substitute.For<IQueueSender>();
         var processor = new KafkaExporterProcessor(factory, log);
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
         return (processor, sender, log);
     }
 
@@ -73,7 +73,8 @@ public sealed class KafkaExporterTests
 
         var branch = Assert.Single(branches);
         Assert.Empty(branch.Data);
-        Assert.Equal(Guid.Empty, branch.EntryId);
+        // A no-data branch has a real, derived key now (it holds ""), like every branch.
+        Assert.Equal(EntryIds.Branch(Guid.Empty, W, S, E), branch.EntryId);
         Assert.Equal(E, branch.ExecutionId);
     }
 

@@ -31,7 +31,7 @@ public sealed class FileFetcherLocatorTests
         var processor = new FileFetcherProcessor(
             new RecordingLogger<FileFetcherProcessor>(),
             Options.Create(new FileFetcherOptions()));
-        processor.BeginDispatch(new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(Substitute.For<IQueueSender>(), C, W, S, P));
         return processor;
     }
 

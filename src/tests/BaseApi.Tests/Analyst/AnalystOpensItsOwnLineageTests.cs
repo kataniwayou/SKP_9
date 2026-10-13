@@ -1,3 +1,4 @@
+using BaseApi.Tests.Support;
 using BaseProcessor.Core.Processing;
 using Messaging.Contracts;
 using Messaging.Transport;
@@ -50,7 +51,7 @@ public sealed class AnalystOpensItsOwnLineageTests
                 new FakeTimeProvider(), NullLogger<InvestigationLoop>.Instance),
             NullLogger<AnalystProcessor>.Instance);
 
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await processor.ExecuteAsync(
             [], System.Text.Json.JsonSerializer.Serialize(new

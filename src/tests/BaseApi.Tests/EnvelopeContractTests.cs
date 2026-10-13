@@ -98,7 +98,7 @@ public sealed class EnvelopeContractTests : IDisposable
         var fetcher = new FileFetcherProcessor(
             new RecordingLogger<FileFetcherProcessor>(),
             Options.Create(new FileFetcherOptions()));
-        fetcher.BeginDispatch(new BaseProcessor.Core.Processing.DispatchState(sender, C, W, S, P));
+        fetcher.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await fetcher.ExecuteAsync(
             Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
@@ -123,7 +123,7 @@ public sealed class EnvelopeContractTests : IDisposable
                 // matches nothing in the rar extractor and is unaffected.
                 [new ZipExtractor(), new RarExtractor()],
                 Options.Create(new ArchiveExpanderOptions())));
-        expander.BeginDispatch(new BaseProcessor.Core.Processing.DispatchState(sender, C, W, S, P));
+        expander.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await expander.ExecuteAsync(envelope, payload, E, CancellationToken.None);
 
@@ -192,7 +192,7 @@ public sealed class EnvelopeContractTests : IDisposable
             l2.Multiplexer,
             new RecordingLogger<RedisFieldWhitelist>());
 
-        normalizer.BeginDispatch(new BaseProcessor.Core.Processing.DispatchState(sender, C, W, S, P));
+        normalizer.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await normalizer.ExecuteAsync(
             document,
@@ -235,7 +235,7 @@ public sealed class EnvelopeContractTests : IDisposable
                 new ZipWriter(),
                 new TarWriter(),
             ]));
-        collapser.BeginDispatch(new BaseProcessor.Core.Processing.DispatchState(sender, C, W, S, P));
+        collapser.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         // The payload is empty and that is not an oversight: this processor reads none.
         await collapser.ExecuteAsync(document, string.Empty, E, CancellationToken.None);

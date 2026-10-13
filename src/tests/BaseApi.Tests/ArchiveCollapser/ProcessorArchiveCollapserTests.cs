@@ -41,7 +41,7 @@ public sealed class ProcessorArchiveCollapserTests
         var processor = new ArchiveCollapserProcessor(
             new RecordingLogger<ArchiveCollapserProcessor>(),
             new ArchiveBuilder([new ZipWriter(), new TarWriter()]));
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await processor.ExecuteAsync(data, payload, E, CancellationToken.None);
 
@@ -62,7 +62,7 @@ public sealed class ProcessorArchiveCollapserTests
 
         var log = new RecordingLogger<ArchiveCollapserProcessor>();
         var processor = new ArchiveCollapserProcessor(log, new ArchiveBuilder([new ZipWriter(), new TarWriter()]));
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await processor.ExecuteAsync(data, payload, E, CancellationToken.None);
 

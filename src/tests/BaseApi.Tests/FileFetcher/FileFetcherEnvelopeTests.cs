@@ -42,7 +42,7 @@ public sealed class FileFetcherEnvelopeTests : IDisposable
 
         var processor = new FileFetcherProcessor(
             new RecordingLogger<FileFetcherProcessor>(), Options.Create(new FileFetcherOptions()));
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await processor.ExecuteAsync(
             Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),

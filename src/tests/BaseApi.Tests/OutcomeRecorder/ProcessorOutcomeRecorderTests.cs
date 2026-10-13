@@ -33,7 +33,7 @@ public sealed class ProcessorOutcomeRecorderTests
         var processor = new OutcomeRecorderProcessor(
             new RecordingLogger<OutcomeRecorderProcessor>(),
             new FakeTimeProvider(Now));
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await processor.ExecuteAsync(data, payload, executionId, CancellationToken.None);
 
@@ -54,7 +54,7 @@ public sealed class ProcessorOutcomeRecorderTests
 
         var log = new RecordingLogger<OutcomeRecorderProcessor>();
         var processor = new OutcomeRecorderProcessor(log, new FakeTimeProvider(Now));
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await processor.ExecuteAsync(data, payload, executionId, CancellationToken.None);
 

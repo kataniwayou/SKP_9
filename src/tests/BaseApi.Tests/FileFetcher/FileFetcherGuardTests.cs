@@ -39,7 +39,7 @@ public sealed class FileFetcherGuardTests : IDisposable
         var processor = new FileFetcherProcessor(
             new RecordingLogger<FileFetcherProcessor>(),
             Options.Create(new FileFetcherOptions { MaxFileSizeBytes = podCeiling }));
-        processor.BeginDispatch(new DispatchState(Substitute.For<IQueueSender>(), C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(Substitute.For<IQueueSender>(), C, W, S, P));
         return processor;
     }
 

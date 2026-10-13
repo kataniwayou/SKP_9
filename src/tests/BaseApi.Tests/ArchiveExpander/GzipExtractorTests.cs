@@ -212,7 +212,7 @@ public sealed class GzipExtractorTests
             new FileContentBuilder(
                 [new ZipExtractor(), new TarExtractor(), Extractor()],
                 Options.Create(new ArchiveExpanderOptions())));
-        processor.BeginDispatch(new DispatchState(sender, C, W, S, P));
+        processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         var sends = new List<ProcessedData>();
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
