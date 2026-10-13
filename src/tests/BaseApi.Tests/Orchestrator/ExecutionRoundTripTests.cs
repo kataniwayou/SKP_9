@@ -191,6 +191,26 @@ public sealed class ExecutionRoundTripTests
     }
 
     [Fact]
+    public async Task ACompletedOutcomeWhoseKeyHoldsNoDataAdvancesWithNoData()
+    {
+        // The processor now writes "" under a no-data branch's own key instead of reporting
+        // Guid.Empty. Read with IsNullOrEmpty that key looked absent — a duplicate — and the step's
+        // successors were never dispatched. Empty means "no data"; only absent means "already done".
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, "");
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+        await h.Drain();
+
+        var dispatch = h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Single();
+        Assert.Equal(B, dispatch.StepId);
+        Assert.Equal(Guid.Empty, dispatch.EntryId);
+        Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
+        Assert.DoesNotContain(h.PreLog.Records,
+            r => r.Message.Contains("duplicate delivery", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task EachSuccessorOfAFanOutGetsItsOwnCopyUnderItsOwnKey()
     {
         // The hazard both processor handlers document and refuse to defend against: three successors

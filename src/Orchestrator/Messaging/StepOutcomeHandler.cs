@@ -420,7 +420,8 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
 
     /// <summary>
     /// Reads the finished step's blob. Returns <c>null</c> when the key is absent, which the caller
-    /// treats as a duplicate delivery.
+    /// treats as a duplicate delivery, and an empty array
+    /// when the key holds no data.
     /// <para>
     /// <b>An absent key is acked, matching the processor's pre handler.</b> This used to park, on the
     /// grounds that the key could equally have been removed by a previous attempt at this outcome or
@@ -463,7 +464,11 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
             .StringGetAsync(L2ProjectionKeys.ExecutionData(entryId))
             .ConfigureAwait(false);
 
-        if (raw.IsNullOrEmpty)
+        // IsNull, NOT IsNullOrEmpty. Redis keeps "" as a value and answers Null only for a missing
+        // key, and the processor writes "" under a no-data branch's own key: absent is a duplicate,
+        // empty is a step that finished with nothing to hand on. Reading "" as absent dropped that
+        // step's successors as a duplicate. See §4 of the in-process post design.
+        if (raw.IsNull)
         {
             // Null, not an exception: the caller returns without advancing or reclaiming, and the
             // consumer acks. Matches ProcessDispatchHandler's "entry absent" branch, which is the
