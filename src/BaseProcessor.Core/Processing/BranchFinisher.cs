@@ -11,12 +11,12 @@ namespace BaseProcessor.Core.Processing;
 
 /// <summary>
 /// Finishes one branch, in-process: validate the output, write it under the branch's own key, report
-/// the outcome. What <c>ProcessedDataHandler</c> did on the post queue, minus the queue.
+/// the outcome.
 /// <para>
-/// <b>Why there is no queue any more.</b> The organisation caps RabbitMQ's message size, and the post
-/// queue carried the whole output inside every message. The queue's durability was what let the
-/// dispatch reclaim its input and ack right after the send; here the dispatch does not reclaim or ack
-/// until this call returns, so the work's completion replaces the durable copy. See
+/// <b>Why there is no queue.</b> The organisation caps RabbitMQ's message size, and a post queue
+/// would have to carry the whole output inside every message. A queue's durability is what would let
+/// the dispatch reclaim its input and ack right after the send; here the dispatch does not reclaim or
+/// ack until this call returns, so the work's completion is the durable copy. See
 /// <c>docs/superpowers/specs/2026-10-12-in-process-post-derived-keys-design.md</c>.
 /// </para>
 /// <para>

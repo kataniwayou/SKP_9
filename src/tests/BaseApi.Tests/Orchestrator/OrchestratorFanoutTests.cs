@@ -55,7 +55,7 @@ public sealed class OrchestratorFanoutTests
         {
             var name = OrchestratorFanout.PerReplica(id);
             Assert.NotEqual(OrchestratorQueues.Result, name);
-            Assert.NotEqual(OrchestratorQueues.ResultPost, name);
+            Assert.NotEqual(OrchestratorQueues.ResultDead, name);
             Assert.NotEqual(OrchestratorQueues.Control, name);
         }
     }

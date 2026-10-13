@@ -6,13 +6,13 @@
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "BoCXUIaJ9SZhGVlzqVYea3FLeRylFSCSwgijZcZ1Eqp0ssa7nv9FlbXOat9TSOBsNnS4EoaKaNT+QXj3GGciXw=="
+        "contentHash": "HK6B2c3FiMOF7DC5b8BNPCK003YwBRMI1H+SsRdicFt6VFduAdKXekMvLbMSFTUE77K8bEr18yceBkzET5upQg=="
       },
       "Messaging.Transport": {
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "MDSVmMO9pGYua+/gMY/fpXYrcq0jYXNAx70CYbsb2ckIsjvt1jP6MkY+5ZFWv8Xba9Hql7Dd3BDE/PJ2juCciQ==",
+        "contentHash": "KkTSPmybDzYLPLc0PuKeQslGGpNn76xawWu7JJ+zxo45spQtqEGM3UMkSrq903cTnE0j5/TbauPwj5P3AJKfcg==",
         "dependencies": {
           "Messaging.Contracts": "[1.0.0]",
           "Microsoft.Extensions.Hosting.Abstractions": "8.0.1",

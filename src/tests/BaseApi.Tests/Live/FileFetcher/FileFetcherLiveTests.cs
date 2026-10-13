@@ -151,7 +151,7 @@ public sealed class FileFetcherLiveTests
             // never reaches the reader: KafkaImporter's OWN output validation refuses the record and
             // the lineage ends at the first hop, with every test here timing out on a chain that
             // never ran. Observed as
-            //   warn ProcessedDataHandler: output failed its schema -- reported failed: /providerName:
+            //   warn BranchFinisher: output failed its schema -- reported failed: /providerName:
             //
             // The guarantee the old field tested has not been lost, it moved and got stronger: an
             // unexpected key used to be dropped downstream, and is now refused at the edge.

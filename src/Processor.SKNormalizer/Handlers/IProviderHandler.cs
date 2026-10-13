@@ -6,7 +6,7 @@ namespace Processor.SKNormalizer;
 /// <b>EVERY MEMBER IS ABOUT CONTENT. None validates a schema and none needs to.</b> Schema
 /// validation happens at exactly two points, both in the framework and neither reachable from here:
 /// <c>ProcessDispatchHandler</c> validates the input before this processor is entered, and
-/// <c>ProcessedDataHandler</c> validates the output after the send. A handler is handed data already
+/// <c>BranchFinisher</c> validates the output after the send. A handler is handed data already
 /// proven to fit its contract, and its result is proven again on the way out.
 /// </para>
 /// <para>

@@ -62,7 +62,7 @@ public sealed class ProcessorLivenessWriter
             // Liveness first: it is what the start gate reads, so a failure of the name write below (a
             // WRONGTYPE against a pre-migration key, a timeout) must not cost it.
             //
-            // When/flags passed explicitly, matching ProcessedDataHandler. Behaviourally identical to
+            // When/flags passed explicitly, matching the other Redis writers here. Behaviourally identical to
             // the bare three-argument call, but StackExchange.Redis overloads that shape between a
             // keepTtl-bool overload and an Expiration-struct one — the compiler picks silently, and
             // that trap has already produced a test here that matched a method the code never called.

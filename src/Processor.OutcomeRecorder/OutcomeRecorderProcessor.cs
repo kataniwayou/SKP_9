@@ -11,15 +11,16 @@ namespace Processor.OutcomeRecorder;
 /// only a log line nobody is watching.
 /// <para>
 /// <b>IT DOES NOT KNOW WHICH OUTCOME DISPATCHED IT, AND IT DOES NOT NEED TO.</b>
-/// <see cref="NextStepHandoff"/> carries no result — the predecessor's outcome is consumed by
+/// The dispatch it receives carries no result — the predecessor's outcome is consumed by
 /// <c>StepAdvancement.SelectNext</c> and discarded — so nothing here can branch on the reason, and
 /// nothing does. That is why the name is the generic one: the entry condition a workflow wires this
 /// on is the workflow's business, and this processor behaves identically on every one of them.
 /// The reason lives in the failing or cancelling step's own log line, resolved by correlation id.
 /// </para>
 /// <para>
-/// <b>It reads nothing and queries nothing.</b> It no longer receives the predecessor's input blob:
-/// a Failed or Cancelled predecessor's successors get an empty key (<c>""</c> — no data). It does
+/// <b>It reads nothing and queries nothing.</b> It does not rely on the predecessor's data: a Failed
+/// or Cancelled predecessor's successors get an empty key (<c>""</c> — no data), and a Completed
+/// edge gets a COPY of the predecessor's output, which this processor leaves unread. It does
 /// not query Elasticsearch either — it runs milliseconds after the outcome, and the line carrying
 /// the reason is the last one the predecessor's pod writes and the furthest from being indexed.
 /// </para>

@@ -74,7 +74,7 @@ public sealed class DeadLetterConventionTests
         { "OrchestrationTopology (API control pair)", () => new OrchestrationTopology() },
         { "OrchestratorTopology (replica + shared pairs)",
             () => new OrchestratorTopology(new InstanceId("orchestrator-0")) },
-        { "ProcessorTopology (work + post pairs)", () => new ProcessorTopology(P) },
+        { "ProcessorTopology (work pair)", () => new ProcessorTopology(P) },
     };
 
     [Theory]

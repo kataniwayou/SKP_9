@@ -66,21 +66,4 @@ public static class OrchestratorQueues
 
     /// <summary>Where <see cref="Result"/> parks a message it refuses.</summary>
     public const string ResultDead = "orchestrator-result.dead";
-
-    /// <summary>
-    /// Pre-to-post fan-out queue. The pre stage sends one <see cref="NextStepHandoff"/> per matched
-    /// successor here, and the post consumer writes that successor's input key and dispatches it.
-    /// <para>
-    /// <b>A separate hop rather than dispatching inline, because a fan-out is N sends that must not
-    /// half-happen.</b> Dispatching successors directly from the pre hop would leave a failure after
-    /// the second of three sends with no way to finish: the source blob is still there, so the retry
-    /// re-sends all three, and the two that already landed run twice. Splitting at the queue makes
-    /// each successor its own delivery with its own retry, and leaves the pre hop with a single
-    /// idempotent job — copy the blob out, hand off, reclaim.
-    /// </para>
-    /// </summary>
-    public const string ResultPost = "orchestrator-result-post";
-
-    /// <summary>Where <see cref="ResultPost"/> parks a message it refuses.</summary>
-    public const string ResultPostDead = "orchestrator-result-post.dead";
 }

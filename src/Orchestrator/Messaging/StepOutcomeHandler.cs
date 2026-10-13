@@ -179,21 +179,20 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
             throw new InvalidOperationException(DescribeL1Miss(_store, m.WorkflowId, m.StepId));
         }
 
-        // PROVENANCE. The sibling of the guard ProcessedDataHandler carries on the branch hop, and
-        // it exists for the same reason: orchestrator-result is an addressable queue on a shared
-        // broker, this handler is resolved by message type across the whole container, and
+        // PROVENANCE. The guard on the shared result queue: orchestrator-result is an addressable
+        // queue on a shared broker, this handler is resolved by message type across the whole container, and
         // everything below acts on the ids in the body — it checks the key under EntryId exists,
         // copies it to the successors' keys, dispatches them, and reclaims. Until now nothing
-        // compared the message against anything but the existence of its workflow and step, so an outcome naming a real workflow and a real
-        // step could be minted by anyone and would advance that workflow.
+        // compared the message against anything but the existence of its workflow and step, so an
+        // outcome naming a real workflow and a real step could be minted by anyone and would advance
+        // that workflow.
         //
         // L1 is the authority the processor's own identity is on the other side: StepL1.ProcessorId
         // is "the processor that executes this step", and every legitimate outcome carries it. All
         // senders are covered — BranchFinisher (the processors' outcomes) carries its own processor
         // identity, and the dispatch that named it was addressed to processor-{L1.ProcessorId};
         // ProcessDispatchHandler's Failed/Cancelled outcomes and this handler's own per-successor
-        // failure reports (below) carry the id read from this same field; NextStepHandoffHandler's,
-        // while it drains release-1 hand-offs, the id this orchestrator put in the hand-off.
+        // failure reports (below) carry the id read from this same field.
         //
         // NOT RECLAIMED BEFORE PARKING, and that is the one place this deliberately departs from the
         // L1-miss branch above. That branch reclaims to avoid leaking a blob. Here the message has

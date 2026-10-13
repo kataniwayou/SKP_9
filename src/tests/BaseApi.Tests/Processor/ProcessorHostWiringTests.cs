@@ -157,7 +157,7 @@ public sealed class ProcessorHostWiringTests
     }
 
     [Fact]
-    public async Task BothQueueProbesRunAsHostedServices()
+    public async Task TheQueueAndDeadLetterProbesRunAsHostedServices()
     {
         // These two answer different questions -- what is WAITING and what was REFUSED -- and both
         // are invisible from outside the process when absent. A missing dead-letter probe is the
@@ -173,26 +173,22 @@ public sealed class ProcessorHostWiringTests
 
         var hosted = sp.GetServices<IHostedService>().ToList();
         Assert.Contains(hosted, h => h is QueueDepthProbe);
-        Assert.Contains(hosted, h => h is DeadLetterDepthProbe);
+        // One dead-letter queue to probe now (processor-{id}.dead), not one per live queue.
+        Assert.Single(hosted.OfType<DeadLetterDepthProbe>());
     }
 
     [Fact]
-    public async Task BothQueuesGetTheirOwnGatedConsumer()
+    public async Task TheWorkQueueGetsExactlyOneGatedConsumer()
     {
-        // TWO consumers, one per queue, and the count is the assertion. AddGatedQueue's own remarks
-        // spell out the trap this guards: AddHostedService registers through TryAddEnumerable, which
-        // de-duplicates on IMPLEMENTATION TYPE -- so a second registration naming GatedQueueConsumer
-        // would be silently dropped, the post queue would never be consumed, and nothing anywhere
-        // would say so. Branches would pile up on a queue with no consumer while every probe stayed
-        // green.
-        //
-        // A count rather than a Contains: one consumer satisfies Contains just as well as two, which
-        // is precisely the failure being guarded against.
+        // ONE consumer, on the work queue, and the count is the assertion. The post queue (and its
+        // second consumer) went with the in-process post hop, so a second GatedQueueConsumer here
+        // would be a consumer on a queue that no longer exists -- or a re-introduced post hop. A count
+        // rather than a Contains pins both directions.
         await using var sp = BuildWithIdentity();
 
         var consumers = sp.GetServices<IHostedService>().OfType<GatedQueueConsumer>().ToList();
 
-        Assert.Equal(2, consumers.Count);
+        Assert.Single(consumers);
     }
 
     [Fact]
@@ -270,8 +266,9 @@ public sealed class ProcessorHostWiringTests
         var sink = sp.GetRequiredService<BaseProcessor.Core.Processing.IBranchSink>();
         Assert.IsType<BaseProcessor.Core.Processing.BranchFinisher>(sink);
         Assert.Same(sink, scope.ServiceProvider.GetRequiredService<BaseProcessor.Core.Processing.IBranchSink>());
-        Assert.Contains(scope.ServiceProvider.GetServices<IQueueMessageHandler>(),
-                        h => h is BaseProcessor.Core.Processing.ProcessDispatchHandler);
+        // The dispatch handler is the only handler: the processed-data drain is gone.
+        var handler = Assert.Single(scope.ServiceProvider.GetServices<IQueueMessageHandler>());
+        Assert.IsType<BaseProcessor.Core.Processing.ProcessDispatchHandler>(handler);
     }
 
     private sealed record WiringStubConfig : BaseProcessor.Core.Configuration.ProcessorConfig;

@@ -121,7 +121,8 @@ public sealed class SampleProcessor(ILogger<SampleProcessor> logger) : BaseProce
                 // message, recording a business outcome that never happened while the work is silently
                 // lost. The replay re-sends the branches that did land: under fresh ids for the entry
                 // step, which mints them, but a downstream step's replay rewrites the same derived keys;
-                // that is the accepted cost of a transient here, and it is why this transform stays side-effect free.
+                // that is the accepted cost of a transient here, and it is why this transform stays
+                // side-effect free.
                 throw;
             }
         }

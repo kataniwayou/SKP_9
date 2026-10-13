@@ -172,7 +172,7 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
             // while every failure line here sat at Information a severity filter could not find one —
             // only a text match could. The transform-faulted line below was already Warning; these are
             // brought up to meet it.
-            // The schema id, for the reason its twin in ProcessedDataHandler carries one: the edge is
+            // The schema id, for the reason its twin in BranchFinisher carries one: the edge is
             // a shared row that gets re-pointed, so the errors alone cannot say whether the document
             // was wrong or the contract moved under it.
             // Scoped rather than templated, matching every outcome-bearing line below: appending
@@ -298,7 +298,7 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         // the framework enforces (spec D3).
         var forgotToSend = ran && !state.BranchSent;
 
-        // The input is reclaimed HERE rather than in the post handler, and only after the author's
+        // The input is reclaimed HERE rather than per branch in BranchFinisher, and only after the author's
         // transform returned normally having sent. A fan-out sends N branches from inside one
         // ProcessAsync; the return is the only signal that all N went out. Reclaiming per branch
         // instead would delete the input after branch 1, so a failed branch-2 send would requeue a

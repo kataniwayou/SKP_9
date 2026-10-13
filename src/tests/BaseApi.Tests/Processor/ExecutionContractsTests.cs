@@ -31,7 +31,7 @@ public sealed class ExecutionContractsTests
     [Fact]
     public void ProcessedDataCarriesItsBytesUnchanged()
     {
-        // Data is the ground truth the post handler writes to L2. A round trip that alters a byte
+        // Data is the ground truth the in-process branch finisher writes to L2. A round trip that alters a byte
         // would corrupt every downstream step with nothing to show for it.
         var payload = new byte[] { 0x7b, 0x22, 0x61, 0x22, 0x3a, 0x31, 0x7d };
         var sent = new ProcessedData(C, E, W, S, P, Guid.NewGuid(), payload);
@@ -79,7 +79,7 @@ public sealed class ExecutionContractsTests
     [Fact]
     public void EveryWireTypeIsDistinct()
     {
-        string[] types = [MessageTypes.ProcessDispatch, MessageTypes.ProcessedData, MessageTypes.StepOutcome];
+        string[] types = [MessageTypes.ProcessDispatch, MessageTypes.StepOutcome];
 
         Assert.Equal(types.Length, types.Distinct(StringComparer.Ordinal).Count());
     }

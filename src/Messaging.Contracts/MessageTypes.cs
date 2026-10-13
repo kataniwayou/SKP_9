@@ -47,9 +47,6 @@ public static class MessageTypes
     /// <summary>Body is a <see cref="Messaging.Contracts.ProcessDispatch"/>.</summary>
     public const string ProcessDispatch = "process-dispatch";
 
-    /// <summary>Body is a <see cref="Messaging.Contracts.ProcessedData"/>.</summary>
-    public const string ProcessedData = "processed-data";
-
     /// <summary>
     /// Body is a <see cref="Messaging.Contracts.StepOutcome"/> — one type for all three terminals,
     /// which is why the discriminator rides the body rather than this header. A header-level split
@@ -57,9 +54,6 @@ public static class MessageTypes
     /// where it cannot be compared against a successor's entry condition without being mapped back.
     /// </summary>
     public const string StepOutcome = "step-outcome";
-
-    /// <summary>Body is a <see cref="Messaging.Contracts.NextStepHandoff"/>.</summary>
-    public const string NextStepHandoff = "next-step-handoff";
 
     /// <summary>Announcement: the API has projected a workflow into L2.</summary>
     public const string OrchestrationStarted = "orchestration-started";

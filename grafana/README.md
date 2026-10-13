@@ -1429,8 +1429,8 @@ graph.
 
 The co-location blind spot, third instance. A queue is measured by the process that probes
 it, and the orchestrator is the only process probing `orchestrator-control`,
-`orchestrator-result` and `orchestrator-result-post` — so when it is scaled to zero, those
-queues stop being observed by anything.
+`orchestrator-result` (and, until it was removed, `orchestrator-result-post`) — so when it
+is scaled to zero, those queues stop being observed by anything.
 
 **Measured, with broker truth beside the instrument every 15s.** The orchestrator was
 absent for ~64 seconds:
@@ -1537,11 +1537,10 @@ An earlier attempt gave the processor a static list of orchestrator queue names.
 and is gone: it coupled a processor to queues it never touches, and the API route closes the
 same gap while also giving the API a queue-side signal it never had.
 
-**Two queues remain single-observer, and both are inert.** `orchestrator-result-post` has
-the orchestrator as its only producer *and* its only consumer, so nothing accumulates there
-while the orchestrator is gone. The per-replica fan-out queues
-`orchestrator-control.orchestrator-N` are named after a pod, so nothing else can name one,
-and each has exactly one consumer by design.
+**One kind of queue remains single-observer, and it is inert.** (A second, `orchestrator-result-post`,
+was removed with the in-process post hop; it had the orchestrator as its only producer and consumer.)
+The per-replica fan-out queues `orchestrator-control.orchestrator-N` are named after a pod, so
+nothing else can name one, and each has exactly one consumer by design.
 
 ## Known gap: the processor's dead-letter queue is not probed
 

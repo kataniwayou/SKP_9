@@ -82,14 +82,12 @@ public sealed class ProcessorTopologyTests
         Assert.Equal(ProcessorQueues.DeadLetterExchange, args["x-dead-letter-exchange"]);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task DeclaresBothPairsWithTheSameArguments(bool post)
+    [Fact]
+    public async Task DeclaresTheWorkPairWithTheDeadLetterArgumentsAndNothingElse()
     {
-        // The work pair and the post pair are declared by one helper, so the thing worth pinning is
-        // that BOTH come out identical apart from their names. A post queue that quietly lost its
-        // dead-letter exchange would discard every branch it refused, with no error anywhere.
+        // A work queue that quietly lost its dead-letter exchange would discard every dispatch it
+        // refused, with no error anywhere. It is also the ONLY pair declared: the post pair went with
+        // the in-process post hop, and a redeclare would recreate a queue nothing consumes.
         var channel = Substitute.For<IChannel>();
         var args = new Dictionary<string, IDictionary<string, object?>?>(StringComparer.Ordinal);
 
@@ -102,15 +100,18 @@ public sealed class ProcessorTopologyTests
 
         await new ProcessorTopology(P).DeclareAsync(channel, CancellationToken.None);
 
-        var live = post ? ProcessorQueues.Post(P) : ProcessorQueues.Work(P);
-        var dead = post ? ProcessorQueues.PostDead(P) : ProcessorQueues.Dead(P);
+        var live = ProcessorQueues.Work(P);
+        var dead = ProcessorQueues.Dead(P);
+
+        Assert.Equal(2, args.Count);
+        Assert.DoesNotContain(args.Keys, q => q.Contains("-post", StringComparison.Ordinal));
 
         var liveArgs = args[live]!;
         Assert.Equal("quorum", liveArgs["x-queue-type"]);
         Assert.Equal(-1, liveArgs["x-delivery-limit"]);
         Assert.Equal(ProcessorQueues.DeadLetterExchange, liveArgs["x-dead-letter-exchange"]);
         // The routing key is the LIVE queue's own name — this assembly's existing convention, kept so
-        // the two pairs agree with each other and with what is already on the broker.
+        // it agrees with what is already on the broker.
         Assert.Equal(live, liveArgs["x-dead-letter-routing-key"]);
 
         var deadArgs = args[dead]!;
@@ -123,8 +124,8 @@ public sealed class ProcessorTopologyTests
     [Fact]
     public async Task BindsEachDeadQueueUnderItsOwnLiveQueuesName()
     {
-        // One exchange serves both pairs, so the routing key is the only thing separating them. Get it
-        // wrong and a refused dispatch and a refused branch land in the same queue, or in neither.
+        // The routing key is what ties a refused dispatch to its dead queue. Get it wrong and the
+        // message lands in the wrong queue, or in none.
         var channel = Substitute.For<IChannel>();
         var binds = new List<(string Queue, string Exchange, string Key)>();
 
@@ -146,20 +147,6 @@ public sealed class ProcessorTopologyTests
         Assert.Contains(
             (ProcessorQueues.Dead(P), ProcessorQueues.DeadLetterExchange, ProcessorQueues.Work(P)),
             binds);
-        Assert.Contains(
-            (ProcessorQueues.PostDead(P), ProcessorQueues.DeadLetterExchange, ProcessorQueues.Post(P)),
-            binds);
-        Assert.Equal(2, binds.Count);
-    }
-
-    [Fact]
-    public void TheTwoPairsNeverShareAName()
-    {
-        // The whole change is worthless if these collapse to one string, and a typo in either format
-        // would do it silently — the topology would declare one queue twice, idempotently, and the
-        // branch hop would go back to sharing the author's lane with nothing to report it.
-        Assert.NotEqual(ProcessorQueues.Work(P), ProcessorQueues.Post(P));
-        Assert.NotEqual(ProcessorQueues.Dead(P), ProcessorQueues.PostDead(P));
-        Assert.Equal($"{ProcessorQueues.Post(P)}.dead", ProcessorQueues.PostDead(P));
+        Assert.Single(binds);
     }
 }

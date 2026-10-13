@@ -15,7 +15,7 @@ ONE KEY, AND IT IS NOT NEGOTIABLE FROM HERE. The registered file-locator schema 
 `required: ["filePath"]` with `additionalProperties: false`, so a second key is refused by
 KafkaImporter's OWN output validation and the lineage ends at the first hop, logged as
 
-    warn ProcessedDataHandler: output failed its schema -- reported failed: /providerName:
+    warn BranchFinisher: output failed its schema -- reported failed: /providerName:
 
 This script carried `{"path", "providerName"}` until 2026-09-11 and had been unusable against the
 registered row since the schema was tightened: `providerName` was refused as an unknown key and

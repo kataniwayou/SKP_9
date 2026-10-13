@@ -71,10 +71,10 @@ internal sealed class OrchestratorTopology(InstanceId instanceId) : IRabbitMqTop
             arguments: null,
             cancellationToken: ct).ConfigureAwait(false);
 
-        // The execution path. Unlike the announcement queue above, these two are SHARED: one name for
-        // the whole deployment, every replica a competing consumer on it. Each replica declares them
+        // The execution path. Unlike the announcement queue above, this one is SHARED: one name for
+        // the whole deployment, every replica a competing consumer on it. Each replica declares it
         // identically, which is idempotent at the broker and is what lets a replica that starts first
-        // serve them alone until the others arrive.
+        // serve it alone until the others arrive.
         await channel.ExchangeDeclareAsync(
             exchange: OrchestratorQueues.DeadLetterExchange,
             type: ExchangeType.Direct,
@@ -84,8 +84,6 @@ internal sealed class OrchestratorTopology(InstanceId instanceId) : IRabbitMqTop
             cancellationToken: ct).ConfigureAwait(false);
 
         await DeclareSharedAsync(channel, OrchestratorQueues.Result, OrchestratorQueues.ResultDead, ct)
-            .ConfigureAwait(false);
-        await DeclareSharedAsync(channel, OrchestratorQueues.ResultPost, OrchestratorQueues.ResultPostDead, ct)
             .ConfigureAwait(false);
     }
 

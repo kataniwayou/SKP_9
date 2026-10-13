@@ -133,15 +133,15 @@ public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHost
     [Fact]
     public void EveryQueueThisReplicaReadsHasAConsumerOfItsOwn()
     {
-        // Three queues, three consumers: the per-replica announcement queue, and the two shared
-        // execution queues. This is the check the wiring most needs, because the failure mode is
+        // Two queues, two consumers: the per-replica announcement queue and the shared result queue
+        // (the hand-off queue is gone: successors are dispatched in-process). This is the check the wiring most needs, because the failure mode is
         // silent — AddHostedService registers through TryAddEnumerable, which de-duplicates on
         // implementation type, so a second GatedQueueConsumer added that way is simply dropped and its
         // queue is never read, with nothing logged and every probe still green. AddGatedQueue uses a
         // plain AddSingleton for exactly that reason, and this asserts it worked.
         var consumers = _host.Services.GetServices<IHostedService>().OfType<GatedQueueConsumer>().ToList();
 
-        Assert.Equal(3, consumers.Count);
+        Assert.Equal(2, consumers.Count);
     }
 
     [Fact]
@@ -159,7 +159,9 @@ public sealed class OrchestratorHostWiringTests : IClassFixture<OrchestratorHost
             handlers.Select(h => h.MessageType).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal));
 
         Assert.Contains(MessageTypes.StepOutcome, handlers.Select(h => h.MessageType));
-        Assert.Contains(MessageTypes.NextStepHandoff, handlers.Select(h => h.MessageType));
+        // The hand-off hop no longer exists: nothing may consume a next-step-handoff message.
+        Assert.DoesNotContain("next-step-handoff", handlers.Select(h => h.MessageType));
+        Assert.Equal(3, handlers.Count);
     }
 
     [Fact]

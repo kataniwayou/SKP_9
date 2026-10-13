@@ -242,25 +242,24 @@ public static class OrchestratorHost
             builder.Services.AddHostedService<LeaderElectionService>();
         }
 
-        // How much work this replica's queues have refused and nobody has dealt with. The three
+        // How much work this replica's queues have refused and nobody has dealt with. The two
         // dead-letter queues are named explicitly rather than derived from the live queue names,
         // because they are constants on the same contract that declares them -- deriving "<queue>
         // .dead" would be a second, unenforced copy of a convention that already exists in one place.
         //
-        // Every replica reports the same three queues, and their values agree because a queue depth
+        // Every replica reports the same two queues, and their values agree because a queue depth
         // is a property of the broker rather than of the replica asking. That redundancy is wanted:
         // the number survives any one replica going away, and a board reads it with min() or max()
         // rather than sum(), which would multiply the depth by the replica count.
         //
         // SEEDED HERE, SYNCHRONOUSLY, RATHER THAN LEFT FOR THE PROBE'S FIRST PASS. See
         // DeadLetterDepthMetrics's own remarks: "zero is a report, not a silence" only holds once a
-        // report has happened. A failed first passive declare would otherwise leave these three
+        // report has happened. A failed first passive declare would otherwise leave these two
         // series absent for up to five minutes with nothing consumed on them to raise
         // DeadLetterReadSignal and shorten that window.
         foreach (var deadQueue in new[]
                  {
                      OrchestratorQueues.ResultDead,
-                     OrchestratorQueues.ResultPostDead,
                      OrchestratorQueues.ControlDead,
                  })
         {
@@ -271,12 +270,11 @@ public static class OrchestratorHost
             sp.GetRequiredKeyedService<RabbitMqConnection>(RabbitMqConnection.ProbeKey),
             [
                 OrchestratorQueues.ResultDead,
-                OrchestratorQueues.ResultPostDead,
                 OrchestratorQueues.ControlDead,
             ],
             // Five minutes, not thirty seconds, and the number is no longer what makes this timely.
             // DeadLetterReadSignal wakes this probe the moment something is parked on any of this
-            // replica's three dead-letter queues; the interval is only the backstop that notices an
+            // replica's two dead-letter queues; the interval is only the backstop that notices an
             // operator draining one by hand. Without that backstop a drained queue would report a
             // stale non-zero forever.
             TimeSpan.FromMinutes(5),
@@ -308,7 +306,6 @@ public static class OrchestratorHost
         [
             OrchestratorQueues.Control,
             OrchestratorQueues.Result,
-            OrchestratorQueues.ResultPost,
             OrchestratorFanout.PerReplica(instanceId.Value),
         ];
 
@@ -402,30 +399,28 @@ public static class OrchestratorHost
 
         // The two consumers that keep a running replica in step with L2 once hydration has admitted
         // it: the start and stop announcements the API publishes after each projection write. Scoped,
-        // exactly as the processor registers ProcessDispatchHandler and ProcessedDataHandler — each
+        // exactly as the processor registers ProcessDispatchHandler — each
         // delivery resolves its own handler instance from its own scope.
         builder.Services.AddScoped<IQueueMessageHandler, ApplyStartHandler>();
         builder.Services.AddScoped<IQueueMessageHandler, ApplyStopHandler>();
 
-        // The execution path's two handlers, registered the same way. Handlers are resolved by their
-        // MessageType across the WHOLE container rather than per queue, so these four must stay
+        // The execution path's handler, registered the same way. Handlers are resolved by their
+        // MessageType across the WHOLE container rather than per queue, so these three must stay
         // type-disjoint — two claiming one type makes the consumer's SingleOrDefault throw, which
         // classifies as deterministic and parks every message of that type.
         builder.Services.AddScoped<IQueueMessageHandler, StepOutcomeHandler>();
-        builder.Services.AddScoped<IQueueMessageHandler, NextStepHandoffHandler>();
 
         // The announcement queue, which also registers the gate, its probe, the liveness check over
-        // that probe, and the first consumer. It has to come before the AddGatedQueue calls below,
-        // which reuse all of that and register only a consumer.
+        // that probe, and the first consumer. It has to come before the AddGatedQueue call below,
+        // which reuses all of that and registers only a consumer.
         builder.Services.AddBaseConsoleGating(
             builder.Configuration, OrchestratorFanout.PerReplica(instanceId.Value));
 
-        // The execution path. Both are SHARED queues — one name for the deployment, every replica a
-        // competing consumer — where the announcement queue above is per-replica. They inherit the
+        // The execution path. The result queue is SHARED — one name for the deployment, every replica a
+        // competing consumer — where the announcement queue above is per-replica. It inherits the
         // hydration latch along with the gate, which is what stops this replica taking a result for a
         // workflow it has not mirrored out of L2 yet.
         builder.Services.AddGatedQueue(OrchestratorQueues.Result);
-        builder.Services.AddGatedQueue(OrchestratorQueues.ResultPost);
 
         return builder.Build();
     }

@@ -20,11 +20,9 @@ namespace BaseApi.Tests.Orchestrator;
 /// The execution path end to end: a step's outcome in, the next step's dispatch out, with the real
 /// handlers on a real (in-memory) L2 and a bus that records what each hop sent.
 /// <para>
-/// <b>Driven by routing rather than by calling the next handler directly.</b> The point of the two
-/// hops is that they are separate deliveries; a test that hands one handler's return value to the
-/// other would prove the pair works while assuming away the queue between them. <see cref="Bus"/>
-/// captures what was sent and to where, and <c>Drain</c> feeds it back through the handler
-/// registered for that type — the same dispatch the gated consumer performs.
+/// <b>One hop.</b> The orchestrator dispatches successors in-process, so a single delivery of the
+/// outcome is the whole loop: <see cref="Bus"/> captures what was sent and to where, and the dispatch
+/// to a processor queue is the exit.
 /// </para>
 /// </summary>
 public sealed class ExecutionRoundTripTests
@@ -81,7 +79,6 @@ public sealed class ExecutionRoundTripTests
         public Bus Bus { get; } = new();
         public WorkflowL1Store Store { get; } = new();
         public RecordingLogger<StepOutcomeHandler> PreLog { get; } = new();
-        public RecordingLogger<NextStepHandoffHandler> PostLog { get; } = new();
 
         public Harness(params StepL1[] steps)
         {
@@ -107,34 +104,15 @@ public sealed class ExecutionRoundTripTests
 
             return null;
         }
-        public IQueueMessageHandler Post => new NextStepHandoffHandler(L2.Multiplexer, Bus, PostLog);
 
         /// <summary>Feeds one message into the handler registered for its type, as the consumer does.</summary>
         public Task Deliver(string type, object body)
         {
             var handler = type == MessageTypes.StepOutcome ? Pre
-                        : type == MessageTypes.NextStepHandoff ? Post
                         : throw new InvalidOperationException($"nothing consumes {type} in this harness");
 
             return handler.HandleAsync(JsonSerializer.SerializeToUtf8Bytes(body, MessagingJson.Options),
                                        CancellationToken.None);
-        }
-
-        /// <summary>
-        /// Runs every message the orchestrator has queued for itself until none are left, so a test
-        /// can assert on the far end of the loop. Dispatches to a processor queue are the exit — they
-        /// stay in <see cref="Bus.Sent"/> and are not fed back.
-        /// </summary>
-        public async Task Drain()
-        {
-            for (var i = 0; i < Bus.Sent.Count; i++)
-            {
-                var (queue, type, body) = Bus.Sent[i];
-                if (queue == OrchestratorQueues.ResultPost)
-                {
-                    await Deliver(type, body);
-                }
-            }
         }
     }
 
@@ -174,7 +152,6 @@ public sealed class ExecutionRoundTripTests
         Seed(h, Entry, Output);
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
-        await h.Drain();
 
         var sent = h.Bus.Sent.Single(s => s.Type == MessageTypes.ProcessDispatch);
         var dispatch = (ProcessDispatch)sent.Body;
@@ -210,7 +187,6 @@ public sealed class ExecutionRoundTripTests
         Seed(h, Entry, "");
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
-        await h.Drain();
 
         var dispatch = h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Single();
         Assert.Equal(B, dispatch.StepId);
@@ -231,7 +207,6 @@ public sealed class ExecutionRoundTripTests
         Seed(h, Entry, Output);
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
-        await h.Drain();
 
         var dispatches = h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).ToList();
         Assert.Equal(2, dispatches.Count);
@@ -256,7 +231,6 @@ public sealed class ExecutionRoundTripTests
         Seed(h, Entry, Output);
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Failed, Entry));
-        await h.Drain();
 
         var dispatch = h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Single();
         var successor = EntryIds.Successor(Entry, Corr, A, B);
@@ -306,7 +280,6 @@ public sealed class ExecutionRoundTripTests
         var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 2, "{}"));
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Failed, Entry));
-        await h.Drain();
 
         Assert.Empty(h.Bus.Sent);
         Assert.Contains(h.PreLog.Records,
@@ -330,7 +303,6 @@ public sealed class ExecutionRoundTripTests
 
         h.Bus.FaultOn = null;
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Failed, Entry));
-        await h.Drain();
 
         Assert.Single(h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch));
         Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
@@ -356,7 +328,6 @@ public sealed class ExecutionRoundTripTests
         var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 4, "{}"));
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Failed, Guid.Empty));
-        await h.Drain();
 
         var dispatch = h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Single();
         var successor = EntryIds.Successor(Guid.Empty, Corr, A, B);
@@ -428,7 +399,7 @@ public sealed class ExecutionRoundTripTests
     {
         // INVERTED on 2026-09-01, not deleted: it pinned the opposite disposition and is the reason
         // the change could not be made silently. It read "this hop cannot tell that from a step
-        // reporting a key it never produced" -- and it can, by elimination. ProcessedDataHandler
+        // reporting a key it never produced" -- and it can, by elimination. BranchFinisher
         // writes before it sends and sends Guid.Empty when it did not write; the L1 miss above
         // already parked anything naming an unknown workflow or step; and the only other deleters of
         // this key touch a different guid or run where no outcome was ever sent. So the key was
@@ -452,7 +423,6 @@ public sealed class ExecutionRoundTripTests
         Seed(h, Entry, Output);
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
-        await h.Drain();
 
         Assert.Equal(C, h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Single().StepId);
         Assert.Contains(h.PreLog.Records, r => r.Message.Contains("is not in this workflow's step set"));
@@ -496,7 +466,7 @@ public sealed class ExecutionRoundTripTests
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
 
-        Assert.DoesNotContain(h.Bus.Sent, s => s.Type == MessageTypes.NextStepHandoff);
+        Assert.All(h.Bus.Sent, s => Assert.Equal(MessageTypes.ProcessDispatch, s.Type));
         Assert.Single(h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch));
     }
 
@@ -674,81 +644,6 @@ public sealed class ExecutionRoundTripTests
         Assert.True(written);
     }
 
-    // ---------------------------------------------------------------- the post hop
-
-    [Fact]
-    public async Task TheInputKeyIsWrittenBeforeTheStepIsDispatched()
-    {
-        // Reversed, the processor's pre handler could read an absent key, take its duplicate-delivery
-        // branch and return — a step that silently never runs rather than a retryable race.
-        var h = new Harness(Step(B, PB, 1, "{}"));
-        var written = false;
-        h.Bus.FaultOn = _ =>
-        {
-            written = h.L2.Has(L2ProjectionKeys.ExecutionData(Entry));
-            return null;
-        };
-
-        await h.Deliver(MessageTypes.NextStepHandoff, new NextStepHandoff(
-            Corr, Exec, W, B, PB, "{}", Entry, Encoding.UTF8.GetBytes(Output)));
-
-        Assert.True(written);
-    }
-
-    [Fact]
-    public async Task ADeterministicDispatchFailureReportsTheStepFailedNamingTheKeyToReclaim()
-    {
-        // Parking would stall the workflow at a step that never started, with nothing downstream
-        // waiting on it. Reporting it runs the graph's own failure branch — and naming the key just
-        // written is what stops that blob being orphaned.
-        var h = new Harness(Step(B, PB, 1, "{}"));
-        h.Bus.FaultOn = t =>
-            t == MessageTypes.ProcessDispatch ? new NotSupportedException("no converter") : null;
-
-        await h.Deliver(MessageTypes.NextStepHandoff, new NextStepHandoff(
-            Corr, Exec, W, B, PB, "{}", Entry, Encoding.UTF8.GetBytes(Output)));
-
-        var outcome = h.Bus.OfType<StepOutcome>(MessageTypes.StepOutcome).Single();
-        Assert.Equal(StepResult.Failed, outcome.Result);
-        Assert.Equal(B, outcome.StepId);
-        Assert.Equal(PB, outcome.ProcessorId);
-        Assert.Equal(Entry, outcome.EntryId);
-        Assert.Equal(Corr, outcome.CorrelationId);
-    }
-
-    [Fact]
-    public async Task ATransientDispatchFailureIsRequeuedRatherThanReported()
-    {
-        // The direction that matters: a broker blip must not be recorded as a business failure, which
-        // would mark a step failed that a redelivery would have started.
-        var h = new Harness(Step(B, PB, 1, "{}"));
-        h.Bus.FaultOn = t =>
-            t == MessageTypes.ProcessDispatch ? new IOException("socket closed") : null;
-
-        await Assert.ThrowsAsync<TransientSendException>(
-            () => h.Deliver(MessageTypes.NextStepHandoff, new NextStepHandoff(
-                Corr, Exec, W, B, PB, "{}", Entry, Encoding.UTF8.GetBytes(Output))));
-
-        Assert.Empty(h.Bus.OfType<StepOutcome>(MessageTypes.StepOutcome));
-    }
-
-    [Fact]
-    public async Task AReplayedHandOffRewritesTheSameKeyWithTheSameBytes()
-    {
-        // The entry id rides the body, so a redelivery of this message repeats the write rather than
-        // minting a second key. That is what lets this hop use a plain NACK as its whole recovery.
-        var h = new Harness(Step(B, PB, 1, "{}"));
-        var handoff = new NextStepHandoff(
-            Corr, Exec, W, B, PB, "{}", Entry, Encoding.UTF8.GetBytes(Output));
-
-        await h.Deliver(MessageTypes.NextStepHandoff, handoff);
-        var first = h.L2.Snapshot();
-        await h.Deliver(MessageTypes.NextStepHandoff, handoff);
-
-        Assert.Equal(first, h.L2.Snapshot());
-        Assert.Equal(2, h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Count());
-    }
-
     // ------------------------------------------------- draining a run whose workflow was stopped
 
     [Fact]
@@ -767,7 +662,6 @@ public sealed class ExecutionRoundTripTests
         Assert.False(h.Store.TryGetActive(W, out _));
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
-        await h.Drain();
 
         // The successor was dispatched with its own payload and its own copy of A's bytes — the same
         // outcome an unstopped workflow would produce. Nothing about the hand-off is degraded by the
@@ -916,7 +810,6 @@ public sealed class ExecutionRoundTripTests
         Seed(h, Entry, Output);
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Failed, Entry));
-        await h.Drain();
 
         Assert.Contains(
             h.PreLog.Records,
@@ -945,7 +838,6 @@ public sealed class ExecutionRoundTripTests
         Seed(h, bystander, Output);
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
-        await h.Drain();
 
         Assert.Empty(h.Bus.Sent);
         Assert.True(h.L2.Has(L2ProjectionKeys.ExecutionData(bystander)));
@@ -975,7 +867,6 @@ public sealed class ExecutionRoundTripTests
         var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Guid.Empty));
-        await h.Drain();
 
         Assert.NotEmpty(h.Bus.Sent);
         Assert.DoesNotContain(
@@ -988,7 +879,7 @@ public sealed class ExecutionRoundTripTests
     [Fact]
     public async Task AnOutcomeClaimingAProcessorTheStepIsNotAssignedToIsRefused()
     {
-        // The sibling of ProcessedDataHandler's WR-02 guard. orchestrator-result is addressable on a
+        // The provenance guard on orchestrator-result: it is addressable on a
         // shared broker and this handler acts entirely on the ids in the body, so without this an
         // outcome naming a real workflow and a real step could be minted by anyone and would advance
         // that workflow. StepL1.ProcessorId is the authority the processor's own identity is on the
@@ -1045,7 +936,6 @@ public sealed class ExecutionRoundTripTests
         Seed(h, Entry, Output);
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
-        await h.Drain();
 
         Assert.Contains(h.Bus.Sent, s => s.Type == MessageTypes.ProcessDispatch);
     }

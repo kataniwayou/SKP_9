@@ -45,7 +45,6 @@ public sealed class OrchestratorTopologyTests
 
     [Theory]
     [InlineData(OrchestratorQueues.Result, OrchestratorQueues.ResultDead)]
-    [InlineData(OrchestratorQueues.ResultPost, OrchestratorQueues.ResultPostDead)]
     public async Task DeclaresEachSharedExecutionQueueAfterTheExchangeItParksInto(string queue, string dead)
     {
         // The execution queues are shared across the deployment, unlike the announcement queue above,
@@ -83,7 +82,6 @@ public sealed class OrchestratorTopologyTests
 
     [Theory]
     [InlineData(OrchestratorQueues.Result, OrchestratorQueues.ResultDead)]
-    [InlineData(OrchestratorQueues.ResultPost, OrchestratorQueues.ResultPostDead)]
     public async Task GivesEachSharedExecutionQueueItsDeadLetterArgumentsAndNoDeliveryLimit(
         string queue, string dead)
     {
@@ -127,6 +125,34 @@ public sealed class OrchestratorTopologyTests
         Assert.Equal("quorum", parked["x-queue-type"]);
         Assert.Equal(-1, parked["x-delivery-limit"]);
         Assert.False(parked.ContainsKey("x-dead-letter-exchange"));
+    }
+
+    [Fact]
+    public async Task DeclaresNoPostQueue()
+    {
+        // The pre-to-post hand-off queue was removed with the in-process post hop. A redeclare of it
+        // would recreate a queue nothing consumes, and every message sent there would sit unread.
+        var channel = Substitute.For<IChannel>();
+        var declared = new List<string>();
+
+        channel.ExchangeDeclareAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<IDictionary<string, object?>>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        channel.QueueDeclareAsync(
+                Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<IDictionary<string, object?>>(), Arg.Any<bool>(), Arg.Any<bool>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new QueueDeclareOk("q", 0, 0)))
+            .AndDoes(c => declared.Add(c.ArgAt<string>(0)));
+
+        await new OrchestratorTopology(new InstanceId("orchestrator-0"))
+            .DeclareAsync(channel, CancellationToken.None);
+
+        Assert.Contains(OrchestratorQueues.Result, declared);
+        Assert.DoesNotContain(declared, q => q.Contains("-post", StringComparison.Ordinal));
     }
 
     [Fact]
