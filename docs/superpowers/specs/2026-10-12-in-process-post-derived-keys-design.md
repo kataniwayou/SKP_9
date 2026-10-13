@@ -156,14 +156,21 @@ identity guard is already enforced before the author runs (`ProcessDispatchHandl
    (`:248-253`). Skipped when `E == Guid.Empty`.
 2. Per matched successor, in order:
    1. `S` (§5.2).
-   2. Completed → `COPY data:{E} data:{S}` **without** `REPLACE` (`KeyCopyAsync`, StackExchange.Redis
+   2. Skip if `handoff:{E}` already holds `nextStepId`. This comes before any write: a successor
+      already dispatched owns its key and may have consumed it, so re-materializing would orphan a
+      key nobody will read or delete. The only remaining re-materialization is a crash between the
+      dispatch and the `SADD` (limit 1).
+   3. Completed → `COPY data:{E} data:{S}` **without** `REPLACE` (`KeyCopyAsync`, StackExchange.Redis
       2.13.1); `false` means an earlier attempt made it, and dispatching is still correct.
       Failed or Cancelled → `SET data:{S} "" NX`. The failed step's input is never passed on (spec D6).
-   3. Skip if `handoff:{E}` already holds `nextStepId`.
    4. In-process hand-off: send `ProcessDispatch(S)` to `processor-{id}`, broker-confirmed; then
       `SADD handoff:{E} nextStepId`.
    5. A deterministic dispatch failure is caught **per successor**: report that successor Failed naming
-      `S` (so it is reclaimed) and continue. The report-also-failed park path
+      `S` (so it is reclaimed) and continue. If `S` itself could not be written (the COPY / SET failed
+      deterministically, e.g. NOPERM), `data:{S}` is first written `""` best effort so the report names
+      a key that exists; if that write is refused too, the report names `Guid.Empty`. An outcome must
+      name a key that exists, or none: one naming a missing key is dropped as a duplicate and the
+      successor's failure branch never runs. The report-also-failed park path
       (`NextStepHandoffHandler.cs:148-170`) runs after the loop, so one bad successor no longer stops its
       siblings.
 3. `DEL data:{E} handoff:{E}`, last (as today).
@@ -243,6 +250,10 @@ Post-hop series stop: dead-letter depth, depth, consumers, queue wait, consumer 
 2. **Release 2 — orchestrator.** Derived `S`, `COPY`/empty keys, in-process hand-off, `handoff:{E}`.
    After both post queues and their `.dead` queues read zero (redrive or inspect `.dead` first): remove
    the drains, topology, constants and `NextStepHandoff`; delete the four queues on each environment.
+   **Deploy only after every `processor-*-post` queue and its `.dead` queue reads zero**: an old
+   no-data `ProcessedData` drained under release 2 takes the entry-successor formula, and two of one
+   step could then share a key. **Rollback constraint:** once release 2 is live, processors must not
+   roll back below release 1.
 
 Order matters: an orchestrator writing empty keys to an old processor would have that step read
 "empty" as "absent" and never run.
