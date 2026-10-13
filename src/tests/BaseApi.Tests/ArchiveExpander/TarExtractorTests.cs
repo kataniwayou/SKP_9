@@ -71,6 +71,34 @@ public sealed class TarExtractorTests
     }
 
     [Fact]
+    public void AZeroByteRegularFileBecomesAnEmptyEntry()
+    {
+        // TarReader hands a size-0 regular file over with a NULL DataStream, not an empty one. Read
+        // as "no data, not a file", it was dropped silently: the document came out one leaf short,
+        // where the same file inside a zip survives the round trip.
+        using var stream = new MemoryStream(Tar(("empty.txt", ""), ("a.csv", "id\n")));
+
+        var entries = new TarExtractor().Extract(stream);
+
+        Assert.Equal(["empty.txt", "a.csv"], entries.Select(e => e.Name).ToArray());
+        Assert.Empty(entries[0].Content);
+        Assert.Equal(new DateTime(2026, 9, 8, 10, 58, 0, DateTimeKind.Utc), entries[0].ModifiedUtc);
+    }
+
+    [Fact]
+    public void ATarHoldingOnlyAZeroByteFileStillHasThatEntry()
+    {
+        // The worst shape of the old drop: the archive's only file vanished, and the node came out
+        // with no entries at all — reported as a healthy empty archive.
+        using var stream = new MemoryStream(Tar(("empty.txt", "")));
+
+        var entry = Assert.Single(new TarExtractor().Extract(stream));
+
+        Assert.Equal("empty.txt", entry.Name);
+        Assert.Empty(entry.Content);
+    }
+
+    [Fact]
     public void ADirectoryEntryIsSkipped()
     {
         using var buffer = new MemoryStream();

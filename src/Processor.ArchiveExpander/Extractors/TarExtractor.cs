@@ -79,14 +79,19 @@ public sealed class TarExtractor : IArchiveExtractor
                 // excluded here deliberately, not overlooked: this extractor's fixtures only ever
                 // needed RegularFile/V7RegularFile, and widening the filter to the other two is a
                 // considered follow-up, not a gap found by accident.
-                if (entry.EntryType is not (TarEntryType.RegularFile or TarEntryType.V7RegularFile)
-                    || entry.DataStream is null)
+                if (entry.EntryType is not (TarEntryType.RegularFile or TarEntryType.V7RegularFile))
                 {
                     continue;
                 }
 
+                // A NULL DataStream IS A ZERO-BYTE FILE, not a missing one. TarReader attaches a
+                // stream only when the header declares a size above zero, so an empty regular file
+                // arrives with none. Skipping it dropped the file silently — the document came out
+                // one leaf short, and a tar whose only file was empty read as an empty archive —
+                // where the same file inside a zip becomes an empty leaf. It is an entry with no
+                // bytes, like zip's.
                 using var buffer = new MemoryStream();
-                entry.DataStream.CopyTo(buffer);
+                entry.DataStream?.CopyTo(buffer);
 
                 entries.Add(new ExtractedEntry(
                     // The archive records a path; the node carries a name. A separator in a node
