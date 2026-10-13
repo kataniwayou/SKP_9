@@ -48,10 +48,18 @@ public sealed class ExecutionRoundTripTests
         public List<(string Queue, string Type, object Body)> Sent { get; } = [];
         public Func<string, Exception?>? FaultOn { get; set; }
 
+        /// <summary>Faults sends to one queue — to fail one successor of a fan-out and not its siblings.</summary>
+        public Func<string, Exception?>? FaultOnQueue { get; set; }
+
         public Task SendAsync<T>(
             string queue, string type, T body, CancellationToken ct,
             string? replyTo = null, string? correlationId = null)
         {
+            if (FaultOnQueue?.Invoke(queue) is { } byQueue)
+            {
+                return Task.FromException(byQueue);
+            }
+
             if (FaultOn?.Invoke(type) is { } ex)
             {
                 return Task.FromException(ex);
@@ -186,7 +194,7 @@ public sealed class ExecutionRoundTripTests
         Assert.Equal(Output, h.L2.Value(L2ProjectionKeys.ExecutionData(dispatch.EntryId)));
 
         // A relocated key, not the same one: A's is reclaimed.
-        Assert.NotEqual(Entry, dispatch.EntryId);
+        Assert.Equal(EntryIds.Successor(Entry, Corr, A, B), dispatch.EntryId);
         Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
     }
 
@@ -204,7 +212,7 @@ public sealed class ExecutionRoundTripTests
 
         var dispatch = h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Single();
         Assert.Equal(B, dispatch.StepId);
-        Assert.Equal(Guid.Empty, dispatch.EntryId);
+        Assert.Equal(EntryIds.Successor(Entry, Corr, A, B), dispatch.EntryId);
         Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
         Assert.DoesNotContain(h.PreLog.Records,
             r => r.Message.Contains("duplicate delivery", StringComparison.Ordinal));
@@ -249,10 +257,12 @@ public sealed class ExecutionRoundTripTests
         await h.Drain();
 
         var dispatch = h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Single();
+        var successor = EntryIds.Successor(Entry, Corr, A, B);
         Assert.Equal(B, dispatch.StepId);
-        Assert.Equal(Guid.Empty, dispatch.EntryId);
+        Assert.Equal(successor, dispatch.EntryId);
+        Assert.Equal("", h.L2.Value(L2ProjectionKeys.ExecutionData(successor)));
         Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
-        Assert.Empty(h.L2.Keys());
+        Assert.Equal([L2ProjectionKeys.ExecutionData(successor)], h.L2.Keys());
     }
 
     [Theory]
@@ -269,6 +279,21 @@ public sealed class ExecutionRoundTripTests
             (RedisKey)L2ProjectionKeys.ExecutionData(Entry), Arg.Any<CommandFlags>());
         await h.L2.Db.Received(1).KeyExistsAsync(
             (RedisKey)L2ProjectionKeys.ExecutionData(Entry), Arg.Any<CommandFlags>());
+    }
+
+    [Fact]
+    public async Task ACompletedOutcomeNeverLoadsTheBlobEither()
+    {
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        await h.L2.Db.DidNotReceive().StringGetAsync(
+            (RedisKey)L2ProjectionKeys.ExecutionData(Entry), Arg.Any<CommandFlags>());
+        await h.L2.Db.Received(1).KeyCopyAsync(
+            (RedisKey)L2ProjectionKeys.ExecutionData(Entry), Arg.Any<RedisKey>(),
+            Arg.Any<int>(), Arg.Any<bool>(), Arg.Any<CommandFlags>());
     }
 
     [Fact]
@@ -293,7 +318,7 @@ public sealed class ExecutionRoundTripTests
         // redelivery would find the key gone and the failure branch would never be dispatched.
         var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 2, "{}"));
         Seed(h, Entry, Output);
-        h.Bus.FaultOn = t => t == MessageTypes.NextStepHandoff
+        h.Bus.FaultOn = t => t == MessageTypes.ProcessDispatch
             ? new TransientSendException("broker blip", new IOException("reset"))
             : null;
 
@@ -322,19 +347,19 @@ public sealed class ExecutionRoundTripTests
     }
 
     [Fact]
-    public async Task AnOutcomeWithNoBlobDispatchesItsSuccessorAsASourceStep()
+    public async Task AnEntryStepsFailureGivesItsSuccessorAKeyDerivedFromTheRun()
     {
-        // Guid.Empty is not a key. It arrives from a failed source step and from an output that failed
-        // its schema, and it has to travel all the way through as the sentinel the processor already
-        // reads as "no upstream input" — not become a zero-length blob under a minted key.
+        // Guid.Empty names no blob (an entry step's Failed outcome). The successor still gets a key,
+        // derived from the run, holding "" — no data.
         var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 4, "{}"));
 
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Failed, Guid.Empty));
         await h.Drain();
 
         var dispatch = h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Single();
-        Assert.Equal(Guid.Empty, dispatch.EntryId);
-        Assert.Empty(h.L2.Keys());
+        var successor = EntryIds.Successor(Guid.Empty, Corr, A, B);
+        Assert.Equal(successor, dispatch.EntryId);
+        Assert.Equal([L2ProjectionKeys.ExecutionData(successor)], h.L2.Keys());
     }
 
     // ---------------------------------------------------------------- the pre hop
@@ -439,7 +464,7 @@ public sealed class ExecutionRoundTripTests
         // replay finds the blob it needs to re-send every hand-off still there.
         var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
         Seed(h, Entry, Output);
-        h.Bus.FaultOn = t => t == MessageTypes.NextStepHandoff ? new IOException("socket closed") : null;
+        h.Bus.FaultOn = t => t == MessageTypes.ProcessDispatch ? new IOException("socket closed") : null;
 
         await Assert.ThrowsAsync<TransientSendException>(
             () => h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry)));
@@ -451,11 +476,144 @@ public sealed class ExecutionRoundTripTests
     public async Task AStoreFaultOnTheReadEscapesSoTheGateCanTrip()
     {
         var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
-        h.L2.Db.StringGetAsync(Arg.Any<RedisKey>())
+        h.L2.Db.KeyExistsAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
             .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.SocketFailure, "down"));
 
         await Assert.ThrowsAsync<RedisConnectionException>(
             () => h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry)));
+    }
+
+    // ---------------------------------------------------------------- the in-process hand-off
+
+    [Fact]
+    public async Task NoHandOffMessageCarriesData()
+    {
+        // The reason for the whole change: the organisation caps message size, and only ids may travel.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, Output);
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        Assert.DoesNotContain(h.Bus.Sent, s => s.Type == MessageTypes.NextStepHandoff);
+        Assert.Single(h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch));
+    }
+
+    [Fact]
+    public async Task AReplayedOutcomeDerivesTheSameSuccessorKey()
+    {
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, Output);
+        h.Bus.FaultOn = t => t == MessageTypes.ProcessDispatch
+            ? new TransientSendException("broker blip", new IOException("reset"))
+            : null;
+
+        await Assert.ThrowsAsync<TransientSendException>(
+            () => h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry)));
+        var first = h.L2.Snapshot();
+
+        h.Bus.FaultOn = null;
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        var dispatch = h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Single();
+        Assert.Contains(L2ProjectionKeys.ExecutionData(dispatch.EntryId), first, StringComparison.Ordinal);
+        Assert.Equal(Output, h.L2.Value(L2ProjectionKeys.ExecutionData(dispatch.EntryId)));
+    }
+
+    [Fact]
+    public async Task ACopyThatAlreadyExistsIsNotOverwritten()
+    {
+        // COPY without REPLACE: a successor key an earlier attempt made is kept as it is.
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, Output);
+        var successor = EntryIds.Successor(Entry, Corr, A, B);
+        Seed(h, successor, "earlier");
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        Assert.Equal("earlier", h.L2.Value(L2ProjectionKeys.ExecutionData(successor)));
+        Assert.Equal(successor, h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Single().EntryId);
+    }
+
+    [Fact]
+    public async Task ARedeliveryDoesNotResendASuccessorAlreadyDispatched()
+    {
+        // Review focus 4. An unroutable send is transient and the WHOLE outcome retries; without
+        // handoff:{E} every sibling dispatched before the failing one would be re-sent on every retry.
+        var h = new Harness(Step(A, PA, 1, "{}", B, C), Step(B, PB, 1, "{}"), Step(C, PC, 1, "{}"));
+        Seed(h, Entry, Output);
+        h.Bus.FaultOnQueue = q => q == ProcessorQueues.Work(PC)
+            ? new TransientSendException("unroutable", new IOException("no route"))
+            : null;
+
+        await Assert.ThrowsAsync<TransientSendException>(
+            () => h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry)));
+
+        h.Bus.FaultOnQueue = null;
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        var dispatched = h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Select(d => d.StepId).ToList();
+        Assert.Equal([B, C], dispatched);
+        Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
+        Assert.Empty(h.L2.Members(L2ProjectionKeys.ExecutionHandoffs(Entry)));
+    }
+
+    [Fact]
+    public async Task ADeterministicDispatchFailureCostsOnlyThatSuccessor()
+    {
+        // Review focus 5. The failing successor is reported Failed under its own key — so its own
+        // outcome reclaims it — and its siblings are dispatched; the outcome is acked.
+        var h = new Harness(Step(A, PA, 1, "{}", B, C), Step(B, PB, 1, "{}"), Step(C, PC, 1, "{}"));
+        Seed(h, Entry, Output);
+        h.Bus.FaultOnQueue = q => q == ProcessorQueues.Work(PB) ? new NotSupportedException("no converter") : null;
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        Assert.Equal(C, h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Single().StepId);
+        var failed = h.Bus.OfType<StepOutcome>(MessageTypes.StepOutcome).Single();
+        Assert.Equal(StepResult.Failed, failed.Result);
+        Assert.Equal(B, failed.StepId);
+        Assert.Equal(PB, failed.ProcessorId);
+        Assert.Equal(EntryIds.Successor(Entry, Corr, A, B), failed.EntryId);
+        Assert.Contains(h.PreLog.Records, r => r.Message.Contains("could not start the step", StringComparison.Ordinal));
+        Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
+    }
+
+    [Fact]
+    public async Task AFailureThatCannotEvenBeReportedReclaimsAndParksAfterTheSiblings()
+    {
+        var h = new Harness(Step(A, PA, 1, "{}", B, C), Step(B, PB, 1, "{}"), Step(C, PC, 1, "{}"));
+        Seed(h, Entry, Output);
+        h.Bus.FaultOnQueue = q =>
+            q == ProcessorQueues.Work(PB) || q == OrchestratorQueues.Result ? new NotSupportedException("broken") : null;
+
+        await Assert.ThrowsAsync<NotSupportedException>(
+            () => h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry)));
+
+        Assert.Equal(C, h.Bus.OfType<ProcessDispatch>(MessageTypes.ProcessDispatch).Single().StepId);
+        Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(EntryIds.Successor(Entry, Corr, A, B))));
+        Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
+    }
+
+    [Fact]
+    public async Task TheSuccessorKeyIsWrittenBeforeItIsDispatched()
+    {
+        var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
+        Seed(h, Entry, Output);
+        var successor = EntryIds.Successor(Entry, Corr, A, B);
+        var written = false;
+        h.Bus.FaultOnQueue = q =>
+        {
+            if (q == ProcessorQueues.Work(PB))
+            {
+                written = h.L2.Has(L2ProjectionKeys.ExecutionData(successor));
+            }
+
+            return null;
+        };
+
+        await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
+
+        Assert.True(written);
     }
 
     // ---------------------------------------------------------------- the post hop
@@ -603,7 +761,7 @@ public sealed class ExecutionRoundTripTests
         var h = new Harness(Step(A, PA, 1, "{}", B), Step(B, PB, 1, "{}"));
         Seed(h, Entry, Output);
 
-        h.Bus.FaultOn = type => type == MessageTypes.NextStepHandoff
+        h.Bus.FaultOn = type => type == MessageTypes.ProcessDispatch
             ? new TransientSendException("broker blip", new IOException("reset"))
             : null;
 

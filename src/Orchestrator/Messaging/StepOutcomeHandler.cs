@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
+using BaseConsole.Core.Gating;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Messaging.Transport;
@@ -11,15 +13,16 @@ using StackExchange.Redis;
 namespace Orchestrator.Messaging;
 
 /// <summary>
-/// The pre hop: takes one step's outcome, decides which successors it lets through, and hands each of
-/// them a copy of the finished step's blob.
+/// The pre hop: takes one step's outcome, decides which successors it lets through, and dispatches each
+/// of them with a copy of the finished step's blob.
 /// <para>
-/// <b>Read once, hand off N times, reclaim last.</b> The blob is read before any hand-off is sent,
-/// because the alternative — each successor reading the shared key for itself — is the multi-successor
-/// hazard both processor handlers document and refuse to defend against: the first successor's pre hop
-/// reclaims the key when its author returns, and every other successor finds it absent and silently
-/// does nothing. Copying it per successor under a key of that successor's own is what closes that, and
-/// it is why this hop exists at all.
+/// <b>Check once, hand off N times in-process, reclaim last.</b> Each matched successor gets a key of
+/// its own, derived (<see cref="EntryIds.Successor"/>) so a redelivery names the same one: a Completed
+/// step's blob is copied there inside Redis (COPY without REPLACE), anything else gets <c>""</c> (no
+/// data). The dispatch is sent from here — no hand-off message carries the blob any more, because the
+/// organisation caps RabbitMQ's message size — and each dispatched successor is remembered in
+/// <c>handoff:{E}</c>, so a redelivered outcome sends only what an earlier attempt did not. See
+/// <c>docs/superpowers/specs/2026-10-12-in-process-post-derived-keys-design.md</c> §8.
 /// </para>
 /// <para>
 /// <b>The reclaim is the last statement and is not inside any branch.</b> Every path that reaches the
@@ -164,7 +167,10 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
             // The cost is deliberate: the dead-lettered message names a key that no longer exists,
             // so it can no longer be replayed by hand. That trade is taken knowingly. The blob is
             // reclaimed for the same reason it is reclaimed on the acked path.
-            await ReclaimAsync(m.EntryId).ConfigureAwait(false);
+            await ReclaimAsync(
+                    m.EntryId,
+                    L2ProjectionKeys.ExecutionHandoffs(EntryIds.HandoffSource(m.EntryId, m.CorrelationId, m.StepId)))
+                .ConfigureAwait(false);
 
             // Described only here, on the cold path. The condition above stays a short-circuited pair
             // of dictionary hits because it is the hot path -- every outcome from every processor
@@ -185,8 +191,9 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         // is "the processor that executes this step", and every legitimate outcome carries it. All
         // three senders are covered — ProcessedDataHandler's two sends carry p.ProcessorId, which
         // WR-02 has already proven equal to that processor's own identity, and the dispatch that
-        // named it was addressed to processor-{L1.ProcessorId}; NextStepHandoffHandler's failure
-        // outcome carries the id this orchestrator put in the hand-off, read from this same field.
+        // named it was addressed to processor-{L1.ProcessorId}; this handler's own failure outcome
+        // (below) carries the id read from this same field, and NextStepHandoffHandler's, while it
+        // drains release-1 hand-offs, the id this orchestrator put in the hand-off.
         //
         // NOT RECLAIMED BEFORE PARKING, and that is the one place this deliberately departs from the
         // L1-miss branch above. That branch reclaims to avoid leaking a blob. Here the message has
@@ -210,42 +217,17 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
                 + "to advance the graph on an outcome whose provenance does not check out");
         }
 
-        // READ BEFORE NARRATING. This sat below the two log lines until the duplicate branch
-        // gave it a reason to move: a delivery that advances nothing was announcing "the entry
-        // step completed" first and discarding itself second. That is not only misleading to
-        // read -- RunLedger's I8 asserts counts[EntryStepCompleted] == shape.EntryBranches
-        // EXACTLY, so a duplicate inflated the count and breached an invariant the chaos
-        // ledger checks. Duplicates that genuinely re-advance still log it, because they take
-        // the whole path below; only the ones that do nothing are now silent about it.
-        // Guid.Empty is not a key. It arrives on three shapes the processor produces — a source step's
-        // Failed or Cancelled outcome, an output that failed its schema, and a branch sent with no
-        // data — and it means there is no blob: nothing to read, nothing to copy, nothing to reclaim.
-        // The successors are handed empty data and dispatched with the same sentinel, which the
-        // processor's pre handler already reads as "no upstream input, the author produces its own".
+// CHECK BEFORE NARRATING: a delivery that advances nothing must not announce "the entry step
+        // completed" first (RunLedger's I8 counts that line exactly).
         //
-        // ONLY A COMPLETED OUTCOME'S BLOB IS DATA (spec D6). A Failed or Cancelled outcome names the
-        // step's input purely so it can be reclaimed; its successors run on empty data. The existence
-        // check replaces the read as the duplicate guard, and the delete stays LAST, after every
-        // hand-off: a hand-off that fails is redelivered and must still find the key, or the
-        // successors would never be dispatched.
-        byte[]? data;
-        if (m.EntryId == Guid.Empty)
-        {
-            data = [];
-        }
-        else if (m.Result == StepResult.Completed)
-        {
-            data = await ReadAsync(m.EntryId).ConfigureAwait(false);
-        }
-        else
-        {
-            data = await ExistsAsync(m.EntryId).ConfigureAwait(false) ? [] : null;
-        }
-
-        // The duplicate-delivery branch. Returning HERE is what makes acking safe: it precedes every
-        // hand-off and the reclaim, so a second attempt at an outcome advances nothing and deletes
-        // nothing. The ids ride the open scope; the template carries none of them.
-        if (data is null)
+        // EXISTS, never a read: the blob is copied inside Redis and never loaded here. Absent means an
+        // earlier delivery of this outcome advanced and reclaimed it — the absent-key disposition
+        // (docs/superpowers/specs/2026-09-01-absent-key-disposition-design.md). Guid.Empty names no
+        // key at all — an entry step's Failed or Cancelled outcome — and skips the check.
+        //
+        // The delete stays LAST, after every hand-off: a hand-off that fails is redelivered and must
+        // still find the key, or the successors would never be dispatched.
+        if (m.EntryId != Guid.Empty && !await ExistsAsync(m.EntryId).ConfigureAwait(false))
         {
             _logger.LogWarning(
                 "the execution blob is absent — treating as a duplicate delivery, advancing nothing");
@@ -290,32 +272,84 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
 
         var selection = StepAdvancement.SelectNext(m.Result, completed, entry.Steps);
 
-        // One hand-off per matched successor, each with its own freshly minted key. The mint is
-        // NewGuid, matching the processor: a redelivery of this outcome mints new keys and hands the
-        // successors off a second time, so a step whose ack was lost advances twice. The reclaim below
-        // is what keeps that narrow — the redelivery finds the source blob gone and is acked with a
-        // Warning, treating it as a duplicate delivery, instead.
+var db = _redis.GetDatabase();
+        var source = EntryIds.HandoffSource(m.EntryId, m.CorrelationId, m.StepId);
+        var handoffs = L2ProjectionKeys.ExecutionHandoffs(source);
+
+        // A failure report that could not itself be sent. Rethrown AFTER the loop, so one broken
+        // successor no longer stops its siblings; the keys it named are reclaimed first.
+        ExceptionDispatchInfo? park = null;
+        var unreported = new List<Guid>();
+
         foreach (var next in selection.Matches)
         {
-            // No blob means no key: the successor is dispatched as a source step rather than pointed
-            // at an empty one. Minting an id here would have the post hop write a zero-length value
-            // that the successor then reads and ignores.
-            var entryId = data.Length == 0 ? Guid.Empty : Guid.NewGuid();
+            var successorId = EntryIds.Successor(m.EntryId, m.CorrelationId, m.StepId, next.StepId);
+            var dispatchStarted = Stopwatch.GetTimestamp();
 
-            var handoff = new NextStepHandoff(
-                m.CorrelationId, m.ExecutionId, m.WorkflowId,
-                next.StepId, next.ProcessorId, next.Payload, entryId, data);
+            try
+            {
+                await MaterializeAsync(db, m, successorId).ConfigureAwait(false);
 
-            // A send fault is classified transient, so the whole outcome is returned to the queue and
-            // every hand-off is re-sent. That is the reason the reclaim is last: the source blob is
-            // still there for the replay to read.
-            await _sender
-                .SendTransientAsync(OrchestratorQueues.ResultPost, MessageTypes.NextStepHandoff, handoff, ct)
-                .ConfigureAwait(false);
+                // Already sent by an earlier attempt at this outcome: an unroutable send is transient
+                // and requeues the WHOLE outcome, and without this set every sibling before it would
+                // be dispatched again on every retry.
+                if (await db.SetContainsAsync(handoffs, next.StepId.ToString("D")).ConfigureAwait(false))
+                {
+                    continue;
+                }
 
-            _logger.LogInformation(
-                "handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}",
-                next.StepId, next.ProcessorId, entryId);
+                // A dispatch STARTS a step, so the clock starts here rather than being inherited from
+                // the outcome being handled.
+                MessageClock.BeginChain();
+
+                await _sender
+                    .SendTransientAsync(
+                        ProcessorQueues.Work(next.ProcessorId), MessageTypes.ProcessDispatch,
+                        new ProcessDispatch(
+                            m.CorrelationId, m.ExecutionId, m.WorkflowId, next.StepId, next.ProcessorId,
+                            next.Payload, successorId),
+                        ct)
+                    .ConfigureAwait(false);
+
+                // After the confirm, never before: a crash between the two dispatches this successor
+                // again — a duplicate, which this system prefers to a loss.
+                await db.SetAddAsync(handoffs, next.StepId.ToString("D")).ConfigureAwait(false);
+
+                _logger.LogInformation(
+                    "handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}",
+                    next.StepId, next.ProcessorId, successorId);
+                _logger.LogInformation(
+                    "dispatched in {ElapsedMs}ms", (int)Stopwatch.GetElapsedTime(dispatchStarted).TotalMilliseconds);
+            }
+            catch (Exception ex) when (!IsRecoverable(ex))
+            {
+                // Deterministic: redelivery cannot help. Report THIS successor failed under its own key
+                // — so that outcome reclaims it and the graph's failure branch runs — and carry on with
+                // its siblings. The message is logged, never sent.
+                _logger.LogError(ex, "could not start the step — reporting it failed");
+
+                try
+                {
+                    await _sender.SendTransientAsync(
+                            OrchestratorQueues.Result,
+                            MessageTypes.StepOutcome,
+                            new StepOutcome(
+                                m.CorrelationId, m.ExecutionId, m.WorkflowId, next.StepId, next.ProcessorId,
+                                successorId, StepResult.Failed),
+                            ct)
+                        .ConfigureAwait(false);
+
+                    await db.SetAddAsync(handoffs, next.StepId.ToString("D")).ConfigureAwait(false);
+                }
+                catch (Exception report) when (!IsRecoverable(report))
+                {
+                    // Nothing will ever name this key: reclaim it and park, after the siblings.
+                    _logger.LogError(
+                        report, "could not report the failed step either — reclaiming its input and parking");
+                    unreported.Add(successorId);
+                    park ??= ExceptionDispatchInfo.Capture(report);
+                }
+            }
         }
 
         // A successor id the step map does not hold. Logged and skipped rather than thrown: throwing
@@ -368,50 +402,50 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
                 selection.Matches.Count, (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
         }
 
-        // Unconditional, and last. See the type remarks: every path reaching here has acked the
-        // outcome as final, and a store fault must propagate so the classifier trips the gate and
-        // requeues rather than acknowledging a hand-off whose source was never reclaimed.
-        await ReclaimAsync(m.EntryId).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Deletes the execution blob this outcome names, if it names one.
-    /// <para>
-    /// <b>Called on every disposition that ends this replica's responsibility for the message —
-    /// acked and parked alike.</b> Only a requeue-nack skips it, because that delivery is coming
-    /// back and will need the blob to still be there.
-    /// </para>
-    /// <para>
-    /// A store fault propagates rather than being swallowed, on both callers. On the acked path that
-    /// is what stops a hand-off being acknowledged with its source unreclaimed. On the parked path it
-    /// converts the park into a requeue — which is the better answer anyway: the store being
-    /// unreachable says nothing about the message, and a redelivery may well find L1 caught up.
-    /// </para>
-    /// </summary>
-    private async Task ReclaimAsync(Guid entryId)
-    {
-        // Guid.Empty is not a key: a source step's Failed or Cancelled outcome, an output that failed
-        // its schema, and a branch sent with no data all report it, and it means there is no blob to
-        // reclaim.
-        if (entryId == Guid.Empty)
+// Unconditional, and last — after every hand-off. See the type remarks: every path reaching
+        // here has acked the outcome as final, and a store fault must propagate so the classifier trips
+        // the gate and requeues rather than acknowledging a hand-off whose source was never reclaimed.
+        foreach (var orphan in unreported)
         {
-            return;
+            await db.KeyDeleteAsync(L2ProjectionKeys.ExecutionData(orphan)).ConfigureAwait(false);
         }
 
-        _logger.LogDebug("reclaiming the source blob from L2");
+        await ReclaimAsync(m.EntryId, handoffs).ConfigureAwait(false);
 
-        await _redis.GetDatabase()
-            .KeyDeleteAsync(L2ProjectionKeys.ExecutionData(entryId))
-            .ConfigureAwait(false);
+        park?.Throw();
     }
 
     /// <summary>
-    /// Whether a Failed or Cancelled outcome's input key is still present. Absent means an earlier
-    /// delivery of this outcome already advanced and reclaimed it.
+    /// Deletes the outcome's blob and its hand-off set, in one call.
+    /// <para>
+    /// <b>Called on every disposition that ends this replica's responsibility for the message —
+    /// acked and parked alike.</b> Only a requeue-nack skips it, because that delivery is coming back
+    /// and will need both to still be there. A store fault propagates on both callers: on the acked
+    /// path that stops a hand-off being acknowledged with its source unreclaimed, and on the parked
+    /// path it converts the park into a requeue, which is the better answer anyway.
+    /// </para>
+    /// </summary>
+    private async Task ReclaimAsync(Guid entryId, string handoffs)
+    {
+        _logger.LogDebug("reclaiming the source blob from L2");
+
+        // Guid.Empty names no blob; the hand-off set may exist either way.
+        var keys = new List<RedisKey> { handoffs };
+        if (entryId != Guid.Empty)
+        {
+            keys.Add(L2ProjectionKeys.ExecutionData(entryId));
+        }
+
+        await _redis.GetDatabase().KeyDeleteAsync([.. keys]).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Whether the outcome's key is still present. Absent means an earlier delivery of this outcome
+    /// already advanced and reclaimed it.
     /// </summary>
     private async Task<bool> ExistsAsync(Guid entryId)
     {
-        _logger.LogDebug("checking the finished step's input is still in L2");
+        _logger.LogDebug("checking the finished step's key is still in L2");
 
         return await _redis.GetDatabase()
             .KeyExistsAsync(L2ProjectionKeys.ExecutionData(entryId))
@@ -419,63 +453,35 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
     }
 
     /// <summary>
-    /// Reads the finished step's blob. Returns <c>null</c> when the key is absent, which the caller
-    /// treats as a duplicate delivery, and an empty array
-    /// when the key holds no data.
+    /// Gives one successor its input under <paramref name="successorId"/>.
     /// <para>
-    /// <b>An absent key is acked, matching the processor's pre handler.</b> This used to park, on the
-    /// grounds that the key could equally have been removed by a previous attempt at this outcome or
-    /// never written at all, the second being a real defect. <b>The second reading is not
-    /// reachable.</b> By the time this runs: the workflow and step are in L1 (a miss already threw
-    /// <see cref="DescribeL1Miss"/> above); <c>EntryId</c> is not the empty sentinel (that path never
-    /// reads); the write happened, because <c>ProcessedDataHandler</c> writes before it sends and
-    /// sends <c>Guid.Empty</c> when it did not write — its own comment says naming the key would
-    /// "send the orchestrator to reclaim a key that was never written"; and nothing else deletes this
-    /// key. The processor's reclaim takes its own INPUT, a different guid, since a fresh key is
-    /// minted per successor below. So an absent key means this outcome was already handled.
-    /// </para>
-    /// <para>
-    /// <b>And the park did not preserve what it was for.</b> A parked outcome cannot be replayed —
-    /// the replay re-reads the same absent key and parks again — so it was a message that could only
-    /// be read once and deleted, at the cost of an entry in <c>pipeline.deadletter.depth</c> and an
-    /// interruption. The rate tracked restarts and migrations rather than defects: one planned
-    /// scale-down on 2026-08-31 produced a park 32ms after the replica admitted consumption, for a
-    /// run that had already completed four times over.
-    /// </para>
-    /// <para>
-    /// Logged at Warning rather than the processor's Information, because the processor can PROVE its
-    /// own reclaim removed the key and this infers it from the argument above. A burst here means
-    /// outcomes are being redelivered in volume, which is worth seeing.
-    /// </para>
-    /// <para>
-    /// See <c>docs/superpowers/specs/2026-09-01-absent-key-disposition-design.md</c>. The forgery
-    /// case this branch used to catch incidentally — a real workflow and step with a bogus EntryId —
-    /// belongs to a provenance guard on this queue, the sibling of the one
-    /// <c>ProcessedDataHandler</c> carries; it is not this branch's job and never did it well.
+    /// <b>Only a Completed outcome's blob is data (spec D6)</b>: copied inside Redis, never loaded
+    /// here. COPY without REPLACE: <c>false</c> means an earlier attempt made the key, and dispatching
+    /// is still correct. Anything else — Failed, Cancelled, or an outcome naming no key — gets
+    /// <c>""</c>, written NX for the same reason.
     /// </para>
     /// </summary>
-    private async Task<byte[]?> ReadAsync(Guid entryId)
+    private async Task MaterializeAsync(IDatabase db, StepOutcome m, Guid successorId)
     {
-        _logger.LogDebug("reading the finished step's blob from L2");
+        var target = L2ProjectionKeys.ExecutionData(successorId);
 
-        // A store fault propagates: the consumer classifies it, closes the gate and returns the
-        // delivery. Catching it here would acknowledge an outcome that was never acted on.
-        var raw = await _redis.GetDatabase()
-            .StringGetAsync(L2ProjectionKeys.ExecutionData(entryId))
-            .ConfigureAwait(false);
-
-        // IsNull, NOT IsNullOrEmpty. Redis keeps "" as a value and answers Null only for a missing
-        // key, and the processor writes "" under a no-data branch's own key: absent is a duplicate,
-        // empty is a step that finished with nothing to hand on. Reading "" as absent dropped that
-        // step's successors as a duplicate. See §4 of the in-process post design.
-        if (raw.IsNull)
+        if (m.Result == StepResult.Completed && m.EntryId != Guid.Empty)
         {
-            // Null, not an exception: the caller returns without advancing or reclaiming, and the
-            // consumer acks. Matches ProcessDispatchHandler's "entry absent" branch, which is the
-            // divergence this closes.
-            return null;
+            _logger.LogDebug("copying the finished step's blob to the successor's key");
+            await db.KeyCopyAsync(L2ProjectionKeys.ExecutionData(m.EntryId), target).ConfigureAwait(false);
+            return;
         }
 
-        return (byte[])raw!;
+        await db.StringSetAsync(target, RedisValue.EmptyString, null, When.NotExists, CommandFlags.None)
+            .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Whether redelivering the outcome could succeed where this attempt did not: a transport fault on
+    /// a send, or the store being unreachable (or OOM, READONLY, LOADING, BUSY). Everything else is
+    /// deterministic, and misclassifying in that direction reports one step failed rather than
+    /// requeueing a message that fails identically forever.
+    /// </summary>
+    private static bool IsRecoverable(Exception ex) =>
+        ex is TransientSendException || L2FaultClassifier.IsTransient(ex);
 }
