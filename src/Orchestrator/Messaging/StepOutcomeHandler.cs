@@ -182,8 +182,8 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         // PROVENANCE. The sibling of the guard ProcessedDataHandler carries on the branch hop, and
         // it exists for the same reason: orchestrator-result is an addressable queue on a shared
         // broker, this handler is resolved by message type across the whole container, and
-        // everything below acts on the ids in the body — it reads a blob under EntryId, hands the
-        // successors off, and reclaims. Until now nothing compared the message against anything but
+        // everything below acts on the ids in the body — it checks the key under EntryId exists,
+        // copies it to the successors' keys, dispatches them, and reclaims. Until now nothing compared the message against anything but
         // the existence of its workflow and step, so an outcome naming a real workflow and a real
         // step could be minted by anyone and would advance that workflow.
         //
@@ -217,7 +217,7 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
                 + "to advance the graph on an outcome whose provenance does not check out");
         }
 
-// CHECK BEFORE NARRATING: a delivery that advances nothing must not announce "the entry step
+        // CHECK BEFORE NARRATING: a delivery that advances nothing must not announce "the entry step
         // completed" first (RunLedger's I8 counts that line exactly).
         //
         // EXISTS, never a read: the blob is copied inside Redis and never loaded here. Absent means an
@@ -272,7 +272,7 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
 
         var selection = StepAdvancement.SelectNext(m.Result, completed, entry.Steps);
 
-var db = _redis.GetDatabase();
+        var db = _redis.GetDatabase();
         var source = EntryIds.HandoffSource(m.EntryId, m.CorrelationId, m.StepId);
         var handoffs = L2ProjectionKeys.ExecutionHandoffs(source);
 
@@ -286,17 +286,21 @@ var db = _redis.GetDatabase();
             var successorId = EntryIds.Successor(m.EntryId, m.CorrelationId, m.StepId, next.StepId);
             var dispatchStarted = Stopwatch.GetTimestamp();
 
+            // CHECKED BEFORE MATERIALIZING, and the order matters. A successor in the set was already
+            // dispatched by an earlier attempt, so it owns its key and may since have run, finished
+            // and reclaimed it; materializing again would recreate a key nobody will ever read or
+            // delete (no TTL, no sweeper). An unroutable send is transient and requeues the WHOLE
+            // outcome, so without this set every sibling before the failing one would also be
+            // dispatched again on every retry. A crash between the dispatch and the SADD still
+            // re-materializes and re-dispatches: the accepted rare case (spec limit 1).
+            if (await db.SetContainsAsync(handoffs, next.StepId.ToString("D")).ConfigureAwait(false))
+            {
+                continue;
+            }
+
             try
             {
                 await MaterializeAsync(db, m, successorId).ConfigureAwait(false);
-
-                // Already sent by an earlier attempt at this outcome: an unroutable send is transient
-                // and requeues the WHOLE outcome, and without this set every sibling before it would
-                // be dispatched again on every retry.
-                if (await db.SetContainsAsync(handoffs, next.StepId.ToString("D")).ConfigureAwait(false))
-                {
-                    continue;
-                }
 
                 // A dispatch STARTS a step, so the clock starts here rather than being inherited from
                 // the outcome being handled.
@@ -402,7 +406,7 @@ var db = _redis.GetDatabase();
                 selection.Matches.Count, (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
         }
 
-// Unconditional, and last — after every hand-off. See the type remarks: every path reaching
+        // Unconditional, and last — after every hand-off. See the type remarks: every path reaching
         // here has acked the outcome as final, and a store fault must propagate so the classifier trips
         // the gate and requeues rather than acknowledging a hand-off whose source was never reclaimed.
         foreach (var orphan in unreported)
@@ -456,8 +460,9 @@ var db = _redis.GetDatabase();
     /// Gives one successor its input under <paramref name="successorId"/>.
     /// <para>
     /// <b>Only a Completed outcome's blob is data (spec D6)</b>: copied inside Redis, never loaded
-    /// here. COPY without REPLACE: <c>false</c> means an earlier attempt made the key, and dispatching
-    /// is still correct. Anything else — Failed, Cancelled, or an outcome naming no key — gets
+    /// here. COPY without REPLACE: <c>false</c> means an earlier attempt made the key, or the source is
+    /// already gone (a concurrent replica finished this outcome and reclaimed it); dispatching is still
+    /// correct either way, because that replica dispatched every successor before its DEL. Anything else — Failed, Cancelled, or an outcome naming no key — gets
     /// <c>""</c>, written NX for the same reason.
     /// </para>
     /// </summary>

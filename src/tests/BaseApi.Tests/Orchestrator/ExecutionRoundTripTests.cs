@@ -548,6 +548,10 @@ public sealed class ExecutionRoundTripTests
         await Assert.ThrowsAsync<TransientSendException>(
             () => h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry)));
 
+        // B has meanwhile run and reclaimed its input; the redelivery must not recreate it.
+        var keyB = EntryIds.Successor(Entry, Corr, A, B);
+        await h.L2.Db.KeyDeleteAsync(L2ProjectionKeys.ExecutionData(keyB));
+
         h.Bus.FaultOnQueue = null;
         await h.Deliver(MessageTypes.StepOutcome, Outcome(StepResult.Completed, Entry));
 
@@ -555,6 +559,8 @@ public sealed class ExecutionRoundTripTests
         Assert.Equal([B, C], dispatched);
         Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(Entry)));
         Assert.Empty(h.L2.Members(L2ProjectionKeys.ExecutionHandoffs(Entry)));
+        Assert.False(h.L2.Has(L2ProjectionKeys.ExecutionData(keyB)));
+        Assert.Equal([L2ProjectionKeys.ExecutionData(EntryIds.Successor(Entry, Corr, A, C))], h.L2.Keys());
     }
 
     [Fact]
