@@ -6,7 +6,7 @@
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "K+V3PgmJWOnldp8zB9G9MBmpgI/cjRbKd8Is7T1MpcNqqI2UlqUlW4UJw+eVH4V8pyhR77BhQunFuangIh7nTg==",
+        "contentHash": "BMg78Kh3AODqjQDDdeFg/UYzNM5W+z6i1rqCLLTW8HnDGF451kLNGFoFmbvw4otR3y0Vy38bT1I0AksayWC/WQ==",
         "dependencies": {
           "Asp.Versioning.Mvc": "8.1.0",
           "Asp.Versioning.Mvc.ApiExplorer": "8.1.0",
@@ -52,7 +52,7 @@
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "VDHlzFlOsyDc7UkYMmvkzJnKY26iifhW2UtLXFXIDOCRn2AJ7i50+i/+/9fe1zksCt1vNr1C3/bRQx4rcV7u2A=="
+        "contentHash": "cKzf+B5WkHrETy73V4ix+GGMs3RaCzMSOGxIhIxMTdv0JbeYxhS+0VngaTe0NgiN3VxtuYJS5QWVzRcRIZ+U/Q=="
       },
       "Microsoft.EntityFrameworkCore.Design": {
         "type": "Direct",
@@ -558,7 +558,7 @@
         "type": "CentralTransitive",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "qjXA72CLziETeDSVVWaRErVA2bRe0cRuKyCxzIQ6/LtA4uMATP8Hnhz33PrB1989ZADhOQYkFasMuVGculH4cQ==",
+        "contentHash": "5vaSP3RDLnVx7+zB2qap5jYC8MwphmHYIukN/zFyuSDaVYH5W4RsPxqddYCbLUyG1bgdf45Xi+dLECuVNrLUFw==",
         "dependencies": {
           "Messaging.Contracts": "[1.0.0]",
           "Microsoft.Extensions.Hosting.Abstractions": "8.0.1",

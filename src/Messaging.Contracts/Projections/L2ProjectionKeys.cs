@@ -151,4 +151,10 @@ public static class L2ProjectionKeys
     /// </para>
     /// </summary>
     public static string ExecutionData(Guid entryId) => $"{Prefix}data:{entryId:D}";
+
+    /// <summary>
+    /// The successors already dispatched for one outcome, as a set of step ids. Lets a redelivered
+    /// outcome skip what an earlier attempt already sent. Deleted with the outcome's own data key.
+    /// </summary>
+    public static string ExecutionHandoffs(Guid sourceId) => $"{Prefix}handoff:{sourceId:D}";
 }
