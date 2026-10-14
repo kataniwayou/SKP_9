@@ -3,6 +3,7 @@ using BaseConsole.Core.Gating;
 using BaseConsole.Core.Naming;
 using Messaging.Contracts;
 using Messaging.Transport;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
@@ -10,6 +11,7 @@ using Orchestrator.Election;
 using Orchestrator.L1;
 using Orchestrator.Scheduling;
 using Quartz;
+using StackExchange.Redis;
 using Xunit;
 
 namespace BaseApi.Tests.Orchestrator;
@@ -149,10 +151,69 @@ public sealed class WorkflowFireJobTests
         /// </summary>
         public RecordingLogger<WorkflowFireJob> Log { get; } = new();
 
-        public WorkflowFireJob Build() => new(Store, Scheduler, Sender, State, Gate, Log);
+        /// <summary>
+        /// The fire's liveness read, answering every processor live by default — every test here but the
+        /// liveness ones is about what a fire does once its processors are up, and a dead default would
+        /// make them all pass for the wrong reason. <see cref="Dead"/> and <see cref="Faulted"/> override
+        /// one processor's answer; <see cref="Alive"/> clears the override.
+        /// </summary>
+        public IProcessorLivenessCheck Liveness { get; } = Substitute.For<IProcessorLivenessCheck>();
+
+        private readonly Dictionary<Guid, ProcessorLivenessVerdict> _verdicts = [];
+
+        public Harness()
+        {
+            Liveness.ReadAsync(Arg.Any<IReadOnlyDictionary<Guid, string>>()).Returns(ci =>
+                (IReadOnlyList<ProcessorLivenessVerdict>)ci.Arg<IReadOnlyDictionary<Guid, string>>().Keys
+                    .Select(id => _verdicts.TryGetValue(id, out var v) ? v : new ProcessorLivenessVerdict(id, Live: true))
+                    .ToList());
+        }
+
+        /// <summary>The processor has no live replica.</summary>
+        public Harness Dead(Guid processorId)
+        {
+            _verdicts[processorId] = new ProcessorLivenessVerdict(processorId, Live: false);
+            return this;
+        }
+
+        /// <summary>The processor is live again.</summary>
+        public Harness Alive(Guid processorId)
+        {
+            _verdicts.Remove(processorId);
+            return this;
+        }
+
+        /// <summary>The processor's liveness keys could not be read, for the reason given.</summary>
+        public Harness Faulted(Guid processorId, Exception fault)
+        {
+            _verdicts[processorId] = new ProcessorLivenessVerdict(processorId, Live: false, fault);
+            return this;
+        }
+
+        /// <summary>
+        /// One entry step on <paramref name="entryProcessor"/> whose successor runs on
+        /// <paramref name="successorProcessor"/> — a processor no entry step uses.
+        /// </summary>
+        public Harness WithChain(Guid workflowId, Guid entryProcessor, Guid successorProcessor)
+        {
+            _definition = new WorkflowL1(
+                workflowId,
+                [S1],
+                EveryHour,
+                [
+                    new StepL1(S1, PreviousCompleted, entryProcessor, Config, [S2]),
+                    new StepL1(S2, PreviousCompleted, successorProcessor, Config, []),
+                ],
+                []);
+
+            Store.Set(workflowId, _definition, JobId);
+            return this;
+        }
+
+        public WorkflowFireJob Build() => new(Store, Scheduler, Sender, State, Gate, Liveness, Log);
 
         public WorkflowFireJob BuildNamed(EntityNameResolver names) => new(
-            Store, Scheduler, Sender, State, Gate, Log, names);
+            Store, Scheduler, Sender, State, Gate, Liveness, Log, names);
 
         /// <summary>
         /// The flattened scope of the one record matching <paramref name="template"/>, or null if no
@@ -649,5 +710,136 @@ public sealed class WorkflowFireJobTests
         Assert.Equal("wf_1.0.0-x", scope![EntityNames.WorkflowName]);
         Assert.Equal("s1_1.0.0-x", scope[EntityNames.StepName]);
         Assert.Equal("p1_1.0.0-x", scope[EntityNames.ProcessorName]);
+    }
+
+    // ---- The liveness gate -------------------------------------------------------------------------
+
+    private static Task DidNotDispatch(Harness h) =>
+        h.Sender.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<ProcessDispatch>(), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
+
+    private static int SingleRecord(Harness h, Func<int, bool> match) =>
+        Assert.Single(Enumerable.Range(0, h.Log.Records.Count), i => match(i));
+
+    [Fact]
+    public async Task AProcessorWithNoLiveReplicaStopsTheWholeFireButStillReschedules()
+    {
+        // The flood this gate exists for: a processor scaled to zero keeps its durable queue, a send to
+        // it is confirmed, and without the gate every tick would pile another run onto it. P1 is live —
+        // and its entry step is still not dispatched, because the run as a whole cannot finish.
+        var h = new Harness().AsLeader().WithWorkflow(W, entries: [(S1, P1), (S2, P2)]).Dead(P2);
+
+        await h.Build().Execute(h.Context(W, h.JobId));
+
+        await DidNotDispatch(h);
+        Assert.Equal(1, h.Scheduler.RescheduleCount);
+        Assert.True(h.Gate.IsOpen);
+
+        var i = SingleRecord(h, i => h.Log.Templates[i] == "the processor has no live replica; this fire dispatches nothing");
+        Assert.Equal(LogLevel.Warning, h.Log.Records[i].Level);
+        Assert.Equal(P2.ToString(), h.Log.RecordScopes[i]["ProcessorId"].ToString());
+    }
+
+    [Fact]
+    public async Task ADeadSuccessorProcessorStopsTheFireEvenThoughNoEntryStepRunsOnIt()
+    {
+        // Every processor of the workflow, not only the entry steps': the successor's queue would flood
+        // the same way, one handoff per run.
+        var h = new Harness().AsLeader().WithChain(W, entryProcessor: P1, successorProcessor: P2).Dead(P2);
+
+        await h.Build().Execute(h.Context(W, h.JobId));
+
+        await DidNotDispatch(h);
+        Assert.Equal(1, h.Scheduler.RescheduleCount);
+        await h.Liveness.Received(1).ReadAsync(Arg.Is<IReadOnlyDictionary<Guid, string>>(k =>
+            k.Count == 2 && k.ContainsKey(P1) && k.ContainsKey(P2)));
+    }
+
+    [Fact]
+    public async Task AFireDispatchesAgainOnceItsProcessorIsBack()
+    {
+        // A skip costs one tick: the reschedule ran, so the next fire is an ordinary one.
+        var h = new Harness().AsLeader().WithWorkflow(W, entries: [(S1, P1)]).Dead(P1);
+        await h.Build().Execute(h.Context(W, h.JobId));
+        await DidNotDispatch(h);
+
+        h.Alive(P1);
+        await h.Build().Execute(h.Context(W, h.JobId));
+
+        await h.Sender.Received(1).SendAsync(ProcessorQueues.Work(P1), MessageTypes.ProcessDispatch,
+            Arg.Any<ProcessDispatch>(), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
+        Assert.Equal(2, h.Scheduler.RescheduleCount);
+    }
+
+    [Fact]
+    public async Task ATransientLivenessFaultTripsTheGateAndSkipsButStillReschedules()
+    {
+        // A transient store fault is the gate's business: tripped, as a consumer trips it, and the
+        // probe reopens it. Never a throw — that would end the schedule on this replica.
+        var h = new Harness().AsLeader().WithWorkflow(W, entries: [(S1, P1)])
+            .Faulted(P1, new RedisConnectionException(ConnectionFailureType.UnableToConnect, "down"));
+
+        await h.Build().Execute(h.Context(W, h.JobId));   // must not throw
+
+        await DidNotDispatch(h);
+        Assert.False(h.Gate.IsOpen);
+        Assert.Equal(1, h.Scheduler.RescheduleCount);
+    }
+
+    [Fact]
+    public async Task ADeterministicLivenessFaultLogsAnErrorNamingTheProcessorAndLeavesTheGateOpen()
+    {
+        // A WRONGTYPE on an index is a broken key, not a broken store: tripping the gate would only see
+        // the probe reopen it onto the same key. The error, once per tick, is what gets it found.
+        var h = new Harness().AsLeader().WithWorkflow(W, entries: [(S1, P1)])
+            .Faulted(P1, new RedisServerException("WRONGTYPE Operation against a key holding the wrong kind of value"));
+
+        await h.Build().Execute(h.Context(W, h.JobId));   // must not throw
+
+        await DidNotDispatch(h);
+        Assert.True(h.Gate.IsOpen);
+        Assert.Equal(1, h.Scheduler.RescheduleCount);
+
+        var i = SingleRecord(h, i => h.Log.Records[i].Level == LogLevel.Error);
+        Assert.IsType<RedisServerException>(h.Log.Records[i].Exception);
+        Assert.Equal(P1.ToString(), h.Log.RecordScopes[i]["ProcessorId"].ToString());
+    }
+
+    [Fact]
+    public async Task ALivenessReadThatThrowsAnywayIsAbsorbedAndTheScheduleSurvives()
+    {
+        // The read captures its faults per processor; this is the backstop if it ever does not.
+        var h = new Harness().AsLeader().WithWorkflow(W, entries: [(S1, P1)]);
+        h.Liveness.ReadAsync(Arg.Any<IReadOnlyDictionary<Guid, string>>())
+            .ThrowsAsync(new RedisTimeoutException("slow", CommandStatus.Sent));
+
+        await h.Build().Execute(h.Context(W, h.JobId));   // must not throw
+
+        await DidNotDispatch(h);
+        Assert.False(h.Gate.IsOpen);
+        Assert.Equal(1, h.Scheduler.RescheduleCount);
+    }
+
+    [Fact]
+    public async Task AFollowerNeverReadsLiveness()
+    {
+        // After the leader check, so only the leader pays the read.
+        var h = new Harness().AsFollower().WithWorkflow(W, entries: [(S1, P1)]);
+
+        await h.Build().Execute(h.Context(W, h.JobId));
+
+        await h.Liveness.DidNotReceive().ReadAsync(Arg.Any<IReadOnlyDictionary<Guid, string>>());
+        Assert.Equal(1, h.Scheduler.RescheduleCount);
+    }
+
+    [Fact]
+    public async Task AClosedStoreNeverReadsLiveness()
+    {
+        var h = new Harness().AsLeader().WithWorkflow(W, entries: [(S1, P1)]);
+        await h.Gate.TripAsync();
+
+        await h.Build().Execute(h.Context(W, h.JobId));
+
+        await h.Liveness.DidNotReceive().ReadAsync(Arg.Any<IReadOnlyDictionary<Guid, string>>());
     }
 }

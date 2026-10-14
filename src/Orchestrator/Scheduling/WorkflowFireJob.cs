@@ -40,6 +40,24 @@ namespace Orchestrator.Scheduling;
 /// already cancelled.
 /// </para>
 /// <para>
+/// <b>The leader also checks that every processor the workflow runs on is live before dispatching.</b>
+/// A processor scaled to zero, or crashed, still has its durable work queue, and a send to it is
+/// routed and confirmed — so without this gate the cron would keep filling that queue for the whole
+/// outage, and the processor would come back to a burst of runs whose window had passed. "Live" is the
+/// API start gate's own rule, shared through <c>ReplicaLivenessClassifier</c>: at least one replica
+/// healthy and fresh. Every processor of the workflow, not only the entry steps', because a dead
+/// successor's queue floods the same way through the handoff. After the leader check, so only the
+/// leader pays the read. A no skips this fire and nothing else: the reschedule below still runs, so
+/// the first fire after the processor returns is an ordinary one.
+/// </para>
+/// <para>
+/// <b>A Redis fault in that check is a skip too, never a throw</b> — a throw before the reschedule
+/// would end the schedule on this replica. A transient fault trips the L2 gate, as a consumer does on
+/// one, and the probe reopens it; a deterministic one (a WRONGTYPE on an index, a NOPERM) is logged as
+/// an error naming the processor, and the gate is left alone, because the probe would only reopen it
+/// onto the same broken key.
+/// </para>
+/// <para>
 /// <b>Business cases are logged and returned from, never thrown.</b> A job-data map that will not
 /// parse and a workflow no longer in L1 are both ordinary — the second is what every fire of a
 /// stopped workflow sees on its way out — and Quartz has nothing useful to do with an exception for
@@ -53,6 +71,7 @@ public sealed class WorkflowFireJob(
     IQueueSender sender,
     LeaderState leaderState,
     L2Gate gate,
+    IProcessorLivenessCheck liveness,
     ILogger<WorkflowFireJob> logger,
     EntityNameResolver? names = null) : IJob
 {
@@ -145,13 +164,13 @@ public sealed class WorkflowFireJob(
                     leaderState.IsLeader ? LogLevel.Information : LogLevel.Debug,
                     "the projection store is unusable; this fire dispatches nothing");
             }
-            else if (leaderState.IsLeader)
-            {
-                await DispatchEntryStepsAsync(workflowId, entry.Definition, context).ConfigureAwait(false);
-            }
-            else
+            else if (!leaderState.IsLeader)
             {
                 logger.LogDebug("not the leader; skipping the dispatch and arming the next fire");
+            }
+            else if (await AllProcessorsLiveAsync(entry, context).ConfigureAwait(false))
+            {
+                await DispatchEntryStepsAsync(workflowId, entry.Definition, context).ConfigureAwait(false);
             }
 
             // Re-read L1 rather than reusing the entry above. The whole value of this check is that it
@@ -198,6 +217,86 @@ public sealed class WorkflowFireJob(
     {
         value = Guid.Empty;
         return map.TryGetValue(key, out var raw) && Guid.TryParse(raw as string, out value);
+    }
+
+    /// <summary>
+    /// The liveness gate: true when every processor of the workflow has at least one live replica.
+    /// Never throws a Redis fault — see the type remarks — and logs one record per processor that
+    /// stops the fire, under that processor's scope, so the record names it without a template id.
+    /// </summary>
+    private async Task<bool> AllProcessorsLiveAsync(L1Entry entry, IJobExecutionContext context)
+    {
+        // The Redis client takes no token, so this is the only place shutdown can land before the read.
+        context.CancellationToken.ThrowIfCancellationRequested();
+
+        IReadOnlyList<ProcessorLivenessVerdict> verdicts;
+        try
+        {
+            verdicts = await liveness.ReadAsync(entry.ProcessorInstanceIndexKeys).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!context.CancellationToken.IsCancellationRequested)
+        {
+            // The read captures its faults per processor and should never get here; this is the
+            // backstop that keeps the reschedule reachable if it ever does.
+            if (L2FaultClassifier.IsTransient(ex))
+            {
+                await gate.TripAsync().ConfigureAwait(false);
+                logger.LogWarning(ex, "the processors' liveness could not be read; this fire dispatches nothing");
+            }
+            else
+            {
+                logger.LogError(ex, "the processors' liveness could not be read; this fire dispatches nothing");
+            }
+
+            return false;
+        }
+
+        var allLive = true;
+        var transient = false;
+
+        foreach (var verdict in verdicts)
+        {
+            if (verdict.Live)
+            {
+                continue;
+            }
+
+            allLive = false;
+
+            var state = ExecutionLogScope.BuildScope(
+                Guid.Empty, Guid.Empty, Guid.Empty, verdict.ProcessorId, Guid.Empty);
+
+            using (logger.BeginScope(state))
+            {
+                using var processorName = logger.BeginNamesScope(
+                    await names.ScopeOrNullAsync(Guid.Empty, Guid.Empty, verdict.ProcessorId).ConfigureAwait(false));
+
+                if (verdict.Fault is null)
+                {
+                    logger.LogWarning("the processor has no live replica; this fire dispatches nothing");
+                }
+                else if (L2FaultClassifier.IsTransient(verdict.Fault))
+                {
+                    transient = true;
+                    logger.LogWarning(
+                        verdict.Fault, "the processor's liveness could not be read; this fire dispatches nothing");
+                }
+                else
+                {
+                    logger.LogError(
+                        verdict.Fault, "the processor's liveness keys cannot be read; this fire dispatches nothing");
+                }
+            }
+        }
+
+        // Once per fire, after the loop: the gate notifies on transitions only, and every faulted
+        // processor above has already been named.
+        if (transient)
+        {
+            await gate.TripAsync().ConfigureAwait(false);
+        }
+
+        return allLive;
     }
 
     /// <summary>

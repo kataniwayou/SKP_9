@@ -185,6 +185,10 @@ public static class OrchestratorHost
         // Quartz builds one instance per fire.
         builder.Services.AddTransient<WorkflowFireJob>();
 
+        // The fire's liveness gate: reads each processor's instance index and replicas from L2 before
+        // the leader dispatches. Stateless, so one instance serves every fire.
+        builder.Services.AddSingleton<IProcessorLivenessCheck, ProcessorLivenessCheck>();
+
         // The clock the scheduler does its cron arithmetic on. AddBaseConsoleGating below TryAdds the
         // same instance; this is deliberately the same TryAdd rather than a second, different
         // registration, so the scheduling block does not depend on a call thirty lines below it for

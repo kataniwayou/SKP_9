@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using Messaging.Contracts;
+using Messaging.Contracts.Projections;
 
 namespace Orchestrator.L1;
 
@@ -57,6 +58,26 @@ public sealed record L1Entry(WorkflowL1 Definition, Guid JobId, DateTimeOffset? 
     /// </summary>
     public IReadOnlyDictionary<Guid, StepL1> Steps { get; } =
         Definition.Steps.GroupBy(s => s.StepId).ToDictionary(g => g.Key, g => g.Last());
+
+    /// <summary>
+    /// Every processor this workflow's steps run on, each mapped to its L2 instance-index key
+    /// (<c>skp:proc:{processorId}:instances</c>) — what the fire's liveness gate reads before it
+    /// dispatches anything.
+    /// <para>
+    /// <b>Scoped to this workflow, and built here because this is the one funnel.</b> A start and a
+    /// hydration pass both reach L1 through <c>WorkflowActivator</c>'s single <c>Set</c>, so deriving the
+    /// keys at construction covers both, and a re-activation rebuilds them against the current graph.
+    /// Nothing extra is read from L2: the processor ids are already on the steps.
+    /// </para>
+    /// <para>
+    /// <b>The index key, never the per-instance keys.</b> Those are named by pod identity, which moves on
+    /// every restart and scale event, so a copy held here would be stale after the first one. The index is
+    /// stable per processor, and the gate resolves the replicas behind it at fire time.
+    /// </para>
+    /// </summary>
+    public IReadOnlyDictionary<Guid, string> ProcessorInstanceIndexKeys { get; } =
+        Definition.Steps.Select(s => s.ProcessorId).Distinct()
+            .ToDictionary(id => id, L2ProjectionKeys.ProcessorInstances);
 }
 
 /// <summary>

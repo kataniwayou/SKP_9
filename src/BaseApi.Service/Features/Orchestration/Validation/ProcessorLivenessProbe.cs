@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Messaging.Contracts.Projections;
 using StackExchange.Redis;
 
@@ -59,20 +58,18 @@ internal sealed class ProcessorLivenessProbe
         }
         var values = await Task.WhenAll(reads);
 
+        // The rule itself is shared with the orchestrator's fire gate: see ReplicaLivenessClassifier.
         int healthy = 0, absent = 0, unhealthy = 0, stale = 0, malformed = 0;
         foreach (var raw in values)
         {
-            if (raw.IsNullOrEmpty) { absent++; continue; }
-
-            ProcessorLivenessEntry? entry;
-            // Any deserialization failure on external data counts as malformed, never a 500.
-            try { entry = JsonSerializer.Deserialize<ProcessorLivenessEntry>(raw!); }
-            catch (Exception ex) when (ex is JsonException or NotSupportedException) { malformed++; continue; }
-            if (entry?.Summary is null) { malformed++; continue; }
-            // Ordinal: the writer is the sole producer and always emits the canonical constant.
-            if (!string.Equals(entry.Status, LivenessStatus.Healthy, StringComparison.Ordinal)) { unhealthy++; continue; }
-            if (entry.Timestamp.AddSeconds(entry.Interval * 2) <= now) { stale++; continue; }
-            healthy++;
+            switch (ReplicaLivenessClassifier.Classify(raw.IsNullOrEmpty ? null : raw.ToString(), now))
+            {
+                case ReplicaLiveness.Absent:    absent++;    break;
+                case ReplicaLiveness.Malformed: malformed++; break;
+                case ReplicaLiveness.Unhealthy: unhealthy++; break;
+                case ReplicaLiveness.Stale:     stale++;     break;
+                case ReplicaLiveness.Healthy:   healthy++;   break;
+            }
         }
 
         return new ProcessorLiveness(processorId, members.Length, healthy, absent, unhealthy, stale, malformed);
