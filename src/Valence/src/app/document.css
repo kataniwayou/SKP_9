@@ -1,0 +1,44 @@
+/* A document panel and its capsule toolbar (mockup v49 .docpanel, .docbar, .cap-b, .docact, .qb). */
+.docpanel { position: relative; height: 100%; background: var(--ground); }
+/* dockview hides a background tab with an inherited visibility: hidden, but React Flow writes an
+   inline visibility: visible on each node, so without this the nodes show through and take clicks */
+.docpanel.bg .react-flow__node { visibility: hidden !important; }
+.doc-msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+.doc-msg.error { color: var(--f); }
+.docbar { position: absolute; left: 12px; right: 24px; top: 10px; display: flex; align-items: center; gap: 8px; z-index: 7; pointer-events: none; font-family: var(--sans); }
+.docbar > * { pointer-events: auto; flex: none; }
+.docbar .spacer { flex: 1 1 0; min-width: 0; }
+.cap-b { white-space: nowrap; background: rgba(14, 24, 40, .86); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: 12.5px; color: var(--muted); }
+.docbar .crumb { flex: 0 1 auto; min-width: 80px; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.crumb b { color: var(--ink); font-weight: 600; font-size: 15px; }
+.crumb .ver { font-family: var(--mono); color: var(--muted); font-size: 12px; }
+.docbar .dirtyl { color: var(--x); font-size: 12px; }
+.docbar .chip { font-family: var(--mono); font-size: 11.5px; max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+.stat { display: flex; gap: 8px; align-items: center; }
+.run-chip { font-size: 11.5px; color: var(--c); border: 1px solid rgba(45, 212, 191, .4); border-radius: 999px; padding: 2px 8px; }
+.stat .stopped { font-size: 11.5px; color: var(--muted); }
+.stat .unknown { font-size: 11.5px; color: var(--faint); }
+.docact { display: flex; align-items: center; gap: 2px; padding: 2px 4px; border-radius: 7px; border: 1px solid var(--line-2); background: rgba(14, 24, 40, .86); backdrop-filter: blur(6px); }
+.qb { font-family: var(--sans); font-size: 12.5px; padding: 3px 9px; white-space: nowrap; border-radius: 5px; border: 1px solid transparent; background: none; color: var(--muted); cursor: pointer; }
+.qb:hover { background: var(--panel-2); border-color: var(--line-2); color: var(--ink); }
+.qb.run { color: var(--c); }
+.qb.stop { color: var(--f); }
+/* a disabled button takes no pointer events, so its wrapper's tooltip still shows */
+.qb:disabled { opacity: .35; cursor: default; background: none; border-color: transparent; pointer-events: none; }
+.qsep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+
+/* the modal question (mockup v49 .modal) */
+.modal { position: fixed; inset: 0; display: none; place-items: center; background: rgba(3, 8, 16, .6); backdrop-filter: blur(2px); z-index: var(--z-modal); font-family: var(--sans); }
+.modal.on { display: grid; }
+.mbox { width: 420px; max-width: calc(100vw - 32px); padding: 20px 20px 16px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 30px 80px -20px rgba(0, 0, 0, .85); color: var(--ink); }
+.mt { font-size: 16px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.mt::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--x); }
+.mb { font-size: 13px; color: var(--muted); line-height: 1.55; margin-bottom: 18px; }
+.mb b { color: var(--ink); font-weight: 600; }
+.mbtns { display: flex; gap: 8px; align-items: center; }
+.mbtns .spacer { flex: 1; }
+.doc-msg .btn { margin-left: 10px; }
+
+/* the warning before a workflow is deleted (2026-10-10) */
+.delwarn p { margin: 0 0 6px; }
+.delwarn p:last-child { margin-bottom: 0; }

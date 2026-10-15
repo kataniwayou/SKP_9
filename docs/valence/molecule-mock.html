@@ -1,0 +1,875 @@
+<title>Entity Molecule</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap">
+<style>
+/* Layout: one full-bleed 3D scene; thin instrument panels float over its edges (lab-viewer feel). Deliberately single dark theme: a molecule viewer. */
+:root {
+  color-scheme: dark;
+  --void: #090c12;
+  --panel: rgba(16, 21, 31, 0.86);
+  --line: rgba(150, 170, 210, 0.16);
+  --ink: #dfe5f0;
+  --muted: #8592a8;
+  --wf: #f2c14e;
+  --step: #6c8cff;
+  --proc: #e9e3d6;
+  --schema: #b48cff;
+  --asg: #3fc1c9;
+  --cache: #c98a5a;
+  --link: #9fb0d8;
+  --restrict: #ff5a5a;
+  --cascade: #ffb347;
+  --ok: #4ade80;
+  --ui: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--void); color: var(--ink);
+  font-family: var(--ui); font-size: 14px; overflow: hidden;
+}
+#stage { position: fixed; inset: 0; }
+#stage canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
+body.deleting #stage canvas { cursor: crosshair; }
+body.grabbable #stage canvas { cursor: grab; }
+body.grabbing #stage canvas { cursor: grabbing; }
+#labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+.lbl {
+  position: absolute; transform: translate(-50%, -160%); white-space: nowrap;
+  font: 500 11px/1 var(--mono); color: var(--ink); opacity: .8;
+  text-shadow: 0 0 4px var(--void), 0 0 8px var(--void);
+  transition: opacity .15s;
+}
+.lbl.wf { color: var(--wf); font-size: 12px; opacity: 1; }
+.lbl.proc { color: var(--proc); }
+.lbl.step { color: #b8c7ff; }
+.lbl.schema { color: #cdb4ff; font-size: 10px; opacity: .7; }
+.lbl.cache { color: #e0ad85; font-size: 10px; }
+.lbl.link { display: none; }
+.lbl.asg { color: #8fd9de; font-size: 9.5px; opacity: .6; }
+.lbl.dim { opacity: .12; }
+.lbl.gone { display: none !important; }
+
+.panel {
+  position: fixed; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+#head { top: calc(14px + env(safe-area-inset-top, 0px)); left: 16px; padding: 12px 14px; max-width: min(420px, calc(100% - 32px)); box-sizing: border-box; }
+#head h1 { margin: 0; font: 600 17px/1.2 var(--ui); letter-spacing: .01em; text-wrap: balance; overflow-wrap: anywhere; }
+#head .meta { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 6px; font: 12px/1.4 var(--mono); color: var(--muted); }
+#head .note { margin: 8px 0 0; font-size: 12px; color: var(--muted); line-height: 1.4; }
+#head .mode { display: none; margin: 8px 0 0; font-size: 12px; line-height: 1.4; color: #ffc7c7; }
+body.deleting #head .mode { display: block; }
+
+#side { top: calc(14px + env(safe-area-inset-top, 0px)); right: 16px; width: 320px; max-height: calc(100% - 100px); overflow: auto; box-sizing: border-box; }
+#side section { padding: 12px 14px; border-bottom: 1px solid var(--line); min-width: 0; }
+#side section:last-child { border-bottom: 0; }
+#side h2 { margin: 0 0 8px; font: 600 11px/1 var(--ui); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.legend { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; font-size: 12.5px; }
+.legend span { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.rule { display: inline-block; width: 4px; height: 12px; border-radius: 1px; background: var(--restrict); vertical-align: -2px; }
+.ringmark { display: inline-block; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--cascade); box-sizing: border-box; vertical-align: -1px; }
+.rules { font-size: 12px; line-height: 1.5; color: var(--muted); }
+.rules b { color: var(--ink); font-weight: 500; }
+.rules code { font: 11px var(--mono); color: var(--ink); }
+#counts { font: 11.5px/1.6 var(--mono); color: var(--muted); }
+#dlog { margin: 0; padding: 0; list-style: none; font: 11px/1.45 var(--mono); color: var(--muted); }
+#dlog li { padding: 5px 0; border-bottom: 1px dashed rgba(150, 170, 210, .1); overflow-wrap: anywhere; }
+#dlog li:last-child { border-bottom: 0; }
+#dlog .sql { color: var(--ink); }
+#dlog .ok { color: var(--ok); }
+#dlog .no { color: var(--restrict); }
+#dlog .empty { font-family: var(--ui); font-size: 12px; }
+
+#legendToggle { display: none; }
+
+/* The tooltip has a fixed home under the atom legend, so it never covers an atom. */
+#tip { font: 12px/1.45 var(--mono); }
+/* The panel grows as the tooltip fills; let the pointer pass through so it never steals the hover. */
+#side { pointer-events: none; }
+#tip[hidden] { display: none; }
+#tip .t { font: 600 10.5px var(--ui); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 3px; }
+#tip .n { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
+#tip .d { color: var(--muted); margin-top: 4px; }
+#tip .d b { color: var(--ink); font-weight: 500; }
+#tip .verdict { margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--line); }
+#tip .ok { color: var(--ok); }
+#tip .no { color: var(--restrict); }
+
+@media (max-width: 760px) {
+  #side { left: 16px; right: 16px; width: auto; }
+  #head .note { display: none; }
+}
+</style>
+
+<div id="stage"></div>
+<div id="labels"></div>
+
+<aside id="side" class="panel">
+  <section>
+    <h2>Atoms · one per row</h2>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--wf)"></i>Workflow</span>
+      <span><i class="dot" style="background:var(--step)"></i>Step</span>
+      <span><i class="dot" style="background:var(--proc)"></i>Processor</span>
+      <span><i class="dot" style="background:var(--schema)"></i>Schema</span>
+      <span><i class="dot" style="background:var(--asg)"></i>Assignment</span>
+      <span><i class="dot" style="background:var(--cache)"></i>Cache</span>
+    </div>
+  </section>
+  <section id="tip" hidden aria-live="polite"></section>
+</aside>
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TrackballControls.js"></script>
+<script>
+(() => {
+  // ---------- The workflow's real rows (docs/rebuild-filefetcher-archiveexpander-chain.md) ----------
+  const WORKFLOW = { name: 'filefetcher-archiveexpander-chain', version: '1.0.0', cron: '0 * * * * *', entry: ['split-importer'] };
+  const SCHEMAS = [
+    ['file-locator', '1.0.0'], ['kafka-importer-config', '1.0.0'], ['file-envelope', '1.0.0'],
+    ['file-fetcher-config', '1.0.0'], ['archive-document', '3.0.0'], ['archive-expander-config', '1.0.0'],
+    ['kafka-exporter-config', '1.0.0'], ['sk-normalizer-config-v4', '4.0.0'],
+    ['archive-collapser-config', '1.0.0'], ['file-persister-config', '1.0.0'],
+  ];
+  // name, version, input, output, config
+  const PROCESSORS = [
+    ['kafka-importer', '2.2.0', null, 'file-locator', 'kafka-importer-config'],
+    ['file-fetcher', '1.0.0', 'file-locator', 'file-envelope', 'file-fetcher-config'],
+    ['outcome-recorder', '1.0.0', null, null, null],
+    ['archive-expander', '1.0.0', 'file-envelope', 'archive-document', 'archive-expander-config'],
+    ['kafka-exporter', '1.2.0', null, null, 'kafka-exporter-config'],
+    ['sk-normalizer', '1.0.0', 'archive-document', 'archive-document', 'sk-normalizer-config-v4'],
+    ['archive-collapser', '1.0.0', 'archive-document', 'file-envelope', 'archive-collapser-config'],
+    ['file-persister', '1.0.0', 'file-envelope', 'file-locator', 'file-persister-config'],
+  ];
+  // name, processor, entryCondition (1 Completed, 2 Failed, 3 Cancelled, 4 Always), next
+  const STEPS = [
+    ['split-importer', 'kafka-importer', 4, ['split-filefetcher', 'record-outcome']],
+    ['split-filefetcher', 'file-fetcher', 1, ['split-archiveexpander', 'record-outcome']],
+    ['record-outcome', 'outcome-recorder', 2, ['export-outcome']],
+    ['split-archiveexpander', 'archive-expander', 1, ['sk-normalizer-sample', 'record-outcome']],
+    ['export-outcome', 'kafka-exporter', 1, []],
+    ['sk-normalizer-sample', 'sk-normalizer', 1, ['split-archivecollapser', 'record-outcome', 'sk-normalizer-alphabeta']],
+    ['split-archivecollapser', 'archive-collapser', 1, ['split-filepersister', 'record-outcome']],
+    ['sk-normalizer-alphabeta', 'sk-normalizer', 1, ['record-outcome', 'split-archivecollapser']],
+    ['split-filepersister', 'file-persister', 1, ['split-exporter', 'record-outcome']],
+    ['split-exporter', 'kafka-exporter', 1, ['record-outcome']],
+  ];
+  const ASSIGNMENTS = [
+    ['split-importer-cfg', 'split-importer'], ['split-filefetcher-cfg', 'split-filefetcher'],
+    ['record-outcome', 'record-outcome'], ['split-archiveexpander-cfg', 'split-archiveexpander'],
+    ['export-outcome', 'export-outcome'], ['sk-normalizer-sample-assignment', 'sk-normalizer-sample'],
+    ['split-archivecollapser-assignment', 'split-archivecollapser'],
+    ['sk-normalizer-alphabeta-assignment', 'sk-normalizer-alphabeta'],
+    ['split-filepersister-cfg', 'split-filepersister'], ['split-exporter-cfg', 'split-exporter'],
+  ];
+  const CACHES = [['chain-artist-whitelist', 'chain-artists']];
+  const COND = { 1: 'PreviousCompleted', 2: 'PreviousFailed', 3: 'PreviousCancelled', 4: 'Always' };
+
+  // ---------- Atoms ----------
+  const TYPES = {
+    wf: { color: 0xf2c14e, r: 0.95, label: 'Workflow', css: 'var(--wf)', table: 'workflows' },
+    step: { color: 0x6c8cff, r: 0.55, label: 'Step', css: 'var(--step)', table: 'steps' },
+    proc: { color: 0xe9e3d6, r: 0.72, label: 'Processor', css: 'var(--proc)', table: 'processors' },
+    schema: { color: 0xb48cff, r: 0.38, label: 'Schema', css: 'var(--schema)', table: 'schemas' },
+    asg: { color: 0x3fc1c9, r: 0.28, label: 'Assignment', css: 'var(--asg)', table: 'assignments' },
+    cache: { color: 0xc98a5a, r: 0.48, label: 'Cache', css: 'var(--cache)', table: 'caches' },
+    // One step_next_steps row. It holds two foreign keys, so it is drawn as an atom with an arrow to each step.
+    link: { color: 0x9fb0d8, r: 0.19, label: 'Next-step link', css: 'var(--link)', table: 'step_next_steps', hidden: true },
+  };
+  const atoms = new Map();
+  const key = (t, n) => t + ':' + n;
+  const addAtom = (type, name, info) => atoms.set(key(type, name), { type, name, info, pos: new THREE.Vector3(), seed: new THREE.Vector3(), vel: new THREE.Vector3(), alive: true });
+  addAtom('wf', WORKFLOW.name, WORKFLOW);
+  SCHEMAS.forEach(([n, v]) => addAtom('schema', n, { version: v }));
+  PROCESSORS.forEach(([n, v, i, o, c]) => addAtom('proc', n, { version: v, input: i, output: o, config: c }));
+  STEPS.forEach(([n, p, c, nx]) => addAtom('step', n, { proc: p, cond: c, next: nx }));
+  ASSIGNMENTS.forEach(([n, s]) => addAtom('asg', n, { step: s }));
+  CACHES.forEach(([n, root]) => addAtom('cache', n, { root }));
+  STEPS.forEach(([n, , , nx]) => nx.forEach(m => addAtom('link', `${n} → ${m}`, { from: n, to: m })));
+
+  // ---------- Arrows: from the row that holds the reference to the row it names ----------
+  // The delete rules are the database's own (Persistence/Migrations/AppDbContextModelSnapshot.cs, after
+  // 20260819120527_RestrictProcessorSchemaDeletes): 11 foreign keys, CASCADE only on the three workflow_id columns.
+  // A column arrow lives inside its owner's row; a join arrow is its own row with a foreign key at each end.
+  // Bond thickness is the database's own strength of the link, in four classes, thickest = hardest to break:
+  //   1 NOT NULL column    – part of the owner row, many-to-one, cannot be cleared, RESTRICT at the target
+  //   2 nullable column    – part of the owner row, many-to-one, UPDATE … SET NULL clears it, RESTRICT at the target
+  //   3 next-step row      – its own row, many-to-many, DELETE removes it, RESTRICT at both ends
+  //   4 workflow join row  – its own row, many-to-many, DELETE removes it, RESTRICT at the target, CASCADE from the workflow
+  const BOND = {
+    1: { r: 0.08, op: 0.9, name: 'NOT NULL column', note: 'part of its row · many-to-one · cannot be cleared · RESTRICT at the target' },
+    2: { r: 0.052, op: 0.85, name: 'nullable column', note: 'part of its row · many-to-one · SET NULL clears it · RESTRICT at the target' },
+    3: { r: 0.034, op: 0.85, name: 'next-step row', note: 'its own row · many-to-many · DELETE removes it · RESTRICT at both ends' },
+    4: { r: 0.02, op: 0.7, name: 'workflow join row', note: 'its own row · many-to-many · DELETE removes it · CASCADE when the workflow goes' },
+  };
+  const KINDS = {
+    entry:  { color: 0xf2c14e, bond: 4, label: 'Workflow → entry Step', table: 'workflow_entry_steps',
+              tail: { col: 'workflow_id', fk: 'fk_workflow_entry_steps_workflow_id', rule: 'CASCADE' },
+              head: { col: 'step_id', fk: 'fk_workflow_entry_steps_step_id', rule: 'RESTRICT' } },
+    wfAsg:  { color: 0xb59a52, bond: 4, label: 'Workflow → Assignment', table: 'workflow_assignments',
+              tail: { col: 'workflow_id', fk: 'fk_workflow_assignments_workflow_id', rule: 'CASCADE' },
+              head: { col: 'assignment_id', fk: 'fk_workflow_assignments_assignment_id', rule: 'RESTRICT' } },
+    wfCache:{ color: 0xd9a066, bond: 4, label: 'Workflow → Cache', table: 'workflow_caches',
+              tail: { col: 'workflow_id', fk: 'fk_workflow_caches_workflow_id', rule: 'CASCADE' },
+              head: { col: 'cache_id', fk: 'fk_workflow_caches_cache_id', rule: 'RESTRICT' } },
+    // The link row is background work: it and its two keys are modelled but not drawn; a single stick stands in for it.
+    linkFrom: { color: 0x5d6f9e, bond: 3, label: 'Link → its Step (from)', table: 'step_next_steps', hidden: true,
+              head: { col: 'step_id', fk: 'fk_step_next_steps_step_id', rule: 'RESTRICT', nullable: false } },
+    next:   { color: 0x7d93d8, bond: 3, label: 'Step → next Step', table: 'step_next_steps', proxy: true,
+              tail: { col: 'step_id', fk: 'fk_step_next_steps_step_id', rule: 'RESTRICT' },
+              head: { col: 'next_step_id', fk: 'fk_step_next_steps_next_step_id', rule: 'RESTRICT' } },
+    linkTo: { color: 0x7d93d8, bond: 3, label: 'Link → next Step (to)', table: 'step_next_steps', hidden: true,
+              head: { col: 'next_step_id', fk: 'fk_step_next_steps_next_step_id', rule: 'RESTRICT', nullable: false } },
+    uses:   { color: 0xb8b1a4, bond: 1, label: 'Step → Processor', table: 'steps',
+              head: { col: 'processor_id', fk: 'fk_step_processor_id', rule: 'RESTRICT', nullable: false } },
+    asg:    { color: 0x3fc1c9, bond: 1, label: 'Assignment → Step', table: 'assignments',
+              head: { col: 'step_id', fk: 'fk_assignment_step_id', rule: 'RESTRICT', nullable: false } },
+    input:  { color: 0x9b7be0, bond: 2, label: 'Processor → input Schema', table: 'processors',
+              head: { col: 'input_schema_id', fk: 'fk_processor_input_schema_id', rule: 'RESTRICT', nullable: true } },
+    output: { color: 0xd3a8ff, bond: 2, label: 'Processor → output Schema', table: 'processors',
+              head: { col: 'output_schema_id', fk: 'fk_processor_output_schema_id', rule: 'RESTRICT', nullable: true } },
+    config: { color: 0x6a5a92, bond: 2, label: 'Processor → config Schema', table: 'processors',
+              head: { col: 'config_schema_id', fk: 'fk_processor_config_schema_id', rule: 'RESTRICT', nullable: true } },
+  };
+  // Removing a column arrow is an UPDATE … SET col = NULL, so the column's nullability decides it
+  // (InitialCreate: processor_id and step_id are NOT NULL; the three schema ids are nullable).
+  Object.values(KINDS).forEach(k => { k.r = BOND[k.bond].r; k.op = BOND[k.bond].op; });
+  const isJoin = k => !!KINDS[k].tail && !KINDS[k].proxy;
+  const arrows = [];
+  const addArrow = (from, to, kind) => arrows.push({ a: atoms.get(from), b: atoms.get(to), kind, alive: true });
+  const W = key('wf', WORKFLOW.name);
+  WORKFLOW.entry.forEach(s => addArrow(W, key('step', s), 'entry'));
+  ASSIGNMENTS.forEach(([n]) => addArrow(W, key('asg', n), 'wfAsg'));
+  CACHES.forEach(([n]) => addArrow(W, key('cache', n), 'wfCache'));
+  STEPS.forEach(([n, p, , nx]) => {
+    addArrow(key('step', n), key('proc', p), 'uses');
+    nx.forEach(m => {
+      addArrow(key('link', `${n} → ${m}`), key('step', n), 'linkFrom');
+      addArrow(key('link', `${n} → ${m}`), key('step', m), 'linkTo');
+      addArrow(key('step', n), key('step', m), 'next');
+      arrows[arrows.length - 1].link = atoms.get(key('link', `${n} → ${m}`));
+    });
+  });
+  ASSIGNMENTS.forEach(([n, s]) => addArrow(key('asg', n), key('step', s), 'asg'));
+  PROCESSORS.forEach(([n, , i, o, c]) => {
+    if (i) addArrow(key('proc', n), key('schema', i), 'input');
+    if (o) addArrow(key('proc', n), key('schema', o), 'output');
+    if (c) addArrow(key('proc', n), key('schema', c), 'config');
+  });
+  // Parallel arrows between the same pair (sk-normalizer: input and output are one schema row) fan apart.
+  const pairCount = new Map();
+  arrows.forEach(x => {
+    const p = [x.a.name, x.b.name].sort().join('|');
+    x.lane = pairCount.get(p) ?? 0; pairCount.set(p, x.lane + 1);
+  });
+  arrows.forEach(x => { x.lanes = pairCount.get([x.a.name, x.b.name].sort().join('|')); });
+
+  // ---------- Layout: seeded reading order, relaxed by springs ----------
+  // Steps stand in columns by hop count from the entry step: one column per hop, left to right.
+  // A fan-out puts its branches in the same column, side by side, as parallel lanes.
+  // record-outcome (every step's failure hand-off) stays out of the flow, below its middle, with its own next steps to its right.
+  const OFF_FLOW = 'record-outcome';
+  const GAP = 4.2, LANE = 2.6;
+  const level = new Map(WORKFLOW.entry.map(n => [n, 0]));
+  for (let todo = [...WORKFLOW.entry]; todo.length;) {
+    const n = todo.shift();
+    STEPS.find(st => st[0] === n)[3].forEach(m => {
+      if (m === OFF_FLOW || level.has(m)) return;
+      level.set(m, level.get(n) + 1); todo.push(m);
+    });
+  }
+  const columns = [];
+  level.forEach((l, n) => (columns[l] ??= []).push(n));
+  const SEED = {};
+  columns.forEach((col, l) => col.forEach((n, i) => { SEED[n] = [(l - (columns.length - 1) / 2) * GAP, ((col.length - 1) / 2 - i) * LANE, 0]; }));
+  SEED[OFF_FLOW] = [0, -6.5, 0];
+  for (let n = OFF_FLOW, x = 0; ;) {
+    const m = STEPS.find(st => st[0] === n)[3].find(m => !SEED[m]);
+    if (!m) break;
+    x += GAP; SEED[m] = [x, -6.5, 0]; n = m;
+  }
+  // The flow's steps and the processors over them hold their places; schemas, assignments and the rest settle around them.
+  const pinned = a => (a.type === 'step' && level.has(a.name)) || a.type === 'proc';
+  let rnd = 7;
+  const rand = () => (rnd = (rnd * 16807) % 2147483647) / 2147483647;
+  atoms.forEach(a => { if (a.type === 'step') a.seed.set(...SEED[a.name]); });
+  atoms.forEach(a => {
+    if (a.type !== 'proc') return;
+    const users = STEPS.filter(s => s[1] === a.name).map(s => atoms.get(key('step', s[0])).seed);
+    const c = users.reduce((v, p) => v.clone().add(p), new THREE.Vector3()).multiplyScalar(1 / users.length);
+    // Above the highest of its own steps (below, for the off-flow steps), behind the flow.
+    a.seed.set(c.x, c.y < -3 ? c.y - 3 : Math.max(...users.map(u => u.y)) + 3.2, -2.2);
+  });
+  atoms.forEach(a => {
+    if (a.type !== 'schema') return;
+    const users = PROCESSORS.filter(p => p[2] === a.name || p[3] === a.name || p[4] === a.name).map(p => atoms.get(key('proc', p[0])).seed);
+    const c = users.reduce((v, p) => v.add(p), new THREE.Vector3()).multiplyScalar(1 / Math.max(users.length, 1));
+    a.seed.copy(c).add(new THREE.Vector3((rand() - .5) * 2, 2.8, -2.4 + (rand() - .5) * 2));
+  });
+  atoms.forEach(a => {
+    if (a.type === 'asg') a.seed.copy(atoms.get(key('step', a.info.step)).seed).add(new THREE.Vector3(0, -1.8, 2));
+    if (a.type === 'cache') a.seed.set(-13, -5, -2);
+    if (a.type === 'wf') a.seed.set(SEED[WORKFLOW.entry[0]][0] - 4, -1.5, 0.5);
+    // A link sits between its two steps, a little nearer the source so the from/to reading is obvious.
+    if (a.type === 'link') a.seed.copy(atoms.get(key('step', a.info.from)).seed).lerp(atoms.get(key('step', a.info.to)).seed, 0.42);
+  });
+  atoms.forEach(a => a.pos.copy(a.seed).add(new THREE.Vector3(rand() - .5, rand() - .5, rand() - .5)));
+
+  // Workflow → Assignment arrows are long and many; they get no spring, or they would drag every assignment to the hub.
+  const REST = { entry: 3.6, wfCache: 3.2, linkFrom: 1.3, linkTo: 1.9, uses: 2.6, asg: 1.5, input: 3.2, output: 3.2, config: 2.6 };
+  const list = [...atoms.values()];
+  const tmp = new THREE.Vector3();
+  for (let it = 0; it < 460; it++) {
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+      const a = list[i], b = list[j];
+      tmp.subVectors(a.pos, b.pos);
+      const d = Math.max(tmp.length(), 0.3);
+      if (d > 7) continue;
+      tmp.multiplyScalar(0.9 / (d * d * d));
+      a.vel.add(tmp); b.vel.sub(tmp);
+    }
+    arrows.forEach(({ a, b, kind }) => {
+      if (!REST[kind]) return;
+      tmp.subVectors(b.pos, a.pos);
+      const d = tmp.length();
+      tmp.multiplyScalar((d - REST[kind]) * 0.06 / d);
+      a.vel.add(tmp); b.vel.sub(tmp);
+    });
+    list.forEach(a => {
+      a.vel.add(tmp.subVectors(a.seed, a.pos).multiplyScalar(a.type === 'step' || a.type === 'wf' ? 0.05 : 0.012));
+      a.pos.add(a.vel.multiplyScalar(0.5));
+      if (pinned(a)) { a.pos.copy(a.seed); a.vel.set(0, 0, 0); }
+    });
+  }
+  // Arrows are straight, so nothing may sit on one: step free atoms (schemas, assignments, caches) off any arrow line
+  // they block, or, when the blocker holds its place, step the arrow's free end aside instead.
+  {
+    const line = new THREE.Line3(), q = new THREE.Vector3(), push = new THREE.Vector3();
+    const shown = arrows.filter(x => !KINDS[x.kind].hidden), solid = list.filter(o => !TYPES[o.type].hidden);
+    for (let it = 0; it < 200; it++) {
+      let moved = false;
+      shown.forEach(x => solid.forEach(o => {
+        if (o === x.a || o === x.b) return;
+        line.set(x.a.pos, x.b.pos);
+        const d = line.closestPointToPoint(o.pos, true, q).distanceTo(o.pos), need = TYPES[o.type].r + 0.35;
+        if (d >= need) return;
+        push.subVectors(o.pos, q);
+        if (push.lengthSq() < 1e-6) push.set(0, 0, 1);
+        push.normalize().multiplyScalar(Math.min(need - d, 0.2));
+        if (!pinned(o)) o.pos.add(push);
+        else { const end = !pinned(x.b) ? x.b : !pinned(x.a) ? x.a : null; if (end) end.pos.sub(push); else return; }
+        moved = true;
+      }));
+      if (!moved) break;
+    }
+  }
+  const centre = list.reduce((v, a) => v.add(a.pos), new THREE.Vector3()).multiplyScalar(1 / list.length);
+  list.forEach(a => a.pos.sub(centre));
+
+  // ---------- Scene (static; only the camera moves) ----------
+  const stage = document.getElementById('stage');
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  stage.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x090c12, 0.016);
+  const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 200);
+  const HOME = new THREE.Vector3(3, 8, 28);
+  camera.position.copy(HOME);
+  // The trackball only zooms (wheel, pinch) and pans (right drag); turning is our own, below.
+  function makeControls() {
+    const c = new THREE.TrackballControls(camera, renderer.domElement);
+    c.noRotate = true; c.zoomSpeed = 1.2; c.panSpeed = 0.8;
+    c.staticMoving = false; c.dynamicDampingFactor = 0.12;
+    c.minDistance = 6; c.maxDistance = 80;
+    c.keys = []; // no A/S/D mode keys
+    return c;
+  }
+  let controls = makeControls();
+
+  // Turning: each drag direction has a fixed axis, so the molecule never leans sideways.
+  //   left/right — about the molecule's own vertical axis (a turntable)
+  //   up/down    — about the screen's horizontal axis, a full 360° over the top and under the bottom
+  // A trackball turns about the drag's own axis instead, and turns about changing axes add up to a roll.
+  // Here the molecule's vertical axis always stays in the plane of the view and the camera's up, so on screen
+  // it is always straight up or straight down, never slanted.
+  const VERTICAL = new THREE.Vector3(0, 1, 0), offset = new THREE.Vector3(), fwd = new THREE.Vector3(), right = new THREE.Vector3();
+  const spin = { x: 0, y: 0 }; // radians per frame still coasting after the pointer lets go
+  let turning = null;
+  function turn(ax, ay) {
+    offset.subVectors(camera.position, controls.target);
+    // Upside down, screen-right is the molecule's left, so the turntable runs the other way: right always turns what you see to the right.
+    const yaw = camera.up.dot(VERTICAL) < 0 ? ax : -ax;
+    offset.applyAxisAngle(VERTICAL, yaw); camera.up.applyAxisAngle(VERTICAL, yaw);
+    fwd.copy(offset).negate().normalize();
+    right.crossVectors(fwd, camera.up).normalize();
+    offset.applyAxisAngle(right, ay); camera.up.applyAxisAngle(right, ay);
+    camera.position.copy(controls.target).add(offset);
+    camera.lookAt(controls.target);
+  }
+  const perPx = () => 2 * Math.PI / stage.clientWidth; // a drag across the full width is one full turn
+  // Dragging an atom takes Ctrl: hovering keeps the plain arrow, Ctrl over an atom shows the open hand,
+  // and Ctrl + press grabs it (closed hand). A press without Ctrl turns the camera, on an atom or not.
+  // Touch has no Ctrl, so there one finger on an atom still drags it.
+  let overAtom = false, ctrlDown = false;
+  const setHand = () => document.body.classList.toggle('grabbable', overAtom && ctrlDown && !dragging);
+  const ctrlKey = e => { if (e.key === 'Control') { ctrlDown = e.type === 'keydown'; setHand(); } };
+  addEventListener('keydown', ctrlKey); addEventListener('keyup', ctrlKey);
+  // Dragging an atom: it slides on a plane facing the camera through its own centre, so it keeps its depth.
+  // Its arrows stretch or shrink with it; nothing else moves and the camera holds still until it is let go.
+  let dragging = null;
+  const dragPlane = new THREE.Plane(), dragHit = new THREE.Vector3(), camDir = new THREE.Vector3();
+  function grab(e, a) {
+    camera.getWorldDirection(camDir);
+    dragPlane.setFromNormalAndCoplanarPoint(camDir, a.pos);
+    if (!ray.ray.intersectPlane(dragPlane, dragHit)) return false;
+    hover(e); // a touch has no hover before it: focus the atom and fill the tooltip now
+    dragging = { id: e.pointerId, atom: a, grip: a.pos.clone().sub(dragHit), arrows: arrows.filter(x => x.a === a || x.b === a) };
+    controls.enabled = false; // no pan or zoom under a held atom
+    renderer.domElement.setPointerCapture(e.pointerId);
+    document.body.classList.add('grabbing');
+    return true;
+  }
+  function dragTo(e) {
+    pick(e); // aims the ray at the pointer
+    if (!ray.ray.intersectPlane(dragPlane, dragHit)) return;
+    const a = dragging.atom;
+    a.pos.copy(dragHit).add(dragging.grip);
+    a.mesh.position.copy(a.pos);
+    dragging.arrows.forEach(placeArrow);
+  }
+  function drop(e) {
+    if (!dragging || e.pointerId !== dragging.id) return;
+    dragging = null; controls.enabled = true;
+    document.body.classList.remove('grabbing');
+    hover(e);
+  }
+  renderer.domElement.addEventListener('pointerdown', e => {
+    // Mouse: left button. Touch: one finger (a second finger hands over to the trackball's pinch).
+    if (e.pointerType === 'mouse' ? e.button !== 0 : !e.isPrimary) { turning = null; return; }
+    spin.x = spin.y = 0;
+    const atom = !deleting && (e.pointerType !== 'mouse' || e.ctrlKey) && pick(e)?.object.userData.atom;
+    if (atom && grab(e, atom)) { turning = null; return; }
+    turning = { id: e.pointerId, x: e.clientX, y: e.clientY, at: performance.now() };
+    renderer.domElement.setPointerCapture(e.pointerId); // the release reaches us wherever the pointer is
+  });
+  addEventListener('pointermove', e => {
+    // A mouse with no button down means the release happened where we never heard it (outside the frame): end it here, without a coast.
+    if (e.pointerType === 'mouse' && !(e.buttons & 1) && (dragging || turning)) { spin.x = spin.y = 0; drop(e); turning = null; return; }
+    if (dragging && e.pointerId === dragging.id) return dragTo(e);
+    if (!turning || e.pointerId !== turning.id) return;
+    const k = perPx(), ax = (e.clientX - turning.x) * k, ay = (e.clientY - turning.y) * k;
+    turning.x = e.clientX; turning.y = e.clientY; turning.at = performance.now();
+    turn(ax, ay);
+    spin.x = ax; spin.y = ay;
+  });
+  // Let go while moving and the turn coasts on; let go after holding still and it stops where it is.
+  // The pause before the release fades the momentum as a coast would have (x0.9 a frame), and a pause past 250 ms ends it.
+  const endTurn = e => {
+    drop(e);
+    if (!turning || e.pointerId !== turning.id) return;
+    const still = performance.now() - turning.at;
+    if (e.type !== 'pointerup' || still > 250) spin.x = spin.y = 0;
+    else { const k = Math.pow(0.9, still / 16.7); spin.x *= k; spin.y *= k; }
+    turning = null;
+  };
+  addEventListener('pointerup', endTurn); addEventListener('pointercancel', endTurn);
+  renderer.domElement.addEventListener('lostpointercapture', endTurn);
+  addEventListener('blur', () => { spin.x = spin.y = 0; turning = null; if (dragging) drop({ pointerId: dragging.id }); ctrlDown = false; setHand(); });
+  // A second finger means pinch or pan, not a turn.
+  renderer.domElement.addEventListener('touchstart', e => { if (e.touches.length > 1 && !dragging) { turning = null; spin.x = spin.y = 0; } }, { passive: true });
+  function coast() {
+    if (turning || (Math.abs(spin.x) < 1e-4 && Math.abs(spin.y) < 1e-4)) return;
+    turn(spin.x, spin.y);
+    spin.x *= 0.9; spin.y *= 0.9;
+  }
+
+  scene.add(new THREE.HemisphereLight(0xbfd0ff, 0x1a1420, 0.75));
+  const key1 = new THREE.DirectionalLight(0xffffff, 0.9); key1.position.set(8, 14, 10); scene.add(key1);
+  const rim = new THREE.DirectionalLight(0x8aa0ff, 0.5); rim.position.set(-10, -4, -12); scene.add(rim);
+
+  atoms.forEach(a => {
+    const t = TYPES[a.type];
+    const mat = new THREE.MeshStandardMaterial({ color: t.color, roughness: 0.32, metalness: 0.15, transparent: true, opacity: 1, emissive: 0x000000 });
+    const m = new THREE.Mesh(new THREE.SphereGeometry(t.r, 40, 28), mat);
+    m.position.copy(a.pos); m.userData.atom = a; m.visible = !t.hidden;
+    scene.add(m);
+    a.mesh = m; a.out = []; a.in = []; a.fx = null;
+  });
+
+  const up = new THREE.Vector3(0, 1, 0), zAxis = new THREE.Vector3(0, 0, 1);
+  const RESTRICT_MAT = new THREE.MeshBasicMaterial({ color: 0xff5a5a });
+  const CASCADE_MAT = new THREE.MeshBasicMaterial({ color: 0xffb347 });
+  const marks = [];
+  // Shaft and sleeve are unit-tall cylinders stretched to length, so an arrow can be re-placed when an atom moves.
+  const aDir = new THREE.Vector3(), aSide = new THREE.Vector3(), aEnd = new THREE.Vector3(), xAxis = new THREE.Vector3(1, 0, 0);
+  function placeArrow(x) {
+    const st = KINDS[x.kind], [shaft, head] = x.meshes;
+    const dir = aDir.subVectors(x.b.pos, x.a.pos).normalize();
+    const side = aSide.crossVectors(dir, Math.abs(dir.y) > 0.9 ? xAxis : up).normalize();
+    const off = (x.lane - (x.lanes - 1) / 2) * 0.22;
+    x.start.copy(x.a.pos).addScaledVector(dir, TYPES[x.a.type].r).addScaledVector(side, off);
+    x.tip.copy(x.b.pos).addScaledVector(dir, -TYPES[x.b.type].r - 0.04).addScaledVector(side, off);
+    const shaftEnd = aEnd.copy(x.tip).addScaledVector(dir, -x.headLen);
+    // Atoms pushed into each other leave no room for a shaft; it shrinks to nothing rather than turning inside out.
+    const len = Math.max(aSide.subVectors(shaftEnd, x.start).dot(dir), 0.001);
+    shaft.position.copy(x.start).add(shaftEnd).multiplyScalar(0.5);
+    shaft.quaternion.setFromUnitVectors(up, dir); shaft.scale.set(1, len, 1);
+    head.position.copy(shaftEnd).addScaledVector(dir, x.headLen / 2);
+    head.quaternion.setFromUnitVectors(up, dir);
+    x.sleeve.position.copy(x.start).add(x.tip).multiplyScalar(0.5);
+    x.sleeve.quaternion.setFromUnitVectors(up, dir); x.sleeve.scale.set(1, Math.max(x.start.distanceTo(x.tip), 0.001), 1);
+    // Delete-rule marks: a red plate where RESTRICT holds (by the head), and at the tail a plate or an amber CASCADE ring.
+    const [headMark, tailMark] = x.marks;
+    if (headMark) { headMark.position.copy(shaftEnd).addScaledVector(dir, -0.1); headMark.quaternion.setFromUnitVectors(up, dir); }
+    if (tailMark) { tailMark.position.copy(x.start).addScaledVector(dir, 0.16); tailMark.quaternion.setFromUnitVectors(st.tail.rule === 'CASCADE' ? zAxis : up, dir); }
+  }
+  arrows.forEach(x => {
+    const st = KINDS[x.kind];
+    if (!st.proxy) { x.a.out.push(x); x.b.in.push(x); }
+    const headLen = Math.max(st.r * 5.5, 0.26), headR = Math.max(st.r * 2.6, 0.11);
+    const mat = new THREE.MeshStandardMaterial({ color: st.color, transparent: true, opacity: st.op, roughness: 0.55, emissive: 0x000000 });
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(st.r, st.r, 1, 10, 1, true), mat);
+    const head = new THREE.Mesh(new THREE.ConeGeometry(headR, headLen, 14), mat);
+    // A fat invisible sleeve makes thin arrows easy to hover.
+    const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1, 6, 1, true), new THREE.MeshBasicMaterial({ visible: false }));
+    sleeve.userData.arrow = x;
+    scene.add(shaft, head, sleeve);
+    Object.assign(x, { mat, base: st.op, meshes: [shaft, head], sleeve, marks: [], headLen, start: new THREE.Vector3(), tip: new THREE.Vector3() });
+    if (st.hidden) shaft.visible = head.visible = false;
+    else {
+      const plate = () => new THREE.Mesh(new THREE.CylinderGeometry(headR * 1.35, headR * 1.35, 0.035, 18), RESTRICT_MAT);
+      const ring = () => new THREE.Mesh(new THREE.TorusGeometry(Math.max(st.r * 3, 0.13), 0.025, 6, 24), CASCADE_MAT);
+      x.marks.push(plate());
+      if (st.tail) x.marks.push(st.tail.rule === 'CASCADE' ? ring() : plate());
+      x.marks.forEach(m => { m.visible = false; scene.add(m); marks.push(m); });
+    }
+    placeArrow(x);
+  });
+
+  // ---------- Panels ----------
+  const hexOf = c => '#' + new THREE.Color(c).getHexString();
+  const countsEl = document.getElementById('counts');
+  function renderCounts() {
+    if (!countsEl) return;
+    const n = t => list.filter(a => a.type === t && a.alive).length;
+    const live = arrows.filter(x => x.alive && !KINDS[x.kind].hidden);
+    countsEl.innerHTML = `${n('wf')} workflow · ${n('step')} steps · ${n('proc')} processors<br>${n('schema')} schemas · ${n('asg')} assignments · ${n('cache')} cache · ${n('link')} next-step rows<br>${live.length} arrows (${live.filter(x => isJoin(x.kind) || KINDS[x.kind].proxy).length} are join-table rows)`;
+  }
+  renderCounts();
+
+  const labelsEl = document.getElementById('labels');
+  const labelNodes = [];
+  atoms.forEach(a => {
+    const el = document.createElement('div');
+    el.className = 'lbl ' + a.type;
+    el.textContent = a.name;
+    labelsEl.appendChild(el); labelNodes.push({ a, el }); a.label = el;
+  });
+  let showLabels = true;
+
+  // ---------- Referential integrity, exactly as Postgres enforces it ----------
+  // DELETE of a row is refused if any live row still references it through a RESTRICT key; otherwise the row goes,
+  // and every link row whose key to it is CASCADE goes with it. Nothing else cascades in this schema.
+  function blockersOf(a) {
+    return arrows.filter(x => x.alive && !KINDS[x.kind].proxy && (
+      (x.b === a && KINDS[x.kind].head.rule === 'RESTRICT') ||
+      (x.a === a && isJoin(x.kind) && KINDS[x.kind].tail.rule === 'RESTRICT')));
+  }
+  // The constraint and the table that hold the reference to `a` for a blocking arrow.
+  const blockRef = (x, a) => {
+    const k = KINDS[x.kind];
+    const end = x.b === a ? k.head : k.tail;
+    return { fk: end.fk, table: k.table, other: x.b === a ? x.a : x.b };
+  };
+  // What goes with `a` if it is deleted: its own column arrows (they are inside its row) and CASCADE link rows.
+  const goesWith = a => arrows.filter(x => x.alive && x.a === a && !KINDS[x.kind].proxy);
+  // A stick shows exactly while its background link row exists.
+  function syncProxies() {
+    arrows.forEach(x => {
+      if (!x.link) return;
+      x.alive = x.link.alive;
+      x.meshes.forEach(m => m.visible = x.alive);
+      if (!x.alive) x.marks.forEach(m => m.visible = false);
+    });
+  }
+
+  const history = [];
+  const dlog = document.getElementById('dlog');
+  function logLine(html) {
+    if (!dlog) return; // the deletes panel is not shown; refusals still show in the tooltip and as a red flash
+    if (dlog.querySelector('.empty')) dlog.innerHTML = '';
+    const li = document.createElement('li'); li.innerHTML = html; dlog.prepend(li);
+    while (dlog.children.length > 30) dlog.lastChild.remove();
+  }
+  // step_next_steps has no id: its key is the pair (step_id, next_step_id).
+  const sqlRow = a => a.type === 'link'
+    ? `DELETE FROM step_next_steps WHERE step_id = ‹${a.info.from}› AND next_step_id = ‹${a.info.to}›;`
+    : `DELETE FROM ${TYPES[a.type].table} WHERE id = ‹${a.name}›;`;
+  const sqlLink = x => { const k = KINDS[x.kind]; return `DELETE FROM ${k.table} WHERE ${k.tail.col} = ‹${x.a.name}› AND ${k.head.col} = ‹${x.b.name}›;`; };
+
+  function deleteAtom(a) {
+    const blockers = blockersOf(a);
+    if (blockers.length) {
+      const first = blockRef(blockers[0], a);
+      logLine(`<span class="sql">${sqlRow(a)}</span><br><span class="no">ERROR</span> update or delete on table "${TYPES[a.type].table}" violates foreign key constraint "${first.fk}" on table "${first.table}"<br>${blockers.length} ${blockers.length > 1 ? 'references hold' : 'reference holds'} it — Postgres names the first it meets.`);
+      a.fx = { kind: 'refuse', t: 0 };
+      blockers.forEach(x => { x.fx = { t: 0 }; });
+      return;
+    }
+    const gone = goesWith(a);
+    const cascaded = gone.filter(x => isJoin(x.kind));
+    gone.forEach(x => kill(x));
+    a.alive = false; a.fx = { kind: 'vanish', t: 0 };
+    history.push({ atoms: [a], arrows: gone });
+    const byTable = {};
+    cascaded.forEach(x => { const t = KINDS[x.kind].table; byTable[t] = (byTable[t] ?? 0) + 1; });
+    const extra = Object.entries(byTable).map(([t, n]) => `${t} ${n}`).join(', ');
+    logLine(`<span class="sql">${sqlRow(a)}</span><br><span class="ok">DELETE 1</span>${extra ? ` · CASCADE removed ${extra}` : ''}`);
+    afterChange();
+  }
+  function deleteLink(x) {
+    kill(x);
+    history.push({ atoms: [], arrows: [x] });
+    logLine(`<span class="sql">${sqlLink(x)}</span><br><span class="ok">DELETE 1</span> · nothing references a link row`);
+    afterChange();
+  }
+  // A column arrow is a value inside its owner's row: clearing it is an UPDATE, allowed only on a nullable column.
+  function clearColumn(x) {
+    const k = KINDS[x.kind];
+    const where = x.a.type === 'link' ? `step_id = ‹${x.a.info.from}› AND next_step_id = ‹${x.a.info.to}›` : `id = ‹${x.a.name}›`;
+    const sql = `UPDATE ${k.table} SET ${k.head.col} = NULL WHERE ${where};`;
+    if (!k.head.nullable) {
+      logLine(`<span class="sql">${sql}</span><br><span class="no">ERROR</span> null value in column "${k.head.col}" of relation "${k.table}" violates not-null constraint<br>Every ${TYPES[x.a.type].label.toLowerCase()} row must point at a ${TYPES[x.b.type].label.toLowerCase()}; this arrow goes only with its row.`);
+      x.fx = { t: 0 };
+      return;
+    }
+    kill(x);
+    history.push({ atoms: [], arrows: [x] });
+    logLine(`<span class="sql">${sql}</span><br><span class="ok">UPDATE 1</span> · ${x.a.name} no longer points at ${x.b.name}`);
+    afterChange();
+  }
+  const removeArrow = x => (isJoin(x.kind) ? deleteLink : clearColumn)(x);
+  function kill(x) { x.alive = false; x.meshes.forEach(m => m.visible = false); x.marks.forEach(m => m.visible = false); }
+  function revive(x) { x.alive = true; x.meshes.forEach(m => m.visible = !KINDS[x.kind].hidden); x.marks.forEach(m => m.visible = deleting); x.fx = null; }
+  function reviveAtom(a) { a.alive = true; a.mesh.visible = !TYPES[a.type].hidden; a.mesh.scale.setScalar(1); a.fx = null; a.label.classList.remove('gone'); }
+  function undo() {
+    const h = history.pop(); if (!h) return;
+    h.atoms.forEach(reviveAtom); h.arrows.forEach(revive);
+    logLine('<span class="sql">ROLLBACK of the last delete</span>');
+    afterChange();
+  }
+  function restoreAll() {
+    while (history.length) { const h = history.pop(); h.atoms.forEach(reviveAtom); h.arrows.forEach(revive); }
+    logLine('<span class="sql">All rows restored</span>');
+    afterChange();
+  }
+  function afterChange() {
+    syncProxies();
+    renderCounts(); paint();
+  }
+
+  // ---------- Hover focus and delete-mode tinting ----------
+  let focus = null, deleting = false;
+  function paint() {
+    const a = focus;
+    const keep = new Set(a ? [a] : list);
+    const live = new Set();
+    if (a) [...a.out, ...a.in].forEach(x => { if (x.alive) { live.add(x); keep.add(x.a); keep.add(x.b); } });
+    if (a) arrows.forEach(x => { if (x.alive && x.link && (x.a === a || x.b === a)) { live.add(x); keep.add(x.a); keep.add(x.b); } });
+    atoms.forEach(o => {
+      if (!o.alive) return;
+      o.mesh.material.opacity = keep.has(o) ? 1 : 0.14;
+      // In delete mode a faint green glow marks every row that a DELETE would accept right now.
+      const free = deleting && !blockersOf(o).length;
+      const e = o === a ? 0.18 : 0;
+      o.mesh.material.emissive.setRGB(e + (free ? 0.03 : 0), e + (free ? 0.2 : 0), e + (free ? 0.08 : 0));
+    });
+    arrows.forEach(x => {
+      if (!x.alive) return;
+      x.mat.opacity = !a ? x.base : live.has(x) ? 1 : 0.05;
+      if (!x.fx) x.mat.emissive.set(a && live.has(x) ? KINDS[x.kind].color : 0x000000).multiplyScalar(0.45);
+      x.marks.forEach(m => m.visible = deleting && (!a || live.has(x)));
+    });
+    labelNodes.forEach(({ a: o, el }) => el.classList.toggle('dim', !!a && !keep.has(o)));
+  }
+  function setFocus(a) { if (focus === a) return; focus = a; paint(); }
+
+  function describe(a) {
+    const i = a.info, outs = k => a.out.filter(x => x.alive && x.kind === k).map(x => x.b.name);
+    const ins = a.in.filter(x => x.alive).map(x => `${x.a.name} <span style="opacity:.6">(${KINDS[x.kind].table}.${KINDS[x.kind].head.col})</span>`);
+    let d = '';
+    if (a.type === 'wf') d = `v${i.version} · cron ${i.cron}<br><b>entry →</b> ${outs('entry').join(', ') || 'none'}<br><b>caches →</b> ${outs('wfCache').join(', ') || 'none'}<br><b>assignments →</b> ${outs('wfAsg').length} rows`;
+    if (a.type === 'step') d = `enters on ${COND[i.cond]}<br><b>processor →</b> ${i.proc}<br><b>next →</b> ${a.in.filter(x => x.alive && x.kind === 'linkFrom').map(x => x.a.info.to).join(', ') || 'none'}`;
+    if (a.type === 'proc') d = `v${i.version}<br><b>input →</b> ${i.input ?? '—'}<br><b>output →</b> ${i.output ?? '—'}<br><b>config →</b> ${i.config ?? '—'}`;
+    if (a.type === 'schema') d = `v${i.version}<br>points at nothing (a root)`;
+    if (a.type === 'asg') d = `<b>step →</b> ${i.step}`;
+    if (a.type === 'cache') d = `root ${i.root}<br>points at nothing (a root)`;
+    if (a.type === 'link') d = `a row in <b>step_next_steps</b>, key (step_id, next_step_id)<br><b>step_id →</b> ${i.from} · NOT NULL · RESTRICT<br><b>next_step_id →</b> ${i.to} · NOT NULL · RESTRICT<br>nothing points at it, so it can always be deleted`;
+    // In delete mode the refusal below already lists every reference, so the plain list would only repeat it.
+    if (ins.length && !(deleting && blockersOf(a).length)) d += `<br><br><b>pointed at by</b> ${ins.length}:<br>${ins.join('<br>')}`;
+    if (deleting) {
+      const bl = blockersOf(a);
+      if (bl.length) d += `<div class="verdict"><span class="no">DELETE would be refused</span> — ${bl.length} RESTRICT reference${bl.length > 1 ? 's' : ''}:<br>${bl.map(x => { const r = blockRef(x, a); return `${r.other.name} <span style="opacity:.6">(${r.fk})</span>`; }).join('<br>')}</div>`;
+      else {
+        const c = goesWith(a).filter(x => isJoin(x.kind)).length;
+        d += `<div class="verdict"><span class="ok">DELETE would succeed</span>${c ? ` — CASCADE removes ${c} link row${c > 1 ? 's' : ''}` : ''}. Click to run it.</div>`;
+      }
+    }
+    return d;
+  }
+  function describeArrow(x) {
+    const k = KINDS[x.kind];
+    const bond = `<br><span style="opacity:.75">bond ${k.bond} of 4 · ${BOND[k.bond].name}<br>${BOND[k.bond].note}</span>`;
+    if (k.proxy) return `a row in <b>step_next_steps</b>, key (step_id, next_step_id)<br>step_id → ${x.a.name} · ON DELETE RESTRICT<br>next_step_id → ${x.b.name} · ON DELETE RESTRICT${bond}`
+      + (deleting ? `<div class="verdict"><span class="ok">DELETE would succeed</span> — nothing references a link row. Click to run it.</div>` : '');
+    let d = k.tail
+      ? `a row in <b>${k.table}</b><br>${k.tail.col} → ${x.a.name} · ON DELETE ${k.tail.rule}<br>${k.head.col} → ${x.b.name} · ON DELETE ${k.head.rule}`
+      : `the column <b>${k.table}.${k.head.col}</b> of ${x.a.name} · ${k.head.nullable ? 'nullable' : 'NOT NULL'}<br>${k.head.fk} · ON DELETE ${k.head.rule}`;
+    d += bond;
+    if (deleting) d += k.tail
+      ? `<div class="verdict"><span class="ok">DELETE would succeed</span> — nothing references a link row. Click to run it.</div>`
+      : k.head.nullable
+        ? `<div class="verdict"><span class="ok">SET NULL would succeed</span> — the column is nullable. Click to run it.</div>`
+        : `<div class="verdict"><span class="no">SET NULL would be refused</span> — ${k.head.col} is NOT NULL; it goes only when ${x.a.name} is deleted.</div>`;
+    return d;
+  }
+
+  // ---------- Tooltip: a fixed section under the atom legend ----------
+  const tipEl = document.getElementById('tip'), sv = new THREE.Vector3();
+  function screenCircle(a) {
+    sv.copy(a.pos).project(camera);
+    const w = innerWidth, h = innerHeight;
+    const dist = camera.position.distanceTo(a.pos);
+    const r = TYPES[a.type].r / (dist * Math.tan(camera.fov * Math.PI / 360)) * (h / 2);
+    return { x: (sv.x + 1) / 2 * w, y: (1 - sv.y) / 2 * h, r: r + 6, front: sv.z < 1 };
+  }
+
+  // ---------- Pointer: hover inspects; in delete mode a click (not a drag) deletes ----------
+  const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+  function pick(e) {
+    const r = renderer.domElement.getBoundingClientRect();
+    mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(mouse, camera);
+    const objs = [...list.filter(a => a.alive && !TYPES[a.type].hidden).map(a => a.mesh), ...arrows.filter(x => x.alive && !KINDS[x.kind].hidden).map(x => x.sleeve)];
+    const hits = ray.intersectObjects(objs);
+    // The nearest thing under the pointer wins; an atom just behind the front arrow's sleeve still wins, since sleeves are wider than their arrows.
+    if (!hits.length) return null;
+    const atomHit = hits.find(h => h.object.userData.atom);
+    if (atomHit && atomHit.distance < hits[0].distance + 0.35) return atomHit;
+    // Among the arrows the pointer is over, take the one whose centre line passes closest to it,
+    // so two arrows that line up on screen can still be told apart.
+    const arrowHits = hits.filter(h => h.object.userData.arrow && (!atomHit || h.distance < atomHit.distance));
+    if (!arrowHits.length) return atomHit ?? hits[0];
+    const off = h => ray.ray.distanceSqToSegment(h.object.userData.arrow.start, h.object.userData.arrow.tip);
+    return arrowHits.reduce((b, h) => (off(h) < off(b) ? h : b));
+  }
+  let lastEvent = null;
+  function hover(e) {
+    lastEvent = e;
+    // While an atom is held or the button is held for a turn, hover is ignored: no hand, no focus change, no tooltip change.
+    // It resumes on the next move after release.
+    if (dragging || turning) return;
+    const hit = pick(e);
+    overAtom = !!hit?.object.userData.atom && !deleting;
+    ctrlDown = !!e.ctrlKey; // a mouse event carries the key state even when the page has no keyboard focus
+    setHand();
+    if (!hit) { tipEl.hidden = true; setFocus(null); return; }
+    const { atom, arrow } = hit.object.userData;
+    if (atom) {
+      setFocus(atom);
+      tipEl.innerHTML = `<div class="t" style="color:${TYPES[atom.type].css}">${TYPES[atom.type].label} · ${TYPES[atom.type].table}</div><div class="n">${atom.name}</div><div class="d">${describe(atom)}</div>`;
+      tipEl.hidden = false;
+    } else {
+      setFocus(null);
+      const k = KINDS[arrow.kind];
+      tipEl.innerHTML = `<div class="t" style="color:${hexOf(k.color)}">${k.label}</div><div class="n">${arrow.a.name} → ${arrow.b.name}</div><div class="d">${describeArrow(arrow)}</div>`;
+      tipEl.hidden = false;
+    }
+  }
+  let down = null;
+  renderer.domElement.addEventListener('pointermove', hover);
+  renderer.domElement.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY }; hover(e); });
+  renderer.domElement.addEventListener('pointerup', e => {
+    const click = down && Math.hypot(e.clientX - down.x, e.clientY - down.y) <= 5;
+    down = null;
+    if (!click || !deleting) return;
+    const hit = pick(e);
+    if (!hit) return;
+    const { atom, arrow } = hit.object.userData;
+    if (atom) deleteAtom(atom);
+    else if (arrow.link) deleteAtom(arrow.link); // the stick is the link row
+    else removeArrow(arrow);
+    focus = undefined; hover(e);
+  });
+  renderer.domElement.addEventListener('pointerleave', () => { if (dragging) return; tipEl.hidden = true; setFocus(null); overAtom = false; setHand(); });
+
+  // ---------- Frame loop ----------
+  const v = new THREE.Vector3();
+  function placeLabels() {
+    const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight;
+    labelNodes.forEach(({ a, el }) => {
+      v.copy(a.pos).project(camera);
+      const vis = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
+      el.style.display = vis ? '' : 'none';
+      if (vis) { el.style.left = ((v.x + 1) / 2 * w) + 'px'; el.style.top = ((1 - v.y) / 2 * h) + 'px'; }
+    });
+  }
+  const RED = new THREE.Color(0xff3b3b);
+  function effects(dt) {
+    atoms.forEach(a => {
+      if (!a.fx) return;
+      a.fx.t += dt;
+      if (a.fx.kind === 'vanish') {
+        const k = Math.max(1 - a.fx.t / 0.45, 0);
+        a.mesh.scale.setScalar(Math.max(k, 0.001)); a.mesh.material.opacity = k;
+        if (k === 0) { a.mesh.visible = false; a.label.classList.add('gone'); a.fx = null; }
+      } else {
+        // Refused: a short shudder, a red flush, and the atom stays exactly where it was.
+        const k = Math.max(1 - a.fx.t / 0.7, 0);
+        a.mesh.position.copy(a.pos).add(tmp.set(Math.sin(a.fx.t * 60) * 0.12 * k, 0, 0));
+        a.mesh.material.emissive.copy(RED).multiplyScalar(0.6 * k);
+        if (k === 0) { a.mesh.position.copy(a.pos); a.fx = null; paint(); }
+      }
+    });
+    arrows.forEach(x => {
+      if (!x.fx) return;
+      x.fx.t += dt;
+      const k = Math.max(1 - x.fx.t / 2.4, 0);
+      x.mat.emissive.copy(RED).multiplyScalar(k);
+      x.mat.opacity = Math.max(x.mat.opacity, k);
+      if (k === 0) { x.fx = null; paint(); }
+    });
+  }
+  function resize() {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    renderer.setSize(w, h, false); camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    controls.handleResize();
+  }
+  // Fit the whole molecule: a tall phone screen needs the camera further back than a wide one.
+  const homeDist = () => Math.min(30 * Math.max(1, 1.5 / (stage.clientWidth / stage.clientHeight)), 68);
+  addEventListener('resize', resize); resize();
+  camera.position.setLength(homeDist());
+
+  const clock = new THREE.Clock();
+  function frame() {
+    effects(Math.min(clock.getDelta(), 0.05));
+    coast();
+    controls.update();
+    renderer.render(scene, camera);
+    if (showLabels) placeLabels();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+
+
+  // Test hook for the mock's own checks; harmless in the page.
+  window.__em = { atoms, arrows, blockersOf, deleteAtom, deleteLink, removeArrow, undo, restoreAll, screenCircle, key, camera };
+})();
+</script>

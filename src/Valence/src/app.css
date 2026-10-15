@@ -1,0 +1,4 @@
+/* The page itself; the chrome is dock/dock.css, the panes panels/panels.css, a document app/document.css. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--ground); color: var(--ink); font-family: var(--sans); overflow: hidden; }

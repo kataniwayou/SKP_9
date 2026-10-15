@@ -1,0 +1,168 @@
+/* Tool pane bodies (mockup v49: .paneBody, the inspector rules, .prob). */
+.paneBody { height: 100%; display: flex; flex-direction: column; background: var(--panel); min-height: 0; font-family: var(--sans); color: var(--ink); }
+.ph2 { padding: 10px 16px 0; min-height: 10px; }
+.pbody { flex: 1; overflow: auto; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.kindpill { font-size: 10px; letter-spacing: .1em; padding: 2px 6px; border-radius: 3px; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--accent); }
+
+/* inspector */
+.sec { padding: 4px 16px 14px; border-bottom: 1px solid var(--line); }
+.sec-title { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 12px 0 8px; display: flex; justify-content: space-between; align-items: center; }
+.uname { margin: 10px 0 0; font-family: var(--mono); font-size: 12.5px; }
+.uname .ro { color: var(--ink); font-size: 12.5px; }
+.field { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; }
+.field label { color: var(--muted); }
+.ro { font-family: var(--mono); font-size: 12px; color: var(--muted); display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ro.null { color: var(--faint); }
+.ro .dot { display: inline-block; vertical-align: middle; margin-right: 6px; }
+.metatog { margin: 2px 0 4px 104px; }
+.meta { margin: 4px 0 2px; padding: 4px 0 2px; border-top: 1px dashed var(--line); }
+.meta .field { margin: 4px 0; font-size: 12px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; }
+.slot { display: grid; grid-template-columns: 52px 1fr auto; gap: 8px; align-items: center; margin: 6px 0; font-size: 12.5px; }
+.slot .k { color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.slot .v { font-family: var(--mono); font-size: 12px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.slot .v.null { color: var(--faint); }
+.link { font-size: 11.5px; color: var(--accent); cursor: pointer; background: none; border: 0; padding: 0; font-family: var(--sans); }
+.note { font-size: 11.5px; color: var(--faint); line-height: 1.5; margin-top: 8px; }
+.note.warn { color: var(--x); }
+.pane-note { padding: 8px 12px; margin: 0; font-size: 12.5px; }
+
+/* Output's pinned problems (2026-10-09: Output is the only message pane); red, above the log */
+.pinned { flex: 0 1 auto; max-height: 60%; overflow: auto; border-bottom: 1px solid var(--error); scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.prob { padding: 7px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--muted); cursor: pointer; }
+.prob:hover { background: rgba(125, 211, 252, .06); }
+.prob.static { cursor: default; }
+.prob.static:hover { background: none; }
+.prob b { color: var(--ink); font-weight: 500; }
+.prob .gate { font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; margin-right: 8px; border: 1px solid var(--line-2); border-radius: 999px; color: var(--muted); background: var(--panel-2); }
+.prob .pd { margin-top: 3px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+.prob.err { border-left: 3px solid var(--error); background: rgba(248, 113, 113, .06); }
+.prob.err:hover { background: rgba(248, 113, 113, .12); }
+.prob.err b, .prob.err .pd { color: var(--error); }
+.prob.err .gate { color: var(--error); border-color: var(--error); }
+.prob:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+/* inspector editing (slice 3b; mockup v49 .input, .btn) */
+.input { font-family: var(--mono); font-size: 12px; background: var(--ground-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 6px 8px; color: var(--ink); width: 100%; min-width: 0; box-sizing: border-box; }
+.input::placeholder { color: var(--faint); }
+.input[aria-invalid="true"] { border-color: var(--f); }
+textarea.input { resize: vertical; line-height: 1.45; font-family: var(--mono); }
+textarea.input.json { white-space: pre; overflow: auto; }
+/* the entry-condition dropdown: each condition drawn as the legend draws it */
+.cpick { position: relative; }
+.cp-btn { display: flex; align-items: center; gap: 2px; text-align: left; cursor: pointer; font-family: var(--sans); font-size: 12.5px; }
+.cp-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.cp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-chev { color: var(--muted); font-size: 11px; }
+.cp-list { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; padding: 4px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 6px; box-shadow: 0 16px 40px -12px rgba(0, 0, 0, .8); }
+.cp-opt { display: flex; align-items: center; gap: 2px; padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 12.5px; color: var(--ink); }
+.cp-opt.hi { background: rgba(125, 211, 252, .10); }
+.cp-tick { color: var(--accent); font-size: 12px; }
+.field.tall { align-items: start; }
+.field.tall > label { padding-top: 7px; }
+.fval { min-width: 0; }
+.ferr { margin-top: 3px; font-size: 11.5px; color: var(--f); }
+.fnote { margin-top: 3px; font-size: 11.5px; color: var(--x); }
+.fhint { margin-top: 3px; font-size: 11.5px; color: var(--muted); }
+.drill { font-family: var(--mono); font-size: 12px; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drill::after { content: " ›"; color: var(--faint); }
+.slot .v.drill { color: var(--accent); }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 16px 0; font-size: 12px; color: var(--muted); }
+.crumbs .sep { color: var(--faint); }
+.crumbs [aria-current] { color: var(--ink); }
+.unsaved { margin-left: 8px; font-size: 11.5px; color: var(--x); }
+.savebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--panel); }
+.banner { flex: 1 0 100%; padding: 6px 8px; font-size: 12px; color: var(--f); background: rgba(255, 122, 102, .08); border: 1px solid rgba(255, 122, 102, .35); border-radius: 6px; white-space: pre-wrap; word-break: break-word; }
+.btn:disabled { opacity: .45; cursor: default; }
+.link.danger { color: var(--f); }
+.link:disabled { opacity: .45; cursor: default; }
+.arow { display: flex; align-items: center; gap: 12px; }
+fieldset.plain { border: 0; margin: 0; padding: 0; min-width: 0; }
+.otools { display: flex; justify-content: flex-end; padding: 3px 8px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+.otools .qb { font-size: 11.5px; }
+.outl { padding: 2px 10px; font-family: var(--mono); font-size: 12px; }
+.outl .t { color: var(--muted); }
+.outl.err { color: var(--error); }
+.outl.err b { color: var(--error); }
+
+/* read-outs (the user's request, 2026-10-09): the picked wire and the workflow's graph as plain text, wrapping */
+.readout .rt { font-family: var(--mono); font-size: 12.5px; color: var(--ink); overflow-wrap: break-word; }
+.readout dl { margin: 8px 0 0; }
+.readout .rrow { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; margin: 6px 0; font-size: 12.5px; align-items: baseline; }
+.readout dt { color: var(--muted); }
+.readout dd { margin: 0; min-width: 0; font-family: var(--mono); font-size: 12px; color: var(--ink); overflow-wrap: break-word; }
+.readout ul { list-style: none; margin: 0; padding: 0; }
+.readout li + li { margin-top: 2px; }
+.readout .held { color: var(--x); }
+.readout .none { color: var(--faint); }
+.readout .rnote { margin-top: 3px; font-family: var(--sans); font-size: 11.5px; color: var(--x); }
+.rtable { width: 100%; border-collapse: collapse; margin: 10px 0 4px; table-layout: fixed; font-size: 12px; }
+.rtable th, .rtable td { text-align: left; vertical-align: top; padding: 4px 6px 4px 0; border-top: 1px solid var(--line); min-width: 0; overflow-wrap: break-word; }
+.rtable thead th { border-top: 0; font-family: var(--sans); font-weight: 400; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.rtable thead th:nth-child(2) { width: 76px; }
+.rtable tbody th { font-family: var(--mono); font-weight: 400; color: var(--ink); }
+.rtable td { font-family: var(--mono); color: var(--ink); }
+
+/* the processor's liveness in the Inspector (2026-10-10): the art's health colours */
+.ro.liveness.healthy { color: var(--healthy); }
+.ro.liveness.unhealthy { color: var(--unhealthy); }
+.ro.liveness.undetermined { color: var(--undetermined); }
+
+/* a dictionary field as a key/value table (2026-10-10, a cache's items) */
+.field.dict { display: block; }
+.dict-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.dict-head label { color: var(--muted); }
+.dict-count { font-size: 11px; color: var(--faint); }
+.dict-tog { margin-left: auto; font-family: var(--mono); font-size: 10px; letter-spacing: .08em; padding: 1px 6px; border-radius: 3px; background: none; border: 1px solid var(--line-2); color: var(--muted); cursor: pointer; }
+.dict-tog.on { color: var(--accent); border-color: var(--accent); }
+.dict-tog:disabled { opacity: .45; cursor: default; }
+.dict-tog:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.dict-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-family: var(--mono); font-size: 12px; }
+.dict-table th { text-align: left; font: 400 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); padding: 2px 4px; border-bottom: 1px solid var(--line); }
+.dict-table th:nth-child(1) { width: 38%; }
+.dict-table th:nth-child(3) { width: 20px; }
+.dict-table td { padding: 1px 2px; border-bottom: 1px solid var(--line); }
+.dict-cell { width: 100%; box-sizing: border-box; font: 400 12px var(--mono); color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 3px; padding: 3px 4px; min-width: 0; }
+.dict-cell:hover:not([readonly]) { border-color: var(--line-2); }
+.dict-cell:focus { outline: none; border-color: var(--accent); background: var(--ground-2); }
+.dict-table tr.bad .dict-cell[aria-invalid="true"] { border-color: var(--error); color: var(--error); }
+.dict-why td { border-bottom: 0; padding: 0 4px 3px; font-size: 11px; color: var(--error); }
+.dict-x { text-align: center; }
+.dict-add { margin-top: 5px; }
+
+/* the Toolbox (2026-10-11): tiles drawn with the canvas's own art, dragged onto a workflow's canvas */
+.tb-search { padding: 8px 10px 6px; border-bottom: 1px solid var(--line); }
+.tb-search input { width: 100%; box-sizing: border-box; background: var(--ground); border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink); font: 12px var(--sans); padding: 5px 8px; }
+.tb-search input:focus { outline: none; border-color: var(--accent); }
+.toolbox { padding: 2px 10px 12px; }
+.tb-h { font: 600 10px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 12px 0 6px; display: flex; align-items: center; gap: 6px; }
+.tb-count { font-weight: 400; color: var(--faint); letter-spacing: 0; }
+.tb-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.tb-row .tb-tile { flex-direction: column; align-items: stretch; }
+.tb-tile { display: flex; align-items: center; gap: 8px; padding: 6px; margin-bottom: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); cursor: grab; user-select: none; touch-action: none; }
+.tb-tile:hover { border-color: var(--accent); }
+.tb-tile:active { cursor: grabbing; }
+/* the one tile picked for the Inspector (2026-10-11): the selection's blue, as a picked block's frame */
+.tb-tile { position: relative; }
+.tb-tile.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 8px rgba(125, 211, 252, .35); }
+/* changed in the active design, not saved yet: the Inspector's "unsaved changes" orange */
+.tb-unsaved { position: absolute; top: 4px; right: 6px; font-size: 10px; line-height: 1; color: var(--x); pointer-events: none; }
+.tb-art { display: block; flex: none; overflow: visible; }
+.tb-step { width: 100%; height: auto; max-height: 72px; }
+.tb-wire { width: 100%; height: 32px; }
+.tb-proc { width: 100%; height: auto; }
+.tb-cache { width: 56px; height: 56px; }
+.tb-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: 11px; color: var(--muted); }
+.tb-text:empty { display: none; }
+.tb-text b { font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-root { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+.tb-error { color: var(--error); }
+.tb-wire .lg-ring { fill: #060c17; stroke: #8A97A8; stroke-width: 1.6; }
+.tb-wire .lg-undecided { fill: none; stroke: #8A97A8; stroke-width: 2; stroke-dasharray: 6 4; }
+.tb-wire .lg-arrow { fill: none; stroke: #8A97A8; stroke-width: 2; stroke-linejoin: miter; }
+/* follows the pointer while a tile is dragged; never under the pointer itself (the canvas below is what it is over) */
+/* centred on the pointer, as the canvas's landing box is (toolDrop.landingBox) */
+.tb-ghost { position: fixed; z-index: var(--z-tip); pointer-events: none; opacity: .8; width: 120px; transform: translate(-50%, -50%); filter: drop-shadow(0 4px 10px rgba(0, 0, 0, .5)); }
+.tb-ghost .tb-art { width: 120px; height: auto; max-height: none; }
+.tb-ghost .tb-cache { width: 72px; display: block; margin: 0 auto; }
