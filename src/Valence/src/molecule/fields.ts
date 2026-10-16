@@ -1,4 +1,6 @@
 import type { ProjectData } from '../api/project';
+import { goneArrows, NOTHING_REMOVED, type Removed } from './deletion';
+import { schemaProblem } from './jsonSchema';
 import { arrowKey, KINDS, TYPES, type ArrowKind, type AtomType, type Molecule } from './model';
 
 /** How a writable field is edited. */
@@ -15,10 +17,13 @@ export interface FieldSpec {
   kind: FieldKind;
   /** Empty text means null. */
   nullable?: boolean;
-  /** Why it cannot be edited yet; absent: it can. */
-  readOnly?: string;
+  /** A rule that can lock it, judged on the virtual entities; absent: it is always open. */
+  lock?(molecule: Molecule, removed: Removed, atomKey: string): Lock;
   check(text: string): string | null;
 }
+
+/** Whether a rule locks a field now, and the line the Inspector shows under it either way. */
+export interface Lock { locked: boolean; note: string }
 
 const MB = 1_048_576;
 const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -26,6 +31,27 @@ const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const required = (label: string, max: number) => (t: string) =>
   t.trim() === '' ? `${label} is required` : t.length > max ? `${label} is at most ${max} characters` : null;
 const jsonProblem = (t: string): string | null => { try { JSON.parse(t); return null; } catch (e) { return `Not valid JSON: ${(e as Error).message}`; } };
+
+/** The processor slots that hold a schema: while any of them points at it, its definition is frozen. */
+const SCHEMA_SLOTS: ReadonlySet<ArrowKind> = new Set(['input', 'output', 'config']);
+
+/**
+ * BaseApi's freeze (`SchemaService.UpdateAsync`: a changed definition → 409 while any processor's input, output or
+ * config slot points at the schema), judged on the virtual entities (the user, 2026-10-16: "build the rule-driven
+ * unlock"): once every such arrow is deleted in Valence the definition opens, and an undo that brings one back closes it.
+ */
+export function definitionLock(molecule: Molecule, removed: Removed, key: string): Lock {
+  const gone = goneArrows(molecule, removed);
+  const holding = molecule.arrows.filter((x) => x.to === key && SCHEMA_SLOTS.has(x.kind) && !gone.has(arrowKey(x)));
+  if (holding.length === 0) {
+    return { locked: false, note: 'Open: no processor uses this schema in Valence. On apply, the processors\' slots clear before the definition is sent.' };
+  }
+  const users = holding.map((x) => `${molecule.atoms.get(x.from)?.name ?? x.from} (${x.kind})`).join(', ');
+  return {
+    locked: true,
+    note: `Frozen: used by ${users}. BaseApi refuses a changed definition while any processor uses the schema — delete ${holding.length === 1 ? 'that arrow' : 'those arrows'}, or make a new schema version and re-point the processor.`,
+  };
+}
 
 /** The entry conditions BaseApi accepts (0, PreviousProcessing, is refused by both step validators). */
 export const CONDITIONS: readonly { value: number; label: string }[] = [
@@ -53,7 +79,16 @@ export const FIELDS: Readonly<Record<AtomType, readonly FieldSpec[]>> = {
     { key: 'sourceHash', label: 'Source hash', kind: 'text', check: (t) => (/^[a-f0-9]{64}$/.test(t) ? null : 'A source hash is 64 lowercase hex characters') },
     { key: 'instanceId', label: 'Instance id', kind: 'text', nullable: true, check: (t) => (t.length > 200 ? 'Instance id is at most 200 characters' : null) },
   ],
-  schema: [...COMMON, { key: 'definition', label: 'Definition', kind: 'json', readOnly: 'Read-only for now', check: () => null }],
+  schema: [...COMMON, {
+    key: 'definition', label: 'Definition', kind: 'json', lock: definitionLock,
+    check: (t) => {
+      if (t.trim() === '') return 'Definition is required';
+      let v: unknown;
+      try { v = JSON.parse(t); } catch (e) { return `Not valid JSON: ${(e as Error).message}`; }
+      const p = schemaProblem(v);
+      return p ? `Not a valid JSON Schema (draft 2020-12) — ${p}` : null;
+    },
+  }],
   asg: [...COMMON, {
     key: 'payload', label: 'Payload', kind: 'json',
     check: (t) => (t.trim() === '' ? 'Payload is required' : t.length > MB ? 'Payload is at most 1 MB' : jsonProblem(t)),
@@ -121,16 +156,20 @@ export function arrowRows(molecule: Molecule, atomKey: string): { label: string;
 /**
  * The edited atoms, split by whether their edits are finished (the user, 2026-10-16): an edit counts as a change — drawn
  * as an update ghost — only when every edited field passes its rule; one breaking a rule is unfinished, marked in the
- * Inspector and drawn as nothing, and blocks apply until it is fixed or reverted.
+ * Inspector and drawn as nothing, and blocks apply until it is fixed or reverted. An edit to a field a rule has locked
+ * again (a schema whose processor arrow came back) is unfinished too, and also listed in `frozen`: BaseApi would refuse it.
  */
-export function editStates(molecule: Molecule, edits: Readonly<Record<string, Readonly<Record<string, string>>>>): { finished: Set<string>; unfinished: Set<string> } {
-  const finished = new Set<string>(), unfinished = new Set<string>();
+export function editStates(molecule: Molecule, edits: Readonly<Record<string, Readonly<Record<string, string>>>>, removed: Removed = NOTHING_REMOVED):
+  { finished: Set<string>; unfinished: Set<string>; frozen: Set<string> } {
+  const finished = new Set<string>(), unfinished = new Set<string>(), frozen = new Set<string>();
   for (const [key, fields] of Object.entries(edits)) {
     const atom = molecule.atoms.get(key);
     if (!atom || Object.keys(fields).length === 0) continue;
-    const specs = FIELDS[atom.type];
-    const broken = Object.entries(fields).some(([field, text]) => specs.find((s) => s.key === field)?.check(text) != null);
+    const specs = Object.keys(fields).map((f) => FIELDS[atom.type].find((s) => s.key === f));
+    const locked = specs.some((s) => s?.lock?.(molecule, removed, key).locked);
+    const broken = locked || Object.entries(fields).some(([field, text]) => FIELDS[atom.type].find((s) => s.key === field)?.check(text) != null);
     (broken ? unfinished : finished).add(key);
+    if (locked) frozen.add(key);
   }
-  return { finished, unfinished };
+  return { finished, unfinished, frozen };
 }

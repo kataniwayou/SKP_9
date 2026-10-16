@@ -248,6 +248,76 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   /** An update ghost's colour: the Inspector's edit amber (--x), apart from the delete ghost's red. */
   const UPDATED = new THREE.Color(0xfbbf24);
   const tint = new THREE.Color();
+
+  // ---------- Halos (the user, 2026-10-16: option B of the ghost-styles mock, "breathing halo") ----------
+  // A glow around an atom, gently breathing (about 1.6 s; still with reduced motion): red for a deleted atom, amber for
+  // one with finished edits, the atom's own colour for the pinned one (a pinned ghost keeps its red or amber, so the
+  // change always shows). It never shrinks below about 34 px on screen, so it marks the atom at the whole-project view,
+  // and it stays strong while the rest of the molecule is faded.
+  // Drawn by a shader on a camera-facing disc (the user, 2026-10-16: "the halo isn't circle like the atom"): its bright
+  // edge lies exactly on the atom's outline on screen, at any zoom and any size, and nothing is drawn inside the atom —
+  // a texture's ring sat inside the see-through body, which the light covered unevenly into a crescent. Blended as a
+  // see-through layer, not added light (added amber saturated to yellow-white and turned crossing arrows white-hot), and
+  // drawn before the other see-through things, so it reads as a glow behind the atom and its arrows.
+  const haloGeom = new THREE.PlaneGeometry(1, 1);
+  disposables.push(haloGeom);
+  const HALO_VERTEX = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
+  const HALO_FRAGMENT = `
+    uniform vec3 color; uniform float opacity; uniform float edge; varying vec2 vUv;
+    void main() {
+      float d = length(vUv - 0.5) * 2.0;                  // 0 at the centre, 1 at the disc's rim
+      if (d >= 1.0 || d < edge * 0.985) discard;          // nothing inside the atom's outline, nothing past the disc
+      float t = clamp((d - edge) / max(1.0 - edge, 1e-3), 0.0, 1.0);   // 0 on the outline, 1 at the disc's rim
+      float rise = smoothstep(edge * 0.985, edge * 1.012, d);          // a crisp inner edge on the outline
+      float a = rise * (0.9 * exp(-t * 4.5) + 0.5 * (1.0 - t) * (1.0 - t)) * (1.0 - smoothstep(0.85, 1.0, d));
+      gl_FragColor = vec4(color, a * opacity);
+      #include <colorspace_fragment>
+    }`;  // the colour space conversion three's own materials do: amber stays #fbbf24, not orange
+  type Halo = THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
+  const halos = new Map<AtomView, Halo>();
+  /** Which atoms breathe a halo now, and in what colour: set by paint(), animated by breathe(). */
+  let haloed: { a: AtomView; color: THREE.Color }[] = [];
+  const stillMotion = win.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  function haloOf(a: AtomView): Halo {
+    let h = halos.get(a);
+    if (!h) {
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { color: { value: new THREE.Color() }, opacity: { value: 1 }, edge: { value: 0.5 } },
+        vertexShader: HALO_VERTEX, fragmentShader: HALO_FRAGMENT,
+        transparent: true, depthWrite: false, blending: THREE.NormalBlending,
+      });
+      h = new THREE.Mesh(haloGeom, mat);
+      // drawn first, behind everything see-through: arrows passing through a halo stay crisp on top of it
+      h.renderOrder = -1;
+      scene.add(h);
+      halos.set(a, h);
+      disposables.push(mat);
+    }
+    return h;
+  }
+  function breathe(t: number) {
+    const pulse = stillMotion ? 1 : 0.72 + 0.28 * Math.sin(t / 255);
+    const hPx = Math.max(el.clientHeight, 1), tanHalfFov = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
+    const on = new Set<AtomView>();
+    for (const { a, color } of haloed) {
+      const h = haloOf(a);
+      on.add(a);
+      h.visible = true;
+      h.position.copy(a.pos);
+      h.quaternion.copy(camera.quaternion); // faces the camera as the image plane does, so it draws as a true circle
+      const r = TYPES[a.atom.type].r, d = camera.position.distanceTo(a.pos);
+      // the sphere's outline, measured in the disc's plane (through its centre, facing the camera)
+      const outline = (r * d) / Math.sqrt(Math.max(d * d - r * r, 1e-6));
+      const perPx = (2 * d * tanHalfFov) / hPx;
+      const size = Math.max(outline * 4.2, outline * 2 + 34 * perPx) * (0.94 + 0.08 * pulse);
+      h.scale.set(size, size, 1);
+      h.material.uniforms.color.value.copy(color);
+      h.material.uniforms.opacity.value = 0.95 * pulse;
+      h.material.uniforms.edge.value = Math.min((outline * 2) / size, 0.95);
+    }
+    halos.forEach((h, a) => { if (!on.has(a)) h.visible = false; });
+  }
+
   function paint() {
     const keep = new Set<AtomView>();
     const live = new Set<ArrowView>();
@@ -262,18 +332,23 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
       arrows.forEach((x) => { if (keep.has(x.a) && keep.has(x.b)) live.add(x); });
     }
     const all = !f && !lit;
+    haloed = [];
     atoms.forEach((a) => {
       const on = all || keep.has(a);
       const ghost = ghosts.atoms.has(a.atom.key);
       const updated = !ghost && !!ghosts.updated?.has(a.atom.key);
       const m = a.mesh.material;
-      // a delete ghost: the atom's colour pulled to red, faint even when in focus, so it reads as "goes on apply";
-      // an update ghost: pulled to amber, half-faint, so it reads as "changes on apply"
+      // a ghost, deleted or updated, is drawn one way (the user, 2026-10-16: align the update ghost to the delete ghost):
+      // the body pulled a little to the ghost's colour and faint, so its halo glows through it — red for "goes on
+      // apply", amber for "changes on apply"
+      const ghostly = ghost || updated;
       m.color.set(TYPES[a.atom.type].color);
-      if (ghost) m.color.lerp(GHOST, 0.65);
-      else if (updated) m.color.lerp(UPDATED, 0.6);
-      m.opacity = ghost ? (on ? 0.32 : 0.1) : updated ? (on ? 0.6 : 0.12) : on ? 1 : 0.14;
-      m.depthWrite = !ghost && !updated;
+      if (ghostly) m.color.lerp(ghost ? GHOST : UPDATED, 0.25);
+      m.opacity = ghostly ? (on ? 0.45 : 0.3) : on ? 1 : 0.14;
+      m.depthWrite = !ghostly;
+      if (ghost) haloed.push({ a, color: GHOST });
+      else if (updated) haloed.push({ a, color: UPDATED });
+      else if (a === pinnedOne) haloed.push({ a, color: new THREE.Color(TYPES[a.atom.type].color) });
       // the pinned atom glows brighter than a hovered one, so it is found again among its neighbours
       m.emissive.setScalar(a === pinnedOne ? 0.32 : a === focus ? 0.18 : 0);
       a.label.classList.toggle('dim', !on);
@@ -287,7 +362,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
       if (ghost) tint.lerp(GHOST, 0.8);
       x.mat.color.copy(tint);
       const op = all ? BOND[KINDS[x.arrow.kind].bond].op : on ? 1 : 0.05;
-      x.mat.opacity = ghost ? Math.min(op, on ? 0.45 : 0.12) : op;
+      x.mat.opacity = ghost ? (on || all ? 0.6 : 0.3) : op;
       // a pinned or hovered arrow glows; an atom's arrows glow while it is in focus
       const self = x === pinnedOne || x === focus;
       x.mat.emissive.copy(f && (on || self) ? tint : new THREE.Color(0)).multiplyScalar(self ? 0.8 : 0.45);
@@ -565,6 +640,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   function frame() {
     if (!turning && (Math.abs(spin.x) > 1e-4 || Math.abs(spin.y) > 1e-4)) { turn(spin.x, spin.y); spin.x *= 0.9; spin.y *= 0.9; }
     easeZoom();
+    breathe(performance.now());
     controls.update();
     // arrows ending at a ball's outline follow the camera
     if (!lastCam.equals(camera.position)) { lastCam.copy(camera.position); arrows.forEach(placeArrow); }
@@ -575,7 +651,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   raf = win.requestAnimationFrame(frame);
 
   // the browser checks read the scene from here (dev server only; never in a build)
-  if (import.meta.env.DEV) Object.assign(el, { __molecule: { camera, atoms, arrows, radiusOf: (t: AtomType) => TYPES[t].r } });
+  if (import.meta.env.DEV) Object.assign(el, { __molecule: { camera, atoms, arrows, halos, radiusOf: (t: AtomType) => TYPES[t].r } });
 
   return {
     highlight(keys) { lit = keys && keys.size > 0 ? keys : null; paint(); },

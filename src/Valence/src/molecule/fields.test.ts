@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectData } from '../api/project';
 import project from '../test/fixtures/project.json';
-import { arrowRows, detailRows, editStates, FIELDS, rowOf, savedText } from './fields';
+import { NOTHING_REMOVED } from './deletion';
+import { arrowRows, definitionLock, detailRows, editStates, FIELDS, rowOf, savedText } from './fields';
 import { atomKey, buildMolecule } from './model';
 
 const field = (type: keyof typeof FIELDS, key: string) => FIELDS[type].find((f) => f.key === key)!;
@@ -16,9 +17,22 @@ describe('FIELDS (the user\'s list, 2026-10-15)', () => {
     });
   });
 
-  it('keeps the schema definition read-only for now', () => {
-    expect(field('schema', 'definition').readOnly).toBe('Read-only for now');
-    expect(FIELDS.proc.every((f) => !f.readOnly)).toBe(true);
+  it('locks only the schema definition, and only by a rule', () => {
+    expect(Object.values(FIELDS).flat().filter((f) => f.lock).map((f) => f.key)).toEqual(['definition']);
+  });
+
+  it('checks a definition as JSON, then as a draft 2020-12 JSON Schema', () => {
+    const def = field('schema', 'definition');
+    expect(def.check('')).toBe('Definition is required');
+    expect(def.check('{')).toMatch(/^Not valid JSON/);
+    expect(def.check('{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}')).toBeNull();
+    expect(def.check('true')).toBeNull();
+    expect(def.check('[]')).toBe('Not a valid JSON Schema (draft 2020-12) — the root: a schema is an object or true/false');
+    expect(def.check('{"properties":{"a":{"type":"text"}}}')).toMatch(/^Not a valid JSON Schema \(draft 2020-12\) — \/properties\/a\/type: one of/);
+    expect(def.check('{"required":["a","a"]}')).toMatch(/\/required: a list of property names without repeats$/);
+    expect(def.check('{"minLength":-1}')).toMatch(/\/minLength: a whole number, 0 or more$/);
+    expect(def.check('{"allOf":[]}')).toMatch(/\/allOf: a non-empty list of schemas$/);
+    expect(def.check('{"x-own":1,"pattern":"[","format":"anything"}')).toBeNull(); // unknown keywords and formats are annotations
   });
 
   it("checks BaseApi's rules", () => {
@@ -80,5 +94,41 @@ describe('editStates: finished edits are changes, unfinished ones are not (the u
     const states = editStates(m, { [wf]: { name: 'renamed', version: '2.0.0' }, [step]: { name: 'ok', version: '1.' }, 'wf:gone': { name: 'x' } });
     expect([...states.finished]).toEqual([wf]);
     expect([...states.unfinished]).toEqual([step]);
+  });
+});
+
+describe("definitionLock: BaseApi's freeze, judged on the virtual entities (the user, 2026-10-16)", () => {
+  const H = 'a'.repeat(64);
+  const proc = (id: string, slots: Record<string, string | null>) => ({ id, name: id, version: '1.0.0', description: null, sourceHash: H, instanceId: null, inputSchemaId: null, outputSchemaId: null, configSchemaId: null, ...slots });
+  const data = {
+    workflows: [], steps: [], assignments: [], caches: [],
+    processors: [proc('p1', { inputSchemaId: 'c1' }), proc('p2', { configSchemaId: 'c1', outputSchemaId: 'c1' })],
+    schemas: [{ id: 'c1', name: 'c1', version: '1.0.0', description: null, definition: '{}' }, { id: 'c2', name: 'c2', version: '1.0.0', description: null, definition: '{}' }],
+  } as unknown as ProjectData;
+  const m = buildMolecule(data);
+  const C1 = atomKey('schema', 'c1'), C2 = atomKey('schema', 'c2');
+  const into = m.arrows.filter((x) => x.to === C1).map((x) => `${x.kind}|${x.from}|${x.to}`);
+
+  it('freezes a schema any processor slot points at, naming each one', () => {
+    const lock = definitionLock(m, NOTHING_REMOVED, C1);
+    expect(lock.locked).toBe(true);
+    expect(lock.note).toMatch(/^Frozen: used by p1 \(input\), p2 \(output\), p2 \(config\)\. /);
+    expect(definitionLock(m, NOTHING_REMOVED, C2).locked).toBe(false);
+  });
+
+  it('stays frozen until every arrow is gone, by arrow deletes or a processor delete', () => {
+    expect(into).toHaveLength(3);
+    expect(definitionLock(m, { atoms: [], arrows: into.slice(0, 2) }, C1).locked).toBe(true);
+    expect(definitionLock(m, { atoms: [], arrows: into }, C1)).toMatchObject({ locked: false, note: expect.stringMatching(/^Open: /) });
+    const p1Input = into.find((k) => k.startsWith('input|'))!;
+    expect(definitionLock(m, { atoms: [atomKey('proc', 'p2')], arrows: [p1Input] }, C1).locked).toBe(false);
+  });
+
+  it('makes a definition edit unfinished, and frozen, once an arrow comes back', () => {
+    const edits = { [C1]: { definition: '{"type":"object"}' } };
+    expect(editStates(m, edits, { atoms: [], arrows: into })).toMatchObject({ finished: new Set([C1]), frozen: new Set() });
+    expect(editStates(m, edits, NOTHING_REMOVED)).toMatchObject({ finished: new Set(), unfinished: new Set([C1]), frozen: new Set([C1]) });
+    // a name edit is never frozen
+    expect(editStates(m, { [C1]: { name: 'renamed' } }, NOTHING_REMOVED).finished.has(C1)).toBe(true);
   });
 });

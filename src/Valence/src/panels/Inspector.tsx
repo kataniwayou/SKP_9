@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Workspace } from '../app/workspace';
 import { useWorkspace } from '../app/workspace';
 import { canDeleteArrow, canDeleteAtom, CONSEQUENCE, goneArrows, type Removed, type Verdict } from '../molecule/deletion';
-import { arrowRows, CONDITIONS, detailRows, editStates, FIELDS, rowOf, savedText, type FieldSpec } from '../molecule/fields';
+import { arrowRows, CONDITIONS, detailRows, editStates, FIELDS, rowOf, savedText, type FieldSpec, type Lock } from '../molecule/fields';
 import { arrowKey, BOND, isArrowKey, KINDS, TYPES, type Molecule } from '../molecule/model';
 import { PaneNote } from './PaneNote';
 
@@ -14,7 +14,7 @@ const writeOpen = (open: boolean) => { try { globalThis.localStorage?.setItem(OP
 /**
  * The Inspector (spec §3c, approved 2026-10-15). Hovering an atom previews it; clicking it pins it, and the pinned atom
  * is edited while nothing is hovered. On top, open: the kind, then every writable field that is not an arrow (the schema's
- * definition is read-only for now). Below, one show/hide "Read-only" section: the details, then the atom's arrows. An
+ * definition opens only while no processor arrow points at the schema: BaseApi's freeze, judged on the virtual entities). Below, one show/hide "Read-only" section: the details, then the atom's arrows. An
  * edit changes the virtual entity only (decision 8): nothing reaches BaseApi until an apply step exists. A pinned atom
  * says whether Delete may delete it (spec §6); a deleted one is a ghost, read-only until undone. An arrow hovered or
  * pinned shows its two ends, where it is held, whether it can be deleted and what deleting it changes (§6b).
@@ -41,7 +41,8 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
   const gone = goneArrows(molecule, removed);
   const changed = edits[key] ?? {};
   const dirty = Object.keys(changed).length > 0;
-  const unfinished = dirty && editStates(molecule, { [key]: changed }).unfinished.has(key);
+  const states = dirty ? editStates(molecule, { [key]: changed }, removed) : null;
+  const unfinished = !!states?.unfinished.has(key), frozen = !!states?.frozen.has(key);
   const toggle = () => { setOpen((o) => { writeOpen(!o); return !o; }); };
   const details = detailRows(molecule, row, key);
   const arrows = arrowRows(molecule, key);
@@ -61,7 +62,8 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
         {!ghost && !preview && <DeleteVerdict verdict={canDeleteAtom(molecule, removed, key)} />}
         {dirty && !preview && !ghost && (
           <div className={unfinished ? 'insp-virtual unfinished' : 'insp-virtual'}>
-            <span>{unfinished ? '◐ Unfinished edit: fix the marked field — not a change, and apply waits, until then' : '● Changed in Valence only, not applied'}</span>
+            <span>{frozen ? '◐ Unfinished edit: the definition is frozen again — a processor uses this schema, so BaseApi would refuse it. Revert it, or delete that arrow again'
+              : unfinished ? '◐ Unfinished edit: fix the marked field — not a change, and apply waits, until then' : '● Changed in Valence only, not applied'}</span>
             <button type="button" className="link" onClick={() => workspace.revert(key)}>Revert</button>
           </div>
         )}
@@ -69,9 +71,10 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
           {FIELDS[atom.type].map((spec) => {
             const saved = savedText(row, spec);
             const value = changed[spec.key] ?? saved;
+            const rule = spec.lock?.(molecule, removed, key);
             return (
-              <Field key={`${key}:${spec.key}`} id={`insp-${spec.key}`} spec={spec} value={value} edited={spec.key in changed}
-                locked={ghost ? 'Deleted in Valence: undo the delete to edit' : preview ? 'Click the atom to pin it, then edit' : spec.readOnly}
+              <Field key={`${key}:${spec.key}`} id={`insp-${spec.key}`} spec={spec} value={value} edited={spec.key in changed} rule={rule}
+                locked={ghost ? 'Deleted in Valence: undo the delete to edit' : preview ? 'Click the atom to pin it, then edit' : rule?.locked ? rule.note : undefined}
                 onChange={(text) => workspace.edit(key, spec.key, text, saved)} />
             );
           })}
@@ -140,10 +143,10 @@ function ArrowInspector({ molecule, removed, arrow, preview }: { molecule: Molec
 }
 
 /** One writable field: its editor, BaseApi's rule for it as a note while typing, and a mark once it is edited. */
-function Field({ id, spec, value, edited, locked, onChange }: {
-  id: string; spec: FieldSpec; value: string; edited: boolean; locked?: string; onChange: (text: string) => void;
+function Field({ id, spec, value, edited, locked, rule, onChange }: {
+  id: string; spec: FieldSpec; value: string; edited: boolean; locked?: string; rule?: Lock; onChange: (text: string) => void;
 }) {
-  const problem = locked ? null : spec.check(value);
+  const problem = locked && !(edited && rule?.locked) ? null : spec.check(value);
   const common = {
     id, value, readOnly: !!locked, title: locked, spellCheck: false,
     className: spec.kind === 'json' ? 'input json' : 'input',
@@ -167,7 +170,7 @@ function Field({ id, spec, value, edited, locked, onChange }: {
       <label htmlFor={id} className={edited ? 'insp-edited' : undefined}>{spec.label}</label>
       <div className="fval">
         {control}
-        {spec.readOnly && <div className="fhint">{spec.readOnly}</div>}
+        {rule && <div className={rule.locked ? 'fhint locked' : 'fhint open'}>{rule.note}</div>}
         {problem && <div className="ferr">{problem}</div>}
       </div>
     </div>

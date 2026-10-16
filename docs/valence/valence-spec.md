@@ -183,8 +183,9 @@ The user: hovering an atom updates the Inspector with all the entity's propertie
    Assignment: StepId (each as `label → target name`). Starts closed; its open/closed state survives a refresh.
 3. Above it, always open: the kind, then the writable fields of item 1.
 Decided next (the user, 2026-10-15): **hover previews, a click pins** (a click on empty canvas unpins); **writes stay
-virtual until an apply step** (decision 8; no apply step exists yet); the **schema Definition sits in the writable list
-but is read-only for now**. Large JSON: a multi-line monospace box with BaseApi's check shown while typing (default).
+virtual until an apply step** (decision 8; no apply step exists yet); the **schema Definition sits in the writable list,
+locked by BaseApi's freeze** (the user, 2026-10-16: "build the rule-driven unlock" — see "Code-level BaseApi rules"
+below). Large JSON: a multi-line monospace box with BaseApi's check shown while typing (default).
 
 Built (uncommitted): `molecule/fields.ts` (the field lists with BaseApi's rules, details, arrows), `app/workspace.ts`
 (project, hovered, pinned, edits — shared by the canvas and the panes), `panels/Inspector.tsx`. A preview is read-only
@@ -349,6 +350,22 @@ processor, not the schema, and the processor update has no in-use check.
   "◐ Unfinished edit: fix the marked field — not a change, and apply waits, until then" (dashed amber), and the apply
   step must refuse while any edit is unfinished. A deleted atom shows the red delete ghost even when edited
   (`fields.editStates`; the rules are still Valence's own copy until `GET /model/fields` exists, §4).
+- **Breathing halos** (the user, 2026-10-16, option B of the ghost-styles mock
+  https://claude.ai/artifact/VKMQtt8GpXtrKUZXpHcmEy — "the ghost is not prominent enough"): a glow behind the atom,
+  breathing about every 1.6 s (still with reduced motion), never smaller than ~34 px on screen so it marks the atom at the
+  whole-project view, and strong while the rest is faded. **Red** for a deleted atom, **amber** for finished edits — both
+  drawn alike (aligned 2026-10-16): the body pulled 25% to the ghost colour, faint (0.45 / 0.3 faded), so the halo glows
+  through it — and **the atom's own colour for the pinned atom**; a pinned ghost
+  keeps its red or amber. Deleted arrows: red, 0.6 (0.3 faded). This replaces the faint tints of the two ghost bullets
+  above; the labels keep their red strike-through and amber italic. **Drawn by a shader on a camera-facing disc**
+  (2026-10-16, "the halo isn't circle like the atom"): its bright inner edge lies on the atom's outline on screen (the
+  sphere's silhouette in the disc's plane, r·d/√(d²−r²)) at any zoom and size, nothing is drawn inside the atom, and it
+  glows outward from there; the earlier texture's ring sat inside the see-through body, which the light covered into a
+  lopsided crescent. **Blended as a see-through layer and drawn first** (2026-10-16, "the edit halo is malformed" at
+  maximum zoom): added light saturated amber to yellow-white and turned the arrows crossing it white-hot; now the halo
+  keeps its true colour (with three's colour-space conversion, so amber is #fbbf24, not orange) and arrows pass crisply
+  over it. Playwright at maximum zoom: the edited processor (5 arrows through its halo) and the deleted cache look alike;
+  ring 50.5–54.5 px around a 50.7–51 px outline, centred, slid off-centre and turned.
 - **One history** (`app/workspace.ts`): field edits, Revert and deletions are steps in one undo / redo list (100 kept);
   typing in one field is one step; a new change drops what could be redone. The session keeps the deletions and the
   history across a refresh (`removed`, `history`, optional, version 1).
@@ -360,6 +377,19 @@ processor, not the schema, and the processor update has no in-use check.
 - **Schema definition frozen** while any processor references the schema: `PUT /schemas/{id}` with a changed
   definition → 409 (`SchemaDefinitionFrozenException`); name/version/description still update. A new definition is a
   new schema version that the processor slot is re-pointed to (SKP Studio's `GraphSchemaEditor`).
+  **In Valence (built 2026-10-16, uncommitted): the rule-driven unlock.** `fields.definitionLock` judges the freeze on
+  the virtual entities: the Definition box is read-only, with an amber "Frozen: used by p (input), …" line naming every
+  processor slot that holds the schema, until each of those arrows is gone — deleted on its own, or with its processor —
+  then it opens with a green "Open: no processor uses this schema in Valence" line. An undo that brings an arrow back
+  freezes it again; a definition edit left behind by that (or by a refresh that finds a new processor using the schema)
+  is unfinished — "frozen again", no update ghost — until reverted or the arrow is deleted again. Name, version and
+  description never freeze. The edit is checked as BaseApi's validator does: required, valid JSON, then a valid draft
+  2020-12 JSON Schema (`molecule/jsonSchema.ts`: every keyword the draft defines holds a value of its kind, down every
+  subschema; formats are annotations, as in JsonSchema.Net, so `pattern` is not parsed). All 24 live definitions pass.
+  **Apply order:** BaseApi checks the database, so the processors' slot-clearing `PUT`s go before the schema's `PUT`.
+  Verified with Playwright on file-envelope (4 processor arrows): frozen naming all 4, still frozen after 3 deletes,
+  open after the 4th; a bad schema marked and no ghost, a good one an amber update ghost; a refresh kept it; undo froze
+  it again; GET only.
 - **Workflow delete guard:** `DELETE /workflows/{id}` → 422 while running (Redis `skp:live`) or while its deletion runs
   (`WorkflowDeleteGuardFilter`). `POST /workflows/{id}/delete` (SKP Studio's) also deletes its steps and assignments.
 - No other service overrides delete; no update checks running state; two edits of a row do not detect each other.
@@ -381,7 +411,7 @@ All six: Name (required, ≤ 200), Version (required, `x.y.z`), Description (≤
 | Processor | SourceHash | no | 64-char lowercase SHA-256 hex; unique with InstanceId |
 | Processor | InstanceId | no | ≤ 200 |
 | Processor | Input/Output/ConfigSchemaId | yes | null clears; not empty when given |
-| Schema | Definition | no | valid JSON + valid JSON Schema (2020-12); frozen while referenced (409) |
+| Schema | Definition | no | valid JSON + valid JSON Schema (2020-12); frozen while referenced (409) — both checked in Valence |
 | Assignment | StepId | yes | required, not empty |
 | Assignment | Payload | no | required valid JSON, ≤ ~1 MB |
 | Cache | Root | no | required, ≤ 200, no `:`, unique |

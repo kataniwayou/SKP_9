@@ -67,12 +67,33 @@ describe('Inspector', () => {
     expect(input('Version')).toHaveValue('1.0.0');
   });
 
-  it("shows the schema's definition read-only for now", () => {
+  it("freezes the schema's definition while a processor uses it, and opens it once that arrow is deleted", () => {
     act(() => ws.pin(C));
     render(<Inspector workspace={ws} />);
     expect(input('Definition')).toHaveAttribute('readonly');
     expect(input('Definition')).toHaveValue('{\n  "type": "object"\n}');
-    expect(screen.getByText('Read-only for now')).toBeInTheDocument();
+    expect(screen.getByText(/^Frozen: used by file-fetcher \(input\)\./)).toHaveClass('fhint', 'locked');
+    expect(input('Name').readOnly).toBe(false); // only the definition freezes
+    const arrow = arrowKey(buildMolecule(data).arrows.find((x) => x.kind === 'input')!);
+    act(() => { ws.remove(arrow); ws.pin(C); });
+    expect(input('Definition')).not.toHaveAttribute('readonly');
+    expect(screen.getByText(/^Open: no processor uses this schema in Valence\./)).toHaveClass('fhint', 'open');
+    fireEvent.change(input('Definition'), { target: { value: '{"type":"array"}' } });
+    expect(ws.get().edits[C]).toEqual({ definition: '{"type":"array"}' });
+    expect(screen.getByText('● Changed in Valence only, not applied')).toBeInTheDocument();
+    fireEvent.change(input('Definition'), { target: { value: '{"type":"list"}' } });
+    expect(screen.getByText(/^Not a valid JSON Schema \(draft 2020-12\) — \/type: one of/)).toBeInTheDocument();
+  });
+
+  it('marks a definition edit frozen again when its processor arrow comes back', () => {
+    ws = createWorkspace({ pinned: C, edits: { [C]: { definition: '{"type":"array"}' } } });
+    ws.loaded(data, buildMolecule(data));
+    render(<Inspector workspace={ws} />);
+    expect(input('Definition')).toHaveAttribute('readonly');
+    expect(input('Definition')).toHaveValue('{"type":"array"}');
+    expect(screen.getByText(/^◐ Unfinished edit: the definition is frozen again/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
+    expect(ws.get().edits).toEqual({});
   });
 
   it('keeps details and arrows in one closed show/hide section, details first', () => {

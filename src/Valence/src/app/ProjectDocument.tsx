@@ -47,7 +47,7 @@ export function ProjectDocument({ workspace, highlights, read = readProject }: {
   // the virtual changes, not applied: deleted ones as red ghosts with every arrow that goes with them; atoms whose edits
   // are finished as amber update ghosts (an unfinished edit is no change yet, so it draws nothing)
   const ghosts = useMemo(() => (loaded.kind === 'ready'
-    ? { atoms: new Set(removed.atoms), arrows: goneArrows(loaded.molecule, removed), updated: editStates(loaded.molecule, edits).finished }
+    ? { atoms: new Set(removed.atoms), arrows: goneArrows(loaded.molecule, removed), updated: editStates(loaded.molecule, edits, removed).finished }
     : undefined), [loaded, removed, edits]);
 
   useEffect(() => {
