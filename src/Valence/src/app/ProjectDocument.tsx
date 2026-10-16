@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { readProject, type ProjectResult } from '../api/project';
 import { goneArrows } from '../molecule/deletion';
+import { editStates } from '../molecule/fields';
 import { layoutMolecule, type Vec } from '../molecule/layout';
 import { buildMolecule, reachOf, type Molecule } from '../molecule/model';
 import { useHighlights, type Highlights } from './highlights';
@@ -43,9 +44,11 @@ export function ProjectDocument({ workspace, highlights, read = readProject }: {
   const [attempt, setAttempt] = useState(0);
   const picked = useHighlights(highlights);
   const lit = useMemo(() => (loaded.kind === 'ready' ? litOf(loaded.molecule, picked) : null), [loaded, picked]);
-  // deleted in Valence, not applied: drawn as ghosts, with every arrow that goes with them
+  // the virtual changes, not applied: deleted ones as red ghosts with every arrow that goes with them; atoms whose edits
+  // are finished as amber update ghosts (an unfinished edit is no change yet, so it draws nothing)
   const ghosts = useMemo(() => (loaded.kind === 'ready'
-    ? { atoms: new Set(removed.atoms), arrows: goneArrows(loaded.molecule, removed) } : undefined), [loaded, removed]);
+    ? { atoms: new Set(removed.atoms), arrows: goneArrows(loaded.molecule, removed), updated: editStates(loaded.molecule, edits).finished }
+    : undefined), [loaded, removed, edits]);
 
   useEffect(() => {
     let live = true;

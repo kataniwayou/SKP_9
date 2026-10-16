@@ -117,3 +117,20 @@ export function arrowRows(molecule: Molecule, atomKey: string): { label: string;
   return molecule.arrows.filter((x) => x.from === atomKey)
     .map((x) => ({ label: ARROW_LABEL[x.kind], target: molecule.atoms.get(x.to)!.name, key: arrowKey(x) }));
 }
+
+/**
+ * The edited atoms, split by whether their edits are finished (the user, 2026-10-16): an edit counts as a change — drawn
+ * as an update ghost — only when every edited field passes its rule; one breaking a rule is unfinished, marked in the
+ * Inspector and drawn as nothing, and blocks apply until it is fixed or reverted.
+ */
+export function editStates(molecule: Molecule, edits: Readonly<Record<string, Readonly<Record<string, string>>>>): { finished: Set<string>; unfinished: Set<string> } {
+  const finished = new Set<string>(), unfinished = new Set<string>();
+  for (const [key, fields] of Object.entries(edits)) {
+    const atom = molecule.atoms.get(key);
+    if (!atom || Object.keys(fields).length === 0) continue;
+    const specs = FIELDS[atom.type];
+    const broken = Object.entries(fields).some(([field, text]) => specs.find((s) => s.key === field)?.check(text) != null);
+    (broken ? unfinished : finished).add(key);
+  }
+  return { finished, unfinished };
+}

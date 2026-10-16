@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectData } from '../api/project';
 import project from '../test/fixtures/project.json';
-import { arrowRows, detailRows, FIELDS, rowOf, savedText } from './fields';
+import { arrowRows, detailRows, editStates, FIELDS, rowOf, savedText } from './fields';
 import { atomKey, buildMolecule } from './model';
 
 const field = (type: keyof typeof FIELDS, key: string) => FIELDS[type].find((f) => f.key === key)!;
@@ -69,5 +69,16 @@ describe('the read-only section', () => {
     const proc = data.processors.find((p) => p.id === s.processorId)!;
     expect(rows).toContainEqual({ label: 'processor', target: proc.name, key: `uses|${key}|proc:${proc.id}` });
     expect(rows.filter((r) => r.label === 'next step')).toHaveLength((s.nextStepIds ?? []).length);
+  });
+});
+
+describe('editStates: finished edits are changes, unfinished ones are not (the user, 2026-10-16)', () => {
+  it('counts an atom finished only when every edited field passes its rule', () => {
+    const m = buildMolecule(project as ProjectData);
+    const wf = [...m.atoms.values()].find((a) => a.type === 'wf')!.key;
+    const step = [...m.atoms.values()].find((a) => a.type === 'step')!.key;
+    const states = editStates(m, { [wf]: { name: 'renamed', version: '2.0.0' }, [step]: { name: 'ok', version: '1.' }, 'wf:gone': { name: 'x' } });
+    expect([...states.finished]).toEqual([wf]);
+    expect([...states.unfinished]).toEqual([step]);
   });
 });

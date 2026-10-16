@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Workspace } from '../app/workspace';
 import { useWorkspace } from '../app/workspace';
 import { canDeleteArrow, canDeleteAtom, CONSEQUENCE, goneArrows, type Removed, type Verdict } from '../molecule/deletion';
-import { arrowRows, CONDITIONS, detailRows, FIELDS, rowOf, savedText, type FieldSpec } from '../molecule/fields';
+import { arrowRows, CONDITIONS, detailRows, editStates, FIELDS, rowOf, savedText, type FieldSpec } from '../molecule/fields';
 import { arrowKey, BOND, isArrowKey, KINDS, TYPES, type Molecule } from '../molecule/model';
 import { PaneNote } from './PaneNote';
 
@@ -41,6 +41,7 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
   const gone = goneArrows(molecule, removed);
   const changed = edits[key] ?? {};
   const dirty = Object.keys(changed).length > 0;
+  const unfinished = dirty && editStates(molecule, { [key]: changed }).unfinished.has(key);
   const toggle = () => { setOpen((o) => { writeOpen(!o); return !o; }); };
   const details = detailRows(molecule, row, key);
   const arrows = arrowRows(molecule, key);
@@ -59,8 +60,8 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
         )}
         {!ghost && !preview && <DeleteVerdict verdict={canDeleteAtom(molecule, removed, key)} />}
         {dirty && !preview && !ghost && (
-          <div className="insp-virtual">
-            <span>● Changed in Valence only, not applied</span>
+          <div className={unfinished ? 'insp-virtual unfinished' : 'insp-virtual'}>
+            <span>{unfinished ? '◐ Unfinished edit: fix the marked field — not a change, and apply waits, until then' : '● Changed in Valence only, not applied'}</span>
             <button type="button" className="link" onClick={() => workspace.revert(key)}>Revert</button>
           </div>
         )}

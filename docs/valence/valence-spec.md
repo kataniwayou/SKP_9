@@ -343,6 +343,12 @@ processor, not the schema, and the processor update has no in-use check.
 - **Ghosts:** a deleted atom keeps its place, its colour pulled to red, faint (0.32 in focus, 0.1 otherwise), its label
   struck through in red; its arrows and those deleted alone turn red and faint. A ghost atom is read-only in the
   Inspector ("● Deleted in Valence only, not applied") until undone. The Canvas tab is dirty while anything is deleted.
+- **Update ghosts** (the user, 2026-10-16): an atom whose edits are all **finished** — every edited field passes its
+  rule — is an update ghost: its colour pulled to the edit amber (#fbbf24), half-faint (0.6 in focus), its label amber
+  and italic, showing the edited name. An edit that breaks a rule is **unfinished**: no ghost, the Inspector says
+  "◐ Unfinished edit: fix the marked field — not a change, and apply waits, until then" (dashed amber), and the apply
+  step must refuse while any edit is unfinished. A deleted atom shows the red delete ghost even when edited
+  (`fields.editStates`; the rules are still Valence's own copy until `GET /model/fields` exists, §4).
 - **One history** (`app/workspace.ts`): field edits, Revert and deletions are steps in one undo / redo list (100 kept);
   typing in one field is one step; a new change drops what could be redone. The session keeps the deletions and the
   history across a refresh (`removed`, `history`, optional, version 1).

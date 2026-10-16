@@ -30,8 +30,11 @@ interface Painter {
 /** What the view tells the page: the atom or arrow under the pointer, and a click's (null: empty canvas). Arrows by `arrowKey`. */
 export interface MoleculeEvents { hover(key: string | null): void; pin(key: string | null): void }
 
-/** Atoms and arrows (by key) deleted in Valence: the arrows include those touching a deleted atom (`goneArrows`). */
-export interface Ghosts { atoms: ReadonlySet<string>; arrows: ReadonlySet<string> }
+/**
+ * Ghosts of the virtual changes: atoms and arrows (by key) deleted in Valence — the arrows include those touching a deleted
+ * atom (`goneArrows`) — drawn red; and atoms with finished edits, `updated`, drawn amber (a deleted one stays red).
+ */
+export interface Ghosts { atoms: ReadonlySet<string>; arrows: ReadonlySet<string>; updated?: ReadonlySet<string> }
 const NO_GHOSTS: Ghosts = { atoms: new Set(), arrows: new Set() };
 
 /**
@@ -242,6 +245,8 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   /** What is in focus: the hovered atom or arrow, else the pinned one. */
   const shown = () => focus ?? pinnedOne;
   const GHOST = new THREE.Color(0xff5a5a);
+  /** An update ghost's colour: the Inspector's edit amber (--x), apart from the delete ghost's red. */
+  const UPDATED = new THREE.Color(0xfbbf24);
   const tint = new THREE.Color();
   function paint() {
     const keep = new Set<AtomView>();
@@ -260,16 +265,20 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
     atoms.forEach((a) => {
       const on = all || keep.has(a);
       const ghost = ghosts.atoms.has(a.atom.key);
+      const updated = !ghost && !!ghosts.updated?.has(a.atom.key);
       const m = a.mesh.material;
-      // a ghost: the atom's colour pulled to red, faint even when in focus, so it reads as "goes on apply"
+      // a delete ghost: the atom's colour pulled to red, faint even when in focus, so it reads as "goes on apply";
+      // an update ghost: pulled to amber, half-faint, so it reads as "changes on apply"
       m.color.set(TYPES[a.atom.type].color);
       if (ghost) m.color.lerp(GHOST, 0.65);
-      m.opacity = ghost ? (on ? 0.32 : 0.1) : on ? 1 : 0.14;
-      m.depthWrite = !ghost;
+      else if (updated) m.color.lerp(UPDATED, 0.6);
+      m.opacity = ghost ? (on ? 0.32 : 0.1) : updated ? (on ? 0.6 : 0.12) : on ? 1 : 0.14;
+      m.depthWrite = !ghost && !updated;
       // the pinned atom glows brighter than a hovered one, so it is found again among its neighbours
       m.emissive.setScalar(a === pinnedOne ? 0.32 : a === focus ? 0.18 : 0);
       a.label.classList.toggle('dim', !on);
       a.label.classList.toggle('ghost', ghost);
+      a.label.classList.toggle('updated', updated);
     });
     arrows.forEach((x) => {
       const on = live.has(x);

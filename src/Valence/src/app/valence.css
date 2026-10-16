@@ -39,6 +39,8 @@
 .mol-lbl.dim { opacity: .12; }
 /* deleted in Valence, not applied (spec §6): struck through in red */
 .mol-lbl.ghost { color: #ff8a8a; text-decoration: line-through; }
+/* edited in Valence, the edits finished, not applied: the edit amber */
+.mol-lbl.updated { color: #fcd34d; font-style: italic; }
 .mol:focus { outline: none; }
 /* the legend: one small row in the bottom-left corner, no title (the user, 2026-10-16); the pointer passes through */
 .mol-legend { position: absolute; left: 12px; bottom: 12px; max-width: calc(100% - 24px); box-sizing: border-box; pointer-events: none; z-index: 6;
@@ -74,3 +76,6 @@ select.input { font-family: var(--sans); font-size: 12.5px; }
 .insp-virtual.ghost { border-color: rgba(255, 90, 90, .45); color: #ff8a8a; flex-wrap: wrap; }
 .insp-hint { color: var(--faint); font-size: 11px; }
 .insp-ro .field.gone .ro, .insp-ro .field.gone label { text-decoration: line-through; color: #ff8a8a; }
+
+/* an edit that breaks a rule is not a change yet (the user, 2026-10-16) */
+.insp-virtual.unfinished { border-color: rgba(242, 180, 90, .55); border-style: dashed; color: #f2b45a; }
