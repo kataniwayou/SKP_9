@@ -439,6 +439,20 @@ processor, not the schema, and the processor update has no in-use check.
   keeps its true colour (with three's colour-space conversion, so amber is #fbbf24, not orange) and arrows pass crisply
   over it. Playwright at maximum zoom: the edited processor (5 arrows through its halo) and the deleted cache look alike;
   ring 50.5–54.5 px around a 50.7–51 px outline, centred, slid off-centre and turned.
+- **Atoms are exact spheres** (2026-10-16, the user: "not all atoms has spheres accurate shape, it distortioned when I
+  zoom in … all atoms and halo must be perfect sphere and verify it by the zoom in max"). The tessellated
+  `SphereGeometry(r, 40, 28)` was a polygon whose flats grew with the zoom, and perspective draws a near, off-centre ball
+  as an ellipse. Each atom is now a **sphere impostor** (`MoleculeView.tsx`, `asImpostor`): a quad facing the camera as
+  the image plane does (so it projects to a true circle anywhere on screen), sized every frame to the outline
+  r·d/√(d²−r²) — the halo's formula, so they stay concentric; the fragment shader cuts the circle (antialiased edge),
+  casts the view ray into the real sphere for the surface point, normal, lighting (three's own standard material via
+  `onBeforeCompile`: the normal and the lights' view position replaced) and `gl_FragDepth`, so arrows still pierce the
+  ball and hide behind it; picking meets the analytic sphere (`ballRaycast`). Playwright (`sphereverify`), every kind at
+  the maximum zoom, centred and off-centre, the body painted flat for the measurement: every edge point within
+  **0.03–0.04 px** of a fitted circle whose radius is the exact one (old spheres: 0.35–0.72 px, growing with size); at the
+  true maximum the workflow is a 531 px ball and its visible arc is the exact circle within 0.03 px; halos (pinned, red
+  deleted) circles within 1% of their radius (the measurement's limit on a soft 8-bit glow), centred on the ball within
+  1 px. Also: a change now clears the last dry-run answer at once ("checking"), not when the next one arrives.
 - **One history** (`app/workspace.ts`): field edits, Revert and deletions are steps in one undo / redo list (100 kept);
   typing in one field is one step; a new change drops what could be redone. The session keeps the deletions and the
   history across a refresh (`removed`, `history`, optional, version 1).

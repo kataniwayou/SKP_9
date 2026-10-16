@@ -85,7 +85,7 @@ export function MoleculeView({ molecule, positions, highlighted, pinned = null, 
   );
 }
 
-interface AtomView { atom: Atom; pos: THREE.Vector3; mesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial>; label: HTMLDivElement; out: ArrowView[]; in: ArrowView[] }
+interface AtomView { atom: Atom; pos: THREE.Vector3; mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial>; label: HTMLDivElement; out: ArrowView[]; in: ArrowView[] }
 interface ArrowView { arrow: Arrow; a: AtomView; b: AtomView; mat: THREE.MeshStandardMaterial; shaft: THREE.Mesh; head: THREE.Mesh; sleeve: THREE.Mesh; headLen: number; start: THREE.Vector3; tip: THREE.Vector3 }
 
 /**
@@ -143,17 +143,73 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   const key1 = new THREE.DirectionalLight(0xffffff, 0.9 * Math.PI); key1.position.set(8, 14, 10); scene.add(key1);
   const rim = new THREE.DirectionalLight(0x8aa0ff, 0.5 * Math.PI); rim.position.set(-10, -4, -12); scene.add(rim);
 
+  // ---------- Atoms: exact spheres (the user, 2026-10-16: "all atoms and halo must be perfect sphere … zoom in max") ----------
+  // A tessellated sphere is a polygon, and perspective draws a near, off-centre ball as an ellipse. Each atom is instead
+  // a sphere impostor: a disc facing the camera as the image plane does (so it projects to a true circle wherever it is
+  // on screen), sized every frame to the sphere's outline in that plane — the halo's own formula, so the two stay
+  // concentric — and shaded per pixel by casting the view ray into the real sphere: its surface point gives the normal,
+  // the lighting (three's own standard material) and the depth, so arrows still pierce and hide behind the ball exactly.
+  const atomGeom = new THREE.PlaneGeometry(2, 2);
+  const IMPOSTOR_VERTEX_DECL = 'varying vec3 vSphereCenter;\nvarying vec3 vQuadPos;\n';
+  // projectionMatrix is the program's own uniform; three declares it for the vertex stage only
+  const IMPOSTOR_FRAGMENT_DECL = 'uniform float sphereRadius;\nuniform mat4 projectionMatrix;\nvarying vec3 vSphereCenter;\nvarying vec3 vQuadPos;\n';
+  /** Turns a standard material into a sphere impostor's: the circle, the ray-cast surface, its normal and depth. */
+  function asImpostor(mat: THREE.MeshStandardMaterial, radius: number) {
+    mat.customProgramCacheKey = () => 'valence-atom-impostor';
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.sphereRadius = { value: radius };
+      shader.vertexShader = IMPOSTOR_VERTEX_DECL + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+        vSphereCenter = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+        vQuadPos = mvPosition.xyz;`);
+      shader.fragmentShader = IMPOSTOR_FRAGMENT_DECL + shader.fragmentShader
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        // the outline: the circle the sphere's silhouette cone cuts from the disc's plane (through the centre, facing the camera)
+        float sphereDist = length(vSphereCenter);
+        float sphereOutline = sphereRadius * sphereDist / sqrt(max(sphereDist * sphereDist - sphereRadius * sphereRadius, 1e-6));
+        float sphereOff = length(vQuadPos.xy - vSphereCenter.xy);
+        float sphereAa = max(fwidth(sphereOff), 1e-5);
+        if (sphereOff > sphereOutline + sphereAa) discard;
+        float sphereEdge = 1.0 - smoothstep(sphereOutline - sphereAa, sphereOutline + sphereAa, sphereOff);
+        // the view ray through this pixel into the real sphere; where it grazes past (the last pixel of the rim), the
+        // sphere's point nearest the ray
+        vec3 sphereRay = normalize(vQuadPos);
+        float sphereB = dot(sphereRay, vSphereCenter);
+        float sphereH = sphereB * sphereB - (dot(vSphereCenter, vSphereCenter) - sphereRadius * sphereRadius);
+        vec3 sphereHit = sphereH >= 0.0
+          ? sphereRay * (sphereB - sqrt(sphereH))
+          : vSphereCenter + normalize(sphereRay * sphereB - vSphereCenter) * sphereRadius;
+        vec3 sphereNormal = normalize(sphereHit - vSphereCenter);
+        vec4 sphereClip = projectionMatrix * vec4(sphereHit, 1.0);
+        gl_FragDepth = clamp((sphereClip.z / sphereClip.w) * 0.5 + 0.5, 0.0, 1.0);`)
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        normal = sphereNormal;
+        nonPerturbedNormal = sphereNormal;`)
+        .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace(/vViewPosition/g, '(-sphereHit)'))
+        .replace('#include <opaque_fragment>', `diffuseColor.a *= sphereEdge;
+        #include <opaque_fragment>`);
+    };
+  }
+  /** Picking meets the real sphere, not the disc's square. */
+  const pickBall = new THREE.Sphere(), pickHit = new THREE.Vector3();
+  function ballRaycast(this: THREE.Mesh, raycaster: THREE.Raycaster, hits: THREE.Intersection[]) {
+    pickBall.set(this.position, this.userData.radius as number);
+    if (!raycaster.ray.intersectSphere(pickBall, pickHit)) return;
+    const distance = raycaster.ray.origin.distanceTo(pickHit);
+    if (distance < raycaster.near || distance > raycaster.far) return;
+    hits.push({ distance, point: pickHit.clone(), object: this });
+  }
   const atoms = new Map<string, AtomView>();
-  const geoms = new Map<AtomType, THREE.SphereGeometry>();
   molecule.atoms.forEach((atom) => {
     const t = TYPES[atom.type];
-    const geom = geoms.get(atom.type) ?? new THREE.SphereGeometry(t.r, 40, 28);
-    geoms.set(atom.type, geom);
-    const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: t.color, roughness: 0.32, metalness: 0.15, transparent: true, opacity: 1 }));
+    const mat = new THREE.MeshStandardMaterial({ color: t.color, roughness: 0.32, metalness: 0.15, transparent: true, opacity: 1 });
+    asImpostor(mat, t.r);
+    const mesh = new THREE.Mesh(atomGeom, mat);
+    mesh.raycast = ballRaycast;
     const p = positions.get(atom.key) ?? [0, 0, 0];
     const pos = new THREE.Vector3(...p);
     mesh.position.copy(pos);
     mesh.userData.atom = atom.key;
+    mesh.userData.radius = t.r;
     scene.add(mesh);
     const label = doc.createElement('div');
     label.className = `mol-lbl ${atom.type}`;
@@ -166,7 +222,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   const aDir = new THREE.Vector3(), aSide = new THREE.Vector3(), aEnd = new THREE.Vector3();
   const sleeveGeom = new THREE.CylinderGeometry(0.16, 0.16, 1, 6, 1, true);
   const sleeveMat = new THREE.MeshBasicMaterial({ visible: false });
-  const disposables: { dispose(): void }[] = [sleeveGeom, sleeveMat, ...geoms.values()];
+  const disposables: { dispose(): void }[] = [sleeveGeom, sleeveMat, atomGeom];
   const toP = new THREE.Vector3(), toC = new THREE.Vector3(), probe = new THREE.Vector3();
   /** Whether the camera's view of `p` is blocked by the ball (c, r): the view ray meets the ball before it reaches p. */
   function hiddenBy(p: THREE.Vector3, c: THREE.Vector3, r: number) {
@@ -637,11 +693,21 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   }
   const lastCam = new THREE.Vector3(NaN, NaN, NaN);
   let raf = 0;
+  /** Each atom's disc faces the camera as the image plane does, and covers the sphere's outline in its plane. */
+  function faceAtoms() {
+    atoms.forEach((a) => {
+      const r = TYPES[a.atom.type].r, d = camera.position.distanceTo(a.pos);
+      const outline = (r * d) / Math.sqrt(Math.max(d * d - r * r, 1e-6));
+      a.mesh.quaternion.copy(camera.quaternion);
+      a.mesh.scale.setScalar(outline * 1.04); // a hair of margin for the edge's antialiasing; the shader cuts the circle
+    });
+  }
   function frame() {
     if (!turning && (Math.abs(spin.x) > 1e-4 || Math.abs(spin.y) > 1e-4)) { turn(spin.x, spin.y); spin.x *= 0.9; spin.y *= 0.9; }
     easeZoom();
-    breathe(performance.now());
     controls.update();
+    faceAtoms();
+    breathe(performance.now());
     // arrows ending at a ball's outline follow the camera
     if (!lastCam.equals(camera.position)) { lastCam.copy(camera.position); arrows.forEach(placeArrow); }
     renderer.render(scene, camera);

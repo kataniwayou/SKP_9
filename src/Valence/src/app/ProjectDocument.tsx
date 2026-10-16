@@ -75,8 +75,9 @@ export function ProjectDocument({ workspace, highlights, read = readProject, rea
     if (planned.length === 0) { workspace.judged(NO_DRY_RUN); return; }
     if (missing.current) { workspace.judged({ kind: 'unavailable', reason: missing.current }); return; } // already said at load
     const abort = new AbortController();
+    // the last answer was about other changes: it goes at once, not when the next one arrives
+    workspace.judged({ kind: 'checking', planned: planned.length });
     const timer = setTimeout(() => {
-      workspace.judged({ kind: 'checking', planned: planned.length });
       check(planned, fetch, abort.signal).then((run) => {
         if (run.kind === 'unavailable' && run.missing) missing.current = run.reason;
         const state = verdictOf(planned, run, rules.fields);
