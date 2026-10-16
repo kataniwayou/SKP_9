@@ -30,8 +30,8 @@ export interface DockShellProps {
   /** `doc`: the window the close came from (a pop-out's, for one there), where the page may ask first. */
   onCloseDocument: (id: string, doc?: Document) => void;
   /**
-   * The picker's list (spec §6.1: searchable, by unique name). Molecule Studio: absent, there is nothing to load (it shows
-   * one document, the whole project): no Workspace › Load…, no Ctrl+O, no + on the document group, no picker.
+   * The picker's list (spec §6.1: searchable, by unique name). Valence: absent, there is nothing to load (it shows
+   * one document, the whole project): no Ctrl+O, no + on the document group, no picker.
    */
   workflows?: readonly PickerItem[];
   /** The status area at the right of the menu strip (2026-10-10: the "live updates reconnecting" mark). */
@@ -62,18 +62,6 @@ export interface DockShellProps {
    * as a toast), or null when it was pressed. Without it the keys say they are not available.
    */
   onRunCommand?: (op: 'start' | 'stop') => string | null;
-  /**
-   * Workspace › Delete workflow… (2026-10-10): deletes the active document's workflow from BaseApi, after a fresh liveness
-   * reading, a dry run and the user's Continue (the page does all of it). Without it the entry is disabled.
-   */
-  onDeleteWorkflow?: (id: string) => void;
-  /** Why the workflow cannot be deleted now (e.g. a new one BaseApi does not have yet), or null: the entry is disabled with it. */
-  deleteBlocked?: (id: string) => string | null;
-  /**
-   * Workspace › New workflow (2026-10-10, Ctrl+N where the browser lets the page have it): a blank document for a workflow
-   * that exists only in the studio until its first Save. Without it the entry is disabled.
-   */
-  onNewWorkflow?: () => void;
   /** A tool pane's own entries at the top of its tab menu (e.g. Output's Clear, 2026-10-10). */
   toolMenu?: (id: ToolId) => MenuEntry[];
 }
@@ -81,8 +69,8 @@ export interface DockShellProps {
 const COMPONENTS = { document: DocumentHost, tool: ToolHost };
 const TAB_COMPONENTS = { studio: StudioTab };
 const TOAST_MS = 2600;
-const NOT_YET = 'Not available yet';
-const STRIP = ['Workspace', 'Edit', 'View', 'Window'] as const;
+// Valence (2026-10-15): no Workspace and no Edit menu — every workflow is shown, and nothing is created or deleted from a menu
+const STRIP = ['View', 'Window'] as const;
 type StripMenu = (typeof STRIP)[number];
 
 const NO_RECT: Rect = { left: 0, top: 0, right: 0, bottom: 0 };
@@ -301,9 +289,9 @@ export function DockShell(props: DockShellProps) {
     setPicker(anchor);
     latest.current.props.onPickerOpen?.();
   }, []);
-  const fileAnchor = useCallback((): Anchor => {
-    const file = stripRefs.current.Workspace;
-    return file ? anchorBelow(file) : { x: 8, y: 36, doc: document };
+  const stripAnchor = useCallback((): Anchor => {
+    const first = stripRefs.current[STRIP[0]];
+    return first ? anchorBelow(first) : { x: 8, y: 36, doc: document };
   }, []);
 
   const pick = useCallback((workflowId: string) => {
@@ -346,7 +334,7 @@ export function DockShell(props: DockShellProps) {
       }
       entries.push({ id: 'autohide', icon: '⇥', label: 'Auto hide', onSelect: () => hide(api, panel) });
     }
-    // a pinned document (Molecule Studio's one document) is never closed
+    // a pinned document (Valence's one document) is never closed
     const pinned = isDoc && latest.current.props.documents.find((d) => d.id === documentIdOf(panelId))?.pinned === true;
     if (!pinned) entries.push('separator', { id: 'close', icon: '×', label: isDoc ? 'Close document' : 'Close', kbd: isDoc ? 'Alt+W' : '', onSelect: () => closePanel(panelId) });
     setPicker(null);
@@ -386,34 +374,8 @@ export function DockShell(props: DockShellProps) {
 
   const stripEntries = (name: StripMenu): MenuEntry[] => {
     const activePanel = api?.activePanel;
-    const activePinned = documents.find((d) => d.id === activeDocumentId)?.pinned === true;
     const docked = activePanel?.group.api.location.type === 'grid';
     switch (name) {
-      case 'Workspace':
-        return [
-          { id: 'new', icon: '+', label: 'New', kbd: 'Ctrl+N', disabled: !props.onNewWorkflow, onSelect: () => props.onNewWorkflow?.() },
-          ...(workflows ? [{ id: 'open', icon: '⌂', label: 'Load…', kbd: 'Ctrl+O', onSelect: () => openPicker(fileAnchor()) }] : []),
-          'separator',
-          {
-            id: 'close', icon: '×', label: 'Close', kbd: 'Alt+W', disabled: activeDocumentId === null || activePinned,
-            tip: activePinned ? 'This document is always open' : undefined,
-            onSelect: () => { if (activeDocumentId) props.onCloseDocument(activeDocumentId); },
-          },
-          'separator',
-          {
-            id: 'delete', icon: '⌫', label: 'Delete…',
-            disabled: activeDocumentId === null || !props.onDeleteWorkflow || (props.deleteBlocked?.(activeDocumentId) ?? null) !== null,
-            tip: activeDocumentId === null ? 'Load a workflow first: Delete acts on the active document' : props.deleteBlocked?.(activeDocumentId) ?? undefined,
-            onSelect: () => { if (activeDocumentId) props.onDeleteWorkflow?.(activeDocumentId); },
-          },
-        ];
-      case 'Edit':
-        return [
-          { id: 'undo', icon: '↶', label: 'Undo', kbd: 'Ctrl+Z', disabled: true, tip: NOT_YET, onSelect: () => {} },
-          { id: 'redo', icon: '↷', label: 'Redo', kbd: 'Ctrl+Y', disabled: true, tip: NOT_YET, onSelect: () => {} },
-          'separator',
-          { id: 'all', icon: '⬚', label: 'Select all', kbd: 'Ctrl+A', disabled: true, tip: NOT_YET, onSelect: () => {} },
-        ];
       case 'View':
         return TOOL_IDS.map((id) => ({
           id, icon: api?.getPanel(id) || hidden.includes(id) ? '✓' : '', label: TOOL_TITLES[id], onSelect: () => toggleTool(id),
@@ -494,11 +456,7 @@ export function DockShell(props: DockShellProps) {
       }
       case 'open':
         if (!now.props.workflows) break;
-        e.preventDefault(); openPicker(doc === document ? fileAnchor() : { x: 8, y: 8, doc }); break;
-      case 'new':
-        // most browsers keep Ctrl+N (a new window) and never send it to the page; where it arrives, it is ours
-        if (latest.current.props.onNewWorkflow) { e.preventDefault(); latest.current.props.onNewWorkflow(); }
-        break;
+        e.preventDefault(); openPicker(doc === document ? stripAnchor() : { x: 8, y: 8, doc }); break;
       case 'start': case 'stop': {
         e.preventDefault();
         // a dialog (a question, the picker, the switcher) is open: the key does nothing
@@ -547,7 +505,7 @@ export function DockShell(props: DockShellProps) {
               <defs><radialGradient id="brandSphere" cx="35%" cy="30%"><stop offset="0" stopColor="#7CCBF5" /><stop offset=".5" stopColor="#1B5594" /><stop offset="1" stopColor="#05142D" /></radialGradient></defs>
               <circle cx="8" cy="8" r="7" fill="url(#brandSphere)" stroke="rgba(125,211,252,.6)" />
             </svg>
-            SKP Studio
+            SKP Valence
           </div>
           <div className="menus">
             {STRIP.map((name) => (

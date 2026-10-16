@@ -42,6 +42,8 @@ worktree is uncommitted or in the commit that carries this file.
 6. **Stage 1:** clone the shell — dock panel, menu strips, toolbox, inspector, the document, output — **empty of
    business**; then review the parts **one by one with the user, who approves each** before the next.
 7. **Stage 2:** the molecule diagram on the document's canvas (whole project, selected workflows highlighted).
+8. **"All loaded entities from db are virtual entities"** (the user, 2026-10-15): an edit changes Valence's copy only;
+   **writes stay virtual until an apply step** (confirmed by the user the same day; where apply lives is open).
 
 The user prefers questions in prose (not multiple choice); "confirm" means: verify against the code and report
 before building.
@@ -66,27 +68,96 @@ before building.
   - `DockDocument.pinned`: a pinned document has no tab ×, ignores middle-click and Alt+W, has Workspace › Close
     disabled ("This document is always open"), and no "Close document" in its window menu.
 
+### Done in the second session (2026-10-15, uncommitted)
+- `index.html` (title SKP Valence), `vite.config.ts` (dev port **5174**, `/api` → `SKP_API` or `localhost:18080`,
+  vitest jsdom), `src/main.tsx`.
+- `src/App.tsx`: `DockShell` with one pinned document (`project`, "Project"), no `workflows`, no New/Delete/Run (their
+  entries show disabled). Session: `app/session.ts`, key **`skp.valence.session`** (dock + highlighted workflow ids,
+  sessionStorage mirrored to localStorage, as SKP Studio's). The highlighted ids live in `app/highlights.ts` (a small
+  external store), because the dock renders the document through its own host, which a page re-render never reaches.
+- Window layout key changed to **`skp.valence.layout`** (`dock/layoutPersistence.ts`); the strip's brand reads
+  **SKP Valence** (`dock/DockShell.tsx`). These and the two edits above are the only changes to copied files.
+- `panels/Panes.tsx`: Toolbox, Inspector and Output as `PaneNote` empty states.
+- `app/ProjectDocument.tsx`: `.docpanel` with the capsule `.docbar` (a "Project" crumb and the multi-select) over an
+  empty `.vcanvas` (ground + SKP Studio's vignette). `app/WorkflowSelect.tsx`: a pill ("Workflows · none
+  highlighted ▾") that opens a checked list (search, Clear, Esc/press outside closes; "No workflows yet." when empty).
+  Its styles are in `app/valence.css`.
+- Tests: 207 pass (dock 191 + 4 new for the pinned document and no Load; session, multi-select and App). In jsdom
+  dockview leaves the document panel hidden, where names are not computed: App tests find it by selector.
+- Playwright on the dev server: menus, Ctrl+O/Alt+W/middle-click do nothing to Project, its window menu has no Close,
+  multi-select opens/closes, Toolbox float + dock back, Output auto-hide + flyout, a real tab drag onto the document,
+  refresh keeps the layout, Reset window layout; no console errors or warnings.
+- `nginx.conf`, `Dockerfile`, `k8s/32-valence.yaml` (in `kustomization.yaml`), port-forward **18082** in
+  `k8s/port-forward-realstack.ps1`. The image `valence:local` builds; run locally it serves `/healthz`, the page and the
+  SPA fallback, and proxies `/api/`. **Not loaded into kind, not applied.** `src/Valence/dist/` is git-ignored.
+
 ### Still to do for stage 1
-1. `index.html` (title **SKP Valence**), `vite.config.ts` (dev port, e.g. 5174; proxy `/api` → `SKP_API` or
-   `http://localhost:18080`, as SKP Studio's; vitest jsdom + `src/test/setup.ts`), `src/main.tsx` (fonts,
-   `dockview-react/dist/styles/dockview.css`, the copied CSS).
-2. `src/App.tsx`: `DockShell` with **one pinned document** (id e.g. `project`, name "Project"), no `workflows` prop,
-   `renderTool` → the three empty panes, `onNewWorkflow`/`onDeleteWorkflow`/`onRunCommand` absent (their menu entries
-   show disabled), the session/dock layout persisted like SKP Studio's (`restore`, `onLayoutChange`, `storage`) — use
-   Valence's own storage keys so the two apps' saved layouts never mix.
-3. Empty panes with SKP Studio's frames: Toolbox, Inspector, Output — `PaneNote`-style empty states, no logic.
-4. The document: SKP Studio's `.docpanel` with its capsule `.docbar` (styles in `app/document.css`) holding only
-   the **workflow multi-select dropdown** (empty list in stage 1), and an empty canvas.
-5. Run the copied dock tests (`npm test`) and fix what the two dock changes broke (they assume `workflows` and
-   closable documents).
-6. Verify in a real browser with Playwright (menus, docking, float, auto-hide, layout reset, no close on the
-   document, no console errors) — the user requires real interactions before reporting.
-7. `nginx.conf` (only `/api/` → `baseapi-service:8080`, `/healthz`, assets, SPA fallback; no AI, no hubs),
-   `Dockerfile` (SKP Studio's, paths `src/Valence/`, no AI env), and `k8s/3x-valence.yaml` (a copy of
-   `31-workflow-studio.yaml`; next free port-forward, e.g. 18082).
-8. **Then the one-by-one review** with the user: dock panel, menu strips, toolbox, inspector, document, output.
+1. **The one-by-one review** with the user: dock panel (**approved 2026-10-15**, unchanged), menu strip (changed as below, **awaiting approval**), toolbox, inspector, document, output.
+   - **Menu strip (the user, 2026-10-15):** no Workspace and no Edit menu — "this studio shows all workflows, you
+     don't create new or delete by menu". The strip is the brand, **View** and **Window**. Removed from the copied dock
+     with them: the props `onNewWorkflow`, `onDeleteWorkflow`, `deleteBlocked`, and Ctrl+N (`keys.ts`). The Load picker's
+     code stays, unused (Valence passes no `workflows`); its empty-area hint reads "Load one with Ctrl+O".
+   - **The document's name is "Canvas"** (the user, 2026-10-15; "Workspace" before that): its tab and its capsule label. The id stays `project`.
+2. Deploy when the user asks (`kind load docker-image valence:local --name desktop`, `kubectl apply -f k8s/32-valence.yaml`).
 
 ---
+
+## 3b. Stage 2 — the molecule on the canvas (started 2026-10-15, at the user's request, before the review finished)
+
+The user: "load the diagram by baseapi to canvas same as mock but darkmode". Built (uncommitted):
+- `api/project.ts`: reads the six list endpoints (open question §8.1 answered for now: **built in the client**, no new
+  endpoint, so it works against the deployed BaseApi). `molecule/model.ts`: one atom per row, one arrow per key value,
+  the mock's colours, radii, bond classes; `reachOf` = what a workflow reaches (highlighting). `molecule/layout.ts`: the
+  mock's layout generalised — a band per workflow (hop columns, fan-out lanes, a hand-off row for a PreviousFailed /
+  PreviousCancelled step reached from several steps), a band for steps no workflow reaches, a grid band for unused
+  rows, bands packed in rows; then the mock's springs and arrow clearance. ~0.4 s for the live data.
+- `molecule/MoleculeView.tsx` (three 0.186.1, lazy-loaded chunk): the mock's scene — fixed-axis turning with coast,
+  wheel zoom, right-drag pan, Ctrl+drag an atom (open hand), **Ctrl+drag on empty canvas slides the picture along the screen's
+  x and y** (the user, 2026-10-15) — a lens shift (`camera.setViewOffset`), not a camera move, so every atom moves exactly
+  with the pointer (Playwright: 200 px drag = 200 px for every atom, also after a turn and zoomed in).
+  **Lens 15°** (the mock's was 48°; the user, 2026-10-15: "the atom isn't accurate ball"): a wide lens stretches spheres
+  away from the centre of the view into ovals, and the slide puts most of the picture off-centre; at 15° atoms stay round
+  (to a few percent) anywhere on screen; the camera stands further back for the same framing.
+  **Arrowheads always show** (the user asked to check the arrows' perspective, 2026-10-15): an arrow whose tip the camera
+  sees behind its target ball ends at the ball's outline instead, recomputed when the camera moves. Playwright (dev-only
+  hook `el.__molecule`): every arrow on the line between its atoms' centres (0 px), heads hidden behind their ball 0 of
+  ~210 (were 12 at home, 30 after a turn).
+- **Off the canvas (the user, 2026-10-15):** the capsule toolbar ("Canvas" label + workflow multi-select) and the hover
+  card are removed. Hover still focuses an atom's neighbours; the colour legend stays. With the multi-select gone nothing
+  is highlighted; `WorkflowSelect`, `highlights.ts` and the session's `highlighted` stay for when the user chooses its new
+  place (open). **Cursors** (the user's table, 2026-10-15): slide the canvas = open hand ready, closed
+  hand while dragging; move an atom = four-way arrow, ready and while dragging; turn = normal arrow at rest, a circular
+  arrow (own SVG, `app/valence.css`) while dragging, hover = one-hop focus + the card under the legend. Dark: SKP Studio's
+  ground (#0A1220) and vignette behind a transparent renderer; fog scaled to the camera's fit distance.
+- **Deviation from the mock:** labels show by size on screen (a workflow's always, a hovered atom's neighbours always),
+  because 137 labels at the full view were unreadable. No delete mode yet.
+- Highlighting (open question §8.2 answered for now): the chosen workflows' atoms stay, the rest dim (atoms 0.14,
+  arrows 0.05, labels 0.12). Hover focus takes over while the pointer is on an atom.
+- Checked live (Playwright, swiftshader WebGL): 137 atoms; filefetcher chain highlighted = 40 atoms (as the mock);
+  hover card; turn; zoom; Ctrl+drag; refresh keeps the highlight; no console errors. Tests 224 pass (fixture
+  `src/test/fixtures/project.json` = the cluster's rows of 2026-10-15, without payloads or definitions).
+
+## 3c. The Inspector (in discussion, 2026-10-15)
+
+The user: hovering an atom updates the Inspector with all the entity's properties. Decided (the user, 2026-10-15):
+1. **Shown open: every writable field that is not an arrow** — all six: Name, Version, Description; Workflow:
+   CronExpression; Step: EntryCondition; Processor: **SourceHash, InstanceId (writable)**; Schema: Definition (BaseApi
+   refuses a changed definition with 409 while a processor references it); Assignment: Payload; Cache: Root, Items.
+2. **One read-only show/hide section, "Read-only"** (layout approved by the user, 2026-10-15): first the details —
+   table, Id, CreatedAt/By, UpdatedAt/By, "pointed at by" — then, after a thin "arrows" divider, the arrows: Workflow:
+   EntryStepIds, AssignmentIds, CacheIds; Step: ProcessorId, NextStepIds; Processor: Input/Output/ConfigSchemaId;
+   Assignment: StepId (each as `label → target name`). Starts closed; its open/closed state survives a refresh.
+3. Above it, always open: the kind, then the writable fields of item 1.
+Decided next (the user, 2026-10-15): **hover previews, a click pins** (a click on empty canvas unpins); **writes stay
+virtual until an apply step** (decision 8; no apply step exists yet); the **schema Definition sits in the writable list
+but is read-only for now**. Large JSON: a multi-line monospace box with BaseApi's check shown while typing (default).
+
+Built (uncommitted): `molecule/fields.ts` (the field lists with BaseApi's rules, details, arrows), `app/workspace.ts`
+(project, hovered, pinned, edits — shared by the canvas and the panes), `panels/Inspector.tsx`. A preview is read-only
+("Preview · click the atom to pin it"); the pinned atom glows on the canvas and is edited while nothing is hovered. An
+edit marks its label, the "Changed in Valence only, not applied" note (with Revert) and the Canvas tab; an edited name
+shows on the canvas label. The session keeps the pin and the edits; the section's open state is kept in localStorage.
+Checked live with Playwright (no console errors); tests 240 pass.
 
 ## 4. BaseApi
 

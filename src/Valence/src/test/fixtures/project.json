@@ -1,0 +1,1244 @@
+{
+ "workflows": [
+  {
+   "id": "a5498df6-1522-4098-ad65-f4aff4998988",
+   "name": "kafka-import-export",
+   "version": "2.0.0",
+   "description": "two steps: import records from skp-paths, export each to skp-exports",
+   "entryStepIds": [
+    "86e5038f-f6e4-45cc-b52e-12aeb31b7755"
+   ],
+   "assignmentIds": [
+    "2f67881a-5ec6-4392-ac1a-301ea66b1fc3",
+    "899612f5-7a52-47ea-8c10-4388ab2e159b"
+   ],
+   "cacheIds": [],
+   "cronExpression": "*/30 * * * * *"
+  },
+  {
+   "id": "9a3d2a6b-3617-4f22-9ff8-77c19a95ff19",
+   "name": "sc-chain",
+   "version": "1.0.0",
+   "description": "Schema-compatibility live suite. Deep clone of filefetcher-archiveexpander-chain: same processor rows, own steps, assignments, topics and output folder.",
+   "entryStepIds": [
+    "3708d3d8-351a-464e-8795-a4b083035640"
+   ],
+   "assignmentIds": [
+    "3fa1a6c2-2790-4cf6-b619-1667ea46b706",
+    "53e67e7a-4778-40f9-9003-acf914a87799",
+    "87a555d1-bf72-4a2e-83de-78c99ebcd59e",
+    "a8151187-4cd1-4506-9a5a-22655037075c",
+    "bab301ad-b2e0-4ee5-bef1-4cd1f096a06b",
+    "f1be83ab-3bfe-4d8b-b018-41c866ec46d2",
+    "f6c855d6-2e0f-430d-8537-5cceafef945b"
+   ],
+   "cacheIds": [],
+   "cronExpression": "15,45 * * * * *"
+  },
+  {
+   "id": "1a56b3ca-e276-4815-87fa-5c2f48ab6dad",
+   "name": "filefetcher-archiveexpander-chain",
+   "version": "1.0.0",
+   "description": "KafkaImporter -> FileFetcher -> ArchiveExpander -> ArchiveCollapser -> FilePersister -> KafkaExporter (symmetric: file-locator in, file-locator out)",
+   "entryStepIds": [
+    "ab9d8741-c109-4457-a090-d76e1ca64a97"
+   ],
+   "assignmentIds": [
+    "2c06da0f-c07c-40ec-a3ff-294d7f60da6b",
+    "6f16195f-04fe-4a45-b740-9b79c299f0c3",
+    "7debab26-9c56-43c2-a21f-f3b171f970e9",
+    "aca14f9b-479d-4b44-a87e-fd58d0665638",
+    "f62f5685-4398-4987-9da2-9eb8f4a60134",
+    "42c5abdd-74d2-4b1b-9de5-81027b8fd2c8",
+    "68a5dd70-e1c9-4bbd-99e9-bc11f9930d2c",
+    "9efc2f59-2ddc-4382-b91a-66fac6693329",
+    "325fe0ac-c458-4fe0-8639-be336d1c6a06",
+    "3728068e-df3c-4781-9792-5448deec8adb"
+   ],
+   "cacheIds": [
+    "04442aee-7906-4418-9213-bea0a445e1bc"
+   ],
+   "cronExpression": "0 * * * * *"
+  },
+  {
+   "id": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
+   "name": "v8-fanout-proof",
+   "version": "1.0.0",
+   "description": null,
+   "entryStepIds": [
+    "4510e105-6730-4e02-a8ec-e53e0a77498e"
+   ],
+   "assignmentIds": [
+    "2bee667f-ea7f-41aa-b1bc-3aaa163f4c8b",
+    "565b18da-cd6b-4beb-80c5-869c3faa176e",
+    "5948df58-0ce5-4f6e-a19d-e837443d16cb",
+    "5fab1d18-e92b-40c5-b287-dae76d8cfd1f",
+    "6e7c4726-01da-42ea-a907-da2d8e1574c0",
+    "9b5fd01f-41bc-4126-8d11-da937f657e67",
+    "b5a9113b-96a3-444d-90c3-c36fd5095e6b",
+    "c6080e65-225c-44a7-ac6c-c182fb6859ee",
+    "d88958e3-7492-4d51-b22f-79ec37731614",
+    "fefc7eae-1b45-4610-be5e-a3b9a0d875aa"
+   ],
+   "cacheIds": [],
+   "cronExpression": "0,30 * * * * *"
+  },
+  {
+   "id": "cbe1c767-3639-475e-a23a-96d3805c676b",
+   "name": "v8-fanout-proof-clone",
+   "version": "1.0.0",
+   "description": "Deep clone of v8-fanout-proof: same processor, same shape, own step and assignment ids.",
+   "entryStepIds": [
+    "cb3a45a7-c69a-4449-8a19-f3272d53b6c8"
+   ],
+   "assignmentIds": [
+    "000a9a99-82bd-418b-a99c-ad06ef89271c",
+    "18d44c60-7b1e-4867-8a28-b8fbd3205035",
+    "36912bb5-465c-4ee9-9446-792b12e15708",
+    "39e25cc6-8d91-46cc-93f0-1f097629654c",
+    "5e5f1349-fba5-480a-9d5e-cb1f1ea6ffe3",
+    "705d01d9-08fc-4b05-98b8-124f67deeec1",
+    "799d46a1-3918-4c26-83c7-8e498f4b4e9b",
+    "b2872520-6365-4393-985e-a68506ae67ab",
+    "d711db2b-55c3-476e-8c71-d97a7348a094",
+    "fac3f708-d3c1-4e30-8732-bf690ade5e32"
+   ],
+   "cacheIds": [],
+   "cronExpression": "20,50 * * * * *"
+  },
+  {
+   "id": "4a77ba79-095b-4eee-a2ba-e1117189dac5",
+   "name": "simple-abc",
+   "version": "1.0.0",
+   "description": "Linear A->B->C probe workflow replacing the two 10-step fanout workflows.",
+   "entryStepIds": [
+    "320e7946-d5d5-4778-89ed-8f6274f783b7"
+   ],
+   "assignmentIds": [
+    "1f3c038d-3882-41ae-aea4-65bf070e141d",
+    "7fa9d182-1ec4-4afe-ad08-78a5301e2e27",
+    "ad890327-1ece-4995-a552-3fb53c06924b",
+    "2084bceb-19ef-4df3-a0a6-9b891e209b5f",
+    "b41cebf6-ed50-42c8-867d-2cd3f8127acd",
+    "d60628a4-f7e5-4e00-9684-82d4137c6600"
+   ],
+   "cacheIds": [],
+   "cronExpression": "10,45 * * * * *"
+  },
+  {
+   "id": "208cba76-d635-4721-9aff-a7f22ee09224",
+   "name": "analyst-monitor",
+   "version": "1.0.0",
+   "description": "Analyst -> KafkaExporter. Investigates filefetcher-archiveexpander-chain every thirty minutes and publishes any finding to skp-analyst-findings.",
+   "entryStepIds": [
+    "71646fcb-6b09-4695-bfa2-189143ab133e"
+   ],
+   "assignmentIds": [
+    "2f1cc7d1-5ffb-495e-be65-1adfd8db458d",
+    "f82812be-65a2-4686-83b6-3a5ce6cb391d"
+   ],
+   "cacheIds": [],
+   "cronExpression": "0 9,39 * * * *"
+  }
+ ],
+ "steps": [
+  {
+   "id": "eb42edf2-062d-48be-896e-7860a7370b12",
+   "name": "step-G-472efb9012de4a0b9e7feaedeb3a9ba6",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [],
+   "entryCondition": 4
+  },
+  {
+   "id": "2da2bb32-22a6-46a6-8c34-04316b4c9693",
+   "name": "step-F1-c31abb4e6ccd42dfbbaab07c0413ac57",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "eb42edf2-062d-48be-896e-7860a7370b12"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "63d3d7fc-771e-4edd-8f3c-8cbc3fa95edf",
+   "name": "step-F2-00fbfae324774fdbb3860a147c83b0a7",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "eb42edf2-062d-48be-896e-7860a7370b12"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "0d2a759d-b2b8-4307-9945-659c048b039d",
+   "name": "step-E1-7cae001fb27243eaa45322248e3b9cc2",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "2da2bb32-22a6-46a6-8c34-04316b4c9693"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "be9f795a-48d3-425c-86a6-35265253d6af",
+   "name": "step-E2-6331dabd1fce4d14bb5312dd4e8ac4f4",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "63d3d7fc-771e-4edd-8f3c-8cbc3fa95edf"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "f79e81d5-2c35-4e6d-b2f7-32753a480c3c",
+   "name": "step-D1-e04ca0b3c9484cb1b11ef1d48c1c43bf",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "0d2a759d-b2b8-4307-9945-659c048b039d"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "c4231653-6b5f-4063-aaa1-05f871430b51",
+   "name": "step-D2-9b812256e21b4732a9237c2caedba232",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "be9f795a-48d3-425c-86a6-35265253d6af"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "5114e779-4843-4f1b-852e-538adbcf81f2",
+   "name": "step-C-d34a56df48364df4881e05eb7b0f2db6",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "c4231653-6b5f-4063-aaa1-05f871430b51",
+    "f79e81d5-2c35-4e6d-b2f7-32753a480c3c"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "c04aa144-4abb-4856-9391-f13880b9b25c",
+   "name": "step-B-977470815c644306abe9e3550695e998",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "5114e779-4843-4f1b-852e-538adbcf81f2"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "13a629b9-f33c-4df8-bb48-7b52244b0955",
+   "name": "step-G-clone-bbce4d609f654a5181f89f218d268e37",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [],
+   "entryCondition": 4
+  },
+  {
+   "id": "3dc52d4c-a1ba-4437-8f5e-2c8d9d081d39",
+   "name": "step-F1-clone-239502ed1c764b729ff1e45822f9f779",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "13a629b9-f33c-4df8-bb48-7b52244b0955"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "cb75d173-f1c9-4731-8229-18525406e722",
+   "name": "step-F2-clone-174a1de1bdd14b0a90ab528476755af0",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "13a629b9-f33c-4df8-bb48-7b52244b0955"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "73f0b0ec-7dbf-4a4a-b544-3c29ec84bef7",
+   "name": "step-E1-clone-c224204d8f0e4b4fa86e0c9237b47d59",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "3dc52d4c-a1ba-4437-8f5e-2c8d9d081d39"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "326930a3-9248-439d-8d19-ecd8cbdf52cf",
+   "name": "step-E2-clone-06fa1f09d32048ceb40f607c7412aa43",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "cb75d173-f1c9-4731-8229-18525406e722"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "69a13ec1-78ac-4dda-bb84-241f609769f8",
+   "name": "step-D1-clone-0683e148c0c6426285b0e6ed4b725ba6",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "73f0b0ec-7dbf-4a4a-b544-3c29ec84bef7"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "08b7fc1a-beba-465c-842c-e1ba68ea7f19",
+   "name": "step-D2-clone-bc05d8e2217742c0be49fc1815cb26d5",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "326930a3-9248-439d-8d19-ecd8cbdf52cf"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "0e4a5493-a158-4baf-a94d-45a4a5813a18",
+   "name": "step-C-clone-bc6f730c4de747d881c3ffb94a4e81aa",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "08b7fc1a-beba-465c-842c-e1ba68ea7f19",
+    "69a13ec1-78ac-4dda-bb84-241f609769f8"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "05c0052b-b40c-461b-9c11-b512d0237a05",
+   "name": "step-B-clone-7d5c0ef42a2c4ac695284672f989de3b",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "0e4a5493-a158-4baf-a94d-45a4a5813a18"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "cb3a45a7-c69a-4449-8a19-f3272d53b6c8",
+   "name": "step-A-clone-9835bb5720f04b949cb63e0add0ff9f3",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "05c0052b-b40c-461b-9c11-b512d0237a05"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "01697e8a-fc9e-404e-aa6e-49508e833c6a",
+   "name": "simple-stepC",
+   "version": "1.0.0",
+   "description": "terminal step of the linear A->B->C probe workflow",
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [],
+   "entryCondition": 4
+  },
+  {
+   "id": "5e36eb17-cbe2-4abb-ac87-4488ef115599",
+   "name": "simple-stepB",
+   "version": "1.0.0",
+   "description": "middle step",
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "01697e8a-fc9e-404e-aa6e-49508e833c6a"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "798b9dc8-9faa-491b-8011-9b7f80d4f9ee",
+   "name": "split-filepersister",
+   "version": "1.0.0",
+   "description": "writes the collapsed file to /mnt/skp-files/out and hands the exporter its path",
+   "processorId": "c046fb57-6fa3-4227-8cb0-103e933652e3",
+   "nextStepIds": [
+    "9cae7b00-5392-4c8f-867f-e3cbb907de58",
+    "73952b09-9d09-4237-b277-995ed2690f1c"
+   ],
+   "entryCondition": 1
+  },
+  {
+   "id": "56fca87f-cdc0-4370-b790-2eeb754ed4fd",
+   "name": "sk-normalizer-sample",
+   "version": "1.0.0",
+   "description": "Applies a provider handler to the expanded document. Wired with the Sample handler, which is identity, so this step is a proven no-op for the chain's existing fixtures while exercising the real processor.",
+   "processorId": "1673b377-8237-4d41-b420-3099a27f7dbf",
+   "nextStepIds": [
+    "c5845265-3bd7-49df-92ca-9e3a1c905752",
+    "73952b09-9d09-4237-b277-995ed2690f1c",
+    "556d5234-3668-498a-ba97-fd2865594ef3"
+   ],
+   "entryCondition": 1
+  },
+  {
+   "id": "50c86e21-484f-4581-8556-0127fb537630",
+   "name": "sc-split-exporter",
+   "version": "1.0.0",
+   "description": "schema-compat clone of split-exporter (9cae7b00-5392-4c8f-867f-e3cbb907de58)",
+   "processorId": "157a0f40-d668-42f3-a500-4762c587f64a",
+   "nextStepIds": [],
+   "entryCondition": 1
+  },
+  {
+   "id": "320e7946-d5d5-4778-89ed-8f6274f783b7",
+   "name": "simple-stepA",
+   "version": "1.0.0",
+   "description": "entry step",
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "5e36eb17-cbe2-4abb-ac87-4488ef115599"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "d12f2e1c-7c40-4f05-bba8-c34606d7f023",
+   "name": "sc-split-filepersister",
+   "version": "1.0.0",
+   "description": "schema-compat clone of split-filepersister (798b9dc8-9faa-491b-8011-9b7f80d4f9ee)",
+   "processorId": "c046fb57-6fa3-4227-8cb0-103e933652e3",
+   "nextStepIds": [
+    "50c86e21-484f-4581-8556-0127fb537630"
+   ],
+   "entryCondition": 1
+  },
+  {
+   "id": "4510e105-6730-4e02-a8ec-e53e0a77498e",
+   "name": "step-A-dab27986fe7f41929cba40dd66921bd8",
+   "version": "1.0.0",
+   "description": null,
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "c04aa144-4abb-4856-9391-f13880b9b25c"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "86e5038f-f6e4-45cc-b52e-12aeb31b7755",
+   "name": "step-kafka-importer",
+   "version": "2.0.0",
+   "description": "entry step: import records from Kafka, one lineage per record",
+   "processorId": "9d0fb8a6-1d57-4a2b-9394-cf0a9568c48a",
+   "nextStepIds": [
+    "c8a8ff61-b0dd-4440-9794-3dcc236aa34f"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "6dfe3e95-d9f3-4465-941d-d48332463f34",
+   "name": "sc-split-archivecollapser",
+   "version": "1.0.0",
+   "description": "schema-compat clone of split-archivecollapser (c5845265-3bd7-49df-92ca-9e3a1c905752)",
+   "processorId": "76146a07-ee04-48de-a82a-5e21d98fb2d0",
+   "nextStepIds": [
+    "d12f2e1c-7c40-4f05-bba8-c34606d7f023"
+   ],
+   "entryCondition": 1
+  },
+  {
+   "id": "ceb2d18b-fb3f-42c3-9acd-c397d3466696",
+   "name": "sc-sk-normalizer-sample",
+   "version": "1.0.0",
+   "description": "schema-compat clone of sk-normalizer-sample (56fca87f-cdc0-4370-b790-2eeb754ed4fd)",
+   "processorId": "1673b377-8237-4d41-b420-3099a27f7dbf",
+   "nextStepIds": [
+    "6dfe3e95-d9f3-4465-941d-d48332463f34"
+   ],
+   "entryCondition": 1
+  },
+  {
+   "id": "c8a8ff61-b0dd-4440-9794-3dcc236aa34f",
+   "name": "step-kafka-exporter",
+   "version": "1.1.0",
+   "description": "terminal step: produce the branch to a Kafka topic and end the lineage",
+   "processorId": "157a0f40-d668-42f3-a500-4762c587f64a",
+   "nextStepIds": [],
+   "entryCondition": 1
+  },
+  {
+   "id": "9cae7b00-5392-4c8f-867f-e3cbb907de58",
+   "name": "split-exporter",
+   "version": "1.0.0",
+   "description": "documents out",
+   "processorId": "157a0f40-d668-42f3-a500-4762c587f64a",
+   "nextStepIds": [
+    "73952b09-9d09-4237-b277-995ed2690f1c"
+   ],
+   "entryCondition": 1
+  },
+  {
+   "id": "06423c6d-553f-4188-b5a8-f6b2ce5722b1",
+   "name": "split-archiveexpander",
+   "version": "1.0.0",
+   "description": "envelope to document",
+   "processorId": "4ad0d5d7-3a5c-4150-b543-b3bf7e944727",
+   "nextStepIds": [
+    "56fca87f-cdc0-4370-b790-2eeb754ed4fd",
+    "73952b09-9d09-4237-b277-995ed2690f1c"
+   ],
+   "entryCondition": 1
+  },
+  {
+   "id": "b9c13653-6558-4445-9d20-ab0a6d3fd48f",
+   "name": "split-filefetcher",
+   "version": "1.0.0",
+   "description": "path to envelope",
+   "processorId": "8f8344b1-caf6-4482-8710-a3249a238e3c",
+   "nextStepIds": [
+    "06423c6d-553f-4188-b5a8-f6b2ce5722b1",
+    "73952b09-9d09-4237-b277-995ed2690f1c"
+   ],
+   "entryCondition": 1
+  },
+  {
+   "id": "ab9d8741-c109-4457-a090-d76e1ca64a97",
+   "name": "split-importer",
+   "version": "1.0.0",
+   "description": "paths in",
+   "processorId": "9d0fb8a6-1d57-4a2b-9394-cf0a9568c48a",
+   "nextStepIds": [
+    "b9c13653-6558-4445-9d20-ab0a6d3fd48f",
+    "73952b09-9d09-4237-b277-995ed2690f1c"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "c5845265-3bd7-49df-92ca-9e3a1c905752",
+   "name": "split-archivecollapser",
+   "version": "1.0.0",
+   "description": "Packs the expander's document back into one archive",
+   "processorId": "76146a07-ee04-48de-a82a-5e21d98fb2d0",
+   "nextStepIds": [
+    "798b9dc8-9faa-491b-8011-9b7f80d4f9ee",
+    "73952b09-9d09-4237-b277-995ed2690f1c"
+   ],
+   "entryCondition": 1
+  },
+  {
+   "id": "a37bb2d5-b4e5-4fde-afbe-a254daeeaadc",
+   "name": "sc-split-archiveexpander",
+   "version": "1.0.0",
+   "description": "schema-compat clone of split-archiveexpander (06423c6d-553f-4188-b5a8-f6b2ce5722b1)",
+   "processorId": "4ad0d5d7-3a5c-4150-b543-b3bf7e944727",
+   "nextStepIds": [
+    "ceb2d18b-fb3f-42c3-9acd-c397d3466696"
+   ],
+   "entryCondition": 1
+  },
+  {
+   "id": "744786e5-600b-41c3-bdd0-f5ab894f876f",
+   "name": "sc-split-filefetcher",
+   "version": "1.0.0",
+   "description": "schema-compat clone of split-filefetcher (b9c13653-6558-4445-9d20-ab0a6d3fd48f)",
+   "processorId": "8f8344b1-caf6-4482-8710-a3249a238e3c",
+   "nextStepIds": [
+    "a37bb2d5-b4e5-4fde-afbe-a254daeeaadc"
+   ],
+   "entryCondition": 1
+  },
+  {
+   "id": "3708d3d8-351a-464e-8795-a4b083035640",
+   "name": "sc-split-importer",
+   "version": "1.0.0",
+   "description": "schema-compat clone of split-importer (ab9d8741-c109-4457-a090-d76e1ca64a97)",
+   "processorId": "9d0fb8a6-1d57-4a2b-9394-cf0a9568c48a",
+   "nextStepIds": [
+    "744786e5-600b-41c3-bdd0-f5ab894f876f"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "556d5234-3668-498a-ba97-fd2865594ef3",
+   "name": "sk-normalizer-alphabeta",
+   "version": "1.0.0",
+   "description": "Lifts Acme's standardized XML out and makes it the whole document. Runs AFTER the Acme step on its output, so an Acme failure skips it; emits a leaf-root .xml that ArchiveCollapser carries through unpacked.",
+   "processorId": "1673b377-8237-4d41-b420-3099a27f7dbf",
+   "nextStepIds": [
+    "73952b09-9d09-4237-b277-995ed2690f1c",
+    "c5845265-3bd7-49df-92ca-9e3a1c905752"
+   ],
+   "entryCondition": 1
+  },
+  {
+   "id": "73952b09-9d09-4237-b277-995ed2690f1c",
+   "name": "record-outcome",
+   "version": "1.0.0",
+   "description": "records that a step reached a terminal outcome and where to look",
+   "processorId": "e0b98ffc-e95d-4fee-a407-cc53fb66914a",
+   "nextStepIds": [
+    "eb707c5e-24af-4d99-8c97-f127b560e4b4"
+   ],
+   "entryCondition": 2
+  },
+  {
+   "id": "eb707c5e-24af-4d99-8c97-f127b560e4b4",
+   "name": "export-outcome",
+   "version": "1.0.0",
+   "description": "puts the outcome record on skp-failures and ends the lineage",
+   "processorId": "157a0f40-d668-42f3-a500-4762c587f64a",
+   "nextStepIds": [],
+   "entryCondition": 1
+  },
+  {
+   "id": "71646fcb-6b09-4695-bfa2-189143ab133e",
+   "name": "analyst-monitor",
+   "version": "1.0.0",
+   "description": "investigates the filefetcher-archiveexpander-chain over the last 15 minutes",
+   "processorId": "f361e170-c899-43d1-9a0e-4d30ff2cad87",
+   "nextStepIds": [
+    "e51db362-050d-449c-902c-2cf78a00200c"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "e51db362-050d-449c-902c-2cf78a00200c",
+   "name": "analyst-finding-export",
+   "version": "1.0.0",
+   "description": "publishes the finding; gated on the Analyst having COMPLETED, not merely finished",
+   "processorId": "157a0f40-d668-42f3-a500-4762c587f64a",
+   "nextStepIds": [],
+   "entryCondition": 1
+  },
+  {
+   "id": "311dced8-3462-465c-a109-a8cf08e0ad59",
+   "name": "simple-stepC",
+   "version": "1.0.0",
+   "description": "terminal step of the linear A->B->C probe workflow",
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [],
+   "entryCondition": 4
+  },
+  {
+   "id": "ba220079-fb1f-47a6-9f91-890b1fd23aa9",
+   "name": "simple-stepA",
+   "version": "1.0.0",
+   "description": "entry step",
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "793a97a1-b57c-44aa-8577-b128793b10a5"
+   ],
+   "entryCondition": 4
+  },
+  {
+   "id": "793a97a1-b57c-44aa-8577-b128793b10a5",
+   "name": "simple-stepB",
+   "version": "1.0.0",
+   "description": "middle step",
+   "processorId": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "nextStepIds": [
+    "311dced8-3462-465c-a109-a8cf08e0ad59"
+   ],
+   "entryCondition": 4
+  }
+ ],
+ "processors": [
+  {
+   "id": "4ad0d5d7-3a5c-4150-b543-b3bf7e944727",
+   "name": "archive-expander",
+   "version": "1.0.0",
+   "description": "envelope in, structured document out",
+   "inputSchemaId": "f495b02e-f7f1-4899-b5a8-5c2a00d43fd7",
+   "outputSchemaId": "e33f8079-7c65-49de-9a1c-bcd1065e9044",
+   "configSchemaId": "9268ba11-76e7-4e2f-bc34-2fe0abba167f"
+  },
+  {
+   "id": "f361e170-c899-43d1-9a0e-4d30ff2cad87",
+   "name": "analyst",
+   "version": "1.0.0",
+   "description": "Reads the same Kibana and Grafana panels an operator reads, drives kimi-k3 through a five-stage investigation, and either writes a finding or says nothing. Read-only.",
+   "inputSchemaId": null,
+   "outputSchemaId": "ebc7e9d3-b02c-4e62-bb02-fb86464793d9",
+   "configSchemaId": "4a203429-8379-42fb-a674-c4242bb37619"
+  },
+  {
+   "id": "9d0fb8a6-1d57-4a2b-9394-cf0a9568c48a",
+   "name": "kafka-importer",
+   "version": "2.2.0",
+   "description": "reads a topic, one lineage per record; broker from Kafka__BrokerList, not the payload",
+   "inputSchemaId": null,
+   "outputSchemaId": "b3877a36-ba2f-4893-8b46-f91413b12384",
+   "configSchemaId": "aa662cc3-a72b-41ed-9de6-8dc09aeed4b6"
+  },
+  {
+   "id": "8b3823e4-212e-4040-8ea9-69747c7b96b1",
+   "name": "live-test-55da8532845f4c62bdbb8bfdb39d4c25",
+   "version": "1.0.0",
+   "description": null,
+   "inputSchemaId": null,
+   "outputSchemaId": null,
+   "configSchemaId": null
+  },
+  {
+   "id": "e0b98ffc-e95d-4fee-a407-cc53fb66914a",
+   "name": "outcome-recorder",
+   "version": "1.0.0",
+   "description": "records that a step reached a terminal outcome and where to look; carries no reason and no payload",
+   "inputSchemaId": null,
+   "outputSchemaId": null,
+   "configSchemaId": null
+  },
+  {
+   "id": "1673b377-8237-4d41-b420-3099a27f7dbf",
+   "name": "sk-normalizer",
+   "version": "1.0.0",
+   "description": "Applies one provider handler, named on the step payload, to the {metadata, content} tree ArchiveExpander produces, and emits a tree of the same contract. Input and output both point at the shared archive-document row: the handler changes contents, never the document's shape.",
+   "inputSchemaId": "e33f8079-7c65-49de-9a1c-bcd1065e9044",
+   "outputSchemaId": "e33f8079-7c65-49de-9a1c-bcd1065e9044",
+   "configSchemaId": "4fe92a0c-5cc8-447f-8148-975152c09908"
+  },
+  {
+   "id": "d033b408-8471-4c3d-8acf-3bee6164f01e",
+   "name": "sample-proc-v9",
+   "version": "1.5.0",
+   "description": "probe logging deploy",
+   "inputSchemaId": null,
+   "outputSchemaId": null,
+   "configSchemaId": "32c21d58-5cc0-440d-a50d-fdd6690ab6fc"
+  },
+  {
+   "id": "76146a07-ee04-48de-a82a-5e21d98fb2d0",
+   "name": "archive-collapser",
+   "version": "1.0.0",
+   "description": "Packs an ArchiveExpander document back into one archive; emits the raw-file envelope",
+   "inputSchemaId": "e33f8079-7c65-49de-9a1c-bcd1065e9044",
+   "outputSchemaId": "f495b02e-f7f1-4899-b5a8-5c2a00d43fd7",
+   "configSchemaId": "6a0df347-1501-4c1b-b004-d25adfe3e312"
+  },
+  {
+   "id": "8f8344b1-caf6-4482-8710-a3249a238e3c",
+   "name": "file-fetcher",
+   "version": "1.0.0",
+   "description": "path in, file bytes plus identity out",
+   "inputSchemaId": "b3877a36-ba2f-4893-8b46-f91413b12384",
+   "outputSchemaId": "f495b02e-f7f1-4899-b5a8-5c2a00d43fd7",
+   "configSchemaId": "ad718b82-64c2-467a-88d3-54fd9beefb61"
+  },
+  {
+   "id": "c046fb57-6fa3-4227-8cb0-103e933652e3",
+   "name": "file-persister",
+   "version": "1.0.0",
+   "description": "writes the envelope's file into a configured folder and reports the absolute path; the mirror of file-fetcher",
+   "inputSchemaId": "f495b02e-f7f1-4899-b5a8-5c2a00d43fd7",
+   "outputSchemaId": "b3877a36-ba2f-4893-8b46-f91413b12384",
+   "configSchemaId": "8615d18f-6557-4176-a101-cb6736f3ade9"
+  },
+  {
+   "id": "157a0f40-d668-42f3-a500-4762c587f64a",
+   "name": "kafka-exporter",
+   "version": "1.2.0",
+   "description": "produces a branch to a topic and ends the lineage; broker from Kafka__BrokerList, not the payload. Input is file-locator, the mirror of what KafkaImporter emits -- so a topic this writes is a topic an importer can read.",
+   "inputSchemaId": null,
+   "outputSchemaId": null,
+   "configSchemaId": "f09a684c-a516-459b-8c43-e415feb85469"
+  }
+ ],
+ "schemas": [
+  {
+   "id": "bf5c3369-8967-41f2-8616-3bd6111db4d0",
+   "name": "gateA-sample-compatible",
+   "version": "1.0.0",
+   "description": null
+  },
+  {
+   "id": "771206b0-e2af-4800-8e13-b45dc8ef33f6",
+   "name": "gateA-badconfig-clash",
+   "version": "1.0.0",
+   "description": null
+  },
+  {
+   "id": "f495b02e-f7f1-4899-b5a8-5c2a00d43fd7",
+   "name": "file-envelope",
+   "version": "1.0.0",
+   "description": "FileFetcher output = ArchiveExpander input: the file identity plus base64 content"
+  },
+  {
+   "id": "6636c058-a620-4b27-aacd-68add863c55d",
+   "name": "archive-expander-document",
+   "version": "1.0.0",
+   "description": "ArchiveExpander output document: metadata plus content, depth 1"
+  },
+  {
+   "id": "5e2c9da8-ff4a-441d-be96-f658ec0d1ab3",
+   "name": "archive-document",
+   "version": "2.0.0",
+   "description": "ArchiveExpander output = ArchiveCollapser input: metadata plus content, depth 2. Supersedes archive-expander-document v1.0.0, which was depth 1 and is frozen."
+  },
+  {
+   "id": "b3877a36-ba2f-4893-8b46-f91413b12384",
+   "name": "file-locator",
+   "version": "1.0.0",
+   "description": "KafkaImporter output = FileFetcher input: the absolute path of one file. Does NOT assert absoluteness -- Path.IsPathFullyQualified is platform-dependent and no regex approximates it."
+  },
+  {
+   "id": "e33f8079-7c65-49de-9a1c-bcd1065e9044",
+   "name": "archive-document",
+   "version": "3.0.0",
+   "description": "ArchiveExpander output = ArchiveCollapser input: one self-referencing node, any depth. Supersedes archive-document v2.0.0, which unrolled the same shape to a fixed depth 2 and is frozen. The depth ceiling is now MaxDepth alone -- there is no second number for a step payload to disagree with."
+  },
+  {
+   "id": "aa662cc3-a72b-41ed-9de6-8dc09aeed4b6",
+   "name": "kafka-importer-config",
+   "version": "1.0.0",
+   "description": "KafkaImporter step payload: which topic to drain, under which group, and the two bounds the framework's ImporterConfig enforces. The broker is NOT here -- it is an address, so it lives in Kafka__BrokerList in the manifest."
+  },
+  {
+   "id": "f09a684c-a516-459b-8c43-e415feb85469",
+   "name": "kafka-exporter-config",
+   "version": "1.0.0",
+   "description": "KafkaExporter step payload: the destination topic and the delivery timeout the cached producer is built with. The broker is not here, for the same reason it is absent from the importer's."
+  },
+  {
+   "id": "ad718b82-64c2-467a-88d3-54fd9beefb61",
+   "name": "file-fetcher-config",
+   "version": "1.0.0",
+   "description": "FileFetcher step payload: everything knowable from FileInfo before the file is opened. allowedExtensions entries carry a leading dot or are the '*.*' sentinel; absent, null or empty widens to ['*.*']. minimumSizeBytes 0 disables the floor."
+  },
+  {
+   "id": "9268ba11-76e7-4e2f-bc34-2fe0abba167f",
+   "name": "archive-expander-config",
+   "version": "1.0.0",
+   "description": "ArchiveExpander step payload: how many levels of archive to expand. Absent means 1. The upper bound is NOT stated here -- MaxSupportedDepth is a compile-time constant checked before a file is opened, and repeating it in a frozen schema row is the coupling archive-document v2.0.0 had."
+  },
+  {
+   "id": "6a0df347-1501-4c1b-b004-d25adfe3e312",
+   "name": "archive-collapser-config",
+   "version": "1.0.0",
+   "description": "ArchiveCollapser step payload: empty. The processor takes no decisions from a step -- what to pack is entirely the document's shape. Registered rather than left null so an empty payload is a stated contract instead of an absence, and so a field added later has somewhere to land."
+  },
+  {
+   "id": "8615d18f-6557-4176-a101-cb6736f3ade9",
+   "name": "file-persister-config",
+   "version": "1.0.0",
+   "description": "FilePersister step payload: the folder written into. Absolute, and it must already exist -- the processor refuses to create it, because an absent folder means the volume is not mounted. The file NAME is not here; it rides the envelope."
+  },
+  {
+   "id": "32c21d58-5cc0-440d-a50d-fdd6690ab6fc",
+   "name": "sample-config",
+   "version": "1.0.0",
+   "description": "Processor.Sample step payload: a number and an optional label, both carried only so a sample step can be told apart from its neighbours in a log."
+  },
+  {
+   "id": "ef246bdb-3f17-4ef5-9d97-ca5f1e44a38d",
+   "name": "archive-document-twin",
+   "version": "3.0.0",
+   "description": "Byte-identical copy of archive-document 3.0.0. Exists to ask whether the edge gate compares schemas or ids."
+  },
+  {
+   "id": "68ef4073-d046-46ce-9056-ef6f6af01c18",
+   "name": "archive-document-tightened",
+   "version": "3.1.0",
+   "description": "archive-document 3.0.0 plus a required metadata.provenanceTag the expander never emits."
+  },
+  {
+   "id": "f33d3018-66ec-4ece-ba7c-b1722a76341c",
+   "name": "file-locator-open",
+   "version": "1.1.0",
+   "description": "file-locator 1.0.0 with additionalProperties removed, so an unknown key is accepted."
+  },
+  {
+   "id": "4fe92a0c-5cc8-447f-8148-975152c09908",
+   "name": "sk-normalizer-config-v4",
+   "version": "4.0.0",
+   "description": "SKNormalizer step payload. Supersedes sk-normalizer-config-v3 3.0.0, which declared cacheAddress -- the full L2 address, authored by hand into the step payload. The record now declares cacheRoot, the dictionary's NAME alone, and composes skp:{workflowId}:cache:{root} from the workflow id the dispatch already carries. A referenced definition cannot be edited, so renaming a property needs a new row."
+  },
+  {
+   "id": "9fa8528f-1e18-465a-b8f2-645001de7312",
+   "name": "analyst-config",
+   "version": "1.0.0",
+   "description": "Analyst step payload: what to investigate, how far back, the panels it may read, and the three hard ceilings. The loop contract is compiled, so a payload edit cannot break the typed exit."
+  },
+  {
+   "id": "94eb15c9-083f-4ab4-8792-eee383a0fc86",
+   "name": "analyst-finding",
+   "version": "1.0.0",
+   "description": "Analyst output document. Quiet and Indeterminate verdicts are deliberately absent: a quiet run cancels the step and an unanalysable one fails it, so neither reaches a document."
+  },
+  {
+   "id": "4bd46792-3ce5-4279-ab83-4384994542cd",
+   "name": "analyst-finding",
+   "version": "2.0.0",
+   "description": "Analyst output document v2: target, insights (each correlating two or more read panels) instead of a narrative, and usage against the budget. Quiet and Indeterminate verdicts are absent: no insight or unbelievable evidence cancels the step, a failed facility fails it."
+  },
+  {
+   "id": "d9021988-b5a7-41e5-90a9-ea0362669aa6",
+   "name": "analyst-finding",
+   "version": "3.0.0",
+   "description": "Analyst output document v3: every run whose facilities worked is published. Drifting/Notable carry correlated insights; Quiet (nothing correlated into anything wrong) and Inconclusive (evidence judged unbelievable) carry a reason instead. A facility failure fails the step and publishes nothing."
+  },
+  {
+   "id": "4a203429-8379-42fb-a674-c4242bb37619",
+   "name": "analyst-config",
+   "version": "2.0.0",
+   "description": "Analyst step payload v2: adds an optional expectations object (declared tolerated failed/cancelled share, with a reason; at least one bound required) so a declared, expected failure rate reads as Quiet."
+  },
+  {
+   "id": "ebc7e9d3-b02c-4e62-bb02-fb86464793d9",
+   "name": "analyst-finding",
+   "version": "4.0.0",
+   "description": "Analyst output document v4: every insight carries classification (deterministic/transient), domain (system/data), severity, onset and evidenceKinds; severity is tied to classification (deterministic=high, transient=low)."
+  }
+ ],
+ "assignments": [
+  {
+   "id": "c6080e65-225c-44a7-ac6c-c182fb6859ee",
+   "name": "asg-Step_A-3cb6da14b0c449a390065ce459daf37d",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "4510e105-6730-4e02-a8ec-e53e0a77498e"
+  },
+  {
+   "id": "b5a9113b-96a3-444d-90c3-c36fd5095e6b",
+   "name": "asg-Step_B-078faf4b079e43a4b68eb611a7a61ee5",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "c04aa144-4abb-4856-9391-f13880b9b25c"
+  },
+  {
+   "id": "9b5fd01f-41bc-4126-8d11-da937f657e67",
+   "name": "asg-Step_C-bf477ffb934d4dc1aed4f64408c76b07",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "5114e779-4843-4f1b-852e-538adbcf81f2"
+  },
+  {
+   "id": "d88958e3-7492-4d51-b22f-79ec37731614",
+   "name": "asg-Step_D1-9f874364379145b9b8920483b3709588",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "f79e81d5-2c35-4e6d-b2f7-32753a480c3c"
+  },
+  {
+   "id": "565b18da-cd6b-4beb-80c5-869c3faa176e",
+   "name": "asg-Step_E1-77862a1e835f4f9cb7f81b0c691ed954",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "0d2a759d-b2b8-4307-9945-659c048b039d"
+  },
+  {
+   "id": "5fab1d18-e92b-40c5-b287-dae76d8cfd1f",
+   "name": "asg-Step_F1-81da3ebdec3f4aea8b62a974e39070ee",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "2da2bb32-22a6-46a6-8c34-04316b4c9693"
+  },
+  {
+   "id": "2bee667f-ea7f-41aa-b1bc-3aaa163f4c8b",
+   "name": "asg-Step_D2-cbe638c25ccb4850b81e5fcd2fec4a0a",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "c4231653-6b5f-4063-aaa1-05f871430b51"
+  },
+  {
+   "id": "fefc7eae-1b45-4610-be5e-a3b9a0d875aa",
+   "name": "asg-Step_E2-ae56507302174fcd8c8f0f61d29ba2a9",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "be9f795a-48d3-425c-86a6-35265253d6af"
+  },
+  {
+   "id": "6e7c4726-01da-42ea-a907-da2d8e1574c0",
+   "name": "asg-Step_F2-815853e796e74f61abb3c6434a3d786b",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "63d3d7fc-771e-4edd-8f3c-8cbc3fa95edf"
+  },
+  {
+   "id": "5948df58-0ce5-4f6e-a19d-e837443d16cb",
+   "name": "asg-Step_G-cf754c86ef044ed3b4031d864cb6ec41",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "eb42edf2-062d-48be-896e-7860a7370b12"
+  },
+  {
+   "id": "fac3f708-d3c1-4e30-8732-bf690ade5e32",
+   "name": "asg-Step_G-clone-6e00c4f14ad7402e9ec1c5724e86f4d7",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "13a629b9-f33c-4df8-bb48-7b52244b0955"
+  },
+  {
+   "id": "b2872520-6365-4393-985e-a68506ae67ab",
+   "name": "asg-Step_F1-clone-5fa4ae719998450ba1f66db874f5cdde",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "3dc52d4c-a1ba-4437-8f5e-2c8d9d081d39"
+  },
+  {
+   "id": "d711db2b-55c3-476e-8c71-d97a7348a094",
+   "name": "asg-Step_F2-clone-5af716c7e4b34f52870eeab1f8df46b8",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "cb75d173-f1c9-4731-8229-18525406e722"
+  },
+  {
+   "id": "36912bb5-465c-4ee9-9446-792b12e15708",
+   "name": "asg-Step_E1-clone-00386b6bdb6745278726ceb440d838f9",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "73f0b0ec-7dbf-4a4a-b544-3c29ec84bef7"
+  },
+  {
+   "id": "799d46a1-3918-4c26-83c7-8e498f4b4e9b",
+   "name": "asg-Step_E2-clone-35cb6c0019bb4f59bd0bf177f6afcffc",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "326930a3-9248-439d-8d19-ecd8cbdf52cf"
+  },
+  {
+   "id": "39e25cc6-8d91-46cc-93f0-1f097629654c",
+   "name": "asg-Step_D1-clone-22670c6728e14e529ae06b96fe2c4024",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "69a13ec1-78ac-4dda-bb84-241f609769f8"
+  },
+  {
+   "id": "000a9a99-82bd-418b-a99c-ad06ef89271c",
+   "name": "asg-Step_D2-clone-8079daf5131b42b4ab3175aed9fc6afe",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "08b7fc1a-beba-465c-842c-e1ba68ea7f19"
+  },
+  {
+   "id": "705d01d9-08fc-4b05-98b8-124f67deeec1",
+   "name": "asg-Step_C-clone-d3f6377f3d834282adb0d3618233ace6",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "0e4a5493-a158-4baf-a94d-45a4a5813a18"
+  },
+  {
+   "id": "5e5f1349-fba5-480a-9d5e-cb1f1ea6ffe3",
+   "name": "asg-Step_B-clone-dcb01d94a3df40fc82480a79c4f08587",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "05c0052b-b40c-461b-9c11-b512d0237a05"
+  },
+  {
+   "id": "18d44c60-7b1e-4867-8a28-b8fbd3205035",
+   "name": "asg-Step_A-clone-bf1d1817f0d5419da9176080abda6483",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "cb3a45a7-c69a-4449-8a19-f3272d53b6c8"
+  },
+  {
+   "id": "b41cebf6-ed50-42c8-867d-2cd3f8127acd",
+   "name": "asg-simple-Step_A",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "320e7946-d5d5-4778-89ed-8f6274f783b7"
+  },
+  {
+   "id": "2084bceb-19ef-4df3-a0a6-9b891e209b5f",
+   "name": "asg-simple-Step_B",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "5e36eb17-cbe2-4abb-ac87-4488ef115599"
+  },
+  {
+   "id": "d60628a4-f7e5-4e00-9684-82d4137c6600",
+   "name": "asg-simple-Step_C",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "01697e8a-fc9e-404e-aa6e-49508e833c6a"
+  },
+  {
+   "id": "2f67881a-5ec6-4392-ac1a-301ea66b1fc3",
+   "name": "asg-kafka-importer",
+   "version": "2.1.0",
+   "description": "topic, group and counts for the importer step; the broker is org infrastructure and comes from Kafka__BrokerList",
+   "stepId": "86e5038f-f6e4-45cc-b52e-12aeb31b7755"
+  },
+  {
+   "id": "899612f5-7a52-47ea-8c10-4388ab2e159b",
+   "name": "asg-kafka-exporter",
+   "version": "1.1.0",
+   "description": "topic and delivery timeout for the exporter step; the broker is org infrastructure and comes from Kafka__BrokerList",
+   "stepId": "c8a8ff61-b0dd-4440-9794-3dcc236aa34f"
+  },
+  {
+   "id": "6f16195f-04fe-4a45-b740-9b79c299f0c3",
+   "name": "split-filefetcher-cfg",
+   "version": "1.0.0",
+   "description": "zip only",
+   "stepId": "b9c13653-6558-4445-9d20-ab0a6d3fd48f"
+  },
+  {
+   "id": "a8151187-4cd1-4506-9a5a-22655037075c",
+   "name": "sc-split-importer-cfg",
+   "version": "1.0.0",
+   "description": "schema-compat clone of assignment 7debab26-9c56-43c2-a21f-f3b171f970e9",
+   "stepId": "3708d3d8-351a-464e-8795-a4b083035640"
+  },
+  {
+   "id": "aca14f9b-479d-4b44-a87e-fd58d0665638",
+   "name": "split-archivecollapser-assignment",
+   "version": "1.0.0",
+   "description": "ArchiveCollapser step payload holds nothing by design",
+   "stepId": "c5845265-3bd7-49df-92ca-9e3a1c905752"
+  },
+  {
+   "id": "f62f5685-4398-4987-9da2-9eb8f4a60134",
+   "name": "split-filepersister-cfg",
+   "version": "1.0.0",
+   "description": "the mirror folder: input files come from in/, output files land in out/",
+   "stepId": "798b9dc8-9faa-491b-8011-9b7f80d4f9ee"
+  },
+  {
+   "id": "42c5abdd-74d2-4b1b-9de5-81027b8fd2c8",
+   "name": "sk-normalizer-sample-assignment",
+   "version": "1.0.0",
+   "description": "handler Sample: identity. Acme would reject these fixtures -- they are nested outer-*.zip archives, not the wav+json pairs Acme pairs by basename.",
+   "stepId": "56fca87f-cdc0-4370-b790-2eeb754ed4fd"
+  },
+  {
+   "id": "2c06da0f-c07c-40ec-a3ff-294d7f60da6b",
+   "name": "split-archiveexpander-cfg",
+   "version": "1.0.0",
+   "description": "expand up to 4 levels",
+   "stepId": "06423c6d-553f-4188-b5a8-f6b2ce5722b1"
+  },
+  {
+   "id": "f6c855d6-2e0f-430d-8537-5cceafef945b",
+   "name": "sc-split-filefetcher-cfg",
+   "version": "1.0.0",
+   "description": "schema-compat clone of assignment 6f16195f-04fe-4a45-b740-9b79c299f0c3",
+   "stepId": "744786e5-600b-41c3-bdd0-f5ab894f876f"
+  },
+  {
+   "id": "f1be83ab-3bfe-4d8b-b018-41c866ec46d2",
+   "name": "sc-sk-normalizer-sample-assignment",
+   "version": "1.0.0",
+   "description": "schema-compat clone of assignment 42c5abdd-74d2-4b1b-9de5-81027b8fd2c8",
+   "stepId": "ceb2d18b-fb3f-42c3-9acd-c397d3466696"
+  },
+  {
+   "id": "bab301ad-b2e0-4ee5-bef1-4cd1f096a06b",
+   "name": "sc-split-archivecollapser-assignment",
+   "version": "1.0.0",
+   "description": "schema-compat clone of assignment aca14f9b-479d-4b44-a87e-fd58d0665638",
+   "stepId": "6dfe3e95-d9f3-4465-941d-d48332463f34"
+  },
+  {
+   "id": "87a555d1-bf72-4a2e-83de-78c99ebcd59e",
+   "name": "sc-split-exporter-cfg",
+   "version": "1.0.0",
+   "description": "schema-compat clone of assignment f112f666-3dd5-4eac-933c-e23758bbbec4",
+   "stepId": "50c86e21-484f-4581-8556-0127fb537630"
+  },
+  {
+   "id": "3fa1a6c2-2790-4cf6-b619-1667ea46b706",
+   "name": "sc-split-filepersister-cfg",
+   "version": "1.0.0",
+   "description": "schema-compat clone of assignment f62f5685-4398-4987-9da2-9eb8f4a60134",
+   "stepId": "d12f2e1c-7c40-4f05-bba8-c34606d7f023"
+  },
+  {
+   "id": "7debab26-9c56-43c2-a21f-f3b171f970e9",
+   "name": "split-importer-cfg",
+   "version": "1.0.0",
+   "description": "own consumer group; batch sized for the live suite's concurrent producers",
+   "stepId": "ab9d8741-c109-4457-a090-d76e1ca64a97"
+  },
+  {
+   "id": "68a5dd70-e1c9-4bbd-99e9-bc11f9930d2c",
+   "name": "record-outcome",
+   "version": "1.0.0",
+   "description": "no payload: nothing this processor records is a workflow author's choice",
+   "stepId": "73952b09-9d09-4237-b277-995ed2690f1c"
+  },
+  {
+   "id": "53e67e7a-4778-40f9-9003-acf914a87799",
+   "name": "sc-split-archiveexpander-cfg",
+   "version": "1.0.0",
+   "description": "schema-compat clone of assignment 2c06da0f-c07c-40ec-a3ff-294d7f60da6b",
+   "stepId": "a37bb2d5-b4e5-4fde-afbe-a254daeeaadc"
+  },
+  {
+   "id": "9efc2f59-2ddc-4382-b91a-66fac6693329",
+   "name": "export-outcome",
+   "version": "1.0.0",
+   "description": "the failures topic",
+   "stepId": "eb707c5e-24af-4d99-8c97-f127b560e4b4"
+  },
+  {
+   "id": "f82812be-65a2-4686-83b6-3a5ce6cb391d",
+   "name": "analyst-finding-export-cfg",
+   "version": "1.0.0",
+   "description": "publishes the Analyst's finding document",
+   "stepId": "e51db362-050d-449c-902c-2cf78a00200c"
+  },
+  {
+   "id": "325fe0ac-c458-4fe0-8639-be336d1c6a06",
+   "name": "sk-normalizer-alphabeta-assignment",
+   "version": "1.0.0",
+   "description": "handler AlphaBeta: pass Acme's rendered XML through as a one-file document",
+   "stepId": "556d5234-3668-498a-ba97-fd2865594ef3"
+  },
+  {
+   "id": "2f1cc7d1-5ffb-495e-be65-1adfd8db458d",
+   "name": "analyst-monitor-cfg",
+   "version": "1.0.0",
+   "description": "5-minute sweep; 15m window overlaps the cadence so nothing falls in a gap",
+   "stepId": "71646fcb-6b09-4695-bfa2-189143ab133e"
+  },
+  {
+   "id": "7fa9d182-1ec4-4afe-ad08-78a5301e2e27",
+   "name": "asg-simple-Step_C",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "311dced8-3462-465c-a109-a8cf08e0ad59"
+  },
+  {
+   "id": "1f3c038d-3882-41ae-aea4-65bf070e141d",
+   "name": "asg-simple-Step_A",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "ba220079-fb1f-47a6-9f91-890b1fd23aa9"
+  },
+  {
+   "id": "ad890327-1ece-4995-a552-3fb53c06924b",
+   "name": "asg-simple-Step_B",
+   "version": "1.0.0",
+   "description": null,
+   "stepId": "793a97a1-b57c-44aa-8577-b128793b10a5"
+  },
+  {
+   "id": "3728068e-df3c-4781-9792-5448deec8adb",
+   "name": "split-exporter-cfg",
+   "version": "1.0.0",
+   "description": "documents topic",
+   "stepId": "9cae7b00-5392-4c8f-867f-e3cbb907de58"
+  }
+ ],
+ "caches": [
+  {
+   "id": "04442aee-7906-4418-9213-bea0a445e1bc",
+   "name": "chain-artist-whitelist",
+   "version": "1.0.0",
+   "description": "Artists this chain is allowed to publish. Key is the artist as the provider wrote it; value is the spelling the standardized XML carries.",
+   "root": "chain-artists"
+  }
+ ]
+}

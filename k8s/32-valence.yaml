@@ -1,0 +1,71 @@
+# SKP Valence: every SKP entity row as one molecule, with create, read, update and delete (spec docs/valence/valence-spec.md).
+#
+# A static React build served by nginx. nginx also proxies /api/ to baseapi-service, so the browser talks to one origin:
+# BaseApi has no CORS policy, and Valence must not need one.
+#
+# Build and load (from the repo root; the kind cluster is named "desktop"):
+#   docker build -f src/Valence/Dockerfile -t valence:local .
+#   kind load docker-image valence:local --name desktop
+#   kubectl apply -f k8s/32-valence.yaml
+# Reach it through k8s/port-forward-realstack.ps1: http://localhost:18082
+apiVersion: v1
+kind: Service
+metadata:
+  name: valence
+  namespace: skp
+  labels:
+    app: valence
+    app.kubernetes.io/part-of: skp
+spec:
+  selector:
+    app: valence
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valence
+  namespace: skp
+  labels:
+    app: valence
+    app.kubernetes.io/part-of: skp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: valence
+  template:
+    metadata:
+      labels:
+        app: valence
+    spec:
+      containers:
+        - name: valence
+          image: valence:local
+          # Read the local image store, as the other :local images do.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          startupProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 2
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests: { memory: "32Mi" }
+            limits:   { memory: "128Mi" }

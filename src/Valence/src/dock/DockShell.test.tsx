@@ -203,24 +203,15 @@ describe('DockShell', () => {
     for (const name of ['Inspector', 'Toolbox', 'Output']) expect(tab(name)).toBeInTheDocument();
   });
 
-  it('Workspace holds Load workflow…, Close and Delete workflow…; Delete acts on the active document, disabled with none (2026-10-10)', () => {
-    const onDeleteWorkflow = vi.fn();
-    const { update } = setup({ onDeleteWorkflow });
-    expect(screen.queryByRole('menuitem', { name: 'File' })).toBeNull();
-    openMenu('Workspace');
-    expect(screen.getByRole('menuitem', { name: /Load…/ })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /Delete…/ })).toHaveAttribute('aria-disabled', 'true');
-    openMenu('Workspace');
-    update({ documents: [doc('a')], activeDocumentId: 'a' });
-    openMenu('Workspace');
-    choose(/Delete…/);
-    expect(onDeleteWorkflow).toHaveBeenCalledWith('a');
+  it('has only View and Window on the strip: no Workspace and no Edit (Valence, 2026-10-15)', () => {
+    setup();
+    const strip = screen.getByRole('menubar');
+    expect(within(strip).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['View', 'Window']);
   });
 
-  it('opens the picker from Workspace, filters it, and opens the first match on Enter', () => {
+  it('opens the picker on Ctrl+O, filters it, and opens the first match on Enter', () => {
     const { props } = setup();
-    openMenu('Workspace');
-    choose(/Load…/);
+    fireEvent.keyDown(window, { key: 'o', ctrlKey: true });
     const search = screen.getByRole('textbox', { name: 'Search workflows' });
     expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['orders_1.0.0-aaaa', 'billing_2.0.0-bbbbopen — switch']);
 
@@ -231,18 +222,16 @@ describe('DockShell', () => {
     expect(screen.queryByRole('dialog', { name: 'Load workflow' })).toBeNull();
   });
 
-  it('leaves focus in the picker search box when Workspace > Load workflow replaces the menu', () => {
+  it('puts focus in the picker search box when Ctrl+O replaces an open menu', () => {
     setup();
-    screen.getByRole('menuitem', { name: 'Workspace' }).focus();   // a real click focuses the trigger
-    openMenu('Workspace');
-    choose(/Load…/);
+    openMenu('View');
+    fireEvent.keyDown(window, { key: 'o', ctrlKey: true });
+    expect(screen.queryByRole('menu')).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Search workflows' }));
   });
 
-  it('keeps Edit present but disabled, and Start/Stop keys harmless without a page to run them', () => {
+  it('keeps Start/Stop keys harmless without a page to run them', () => {
     setup();
-    openMenu('Edit');
-    for (const item of screen.getAllByRole('menuitem').filter((m) => m.classList.contains('mi'))) expect(item).toHaveAttribute('aria-disabled', 'true');
     fireEvent.keyDown(window, { key: 'F5' });
     expect(toast()).toHaveTextContent('Start and Stop are not available.');
   });
@@ -285,28 +274,27 @@ describe('DockShell', () => {
     } finally {
       dialog.remove();
     }
-    openMenu('Workspace');
-    choose(/Load…/);
+    fireEvent.keyDown(window, { key: 'o', ctrlKey: true });
     fireEvent.keyDown(window, { key: 'F5' });
     expect(onRunCommand).not.toHaveBeenCalled();
   });
 
   it('toggles a strip menu with its own button', () => {
     setup();
-    openMenu('Workspace');
-    expect(screen.getByRole('menu', { name: 'Workspace' })).toBeInTheDocument();
-    fireEvent.pointerDown(screen.getByRole('menuitem', { name: 'Workspace' }));
-    openMenu('Workspace');
+    openMenu('View');
+    expect(screen.getByRole('menu', { name: 'View' })).toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByRole('menuitem', { name: 'View' }));
+    openMenu('View');
     expect(screen.queryByRole('menu')).toBeNull();
   });
 
   it('focuses the first item of the menu switched to, and gives focus back to its own button (review Minor)', () => {
     setup();
-    const file = screen.getByRole('menuitem', { name: 'Workspace' });
+    const file = screen.getByRole('menuitem', { name: 'Window' });
     const view = screen.getByRole('menuitem', { name: 'View' });
     file.focus();
     fireEvent.click(file);
-    expect(document.activeElement).toHaveTextContent('Load…');
+    expect(document.activeElement).toHaveTextContent('Float');
     view.focus();
     fireEvent.click(view);
     const menu = screen.getByRole('menu', { name: 'View' });
@@ -910,5 +898,40 @@ describe('session (plan 3d)', () => {
     const storage = memoryStorage();
     setup({ storage, restore: null });
     expect(tab('Inspector')).toBeInTheDocument();
+  });
+});
+
+// Valence (2026-10-15): one document, the whole project, always open; nothing to load.
+describe('DockShell with a pinned document and no workflows', () => {
+  const project: DockDocument = { id: 'project', name: 'Project', version: '', tooltip: 'The whole project', pinned: true };
+  const pinnedSetup = () => setup({ workflows: undefined, documents: [project], activeDocumentId: 'project' });
+
+  it('has no Load: no + on the document group, and Ctrl+O opens no picker', () => {
+    pinnedSetup();
+    expect(screen.queryByRole('button', { name: 'Load workflow' })).toBeNull();
+    fireEvent.keyDown(window, { key: 'o', ctrlKey: true });
+    expect(screen.queryByRole('dialog', { name: 'Load workflow' })).toBeNull();
+  });
+
+  it('an empty document area offers no Load either', () => {
+    setup({ workflows: undefined });
+    expect(screen.getByText('No workflow open')).toBeInTheDocument();
+    expect(screen.queryByText('Load one with Ctrl+O')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Load workflow…' })).toBeNull();
+  });
+
+  it('never closes the pinned document: no tab ×, and a middle click and Alt+W do nothing', () => {
+    const { props } = pinnedSetup();
+    expect(within(tab('Project')).queryByRole('button', { name: 'Close Project' })).toBeNull();
+    fireEvent(tab('Project'), new MouseEvent('auxclick', { bubbles: true, button: 1 }));
+    fireEvent.keyDown(window, { key: 'w', altKey: true });
+    expect(props.onCloseDocument).not.toHaveBeenCalled();
+  });
+
+  it('its window menu has no Close document', () => {
+    pinnedSetup();
+    fireEvent.contextMenu(tab('Project'));
+    const menu = screen.getByRole('menu', { name: 'Window position' });
+    expect(within(menu).queryByRole('menuitem', { name: /Close document/ })).toBeNull();
   });
 });

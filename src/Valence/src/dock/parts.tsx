@@ -15,7 +15,7 @@ export interface DockDocument {
   dirty?: boolean;
   /** A Save of this workflow is running (2026-10-10): its tab shows a spinner, wherever the tab is. */
   saving?: boolean;
-  /** Molecule Studio: a document that is always open (the whole project): no ×, no middle-click close, Close disabled. */
+  /** Valence: a document that is always open (the whole project): no ×, no middle-click close, Close disabled. */
   pinned?: boolean;
 }
 
@@ -31,7 +31,7 @@ export interface ShellApi {
   toggleFloat(panelId: string): void;
   toggleMaximize(panelId: string): void;
   openPicker(anchor: Anchor): void;
-  /** Molecule Studio: false when the page has no workflow list, so there is nothing to load (no +, no Load button). */
+  /** Valence: false when the page has no workflow list, so there is nothing to load (no +, no Load button). */
   canLoad: boolean;
   groupAction(group: DockviewGroupPanel, action: GroupAction, anchor: Anchor): void;
 }
@@ -159,7 +159,7 @@ export function Watermark() {
     <div className="empty">
       <div>
         <div className="e1">No workflow open</div>
-        {shell.canLoad && <div className="e2">Workspace › Load… or Ctrl+O</div>}
+        {shell.canLoad && <div className="e2">Load one with Ctrl+O</div>}
         {shell.canLoad && <button type="button" className="btn primary" onClick={(e) => shell.openPicker(anchorBelow(e.currentTarget))}>Load workflow…</button>}
       </div>
     </div>

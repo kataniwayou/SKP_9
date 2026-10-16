@@ -468,6 +468,7 @@ analyzer-reports/phase-88-screenshots/
 
 # SKP Studio build output
 src/WorkflowStudio/dist/
+src/Valence/dist/
 
 # SKP Studio end-to-end output
 src/WorkflowStudio/test-results/

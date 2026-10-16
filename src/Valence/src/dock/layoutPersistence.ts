@@ -3,7 +3,7 @@ import { isDocPanelId, isToolId, RETIRED_TOOL_IDS, type ToolId } from './ids';
 import type { Direction, Home, Side } from './home';
 
 /** localStorage key of the saved window layout (spec §6.2.2: per browser, never in the database). */
-export const LAYOUT_KEY = 'skp.studio.layout';
+export const LAYOUT_KEY = 'skp.valence.layout';
 /** Bumped whenever the saved shape changes; an older or unknown version is ignored, never migrated. */
 export const LAYOUT_VERSION = 1;
 

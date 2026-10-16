@@ -1,0 +1,62 @@
+/* Valence's own parts; everything else is SKP Studio's CSS, copied unchanged. */
+
+/* the empty canvas (stage 1): the blueprint ground with SKP Studio's vignette; the molecule draws here in stage 2 */
+.vcanvas { position: absolute; inset: 0; background: radial-gradient(75% 75% at 50% 45%, rgba(15, 29, 51, .9), rgba(10, 18, 32, 0)), var(--ground); }
+
+/* the workflow multi-select in the capsule toolbar */
+.wfsel { position: relative; }
+.wfsel-b { cursor: pointer; font-family: var(--sans); }
+.wfsel-b:hover, .wfsel-b[aria-expanded="true"] { color: var(--ink); border-color: var(--line-2); }
+.wfsel-n { color: var(--accent); margin: 0 2px 0 4px; }
+.wfsel-list { position: absolute; top: calc(100% + 6px); left: 0; width: 360px; max-height: 60vh; overflow: auto; padding: 8px; background: var(--panel-2);
+  border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 24px 60px -16px rgba(0, 0, 0, .8); z-index: var(--z-menu); font-family: var(--sans); }
+.wfsel-list .input { font-family: var(--mono); font-size: 12px; background: var(--ground-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 6px 8px; color: var(--ink); width: 100%; margin: 0 0 6px; box-sizing: border-box; }
+.wfsel-list .note { font-size: 11.5px; color: var(--faint); line-height: 1.5; padding: 8px; }
+.wfsel-o { display: grid; grid-template-columns: 16px 1fr; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; cursor: pointer; color: var(--ink); }
+.wfsel-o:hover, .wfsel-o:focus-visible { background: rgba(125, 211, 252, .10); outline: none; }
+.wfsel-o b { font-weight: 500; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wfsel-c { color: var(--accent); text-align: center; }
+.wfsel-clear { margin: 6px 0 0 4px; }
+
+/* the molecule (stage 2): the mock's scene and panels over SKP Studio's dark ground */
+.mol { position: absolute; inset: 0; overflow: hidden; }
+.mol-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
+/* cursors (the user's table, 2026-10-15): slide the canvas = open hand, then closed while dragging; move an atom = the
+   four-way arrow; turn = the normal arrow at rest, a circular arrow (white on a dark outline) while dragging */
+.mol.panready .mol-canvas { cursor: grab; }
+.mol.panning .mol-canvas { cursor: grabbing; }
+.mol.movable .mol-canvas { cursor: move; }
+.mol.turning .mol-canvas { cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><g fill='none' stroke-linecap='round' stroke-linejoin='round'><path d='M19 12a7 7 0 1 1-2.05-4.95M17.3 3.8l.36 3.96-3.96-.36' stroke='%230A1220' stroke-width='4'/><path d='M19 12a7 7 0 1 1-2.05-4.95M17.3 3.8l.36 3.96-3.96-.36' stroke='%23fff' stroke-width='2'/></g></svg>") 12 12, grabbing; }
+.mol-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.mol-lbl { position: absolute; transform: translate(-50%, -160%); white-space: nowrap; font: 500 11px/1 var(--mono); color: var(--ink); opacity: .8;
+  text-shadow: 0 0 4px var(--ground), 0 0 8px var(--ground); transition: opacity .15s; }
+.mol-lbl.wf { color: #f2c14e; font-size: 12px; opacity: 1; }
+.mol-lbl.proc { color: #e9e3d6; }
+.mol-lbl.step { color: #b8c7ff; }
+.mol-lbl.schema { color: #cdb4ff; font-size: 10px; opacity: .7; }
+.mol-lbl.cache { color: #e0ad85; font-size: 10px; }
+.mol-lbl.asg { color: #8fd9de; font-size: 9.5px; opacity: .6; }
+.mol-lbl.dim { opacity: .12; }
+/* the legend: the mock's side panel (no hover card: the user, 2026-10-15); the pointer passes through */
+.mol-side { position: absolute; top: 16px; right: 16px; width: 300px; max-height: calc(100% - 32px); overflow: auto; box-sizing: border-box; pointer-events: none;
+  background: rgba(14, 24, 40, .86); border: 1px solid var(--line); border-radius: 8px; backdrop-filter: blur(6px); font-family: var(--sans); color: var(--ink); z-index: 6; }
+.mol-side section { padding: 10px 12px; border-bottom: 1px solid var(--line); min-width: 0; }
+.mol-side section:last-child { border-bottom: 0; }
+.mol-side h2 { margin: 0 0 8px; font: 600 11px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.mol-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; font-size: 12.5px; }
+.mol-legend span { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.mol-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+
+/* the Inspector (spec §3c): preview or pinned, the virtual-change note, the one read-only show/hide section */
+.insp-head { display: flex; align-items: center; gap: 8px; }
+.insp-state { font-size: 11.5px; color: var(--faint); }
+.insp-state.is-pinned { color: var(--accent); }
+.insp-virtual { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 16px 0; padding: 6px 10px; border: 1px solid rgba(251, 191, 36, .35); border-radius: 6px; font-size: 12px; color: var(--x); }
+.insp-toggle { width: 100%; background: none; border: 0; padding: 0; font-family: inherit; cursor: pointer; text-align: left; }
+.insp-toggle:hover { color: var(--ink); }
+.insp-ro .field { align-items: start; }
+.insp-wrap { white-space: normal; overflow-wrap: anywhere; }
+.insp-divider { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+.insp-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+label.insp-edited::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--x); vertical-align: 1px; }
+select.input { font-family: var(--sans); font-size: 12.5px; }
