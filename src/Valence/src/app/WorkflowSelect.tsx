@@ -3,9 +3,9 @@ import { useEffect, useRef, useState } from 'react';
 export interface WorkflowItem { id: string; label: string }
 
 /**
- * The document's workflow multi-select (spec §2.4): picks which workflows the whole-project molecule highlights. Nothing
- * is loaded by it; it only says which ones stand out. A pill in the capsule toolbar opens a checked list below it, in
- * the panel's own window (a pop-out's too); a press outside or Esc closes it.
+ * The workflow multi-select (spec §2.4): picks which workflows the whole-project molecule highlights. Nothing is loaded
+ * by it; it only says which ones stand out. A pill on the main menu strip opens a checked list below it, aligned to its
+ * right edge; a press outside or Esc closes it.
  */
 export function WorkflowSelect({ items, selected, onChange, note }: {
   items: readonly WorkflowItem[];

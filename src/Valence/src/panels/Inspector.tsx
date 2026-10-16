@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import type { Workspace } from '../app/workspace';
 import { useWorkspace } from '../app/workspace';
+import { canDeleteArrow, canDeleteAtom, CONSEQUENCE, goneArrows, type Removed, type Verdict } from '../molecule/deletion';
 import { arrowRows, CONDITIONS, detailRows, FIELDS, rowOf, savedText, type FieldSpec } from '../molecule/fields';
-import { TYPES } from '../molecule/model';
+import { arrowKey, BOND, isArrowKey, KINDS, TYPES, type Molecule } from '../molecule/model';
 import { PaneNote } from './PaneNote';
 
 /** Where the read-only section's open/closed state is kept (this browser; a convenience, not the session). */
@@ -14,7 +15,9 @@ const writeOpen = (open: boolean) => { try { globalThis.localStorage?.setItem(OP
  * The Inspector (spec §3c, approved 2026-10-15). Hovering an atom previews it; clicking it pins it, and the pinned atom
  * is edited while nothing is hovered. On top, open: the kind, then every writable field that is not an arrow (the schema's
  * definition is read-only for now). Below, one show/hide "Read-only" section: the details, then the atom's arrows. An
- * edit changes the virtual entity only (decision 8): nothing reaches BaseApi until an apply step exists.
+ * edit changes the virtual entity only (decision 8): nothing reaches BaseApi until an apply step exists. A pinned atom
+ * says whether Delete may delete it (spec §6); a deleted one is a ghost, read-only until undone. An arrow hovered or
+ * pinned shows its two ends, where it is held, whether it can be deleted and what deleting it changes (§6b).
  */
 export function Inspector({ workspace }: { workspace: Workspace }) {
   const data = useWorkspace(workspace, (s) => s.data);
@@ -22,16 +25,20 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
   const hovered = useWorkspace(workspace, (s) => s.hovered);
   const pinned = useWorkspace(workspace, (s) => s.pinned);
   const edits = useWorkspace(workspace, (s) => s.edits);
+  const removed = useWorkspace(workspace, (s) => s.removed);
   const [open, setOpen] = useState(readOpen);
 
   if (!data || !molecule) return <PaneNote pane="inspector">Reading the project…</PaneNote>;
   const key = hovered ?? pinned;
-  if (key === null) return <PaneNote pane="inspector">Nothing selected. Hover an atom to preview it; click it to pin it.</PaneNote>;
+  if (key === null) return <PaneNote pane="inspector">Nothing selected. Hover an atom or arrow to preview it; click it to pin it.</PaneNote>;
+  if (isArrowKey(key)) return <ArrowInspector molecule={molecule} removed={removed} arrow={key} preview={key !== pinned} />;
   const atom = molecule.atoms.get(key);
   const row = atom ? rowOf(data, atom.type, atom.id) : undefined;
   if (!atom || !row) return <PaneNote pane="inspector">This row is no longer in the project.</PaneNote>;
 
   const preview = key !== pinned;
+  const ghost = removed.atoms.includes(key);
+  const gone = goneArrows(molecule, removed);
   const changed = edits[key] ?? {};
   const dirty = Object.keys(changed).length > 0;
   const toggle = () => { setOpen((o) => { writeOpen(!o); return !o; }); };
@@ -45,7 +52,13 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
         <span className={preview ? 'insp-state' : 'insp-state is-pinned'}>{preview ? 'Preview · click the atom to pin it' : 'Pinned'}</span>
       </div>
       <div className="pbody">
-        {dirty && !preview && (
+        {ghost && (
+          <div className="insp-virtual ghost">
+            <span>● Deleted in Valence only, not applied</span><span className="insp-hint">Ctrl+Z on the canvas undoes it</span>
+          </div>
+        )}
+        {!ghost && !preview && <DeleteVerdict verdict={canDeleteAtom(molecule, removed, key)} />}
+        {dirty && !preview && !ghost && (
           <div className="insp-virtual">
             <span>● Changed in Valence only, not applied</span>
             <button type="button" className="link" onClick={() => workspace.revert(key)}>Revert</button>
@@ -57,7 +70,7 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
             const value = changed[spec.key] ?? saved;
             return (
               <Field key={`${key}:${spec.key}`} id={`insp-${spec.key}`} spec={spec} value={value} edited={spec.key in changed}
-                locked={preview ? 'Click the atom to pin it, then edit' : spec.readOnly}
+                locked={ghost ? 'Deleted in Valence: undo the delete to edit' : preview ? 'Click the atom to pin it, then edit' : spec.readOnly}
                 onChange={(text) => workspace.edit(key, spec.key, text, saved)} />
             );
           })}
@@ -73,11 +86,52 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
               ))}
               <div className="insp-divider">arrows</div>
               {arrows.length === 0 && <div className="note">No arrows leave it.</div>}
-              {arrows.map((a, i) => (
-                <div key={i} className="field"><label>{a.label}</label><span className="ro">→ {a.target}</span></div>
+              {arrows.map((a) => (
+                <div key={a.key} className={gone.has(a.key) ? 'field gone' : 'field'}><label>{a.label}</label><span className="ro">→ {a.target}</span></div>
               ))}
             </div>
           )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+/** Whether Delete may delete what is pinned, and what goes with it (spec §6). */
+function DeleteVerdict({ verdict }: { verdict: Verdict }) {
+  if (!verdict.ok) return <div className="insp-delete no"><b>Delete</b> ✗ {verdict.reason}</div>;
+  const n = verdict.taking.length;
+  const taking = n === 0 ? '' : n === 1 ? ' — the arrow pointing at it goes with it' : ` — the ${n} arrows pointing at it go with it`;
+  return <div className="insp-delete ok"><b>Delete</b> ✓ allowed{taking}. Press Delete on the canvas.</div>;
+}
+
+/** A hovered or pinned arrow (spec §6b): its two ends, where it is held, whether it can be deleted and what that changes. */
+function ArrowInspector({ molecule, removed, arrow, preview }: { molecule: Molecule; removed: Removed; arrow: string; preview: boolean }) {
+  const x = molecule.arrows.find((a) => arrowKey(a) === arrow);
+  if (!x) return <PaneNote pane="inspector">This arrow is no longer in the project.</PaneNote>;
+  const kind = KINDS[x.kind];
+  const ghost = goneArrows(molecule, removed).has(arrow);
+  const end = (k: string) => { const a = molecule.atoms.get(k); return a ? `${TYPES[a.type].label} ${a.name}` : k; };
+  return (
+    <div className="paneBody" data-pane="inspector">
+      <div className="ph2 insp-head">
+        <span className="kindpill">ARROW</span>
+        <span className={preview ? 'insp-state' : 'insp-state is-pinned'}>{preview ? 'Preview · click the arrow to pin it' : 'Pinned'}</span>
+      </div>
+      <div className="pbody">
+        {ghost && (
+          <div className="insp-virtual ghost">
+            <span>● Deleted in Valence only, not applied</span><span className="insp-hint">Ctrl+Z on the canvas undoes it</span>
+          </div>
+        )}
+        {!ghost && !preview && <DeleteVerdict verdict={canDeleteArrow(molecule, removed, arrow)} />}
+        <section className="sec" aria-label="Arrow">
+          <div className="field"><label>Kind</label><span className="ro">{kind.label}</span></div>
+          <div className="field"><label>From</label><span className="ro insp-wrap">{end(x.from)}</span></div>
+          <div className="field"><label>To</label><span className="ro insp-wrap">{end(x.to)}</span></div>
+          <div className="field"><label>Held in</label><span className="ro insp-wrap">{kind.where}</span></div>
+          <div className="field"><label>Bond</label><span className="ro insp-wrap">{BOND[kind.bond].name}: {BOND[kind.bond].note}</span></div>
+          <div className="field tall"><label>If deleted</label><span className="ro insp-wrap">{CONSEQUENCE[x.kind]}</span></div>
         </section>
       </div>
     </div>

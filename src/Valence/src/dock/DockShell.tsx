@@ -4,7 +4,7 @@ import { DockviewReact, themeVisualStudio, type DockviewApi, type DockviewGroupP
 import { AutoHide } from './AutoHide';
 import { canDrop } from './dropRules';
 import type { Rect } from './home';
-import { docPanelId, documentIdOf, isDocPanelId, isToolId, TOOL_IDS, TOOL_TITLES, type ToolId } from './ids';
+import { docPanelId, documentIdOf, isDocPanelId, isToolId, TOOL_IDS, TOOL_TITLES, type PaneId, type ToolId } from './ids';
 import { keyCommand } from './keys';
 import { browserStorage, readLayout, writeLayout, type SavedLayout } from './layoutPersistence';
 import { anchorBelow, Menu, type Anchor, type MenuEntry } from './Menu';
@@ -15,7 +15,7 @@ import { Tooltips } from './Tooltip';
 import { windowKey } from './windowKey';
 import {
   addDocument, applyLayout, autoHide, captureLayout, closeTool, dockAsDocument, dockBack, documentArea, ensureDocumentArea, floatGroup,
-  floatPanel, markDocumentArea, newMemory, pinBack as pinToolBack, popOut, resetLayout, showTool, toolSide,
+  floatPanel, markDocumentArea, newMemory, pinBack as pinToolBack, resetLayout, showTool, toggleFloatMaximize, toolSide,
 } from './windowActions';
 
 export type { DockDocument } from './parts';
@@ -101,9 +101,9 @@ export function DockShell(props: DockShellProps) {
   const applying = useRef(false);
   const mru = useRef<string[]>([]);
 
-  const [hidden, setHidden] = useState<ToolId[]>([]);
-  const [flyId, setFlyId] = useState<ToolId | null>(null);
-  const [fresh, setFresh] = useState<ReadonlySet<ToolId>>(new Set());
+  const [hidden, setHidden] = useState<PaneId[]>([]);
+  const [flyId, setFlyId] = useState<PaneId | null>(null);
+  const [fresh, setFresh] = useState<ReadonlySet<PaneId>>(new Set());
   const [menu, setMenu] = useState<{ label: string; entries: MenuEntry[]; anchor: Anchor; strip?: StripMenu } | null>(null);
   const [picker, setPicker] = useState<Anchor | null>(null);
   const [switcher, setSwitcher] = useState<{ order: string[]; index: number; doc: Document } | null>(null);
@@ -136,7 +136,7 @@ export function DockShell(props: DockShellProps) {
     if (stale.length > 0 && !dv.panels.some((p) => isDocPanelId(p.id))) ensureDocumentArea(dv, memory);
   }, [memory]);
 
-  const openFly = useCallback((id: ToolId) => {
+  const openFly = useCallback((id: PaneId) => {
     setFlyId(id);
     setFresh((f) => { const next = new Set(f); next.delete(id); return next; });
     mru.current = touch(mru.current, id);
@@ -150,7 +150,7 @@ export function DockShell(props: DockShellProps) {
     if (ids.length > 0) setHidden((h) => [...h, ...ids.filter((id) => !h.includes(id))]);
   }, [memory, dockRect]);
 
-  const pinBack = useCallback((id: ToolId) => {
+  const pinBack = useCallback((id: PaneId) => {
     if (!api) return;
     setFlyId(null);
     const back = pinToolBack(api, memory, id);
@@ -308,7 +308,9 @@ export function DockShell(props: DockShellProps) {
   }, [api, memory, dockRect]);
 
   const toggleMaximize = useCallback((group: DockviewGroupPanel) => {
-    if (group.api.location.type !== 'grid') return;
+    const where = group.api.location.type;
+    if (where === 'floating') { toggleFloatMaximize(group); return; }
+    if (where !== 'grid') return;
     if (group.api.isMaximized()) group.api.exitMaximized(); else group.api.maximize();
   }, []);
 
@@ -328,12 +330,10 @@ export function DockShell(props: DockShellProps) {
     if (isDoc && docked) {
       entries.push({ id: 'max', icon: '▢', label: group.api.isMaximized() ? 'Restore' : 'Maximize', kbd: 'dbl-click', onSelect: () => toggleMaximize(group) });
     }
-    if (!isDoc) {
-      if (documentArea(api, memory, group)) {
-        entries.push({ id: 'tabbed', icon: '▤', label: 'Dock as tabbed document', onSelect: () => dockAsDocument(api, memory, panel, dockRect()) });
-      }
-      entries.push({ id: 'autohide', icon: '⇥', label: 'Auto hide', onSelect: () => hide(api, panel) });
+    if (!isDoc && documentArea(api, memory, group)) {
+      entries.push({ id: 'tabbed', icon: '▤', label: 'Dock as tabbed document', onSelect: () => dockAsDocument(api, memory, panel, dockRect()) });
     }
+    entries.push({ id: 'autohide', icon: '⇥', label: 'Auto hide', onSelect: () => hide(api, panel) });
     // a pinned document (Valence's one document) is never closed
     const pinned = isDoc && latest.current.props.documents.find((d) => d.id === documentIdOf(panelId))?.pinned === true;
     if (!pinned) entries.push('separator', { id: 'close', icon: '×', label: isDoc ? 'Close document' : 'Close', kbd: isDoc ? 'Alt+W' : '', onSelect: () => closePanel(panelId) });
@@ -364,7 +364,6 @@ export function DockShell(props: DockShellProps) {
         case 'menu': if (group.activePanel) windowMenu(group.activePanel.id, anchor); break;
         case 'hide': if (group.activePanel) hide(api, group.activePanel); break;
         case 'float': floatGroup(api, memory, group, dockRect()); break;
-        case 'popout': popOut(api, memory, group, dockRect()); break;
         case 'maximize': toggleMaximize(group); break;
         case 'dock': dockBack(api, memory, group); break;
       }
@@ -402,7 +401,7 @@ export function DockShell(props: DockShellProps) {
     const info = documentId === null ? undefined : documents.find((d) => d.id === documentId);
     return info
       ? { id, label: info.name, document: true, hint: info.version }
-      : { id, label: isToolId(id) ? TOOL_TITLES[id] : id, document: false, hint: isToolId(id) && hidden.includes(id) ? 'auto-hidden' : undefined };
+      : { id, label: isToolId(id) ? TOOL_TITLES[id] : id, document: false, hint: hidden.includes(id) ? 'auto-hidden' : undefined };
   });
 
   function advanceSwitcher(step: 1 | -1, doc: Document) {
@@ -427,7 +426,7 @@ export function DockShell(props: DockShellProps) {
     setSwitcher(null);
     const id = target ?? current.order[current.index];
     if (!id) return;
-    if (isToolId(id) && latest.current.hidden.includes(id)) openFly(id);
+    if (latest.current.hidden.includes(id)) openFly(id);
     else api?.getPanel(id)?.api.setActive();
   }
 
@@ -550,7 +549,13 @@ export function DockShell(props: DockShellProps) {
             onOpen={openFly}
             onClose={closeFly}
             onPin={pinBack}
-            renderTool={(id) => props.renderTool(id)}
+            titleOf={(id) => (isToolId(id) ? TOOL_TITLES[id] : documents.find((d) => docPanelId(d.id) === id)?.name ?? id)}
+            renderPane={(id) => {
+              if (isToolId(id)) return props.renderTool(id);
+              const documentId = documentIdOf(id);
+              const panel = api?.getPanel(id);
+              return documentId !== null && panel ? props.renderDocument(documentId, panel.api) : null;
+            }}
           />
         </div>
       </div>

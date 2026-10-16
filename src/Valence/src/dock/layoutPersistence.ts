@@ -1,5 +1,5 @@
 import { Orientation, type GroupviewPanelState, type SerializedDockview, type SerializedFloatingGroup, type SerializedGridObject } from 'dockview-react';
-import { isDocPanelId, isToolId, RETIRED_TOOL_IDS, type ToolId } from './ids';
+import { isDocPanelId, isToolId, RETIRED_TOOL_IDS, type PaneId, type ToolId } from './ids';
 import type { Direction, Home, Side } from './home';
 
 /** localStorage key of the saved window layout (spec §6.2.2: per browser, never in the database). */
@@ -17,8 +17,9 @@ export interface SavedLayout {
   /** The main-grid group the documents sat in, kept (possibly empty) so they go back there. */
   documentGroupId: string | null;
   /** Tool panes on an auto-hide rail. */
-  hidden: ToolId[];
-  sides: Partial<Record<ToolId, Side>>;
+  /** Auto-hidden panes: tool panes, and (in the session only) documents. */
+  hidden: PaneId[];
+  sides: Partial<Record<PaneId, Side>>;
   homes: Partial<Record<ToolId, Home>>;
   /**
    * Tool panes that were in a pop-out window, in the order they go back into the dock (each one's
@@ -79,11 +80,12 @@ export function parseLayout(value: unknown): SavedLayout | null {
   const dock = withoutRetired(value.dock, typeof value.documentGroupId === 'string' ? value.documentGroupId : null);
   const retiredRef = (h: Home) => RETIRED_TOOL_IDS.includes(h.ref);
 
-  const hidden = Array.isArray(value.hidden) ? value.hidden.filter((id): id is ToolId => typeof id === 'string' && isToolId(id)) : [];
-  const sides: Partial<Record<ToolId, Side>> = {};
+  const pane = (id: unknown): id is PaneId => typeof id === 'string' && (isToolId(id) || isDocPanelId(id));
+  const hidden = Array.isArray(value.hidden) ? value.hidden.filter(pane) : [];
+  const sides: Partial<Record<PaneId, Side>> = {};
   const homes: Partial<Record<ToolId, Home>> = {};
   if (isRecord(value.sides)) {
-    for (const [id, side] of Object.entries(value.sides)) if (isToolId(id) && isSide(side)) sides[id] = side;
+    for (const [id, side] of Object.entries(value.sides)) if (pane(id) && isSide(side)) sides[id] = side;
   }
   if (isRecord(value.homes)) {
     for (const [id, home] of Object.entries(value.homes)) {

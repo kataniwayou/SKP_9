@@ -1,8 +1,10 @@
 import { parseLayout, type SavedLayout } from '../dock/layoutPersistence';
+import type { Removed } from '../molecule/deletion';
+import type { Change, EditChange, History } from './workspace';
 
 /**
  * The page as the user left it, as SKP Studio keeps its own (spec §6.1): a refresh keeps the dock, the highlighted
- * workflows, the pinned atom and the virtual entities' unapplied edits. Kept per tab in sessionStorage and mirrored to localStorage under the same key, to seed a new tab or a
+ * workflows, the pinned atom or arrow, and the virtual entities' unapplied edits and deletions with their history. Kept per tab in sessionStorage and mirrored to localStorage under the same key, to seed a new tab or a
  * browser restart. Valence's own key, so its session and SKP Studio's never mix.
  */
 export const SESSION_KEY = 'skp.valence.session';
@@ -18,6 +20,10 @@ export interface Session {
   pinned?: string | null;
   /** The virtual entities' edits, not applied (decision 8): field texts by atom key. Optional, so the version stays 1. */
   edits?: Record<string, Record<string, string>>;
+  /** Deleted in Valence and not applied (spec §6). Optional, so the version stays 1. */
+  removed?: Removed;
+  /** The shared undo / redo history of edits and deletions (the user, 2026-10-16: kept on refresh). Optional. */
+  history?: History;
 }
 
 export function readSession(storage: Storage | null): Session | null {
@@ -45,11 +51,36 @@ export function readSession(storage: Storage | null): Session | null {
       if (Object.keys(kept).length) edits[key] = kept;
     }
   }
+  const removed = isRecord(value.removed) ? { atoms: strings(value.removed.atoms), arrows: strings(value.removed.arrows) } : null;
+  const history = isRecord(value.history) ? { past: changes(value.history.past), future: changes(value.history.future) } : null;
   return {
     version: SESSION_VERSION, dock: parseLayout(value.dock), highlighted,
     ...(typeof value.pinned === 'string' ? { pinned: value.pinned } : {}),
     ...(Object.keys(edits).length ? { edits } : {}),
+    ...(removed && (removed.atoms.length || removed.arrows.length) ? { removed } : {}),
+    ...(history && (history.past.length || history.future.length) ? { history } : {}),
   };
+}
+
+const strings = (v: unknown): string[] => (Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === 'string' && x !== ''))] : []);
+const fieldsOf = (v: unknown): Record<string, string> | null =>
+  (isRecord(v) ? Object.fromEntries(Object.entries(v).filter((f): f is [string, string] => typeof f[1] === 'string')) : null);
+/** The history's steps that are whole; a malformed one is dropped, not the history. */
+function changes(v: unknown): Change[] {
+  if (!Array.isArray(v)) return [];
+  return v.flatMap((c): Change[] => {
+    if (!isRecord(c) || typeof c.label !== 'string') return [];
+    const edits = Array.isArray(c.edits)
+      ? c.edits.flatMap((e): EditChange[] => (isRecord(e) && typeof e.key === 'string' ? [{ key: e.key, before: fieldsOf(e.before), after: fieldsOf(e.after) }] : []))
+      : [];
+    return [{
+      label: c.label,
+      ...(edits.length ? { edits } : {}),
+      ...(Array.isArray(c.atoms) ? { atoms: strings(c.atoms) } : {}),
+      ...(Array.isArray(c.arrows) ? { arrows: strings(c.arrows) } : {}),
+      ...(typeof c.merge === 'string' ? { merge: c.merge } : {}),
+    }];
+  });
 }
 
 /** False when the browser refuses (quota, blocked storage); never throws. */

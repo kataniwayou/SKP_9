@@ -60,6 +60,9 @@
 .fly.r { top: 0; bottom: 0; right: 28px; width: 340px; animation: flyR .16s ease-out; }
 .fly.l { top: 0; bottom: 0; left: 28px; width: 340px; animation: flyL .16s ease-out; }
 .fly.b { left: 0; right: 0; bottom: 26px; height: 220px; animation: flyB .16s ease-out; }
+/* a hidden document is the main view: it flies out over most of the dock */
+.fly.doc.r, .fly.doc.l { width: 70%; }
+.fly.doc.b { height: 70%; }
 @keyframes flyL { from { transform: translateX(-24px); opacity: 0; } }
 @keyframes flyR { from { transform: translateX(24px); opacity: 0; } }
 @keyframes flyB { from { transform: translateY(24px); opacity: 0; } }

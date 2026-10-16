@@ -19,7 +19,7 @@ export interface DockDocument {
   pinned?: boolean;
 }
 
-export type GroupAction = 'open' | 'menu' | 'hide' | 'float' | 'popout' | 'maximize' | 'dock';
+export type GroupAction = 'open' | 'menu' | 'hide' | 'float' | 'maximize' | 'dock';
 
 /** What the dock's parts (tabs, header buttons, hosts) ask of the shell. */
 export interface ShellApi {
@@ -112,9 +112,9 @@ export function StudioTab({ api }: IDockviewPanelHeaderProps) {
 }
 
 /**
- * A group's header buttons (mockup v49 GroupActions). Docked: + (documents), ▾ and ⇥ (tool
- * panes), float, pop out, maximize. Floating or popped out: ▾ (tool panes), Dock, and pop out
- * (floating only). An empty group is the document area waiting for a document.
+ * A group's header buttons (mockup v49 GroupActions). Docked: + (documents), ▾, ⇥, float, maximize.
+ * Floating: ▾, Dock, maximize / restore. Documents and tool panes get the same ones (Valence, 2026-10-16). Valence has no
+ * pop-out button (the user, 2026-10-16). An empty group is the document area waiting for a document.
  */
 export function GroupActions({ group, panels, location }: IDockviewHeaderActionsProps) {
   const shell = useShell();
@@ -135,17 +135,16 @@ export function GroupActions({ group, panels, location }: IDockviewHeaderActions
       {where === 'grid' ? (
         <>
           {documents && shell.canLoad && button('open', '+', 'Load workflow')}
-          {!documents && button('menu', '▾', 'Window position')}
-          {!documents && button('hide', '⇥', 'Auto-hide to a side tab')}
+          {panels.length > 0 && button('menu', '▾', 'Window position')}
+          {panels.length > 0 && button('hide', '⇥', 'Auto-hide to a side tab')}
           {panels.length > 0 && button('float', '⧉', 'Float this group (or Shift+drag a tab)')}
-          {panels.length > 0 && button('popout', '⇱', 'Pop out to its own window')}
           {panels.length > 0 && button('maximize', '▢', 'Maximize / restore')}
         </>
       ) : (
         <>
-          {!documents && button('menu', '▾', 'Window position')}
+          {panels.length > 0 && button('menu', '▾', 'Window position')}
           {button('dock', '⤓', 'Dock back into the main layout')}
-          {where === 'floating' && button('popout', '⇱', 'Pop out to its own window')}
+          {where === 'floating' && button('maximize', '▢', 'Maximize / restore')}
         </>
       )}
     </div>

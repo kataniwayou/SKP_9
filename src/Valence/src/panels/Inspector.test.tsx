@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ProjectData } from '../api/project';
 import { createWorkspace, type Workspace } from '../app/workspace';
-import { atomKey, buildMolecule } from '../molecule/model';
+import { arrowKey, atomKey, buildMolecule } from '../molecule/model';
 import { Inspector } from './Inspector';
 
 const HASH = 'a'.repeat(64);
@@ -27,7 +27,7 @@ const input = (label: string) => screen.getByLabelText(label) as HTMLInputElemen
 describe('Inspector', () => {
   it('says how to start when nothing is hovered or pinned', () => {
     render(<Inspector workspace={ws} />);
-    expect(screen.getByText('Nothing selected. Hover an atom to preview it; click it to pin it.')).toBeInTheDocument();
+    expect(screen.getByText('Nothing selected. Hover an atom or arrow to preview it; click it to pin it.')).toBeInTheDocument();
   });
 
   it('previews a hovered atom read-only, and edits it once pinned', () => {
@@ -99,5 +99,26 @@ describe('Inspector', () => {
     render(<Inspector workspace={ws} />);
     expect([...(screen.getByLabelText('Entry condition') as HTMLSelectElement).options].map((o) => o.textContent))
       .toEqual(['PreviousCompleted', 'PreviousFailed', 'PreviousCancelled', 'Always', 'Never']);
+  });
+  it('shows a pinned arrow: its ends, whether it can be deleted and what that changes (spec §6b)', () => {
+    ws.pin(arrowKey({ kind: 'input', from: P, to: C }));
+    render(<Inspector workspace={ws} />);
+    expect(screen.getByText('ARROW')).toBeInTheDocument();
+    expect(screen.getByText('Processor file-fetcher')).toBeInTheDocument();
+    expect(screen.getByText('Schema file-locator')).toBeInTheDocument();
+    expect(screen.getByText(/✓ allowed/)).toBeInTheDocument();
+    expect(screen.getByText(/schema-edge check passes on an empty slot/)).toBeInTheDocument();
+  });
+
+  it("says why a pinned atom cannot be deleted, and shows a deleted one as a read-only ghost", () => {
+    ws.pin(P);
+    const { rerender } = render(<Inspector workspace={ws} />);
+    expect(screen.getByText(/✗ file-fetcher cannot be deleted/)).toBeInTheDocument();
+    act(() => { ws.pin(C); });
+    rerender(<Inspector workspace={ws} />);
+    expect(screen.getByText(/✓ allowed — the arrow pointing at it goes with it/)).toBeInTheDocument();
+    act(() => { ws.remove(C); });
+    expect(screen.getByText('● Deleted in Valence only, not applied')).toBeInTheDocument();
+    expect(input('Name').readOnly).toBe(true);
   });
 });

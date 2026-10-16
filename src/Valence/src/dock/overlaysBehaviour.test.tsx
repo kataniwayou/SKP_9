@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AutoHide } from './AutoHide';
 import { Menu } from './Menu';
 import { Picker } from './Picker';
-import type { ToolId } from './ids';
+import { TOOL_TITLES, type ToolId } from './ids';
 
 describe('Menu keyboard', () => {
   const setup = () => {
@@ -103,8 +103,8 @@ describe('AutoHide', () => {
   const view = (over: Partial<Parameters<typeof AutoHide>[0]> = {}) => {
     const onOpen = vi.fn(), onClose = vi.fn(), onPin = vi.fn();
     const props = {
-      hidden, sideOf: (id: ToolId) => (id === 'inspector' ? 'right' as const : 'bottom' as const),
-      flyId: null as ToolId | null, fresh: new Set<ToolId>(), onOpen, onClose, onPin, renderTool: (id: ToolId) => <div>{id} body</div>, ...over,
+      hidden, sideOf: (id: string) => (id === 'inspector' ? 'right' as const : 'bottom' as const), titleOf: (id: string) => TOOL_TITLES[id as ToolId],
+      flyId: null as string | null, fresh: new Set<string>(), onOpen, onClose, onPin, renderPane: (id: string) => <div>{id} body</div>, ...over,
     };
     const r = render(<AutoHide {...props} />);
     return { ...r, onOpen, onClose, onPin, props };

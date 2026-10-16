@@ -12,6 +12,9 @@ export const TOOL_TITLES: Readonly<Record<ToolId, string>> = {
 
 export const isToolId = (id: string): id is ToolId => (TOOL_IDS as readonly string[]).includes(id);
 
+/** A pane that auto-hides to a rail tab: a tool pane's id or a document's panel id (`doc:…`; Valence, 2026-10-16). */
+export type PaneId = string;
+
 /** Tool panes the studio had and no longer has; a stored layout holding one loads without it (layoutPersistence). */
 export const RETIRED_TOOL_IDS: readonly string[] = ['problems'];
 

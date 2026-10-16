@@ -32,7 +32,17 @@ describe('App', () => {
     expect(within(screen.getByRole('menubar')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['View', 'Window']);
   });
 
-  it('keeps the last highlighted workflows in the session while the multi-select is off the canvas', () => {
+  it('has the workflow filter at the right of the menu strip (the user, 2026-10-16)', () => {
+    setup();
+    const strip = screen.getByRole('menubar');
+    const filter = within(strip).getByRole('button', { name: /Workflows/ });
+    expect(filter.closest('.mstatus')).not.toBeNull();
+    expect(filter).toHaveTextContent('none highlighted');
+    act(() => filter.click());
+    expect(within(strip).getByText('Reading the project…')).toBeInTheDocument(); // BaseApi never answers here
+  });
+
+  it('keeps the picked workflows in the session', () => {
     const tabStorage = memoryStorage({ [SESSION_KEY]: JSON.stringify({ version: 1, dock: null, highlighted: ['a'] }) });
     const { view } = setup(memoryStorage(), tabStorage);
     act(() => view.unmount()); // the unmount flushes a pending write

@@ -92,8 +92,8 @@ describe('overlays with nodes from another realm (a pop-out window)', () => {
     const host = doc.body.appendChild(doc.createElement('div'));
     const onClose = vi.fn();
     render(
-      <AutoHide hidden={['inspector']} sideOf={() => 'right'} flyId="inspector" fresh={new Set()} onOpen={() => {}} onClose={onClose} onPin={() => {}}
-        renderTool={() => <div className="inside">x</div>} />,
+      <AutoHide hidden={['inspector']} sideOf={() => 'right'} titleOf={() => 'Inspector'} flyId="inspector" fresh={new Set()} onOpen={() => {}} onClose={onClose} onPin={() => {}}
+        renderPane={() => <div className="inside">x</div>} />,
       { container: host },
     );
 

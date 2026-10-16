@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import type { Side } from './home';
-import { TOOL_TITLES, type ToolId } from './ids';
+import { isDocPanelId, type PaneId } from './ids';
 import { asElement } from './nodes';
 
 export type Rail = 'l' | 'r' | 'b';
@@ -11,14 +11,15 @@ const OPEN_AFTER_MS = 280; // resting on a side tab slides its pane out
 const CLOSE_AFTER_MS = 550; // leaving both tab and pane slides it back
 
 interface Props {
-  hidden: readonly ToolId[];
-  sideOf: (id: ToolId) => Side;
-  flyId: ToolId | null;
-  fresh: ReadonlySet<ToolId>;
-  onOpen: (id: ToolId) => void;
+  hidden: readonly PaneId[];
+  sideOf: (id: PaneId) => Side;
+  titleOf: (id: PaneId) => string;
+  flyId: PaneId | null;
+  fresh: ReadonlySet<PaneId>;
+  onOpen: (id: PaneId) => void;
   onClose: () => void;
-  onPin: (id: ToolId) => void;
-  renderTool: (id: ToolId) => ReactNode;
+  onPin: (id: PaneId) => void;
+  renderPane: (id: PaneId) => ReactNode;
 }
 
 /**
@@ -26,9 +27,9 @@ interface Props {
  * mockup: hidden panes become side tabs on the left, right or bottom rail. A click, or resting on
  * a tab, slides the pane out over the dock; leaving both, a press elsewhere or Esc slides it back;
  * Dock pins it back into the layout. A tab marked fresh glows (the Inspector's content changed).
- * Rendered inside `.dockwrap`, whose grid places the rails.
+ * A hidden document (Valence's Canvas) flies out larger (`.fly.doc`). Rendered inside `.dockwrap`, whose grid places the rails.
  */
-export function AutoHide({ hidden, sideOf, flyId, fresh, onOpen, onClose, onPin, renderTool }: Props) {
+export function AutoHide({ hidden, sideOf, titleOf, flyId, fresh, onOpen, onClose, onPin, renderPane }: Props) {
   const openTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const flyRef = useRef<HTMLDivElement>(null);
@@ -88,7 +89,7 @@ export function AutoHide({ hidden, sideOf, flyId, fresh, onOpen, onClose, onPin,
             onPointerLeave={() => { clearTimeout(openTimer.current); closeLater(); }}
           >
             <i className="fd" />
-            {TOOL_TITLES[id]}
+            {titleOf(id)}
           </div>
         ))}
       </div>
@@ -103,19 +104,19 @@ export function AutoHide({ hidden, sideOf, flyId, fresh, onOpen, onClose, onPin,
       {flyId !== null && (
         <div
           ref={flyRef}
-          className={`fly ${railOf(sideOf(flyId))}`}
+          className={`fly ${railOf(sideOf(flyId))}${isDocPanelId(flyId) ? ' doc' : ''}`}
           role="region"
-          aria-label={TOOL_TITLES[flyId]}
+          aria-label={titleOf(flyId)}
           onPointerEnter={() => clearTimeout(closeTimer.current)}
           onPointerLeave={closeLater}
         >
           <div className="fly-h">
-            <span>{TOOL_TITLES[flyId]}</span>
+            <span>{titleOf(flyId)}</span>
             <span className="spacer" />
             <button type="button" data-tip="Dock it back into the layout" onClick={() => onPin(flyId)}>⤓ Dock</button>
             <button type="button" aria-label="Hide" data-tip="Hide (Esc)" onClick={onClose}>×</button>
           </div>
-          <div className="fly-b">{renderTool(flyId)}</div>
+          <div className="fly-b">{renderPane(flyId)}</div>
         </div>
       )}
     </>

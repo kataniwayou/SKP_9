@@ -27,6 +27,9 @@ export interface Molecule {
 }
 
 export const atomKey = (type: AtomType, id: string) => `${type}:${id}`;
+/** An arrow's key: `${kind}|${from}|${to}` (unique: one foreign key value per kind and pair). Atom keys never hold a `|`. */
+export const arrowKey = (x: { kind: ArrowKind; from: string; to: string }) => `${x.kind}|${x.from}|${x.to}`;
+export const isArrowKey = (key: string) => key.includes('|');
 
 /** The mock's atom styles (docs/valence/molecule-mock.html): colour, radius, label, table. */
 export const TYPES: Readonly<Record<AtomType, { color: number; r: number; label: string; table: string }>> = {

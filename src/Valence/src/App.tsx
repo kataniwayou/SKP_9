@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createHighlights } from './app/highlights';
 import { browserTabStorage, createSaver, readTabSession, SESSION_VERSION, writeTabSession } from './app/session';
 import { ProjectDocument, PROJECT_ID, PROJECT_NAME } from './app/ProjectDocument';
+import { WorkflowFilter } from './app/WorkflowFilter';
 import { DockShell, type DockDocument } from './dock/DockShell';
 import type { ToolId } from './dock/ids';
 import { browserStorage, type SavedLayout } from './dock/layoutPersistence';
@@ -29,33 +30,33 @@ export function App({ storage, tabStorage }: AppProps) {
   const tab = useMemo(() => (tabStorage === undefined ? browserTabStorage() : tabStorage), [tabStorage]);
   // the session is read once: the page starts from what it was left as
   const session = useMemo(() => readTabSession(tab, resolved), []);
-  // the multi-select is off the canvas until its new place is chosen (the user, 2026-10-15): the session keeps the last choice
+  // the workflow filter (the main menu strip, 2026-10-16): the session keeps the picked workflows
   const highlights = useMemo(() => createHighlights(session?.highlighted ?? []), []);
-  const workspace = useMemo(() => createWorkspace({ pinned: session?.pinned ?? null, edits: session?.edits ?? {} }), []);
+  const workspace = useMemo(() => createWorkspace({ pinned: session?.pinned ?? null, edits: session?.edits ?? {}, removed: session?.removed, history: session?.history }), []);
   const pinned = useWorkspace(workspace, (s) => s.pinned);
-  const dirty = useWorkspace(workspace, (s) => Object.keys(s.edits).length > 0);
+  const dirty = useWorkspace(workspace, (s) => Object.keys(s.edits).length > 0 || s.removed.atoms.length > 0 || s.removed.arrows.length > 0);
   const documents = useMemo(() => documentOf(dirty), [dirty]);
   const [notice, setNotice] = useState<{ id: number; text: string } | undefined>(undefined);
 
   const dockState = useRef<SavedLayout | null>(session?.dock ?? null);
   const refused = useRef(false);
   const saver = useMemo(() => createSaver(() => {
-    const { pinned: pin, edits } = workspace.get();
-    const kept = writeTabSession(tab, resolved, { version: SESSION_VERSION, dock: dockState.current, highlighted: [...highlights.get()], pinned: pin, edits: { ...edits } });
+    const { pinned: pin, edits, removed, history } = workspace.get();
+    const kept = writeTabSession(tab, resolved, { version: SESSION_VERSION, dock: dockState.current, highlighted: [...highlights.get()], pinned: pin, edits: { ...edits }, removed, history });
     if (!kept && !refused.current) setNotice((n) => ({ id: (n?.id ?? 0) + 1, text: 'This browser would not keep the session: a refresh may lose the layout' }));
     refused.current = !kept;
   }), [tab, resolved]);
   // each change of the highlighted workflows is kept, as the dock's are
   useEffect(() => highlights.subscribe(() => saver.schedule()), [highlights, saver]);
-  // the pin and the edits too (a refresh keeps unapplied edits); hovering changes neither, so it writes nothing
+  // the pin, the edits, the deletions and their history too (a refresh keeps them); hovering changes none, so it writes nothing
   useEffect(() => {
     let last = workspace.get();
-    return workspace.subscribe(() => { const now = workspace.get(); if (now.pinned !== last.pinned || now.edits !== last.edits) saver.schedule(); last = now; });
+    return workspace.subscribe(() => { const now = workspace.get(); if (now.pinned !== last.pinned || now.edits !== last.edits || now.removed !== last.removed || now.history !== last.history) saver.schedule(); last = now; });
   }, [workspace, saver]);
   const renderTool = (id: ToolId) => {
     switch (id) {
       case 'inspector': return <Inspector workspace={workspace} />;
-      case 'output': return <Output />;
+      case 'output': return <Output workspace={workspace} />;
       case 'toolbox': return <Toolbox />;
     }
   };
@@ -70,10 +71,11 @@ export function App({ storage, tabStorage }: AppProps) {
       documents={documents}
       activeDocumentId={PROJECT_ID}
       notice={notice}
+      status={<WorkflowFilter workspace={workspace} highlights={highlights} />}
       onActivateDocument={() => {}}
       onCloseDocument={() => {}}
       onOpenWorkflow={() => {}}
-      renderDocument={() => <ProjectDocument workspace={workspace} />}
+      renderDocument={() => <ProjectDocument workspace={workspace} highlights={highlights} />}
       renderTool={renderTool}
       inspectorKey={pinned ?? ''}
       onEscape={() => {}}

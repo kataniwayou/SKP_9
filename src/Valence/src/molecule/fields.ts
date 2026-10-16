@@ -1,5 +1,5 @@
 import type { ProjectData } from '../api/project';
-import { KINDS, TYPES, type ArrowKind, type AtomType, type Molecule } from './model';
+import { arrowKey, KINDS, TYPES, type ArrowKind, type AtomType, type Molecule } from './model';
 
 /** How a writable field is edited. */
 export type FieldKind = 'text' | 'multiline' | 'json' | 'condition';
@@ -113,6 +113,7 @@ const ARROW_LABEL: Readonly<Record<ArrowKind, string>> = {
 };
 
 /** The arrows that leave an atom (its arrow fields, read-only in the Inspector), each `label → target name`. */
-export function arrowRows(molecule: Molecule, atomKey: string): { label: string; target: string }[] {
-  return molecule.arrows.filter((x) => x.from === atomKey).map((x) => ({ label: ARROW_LABEL[x.kind], target: molecule.atoms.get(x.to)!.name }));
+export function arrowRows(molecule: Molecule, atomKey: string): { label: string; target: string; key: string }[] {
+  return molecule.arrows.filter((x) => x.from === atomKey)
+    .map((x) => ({ label: ARROW_LABEL[x.kind], target: molecule.atoms.get(x.to)!.name, key: arrowKey(x) }));
 }

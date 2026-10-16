@@ -1,6 +1,6 @@
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
 import { findHome, SIDE_DIRECTION, sideOf, spansEdge, toPosition, type GroupBox, type Home, type Rect, type Side } from './home';
-import { docPanelId, documentIdOf, isDocPanelId, isToolId, TOOL_IDS, TOOL_TITLES, type ToolId } from './ids';
+import { docPanelId, documentIdOf, isDocPanelId, isToolId, TOOL_IDS, TOOL_TITLES, type PaneId, type ToolId } from './ids';
 import { gridHolds, sessionDock, stripDocuments, withDocuments, type SavedLayout } from './layoutPersistence';
 
 /**
@@ -9,7 +9,7 @@ import { gridHolds, sessionDock, stripDocuments, withDocuments, type SavedLayout
  * area. Mutated in place by the actions below; the shell keeps one per dock.
  */
 export interface DockMemory {
-  sides: Partial<Record<ToolId, Side>>;
+  sides: Partial<Record<PaneId, Side>>;
   homes: Partial<Record<string, Home>>;
   documentGroupId: string | null;
 }
@@ -23,7 +23,8 @@ const TOOL_SIZE: Readonly<Record<ToolId, number>> = { inspector: 340, toolbox: 2
 /** Panes that share a group when they share a side (none since Problems went, 2026-10-09). */
 const MATE: Readonly<Partial<Record<ToolId, ToolId>>> = {};
 
-export const toolSide = (memory: DockMemory, id: ToolId): Side => memory.sides[id] ?? DEFAULT_SIDES[id];
+/** The edge a pane belongs to; a document only has one once it was auto-hidden (bottom until then). */
+export const toolSide = (memory: DockMemory, id: PaneId): Side => memory.sides[id] ?? (isToolId(id) ? DEFAULT_SIDES[id] : 'bottom');
 
 const toolPanel = (id: ToolId) => ({ id, component: 'tool', title: TOOL_TITLES[id] });
 const inGrid = (group: DockviewGroupPanel | undefined): group is DockviewGroupPanel => group?.api.location.type === 'grid';
@@ -246,13 +247,39 @@ export function floatGroup(api: DockviewApi, memory: DockMemory, group: Dockview
   keepingToolSizes(api, memory, () => api.addFloatingGroup(group));
 }
 
-/** Pops a group out into its own browser window, remembering where it was. */
-export function popOut(api: DockviewApi, memory: DockMemory, group: DockviewGroupPanel, dock: Rect): void {
-  if (!liveGroup(api, group)) return;
-  recordHome(api, memory, group, dock);
-  // the group leaves the grid once the window has opened
-  const putBack = noteToolSizes(api, memory);
-  void api.addPopoutGroup(group).then(putBack);
+/** A floating window's box, in pixels from its container's top left (dockview's `AnchoredBox`). */
+type FloatBox = { top?: number; bottom?: number; left?: number; right?: number; width: number; height: number };
+/**
+ * dockview's floating window around a group. Its public API never reaches a float's bounds from a
+ * group, so the group api's `accessor` (the dockview component) and the overlay's container are read here.
+ */
+type FloatingWindow = { overlay: { toJSON(): FloatBox; setBounds(box: Partial<FloatBox>): void; options: { container: HTMLElement } } };
+const floatingWindow = (group: DockviewGroupPanel): FloatingWindow | undefined =>
+  (group.api as unknown as { accessor: { getFloatingWindowForGroup(g: DockviewGroupPanel): FloatingWindow | undefined } })
+    .accessor.getFloatingWindowForGroup(group);
+/** Each maximized float's box before it was maximized; restore puts it back. */
+const floatBefore = new WeakMap<DockviewGroupPanel, FloatBox>();
+
+/**
+ * Maximize / restore for a floating group: maximized, it fills the dock area; restore puts back the
+ * box it had (or, after a reload lost that, a centred box of 60%). A float counts as maximized while
+ * it covers the whole area, so moving or resizing it un-maximizes it.
+ */
+export function toggleFloatMaximize(group: DockviewGroupPanel): void {
+  const float = floatingWindow(group);
+  if (!float) return;
+  const area = float.overlay.options.container.getBoundingClientRect();
+  const box = float.overlay.toJSON();
+  const full = (box.top ?? 0) <= 0 && (box.left ?? 0) <= 0 && box.width >= area.width - 1 && box.height >= area.height - 1;
+  if (!full) {
+    floatBefore.set(group, box);
+    float.overlay.setBounds({ top: 0, left: 0, width: area.width, height: area.height });
+    return;
+  }
+  const width = Math.round(area.width * 0.6), height = Math.round(area.height * 0.6);
+  float.overlay.setBounds(floatBefore.get(group)
+    ?? { top: Math.round((area.height - height) / 2), left: Math.round((area.width - width) / 2), width, height });
+  floatBefore.delete(group);
 }
 
 /**
@@ -304,27 +331,34 @@ export function dockBack(api: DockviewApi, memory: DockMemory, group: DockviewGr
  * slot and size, so pinning it back is exact); a floating, popped-out or document-sharing pane
  * leaves the layout instead, remembering where it was. Returns the panes that go to a rail.
  */
-export function autoHide(api: DockviewApi, memory: DockMemory, panel: IDockviewPanel, dock: Rect): ToolId[] {
-  if (!isToolId(panel.id) || !livePanel(api, panel)) return [];
+export function autoHide(api: DockviewApi, memory: DockMemory, panel: IDockviewPanel, dock: Rect): PaneId[] {
+  const isDoc = isDocPanelId(panel.id);
+  if ((!isDoc && !isToolId(panel.id)) || !livePanel(api, panel)) return [];
+  // a document hides with its whole group, from the grid: a floating one docks back first
+  if (isDoc && !inGrid(panel.group)) dockBack(api, memory, panel.group);
   const group = panel.group;
-  if (inGrid(group) && !hasDocument(group)) {
-    for (const p of group.panels) if (isToolId(p.id)) memory.sides[p.id] = sideOf(rectOf(group.element), dock);
+  const alone = isDoc ? group.panels.every((p) => isDocPanelId(p.id)) : !hasDocument(group);
+  if (inGrid(group) && alone) {
+    for (const p of group.panels) memory.sides[p.id] = sideOf(rectOf(group.element), dock);
     group.api.setVisible(false);
-    return group.panels.map((p) => p.id).filter(isToolId);
+    return group.panels.map((p) => p.id);
   }
+  // a document is never taken out of the dock: one sharing its group with tool panes stays
+  if (isDoc) return [];
   recordHome(api, memory, group, dock, [panel]);
   keepingToolSizes(api, memory, () => api.removePanel(panel));
   return [panel.id];
 }
 
 /** Pin back from a rail: a hidden group shows again where it was; a removed pane goes home. Returns the panes that leave the rail. */
-export function pinBack(api: DockviewApi, memory: DockMemory, id: ToolId): ToolId[] {
+export function pinBack(api: DockviewApi, memory: DockMemory, id: PaneId): PaneId[] {
   const panel = api.getPanel(id);
   if (panel && !panel.group.api.isVisible) {
     panel.group.api.setVisible(true);
     panel.api.setActive();
-    return panel.group.panels.map((p) => p.id).filter(isToolId);
+    return panel.group.panels.map((p) => p.id);
   }
+  if (!isToolId(id)) return panel ? [id] : [];
   showTool(api, memory, id);
   return [id];
 }
@@ -369,7 +403,7 @@ export function resetLayout(api: DockviewApi, memory: DockMemory, dockWidth: num
  * Window › Save window layout: dockview's layout without documents, plus what the dock remembers.
  * With `keepDocuments` it is the session's snapshot: the documents stay where they are.
  */
-export function captureLayout(api: DockviewApi, memory: DockMemory, hidden: readonly ToolId[], { keepDocuments = false }: { keepDocuments?: boolean } = {}): SavedLayout {
+export function captureLayout(api: DockviewApi, memory: DockMemory, hidden: readonly PaneId[], { keepDocuments = false }: { keepDocuments?: boolean } = {}): SavedLayout {
   const { dock, documentGroupId, popped: poppedGroups } = (keepDocuments ? sessionDock : stripDocuments)(api.toJSON());
   const homes: SavedLayout['homes'] = {};
   for (const id of TOOL_IDS) { const h = memory.homes[id]; if (h) homes[id] = h; }
@@ -386,7 +420,9 @@ export function captureLayout(api: DockviewApi, memory: DockMemory, hidden: read
   }
   // the remembered area only when the snapshot still holds it (the session drops a pop-out's hidden place)
   const remembered = memory.documentGroupId !== null && gridHolds(dock, memory.documentGroupId) ? memory.documentGroupId : null;
-  return { version: 1, dock, documentGroupId: documentGroupId ?? remembered, hidden: [...hidden], sides: { ...memory.sides }, homes, popped };
+  // a saved window layout holds no documents, so no hidden one either (Apply shows them in the document area)
+  const kept = keepDocuments ? hidden : hidden.filter(isToolId);
+  return { version: 1, dock, documentGroupId: documentGroupId ?? remembered, hidden: [...kept], sides: { ...memory.sides }, homes, popped };
 }
 
 /**
@@ -394,7 +430,7 @@ export function captureLayout(api: DockviewApi, memory: DockMemory, hidden: read
  * dockview moves them there (`reuseExistingPanels`), so their canvases are not re-created.
  * Returns the panes that go back on a rail. Throws when dockview rejects the layout.
  */
-export function applyLayout(api: DockviewApi, memory: DockMemory, saved: SavedLayout): ToolId[] {
+export function applyLayout(api: DockviewApi, memory: DockMemory, saved: SavedLayout): PaneId[] {
   // a tool pane the dock does not know would be an empty tab (ToolHost renders nothing): reject it up front
   for (const panel of Object.values(saved.dock.panels)) {
     if (isToolId(panel.id) !== (panel.contentComponent === 'tool')) throw new Error(`The layout holds a tool pane the dock does not know: ${panel.id}`);

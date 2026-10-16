@@ -137,10 +137,53 @@ describe('window actions on a real dockview', () => {
     expect(autoHide(api, memory, api.getPanel('inspector')!, NO_RECT)).toEqual(['inspector']);
     expect(api.getPanel('inspector')).toBeUndefined();
     expect(api.getPanel('doc:a')).toBeDefined();
-    expect(autoHide(api, memory, api.getPanel('doc:a')!, NO_RECT)).toEqual([]);
 
     expect(pinBack(api, memory, 'inspector')).toEqual(['inspector']);
     expect(where(api, 'inspector')!.location).toBe('grid');
+  });
+
+  it('auto-hides a document with its whole group, and pins it back shown (Valence, 2026-10-16)', () => {
+    const { api, memory } = dock();
+    addDocument(api, memory, 'a', 'orders');
+    showTool(api, memory, 'inspector');
+    const doc = api.getPanel('doc:a')!;
+    expect(autoHide(api, memory, doc, NO_RECT)).toEqual(['doc:a']);
+    expect(doc.group.api.isVisible).toBe(false);
+    expect(api.getPanel('doc:a')).toBe(doc);
+    expect(memory.sides['doc:a']).toBeDefined();
+
+    expect(pinBack(api, memory, 'doc:a')).toEqual(['doc:a']);
+    expect(doc.group.api.isVisible).toBe(true);
+    expect(where(api, 'doc:a')!.location).toBe('grid');
+  });
+
+  it('never takes a document out of the dock: one sharing its group with a tool pane stays', () => {
+    const { api, memory } = dock();
+    addDocument(api, memory, 'a', 'orders');
+    showTool(api, memory, 'inspector');
+    dockAsDocument(api, memory, api.getPanel('inspector')!, NO_RECT);
+    expect(autoHide(api, memory, api.getPanel('doc:a')!, NO_RECT)).toEqual([]);
+    expect(api.getPanel('doc:a')!.group.api.isVisible).toBe(true);
+  });
+
+  it('docks a floating document back before hiding it', () => {
+    const { api, memory } = dock();
+    addDocument(api, memory, 'a', 'orders');
+    showTool(api, memory, 'inspector');
+    floatPanel(api, memory, api.getPanel('doc:a')!, NO_RECT);
+    expect(where(api, 'doc:a')!.location).toBe('floating');
+    expect(autoHide(api, memory, api.getPanel('doc:a')!, NO_RECT)).toEqual(['doc:a']);
+    expect(where(api, 'doc:a')!.location).toBe('grid');
+    expect(api.getPanel('doc:a')!.group.api.isVisible).toBe(false);
+  });
+
+  it('keeps a hidden document in the session but not in a saved window layout', () => {
+    const { api, memory } = dock();
+    addDocument(api, memory, 'a', 'orders');
+    showTool(api, memory, 'inspector');
+    const hidden = autoHide(api, memory, api.getPanel('doc:a')!, NO_RECT);
+    expect(captureLayout(api, memory, hidden, { keepDocuments: true }).hidden).toEqual(['doc:a']);
+    expect(captureLayout(api, memory, hidden).hidden).toEqual([]);
   });
 
   it('docks a tool pane as a tab of the document area', () => {

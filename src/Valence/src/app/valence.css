@@ -8,7 +8,7 @@
 .wfsel-b { cursor: pointer; font-family: var(--sans); }
 .wfsel-b:hover, .wfsel-b[aria-expanded="true"] { color: var(--ink); border-color: var(--line-2); }
 .wfsel-n { color: var(--accent); margin: 0 2px 0 4px; }
-.wfsel-list { position: absolute; top: calc(100% + 6px); left: 0; width: 360px; max-height: 60vh; overflow: auto; padding: 8px; background: var(--panel-2);
+.wfsel-list { position: absolute; top: calc(100% + 6px); right: 0; width: 360px; max-height: 60vh; overflow: auto; padding: 8px; background: var(--panel-2);
   border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 24px 60px -16px rgba(0, 0, 0, .8); z-index: var(--z-menu); font-family: var(--sans); }
 .wfsel-list .input { font-family: var(--mono); font-size: 12px; background: var(--ground-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 6px 8px; color: var(--ink); width: 100%; margin: 0 0 6px; box-sizing: border-box; }
 .wfsel-list .note { font-size: 11.5px; color: var(--faint); line-height: 1.5; padding: 8px; }
@@ -37,15 +37,15 @@
 .mol-lbl.cache { color: #e0ad85; font-size: 10px; }
 .mol-lbl.asg { color: #8fd9de; font-size: 9.5px; opacity: .6; }
 .mol-lbl.dim { opacity: .12; }
-/* the legend: the mock's side panel (no hover card: the user, 2026-10-15); the pointer passes through */
-.mol-side { position: absolute; top: 16px; right: 16px; width: 300px; max-height: calc(100% - 32px); overflow: auto; box-sizing: border-box; pointer-events: none;
-  background: rgba(14, 24, 40, .86); border: 1px solid var(--line); border-radius: 8px; backdrop-filter: blur(6px); font-family: var(--sans); color: var(--ink); z-index: 6; }
-.mol-side section { padding: 10px 12px; border-bottom: 1px solid var(--line); min-width: 0; }
-.mol-side section:last-child { border-bottom: 0; }
-.mol-side h2 { margin: 0 0 8px; font: 600 11px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
-.mol-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; font-size: 12.5px; }
-.mol-legend span { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.mol-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+/* deleted in Valence, not applied (spec §6): struck through in red */
+.mol-lbl.ghost { color: #ff8a8a; text-decoration: line-through; }
+.mol:focus { outline: none; }
+/* the legend: one small row in the bottom-left corner, no title (the user, 2026-10-16); the pointer passes through */
+.mol-legend { position: absolute; left: 12px; bottom: 12px; max-width: calc(100% - 24px); box-sizing: border-box; pointer-events: none; z-index: 6;
+  display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 5px 10px; font: 11px/1.2 var(--sans); color: var(--muted);
+  background: rgba(14, 24, 40, .78); border: 1px solid var(--line); border-radius: 6px; backdrop-filter: blur(6px); }
+.mol-legend span { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.mol-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 
 /* the Inspector (spec §3c): preview or pinned, the virtual-change note, the one read-only show/hide section */
 .insp-head { display: flex; align-items: center; gap: 8px; }
@@ -60,3 +60,17 @@
 .insp-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 label.insp-edited::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--x); vertical-align: 1px; }
 select.input { font-family: var(--sans); font-size: 12.5px; }
+
+/* the Output pane's log (spec §6): one line per deletion, refusal, undo or redo */
+.out-log { padding: 6px 12px; font-size: 12px; }
+.out-line { display: grid; grid-template-columns: 62px 1fr; gap: 8px; padding: 3px 0; color: var(--ink); line-height: 1.45; }
+.out-line time { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.out-line.refused span { color: #f2b45a; }
+
+/* deletion (spec §6): the pinned item's verdict, a ghost's note, a gone arrow in the read-only list */
+.insp-delete { margin: 8px 16px 0; padding: 6px 10px; border-radius: 6px; font-size: 12px; line-height: 1.45; border: 1px solid var(--line); color: var(--muted); }
+.insp-delete b { font-weight: 600; margin-right: 4px; color: var(--ink); }
+.insp-delete.no { border-color: rgba(242, 180, 90, .35); color: #f2b45a; }
+.insp-virtual.ghost { border-color: rgba(255, 90, 90, .45); color: #ff8a8a; flex-wrap: wrap; }
+.insp-hint { color: var(--faint); font-size: 11px; }
+.insp-ro .field.gone .ro, .insp-ro .field.gone label { text-decoration: line-through; color: #ff8a8a; }

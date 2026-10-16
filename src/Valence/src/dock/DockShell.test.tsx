@@ -397,149 +397,19 @@ describe('DockShell, a layout dockview rejects', () => {
   });
 });
 
-let frames: HTMLIFrameElement[] = [];
-afterEach(() => { vi.restoreAllMocks(); frames.forEach((f) => f.remove()); frames = []; });
-
-/** Pops a tab's group out through its pop-out button; the "window" is an iframe that answers window.open. */
-async function popOut(tabName: string): Promise<Window> {
-  const frame = document.createElement('iframe');
-  document.body.appendChild(frame);
-  frames.push(frame);
-  const win = frame.contentWindow!;
-  vi.spyOn(window, 'open').mockImplementation(() => win);
-  const group = tab(tabName).closest('.dv-groupview') as HTMLElement;
-  fireEvent.click(within(group).getByRole('button', { name: 'Pop out to its own window' }));
-  await act(async () => {
-    win.dispatchEvent(new (win as Window & typeof globalThis).Event('load'));
-    await new Promise((r) => setTimeout(r, 0));
-  });
-  return win;
-}
-const inPopout = (win: Window) => within(win.document.body);
-const popoutTab = (win: Window, name: string) => inPopout(win).getAllByText(name, { selector: '.doctab .nm' })[0]!;
-
-describe('DockShell, pop-out windows', () => {
-  it('moves the group into the pop-out, with the page content and its own tooltip layer', async () => {
-    setup({ popoutContent: <svg data-testid="defs" /> });
-    const win = await popOut('Output');
-    expect(inPopout(win).getAllByText('Output', { selector: '.doctab .nm' })).toHaveLength(1);
-    // getBy* throws when it finds nothing; toBeInTheDocument cannot judge a node of another window
-    expect(inPopout(win).getByText('body of output').ownerDocument).toBe(win.document);
-    expect(inPopout(win).getByTestId('defs').parentElement).toBe(win.document.body);
-    expect(win.document.querySelector('.tip[role="tooltip"]')).not.toBeNull();
-  });
-
-  it('opens the window-position menu, the switcher, the picker and toasts in the pop-out', async () => {
-    const { props, update } = setup();
-    update({ documents: [doc('a')], activeDocumentId: 'a' });
-    const win = await popOut('Output');
-
-    fireEvent.contextMenu(popoutTab(win, 'Output'));
-    expect(inPopout(win).getByRole('menu', { name: 'Window position' })).toBeInTheDocument();
-    fireEvent.keyDown(win, { key: 'Escape' });
-    expect(inPopout(win).queryByRole('menu')).toBeNull();
-
-    fireEvent.keyDown(win, { key: 'e', ctrlKey: true });
-    expect(inPopout(win).getByRole('dialog', { name: 'Switch window' })).toBeInTheDocument();
-    fireEvent.keyDown(win, { key: 'Escape' });
-
-    fireEvent.keyDown(win, { key: 'o', ctrlKey: true });
-    expect(inPopout(win).getByRole('dialog', { name: 'Load workflow' })).toBeInTheDocument();
-    expect(screen.queryByRole('dialog', { name: 'Load workflow' })).toBeNull();
-    fireEvent.keyDown(win, { key: 'Escape' });
-
-    fireEvent.keyDown(win, { key: 'F5', shiftKey: true });
-    expect(win.document.querySelector('.toast')).toHaveTextContent('Start and Stop are not available.');
-
-    fireEvent.keyDown(win, { key: 'w', altKey: true });
-    expect(props.onCloseDocument).toHaveBeenCalledWith('a', win.document);
-    expect(props.onEscape).not.toHaveBeenCalled();
-  });
-
-  it("tells the page the pop-out's document on Escape, Alt+W, a tab × and a middle click there (spec §6.3)", async () => {
-    const { props } = setup({ documents: [doc('a')], activeDocumentId: 'a' });
-    const win = await popOut('wf-a');
-
-    fireEvent.keyDown(win, { key: 'Escape' });
-    expect(props.onEscape).toHaveBeenCalledWith(win.document);
-
-    fireEvent.keyDown(win, { key: 'w', altKey: true });
-    fireEvent.click(within(win.document.body).getByRole('button', { name: 'Close wf-a' }));
-    fireEvent(popoutTab(win, 'wf-a'), new MouseEvent('auxclick', { bubbles: true, button: 1 }));
-    expect(vi.mocked(props.onCloseDocument).mock.calls).toEqual([['a', win.document], ['a', win.document], ['a', win.document]]);
-  });
-
-  it('opens a workflow in the main window, shown, while the document group is popped out (review Critical 1)', async () => {
-    const { update } = setup({ documents: [doc('a')], activeDocumentId: 'a' });
-    await popOut('wf-a');
-    update({ documents: [doc('a'), doc('b')], activeDocumentId: 'b' });
-    expect(docTabs('wf-b')).toHaveLength(1);
-    expect(tab('wf-b').closest('.dv-view')).toHaveClass('visible');
-  });
-
-  it('brings a popped-out document back shown after a refresh (review Critical 1)', async () => {
-    const onLayoutChange = vi.fn();
-    setup({ documents: [doc('a')], activeDocumentId: 'a', onLayoutChange });
-    await popOut('wf-a');
-    const last = onLayoutChange.mock.calls.at(-1)![0] as SavedLayout;
-    cleanup();
-
-    setup({ documents: [doc('a')], activeDocumentId: 'a', restore: last });
-    expect(docTabs('wf-a')).toHaveLength(1);
-    expect(tab('wf-a').closest('.dv-view')).toHaveClass('visible');
-    expect(dockApi.current!.groups.filter((g) => !g.api.isVisible)).toEqual([]);
-  });
-
-  it('puts a document in a shown group on Apply after Save was made while its group was popped out', async () => {
-    const storage = memoryStorage();
-    setup({ documents: [doc('a')], activeDocumentId: 'a', storage });
-    const win = await popOut('wf-a');
-    const hiddenPlaceholder = dockApi.current!.groups.find((g) => !g.api.isVisible && g.panels.length === 0)!.id;
-    openMenu('Window');
-    choose(/Save window layout/);
-    // the place the pop-out left (hidden, empty) is not saved, nor remembered as the document area
-    const saved = JSON.parse(storage.getItem(LAYOUT_KEY)!) as SavedLayout;
-    expect(JSON.stringify(saved.dock.grid.root)).not.toContain('"visible":false');
-    expect(JSON.stringify(saved.dock.grid.root)).not.toContain(`"id":"${hiddenPlaceholder}"`);
-    expect(saved.documentGroupId).not.toBe(hiddenPlaceholder);
-    vi.spyOn(win, 'close').mockImplementation(() => {});
-    const group = popoutTab(win, 'wf-a').closest('.dv-groupview') as HTMLElement;
-    act(() => { fireEvent.click(within(group).getByRole('button', { name: 'Dock back into the main layout' })); });
-    openMenu('Window');
-    choose(/Apply saved layout/);
-    expect(docTabs('wf-a')).toHaveLength(1);
-    expect(tab('wf-a').closest('.dv-view')).toHaveClass('visible');
-    expect(dockApi.current!.getPanel('doc:a')!.group.api.isVisible).toBe(true);
-    expect(dockApi.current!.getPanel('doc:a')!.group.panels.map((p) => p.id)).toEqual(['doc:a']);
-  });
-
-  it('stops listening to a pop-out once its group is docked back', async () => {
-    const { props } = setup();
-    const win = await popOut('Output');
-    // jsdom's close() tears the frame's window down, listeners and all, which would hide a leak
-    vi.spyOn(win, 'close').mockImplementation(() => {});
-    const group = popoutTab(win, 'Output').closest('.dv-groupview') as HTMLElement;
-    act(() => { fireEvent.click(within(group).getByRole('button', { name: 'Dock back into the main layout' })); });
-
-    expect(tab('Output')).toBeInTheDocument();
-    fireEvent.keyDown(win, { key: 'Escape' });
-    expect(props.onEscape).not.toHaveBeenCalled();
-    fireEvent.keyDown(window, { key: 'Escape' });
-    expect(props.onEscape).toHaveBeenCalledTimes(1);
-  });
-});
+afterEach(() => { vi.restoreAllMocks(); });
 
 /**
  * The Esc order (switcher, menu, picker, flyout, then the selection) as a real keypress drives it:
- * every key goes to the focused element of the window it is pressed in, so an overlay that takes
+ * every key goes to the focused element, so an overlay that takes
  * keys itself (the picker's search box, a menu's items) is in the path. The menu, the picker and
  * the switcher are mutually exclusive: opening one closes the others.
  */
-describe.each(['main window', 'pop-out'] as const)('DockShell, the Esc order in the %s', (where) => {
+describe('DockShell, the Esc order', () => {
   async function start() {
     const view = setup();
     view.update({ documents: [doc('a'), doc('b')], activeDocumentId: 'a' });
-    const win = where === 'pop-out' ? await popOut('Output') : window;
+    const win = window;
     const d = win.document;
     fireEvent.contextMenu(tab('Inspector'));
     choose(/Auto hide/);
@@ -553,10 +423,7 @@ describe.each(['main window', 'pop-out'] as const)('DockShell, the Esc order in 
       picker: scope.queryByRole('dialog', { name: 'Load workflow' }) !== null,
       flyout: flyout() !== null,
     });
-    const openMenuHere = () => {
-      if (where === 'pop-out') fireEvent.contextMenu(popoutTab(win, 'Output'));
-      else openMenu('View');
-    };
+    const openMenuHere = () => openMenu('View');
     return { ...view, win, d, key, shown, openMenuHere };
   }
   const none = { switcher: false, menu: false, picker: false };
@@ -672,6 +539,51 @@ describe('DockShell, tab gestures and the window-position menu (spec 6.2)', () =
     expect(group().api.isMaximized()).toBe(false);
     fireEvent.contextMenu(tab('wf-a'));
     expect(screen.getByRole('menuitem', { name: /Maximize/ })).toBeInTheDocument();
+  });
+
+  it('has no pop-out button on any group, docked or floating', () => {
+    withDocuments();
+    fireEvent.doubleClick(tab('Toolbox'), { ctrlKey: true });
+    expect(floating('Toolbox')).toBe(true);
+    expect(screen.queryAllByRole('button', { name: /Pop out/ })).toEqual([]);
+    for (const name of ['wf-a', 'Inspector', 'Output']) {
+      expect(within(groupOf(name)).getByRole('button', { name: 'Float this group (or Shift+drag a tab)' })).toBeInTheDocument();
+    }
+  });
+
+  it('maximizes a floating group to the dock area and restores its box, by button and by double-click', () => {
+    // the dock is 1200 × 700; a float measures what its style says (jsdom has no layout)
+    const real = Element.prototype.getBoundingClientRect;
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this.classList.contains('dv-resize-container')) {
+        const s = (this as HTMLElement).style;
+        const left = parseFloat(s.left) || 0, top = parseFloat(s.top) || 0, width = parseFloat(s.width) || 300, height = parseFloat(s.height) || 200;
+        return { left, top, right: left + width, bottom: top + height, x: left, y: top, width, height } as DOMRect;
+      }
+      if (this.querySelector('.dv-resize-container')) {
+        return { left: 0, top: 0, right: 1200, bottom: 700, x: 0, y: 0, width: 1200, height: 700 } as DOMRect;
+      }
+      return real.call(this);
+    });
+    withDocuments();
+    fireEvent.doubleClick(tab('Toolbox'), { ctrlKey: true });
+    const box = () => {
+      const s = (groupOf('Toolbox').closest('.dv-resize-container') as HTMLElement).style;
+      return [s.left, s.top, s.width, s.height].map((v) => parseFloat(v) || 0);
+    };
+    const before = box();
+    const maxButton = () => within(groupOf('Toolbox')).getByRole('button', { name: 'Maximize / restore' });
+
+    fireEvent.click(maxButton());
+    expect(box()).toEqual([0, 0, 1200, 700]);
+    fireEvent.click(maxButton());
+    expect(box()).toEqual(before);
+
+    fireEvent.doubleClick(tab('Toolbox'));
+    expect(box()).toEqual([0, 0, 1200, 700]);
+    fireEvent.doubleClick(tab('Toolbox'));
+    expect(box()).toEqual(before);
+    expect(floating('Toolbox')).toBe(true);
   });
 
   it('opens the window-position menu from a tool group header', () => {
@@ -933,5 +845,41 @@ describe('DockShell with a pinned document and no workflows', () => {
     fireEvent.contextMenu(tab('Project'));
     const menu = screen.getByRole('menu', { name: 'Window position' });
     expect(within(menu).queryByRole('menuitem', { name: /Close document/ })).toBeNull();
+  });
+
+  const headerOf = (name: string) => within(tab(name).closest('.dv-groupview') as HTMLElement)
+    .getAllByRole('button').filter((b) => b.closest('.ghead')).map((b) => b.getAttribute('aria-label'));
+
+  it('has the same header buttons as a tool pane, docked and floating (Valence, 2026-10-16)', () => {
+    pinnedSetup();
+    expect(headerOf('Project')).toEqual(headerOf('Inspector'));
+    expect(headerOf('Project')).toEqual(['Window position', 'Auto-hide to a side tab', 'Float this group (or Shift+drag a tab)', 'Maximize / restore']);
+    for (const name of ['Project', 'Inspector']) fireEvent.doubleClick(tab(name), { ctrlKey: true });
+    expect(headerOf('Project')).toEqual(headerOf('Inspector'));
+    expect(headerOf('Project')).toEqual(['Window position', 'Dock back into the main layout', 'Maximize / restore']);
+  });
+
+  it('its window menu offers Auto hide', () => {
+    pinnedSetup();
+    fireEvent.contextMenu(tab('Project'));
+    const menu = screen.getByRole('menu', { name: 'Window position' });
+    expect(within(menu).getAllByRole('menuitem').map((m) => m.querySelector('.ml')!.textContent)).toEqual(['⧉Float', '▢Maximize', '⇥Auto hide']);
+  });
+
+  it('auto-hides to a rail tab that flies the document out, and Dock pins it back', () => {
+    pinnedSetup();
+    const shown = () => api().getPanel('doc:project')!.group.api.isVisible;
+    fireEvent.click(within(tab('Project').closest('.dv-groupview') as HTMLElement).getByRole('button', { name: 'Auto-hide to a side tab' }));
+    expect(railTab('doc:project')).toHaveTextContent('Project');
+    expect(shown()).toBe(false);
+
+    fireEvent.click(railTab('doc:project')!);
+    expect(flyout()).toHaveClass('doc');
+    expect(within(flyout()!).getByText('canvas of project')).toBeInTheDocument();
+
+    fireEvent.click(within(flyout()!).getByRole('button', { name: /Dock/ }));
+    expect(railTab('doc:project')).toBeNull();
+    expect(flyout()).toBeNull();
+    expect(shown()).toBe(true);
   });
 });

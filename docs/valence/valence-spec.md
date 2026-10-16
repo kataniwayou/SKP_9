@@ -97,6 +97,18 @@ before building.
      don't create new or delete by menu". The strip is the brand, **View** and **Window**. Removed from the copied dock
      with them: the props `onNewWorkflow`, `onDeleteWorkflow`, `deleteBlocked`, and Ctrl+N (`keys.ts`). The Load picker's
      code stays, unused (Valence passes no `workflows`); its empty-area hint reads "Load one with Ctrl+O".
+   - **No pop-out (the user, 2026-10-16):** no group, docked or floating, has "Pop out to its own window". Docked
+     groups keep Float and Maximize / restore; a **floating group gets Maximize / restore** (▢, and double-click on a
+     tab): it fills the dock area and restore puts back its box (a centred 60% box after a reload). Moving or
+     resizing a maximized float counts as restored. `windowActions.toggleFloatMaximize` reads dockview's float
+     through the group api's `accessor` (no public API). The pop-out plumbing in `DockShell` stays, unreachable.
+   - **The Canvas has the tool panes' buttons (the user, 2026-10-16, "for consistency"):** docked ▾ Window position,
+     ⇥ Auto-hide, ⧉ Float, ▢ Maximize / restore; floating ▾, ⤓ Dock, ▢. Its ▾ menu: Float/Dock, Maximize (docked),
+     Auto hide (no Close: pinned). **Auto-hide of a document:** its whole group hides (a floating one docks back
+     first; one sharing a group with a tool pane is not hidden, documents never leave the dock); its rail tab is on
+     the edge it was nearest (the Canvas: bottom) and its flyout covers 70% of the dock (`.fly.doc`) with a second
+     render of the document (same workspace store). The session keeps it hidden across a refresh; a saved window
+     layout drops hidden documents (Apply shows them docked). Hidden ids are `PaneId` (tool id or `doc:…`).
    - **The document's name is "Canvas"** (the user, 2026-10-15; "Workspace" before that): its tab and its capsule label. The id stays `project`.
 2. Deploy when the user asks (`kind load docker-image valence:local --name desktop`, `kubectl apply -f k8s/32-valence.yaml`).
 
@@ -115,6 +127,13 @@ The user: "load the diagram by baseapi to canvas same as mock but darkmode". Bui
   wheel zoom, right-drag pan, Ctrl+drag an atom (open hand), **Ctrl+drag on empty canvas slides the picture along the screen's
   x and y** (the user, 2026-10-15) — a lens shift (`camera.setViewOffset`), not a camera move, so every atom moves exactly
   with the pointer (Playwright: 200 px drag = 200 px for every atom, also after a turn and zoomed in).
+  **The wheel and a pinch zoom toward the canvas centre** (the user, 2026-10-16). Our own zoom (`zoomBy`; the trackball's
+  `noZoom`): the camera moves along the line from it through the canvas centre, so an atom put at the centre stays there at
+  any depth (the trackball moved along the camera's axis, which a slide puts off-centre: atoms at the centre drifted
+  127–225 px in 6 notches). The view direction and the slide do not change; the target (turning pivot) stays on the camera's
+  axis, moving sideways with it. Same feel as the trackball: a 100 px notch eases to ×0.78 of the distance (5 notches
+  268.5 → 76.9), the same limits; a pinch scales the distance by the fingers' spread at once. Playwright: atoms slid to the
+  centre stay within 2 px through 6 notches; turn, right-drag pan, an exact Ctrl+drag slide and a real touch pinch all work.
   **Lens 15°** (the mock's was 48°; the user, 2026-10-15: "the atom isn't accurate ball"): a wide lens stretches spheres
   away from the centre of the view into ovals, and the slide puts most of the picture off-centre; at 15° atoms stay round
   (to a few percent) anywhere on screen; the camera stands further back for the same framing.
@@ -122,8 +141,15 @@ The user: "load the diagram by baseapi to canvas same as mock but darkmode". Bui
   sees behind its target ball ends at the ball's outline instead, recomputed when the camera moves. Playwright (dev-only
   hook `el.__molecule`): every arrow on the line between its atoms' centres (0 px), heads hidden behind their ball 0 of
   ~210 (were 12 at home, 30 after a turn).
+- **Arrowheads up close** (the user, 2026-10-16: "not elegant and accurate"): each head is a slim lathe-turned dart
+  (`headOf`: flanks curving in to a sharp point, length 3.4 × base width, 40 sides, a low dome closing the base), its
+  point placed on the target ball's surface — exactly, also for a side-by-side arrow (the offset line meets the ball at
+  √(r² − off²)); the 0.04 gap is gone. Shafts are closed, 24-sided rods starting inside the source ball, so no hollow end
+  shows. Playwright: 118 of 219 tips on the surface to 0.001; the other 101 are the ones hidden behind their own ball,
+  pulled back to its outline (2026-10-15 rule).
 - **Off the canvas (the user, 2026-10-15):** the capsule toolbar ("Canvas" label + workflow multi-select) and the hover
-  card are removed. Hover still focuses an atom's neighbours; the colour legend stays. With the multi-select gone nothing
+  card are removed. Hover still focuses an atom's neighbours; the colour legend stays — since 2026-10-16 (the user)
+  a small one-row strip in the canvas's bottom-left corner, without the "Atoms · one per row" title. With the multi-select gone nothing
   is highlighted; `WorkflowSelect`, `highlights.ts` and the session's `highlighted` stay for when the user chooses its new
   place (open). **Cursors** (the user's table, 2026-10-15): slide the canvas = open hand ready, closed
   hand while dragging; move an atom = four-way arrow, ready and while dragging; turn = normal arrow at rest, a circular
@@ -133,6 +159,14 @@ The user: "load the diagram by baseapi to canvas same as mock but darkmode". Bui
   because 137 labels at the full view were unreadable. No delete mode yet.
 - Highlighting (open question §8.2 answered for now): the chosen workflows' atoms stay, the rest dim (atoms 0.14,
   arrows 0.05, labels 0.12). Hover focus takes over while the pointer is on an atom.
+- **The workflow filter is on the main menu strip** (the user, 2026-10-16), at its right (`DockShell` `status` slot):
+  `app/WorkflowFilter.tsx` around `WorkflowSelect` — "Workflows · n highlighted ▾", a checked list (by name, an edited
+  name too; search, Clear; Esc or a press outside closes; it opens right-aligned). Ids are workflow atom keys (`wf:<id>`),
+  kept in the session. **The filter sets the molecule's base state:** what the picked workflows reach (`reachOf`, joined;
+  `ProjectDocument.litOf`) stays, the rest fades like hover's fade — nothing is removed; an arrow stays when both ends do.
+  **Hover and pin are unchanged on top:** a hovered atom's neighbourhood, else the pinned atom's, else the filter.
+  Playwright: filefetcher chain = 40 atoms / 67 arrows bright; + simple-abc = 52 / 83; hover and pin show their
+  neighbourhood and the filter returns after; a refresh keeps the picks; Clear brings everything back.
 - Checked live (Playwright, swiftshader WebGL): 137 atoms; filefetcher chain highlighted = 40 atoms (as the mock);
   hover card; turn; zoom; Ctrl+drag; refresh keeps the highlight; no console errors. Tests 224 pass (fixture
   `src/test/fixtures/project.json` = the cluster's rows of 2026-10-15, without payloads or definitions).
@@ -227,6 +261,8 @@ mean every row, not what workflows reach.
 
 ## 6. Diagram rules (the user's, judged from the drawing only)
 
+### 6a. Atom deletion — the user's rule #1
+
 - **Delete:** an atom can be deleted only when **no arrow points to it**; deleting it **removes the arrows that
   leave it** (a stage of the delete, not a separate rule).
 - With the whole project drawn the rule is **hermetic**: verdicts come from the drawing alone, no delete leaves an
@@ -237,6 +273,82 @@ mean every row, not what workflows reach.
   by the next-step arrows leaving it (`fk_step_next_steps_step_id` RESTRICT at the tail), so remove a step's
   `nextStepIds` (PUT) before its DELETE. Checked live: a stray step X → B is refused with 422 until unwired.
 - Other arrows never hold their tail: key columns live in the deleted row, and the workflow's link rows CASCADE.
+
+### 6b. Arrow deletion (analysed 2026-10-16 against BaseApi, the orchestrator and the processors)
+
+An arrow belongs to its **tail**: a key column in the tail's row, or a link row the tail's update rewrites. Deleting an
+arrow is a `PUT` of the tail's whole row without it (§7), virtual until the apply step (decision 8). **RESTRICT never
+refuses an arrow's removal**: it guards only the target's deletion. So with rule #1, removing an arrow can make its
+target deletable (when it was the last arrow pointing at it) and never makes anything undeletable.
+
+**Cannot be deleted — a NOT NULL key column: re-point only.**
+
+| Arrow | Why |
+|---|---|
+| step → processor (`fk_step_processor_id`) | `steps.processor_id` NOT NULL; BaseApi requires `ProcessorId` |
+| assignment → step (`fk_assignment_step_id`) | `assignments.step_id` NOT NULL; BaseApi requires `StepId` |
+
+A processor used by steps is freed only by re-pointing those steps or deleting them (rule #1: nothing may point at the
+step — next-step, entry or assignment arrows).
+
+**Deletable — a nullable key column (`PUT /processors/{id}` with the slot null).**
+
+| Arrow | What changes |
+|---|---|
+| processor → input / output schema | The start's schema-edge gate treats null as "passes" (`SchemaEdgeValidator`): that step pair's output = input check is gone. |
+| processor → config schema | The start's payload gate skips the processor (`PayloadConfigSchemaValidator`): its steps' payloads are no longer checked. |
+| all three | Running processor pods keep enforcing the schema they resolved at boot until they restart (`ProcessorStartupOrchestrator`); `SchemaDriftProbe` warns at every check meanwhile, and a restart never restores the arrow. A schema left with no processor becomes deletable and its definition unfreezes. |
+
+Checked live for one case (2026-10-16): processor `archive-expander` may drop its config arrow to
+`archive-expander-config` while steps `split-archiveexpander` / `sc-split-archiveexpander` use it — the steps point at the
+processor, not the schema, and the processor update has no in-use check.
+
+**Deletable — link rows.**
+
+| Arrow | Rule | What changes |
+|---|---|---|
+| step → next step | always | Steps no entry step reaches any more drop out of the run (`WorkflowGraphLoader` walks from the entry steps); their assignments are ignored; that pair's schema-edge check goes. A removal never creates a cycle. |
+| workflow → entry step | **not the last one** (`EntryStepIds` ≥ 1, else 400) | That step, and what only it reached, drops out of the workflow's run. |
+| workflow → assignment | always | ⚠ **The step still runs, with an empty payload**: the payload is looked up only among the workflow's own assignments (`OrchestrationService.ToDefinition`), and the payload gate walks only existing assignments, so no start gate notices. A step whose processor needs its config runs without it. The assignment becomes deletable. |
+| workflow → cache | always | The cache's entries are not projected into Redis at the next start; processors reading that root find nothing. The cache becomes deletable when no other workflow uses it. |
+
+**For every arrow deletion.**
+- **A running workflow keeps its graph until its next start**: a start projects the snapshot into Redis
+  (`L2ProjectionWriter`) and the orchestrator runs from it; no BaseApi update checks the running state. (Processor
+  schema slots: the pods' restart, above.)
+- **Two edits of a row do not detect each other**: the apply step must send the row as it is now, plus the change.
+- **Breaking a loop** (§8 #5, answered): rule #1 always refuses atoms in a loop of next-step arrows, so deleting one
+  next-step arrow is the way to open it; the loop's steps then become deletable one by one under rule #1.
+- **Pinning an arrow** (proposed, not designed): the canvas already picks arrows under the pointer (`MoleculeView`
+  `pick`); a click would pin one as it pins an atom, and the Inspector would show its two ends, whether it can be
+  deleted ("re-point only" for the two NOT NULL arrows, "the workflow's only entry" for the last entry step) and the
+  consequence above.
+
+### 6c. Deleting in Valence — built 2026-10-16 (the user: relaxed rule, ghosts, shared history, kept on refresh)
+
+- **Why the virtual entities obey the rules:** apply turns the virtual changes into `PUT`/`DELETE` calls with no
+  transaction across them; a virtual state the database cannot hold would fail apply halfway. Under the rules every
+  virtual state is a real one, and apply can replay the changes in order.
+- **Rule #1, relaxed** (`molecule/deletion.ts`): an atom can be deleted when every arrow pointing at it is deletable;
+  those arrows go with it, as do the arrows leaving it. Refused: an incoming step → processor or assignment → step
+  arrow (re-point only), or being a workflow's only entry step. An arrow alone (§6b): refused for the two NOT NULL kinds
+  and a workflow's last entry. An arrow touching a deleted atom is gone (`goneArrows`).
+- **Keys, while the canvas has focus** (SKP Studio's `useDesignKeys`): **Delete** deletes the pinned atom or arrow;
+  **Ctrl+Z** undoes; **Ctrl+Y** and **Ctrl+Shift+Z** redo. A press on the canvas gives it focus; keys typed in an
+  Inspector field never reach it.
+- **Arrows are pinned like atoms:** hovering an arrow previews it, a click pins it (`arrowKey` = `kind|from|to`). The
+  Inspector shows its kind, ends, where it is held, its bond, the verdict and "If deleted" (§6b).
+- **The pinned atom's verdict** is in the Inspector ("Delete ✓ allowed — the N arrows pointing at it go with it" or
+  "✗ <reason>"); a refused Delete writes the reason to the **Output pane**, which logs deletions, refusals, undo and redo.
+- **Ghosts:** a deleted atom keeps its place, its colour pulled to red, faint (0.32 in focus, 0.1 otherwise), its label
+  struck through in red; its arrows and those deleted alone turn red and faint. A ghost atom is read-only in the
+  Inspector ("● Deleted in Valence only, not applied") until undone. The Canvas tab is dirty while anything is deleted.
+- **One history** (`app/workspace.ts`): field edits, Revert and deletions are steps in one undo / redo list (100 kept);
+  typing in one field is one step; a new change drops what could be redone. The session keeps the deletions and the
+  history across a refresh (`removed`, `history`, optional, version 1).
+- Checked with Playwright on the live data: archive-expander refused (two steps run on it); archive-expander-config
+  deleted with its config arrow; a next-step arrow clicked, pinned and deleted; Delete typed in an Inspector field did
+  nothing; Ctrl+Z walked back the edit, the arrow, the schema; Ctrl+Y redid; a refresh kept the ghost and the history.
 
 ### Code-level BaseApi rules the diagram cannot see
 - **Schema definition frozen** while any processor references the schema: `PUT /schemas/{id}` with a changed
@@ -281,7 +393,7 @@ Server-set, never sent: Id, CreatedAt/By, UpdatedAt/By, `xmin`.
    "highlighted" looks like (the rest dimmed?).
 3. Does a diagram delete reach BaseApi immediately, or is there a draft/apply step like SKP Studio's design save?
 4. Which fields are editable from Valence (SourceHash/InstanceId identify a processor's running build).
-5. How a loop of next-step arrows is broken (the delete rule alone never can).
+5. ~~How a loop of next-step arrows is broken~~ — answered 2026-10-16: delete one next-step arrow (§6b).
 6. The mock's 3D camera and interaction decisions (fixed-axis turning, Ctrl-drag of atoms, steps by hop with fan-out
    lanes, hover = one-hop focus) — carried into stage 2 as they are, or reviewed again?
 

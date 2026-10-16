@@ -67,7 +67,7 @@ describe('the read-only section', () => {
   it('lists the arrows that leave the row, by the target\'s name', () => {
     const rows = arrowRows(m, key);
     const proc = data.processors.find((p) => p.id === s.processorId)!;
-    expect(rows).toContainEqual({ label: 'processor', target: proc.name });
+    expect(rows).toContainEqual({ label: 'processor', target: proc.name, key: `uses|${key}|proc:${proc.id}` });
     expect(rows.filter((r) => r.label === 'next step')).toHaveLength((s.nextStepIds ?? []).length);
   });
 });
