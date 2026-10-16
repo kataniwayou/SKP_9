@@ -10,15 +10,15 @@ This file records where the work stands at the restart and what comes next.
 | What | Where / state |
 |---|---|
 | Worktree | `C:\Users\UserL\source\repos\SK_P10-molecule-studio` |
-| Branch | `feature/molecule-studio`, local only, never pushed. Last commit `1dd8453` (spec + stage-1 scaffold + mock) |
-| Uncommitted | **Everything since `1dd8453`**: the stage-1 shell, the stage-2 molecule and the Inspector. Commit only when the user asks. |
+| Branch | `feature/molecule-studio`, local only, never pushed. `1dd8453` = spec + stage-1 scaffold + mock; `0add1c9` = the shell, the molecule, the Inspector and this handover |
+| Committed | Everything below is in `0add1c9` (2026-10-16). Commit only when the user asks. |
 | Main repo folder | `C:\Users\UserL\source\repos\SK_P10` (`feature/in-process-post`, the user's own uncommitted work): **never touch it** |
 | Checks at handover | `npx vitest run`: 19 files, **240 tests pass**. `npx tsc --noEmit`: clean |
 | Dev server | `npx vite --port 5174 --strictPort` in `src/Valence` (was still running as PID 29824; stop it or reuse it) |
 | BaseApi for the dev proxy | `localhost:18080`, already port-forwarded by another process (probably the user's) |
 | Image / k8s | `valence:local` builds and runs locally. **Not loaded into kind, not applied.** Deploy only when asked: `kind load docker-image valence:local --name desktop`, then `kubectl apply -f k8s/32-valence.yaml` |
 
-### Uncommitted files
+### Files of commit `0add1c9`
 - Modified: `.gitignore` (`src/Valence/dist/`), `docs/valence/valence-spec.md`, `k8s/kustomization.yaml`,
   `k8s/port-forward-realstack.ps1` (Valence on 18082), `src/Valence/package.json` + lock (three 0.186.1, @types/three
   0.186.0), `src/Valence/src/dock/{DockShell.tsx, DockShell.test.tsx, keys.ts, layoutPersistence.ts, parts.tsx}`.
@@ -29,7 +29,7 @@ This file records where the work stands at the restart and what comes next.
 
 ---
 
-## 2. What is built (all uncommitted)
+## 2. What is built (commit `0add1c9`)
 
 **Stage 1, the shell.** SKP Studio's dock and theme, copied. Session key `skp.valence.session`, layout key
 `skp.valence.layout`.
