@@ -65,3 +65,71 @@ public sealed record MoleculeBondDto(
     Guid From,
     Guid To,
     IReadOnlyList<string> Constraints);
+
+/// <summary>
+/// The body of <c>GET /model/fields</c>: every entity's writable fields with the rules a write must pass, read from the
+/// update validators and the EF model at runtime, so a client checks an edit as BaseApi will without a copy of the rules.
+/// </summary>
+public sealed record ModelFieldsDto(IReadOnlyList<ModelEntityFieldsDto> Entities);
+
+/// <param name="Table">The entity's table, as in <see cref="ModelTableDto.Table"/>.</param>
+/// <param name="Fields">The update DTO's properties, in its order: what a <c>PUT</c> sends.</param>
+/// <param name="Unique">The table's unique indexes, each a 409 on a duplicate.</param>
+public sealed record ModelEntityFieldsDto(string Table, IReadOnlyList<ModelFieldDto> Fields, IReadOnlyList<ModelUniqueDto> Unique);
+
+/// <summary>One writable field.</summary>
+/// <param name="Field">Its JSON name, as the read and update bodies carry it.</param>
+/// <param name="Column">The column it is stored in, or null when it is held elsewhere (a link table's rows).</param>
+/// <param name="Type">string, guid, enum, integer, number, boolean, datetime, object, or an item type with <c>[]</c> for a list.</param>
+/// <param name="Nullable">Whether an update may send null.</param>
+/// <param name="StoreType">The column's database type (<c>jsonb</c> holds JSON), or null with no column.</param>
+/// <param name="Rules">The validator's rules for it, in the order they run.</param>
+/// <param name="Values">For an enum, every value with its name; the rules say which are refused.</param>
+public sealed record ModelFieldDto(
+    string Field,
+    string? Column,
+    string Type,
+    bool Nullable,
+    string? StoreType,
+    IReadOnlyList<ModelRuleDto> Rules,
+    IReadOnlyList<ModelEnumValueDto>? Values);
+
+/// <summary>One validator rule.</summary>
+/// <param name="Kind">
+/// <c>required</c> (not null, not empty, not blank), <c>notNull</c>, <c>maxLength</c>, <c>minLength</c>, <c>length</c>
+/// (<c>min..max</c>), <c>pattern</c> (a .NET regular expression), <c>enum</c> (a defined value), <c>notEqual</c>,
+/// <c>equal</c>, or <c>code</c>: a rule written as code, which only BaseApi can run.
+/// </param>
+/// <param name="Value">The rule's value: the length, the pattern, the compared value (an enum as its number); else null.</param>
+/// <param name="Message">The rule's own message, or null when it uses FluentValidation's default.</param>
+/// <param name="Conditional">Whether it applies only under a condition, such as only when the field is given.</param>
+public sealed record ModelRuleDto(string Kind, string? Value, string? Message, bool Conditional);
+
+public sealed record ModelEnumValueDto(long Value, string Name);
+
+/// <param name="Index">The unique index's name in the database.</param>
+/// <param name="Fields">Its fields (a column name where no field maps to it).</param>
+/// <param name="Filter">The index's SQL filter, when it covers only some rows; null for every row.</param>
+public sealed record ModelUniqueDto(string Index, IReadOnlyList<string> Fields, string? Filter);
+
+/// <summary>The body of <c>POST /model/validate</c>: the changes, in the order they would be sent.</summary>
+public sealed record ModelChangesDto(IReadOnlyList<ModelChangeDto> Changes);
+
+/// <summary>One change.</summary>
+/// <param name="Op"><c>update</c> (a <c>PUT</c>) or <c>delete</c> (a <c>DELETE</c>).</param>
+/// <param name="Table">The entity's table, as <c>GET /model/fields</c> names it.</param>
+/// <param name="Id">The row's id.</param>
+/// <param name="Row">For an update, the body a <c>PUT</c> would send; absent for a delete.</param>
+public sealed record ModelChangeDto(string Op, string Table, Guid Id, System.Text.Json.JsonElement? Row);
+
+/// <summary>The dry run's answer: whether every change passed, and each change's result in order.</summary>
+public sealed record ModelValidateResultDto(bool Ok, IReadOnlyList<ModelChangeResultDto> Results);
+
+/// <param name="Index">The change's place in the request.</param>
+/// <param name="Op">The change's op, as sent.</param>
+/// <param name="Table">The change's table, as sent.</param>
+/// <param name="Id">The change's row id, as sent.</param>
+/// <param name="Ok">Whether it passed, on the state the changes before it left.</param>
+/// <param name="Status">What the real call would answer: 200 or 204, else the problem's status.</param>
+/// <param name="Problem">The problem the real call would answer (its <c>errors</c>, <c>detail</c>, <c>field</c>…), or null.</param>
+public sealed record ModelChangeResultDto(int Index, string Op, string Table, Guid Id, bool Ok, int Status, System.Text.Json.JsonElement? Problem);

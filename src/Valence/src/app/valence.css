@@ -73,6 +73,13 @@ select.input { font-family: var(--sans); font-size: 12.5px; }
 .insp-delete { margin: 8px 16px 0; padding: 6px 10px; border-radius: 6px; font-size: 12px; line-height: 1.45; border: 1px solid var(--line); color: var(--muted); }
 .insp-delete b { font-weight: 600; margin-right: 4px; color: var(--ink); }
 .insp-delete.no { border-color: rgba(242, 180, 90, .35); color: #f2b45a; }
+/* BaseApi's dry run of this atom's changes (POST /model/validate) */
+.insp-dry { margin: 8px 16px 0; padding: 6px 10px; border-radius: 6px; font-size: 12px; line-height: 1.45; border: 1px solid var(--line); color: var(--muted); }
+.insp-dry b { font-weight: 600; color: var(--ink); display: block; }
+.insp-dry.ok { border-color: rgba(125, 211, 168, .35); color: #7dd3a8; }
+.insp-dry.no { border-color: rgba(255, 90, 90, .4); color: #ff8a8a; }
+.insp-dry.no b { color: #ff8a8a; }
+.insp-dry.checking { font-style: italic; }
 .insp-virtual.ghost { border-color: rgba(255, 90, 90, .45); color: #ff8a8a; flex-wrap: wrap; }
 .insp-hint { color: var(--faint); font-size: 11px; }
 .insp-ro .field.gone .ro, .insp-ro .field.gone label { text-decoration: line-through; color: #ff8a8a; }

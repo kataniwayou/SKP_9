@@ -1,0 +1,812 @@
+{
+  "etag": "f0c7e8cdfcdcf019",
+  "entities": [
+    {
+      "table": "assignments",
+      "fields": [
+        {
+          "field": "name",
+          "column": "name",
+          "type": "string",
+          "nullable": false,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "maxLength",
+              "value": "200",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "version",
+          "column": "version",
+          "type": "string",
+          "nullable": false,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "pattern",
+              "value": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "description",
+          "column": "description",
+          "type": "string",
+          "nullable": true,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "maxLength",
+              "value": "2000",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "stepId",
+          "column": "step_id",
+          "type": "guid",
+          "nullable": false,
+          "storeType": "uuid",
+          "rules": [
+            {
+              "kind": "notEqual",
+              "value": "00000000-0000-0000-0000-000000000000",
+              "message": "StepId must not be Guid.Empty.",
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "payload",
+          "column": "payload",
+          "type": "string",
+          "nullable": false,
+          "storeType": "jsonb",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "maxLength",
+              "value": "1048576",
+              "message": "Payload must be at most 1048576 characters.",
+              "conditional": false
+            },
+            {
+              "kind": "code",
+              "value": null,
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        }
+      ],
+      "unique": []
+    },
+    {
+      "table": "caches",
+      "fields": [
+        {
+          "field": "name",
+          "column": "name",
+          "type": "string",
+          "nullable": false,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "maxLength",
+              "value": "200",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "version",
+          "column": "version",
+          "type": "string",
+          "nullable": false,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "pattern",
+              "value": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "description",
+          "column": "description",
+          "type": "string",
+          "nullable": true,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "maxLength",
+              "value": "2000",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "root",
+          "column": "root",
+          "type": "string",
+          "nullable": false,
+          "storeType": "character varying(200)",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "maxLength",
+              "value": "200",
+              "message": "Root must be at most 200 characters.",
+              "conditional": false
+            },
+            {
+              "kind": "code",
+              "value": null,
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "items",
+          "column": "items",
+          "type": "string",
+          "nullable": false,
+          "storeType": "jsonb",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "maxLength",
+              "value": "1048576",
+              "message": "Items must be at most 1048576 characters.",
+              "conditional": false
+            },
+            {
+              "kind": "code",
+              "value": null,
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        }
+      ],
+      "unique": [
+        {
+          "index": "uq_cache_root",
+          "fields": [
+            "root"
+          ],
+          "filter": null
+        }
+      ]
+    },
+    {
+      "table": "processors",
+      "fields": [
+        {
+          "field": "name",
+          "column": "name",
+          "type": "string",
+          "nullable": false,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "maxLength",
+              "value": "200",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "version",
+          "column": "version",
+          "type": "string",
+          "nullable": false,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "pattern",
+              "value": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "description",
+          "column": "description",
+          "type": "string",
+          "nullable": true,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "maxLength",
+              "value": "2000",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "sourceHash",
+          "column": "source_hash",
+          "type": "string",
+          "nullable": false,
+          "storeType": "character varying(64)",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "pattern",
+              "value": "^[a-f0-9]{64}$",
+              "message": "SourceHash must be a lowercase SHA-256 hex string (64 chars, [a-f0-9]).",
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "instanceId",
+          "column": "instance_id",
+          "type": "string",
+          "nullable": true,
+          "storeType": "character varying(200)",
+          "rules": [
+            {
+              "kind": "maxLength",
+              "value": "200",
+              "message": "InstanceId must be 200 characters or fewer.",
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "inputSchemaId",
+          "column": "input_schema_id",
+          "type": "guid",
+          "nullable": true,
+          "storeType": "uuid",
+          "rules": [
+            {
+              "kind": "notEqual",
+              "value": "00000000-0000-0000-0000-000000000000",
+              "message": "InputSchemaId must not be Guid.Empty when provided.",
+              "conditional": true
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "outputSchemaId",
+          "column": "output_schema_id",
+          "type": "guid",
+          "nullable": true,
+          "storeType": "uuid",
+          "rules": [
+            {
+              "kind": "notEqual",
+              "value": "00000000-0000-0000-0000-000000000000",
+              "message": "OutputSchemaId must not be Guid.Empty when provided.",
+              "conditional": true
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "configSchemaId",
+          "column": "config_schema_id",
+          "type": "guid",
+          "nullable": true,
+          "storeType": "uuid",
+          "rules": [
+            {
+              "kind": "notEqual",
+              "value": "00000000-0000-0000-0000-000000000000",
+              "message": "ConfigSchemaId must not be Guid.Empty when provided.",
+              "conditional": true
+            }
+          ],
+          "values": null
+        }
+      ],
+      "unique": [
+        {
+          "index": "uq_processor_instance_id",
+          "fields": [
+            "sourceHash",
+            "instanceId"
+          ],
+          "filter": "instance_id IS NOT NULL"
+        },
+        {
+          "index": "uq_processor_source_hash",
+          "fields": [
+            "sourceHash"
+          ],
+          "filter": "instance_id IS NULL"
+        }
+      ]
+    },
+    {
+      "table": "schemas",
+      "fields": [
+        {
+          "field": "name",
+          "column": "name",
+          "type": "string",
+          "nullable": false,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "maxLength",
+              "value": "200",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "version",
+          "column": "version",
+          "type": "string",
+          "nullable": false,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "pattern",
+              "value": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "description",
+          "column": "description",
+          "type": "string",
+          "nullable": true,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "maxLength",
+              "value": "2000",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "definition",
+          "column": "definition",
+          "type": "string",
+          "nullable": false,
+          "storeType": "jsonb",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "code",
+              "value": null,
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        }
+      ],
+      "unique": []
+    },
+    {
+      "table": "steps",
+      "fields": [
+        {
+          "field": "name",
+          "column": "name",
+          "type": "string",
+          "nullable": false,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "maxLength",
+              "value": "200",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "version",
+          "column": "version",
+          "type": "string",
+          "nullable": false,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "pattern",
+              "value": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "description",
+          "column": "description",
+          "type": "string",
+          "nullable": true,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "maxLength",
+              "value": "2000",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "processorId",
+          "column": "processor_id",
+          "type": "guid",
+          "nullable": false,
+          "storeType": "uuid",
+          "rules": [
+            {
+              "kind": "notEqual",
+              "value": "00000000-0000-0000-0000-000000000000",
+              "message": "ProcessorId must not be Guid.Empty.",
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "nextStepIds",
+          "column": null,
+          "type": "guid[]",
+          "nullable": true,
+          "storeType": null,
+          "rules": [
+            {
+              "kind": "code",
+              "value": null,
+              "message": "NextStepIds must be unique.",
+              "conditional": false
+            },
+            {
+              "kind": "code",
+              "value": null,
+              "message": "NextStepIds must not contain Guid.Empty.",
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "entryCondition",
+          "column": "entry_condition",
+          "type": "enum",
+          "nullable": false,
+          "storeType": "integer",
+          "rules": [
+            {
+              "kind": "enum",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "notEqual",
+              "value": "0",
+              "message": "EntryCondition must not be PreviousProcessing: no step ever reports that result, so a successor gated on it can never be entered. Send an explicit value — omitting the field binds it to this one.",
+              "conditional": false
+            }
+          ],
+          "values": [
+            {
+              "value": 0,
+              "name": "PreviousProcessing"
+            },
+            {
+              "value": 1,
+              "name": "PreviousCompleted"
+            },
+            {
+              "value": 2,
+              "name": "PreviousFailed"
+            },
+            {
+              "value": 3,
+              "name": "PreviousCancelled"
+            },
+            {
+              "value": 4,
+              "name": "Always"
+            },
+            {
+              "value": 5,
+              "name": "Never"
+            }
+          ]
+        }
+      ],
+      "unique": []
+    },
+    {
+      "table": "workflows",
+      "fields": [
+        {
+          "field": "name",
+          "column": "name",
+          "type": "string",
+          "nullable": false,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "maxLength",
+              "value": "200",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "version",
+          "column": "version",
+          "type": "string",
+          "nullable": false,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "required",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "pattern",
+              "value": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "description",
+          "column": "description",
+          "type": "string",
+          "nullable": true,
+          "storeType": "text",
+          "rules": [
+            {
+              "kind": "maxLength",
+              "value": "2000",
+              "message": null,
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "entryStepIds",
+          "column": null,
+          "type": "guid[]",
+          "nullable": false,
+          "storeType": null,
+          "rules": [
+            {
+              "kind": "notNull",
+              "value": null,
+              "message": null,
+              "conditional": false
+            },
+            {
+              "kind": "code",
+              "value": null,
+              "message": "EntryStepIds must contain at least one Step Id.",
+              "conditional": false
+            },
+            {
+              "kind": "code",
+              "value": null,
+              "message": "EntryStepIds must be unique.",
+              "conditional": false
+            },
+            {
+              "kind": "code",
+              "value": null,
+              "message": "EntryStepIds must not contain Guid.Empty.",
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "assignmentIds",
+          "column": null,
+          "type": "guid[]",
+          "nullable": true,
+          "storeType": null,
+          "rules": [
+            {
+              "kind": "code",
+              "value": null,
+              "message": "AssignmentIds must be unique when present.",
+              "conditional": false
+            },
+            {
+              "kind": "code",
+              "value": null,
+              "message": "AssignmentIds must not contain Guid.Empty.",
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "cacheIds",
+          "column": null,
+          "type": "guid[]",
+          "nullable": true,
+          "storeType": null,
+          "rules": [
+            {
+              "kind": "code",
+              "value": null,
+              "message": "CacheIds must be unique when present.",
+              "conditional": false
+            },
+            {
+              "kind": "code",
+              "value": null,
+              "message": "CacheIds must not contain Guid.Empty.",
+              "conditional": false
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "cronExpression",
+          "column": "cron_expression",
+          "type": "string",
+          "nullable": true,
+          "storeType": "character varying(120)",
+          "rules": [
+            {
+              "kind": "code",
+              "value": null,
+              "message": "CronExpression must be a valid 5- or 6-field cron expression (e.g., '0 0 * * *' or '*/30 * * * * *').",
+              "conditional": true
+            }
+          ],
+          "values": null
+        }
+      ],
+      "unique": []
+    }
+  ]
+}

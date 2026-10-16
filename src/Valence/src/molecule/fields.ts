@@ -1,14 +1,15 @@
 import type { ProjectData } from '../api/project';
 import { goneArrows, NOTHING_REMOVED, type Removed } from './deletion';
-import { schemaProblem } from './jsonSchema';
 import { arrowKey, KINDS, TYPES, type ArrowKind, type AtomType, type Molecule } from './model';
+import type { FieldTable } from './rules';
 
 /** How a writable field is edited. */
-export type FieldKind = 'text' | 'multiline' | 'json' | 'condition';
+export type FieldKind = 'text' | 'multiline' | 'json' | 'choice';
 
 /**
- * A writable, non-arrow field of an entity (spec §3c, the user's list of 2026-10-15). `check` is BaseApi's own rule for
- * it (BaseDtoValidator and the entities' validators), so a problem shows while typing; BaseApi stays the judge on apply.
+ * A writable, non-arrow field of an entity (spec §3c), built from BaseApi's description of its update DTO
+ * (`GET /model/fields`, `rules.fieldTable`): `check` runs BaseApi's own rules for it, so a problem shows while typing;
+ * BaseApi stays the judge on apply.
  */
 export interface FieldSpec {
   /** The read DTO's property. */
@@ -17,6 +18,8 @@ export interface FieldSpec {
   kind: FieldKind;
   /** Empty text means null. */
   nullable?: boolean;
+  /** A choice's values (an enum's, without those its rules refuse). */
+  options?: readonly { value: string; label: string }[];
   /** A rule that can lock it, judged on the virtual entities; absent: it is always open. */
   lock?(molecule: Molecule, removed: Removed, atomKey: string): Lock;
   check(text: string): string | null;
@@ -24,13 +27,6 @@ export interface FieldSpec {
 
 /** Whether a rule locks a field now, and the line the Inspector shows under it either way. */
 export interface Lock { locked: boolean; note: string }
-
-const MB = 1_048_576;
-const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-
-const required = (label: string, max: number) => (t: string) =>
-  t.trim() === '' ? `${label} is required` : t.length > max ? `${label} is at most ${max} characters` : null;
-const jsonProblem = (t: string): string | null => { try { JSON.parse(t); return null; } catch (e) { return `Not valid JSON: ${(e as Error).message}`; } };
 
 /** The processor slots that hold a schema: while any of them points at it, its definition is frozen. */
 const SCHEMA_SLOTS: ReadonlySet<ArrowKind> = new Set(['input', 'output', 'config']);
@@ -52,65 +48,6 @@ export function definitionLock(molecule: Molecule, removed: Removed, key: string
     note: `Frozen: used by ${users}. BaseApi refuses a changed definition while any processor uses the schema — delete ${holding.length === 1 ? 'that arrow' : 'those arrows'}, or make a new schema version and re-point the processor.`,
   };
 }
-
-/** The entry conditions BaseApi accepts (0, PreviousProcessing, is refused by both step validators). */
-export const CONDITIONS: readonly { value: number; label: string }[] = [
-  { value: 1, label: 'PreviousCompleted' }, { value: 2, label: 'PreviousFailed' }, { value: 3, label: 'PreviousCancelled' },
-  { value: 4, label: 'Always' }, { value: 5, label: 'Never' },
-];
-
-const COMMON: readonly FieldSpec[] = [
-  { key: 'name', label: 'Name', kind: 'text', check: required('Name', 200) },
-  { key: 'version', label: 'Version', kind: 'text', check: (t) => (t.trim() === '' ? 'Version is required' : VERSION.test(t) ? null : 'Version is x.y.z, e.g. 1.0.0') },
-  { key: 'description', label: 'Description', kind: 'multiline', nullable: true, check: (t) => (t.length > 2000 ? 'Description is at most 2000 characters' : null) },
-];
-
-/** Every kind's writable fields that are not arrows, in the Inspector's order. */
-export const FIELDS: Readonly<Record<AtomType, readonly FieldSpec[]>> = {
-  wf: [...COMMON, {
-    key: 'cronExpression', label: 'Cron', kind: 'text', nullable: true,
-    check: (t) => { const n = t.trim() === '' ? 0 : t.trim().split(/\s+/).length; return n === 0 || n === 5 || n === 6 ? null : 'A cron has 5 or 6 fields'; },
-  }],
-  step: [...COMMON, {
-    key: 'entryCondition', label: 'Entry condition', kind: 'condition',
-    check: (t) => (CONDITIONS.some((c) => String(c.value) === t) ? null : 'Pick an entry condition'),
-  }],
-  proc: [...COMMON,
-    { key: 'sourceHash', label: 'Source hash', kind: 'text', check: (t) => (/^[a-f0-9]{64}$/.test(t) ? null : 'A source hash is 64 lowercase hex characters') },
-    { key: 'instanceId', label: 'Instance id', kind: 'text', nullable: true, check: (t) => (t.length > 200 ? 'Instance id is at most 200 characters' : null) },
-  ],
-  schema: [...COMMON, {
-    key: 'definition', label: 'Definition', kind: 'json', lock: definitionLock,
-    check: (t) => {
-      if (t.trim() === '') return 'Definition is required';
-      let v: unknown;
-      try { v = JSON.parse(t); } catch (e) { return `Not valid JSON: ${(e as Error).message}`; }
-      const p = schemaProblem(v);
-      return p ? `Not a valid JSON Schema (draft 2020-12) — ${p}` : null;
-    },
-  }],
-  asg: [...COMMON, {
-    key: 'payload', label: 'Payload', kind: 'json',
-    check: (t) => (t.trim() === '' ? 'Payload is required' : t.length > MB ? 'Payload is at most 1 MB' : jsonProblem(t)),
-  }],
-  cache: [...COMMON,
-    { key: 'root', label: 'Root', kind: 'text', check: (t) => required('Root', 200)(t) ?? (t.includes(':') ? 'Root cannot contain ":"' : null) },
-    {
-      key: 'items', label: 'Items', kind: 'json',
-      check: (t) => {
-        if (t.length > MB) return 'Items are at most 1 MB';
-        let v: unknown;
-        try { v = JSON.parse(t); } catch (e) { return `Not valid JSON: ${(e as Error).message}`; }
-        if (typeof v !== 'object' || v === null || Array.isArray(v)) return 'Items are a JSON object';
-        for (const [k, x] of Object.entries(v)) {
-          if (k === '' || k.includes(':')) return `Key "${k}": keys are non-empty and without ":"`;
-          if (typeof x !== 'string') return `Key "${k}": values are strings`;
-        }
-        return null;
-      },
-    },
-  ],
-};
 
 const LIST: Readonly<Record<AtomType, keyof ProjectData>> = { wf: 'workflows', step: 'steps', proc: 'processors', schema: 'schemas', asg: 'assignments', cache: 'caches' };
 
@@ -158,16 +95,17 @@ export function arrowRows(molecule: Molecule, atomKey: string): { label: string;
  * as an update ghost — only when every edited field passes its rule; one breaking a rule is unfinished, marked in the
  * Inspector and drawn as nothing, and blocks apply until it is fixed or reverted. An edit to a field a rule has locked
  * again (a schema whose processor arrow came back) is unfinished too, and also listed in `frozen`: BaseApi would refuse it.
+ * So is an atom whose change BaseApi's dry run refused (`refused`): the dry run runs every rule, code ones included.
  */
-export function editStates(molecule: Molecule, edits: Readonly<Record<string, Readonly<Record<string, string>>>>, removed: Removed = NOTHING_REMOVED):
-  { finished: Set<string>; unfinished: Set<string>; frozen: Set<string> } {
+export function editStates(fieldTable: FieldTable, molecule: Molecule, edits: Readonly<Record<string, Readonly<Record<string, string>>>>, removed: Removed = NOTHING_REMOVED,
+  refused: ReadonlySet<string> = new Set()): { finished: Set<string>; unfinished: Set<string>; frozen: Set<string> } {
   const finished = new Set<string>(), unfinished = new Set<string>(), frozen = new Set<string>();
   for (const [key, fields] of Object.entries(edits)) {
     const atom = molecule.atoms.get(key);
     if (!atom || Object.keys(fields).length === 0) continue;
-    const specs = Object.keys(fields).map((f) => FIELDS[atom.type].find((s) => s.key === f));
+    const specs = Object.keys(fields).map((f) => fieldTable[atom.type].find((s) => s.key === f));
     const locked = specs.some((s) => s?.lock?.(molecule, removed, key).locked);
-    const broken = locked || Object.entries(fields).some(([field, text]) => FIELDS[atom.type].find((s) => s.key === field)?.check(text) != null);
+    const broken = locked || refused.has(key) || Object.entries(fields).some(([field, text]) => fieldTable[atom.type].find((s) => s.key === field)?.check(text) != null);
     (broken ? unfinished : finished).add(key);
     if (locked) frozen.add(key);
   }

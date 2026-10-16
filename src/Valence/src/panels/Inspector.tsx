@@ -2,8 +2,10 @@ import { useState } from 'react';
 import type { Workspace } from '../app/workspace';
 import { useWorkspace } from '../app/workspace';
 import { canDeleteArrow, canDeleteAtom, CONSEQUENCE, goneArrows, type Removed, type Verdict } from '../molecule/deletion';
-import { arrowRows, CONDITIONS, detailRows, editStates, FIELDS, rowOf, savedText, type FieldSpec, type Lock } from '../molecule/fields';
+import { arrowRows, detailRows, editStates, rowOf, savedText, type FieldSpec, type Lock } from '../molecule/fields';
 import { arrowKey, BOND, isArrowKey, KINDS, TYPES, type Molecule } from '../molecule/model';
+import { tableFor } from '../molecule/rules';
+import type { AtomVerdict, DryRunState } from '../molecule/verdict';
 import { PaneNote } from './PaneNote';
 
 /** Where the read-only section's open/closed state is kept (this browser; a convenience, not the session). */
@@ -26,6 +28,9 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
   const pinned = useWorkspace(workspace, (s) => s.pinned);
   const edits = useWorkspace(workspace, (s) => s.edits);
   const removed = useWorkspace(workspace, (s) => s.removed);
+  const rules = useWorkspace(workspace, (s) => s.rules);
+  const dry = useWorkspace(workspace, (s) => s.dryRun);
+  const dryRunWorks = useWorkspace(workspace, (s) => s.dryRunWorks);
   const [open, setOpen] = useState(readOpen);
 
   if (!data || !molecule) return <PaneNote pane="inspector">Reading the project…</PaneNote>;
@@ -41,8 +46,13 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
   const gone = goneArrows(molecule, removed);
   const changed = edits[key] ?? {};
   const dirty = Object.keys(changed).length > 0;
-  const states = dirty ? editStates(molecule, { [key]: changed }, removed) : null;
+  const table = tableFor(rules, dryRunWorks);
+  const verdict = dry.kind === 'done' ? dry.byAtom[key] : undefined;
+  const refusedByBaseApi = !!verdict && !verdict.ok;
+  const states = dirty ? editStates(table, molecule, { [key]: changed }, removed, refusedByBaseApi ? new Set([key]) : undefined) : null;
   const unfinished = !!states?.unfinished.has(key), frozen = !!states?.frozen.has(key);
+  // the atom is in the planned changes: edited, deleted, or an arrow leaving it deleted
+  const planned = dirty || ghost || molecule.arrows.some((x) => x.from === key && gone.has(arrowKey(x)));
   const toggle = () => { setOpen((o) => { writeOpen(!o); return !o; }); };
   const details = detailRows(molecule, row, key);
   const arrows = arrowRows(molecule, key);
@@ -59,21 +69,24 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
             <span>● Deleted in Valence only, not applied</span><span className="insp-hint">Ctrl+Z on the canvas undoes it</span>
           </div>
         )}
+        {planned && !preview && <DryRunNote state={dry} verdict={verdict} />}
         {!ghost && !preview && <DeleteVerdict verdict={canDeleteAtom(molecule, removed, key)} />}
         {dirty && !preview && !ghost && (
           <div className={unfinished ? 'insp-virtual unfinished' : 'insp-virtual'}>
             <span>{frozen ? '◐ Unfinished edit: the definition is frozen again — a processor uses this schema, so BaseApi would refuse it. Revert it, or delete that arrow again'
+              : refusedByBaseApi ? "◐ Unfinished edit: BaseApi's dry run refuses it — not a change, and apply waits, until it passes"
               : unfinished ? '◐ Unfinished edit: fix the marked field — not a change, and apply waits, until then' : '● Changed in Valence only, not applied'}</span>
             <button type="button" className="link" onClick={() => workspace.revert(key)}>Revert</button>
           </div>
         )}
         <section className="sec" aria-label="Writable">
-          {FIELDS[atom.type].map((spec) => {
+          {table[atom.type].map((spec) => {
             const saved = savedText(row, spec);
             const value = changed[spec.key] ?? saved;
             const rule = spec.lock?.(molecule, removed, key);
             return (
               <Field key={`${key}:${spec.key}`} id={`insp-${spec.key}`} spec={spec} value={value} edited={spec.key in changed} rule={rule}
+                remote={preview ? undefined : verdict?.fields[spec.key]}
                 locked={ghost ? 'Deleted in Valence: undo the delete to edit' : preview ? 'Click the atom to pin it, then edit' : rule?.locked ? rule.note : undefined}
                 onChange={(text) => workspace.edit(key, spec.key, text, saved)} />
             );
@@ -97,6 +110,24 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
           )}
         </section>
       </div>
+    </div>
+  );
+}
+
+/**
+ * BaseApi's dry run for this atom's changes (POST /model/validate): checking, passing, refused (problems that belong to
+ * no one field; field problems show under their fields), or not available on this BaseApi.
+ */
+function DryRunNote({ state, verdict }: { state: DryRunState; verdict?: AtomVerdict }) {
+  if (state.kind === 'checking') return <div className="insp-dry checking">BaseApi is checking the changes…</div>;
+  if (state.kind === 'unavailable') return <div className="insp-dry off">Not checked by BaseApi: {state.reason}. The rules above still apply.</div>;
+  if (state.kind !== 'done' || !verdict) return null;
+  if (verdict.ok) return <div className="insp-dry ok">✓ BaseApi's dry run passes this change (nothing was written)</div>;
+  return (
+    <div className="insp-dry no">
+      <b>BaseApi refuses it</b>
+      {verdict.other.map((t, i) => <div key={i}>{t}</div>)}
+      {verdict.other.length === 0 && <div>See the marked fields.</div>}
     </div>
   );
 }
@@ -143,8 +174,11 @@ function ArrowInspector({ molecule, removed, arrow, preview }: { molecule: Molec
 }
 
 /** One writable field: its editor, BaseApi's rule for it as a note while typing, and a mark once it is edited. */
-function Field({ id, spec, value, edited, locked, rule, onChange }: {
-  id: string; spec: FieldSpec; value: string; edited: boolean; locked?: string; rule?: Lock; onChange: (text: string) => void;
+function Field({ id, spec, value, edited, locked, rule, remote, onChange }: {
+  id: string; spec: FieldSpec; value: string; edited: boolean; locked?: string; rule?: Lock;
+  /** BaseApi's dry-run problems for this field. */
+  remote?: readonly string[];
+  onChange: (text: string) => void;
 }) {
   const problem = locked && !(edited && rule?.locked) ? null : spec.check(value);
   const common = {
@@ -157,10 +191,10 @@ function Field({ id, spec, value, edited, locked, rule, onChange }: {
     case 'text': control = <input {...common} type="text" onChange={(e) => onChange(e.target.value)} />; break;
     case 'multiline': control = <textarea {...common} rows={2} onChange={(e) => onChange(e.target.value)} />; break;
     case 'json': control = <textarea {...common} rows={8} onChange={(e) => onChange(e.target.value)} />; break;
-    case 'condition':
+    case 'choice':
       control = (
         <select {...common} disabled={!!locked} onChange={(e) => onChange(e.target.value)}>
-          {CONDITIONS.map((c) => <option key={c.value} value={String(c.value)}>{c.label}</option>)}
+          {(spec.options ?? []).map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
         </select>
       );
       break;
@@ -172,6 +206,8 @@ function Field({ id, spec, value, edited, locked, rule, onChange }: {
         {control}
         {rule && <div className={rule.locked ? 'fhint locked' : 'fhint open'}>{rule.note}</div>}
         {problem && <div className="ferr">{problem}</div>}
+        {/* the dry run's own words, when the described rules see nothing wrong (a code rule, a key, a service rule) */}
+        {!problem && remote?.map((m, i) => <div key={i} className="ferr remote">BaseApi: {m}</div>)}
       </div>
     </div>
   );

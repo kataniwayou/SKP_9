@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 import type { ProjectData } from '../api/project';
 import project from '../test/fixtures/project.json';
 import { NOTHING_REMOVED } from './deletion';
-import { arrowRows, definitionLock, detailRows, editStates, FIELDS, rowOf, savedText } from './fields';
+import { arrowRows, definitionLock, detailRows, editStates, rowOf, savedText } from './fields';
 import { atomKey, buildMolecule } from './model';
+import { SNAPSHOT_RULES } from './rules';
 
+// the field table built from BaseApi's description (the bundled snapshot of GET /model/fields)
+const FIELDS = SNAPSHOT_RULES.table;
 const field = (type: keyof typeof FIELDS, key: string) => FIELDS[type].find((f) => f.key === key)!;
 
-describe('FIELDS (the user\'s list, 2026-10-15)', () => {
+describe("the field table, from BaseApi's description (the user's list, 2026-10-15)", () => {
   it('holds every writable field that is not an arrow, and no arrow field', () => {
     const keys = Object.fromEntries(Object.entries(FIELDS).map(([t, fs]) => [t, fs.map((f) => f.key)]));
     const common = ['name', 'version', 'description'];
@@ -35,24 +38,27 @@ describe('FIELDS (the user\'s list, 2026-10-15)', () => {
     expect(def.check('{"x-own":1,"pattern":"[","format":"anything"}')).toBeNull(); // unknown keywords and formats are annotations
   });
 
-  it("checks BaseApi's rules", () => {
+  it("checks BaseApi's rules, with BaseApi's own messages where it has them", () => {
     expect(field('wf', 'name').check('')).toBe('Name is required');
     expect(field('wf', 'name').check('x'.repeat(201))).toBe('Name is at most 200 characters');
-    expect(field('wf', 'version').check('1.0')).toBe('Version is x.y.z, e.g. 1.0.0');
-    expect(field('wf', 'version').check('01.0.0')).toBe('Version is x.y.z, e.g. 1.0.0');
+    expect(field('wf', 'version').check('1.0')).toBe('Version does not match ^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$');
+    expect(field('wf', 'version').check('01.0.0')).toMatch(/^Version does not match /);
     expect(field('wf', 'version').check('2.10.0')).toBeNull();
     expect(field('wf', 'cronExpression').check('')).toBeNull();
     expect(field('wf', 'cronExpression').check('0 * * * *')).toBeNull();
-    expect(field('wf', 'cronExpression').check('* *')).toBe('A cron has 5 or 6 fields');
-    expect(field('step', 'entryCondition').check('0')).toBe('Pick an entry condition');
+    expect(field('wf', 'cronExpression').check('* *')).toMatch(/^CronExpression must be a valid 5- or 6-field cron expression/);
+    expect(field('step', 'entryCondition').check('0')).toMatch(/^EntryCondition must not be PreviousProcessing/);
+    expect(field('step', 'entryCondition').check('9')).toBe('Entry condition is not one of its values');
     expect(field('step', 'entryCondition').check('5')).toBeNull();
-    expect(field('proc', 'sourceHash').check('ABC')).toBe('A source hash is 64 lowercase hex characters');
+    expect(field('proc', 'sourceHash').check('ABC')).toBe('SourceHash must be a lowercase SHA-256 hex string (64 chars, [a-f0-9]).');
     expect(field('proc', 'sourceHash').check('a'.repeat(64))).toBeNull();
+    expect(field('proc', 'instanceId').check('')).toBeNull();
     expect(field('asg', 'payload').check('{')).toMatch(/^Not valid JSON/);
-    expect(field('cache', 'root').check('a:b')).toBe('Root cannot contain ":"');
-    expect(field('cache', 'items').check('[]')).toBe('Items are a JSON object');
-    expect(field('cache', 'items').check('{"a":1}')).toBe('Key "a": values are strings');
-    expect(field('cache', 'items').check('{"a:b":"x"}')).toBe('Key "a:b": keys are non-empty and without ":"');
+    expect(field('cache', 'root').check('a:b')).toBe("Root must not contain ':'.");
+    expect(field('cache', 'root').check(' ')).toBe('Root is required');
+    expect(field('cache', 'items').check('[]')).toBe('Items must be a JSON object.');
+    expect(field('cache', 'items').check('{"a":1}')).toBe("Items value for key 'a' must be a string.");
+    expect(field('cache', 'items').check('{"a:b":"x"}')).toBe("Items key 'a:b' must not contain ':'.");
     expect(field('cache', 'items').check('{"a":"x"}')).toBeNull();
   });
 
@@ -91,7 +97,7 @@ describe('editStates: finished edits are changes, unfinished ones are not (the u
     const m = buildMolecule(project as ProjectData);
     const wf = [...m.atoms.values()].find((a) => a.type === 'wf')!.key;
     const step = [...m.atoms.values()].find((a) => a.type === 'step')!.key;
-    const states = editStates(m, { [wf]: { name: 'renamed', version: '2.0.0' }, [step]: { name: 'ok', version: '1.' }, 'wf:gone': { name: 'x' } });
+    const states = editStates(FIELDS, m, { [wf]: { name: 'renamed', version: '2.0.0' }, [step]: { name: 'ok', version: '1.' }, 'wf:gone': { name: 'x' } });
     expect([...states.finished]).toEqual([wf]);
     expect([...states.unfinished]).toEqual([step]);
   });
@@ -126,9 +132,9 @@ describe("definitionLock: BaseApi's freeze, judged on the virtual entities (the 
 
   it('makes a definition edit unfinished, and frozen, once an arrow comes back', () => {
     const edits = { [C1]: { definition: '{"type":"object"}' } };
-    expect(editStates(m, edits, { atoms: [], arrows: into })).toMatchObject({ finished: new Set([C1]), frozen: new Set() });
-    expect(editStates(m, edits, NOTHING_REMOVED)).toMatchObject({ finished: new Set(), unfinished: new Set([C1]), frozen: new Set([C1]) });
+    expect(editStates(FIELDS, m, edits, { atoms: [], arrows: into })).toMatchObject({ finished: new Set([C1]), frozen: new Set() });
+    expect(editStates(FIELDS, m, edits, NOTHING_REMOVED)).toMatchObject({ finished: new Set(), unfinished: new Set([C1]), frozen: new Set([C1]) });
     // a name edit is never frozen
-    expect(editStates(m, { [C1]: { name: 'renamed' } }, NOTHING_REMOVED).finished.has(C1)).toBe(true);
+    expect(editStates(FIELDS, m, { [C1]: { name: 'renamed' } }, NOTHING_REMOVED).finished.has(C1)).toBe(true);
   });
 });

@@ -38,7 +38,7 @@ worktree is uncommitted or in the commit that carries this file.
 4. **Workflows are highlighted, not loaded:** a **multi-select dropdown** picks which workflows are highlighted in the
    whole-project molecule.
 5. **Rules come from BaseApi**, "for consistency" with SKP Studio's REST-first design: `GET /model/relations` (exists
-   on the branch) and `GET /model/fields` (to build). The same-day alternative of hard-coding them was **reversed**.
+   on the branch) and `GET /model/fields` (built and deployed 2026-10-16, uncommitted; §4). The same-day alternative of hard-coding them was **reversed**.
 6. **Stage 1:** clone the shell — dock panel, menu strips, toolbox, inspector, the document, output — **empty of
    business**; then review the parts **one by one with the user, who approves each** before the next.
 7. **Stage 2:** the molecule diagram on the document's canvas (whole project, selected workflows highlighted).
@@ -209,13 +209,86 @@ Checked live with Playwright (no console errors); tests 240 pass.
   relational provider: tests build `AppDbContext` with `UseNpgsql("Host=unused;Database=unused")` (no connection);
   the in-memory provider names tables after the classes (`step_entity`).
 
-### `GET /model/fields` — to build
-From the update validators' FluentValidation descriptors plus the EF model. Probed: declarative rules come with their
-values (`NotEmpty`, `MaximumLength` 200 / 1 048 576, `Matches` `^[a-f0-9]{64}$`, `NotEqual(Guid.Empty)`,
-`IsInEnum`); `Must`/`Custom` rules appear as bare `PredicateValidator` — only their messages are readable; the shared
-Name/Version/Description rules sit behind an included child validator (recurse into it); unique indexes and not-null
-come from the EF model. **Not describable:** the schema-definition freeze (code in `SchemaService.UpdateAsync`).
+### `GET /model/fields` — built 2026-10-16 (uncommitted), tested, **deployed 2026-10-16**
+The user, 2026-10-16: "build it, start with GET /model/fields" (part 1 of: the rules come from BaseApi, so Valence stops
+keeping its own copy; part 2 is a dry-run validate of the whole pending change set).
+- **BaseApi** `src/BaseApi.Service/Features/Molecule/ModelFields.cs` + `ModelFieldsController.cs` (DTOs in
+  `MoleculeDtos.cs`, registered in `AddMoleculeFeature`). Body `{ entities: [{ table, fields: [{ field, column, type,
+  nullable, storeType, rules: [{ kind, value, message, conditional }], values }], unique: [{ index, fields, filter }] }] }`,
+  strong ETag, 304 on If-None-Match. Nothing is named in the code: each table's entity is paired with its update DTO
+  through the `BaseService<,,,>` subclass serving it; the DTO's properties are the fields (JSON names, nullability from
+  the record); the registered update validator's descriptor gives the rules, an `Include` read through (FluentValidation
+  12 hides the included validator: read from the adaptor's `_validator` field, pinned by the tests); a rule inside
+  `When(x => x.P.HasValue)` (written against `P.Value`) is `conditional` on P; rule kinds `required`, `notNull`,
+  `maxLength`, `minLength`, `length`, `pattern`, `enum`, `notEqual`, `equal`, else `code` (a `Must`/`Custom`) with its own
+  message or null; enum values listed with names, compared values as numbers; store types and unique indexes (with
+  filters) from the EF model. Tests `src/tests/BaseApi.Tests/Molecule/ModelFieldsTests.cs` (12) and `ValenceFieldsSnapshotTests.cs` (1) — whole suite 2162 pass, 75 skipped as before.
+- **Generated snapshot:** `src/Valence/src/api/model-fields.snapshot.json`, written and checked by
+  `ValenceFieldsSnapshotTests` (fails when a validator or index changes; regenerate with `VALENCE_FIELDS_SNAPSHOT=write`).
+- **Valence** `api/fields.ts` reads the endpoint; `molecule/rules.ts` builds every kind's field list (the update DTO's
+  non-link fields, in order), labels (`sourceHash` → "Source hash"), editors (`jsonb` → JSON box, enum → choice without
+  refused values, maxLength ≥ 1000 → multi-line) and checks (each rule in order, BaseApi's own message when it has one).
+  The workspace holds the rules in use; the Output pane says where they came from. A BaseApi without the endpoint (the
+  cluster today) or no BaseApi: the snapshot, and the line says why. `fields.ts` holds no rule any more.
+- **What Valence still does itself:** stand-ins for the `code` rules BaseApi reports (definition JSON + JSON Schema,
+  payload JSON, cache root ":", items, cron field count) — only while BaseApi's dry run is not available (below), only
+  where BaseApi lists a code rule, with BaseApi's message when it has one; and the definition freeze lock (a service
+  rule, judged on the virtual entities; the dry run confirms it).
+- Verified with Playwright: live → "Rules: the bundled snapshot … (this BaseApi has no GET /model/fields yet)", checks
+  with BaseApi's messages, entry condition without PreviousProcessing; the endpoint served (route interception) with the
+  generated description and processor names capped at 10 → "Rules: from BaseApi", the cap enforced with its message, step
+  names unaffected; GET only. Messages are now BaseApi's (e.g. "Version does not match ^(0|[1-9]\d*)…$", since
+  `BaseDtoValidator` gives the version pattern no message of its own).
 
+
+### `POST /model/validate` — the dry run, built 2026-10-16 (uncommitted), tested on a local stack, **deployed 2026-10-16**
+The user, 2026-10-16: "complete these parts" (part 2). Body `{ changes: [{ op: update|delete, table, id, row? }] }` (≤ 500);
+answer `{ ok, results: [{ index, op, table, id, ok, status, problem }] }`, always 200 when the request can be read.
+- `ModelChanges.cs` (`ModelChangeRunner`): one transaction, **always rolled back**; a savepoint per change (a failed one
+  rolls back to it, the next change runs on what the passing ones left). Each change goes through the entity's own
+  `BaseService` (`UpdateAsync` / `DeleteAsync`, found by `ModelEntities`, shared with `/model/fields`), so validators,
+  junction syncing, the schema freeze, keys and unique indexes all judge it; a workflow delete runs the delete guard's
+  read-only Redis checks first. A failure's `problem` is written by BaseApi's own registered exception handlers into a
+  private response — the exact ProblemDetails the real call answers. An unknown table/op or a missing row is a 400 of
+  its own. The services touch only the database (checked: no publish, no Redis writes), so the rollback undoes all.
+- Tests: controller (2) in `ModelFieldsTests.cs`; BaseApi suite 2164 pass. The runner itself needs Postgres (savepoints),
+  which the test project has no harness for: it was verified on a **local stack** — this branch's BaseApi on port 18090
+  against throwaway containers (`postgres:18-alpine`, `redis:7.4.9-alpine`, `rabbitmq:4.1.8-management-alpine`, the
+  cluster's images) — 12/12 HTTP checks: frozen definition → the real 409; slot clear then definition → 200, 200; the
+  reverse → 409, 200; rolled back (re-read unchanged); validator errors → 400 by field; duplicate cache root → 409;
+  used schema delete → 422 FK; free schema and workflow deletes → 204 and still there; processor delete refused alone,
+  passing after its workflow and step; unknown table/op/missing row → 400; missing row → 404.
+- **Valence:** `molecule/plan.ts` turns the virtual state into the ordered change set — every surviving row with edits or
+  deleted arrows is one update (the whole PUT body: the stored row, typed edits, the arrows still there), in the order
+  workflows, steps, assignments, processors, caches, schemas (a slot clears before its schema's definition changes); then
+  deletes, workflows → assignments → steps → processors → caches → schemas, a deleted step's own next-step rows cleared
+  first (RESTRICT); a ghost's edits are not sent. `api/validate.ts` calls the dry run; `molecule/verdict.ts` maps the
+  answers onto atoms and fields (validator errors by property → field; a key error's column → field; the rest per atom).
+  The document runs it 600 ms after the virtual state settles (aborting a stale one) and once at load with no changes
+  (does this BaseApi have it?). While it answers, the code-rule stand-ins are off (`rules.bare`): the code rules are
+  BaseApi's alone. A refused atom is unfinished (no update ghost). Inspector: a red "BaseApi refuses it" / green "✓ BaseApi's
+  dry run passes this change (nothing was written)" box, "BaseApi: …" under the field, "◐ Unfinished edit: BaseApi's dry
+  run refuses it". Output pane: one line per new answer ("Dry run by BaseApi: 5 changes, all pass (nothing was written)"
+  / "… 1 of 1 refused — free-x — Definition: …"). A BaseApi without it (the cluster today): said once at load, never asked
+  again until reload; the stand-ins stay on.
+- Verified with Playwright on Valence → the local stack (a copy of the cluster's 137 rows, GET-only from the cluster):
+  11/11 — rules from BaseApi; an invalid JSON Schema shown only by BaseApi's message (no local copy), unfinished, no halo;
+  fixed → passes, amber halo; file-envelope's 4 slot clears + definition → "5 changes, all pass"; duplicate cache root →
+  the unique index's 409 under Root; a free schema's delete passes; every table read back unchanged; the only non-GET
+  request the dry run; no console errors. On the cluster (no endpoints): fields 9/9, unlock 16/16, deletion rules 26/0
+  (1 skip) — one earlier run of the last two had misses that did not recur in three later runs.
+- **Deployed 2026-10-16** (the user: "deploy"), from the worktree, which starts at `feature/in-process-post`'s head
+  `2a781de` (nothing rolled back): `baseapi-service:local` rebuilt, the previous image kept as
+  `baseapi-service:before-model-fields`, loaded into kind `desktop`, `rollout restart`; Valence deployed for the first time
+  (`k8s/32-valence.yaml`, `valence:local`, port-forward 18082). Checked live: `/model/fields` 200 with the snapshot's ETag;
+  dry run of an empty set / unknown table / missing row → 200 / 400 / 404; the dry-run suite on the dev server against the
+  cluster 10/10 (6 tables read back unchanged); the deployed nginx build renders, takes its rules from BaseApi and passes the
+  dry-run probe (the production build has no `__molecule` hook, so atom-level checks run on the dev server); every pod
+  Running, no BaseApi errors. Rollback: `docker tag baseapi-service:before-model-fields baseapi-service:local`, `kind load`,
+  `rollout restart`.
+- **Version message:** a friendlier `WithMessage` for the version pattern lives in `BaseApi.Core`'s `BaseDtoValidator`,
+  which BaseApi.Service consumes as the local NuGet package `BaseApi.Core 1.0.0`; changing it means repacking that
+  package into the shared NuGet cache, which the main checkout's builds use too — not done.
 ### Cluster state
 The cluster's BaseApi currently runs **without** these endpoints (deployed, then rolled back the same day).
 Deploy (from the worktree root):
@@ -349,7 +422,7 @@ processor, not the schema, and the processor update has no in-use check.
   and italic, showing the edited name. An edit that breaks a rule is **unfinished**: no ghost, the Inspector says
   "◐ Unfinished edit: fix the marked field — not a change, and apply waits, until then" (dashed amber), and the apply
   step must refuse while any edit is unfinished. A deleted atom shows the red delete ghost even when edited
-  (`fields.editStates`; the rules are still Valence's own copy until `GET /model/fields` exists, §4).
+  (`fields.editStates`; the rules now come from `GET /model/fields`, §4).
 - **Breathing halos** (the user, 2026-10-16, option B of the ghost-styles mock
   https://claude.ai/artifact/VKMQtt8GpXtrKUZXpHcmEy — "the ghost is not prominent enough"): a glow behind the atom,
   breathing about every 1.6 s (still with reduced motion), never smaller than ~34 px on screen so it marks the atom at the

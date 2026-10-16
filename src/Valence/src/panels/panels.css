@@ -66,6 +66,7 @@ textarea.input.json { white-space: pre; overflow: auto; }
 .fhint { margin-top: 3px; font-size: 11.5px; color: var(--muted); }
 .fhint.locked { color: #f2b45a; }
 .fhint.open { color: #7dd3a8; }
+.ferr.remote { color: #ff8a8a; }
 .drill { font-family: var(--mono); font-size: 12px; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drill::after { content: " ›"; color: var(--faint); }
 .slot .v.drill { color: var(--accent); }

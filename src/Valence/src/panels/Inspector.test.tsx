@@ -61,7 +61,7 @@ describe('Inspector', () => {
     fireEvent.change(input('Name'), { target: { value: 'file-fetcher' } });
     expect(ws.get().edits).toEqual({});
     fireEvent.change(input('Version'), { target: { value: '2' } });
-    expect(screen.getByText('Version is x.y.z, e.g. 1.0.0')).toBeInTheDocument();
+    expect(screen.getByText(/^Version does not match /)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
     expect(ws.get().edits).toEqual({});
     expect(input('Version')).toHaveValue('1.0.0');

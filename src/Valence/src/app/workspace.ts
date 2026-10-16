@@ -1,7 +1,10 @@
 import { useSyncExternalStore } from 'react';
+import type { RulesSource } from '../api/fields';
 import type { ProjectData } from '../api/project';
 import { canDeleteArrow, canDeleteAtom, deletedLine, NOTHING_REMOVED, type Removed } from '../molecule/deletion';
 import { arrowKey, isArrowKey, type Molecule } from '../molecule/model';
+import { rulesOf, SNAPSHOT_RULES, type Rules } from '../molecule/rules';
+import { NO_DRY_RUN, type DryRunState } from '../molecule/verdict';
 
 /** Edited field texts by atom key, then by field: the virtual entities' changes (decision 8: nothing is applied yet). */
 export type Edits = Readonly<Record<string, Readonly<Record<string, string>>>>;
@@ -41,6 +44,12 @@ export interface WorkspaceState {
   removed: Removed;
   history: History;
   messages: readonly Message[];
+  /** BaseApi's rules for every writable field (`GET /model/fields`), or the bundled snapshot until BaseApi answers. */
+  rules: Rules;
+  /** BaseApi's dry run of the virtual changes (`POST /model/validate`): what the apply would answer, change by change. */
+  dryRun: DryRunState;
+  /** Whether BaseApi's dry run answers (its last run did): then it runs the code rules and Valence's stand-ins rest. */
+  dryRunWorks: boolean;
 }
 
 export interface Workspace {
@@ -48,6 +57,10 @@ export interface Workspace {
   subscribe(listener: () => void): () => void;
   /** The project as BaseApi returned it; a pin, edit or deletion of a row it no longer has is dropped. */
   loaded(data: ProjectData, molecule: Molecule): void;
+  /** The rules BaseApi described (or the snapshot it fell back to, and why): one line in the Output pane. */
+  rulesLoaded(source: RulesSource): void;
+  /** BaseApi's answer to the dry run of the current changes; a line for the Output pane when the answer changed. */
+  judged(state: DryRunState, line?: string | null, works?: boolean): void;
   hover(key: string | null): void;
   pin(key: string | null): void;
   /** A field's text; the stored text again means the field is no longer edited. Typing in one field is one step. */
@@ -67,7 +80,7 @@ export interface Workspace {
 export function createWorkspace(init: { pinned?: string | null; edits?: Edits; removed?: Removed; history?: History } = {}): Workspace {
   let state: WorkspaceState = {
     data: null, molecule: null, hovered: null, pinned: init.pinned ?? null, edits: init.edits ?? {},
-    removed: init.removed ?? NOTHING_REMOVED, history: init.history ?? NO_HISTORY, messages: [],
+    removed: init.removed ?? NOTHING_REMOVED, history: init.history ?? NO_HISTORY, messages: [], rules: SNAPSHOT_RULES, dryRun: NO_DRY_RUN, dryRunWorks: false,
   };
   let nextMessage = 1;
   const listeners = new Set<() => void>();
@@ -108,6 +121,12 @@ export function createWorkspace(init: { pinned?: string | null; edits?: Edits; r
         edits: Object.fromEntries(Object.entries(state.edits).filter(([k]) => has(k))),
         removed: { atoms: state.removed.atoms.filter(has), arrows: state.removed.arrows.filter(has) },
       });
+    },
+    rulesLoaded(source) { set({ rules: rulesOf(source), messages: say(source.note, source.from === 'baseapi' ? 'info' : 'refused') }); },
+    judged(dryRun, line, works) {
+      const last = state.messages[state.messages.length - 1]?.text;
+      const dryRunWorks = works ?? (dryRun.kind === 'done' ? true : dryRun.kind === 'unavailable' ? false : state.dryRunWorks);
+      set(line && line !== last ? { dryRun, dryRunWorks, messages: say(line, dryRun.kind === 'done' && dryRun.ok ? 'info' : 'refused') } : { dryRun, dryRunWorks });
     },
     hover(key) { if (key !== state.hovered) set({ hovered: key }); },
     pin(key) { if (key !== state.pinned) set({ pinned: key }); },

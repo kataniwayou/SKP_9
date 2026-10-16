@@ -1,9 +1,14 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { readFields, type RulesSource } from '../api/fields';
 import { readProject, type ProjectResult } from '../api/project';
+import { dryRun, type DryRun } from '../api/validate';
 import { goneArrows } from '../molecule/deletion';
 import { editStates } from '../molecule/fields';
 import { layoutMolecule, type Vec } from '../molecule/layout';
 import { buildMolecule, reachOf, type Molecule } from '../molecule/model';
+import { planChanges, type PlannedChange } from '../molecule/plan';
+import { tableFor } from '../molecule/rules';
+import { dryRunLine, NO_DRY_RUN, verdictOf } from '../molecule/verdict';
 import { useHighlights, type Highlights } from './highlights';
 import { useWorkspace, type Workspace } from './workspace';
 
@@ -31,13 +36,19 @@ export function litOf(molecule: Molecule, workflowKeys: readonly string[]): Read
  * toolbar on the canvas (the user, 2026-10-15); the workflow filter is on the main menu strip (2026-10-16) and sets the
  * molecule's base state: what the picked workflows reach stays, the rest fades.
  */
-export function ProjectDocument({ workspace, highlights, read = readProject }: {
-  workspace: Workspace; highlights: Highlights; read?: () => Promise<ProjectResult>;
+export function ProjectDocument({ workspace, highlights, read = readProject, readRules = readFields, check = dryRun }: {
+  workspace: Workspace; highlights: Highlights; read?: () => Promise<ProjectResult>; readRules?: () => Promise<RulesSource>;
+  check?: (changes: readonly PlannedChange[], fetchFn?: typeof fetch, signal?: AbortSignal) => Promise<DryRun>;
 }) {
   const [loaded, setLoaded] = useState<Loaded>({ kind: 'loading' });
   const pinned = useWorkspace(workspace, (s) => s.pinned);
   const removed = useWorkspace(workspace, (s) => s.removed);
   const edits = useWorkspace(workspace, (s) => s.edits);
+  const rules = useWorkspace(workspace, (s) => s.rules);
+  const judged = useWorkspace(workspace, (s) => s.dryRun);
+  const dryRunWorks = useWorkspace(workspace, (s) => s.dryRunWorks);
+  // set when BaseApi answered that it has no dry run: not asked again until the page reloads
+  const missing = useRef<string | null>(null);
   // the labels show the virtual entities' names (decision 8)
   const names = useMemo(() => new Map(Object.entries(edits).flatMap(([k, f]) => (f.name !== undefined ? [[k, f.name] as const] : []))), [edits]);
   const events = useMemo(() => ({ hover: workspace.hover, pin: workspace.pin }), [workspace]);
@@ -45,14 +56,50 @@ export function ProjectDocument({ workspace, highlights, read = readProject }: {
   const picked = useHighlights(highlights);
   const lit = useMemo(() => (loaded.kind === 'ready' ? litOf(loaded.molecule, picked) : null), [loaded, picked]);
   // the virtual changes, not applied: deleted ones as red ghosts with every arrow that goes with them; atoms whose edits
-  // are finished as amber update ghosts (an unfinished edit is no change yet, so it draws nothing)
-  const ghosts = useMemo(() => (loaded.kind === 'ready'
-    ? { atoms: new Set(removed.atoms), arrows: goneArrows(loaded.molecule, removed), updated: editStates(loaded.molecule, edits, removed).finished }
-    : undefined), [loaded, removed, edits]);
+  // are finished as amber update ghosts (an unfinished edit — or one BaseApi's dry run refused — is no change yet, so it
+  // draws nothing)
+  const ghosts = useMemo(() => {
+    if (loaded.kind !== 'ready') return undefined;
+    const refused = new Set(judged.kind === 'done' ? Object.entries(judged.byAtom).filter(([, v]) => !v.ok).map(([k]) => k) : []);
+    const updated = editStates(tableFor(rules, dryRunWorks), loaded.molecule, edits, removed, refused).finished;
+    return { atoms: new Set(removed.atoms), arrows: goneArrows(loaded.molecule, removed), updated };
+  }, [loaded, removed, edits, rules, judged, dryRunWorks]);
+
+  // BaseApi's dry run of the virtual changes (POST /model/validate), shortly after they settle: every rule BaseApi has,
+  // its services' and the database's included, judges them as the apply would — and nothing is written
+  useEffect(() => {
+    if (loaded.kind !== 'ready') return;
+    const data = workspace.get().data;
+    if (!data) return;
+    const planned = planChanges(data, loaded.molecule, edits, removed, rules.fields);
+    if (planned.length === 0) { workspace.judged(NO_DRY_RUN); return; }
+    if (missing.current) { workspace.judged({ kind: 'unavailable', reason: missing.current }); return; } // already said at load
+    const abort = new AbortController();
+    const timer = setTimeout(() => {
+      workspace.judged({ kind: 'checking', planned: planned.length });
+      check(planned, fetch, abort.signal).then((run) => {
+        if (run.kind === 'unavailable' && run.missing) missing.current = run.reason;
+        const state = verdictOf(planned, run, rules.fields);
+        workspace.judged(state, dryRunLine(state, planned, (a) => loaded.molecule.atoms.get(a)?.name ?? a));
+      }).catch(() => { /* superseded by a newer change */ });
+    }, 600);
+    return () => { clearTimeout(timer); abort.abort(); };
+  }, [loaded, edits, removed, rules, workspace, check]);
 
   useEffect(() => {
     let live = true;
     setLoaded({ kind: 'loading' });
+    // the rules come from BaseApi with the rows (decision 5); until then, and on an older BaseApi, the snapshot
+    void readRules().then((source) => { if (live) workspace.rulesLoaded(source); });
+    // does this BaseApi have the dry run? An empty one says so before the first edit: then the code rules are BaseApi's
+    // alone from the start, with no stand-in showing first
+    void check([]).then((run) => {
+      if (run.kind === 'unavailable' && run.missing) missing.current = run.reason;
+      if (!live || workspace.get().dryRun.kind !== 'idle') return;
+      // said once, here: a BaseApi without the dry run stays without it until the page reloads
+      if (run.kind === 'done') workspace.judged({ kind: 'idle' }, null, true);
+      else workspace.judged({ kind: 'unavailable', reason: run.reason }, `Dry run: not available (${run.reason}); edits are checked by the rules alone.`, false);
+    }).catch(() => { /* superseded */ });
     void read().then((r) => {
       if (!live) return;
       if (!r.ok) { setLoaded({ kind: 'failed', message: r.message }); return; }
@@ -61,7 +108,7 @@ export function ProjectDocument({ workspace, highlights, read = readProject }: {
       setLoaded({ kind: 'ready', molecule, positions: layoutMolecule(molecule) });
     });
     return () => { live = false; };
-  }, [read, attempt, workspace]);
+  }, [read, readRules, check, attempt, workspace]);
 
   // The canvas's keys, while it has focus (SKP Studio's, design/useDesignKeys.ts): Delete deletes the pinned atom or
   // arrow under the rules (spec §6); Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z redo, through edits and deletions alike.
