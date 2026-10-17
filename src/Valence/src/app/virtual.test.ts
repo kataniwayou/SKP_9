@@ -87,6 +87,17 @@ describe('the workspace makes atoms and draws arrows (approved 2026-10-17)', () 
     expect(plan[2]!.row).toMatchObject({ nextStepIds: [n.split(':')[1]] });
     expect(a).toBeTruthy();
   });
+
+  it('a next step between two made steps: created without it, then an update adds it once both exist', () => {
+    const w = ws();
+    const a = w.create('step', P, [0, 0, 0])!, b = w.create('step', P, [1, 0, 0])!;
+    w.draw('next', a, b);
+    const s = w.get();
+    const plan = planChanges(s.data!, s.molecule!, s.edits, s.removed, SNAPSHOT, new Set(s.created.map((c) => c.key)), s.added);
+    expect(plan.map((c) => `${c.op} ${c.id.slice(0, 4)} ${JSON.stringify(c.row?.nextStepIds)}`)).toEqual([
+      `create ${a.split(':')[1]!.slice(0, 4)} []`, `create ${b.split(':')[1]!.slice(0, 4)} []`, `update ${a.split(':')[1]!.slice(0, 4)} ${JSON.stringify([b.split(':')[1]])}`,
+    ]);
+  });
 });
 
 describe('copy/paste (the user, 2026-10-17): the Toolbox atom drop with the copied values', () => {

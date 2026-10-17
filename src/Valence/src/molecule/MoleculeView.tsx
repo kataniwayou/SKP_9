@@ -717,6 +717,9 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
     shift.x = kept.view.shift.x; shift.y = kept.view.shift.y; applyShift();
     kept.view.atoms.forEach((p, key) => { const a = atoms.get(key); if (a) { a.pos.set(...p); a.mesh.position.copy(a.pos); } });
     arrows.forEach(placeArrow);
+    // a rebuilt scene hovers nothing yet, and reports a hover only when it changes: the hover the old scene left (the
+    // atom a tile was dropped on) would stay in the Inspector over the new pinned atom until another atom was hovered
+    events.hover(null);
   }
   // the mock's fog (0.016 at a 30-unit camera), scaled to this molecule's distance, so its far side fades as gently
   fog.density = 0.48 / home;
@@ -779,7 +782,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
     ray.setFromCamera(mouse, camera);
     return ray.ray;
   };
-  const viewPlane = new THREE.Plane(), planeHit = new THREE.Vector3(), camRight = new THREE.Vector3();
+  const viewPlane = new THREE.Plane(), planeHit = new THREE.Vector3(), camRight = new THREE.Vector3(), camUp = new THREE.Vector3();
   /** The point under (x, y) on the plane facing the camera through `through`. */
   const pointAt = (x: number, y: number, through: THREE.Vector3) => {
     camera.getWorldDirection(camDir);
@@ -813,7 +816,21 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
         camRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
         const under = pointAt(x, y, by.pos);
         const side = under && under.clone().sub(by.pos).dot(camRight) < 0 ? -1 : 1;
-        pos = by.pos.clone().addScaledVector(camRight, side * (TYPES[by.atom.type].r + r + 0.6));
+        // the first free place around it, starting on the pointer's side (a second step on the same processor went exactly
+        // on top of the first, the two impossible to tell apart or to click): turning round it in the screen's plane, then
+        // a ring further out
+        camUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
+        const gap = TYPES[by.atom.type].r + r + 0.6;
+        const free = (p: THREE.Vector3) => [...atoms.values()].every((o) => o === by || o.pos.distanceTo(p) >= TYPES[o.atom.type].r + r + 0.3);
+        pos = null;
+        for (let ring = 1; ring <= 4 && !pos; ring++) {
+          for (let i = 0; i < 12 && !pos; i++) {
+            const a = (i % 2 ? -1 : 1) * Math.ceil(i / 2) * (Math.PI / 6);
+            const p = by.pos.clone().addScaledVector(camRight, side * Math.cos(a) * gap * ring).addScaledVector(camUp, Math.sin(a) * gap * ring);
+            if (free(p)) pos = p;
+          }
+        }
+        pos ??= by.pos.clone().addScaledVector(camRight, side * gap);
       } else {
         pos = pointAt(x, y, controls.target);
       }

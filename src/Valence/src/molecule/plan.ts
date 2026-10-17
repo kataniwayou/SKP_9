@@ -75,14 +75,26 @@ export function planChanges(data: ProjectData, molecule: Molecule, edits: Readon
   }
 
   const changes: PlannedChange[] = [];
-  // atoms made from the Toolbox: a create each, its row as typed, with its arrows (the mandatory one and any drawn)
+  // atoms made from the Toolbox: a create each, its row as typed, with its arrows (the mandatory one and any drawn).
+  // A new step's next steps that are new too would name rows not created yet (a foreign key BaseApi refuses, found by
+  // the browser suite 2026-10-17): it is created without them, and an update after every create adds them.
+  const madeIds = new Set([...molecule.atoms.values()].filter((a) => created.has(a.key) && !deleted.has(a.key)).map((a) => a.id));
+  const later: PlannedChange[] = [];
   for (const type of CREATE_ORDER) {
     for (const atom of molecule.atoms.values()) {
       if (atom.type !== type || !created.has(atom.key) || deleted.has(atom.key)) continue;
       const row = body(atom.key);
-      if (row) changes.push({ op: 'create', table: TYPES[type].table, id: atom.id, row, atom: atom.key, why: `${atom.name}: made in Valence` });
+      if (!row) continue;
+      const next = Array.isArray(row.nextStepIds) ? (row.nextStepIds as string[]) : [];
+      if (type === 'step' && next.some((id) => madeIds.has(id))) {
+        changes.push({ op: 'create', table: TYPES[type].table, id: atom.id, row: { ...row, nextStepIds: next.filter((id) => !madeIds.has(id)) }, atom: atom.key, why: `${atom.name}: made in Valence` });
+        later.push({ op: 'update', table: TYPES[type].table, id: atom.id, row, atom: atom.key, why: `${atom.name}: its next steps made in Valence, once they exist` });
+      } else {
+        changes.push({ op: 'create', table: TYPES[type].table, id: atom.id, row, atom: atom.key, why: `${atom.name}: made in Valence` });
+      }
     }
   }
+  changes.push(...later);
   for (const type of UPDATE_ORDER) {
     for (const atom of molecule.atoms.values()) {
       if (atom.type !== type || deleted.has(atom.key) || created.has(atom.key)) continue;
