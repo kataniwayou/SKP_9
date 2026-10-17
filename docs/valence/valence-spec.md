@@ -665,3 +665,18 @@ extra. The full suite runs against the deployed bundle through nginx to the clus
   cleared first) sent its NOT NULL processor as null, and one deleted step naming another was deleted after it — every
   deleted step's next-step rows now clear first, from the row as BaseApi holds it; and every canvas rebuild left its
   WebGL context behind ("Too many active WebGL contexts", the tab could crash) — `renderer.forceContextLoss()` on dispose.
+
+### The view kept in this browser — built 2026-10-17 (the user: moved atoms were lost after closing the browser)
+
+- **What:** the camera (position, target, up), the canvas slide and every atom's place, by atom key. Kept with the session
+  (`skp.valence.session`, field `view`), in the tab's sessionStorage and mirrored to localStorage, so a refresh and a
+  browser restart open on it. **Never sent to BaseApi**: the user decided against any database saving of the drawing
+  (a design table and autosave were built and rolled back the same day); BaseApi changes only through Apply.
+- **When:** the canvas reports the view once a turn, wheel zoom, slide or atom move has held still for 400 ms with nothing
+  pressed (a coasting turn is one change); the session's own saver writes it 300 ms later. Closing the page mid-turn
+  reports the view as it stands and writes it at once (`pagehide`).
+- **After an apply:** the made atoms' places are reported again under their real ids.
+- **Another machine** opens on the default view: the view, like the draft, stays in the browser that made it.
+- Verified: unit test in `app/session.test.ts`; browser test (a real profile, the browser closed and reopened): camera,
+  slide and all 137 atoms back within 0.02 px, a moved atom where it was moved, the draft beside it, a refresh, a close
+  mid-turn; no writes to BaseApi.

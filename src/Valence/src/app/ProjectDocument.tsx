@@ -13,6 +13,7 @@ import { useHighlights, type Highlights } from './highlights';
 import { Placer } from '../panels/Toolbox';
 import { applyBridge } from './Apply';
 import type { Copied } from './virtual';
+import type { CanvasView } from '../molecule/view';
 import { useWorkspace, type Workspace } from './workspace';
 
 // three.js is most of the bundle: it loads with the first molecule, not with the page
@@ -42,8 +43,12 @@ export function litOf(molecule: Molecule, workflowKeys: readonly string[]): Read
  * toolbar on the canvas (the user, 2026-10-15); the workflow filter is on the main menu strip (2026-10-16) and sets the
  * molecule's base state: what the picked workflows reach stays, the rest fades.
  */
-export function ProjectDocument({ workspace, highlights, read = readProject, readRules = readFields, check = dryRun }: {
+export function ProjectDocument({ workspace, highlights, view = null, onView, read = readProject, readRules = readFields, check = dryRun }: {
   workspace: Workspace; highlights: Highlights; read?: () => Promise<ProjectResult>; readRules?: () => Promise<RulesSource>;
+  /** The view kept in this browser (the camera and every atom's place), to open on. */
+  view?: CanvasView | null;
+  /** The view settled (`closing`: the page is closing): to keep in this browser. */
+  onView?: (view: CanvasView, closing: boolean) => void;
   check?: (changes: readonly PlannedChange[], fetchFn?: typeof fetch, signal?: AbortSignal) => Promise<DryRun>;
 }) {
   const [loaded, setLoaded] = useState<Loaded>({ kind: 'loading' });
@@ -69,7 +74,7 @@ export function ProjectDocument({ workspace, highlights, read = readProject, rea
   const missing = useRef<string | null>(null);
   // the labels show the virtual entities' names (decision 8)
   const names = useMemo(() => new Map(Object.entries(edits).flatMap(([k, f]) => (f.name !== undefined ? [[k, f.name] as const] : []))), [edits]);
-  const events = useMemo(() => ({ hover: workspace.hover, pin: workspace.pin }), [workspace]);
+  const events = useMemo(() => ({ hover: workspace.hover, pin: workspace.pin, view: onView }), [workspace, onView]);
   const [attempt, setAttempt] = useState(0);
   const picked = useHighlights(highlights);
   const lit = useMemo(() => (loaded.kind === 'ready' && molecule ? litOf(molecule, picked) : null), [loaded, molecule, picked]);
@@ -204,7 +209,7 @@ export function ProjectDocument({ workspace, highlights, read = readProject, rea
       <div className="vcanvas" />
       {loaded.kind === 'ready' && (
         <Suspense fallback={<div className="doc-msg">Loading…</div>}>
-          <MoleculeView molecule={molecule ?? loaded.molecule} positions={positions ?? loaded.positions} highlighted={lit} pinned={pinned} names={names} events={events} ghosts={ghosts} />
+          <MoleculeView molecule={molecule ?? loaded.molecule} positions={positions ?? loaded.positions} highlighted={lit} pinned={pinned} names={names} events={events} ghosts={ghosts} view={view} />
         </Suspense>
       )}
       {loaded.kind === 'loading' && <div className="doc-msg">Reading the project…</div>}

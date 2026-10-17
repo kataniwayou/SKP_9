@@ -11,6 +11,7 @@ import { Inspector } from './panels/Inspector';
 import { Output, Toolbox } from './panels/Panes';
 import { SHORTCUTS } from './app/shortcuts';
 import { createWorkspace, useWorkspace } from './app/workspace';
+import type { CanvasView } from './molecule/view';
 
 /** The one document: the whole project, always open (spec §2.3); its tab is marked while edits are not applied. */
 const documentOf = (dirty: boolean): DockDocument[] => [{ id: PROJECT_ID, name: PROJECT_NAME, version: '', tooltip: 'Every row of the project, as one molecule', pinned: true, dirty }];
@@ -41,10 +42,12 @@ export function App({ storage, tabStorage }: AppProps) {
   const [notice, setNotice] = useState<{ id: number; text: string } | undefined>(undefined);
 
   const dockState = useRef<SavedLayout | null>(session?.dock ?? null);
+  // the camera and every atom's place, kept with the session (2026-10-17): a refresh or a browser restart opens on them
+  const view = useRef<CanvasView | null>(session?.view ?? null);
   const refused = useRef(false);
   const saver = useMemo(() => createSaver(() => {
     const { pinned: pin, edits, removed, history, created, added } = workspace.get();
-    const kept = writeTabSession(tab, resolved, { version: SESSION_VERSION, dock: dockState.current, highlighted: [...highlights.get()], pinned: pin, edits: { ...edits }, removed, history, created: [...created], added: [...added] });
+    const kept = writeTabSession(tab, resolved, { version: SESSION_VERSION, dock: dockState.current, highlighted: [...highlights.get()], pinned: pin, edits: { ...edits }, removed, history, created: [...created], added: [...added], ...(view.current ? { view: view.current } : {}) });
     if (!kept && !refused.current) setNotice((n) => ({ id: (n?.id ?? 0) + 1, text: 'This browser would not keep the session: a refresh may lose the layout' }));
     refused.current = !kept;
   }), [tab, resolved]);
@@ -55,6 +58,7 @@ export function App({ storage, tabStorage }: AppProps) {
     let last = workspace.get();
     return workspace.subscribe(() => { const now = workspace.get(); if (now.pinned !== last.pinned || now.edits !== last.edits || now.removed !== last.removed || now.history !== last.history || now.created !== last.created || now.added !== last.added) saver.schedule(); last = now; });
   }, [workspace, saver]);
+  const onView = useMemo(() => (v: CanvasView, closing: boolean) => { view.current = v; saver.schedule(); if (closing) saver.flush(); }, [saver]);
   const renderTool = (id: ToolId) => {
     switch (id) {
       case 'inspector': return <Inspector workspace={workspace} />;
@@ -78,7 +82,7 @@ export function App({ storage, tabStorage }: AppProps) {
       onActivateDocument={() => {}}
       onCloseDocument={() => {}}
       onOpenWorkflow={() => {}}
-      renderDocument={() => <ProjectDocument workspace={workspace} highlights={highlights} />}
+      renderDocument={() => <ProjectDocument workspace={workspace} highlights={highlights} view={session?.view ?? null} onView={onView} />}
       renderTool={renderTool}
       inspectorKey={pinned ?? ''}
       onEscape={() => {}}

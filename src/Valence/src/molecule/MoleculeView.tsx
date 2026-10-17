@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls.js';
 import { canvasBridge } from './bridge';
+import type { CanvasView } from './view';
 import { extentOf, type Vec } from './layout';
 import { arrowKey, BOND, isArrowKey, KINDS, TYPES, type Arrow, type ArrowKind, type Atom, type AtomType, type Molecule } from './model';
 
@@ -30,7 +31,14 @@ interface Painter {
 }
 
 /** What the view tells the page: the atom or arrow under the pointer, and a click's (null: empty canvas). Arrows by `arrowKey`. */
-export interface MoleculeEvents { hover(key: string | null): void; pin(key: string | null): void }
+export interface MoleculeEvents {
+  hover(key: string | null): void; pin(key: string | null): void;
+  /**
+   * The view (the camera and every atom's place) once a turn, zoom, slide or atom move has settled, to keep in this
+   * browser (the user, 2026-10-17); `closing`: the page is closing, so it must be written now.
+   */
+  view?(view: CanvasView, closing: boolean): void;
+}
 
 /**
  * Ghosts of the virtual changes: atoms and arrows (by key) deleted in Valence — the arrows include those touching a deleted
@@ -44,6 +52,9 @@ export interface Ghosts {
 
 /** The view kept across a rebuild (an atom made or taken back rebuilds the scene): the camera and where atoms stand. */
 interface SavedView { camera: Vec; target: Vec; up: Vec; shift: { x: number; y: number }; atoms: Map<string, Vec> }
+/** What a scene keeps for the next one: the view, an apply's renamed keys, and whether the view must be reported again (an apply renamed made atoms). */
+interface Kept { view?: SavedView; rename?: ReadonlyMap<string, string>; report?: boolean }
+const savedOf = (v: CanvasView): SavedView => ({ camera: v.camera, target: v.target, up: v.up, shift: { ...v.shift }, atoms: new Map(Object.entries(v.atoms)) });
 const NO_GHOSTS: Ghosts = { atoms: new Set(), arrows: new Set() };
 
 /**
@@ -55,13 +66,15 @@ const NO_GHOSTS: Ghosts = { atoms: new Set(), arrows: new Set() };
  * nothing is hovered, keeps its neighbours in focus. `highlighted`: the atoms of the chosen workflows stand out and the
  * rest are dimmed; null highlights nothing.
  */
-export function MoleculeView({ molecule, positions, highlighted, pinned = null, names, events, ghosts = NO_GHOSTS }: {
+export function MoleculeView({ molecule, positions, highlighted, pinned = null, names, events, ghosts = NO_GHOSTS, view = null }: {
   molecule: Molecule; positions: ReadonlyMap<string, Vec>; highlighted: ReadonlySet<string> | null;
   pinned?: string | null; names?: ReadonlyMap<string, string>; events?: MoleculeEvents; ghosts?: Ghosts;
+  /** The view kept in this browser, to open on (the first build only; later builds keep the view as it stands). */
+  view?: CanvasView | null;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const painter = useRef<Painter | null>(null);
-  const kept = useRef<{ view?: SavedView; rename?: ReadonlyMap<string, string> }>({});
+  const kept = useRef<Kept>(view ? { view: savedOf(view) } : {});
   const latest = useRef({ highlighted, pinned, names, events, ghosts });
   latest.current = { highlighted, pinned, names, events, ghosts };
 
@@ -70,6 +83,7 @@ export function MoleculeView({ molecule, positions, highlighted, pinned = null, 
     const scene3 = buildScene(el, molecule, positions, {
       hover: (key) => latest.current.events?.hover(key),
       pin: (key) => latest.current.events?.pin(key),
+      view: (v, closing) => latest.current.events?.view?.(v, closing),
     }, kept.current);
     painter.current = scene3;
     scene3.highlight(latest.current.highlighted);
@@ -124,7 +138,7 @@ function headOf(shaftR: number): { headGeom: THREE.LatheGeometry; headLen: numbe
   return { headGeom, headLen: L };
 }
 
-function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyMap<string, Vec>, events: MoleculeEvents, kept: { view?: SavedView; rename?: ReadonlyMap<string, string> } = {}): Painter & { dispose(): void } {
+function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyMap<string, Vec>, events: MoleculeEvents, kept: Kept = {}): Painter & { dispose(): void } {
   const doc = el.ownerDocument;
   const win = doc.defaultView ?? window;
   const labelsEl = el.querySelector<HTMLDivElement>('.mol-labels')!;
@@ -507,6 +521,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   let overAtom = false, overCanvas = false, ctrlDown = false;
   let dragging: { id: number; atom: AtomView; grip: THREE.Vector3; arrows: ArrowView[] } | null = null;
   let panning: { id: number; x: number; y: number } | null = null;
+  let moves = 0; // atom moves, for the kept view
   const setHand = () => {
     const busy = !!(dragging || panning || turning);
     el.classList.toggle('movable', !!dragging || (overAtom && ctrlDown && !busy));
@@ -548,6 +563,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
     a.pos.copy(dragHit).add(dragging.grip);
     a.mesh.position.copy(a.pos);
     dragging.arrows.forEach(placeArrow);
+    moves++;
   }
   function drop(e: { pointerId: number }) {
     if (!dragging || e.pointerId !== dragging.id) return;
@@ -755,6 +771,31 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
       a.mesh.scale.setScalar(outline * 1.04); // a hair of margin for the edge's antialiasing; the shader cuts the circle
     });
   }
+  // ---------- The view, kept in this browser (the user, 2026-10-17) ----------
+  // The camera, the slide and the atoms' places, reported once they have held still for 400 ms with nothing pressed: a
+  // coasting turn, an easing zoom or a damped slide is one change, not one per frame. Rounded, so damping's last vanishing
+  // steps end the change instead of keeping it alive.
+  const r4 = (n: number) => Math.round(n * 1e4) / 1e4;
+  const vec4 = (v: THREE.Vector3): Vec => [r4(v.x), r4(v.y), r4(v.z)];
+  const signature = () => `${vec4(camera.position)}|${vec4(controls.target)}|${vec4(camera.up)}|${r4(shift.x)},${r4(shift.y)}|${moves}`;
+  let lastSig = '', changedAt = 0, unreported = !!kept.report;
+  kept.report = false;
+  function watchView(now: number) {
+    const sig = signature();
+    if (sig !== lastSig) { if (lastSig !== '') unreported = true; lastSig = sig; changedAt = now; return; }
+    if (!unreported || dragging || turning || panning || now - changedAt < 400) return;
+    reportView(false);
+  }
+  function reportView(closing: boolean) {
+    unreported = false;
+    lastSig = signature();
+    events.view?.({
+      camera: vec4(camera.position), target: vec4(controls.target), up: vec4(camera.up), shift: { x: r4(shift.x), y: r4(shift.y) },
+      atoms: Object.fromEntries([...atoms].map(([k, a]) => [k, vec4(a.pos)])),
+    }, closing);
+  }
+  // the page closing mid-turn (still coasting) or mid-drag: the view as it stands is kept
+  listen(win, 'pagehide', () => { if (unreported || signature() !== lastSig) reportView(true); });
   function frame() {
     if (!turning && (Math.abs(spin.x) > 1e-4 || Math.abs(spin.y) > 1e-4)) { turn(spin.x, spin.y); spin.x *= 0.9; spin.y *= 0.9; }
     easeZoom();
@@ -765,6 +806,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
     if (!lastCam.equals(camera.position)) { lastCam.copy(camera.position); arrows.forEach(placeArrow); }
     renderer.render(scene, camera);
     placeLabels();
+    watchView(performance.now());
     raf = win.requestAnimationFrame(frame);
   }
   raf = win.requestAnimationFrame(frame);
@@ -890,6 +932,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
       // after an apply, a made atom's place is kept under the id BaseApi gave it
       const rename = kept.rename;
       kept.rename = undefined;
+      kept.report = !!rename?.size; // the made atoms' places, under their real ids
       kept.view = { camera: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), shift: { ...shift }, atoms: new Map([...atoms].map(([k, a]) => [rename?.get(k) ?? k, a.pos.toArray()])) };
       win.cancelAnimationFrame(raf);
       cleanups.forEach((c) => c());

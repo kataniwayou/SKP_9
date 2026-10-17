@@ -2,6 +2,7 @@ import { parseLayout, type SavedLayout } from '../dock/layoutPersistence';
 import type { CreatedAtom } from './virtual';
 import type { Removed } from '../molecule/deletion';
 import type { Change, EditChange, History } from './workspace';
+import { parseView, type CanvasView } from '../molecule/view';
 
 /**
  * The page as the user left it, as SKP Studio keeps its own (spec §6.1): a refresh keeps the dock, the highlighted
@@ -28,6 +29,8 @@ export interface Session {
   /** Made from the Toolbox, not applied (2026-10-17): atoms and drawn arrows. Optional, so the version stays 1. */
   created?: CreatedAtom[];
   added?: string[];
+  /** The camera and every atom's place (the user, 2026-10-17: moved atoms were lost on a restart). Optional, so the version stays 1. */
+  view?: CanvasView;
 }
 
 export function readSession(storage: Storage | null): Session | null {
@@ -56,6 +59,7 @@ export function readSession(storage: Storage | null): Session | null {
     }
   }
   const removed = isRecord(value.removed) ? { atoms: strings(value.removed.atoms), arrows: strings(value.removed.arrows) } : null;
+  const view = parseView(value.view);
   const history = isRecord(value.history) ? { past: changes(value.history.past), future: changes(value.history.future) } : null;
   return {
     version: SESSION_VERSION, dock: parseLayout(value.dock), highlighted,
@@ -65,6 +69,7 @@ export function readSession(storage: Storage | null): Session | null {
     ...(history && (history.past.length || history.future.length) ? { history } : {}),
     ...(madeOf(value.created).length ? { created: madeOf(value.created) } : {}),
     ...(strings(value.added).length ? { added: strings(value.added) } : {}),
+    ...(view ? { view } : {}),
   };
 }
 
