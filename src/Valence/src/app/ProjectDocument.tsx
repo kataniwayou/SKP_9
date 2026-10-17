@@ -10,9 +10,14 @@ import { planChanges, type PlannedChange } from '../molecule/plan';
 import { tableFor } from '../molecule/rules';
 import { dryRunLine, NO_DRY_RUN, verdictOf } from '../molecule/verdict';
 import { useHighlights, type Highlights } from './highlights';
+import { Placer } from '../panels/Toolbox';
+import type { Copied } from './virtual';
 import { useWorkspace, type Workspace } from './workspace';
 
 // three.js is most of the bundle: it loads with the first molecule, not with the page
+/** A shortcut's letter: the typed one, or under another keyboard layout (Hebrew types ב for C) the physical key's. */
+const keyOf = (e: { key: string; code: string }) => (/^Key[A-Z]$/.test(e.code) && !/^[a-z]$/i.test(e.key) ? e.code.slice(3).toLowerCase() : e.key.toLowerCase());
+
 const MoleculeView = lazy(() => import('../molecule/MoleculeView').then((m) => ({ default: m.MoleculeView })));
 
 /** The one document's id and name: the whole project, always open (spec §2.3). */
@@ -141,10 +146,32 @@ export function ProjectDocument({ workspace, highlights, read = readProject, rea
 
   // The canvas's keys, while it has focus (SKP Studio's, design/useDesignKeys.ts): Delete deletes the pinned atom or
   // arrow under the rules (spec §6); Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z redo, through edits and deletions alike.
+  const [pasting, setPasting] = useState<Copied | null>(null);
+  const pointer = useRef<{ x: number; y: number } | null>(null);
+  // Copy/paste (the user, 2026-10-17) answer wherever the focus is — the canvas, the Project list, the Toolbox — except in
+  // a text field or over selected text, where Ctrl+C and Ctrl+V are the browser's: Ctrl+C copies the pinned atom; Ctrl+V
+  // puts its copy on the pointer, to drop.
+  useEffect(() => {
+    const win = window;
+    const track = (e: PointerEvent) => { pointer.current = { x: e.clientX, y: e.clientY }; };
+    const keys = (e: globalThis.KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.defaultPrevented) return;
+      const key = keyOf(e);
+      if (key !== 'c' && key !== 'v') return;
+      if ((e.target as Element | null)?.closest?.('input, textarea, select, [contenteditable]')) return;
+      if (key === 'c' && !(win.getSelection()?.isCollapsed ?? true)) return;
+      e.preventDefault();
+      if (key === 'c') workspace.copy(workspace.get().pinned);
+      else if (workspace.canPaste()) setPasting(workspace.get().clipboard);
+    };
+    win.addEventListener('pointermove', track);
+    win.addEventListener('keydown', keys);
+    return () => { win.removeEventListener('pointermove', track); win.removeEventListener('keydown', keys); };
+  }, [workspace]);
   const onKeyDown = (e: KeyboardEvent) => {
     if ((e.target as Element).closest?.('input, textarea, select, [contenteditable]')) return;
     const mod = e.ctrlKey || e.metaKey;
-    const key = e.key.toLowerCase();
+    const key = keyOf(e);
     if (mod && !e.altKey && key === 'z') { e.preventDefault(); if (e.shiftKey) workspace.redo(); else workspace.undo(); return; }
     if (mod && !e.altKey && key === 'y') { e.preventDefault(); workspace.redo(); return; }
     if (e.key === 'Delete' && !mod && !e.altKey) {
@@ -155,6 +182,7 @@ export function ProjectDocument({ workspace, highlights, read = readProject, rea
 
   return (
     <div className="docpanel" onKeyDown={onKeyDown}>
+      {pasting && <Placer workspace={workspace} copy={pasting} at={pointer.current} onDone={() => setPasting(null)} />}
       <div className="vcanvas" />
       {loaded.kind === 'ready' && (
         <Suspense fallback={<div className="doc-msg">Loading…</div>}>

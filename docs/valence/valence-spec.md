@@ -593,3 +593,19 @@ on the head.
 **A drop keeps the view (the user, 2026-10-17: "when I drop the new component it lost the center and all canvas moved").**
 A drop rebuilds the scene; the camera, its target and the atoms were kept, but the pan (Ctrl+drag, a slide of the picture
 by the lens shift, not a camera move) was not, so the whole picture jumped back by the pan. The pan is kept now too.
+
+**Copy/paste (the user, 2026-10-17: "do the same as toolbox atoms section does but with the copied fields values").**
+Ctrl+C on the canvas copies the pinned atom; Ctrl+V puts its copy on the pointer, ghosted and sized exactly as its Toolbox
+tile's, and a click drops it under the tile's rules (a step on a processor, an assignment on a step, a workflow on a step;
+the rest anywhere). Escape cancels; one copy pastes any number of times; undo takes a paste back in one step. The copy is
+kept in Valence, not on the system clipboard, and not across a refresh. The keys answer wherever the focus is (the canvas,
+the Project list, the Toolbox, Output), except in a text field or over selected text, and under any keyboard layout (the
+physical C and V keys: a Hebrew layout types ב and ה).
+- Copied: the atom's own values (name, version, description, definition, items, instance id, entry condition, payload,
+  cron expression), and a made atom's typed texts, which the paste carries as its own edits.
+- Not copied: arrows. A paste gets only its mandatory arrow, from where it lands; next steps, schemas, assignments and
+  caches start empty. An arrow itself cannot be copied.
+- Pasted empty: a cache's root and a processor's source hash, unique in the database (uq_cache_root,
+  uq_processor_source_hash), so the paste lands "unfinished: fill in …".
+- Cannot be copied (the user, 2026-10-17): a deleted atom, or an updated one — edited in the Inspector, or whose row a drawn
+  or deleted arrow changes (its amber halo). A made atom can be copied.

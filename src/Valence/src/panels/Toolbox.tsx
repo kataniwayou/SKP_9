@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { DRAWABLE, MAKES } from '../app/virtual';
+import { DRAWABLE, MAKES, type Copied } from '../app/virtual';
 import type { Workspace } from '../app/workspace';
 import { canvasBridge } from '../molecule/bridge';
 import { KINDS, TYPES, type ArrowKind, type AtomType } from '../molecule/model';
@@ -57,6 +57,39 @@ const DRAG_START = 4;
 
 type Ghost = { x: number; y: number; tool: Tool; px: number | null; ok: boolean | null };
 
+/** The atoms a tool may be dropped on: its mandatory arrow's target, or an arrow's tail; none for a lone atom. */
+function targetsOf(workspace: Workspace, tool: Tool, stage: 'tail' | 'head' = 'tail'): Set<string> {
+  const { molecule, removed } = workspace.get();
+  const want = tool.kind === 'atom' ? MAKES[tool.type].on : stage === 'tail' ? DRAWABLE[tool.arrow]!.tail : DRAWABLE[tool.arrow]!.head;
+  const out = new Set<string>();
+  if (!molecule || !want) return out;
+  molecule.atoms.forEach((a) => { if (a.type === want && !removed.atoms.includes(a.key)) out.add(a.key); });
+  return out;
+}
+
+/** An atom tool's ghost at (x, y): the size it will have where it lands, and whether it may land there. */
+function atomGhost(type: AtomType, targets: ReadonlySet<string>, x: number, y: number): Ghost {
+  const tool: Tool = { kind: 'atom', type };
+  const api = canvasBridge.get();
+  if (!api || !api.contains(x, y)) return { x, y, tool, px: null, ok: null };
+  const over = api.atomAt(x, y);
+  const onTarget = over !== null && targets.has(over);
+  const land = api.landing(x, y, type, onTarget ? over : null);
+  return { x, y, tool, px: land?.px ?? null, ok: MAKES[type].on === null ? true : onTarget };
+}
+
+/** Drops an atom tool (a tile, or a paste with its copy) at (x, y) on the canvas; a refusal says why. */
+function dropAtom(workspace: Workspace, type: AtomType, targets: ReadonlySet<string>, x: number, y: number, copy?: Copied): void {
+  const api = canvasBridge.get();
+  if (!api || !api.contains(x, y)) return; // let go off the canvas: nothing
+  const over = api.atomAt(x, y);
+  const need = MAKES[type].on;
+  const on = need && over && targets.has(over) ? over : null;
+  if (need && !on) { workspace.create(type, over, [0, 0, 0], copy); return; } // refused, with the reason
+  const land = api.landing(x, y, type, on);
+  if (land) workspace.create(type, on, land.pos, copy);
+}
+
 /**
  * The Toolbox (approved 2026-10-17). Atoms, each with only its mandatory arrow: a schema, a cache or a processor is
  * dropped anywhere; a step on a processor, an assignment on a step, a workflow on a step (its entry). Arrows — the
@@ -71,23 +104,13 @@ export function Toolbox({ workspace }: { workspace: Workspace }) {
   const root = useRef<HTMLDivElement>(null);
   const doc = root.current?.ownerDocument ?? document;
 
-  /** The atoms a tool may be dropped on: its mandatory arrow's target, or an arrow's tail; none for a lone atom. */
-  const targetsOf = (tool: Tool, stage: 'tail' | 'head' = 'tail'): Set<string> => {
-    const { molecule, removed } = workspace.get();
-    const want = tool.kind === 'atom' ? MAKES[tool.type].on : stage === 'tail' ? DRAWABLE[tool.arrow]!.tail : DRAWABLE[tool.arrow]!.head;
-    const out = new Set<string>();
-    if (!molecule || !want) return out;
-    molecule.atoms.forEach((a) => { if (a.type === want && !removed.atoms.includes(a.key)) out.add(a.key); });
-    return out;
-  };
-
   // aiming an arrow: the arrow follows the pointer from its tail; a click on a valid head draws it, elsewhere cancels
   useEffect(() => {
     if (!aiming) return undefined;
     const api = canvasBridge.get();
     if (!api) { setAiming(null); return undefined; }
     const tool: Tool = { kind: 'arrow', arrow: aiming.arrow };
-    const heads = targetsOf(tool, 'head');
+    const heads = targetsOf(workspace, tool, 'head');
     if (aiming.arrow === 'next') heads.delete(aiming.tail);
     api.spotlight(new Set([aiming.tail, ...heads]));
     const win = doc.defaultView ?? window;
@@ -105,17 +128,14 @@ export function Toolbox({ workspace }: { workspace: Workspace }) {
     e.preventDefault();
     const win = e.currentTarget.ownerDocument.defaultView ?? window;
     const from = { x: e.clientX, y: e.clientY };
-    const targets = targetsOf(tool);
+    const targets = targetsOf(workspace, tool);
     let dragging = false;
     const at = (x: number, y: number): Ghost => {
       const api = canvasBridge.get();
+      if (tool.kind === 'atom') return atomGhost(tool.type, targets, x, y);
       if (!api || !api.contains(x, y)) return { x, y, tool, px: null, ok: null };
       const over = api.atomAt(x, y);
-      const onTarget = over !== null && targets.has(over);
-      if (tool.kind === 'arrow') return { x, y, tool, px: api.bondPx(x, y, tool.arrow), ok: onTarget };
-      const lone = MAKES[tool.type].on === null;
-      const land = api.landing(x, y, tool.type, onTarget ? over : null);
-      return { x, y, tool, px: land?.px ?? null, ok: lone ? true : onTarget };
+      return { x, y, tool, px: api.bondPx(x, y, tool.arrow), ok: over !== null && targets.has(over) };
     };
     const move = (ev: PointerEvent) => {
       if (!dragging) {
@@ -134,19 +154,12 @@ export function Toolbox({ workspace }: { workspace: Workspace }) {
     const up = (ev: PointerEvent) => {
       stop();
       if (!dragging) return;
+      if (tool.kind === 'atom') { dropAtom(workspace, tool.type, targets, ev.clientX, ev.clientY); return; }
       const api = canvasBridge.get();
       if (!api || !api.contains(ev.clientX, ev.clientY)) return; // let go off the canvas: nothing
       const over = api.atomAt(ev.clientX, ev.clientY);
-      if (tool.kind === 'arrow') {
-        if (over && targets.has(over)) setAiming({ arrow: tool.arrow, tail: over });
-        else workspace.draw(tool.arrow, over ?? '', ''); // says why in the Output pane
-        return;
-      }
-      const need = MAKES[tool.type].on;
-      const on = need && over && targets.has(over) ? over : null;
-      if (need && !on) { workspace.create(tool.type, over, [0, 0, 0]); return; } // refused, with the reason
-      const land = api.landing(ev.clientX, ev.clientY, tool.type, on);
-      if (land) workspace.create(tool.type, on, land.pos);
+      if (over && targets.has(over)) setAiming({ arrow: tool.arrow, tail: over });
+      else workspace.draw(tool.arrow, over ?? '', ''); // says why in the Output pane
     };
     const cancel = () => stop();
     const key = (ev: KeyboardEvent) => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); dragging = false; stop(); } };
@@ -192,6 +205,42 @@ export function Toolbox({ workspace }: { workspace: Workspace }) {
       {ghost && createPortal(<GhostView g={ghost} />, doc.body)}
     </div>
   );
+}
+
+/**
+ * A paste (Ctrl+V, the user, 2026-10-17): the copied atom's ghost follows the pointer exactly as its Toolbox tile's
+ * does — sized to the canvas, its targets lit — and a click drops it under the tile's rules, with the copied values.
+ * Escape, or a click off the canvas, cancels.
+ */
+export function Placer({ workspace, copy, at, onDone }: { workspace: Workspace; copy: Copied; at: { x: number; y: number } | null; onDone: () => void }) {
+  const [ghost, setGhost] = useState<Ghost | null>(null);
+  useEffect(() => {
+    const win = window;
+    const targets = targetsOf(workspace, { kind: 'atom', type: copy.type });
+    if (targets.size > 0) canvasBridge.get()?.spotlight(targets);
+    if (at) setGhost(atomGhost(copy.type, targets, at.x, at.y)); // where the pointer was when Ctrl+V was pressed
+    const move = (e: PointerEvent) => setGhost(atomGhost(copy.type, targets, e.clientX, e.clientY));
+    // the click that drops is the paste's, not the canvas's (no pin, no turn)
+    const swallow = (e: Event) => { e.preventDefault(); e.stopPropagation(); };
+    const down = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      swallow(e);
+      win.addEventListener('pointerup', swallow, { capture: true, once: true });
+      win.addEventListener('click', swallow, { capture: true, once: true });
+      finish();
+      dropAtom(workspace, copy.type, targets, e.clientX, e.clientY, copy);
+    };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(); } };
+    const detach = () => {
+      win.removeEventListener('pointermove', move); win.removeEventListener('pointerdown', down, true); win.removeEventListener('keydown', key, true);
+      canvasBridge.get()?.spotlight(null);
+    };
+    // finished (dropped or cancelled): the paste ends; unmounted otherwise, only the listeners go
+    const finish = () => { detach(); setGhost(null); onDone(); };
+    win.addEventListener('pointermove', move); win.addEventListener('pointerdown', down, true); win.addEventListener('keydown', key, true);
+    return detach;
+  }, [copy]); // eslint-disable-line react-hooks/exhaustive-deps
+  return ghost && createPortal(<GhostView g={ghost} />, document.body);
 }
 
 /** What follows the pointer: over the canvas, the atom (or the bond) at its size there; elsewhere, the tile's art. */

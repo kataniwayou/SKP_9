@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useWorkspace, type Workspace } from '../app/workspace';
 import { PaneNote } from './PaneNote';
-export { Toolbox } from './Toolbox';
+export { Placer, Toolbox } from './Toolbox';
 
 /**
  * The Output pane: what Valence did and refused (spec §6) — deletions, refusals with their reason, undo and redo — one

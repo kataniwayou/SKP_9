@@ -88,3 +88,54 @@ describe('the workspace makes atoms and draws arrows (approved 2026-10-17)', () 
     expect(a).toBeTruthy();
   });
 });
+
+describe('copy/paste (the user, 2026-10-17): the Toolbox atom drop with the copied values', () => {
+  it('copies only an atom that is neither deleted nor updated, and never an arrow', () => {
+    const w = ws();
+    expect(w.copy(null)).toBe(false);
+    expect(w.copy(`uses|${S}|${P}`)).toBe(false);
+    expect(w.get().messages.at(-1)!.text).toMatch(/arrow cannot be copied/);
+    w.edit(S, 'description', 'changed', '');
+    expect(w.copy(S)).toBe(false);
+    expect(w.get().messages.at(-1)!.text).toMatch(/updated atom cannot be copied/);
+    w.undo();
+    w.draw('input', P, C);
+    expect(w.copy(P)).toBe(false); // a drawn arrow updates its tail
+    w.undo();
+    expect(w.remove(C)).toBe(true);
+    expect(w.copy(C)).toBe(false);
+    expect(w.get().messages.at(-1)!.text).toMatch(/deleted atom cannot be copied/);
+    w.undo();
+    expect(w.copy(P)).toBe(true);
+    expect(w.get().clipboard).toMatchObject({ type: 'proc', name: 'p1', values: { name: 'p1', version: '1.0.0', instanceId: null } });
+    expect(w.get().clipboard!.values).not.toHaveProperty('sourceHash'); // unique: pastes empty
+    expect(w.get().clipboard!.values).not.toHaveProperty('inputSchemaId'); // an arrow
+  });
+
+  it('pastes under the tile rules, with the values but only the mandatory arrow; one step to undo', () => {
+    const w = ws();
+    expect(w.copy(S)).toBe(true);
+    const copy = w.get().clipboard!;
+    expect(w.create('step', null, [0, 0, 0], copy)).toBeNull(); // a step lands on a processor
+    const k = w.create('step', P, [0, 0, 0], copy)!;
+    const made = w.get().created.find((c) => c.key === k)!;
+    expect(made.row).toMatchObject({ name: 's1', version: '1.0.0', entryCondition: 1, processorId: 'p1', nextStepIds: [] });
+    expect(w.get().messages.at(-1)!.text).toMatch(/^Pasted a copy of s1 on p1/);
+    w.create('step', P, [0, 0, 0], copy); // one copy, many pastes
+    expect(w.get().created).toHaveLength(2);
+    w.undo(); w.undo();
+    expect(w.get().created).toEqual([]);
+  });
+
+  it('a made atom copies with its typed texts, which the paste carries as its own edits', () => {
+    const w = ws();
+    const n = w.create('schema', null, [0, 0, 0])!;
+    w.edit(n, 'name', 'typed', '');
+    expect(w.copy(n)).toBe(true);
+    const k = w.create('schema', null, [1, 1, 1], w.get().clipboard!)!;
+    expect(w.get().edits[k]).toEqual({ name: 'typed' });
+    expect(w.get().created.find((c) => c.key === k)!.row).toMatchObject({ definition: '{"type":"object"}' });
+    w.undo();
+    expect(w.get().edits[k]).toBeUndefined();
+  });
+});

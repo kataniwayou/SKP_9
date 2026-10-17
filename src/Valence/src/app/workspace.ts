@@ -1,10 +1,11 @@
 import { useSyncExternalStore } from 'react';
 import type { RulesSource } from '../api/fields';
 import type { ProjectData } from '../api/project';
-import { canDeleteArrow, canDeleteAtom, deletedLine, NOTHING_REMOVED, type Removed } from '../molecule/deletion';
+import { canDeleteArrow, canDeleteAtom, deletedLine, goneArrows, NOTHING_REMOVED, type Removed } from '../molecule/deletion';
 import type { Vec } from '../molecule/layout';
 import { arrowKey, atomKey, buildMolecule, isArrowKey, KINDS, TYPES, type ArrowKind, type AtomType, type Molecule } from '../molecule/model';
-import { DRAWABLE, MAKES, newCreated, virtualData, type AddedArrow, type CreatedAtom } from './virtual';
+import { copyOf, DRAWABLE, MAKES, newCreated, virtualData, type AddedArrow, type Copied, type CreatedAtom } from './virtual';
+import { rowOf } from '../molecule/fields';
 import { rulesOf, SNAPSHOT_RULES, type Rules } from '../molecule/rules';
 import { NO_DRY_RUN, type DryRunState } from '../molecule/verdict';
 
@@ -66,6 +67,8 @@ export interface WorkspaceState {
   dryRun: DryRunState;
   /** Whether BaseApi's dry run answers (its last run did): then it runs the code rules and Valence's stand-ins rest. */
   dryRunWorks: boolean;
+  /** The atom last copied (Ctrl+C), to paste as new ones (Ctrl+V); kept in Valence, not on the system clipboard. */
+  clipboard: Copied | null;
 }
 
 export interface Workspace {
@@ -85,7 +88,11 @@ export interface Workspace {
   /** Deletes an atom or arrow in Valence under the rules (spec §6); a refusal says why in the Output pane. */
   remove(key: string | null): boolean;
   /** Makes an atom from the Toolbox, dropped on `on` (its mandatory arrow's target) or on empty canvas; a refusal says why. */
-  create(type: AtomType, on: string | null, pos: Vec): string | null;
+  create(type: AtomType, on: string | null, pos: Vec, copy?: Copied): string | null;
+  /** Copies an atom (the user, 2026-10-17): not an arrow, not a deleted or updated atom; a refusal says why. */
+  copy(key: string | null): boolean;
+  /** Whether there is a copy to paste; if not, the Output pane says so. */
+  canPaste(): boolean;
   /** Draws an arrow from the Toolbox, tail first, then head (the user, 2026-10-17); a refusal says why. */
   draw(kind: ArrowKind, tail: string, head: string): boolean;
   undo(): void;
@@ -101,7 +108,7 @@ export function createWorkspace(init: { pinned?: string | null; edits?: Edits; r
   let state: WorkspaceState = {
     data: null, molecule: null, base: null, created: init.created ?? [], added: init.added ?? [],
     hovered: null, pinned: init.pinned ?? null, edits: init.edits ?? {},
-    removed: init.removed ?? NOTHING_REMOVED, history: init.history ?? NO_HISTORY, messages: [], rules: SNAPSHOT_RULES, dryRun: NO_DRY_RUN, dryRunWorks: false,
+    removed: init.removed ?? NOTHING_REMOVED, history: init.history ?? NO_HISTORY, messages: [], rules: SNAPSHOT_RULES, dryRun: NO_DRY_RUN, dryRunWorks: false, clipboard: null,
   };
   let nextMessage = 1;
   const listeners = new Set<() => void>();
@@ -226,7 +233,33 @@ export function createWorkspace(init: { pinned?: string | null; edits?: Edits; r
         { messages: say(line) });
       return true;
     },
-    create(type, on, pos) {
+    copy(key) {
+      const molecule = state.molecule;
+      if (!molecule) return false;
+      const refuse = (why: string) => { set({ messages: say(why, 'refused') }); return false; };
+      if (key === null) return refuse('Nothing to copy: click an atom to pin it, then press Ctrl+C.');
+      if (isArrowKey(key)) return refuse('An arrow cannot be copied: copy an atom, then draw its arrows from the Toolbox.');
+      const atom = molecule.atoms.get(key);
+      if (!atom) return false;
+      if (state.removed.atoms.includes(key)) return refuse(`${atom.name} is deleted in Valence: a deleted atom cannot be copied.`);
+      const made = state.created.find((c) => c.key === key);
+      // updated: edited in the Inspector, or its row changed by a drawn or a deleted arrow (its amber halo)
+      const updated = !made && (!!state.edits[key] || state.added.some((a) => a.split('|')[1] === key)
+        || [...goneArrows(molecule, state.removed)].some((a) => a.split('|')[1] === key));
+      if (updated) return refuse(`${atom.name} has changes not applied: an updated atom cannot be copied (undo its changes first).`);
+      const row = made ? made.row : rowOf(state.data!, atom.type, atom.id);
+      if (!row) return false;
+      const name = made ? state.edits[key]?.name ?? String(made.row.name ?? '') : atom.name;
+      set({ clipboard: copyOf(atom.type, name, row, made ? state.edits[key] : {}),
+        messages: say(`Copied ${name || `the new ${TYPES[atom.type].label.toLowerCase()}`}: Ctrl+V on the canvas pastes it as a new ${TYPES[atom.type].label.toLowerCase()}.`) });
+      return true;
+    },
+    canPaste() {
+      if (state.clipboard) return true;
+      set({ messages: say('Nothing to paste: pin an atom and press Ctrl+C first.', 'refused') });
+      return false;
+    },
+    create(type, on, pos, copy) {
       const molecule = state.molecule;
       if (!molecule) return null;
       const need = MAKES[type].on;
@@ -236,7 +269,15 @@ export function createWorkspace(init: { pinned?: string | null; edits?: Edits; r
         set({ messages: say(`A ${label.toLowerCase()} is dropped on a ${TYPES[need].label.toLowerCase()}: its ${KINDS[type === 'step' ? 'uses' : type === 'asg' ? 'asg' : 'entry'].label} arrow is mandatory.`, 'refused') });
         return null;
       }
-      const made = newCreated(type, need ? target!.id : null, pos);
+      const made = newCreated(type, need ? target!.id : null, pos, undefined, copy?.values);
+      if (copy) {
+        // a paste: the copy's values, and a made source's typed texts as this one's edits, in one step
+        const texts = Object.keys(copy.texts).length ? copy.texts : null;
+        const of = copy.name || `the new ${label.toLowerCase()}`;
+        commit({ label: `paste a copy of ${of}`, created: [made], ...(texts ? { edits: [{ key: made.key, before: null, after: texts }] } : {}) },
+          { messages: say(`Pasted a copy of ${of}${target ? ` on ${target.name}` : ''} in Valence (not applied): only its mandatory arrow came with it.`), pinned: made.key });
+        return made.key;
+      }
       commit({ label: `make a ${label.toLowerCase()}`, created: [made] },
         { messages: say(`Made a new ${label.toLowerCase()}${target ? ` on ${target.name}` : ''} in Valence (not applied): fill in its fields in the Inspector.`), pinned: made.key });
       return made.key;

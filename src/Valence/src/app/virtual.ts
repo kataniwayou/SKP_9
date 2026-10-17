@@ -43,8 +43,25 @@ export function defaultRow(type: AtomType, onId: string | null): Record<string, 
   }
 }
 
-export function newCreated(type: AtomType, onId: string | null, pos: Vec, id: string = globalThis.crypto.randomUUID()): CreatedAtom {
-  return { key: atomKey(type, id), type, id, row: { id, ...defaultRow(type, onId) }, pos };
+export function newCreated(type: AtomType, onId: string | null, pos: Vec, id: string = globalThis.crypto.randomUUID(), values: Readonly<Record<string, unknown>> = {}): CreatedAtom {
+  return { key: atomKey(type, id), type, id, row: { id, ...defaultRow(type, onId), ...values }, pos };
+}
+
+/** The fields that are arrows (copy/paste leaves them: a paste gets only its mandatory arrow, from where it lands). */
+const LINK_FIELDS = new Set(['processorId', 'nextStepIds', 'stepId', 'entryStepIds', 'assignmentIds', 'cacheIds', 'inputSchemaId', 'outputSchemaId', 'configSchemaId']);
+/** Unique in the database (uq_cache_root, uq_processor_source_hash): an exact copy is always refused, so it pastes empty. */
+export const PASTED_EMPTY = new Set(['root', 'sourceHash']);
+/** The field keys a copy carries (the user, 2026-10-17): the atom's own values, not its arrows, not the unique ones. */
+export const copiedField = (field: string) => field !== 'id' && !LINK_FIELDS.has(field) && !PASTED_EMPTY.has(field);
+
+/** An atom copied (Ctrl+C), to paste as a new one: its own values, and a made atom's typed texts. */
+export interface Copied { type: AtomType; name: string; values: Readonly<Record<string, unknown>>; texts: Readonly<Record<string, string>> }
+
+/** The copy of a row: every own field of the kind's row, as the source has it. */
+export function copyOf(type: AtomType, name: string, row: Readonly<Record<string, unknown>>, texts: Readonly<Record<string, string>> = {}): Copied {
+  const values: Record<string, unknown> = {};
+  for (const f of Object.keys(defaultRow(type, null))) if (copiedField(f) && f in row) values[f] = row[f];
+  return { type, name, values, texts: Object.fromEntries(Object.entries(texts).filter(([f]) => copiedField(f))) };
 }
 
 const idOf = (key: string) => key.slice(key.indexOf(':') + 1);
