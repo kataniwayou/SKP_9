@@ -64,13 +64,15 @@ export interface DockShellProps {
   onRunCommand?: (op: 'start' | 'stop') => string | null;
   /** A tool pane's own entries at the top of its tab menu (e.g. Output's Clear, 2026-10-10). */
   toolMenu?: (id: ToolId) => MenuEntry[];
+  /** Every key stroke and mouse gesture, for the Shortcuts menu (the user, 2026-10-17): a title per group. */
+  shortcuts?: readonly { group: string; items: readonly { keys: string; does: string }[] }[];
 }
 
 const COMPONENTS = { document: DocumentHost, tool: ToolHost };
 const TAB_COMPONENTS = { studio: StudioTab };
 const TOAST_MS = 2600;
 // Valence (2026-10-15): no Workspace and no Edit menu — every workflow is shown, and nothing is created or deleted from a menu
-const STRIP = ['View', 'Window'] as const;
+const STRIP = ['View', 'Window', 'Shortcuts'] as const;
 type StripMenu = (typeof STRIP)[number];
 
 const NO_RECT: Rect = { left: 0, top: 0, right: 0, bottom: 0 };
@@ -393,6 +395,13 @@ export function DockShell(props: DockShellProps) {
           { id: 'apply', icon: '⤒', label: 'Apply saved layout', onSelect: () => { if (api) apply(api, false); } },
           { id: 'reset', icon: '↺', label: 'Reset window layout', onSelect: () => { if (api) { reset(api); syncDocuments(api); showToast('Window layout reset'); } } },
         ];
+      case 'Shortcuts':
+        // to read, not to run: choosing one only closes the menu
+        return (latest.current.props.shortcuts ?? []).flatMap((g, i): MenuEntry[] => [
+          ...(i > 0 ? ['separator' as const] : []),
+          { heading: g.group },
+          ...g.items.map((s, j): MenuEntry => ({ id: `sc-${i}-${j}`, label: s.does, kbd: s.keys, onSelect: () => {} })),
+        ]);
     }
   };
 

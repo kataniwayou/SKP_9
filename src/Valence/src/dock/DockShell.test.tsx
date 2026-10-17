@@ -203,10 +203,10 @@ describe('DockShell', () => {
     for (const name of ['Inspector', 'Toolbox', 'Output']) expect(tab(name)).toBeInTheDocument();
   });
 
-  it('has only View and Window on the strip: no Workspace and no Edit (Valence, 2026-10-15)', () => {
+  it('has View, Window and Shortcuts on the strip: no Workspace and no Edit (Valence, 2026-10-15; Shortcuts 2026-10-17)', () => {
     setup();
     const strip = screen.getByRole('menubar');
-    expect(within(strip).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['View', 'Window']);
+    expect(within(strip).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['View', 'Window', 'Shortcuts']);
   });
 
   it('opens the picker on Ctrl+O, filters it, and opens the first match on Enter', () => {

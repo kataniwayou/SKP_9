@@ -1,8 +1,9 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 // dockview's jsdom layout leaves the document panel hidden, where jsdom gives no accessible names: it is found by selector. The browser check covers it.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { SESSION_KEY } from './app/session';
+import { SHORTCUTS } from './app/shortcuts';
 import { memoryStorage } from './test/memoryStorage';
 
 const setup = (storage = memoryStorage(), tabStorage = memoryStorage()) => {
@@ -27,9 +28,18 @@ describe('App', () => {
     expect(document.querySelector('[data-pane="toolbox"]')).toBeInTheDocument();
   });
 
-  it('has only View and Window on the menu strip: nothing is loaded, created or deleted from a menu', () => {
+  it('has View, Window and Shortcuts on the menu strip: nothing is loaded, created or deleted from a menu', () => {
     setup();
-    expect(within(screen.getByRole('menubar')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['View', 'Window']);
+    expect(within(screen.getByRole('menubar')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['View', 'Window', 'Shortcuts']);
+  });
+
+  it('lists every key stroke under Shortcuts, by group (the user, 2026-10-17)', () => {
+    setup();
+    fireEvent.click(within(screen.getByRole('menubar')).getByRole('menuitem', { name: 'Shortcuts' }));
+    const menu = screen.getByRole('menu', { name: 'Shortcuts' });
+    const keys = [...menu.querySelectorAll('[role="menuitem"] kbd')].map((k) => k.textContent);
+    for (const k of ['Delete', 'Ctrl+Z', 'Ctrl+Y', 'Ctrl+Shift+Z', 'Ctrl+C', 'Ctrl+V', 'Escape', 'Ctrl+E', 'Ctrl+Shift+E', 'Ctrl+drag']) expect(keys).toContain(k);
+    expect([...menu.querySelectorAll('.mhead')].map((h) => h.textContent)).toEqual(SHORTCUTS.map((g) => g.group));
   });
 
   it('has the workflow filter at the right of the menu strip (the user, 2026-10-16)', () => {

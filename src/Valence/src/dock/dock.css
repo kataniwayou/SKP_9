@@ -22,6 +22,7 @@
 .mi { display: flex; justify-content: space-between; gap: 24px; padding: 7px 10px; border-radius: 5px; font-size: 13px; color: var(--ink); cursor: pointer; }
 .mi:hover { background: rgba(125, 211, 252, .10); }
 .mi kbd { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.mhead { padding: 8px 10px 3px; font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
 .mi .ml { display: flex; align-items: center; gap: 8px; }
 .mi .mic { width: 16px; text-align: center; color: var(--muted); }
 .mi.dis .mic { opacity: .4; }

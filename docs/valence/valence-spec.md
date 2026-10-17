@@ -609,3 +609,20 @@ physical C and V keys: a Hebrew layout types ב and ה).
   uq_processor_source_hash), so the paste lands "unfinished: fill in …".
 - Cannot be copied (the user, 2026-10-17): a deleted atom, or an updated one — edited in the Inspector, or whose row a drawn
   or deleted arrow changes (its amber halo). A made atom can be copied.
+
+**Found by the full browser suite (2026-10-17: every tile, every key, enriched workflows, virtual only).**
+- A new atom dropped on another lands on the first free place around it, starting on the pointer's side, turning round it
+  in the screen's plane, then a ring further out. Before, a second step on the same processor went exactly on top of the
+  first, the two impossible to tell apart or to click.
+- A new step whose next steps are new too is created without them, and an update after every create adds them. Before,
+  the create named rows not created yet, a foreign key BaseApi refused (and the workflow entering the step with it).
+- A rebuilt canvas clears the hover the old one left. Before, after a drop on a processor the Inspector kept showing the
+  processor's preview over the new pinned atom, until another atom was hovered.
+- BaseApi refuses a cache whose items have values that are not strings ({"seed":1}); {"seed":"1"} passes.
+
+**Shortcuts menu (the user, 2026-10-17: "add on main menu strip to show all the key stroke shortcuts").**
+The menu strip is View, Window, Shortcuts. Shortcuts lists every key stroke and mouse gesture Valence answers, by group:
+the canvas's keys (Delete, Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z), copy and paste (Ctrl+C, Ctrl+V), the Toolbox (drag a tile, drop
+then click, Escape), the canvas's mouse (click, drag, Ctrl+drag an atom, Ctrl+drag, wheel) and the windows' (Ctrl+E,
+Ctrl+Shift+E, double-click and Ctrl+double-click a tab, Escape). It is to read: choosing an entry only closes the menu.
+The list is src/app/shortcuts.ts, beside the handlers; F5, Ctrl+O and Alt+W do nothing in Valence and are not listed.

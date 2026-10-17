@@ -8,6 +8,7 @@ import type { ToolId } from './dock/ids';
 import { browserStorage, type SavedLayout } from './dock/layoutPersistence';
 import { Inspector } from './panels/Inspector';
 import { Output, Toolbox } from './panels/Panes';
+import { SHORTCUTS } from './app/shortcuts';
 import { createWorkspace, useWorkspace } from './app/workspace';
 
 /** The one document: the whole project, always open (spec §2.3); its tab is marked while edits are not applied. */
@@ -69,6 +70,7 @@ export function App({ storage, tabStorage }: AppProps) {
   return (
     <DockShell
       documents={documents}
+      shortcuts={SHORTCUTS}
       activeDocumentId={PROJECT_ID}
       notice={notice}
       status={<WorkflowFilter workspace={workspace} highlights={highlights} />}
