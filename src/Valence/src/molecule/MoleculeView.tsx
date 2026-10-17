@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls.js';
+import { canvasBridge } from './bridge';
 import { extentOf, type Vec } from './layout';
-import { arrowKey, BOND, isArrowKey, KINDS, TYPES, type Arrow, type Atom, type AtomType, type Molecule } from './model';
+import { arrowKey, BOND, isArrowKey, KINDS, TYPES, type Arrow, type ArrowKind, type Atom, type AtomType, type Molecule } from './model';
 
 /** The ground the molecule floats over: SKP Studio's blueprint ground (canvas/tokens.css --ground). */
 const GROUND = 0x0a1220;
@@ -34,7 +36,14 @@ export interface MoleculeEvents { hover(key: string | null): void; pin(key: stri
  * Ghosts of the virtual changes: atoms and arrows (by key) deleted in Valence — the arrows include those touching a deleted
  * atom (`goneArrows`) — drawn red; and atoms with finished edits, `updated`, drawn amber (a deleted one stays red).
  */
-export interface Ghosts { atoms: ReadonlySet<string>; arrows: ReadonlySet<string>; updated?: ReadonlySet<string> }
+export interface Ghosts {
+  atoms: ReadonlySet<string>; arrows: ReadonlySet<string>; updated?: ReadonlySet<string>;
+  /** Made from the Toolbox (2026-10-17): finished ones green with a halo, unfinished (`making`) green without. */
+  created?: ReadonlySet<string>; making?: ReadonlySet<string>;
+}
+
+/** The view kept across a rebuild (an atom made or taken back rebuilds the scene): the camera and where atoms stand. */
+interface SavedView { camera: Vec; target: Vec; up: Vec; atoms: Map<string, Vec> }
 const NO_GHOSTS: Ghosts = { atoms: new Set(), arrows: new Set() };
 
 /**
@@ -52,6 +61,7 @@ export function MoleculeView({ molecule, positions, highlighted, pinned = null, 
 }) {
   const host = useRef<HTMLDivElement>(null);
   const painter = useRef<Painter | null>(null);
+  const kept = useRef<{ view?: SavedView }>({});
   const latest = useRef({ highlighted, pinned, names, events, ghosts });
   latest.current = { highlighted, pinned, names, events, ghosts };
 
@@ -60,7 +70,7 @@ export function MoleculeView({ molecule, positions, highlighted, pinned = null, 
     const scene3 = buildScene(el, molecule, positions, {
       hover: (key) => latest.current.events?.hover(key),
       pin: (key) => latest.current.events?.pin(key),
-    });
+    }, kept.current);
     painter.current = scene3;
     scene3.highlight(latest.current.highlighted);
     scene3.ghost(latest.current.ghosts);
@@ -89,25 +99,32 @@ interface AtomView { atom: Atom; pos: THREE.Vector3; mesh: THREE.Mesh<THREE.Plan
 interface ArrowView { arrow: Arrow; a: AtomView; b: AtomView; mat: THREE.MeshStandardMaterial; shaft: THREE.Mesh; head: THREE.Mesh; sleeve: THREE.Mesh; headLen: number; start: THREE.Vector3; tip: THREE.Vector3 }
 
 /**
- * An arrowhead (the user, 2026-10-16: "isn't elegant"): a slim dart turned on a lathe — flanks curving gently in to a
- * sharp point, about 3.4 times as long as it is wide at the base, smooth with 40 sides, its base closed by a low dome
- * (a hollow-looking dish read as an open bell from behind). Built pointing up (+y) with its point at the origin, so it is placed at the arrow's tip. The head's width grows
- * with the bond, but not below a size that still reads at the whole-project view.
+ * An arrowhead (the user, 2026-10-16: "isn't elegant"): a slim cone turned on a lathe, about 3.4 times as long as it is
+ * wide at the base, smooth with 40 sides. Its point is a small rounded nose (the user, 2026-10-17: "the tip of the arrow
+ * doesn't touch the atom … also the shape of the arrow distorted"): flanks curving in to a needle left the last pixels of
+ * the point thinner than a pixel, so the drawn head stopped short of the ball; a nose keeps visible width to the very
+ * front. Its base is flat, with a sharp crease at the rim, and the shaft ends exactly there: the arrows are see-through,
+ * and a dome with the shaft's stub inside it showed through the head as a lighter ring. Built pointing up (+y) with the
+ * nose's front at the origin, so it is placed at the arrow's tip. The head's width grows with the bond, but not below a
+ * size that still reads at the whole-project view.
  */
 function headOf(shaftR: number): { headGeom: THREE.LatheGeometry; headLen: number } {
-  const R = Math.max(shaftR * 2.4, 0.075), L = R * 3.4;
-  const profile: THREE.Vector2[] = [new THREE.Vector2(0, -L - R * 0.16)]; // the dome's crown, just behind the base
-  profile.push(new THREE.Vector2(R * 0.55, -L - R * 0.11), new THREE.Vector2(R * 0.88, -L - R * 0.04), new THREE.Vector2(R, -L));
-  for (let i = 1; i <= 16; i++) {
-    const s = i / 16; // 0 at the base, 1 at the point
-    profile.push(new THREE.Vector2(R * Math.pow(1 - s, 1.25), -L + s * L));
+  const R = Math.max(shaftR * 2.4, 0.075), L = R * 3.4, nose = R * 0.1;
+  const slope = Math.atan2(R, L); // the flank's angle to the axis
+  const profile: THREE.Vector2[] = [new THREE.Vector2(0, -L), new THREE.Vector2(R, -L)]; // the flat base, centre to rim
+  profile.push(new THREE.Vector2(R, -L)); // the rim again: the base and the flank keep their own normals (a sharp crease)
+  // the straight flank, then the nose's arc from where it meets the flank's slope round to the front point
+  const arc = Math.PI / 2 - slope;
+  for (let i = 8; i >= 0; i--) {
+    const t = (arc * i) / 8;
+    profile.push(new THREE.Vector2(nose * Math.sin(t), -nose + nose * Math.cos(t)));
   }
   const headGeom = new THREE.LatheGeometry(profile, 40);
   headGeom.computeVertexNormals();
   return { headGeom, headLen: L };
 }
 
-function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyMap<string, Vec>, events: MoleculeEvents): Painter & { dispose(): void } {
+function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyMap<string, Vec>, events: MoleculeEvents, kept: { view?: SavedView } = {}): Painter & { dispose(): void } {
   const doc = el.ownerDocument;
   const win = doc.defaultView ?? window;
   const labelsEl = el.querySelector<HTMLDivElement>('.mol-labels')!;
@@ -180,7 +197,9 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
           : vSphereCenter + normalize(sphereRay * sphereB - vSphereCenter) * sphereRadius;
         vec3 sphereNormal = normalize(sphereHit - vSphereCenter);
         vec4 sphereClip = projectionMatrix * vec4(sphereHit, 1.0);
-        gl_FragDepth = clamp((sphereClip.z / sphereClip.w) * 0.5 + 0.5, 0.0, 1.0);`)
+        // the antialiased rim is partly see-through: it takes the far depth, so what lies behind the ball (an arrowhead
+        // tucked behind its outline) still draws there instead of a hairline of background (2026-10-17)
+        gl_FragDepth = sphereEdge < 0.999 ? 1.0 : clamp((sphereClip.z / sphereClip.w) * 0.5 + 0.5, 0.0, 1.0);`)
         .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
         normal = sphereNormal;
         nonPerturbedNormal = sphereNormal;`)
@@ -253,10 +272,15 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
     if (hiddenBy(x.tip, x.b.pos, rb) && !hiddenBy(x.start, x.b.pos, rb)) {
       let lo = 0, hi = 1; // lo: seen; hi: behind the ball
       for (let i = 0; i < 24; i++) { const mid = (lo + hi) / 2; if (hiddenBy(probe.lerpVectors(x.start, x.tip, mid), x.b.pos, rb)) hi = mid; else lo = mid; }
+      const full = probe.copy(x.tip);
       x.tip.lerpVectors(x.start, x.tip, lo);
+      // on: by the nose's radius, so the nose tucks behind the ball (which hides its front) and the head overlaps the
+      // rim instead of touching it at one point, where antialiasing left a hairline of background (2026-10-17)
+      const nose = (x.headLen / 3.4) * 0.1;
+      x.tip.addScaledVector(dir, Math.min(nose, full.distanceTo(x.tip)));
     }
-    // the shaft runs into the head's base a little, so no seam shows between them
-    const shaftEnd = aEnd.copy(x.tip).addScaledVector(dir, -x.headLen * 0.92);
+    // the shaft ends at the head's flat base: nothing of it inside the see-through head
+    const shaftEnd = aEnd.copy(x.tip).addScaledVector(dir, -x.headLen);
     // Atoms pushed into each other leave no room for a shaft; it shrinks to nothing rather than turning inside out.
     const len = Math.max(probe.subVectors(shaftEnd, x.start).dot(dir), 0.001);
     x.shaft.position.copy(x.start).add(shaftEnd).multiplyScalar(0.5);
@@ -268,13 +292,22 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
     x.sleeve.quaternion.setFromUnitVectors(up, dir); x.sleeve.scale.set(1, Math.max(x.start.distanceTo(x.tip), 0.001), 1);
   }
   const headByBond = new Map<number, ReturnType<typeof headOf>>();
+  /** A unit-tall tube along +y, its start (−y) closed by a disc, its end (+y) open for the head's base. */
+  function shaftOf(r: number): THREE.BufferGeometry {
+    const tube = new THREE.CylinderGeometry(r, r, 1, 24, 1, true);
+    const cap = new THREE.CircleGeometry(r, 24).rotateX(Math.PI / 2).translate(0, -0.5, 0); // facing −y
+    const merged = mergeGeometries([tube.toNonIndexed(), cap.toNonIndexed()]);
+    tube.dispose(); cap.dispose();
+    return merged;
+  }
   const arrows: ArrowView[] = molecule.arrows.map((arrow) => {
     const k = KINDS[arrow.kind], bond = BOND[k.bond];
     // one head per bond class, shared by its arrows and disposed with the scene
     const { headGeom, headLen } = headByBond.get(bond.r) ?? headByBond.set(bond.r, headOf(bond.r)).get(bond.r)!;
     const mat = new THREE.MeshStandardMaterial({ color: k.color, transparent: true, opacity: bond.op, roughness: 0.45, metalness: 0.1 });
-    // closed, smooth tubes: a close look sees a round rod, never a hollow ring
-    const shaftGeom = new THREE.CylinderGeometry(bond.r, bond.r, 1, 24, 1, false);
+    // smooth tubes, closed where they start (inside the source ball, which a ghost shows through): a close look sees a
+    // round rod, never a hollow ring; open where they meet the head, whose flat base closes them with no second layer
+    const shaftGeom = shaftOf(bond.r);
     disposables.push(mat, shaftGeom);
     const shaft = new THREE.Mesh(shaftGeom, mat), head = new THREE.Mesh(headGeom, mat);
     // A fat invisible sleeve makes thin arrows easy to hover.
@@ -303,6 +336,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   const GHOST = new THREE.Color(0xff5a5a);
   /** An update ghost's colour: the Inspector's edit amber (--x), apart from the delete ghost's red. */
   const UPDATED = new THREE.Color(0xfbbf24);
+  const CREATED = new THREE.Color(0x4ade80);
   const tint = new THREE.Color();
 
   // ---------- Halos (the user, 2026-10-16: option B of the ghost-styles mock, "breathing halo") ----------
@@ -397,12 +431,15 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
       // a ghost, deleted or updated, is drawn one way (the user, 2026-10-16: align the update ghost to the delete ghost):
       // the body pulled a little to the ghost's colour and faint, so its halo glows through it — red for "goes on
       // apply", amber for "changes on apply"
-      const ghostly = ghost || updated;
+      const madeDone = !ghost && !!ghosts.created?.has(a.atom.key);
+      const made = madeDone || (!ghost && !!ghosts.making?.has(a.atom.key));
+      const ghostly = ghost || updated || made;
       m.color.set(TYPES[a.atom.type].color);
-      if (ghostly) m.color.lerp(ghost ? GHOST : UPDATED, 0.25);
+      if (ghostly) m.color.lerp(ghost ? GHOST : made ? CREATED : UPDATED, 0.25);
       m.opacity = ghostly ? (on ? 0.45 : 0.3) : on ? 1 : 0.14;
       m.depthWrite = !ghostly;
       if (ghost) haloed.push({ a, color: GHOST });
+      else if (madeDone) haloed.push({ a, color: CREATED });
       else if (updated) haloed.push({ a, color: UPDATED });
       else if (a === pinnedOne) haloed.push({ a, color: new THREE.Color(TYPES[a.atom.type].color) });
       // the pinned atom glows brighter than a hovered one, so it is found again among its neighbours
@@ -543,6 +580,9 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
     const p = press;
     press = null;
     if (!p || p.ctrl || e.button !== 0 || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 5) return;
+    // an arrow tile is aiming (its tail dropped): the click picks its head instead of pinning
+    const aiming = canvasBridge.get()?.onClick;
+    if (aiming) { aiming((pick(e)?.object.userData.atom as string | undefined) ?? null); return; }
     events.pin(keyOf(focusOf(pick(e))));
   });
 
@@ -668,6 +708,13 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   controls.minDistance = 1.8 / Math.tan(THREE.MathUtils.degToRad(FOV / 2)); controls.maxDistance = Math.max(home, radius) * 3;
   camera.far = controls.maxDistance + radius * 2;
   camera.updateProjectionMatrix();
+  // rebuilt (an atom made or taken back): the camera and the atoms stay where they were
+  if (kept.view) {
+    camera.position.set(...kept.view.camera); controls.target.set(...kept.view.target); camera.up.set(...kept.view.up);
+    camera.lookAt(controls.target);
+    kept.view.atoms.forEach((p, key) => { const a = atoms.get(key); if (a) { a.pos.set(...p); a.mesh.position.copy(a.pos); } });
+    arrows.forEach(placeArrow);
+  }
   // the mock's fog (0.016 at a 30-unit camera), scaled to this molecule's distance, so its far side fades as gently
   fog.density = 0.48 / home;
 
@@ -719,12 +766,104 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   // the browser checks read the scene from here (dev server only; never in a build)
   if (import.meta.env.DEV) Object.assign(el, { __molecule: { camera, atoms, arrows, halos, radiusOf: (t: AtomType) => TYPES[t].r } });
 
+  // ---------- The Toolbox's drag (2026-10-17): sizes, targets and the aimed arrow ----------
+  const tanHalfView = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
+  const worldPerPx = (d: number) => (2 * d * tanHalfView) / Math.max(el.clientHeight, 1);
+  const onCanvas = (x: number, y: number) => { const r = canvas.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; };
+  const rayTo = (x: number, y: number) => {
+    const r = canvas.getBoundingClientRect();
+    mouse.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(mouse, camera);
+    return ray.ray;
+  };
+  const viewPlane = new THREE.Plane(), planeHit = new THREE.Vector3(), camRight = new THREE.Vector3();
+  /** The point under (x, y) on the plane facing the camera through `through`. */
+  const pointAt = (x: number, y: number, through: THREE.Vector3) => {
+    camera.getWorldDirection(camDir);
+    viewPlane.setFromNormalAndCoplanarPoint(camDir, through);
+    return rayTo(x, y).intersectPlane(viewPlane, planeHit) ? planeHit.clone() : null;
+  };
+  let litBefore: ReadonlySet<string> | null = null, spotlit = false;
+  // the aimed arrow: one shaft and head, re-shaped as the pointer moves
+  let aimed: { shaft: THREE.Mesh; head: THREE.Mesh; mat: THREE.MeshStandardMaterial; kind: ArrowKind } | null = null;
+  const clearAim = () => {
+    if (!aimed) return;
+    scene.remove(aimed.shaft, aimed.head);
+    aimed.shaft.geometry.dispose(); aimed.head.geometry.dispose(); aimed.mat.dispose();
+    aimed = null;
+  };
+  canvasBridge.set({
+    contains: onCanvas,
+    atomAt(x, y) {
+      if (!onCanvas(x, y)) return null;
+      rayTo(x, y);
+      const hit = ray.intersectObjects(solid, false)[0];
+      return (hit?.object.userData.atom as string | undefined) ?? null;
+    },
+    landing(x, y, type, near) {
+      if (!onCanvas(x, y)) return null;
+      const r = TYPES[type].r;
+      let pos: THREE.Vector3 | null;
+      const by = near ? atoms.get(near) : undefined;
+      if (by) {
+        // beside the atom it is dropped on, at its depth, on the side the pointer is
+        camRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
+        const under = pointAt(x, y, by.pos);
+        const side = under && under.clone().sub(by.pos).dot(camRight) < 0 ? -1 : 1;
+        pos = by.pos.clone().addScaledVector(camRight, side * (TYPES[by.atom.type].r + r + 0.6));
+      } else {
+        pos = pointAt(x, y, controls.target);
+      }
+      if (!pos) return null;
+      const d = camera.position.distanceTo(pos), outline = (r * d) / Math.sqrt(Math.max(d * d - r * r, 1e-6));
+      return { pos: [pos.x, pos.y, pos.z], px: outline / worldPerPx(d) };
+    },
+    bondPx(x, y, kind) {
+      if (!onCanvas(x, y)) return null;
+      const p = pointAt(x, y, controls.target);
+      return p ? BOND[KINDS[kind].bond].r / worldPerPx(camera.position.distanceTo(p)) : null;
+    },
+    spotlight(keys) {
+      if (keys) { if (!spotlit) { litBefore = lit; spotlit = true; } lit = keys.size > 0 ? keys : null; }
+      else if (spotlit) { lit = litBefore; spotlit = false; }
+      paint();
+    },
+    aim(preview) {
+      if (!preview) { clearAim(); return; }
+      const tail = atoms.get(preview.tail);
+      if (!tail) { clearAim(); return; }
+      if (!aimed || aimed.kind !== preview.kind) {
+        clearAim();
+        const k = KINDS[preview.kind], bond = BOND[k.bond];
+        const mat = new THREE.MeshStandardMaterial({ color: k.color, emissive: k.color, emissiveIntensity: 0.35, roughness: 0.45, metalness: 0.1 });
+        const { headGeom } = headOf(bond.r);
+        aimed = { shaft: new THREE.Mesh(shaftOf(bond.r), mat), head: new THREE.Mesh(headGeom, mat), mat, kind: preview.kind };
+        scene.add(aimed.shaft, aimed.head);
+      }
+      const head = preview.head ? atoms.get(preview.head) : undefined;
+      const end = head ? head.pos.clone() : pointAt(preview.x, preview.y, tail.pos);
+      if (!end) return;
+      const dir = end.clone().sub(tail.pos); const D = dir.length(); dir.divideScalar(D || 1);
+      const headLen = (Math.max(BOND[KINDS[preview.kind].bond].r * 2.4, 0.075)) * 3.4;
+      const start = tail.pos.clone().addScaledVector(dir, TYPES[tail.atom.type].r * 0.6);
+      const tip = head ? tail.pos.clone().addScaledVector(dir, D - TYPES[head.atom.type].r) : end;
+      const shaftEnd = tip.clone().addScaledVector(dir, -headLen);
+      const len = Math.max(shaftEnd.clone().sub(start).dot(dir), 0.001);
+      aimed.shaft.position.copy(start).add(shaftEnd).multiplyScalar(0.5);
+      aimed.shaft.quaternion.setFromUnitVectors(up, dir); aimed.shaft.scale.set(1, len, 1);
+      aimed.head.position.copy(tip); aimed.head.quaternion.setFromUnitVectors(up, dir);
+    },
+    onClick: null,
+  });
+  cleanups.push(() => { clearAim(); canvasBridge.set(null); });
+
   return {
-    highlight(keys) { lit = keys && keys.size > 0 ? keys : null; paint(); },
+    highlight(keys) { if (spotlit) { litBefore = keys && keys.size > 0 ? keys : null; return; } lit = keys && keys.size > 0 ? keys : null; paint(); },
     pin(key) { pinnedOne = key === null ? null : isArrowKey(key) ? arrowByKey.get(key) ?? null : atoms.get(key) ?? null; paint(); },
     ghost(next) { ghosts = next; paint(); },
     rename(names) { atoms.forEach((a) => { a.label.textContent = names.get(a.atom.key) ?? a.atom.name; }); },
     dispose() {
+      kept.view = { camera: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), atoms: new Map([...atoms].map(([k, a]) => [k, a.pos.toArray()])) };
       win.cancelAnimationFrame(raf);
       cleanups.forEach((c) => c());
       disposables.forEach((d) => d.dispose());

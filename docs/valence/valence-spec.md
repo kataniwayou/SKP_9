@@ -453,6 +453,18 @@ processor, not the schema, and the processor update has no in-use check.
   true maximum the workflow is a 531 px ball and its visible arc is the exact circle within 0.03 px; halos (pinned, red
   deleted) circles within 1% of their radius (the measurement's limit on a soft 8-bit glow), centred on the ball within
   1 px. Also: a change now clears the last dry-run answer at once ("checking"), not when the next one arrives.
+- **Arrowheads meet the ball** (2026-10-17, the user: "the tip of the arrow doesn't touch the atom … also the shape of
+  the arrow distorted"). The tips were already on the true surface (0 off); what showed was the head: flanks curving in as
+  (1−s)^1.25 left the last 2–3.6 px of the point thinner than a pixel, so the drawn head ended short of the ball; and the
+  see-through arrows (0.7–0.9) showed the shaft's stub (8% inside the head) and the domed base through the head as a
+  lighter ring. Now (`headOf`): a straight-flanked cone (still 3.4 : 1) ending in a rounded nose (radius 0.1 of the base),
+  a flat base with a sharp crease; the shaft ends exactly at the base, open there (the base closes it) and capped where it
+  starts inside the source ball. An arrow from behind, whose tip is pulled back to the ball's outline, goes on by the
+  nose's radius so the nose tucks behind the ball and the head overlaps the rim; and the impostor's antialiased rim takes
+  the far depth, so what lies behind the ball still draws there (it had left a 1 px hairline of background). Playwright at
+  the maximum zoom (`headtouch`: one arrow and its ball alone, flat colours, sampled along the arrow's screen axis): 17/17
+  arrows into five atoms with **no background pixel between head and ball**; heads meeting the ball's face end within 1 px
+  of the true tip (before: 2–3.6 px short, up to 1.25 px of background); every shaft's start inside its ball hidden (18/18).
 - **One history** (`app/workspace.ts`): field edits, Revert and deletions are steps in one undo / redo list (100 kept);
   typing in one field is one step; a new change drops what could be redone. The session keeps the deletions and the
   history across a refresh (`removed`, `history`, optional, version 1).
@@ -535,3 +547,37 @@ Server-set, never sent: Id, CreatedAt/By, UpdatedAt/By, `xmin`.
   `svc/baseapi-service:8080`; SKP Studio's dev proxy expects BaseApi at `localhost:18080`. Use your own port-forward
   ports for checks and close them afterwards. Live-data checks must only touch rows the check itself creates.
 - Build warnings are errors in BaseApi (missing XML `<param>` tags fail the build).
+
+## Toolbox (approved 2026-10-17, built, uncommitted, BaseApi part not deployed)
+The user's decisions (2026-10-17): only existing processors behind a Step, but the lone Processor tile stays; no
+composite tiles; no start-time warnings on drop; tiles = the atoms with only their mandatory arrow plus the deletable
+arrows (spec §6b) to draw again; arrows dropped tail first, then the head clicked; green for the create ghost; no lists
+of existing atoms; the dragged object is the size it will have on the canvas (tile size while still over the Toolbox).
+- **Tiles** (`panels/Toolbox.tsx`): Schema, Cache, Processor (drop anywhere); Step (on a processor), Assignment (on a
+  step), Workflow (on a step, its entry). Arrows: entry step, next step, workflow → assignment, workflow → cache, input /
+  output / config schema. Step → processor and assignment → step are not tiles (mandatory; re-point only).
+- **Drag**: SKP Studio's (4 px to start, Escape cancels). Valid targets lit, the rest dimmed (`spotlight`). Over the
+  canvas the ghost is a disc of the exact on-screen radius the atom will have where it lands — beside its target at the
+  target's depth, or on the plane through the view's centre — and an arrow tile's ghost a bond of its real thickness;
+  the canvas exposes this through `molecule/bridge.ts` (`CanvasApi`: contains, atomAt, landing, bondPx, spotlight, aim,
+  onClick). An arrow tile dropped on a valid tail aims: a real 3D arrow follows the pointer from the tail, ending on a
+  valid head's surface; a click there draws it, elsewhere (or Escape) cancels.
+- **Virtual** (`app/virtual.ts`, `app/workspace.ts`): `created` atoms (client UUID, default row with the mandatory link,
+  position) and `added` arrows (`kind|from|to`), in the one history (`created`/`uncreated`, `added`/`unadded`, `restored`
+  for a deleted arrow drawn again) and the session. The workspace's `data`/`molecule` are the virtual project
+  (`virtualData`: rows + made rows + drawn links written into their tail rows); `base` is BaseApi's. Refusals (Output):
+  wrong target kind, an arrow onto itself (next step), a duplicate, a taken processor slot ("delete that arrow first").
+  Delete takes back a made atom with the drawn arrows touching it, or a drawn arrow. Unnamed made atoms are called
+  "new step" etc. A made atom is pinned; the Inspector says "New in Valence, unfinished: fill in …" until its fields pass,
+  then "New in Valence only, not applied"; drawn green (halo once finished).
+- **Canvas**: a rebuild (made or taken back) keeps the camera and where atoms stand.
+- **Plan**: creates first (schema, cache, processor, step, assignment, workflow), then updates (drawn arrows update their
+  tail row), then deletes. **BaseApi dry run**: `create` runs `CreateAsync`; later changes naming a made row's client id
+  (in their id or row) are rewritten to the id BaseApi gave it.
+- Verified: local stack (this branch's BaseApi + throwaway containers, a copy of the project) — HTTP 5/5 (chained creates
+  201 ×3, an update naming a made row, 400 by field, 422 FK, nothing kept) + the earlier 12/12; Playwright `toolbox` 16/16
+  (tiles; ghost tile-size over the Toolbox, then 3.74 px = the made schema's 3.74 px, 5.49 px = the made step's beside
+  its processor; camera unchanged; unfinished → named → dry run passes → green halo; a Step on empty canvas refused; a
+  next-step arrow aimed and drawn; refresh keeps made + drawn; Ctrl+Z; Delete takes back; no writes; no console errors).
+  Unit tests 292; BaseApi 2164. Cluster suites: unlock 16/0, spheres 28/0, deletion rules 26/0 (one earlier run had the
+  known session-timing flake). The cluster's BaseApi needs a redeploy for creates in the dry run.

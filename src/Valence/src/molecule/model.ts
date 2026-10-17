@@ -71,7 +71,8 @@ const CONDITION: Readonly<Record<number, string>> = { 1: 'PreviousCompleted', 2:
 export function buildMolecule(data: ProjectData): Molecule {
   const atoms = new Map<string, Atom>();
   const add = (type: AtomType, row: { id: string; name: string; version: string }) =>
-    atoms.set(atomKey(type, row.id), { key: atomKey(type, row.id), type, id: row.id, name: row.name, version: row.version, facts: [] });
+    // a row made in Valence has no name until one is typed: it is called by its kind meanwhile
+    atoms.set(atomKey(type, row.id), { key: atomKey(type, row.id), type, id: row.id, name: row.name || `new ${TYPES[type].label.toLowerCase()}`, version: row.version, facts: [] });
   const nameOf = (type: AtomType, id: string | null | undefined) => (id ? atoms.get(atomKey(type, id))?.name ?? '—' : '—');
   const facts = (type: AtomType, id: string, lines: string[]) => atoms.get(atomKey(type, id))!.facts.push(...lines);
 

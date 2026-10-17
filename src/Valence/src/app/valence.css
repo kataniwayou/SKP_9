@@ -86,3 +86,6 @@ select.input { font-family: var(--sans); font-size: 12.5px; }
 
 /* an edit that breaks a rule is not a change yet (the user, 2026-10-16) */
 .insp-virtual.unfinished { border-color: rgba(242, 180, 90, .55); border-style: dashed; color: #f2b45a; }
+
+.insp-virtual.made { border-color: rgba(74, 222, 128, .4); color: #4ade80; }
+.insp-virtual.made.unfinished { border-style: dashed; color: #86efac; }

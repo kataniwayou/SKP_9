@@ -116,10 +116,10 @@ public sealed record ModelUniqueDto(string Index, IReadOnlyList<string> Fields, 
 public sealed record ModelChangesDto(IReadOnlyList<ModelChangeDto> Changes);
 
 /// <summary>One change.</summary>
-/// <param name="Op"><c>update</c> (a <c>PUT</c>) or <c>delete</c> (a <c>DELETE</c>).</param>
+/// <param name="Op"><c>create</c> (a <c>POST</c>), <c>update</c> (a <c>PUT</c>) or <c>delete</c> (a <c>DELETE</c>).</param>
 /// <param name="Table">The entity's table, as <c>GET /model/fields</c> names it.</param>
-/// <param name="Id">The row's id.</param>
-/// <param name="Row">For an update, the body a <c>PUT</c> would send; absent for a delete.</param>
+/// <param name="Id">The row's id; for a create, the client's id for it, which later changes may name (BaseApi maps it to the id it gives).</param>
+/// <param name="Row">For a create or an update, the body a <c>POST</c> or <c>PUT</c> would send; absent for a delete.</param>
 public sealed record ModelChangeDto(string Op, string Table, Guid Id, System.Text.Json.JsonElement? Row);
 
 /// <summary>The dry run's answer: whether every change passed, and each change's result in order.</summary>

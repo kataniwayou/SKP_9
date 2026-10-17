@@ -28,6 +28,7 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
   const pinned = useWorkspace(workspace, (s) => s.pinned);
   const edits = useWorkspace(workspace, (s) => s.edits);
   const removed = useWorkspace(workspace, (s) => s.removed);
+  const created = useWorkspace(workspace, (s) => s.created);
   const rules = useWorkspace(workspace, (s) => s.rules);
   const dry = useWorkspace(workspace, (s) => s.dryRun);
   const dryRunWorks = useWorkspace(workspace, (s) => s.dryRunWorks);
@@ -44,6 +45,7 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
   const preview = key !== pinned;
   const ghost = removed.atoms.includes(key);
   const gone = goneArrows(molecule, removed);
+  const made = created.some((c) => c.key === key);
   const changed = edits[key] ?? {};
   const dirty = Object.keys(changed).length > 0;
   const table = tableFor(rules, dryRunWorks);
@@ -69,9 +71,18 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
             <span>● Deleted in Valence only, not applied</span><span className="insp-hint">Ctrl+Z on the canvas undoes it</span>
           </div>
         )}
-        {planned && !preview && <DryRunNote state={dry} verdict={verdict} />}
+        {made && !preview && (() => {
+          const missing = table[atom.type].filter((spec) => spec.check(changed[spec.key] ?? savedText(row, spec)) !== null).map((s) => s.label);
+          return (
+            <div className={missing.length || refusedByBaseApi ? 'insp-virtual made unfinished' : 'insp-virtual made'}>
+              <span>{missing.length ? `◐ New in Valence, unfinished: fill in ${missing.join(', ')}` : refusedByBaseApi ? "◐ New in Valence: BaseApi's dry run refuses it" : '● New in Valence only, not applied'}</span>
+              <span className="insp-hint">Delete takes it back</span>
+            </div>
+          );
+        })()}
+        {(planned || made) && !preview && <DryRunNote state={dry} verdict={verdict} />}
         {!ghost && !preview && <DeleteVerdict verdict={canDeleteAtom(molecule, removed, key)} />}
-        {dirty && !preview && !ghost && (
+        {dirty && !made && !preview && !ghost && (
           <div className={unfinished ? 'insp-virtual unfinished' : 'insp-virtual'}>
             <span>{frozen ? '◐ Unfinished edit: the definition is frozen again — a processor uses this schema, so BaseApi would refuse it. Revert it, or delete that arrow again'
               : refusedByBaseApi ? "◐ Unfinished edit: BaseApi's dry run refuses it — not a change, and apply waits, until it passes"

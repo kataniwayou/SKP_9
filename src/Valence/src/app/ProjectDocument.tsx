@@ -3,7 +3,7 @@ import { readFields, type RulesSource } from '../api/fields';
 import { readProject, type ProjectResult } from '../api/project';
 import { dryRun, type DryRun } from '../api/validate';
 import { goneArrows } from '../molecule/deletion';
-import { editStates } from '../molecule/fields';
+import { createdStates, editStates } from '../molecule/fields';
 import { layoutMolecule, type Vec } from '../molecule/layout';
 import { buildMolecule, reachOf, type Molecule } from '../molecule/model';
 import { planChanges, type PlannedChange } from '../molecule/plan';
@@ -45,6 +45,18 @@ export function ProjectDocument({ workspace, highlights, read = readProject, rea
   const removed = useWorkspace(workspace, (s) => s.removed);
   const edits = useWorkspace(workspace, (s) => s.edits);
   const rules = useWorkspace(workspace, (s) => s.rules);
+  // the project as Valence shows it: BaseApi's rows with what was made from the Toolbox
+  const molecule = useWorkspace(workspace, (s) => s.molecule);
+  const created = useWorkspace(workspace, (s) => s.created);
+  const createdKeys = useMemo(() => new Set(created.map((c) => c.key)), [created]);
+  // made atoms sit where they were dropped; the rest keep the layout of the project as read
+  const positions = useMemo(() => {
+    if (loaded.kind !== 'ready') return null;
+    if (created.length === 0) return loaded.positions;
+    const all = new Map(loaded.positions);
+    created.forEach((c) => all.set(c.key, c.pos));
+    return all;
+  }, [loaded, created]);
   const judged = useWorkspace(workspace, (s) => s.dryRun);
   const dryRunWorks = useWorkspace(workspace, (s) => s.dryRunWorks);
   // set when BaseApi answered that it has no dry run: not asked again until the page reloads
@@ -54,24 +66,28 @@ export function ProjectDocument({ workspace, highlights, read = readProject, rea
   const events = useMemo(() => ({ hover: workspace.hover, pin: workspace.pin }), [workspace]);
   const [attempt, setAttempt] = useState(0);
   const picked = useHighlights(highlights);
-  const lit = useMemo(() => (loaded.kind === 'ready' ? litOf(loaded.molecule, picked) : null), [loaded, picked]);
+  const lit = useMemo(() => (loaded.kind === 'ready' && molecule ? litOf(molecule, picked) : null), [loaded, molecule, picked]);
   // the virtual changes, not applied: deleted ones as red ghosts with every arrow that goes with them; atoms whose edits
   // are finished as amber update ghosts (an unfinished edit — or one BaseApi's dry run refused — is no change yet, so it
   // draws nothing)
   const ghosts = useMemo(() => {
-    if (loaded.kind !== 'ready') return undefined;
+    const data = workspace.get().data;
+    if (loaded.kind !== 'ready' || !molecule || !data) return undefined;
     const refused = new Set(judged.kind === 'done' ? Object.entries(judged.byAtom).filter(([, v]) => !v.ok).map(([k]) => k) : []);
-    const updated = editStates(tableFor(rules, dryRunWorks), loaded.molecule, edits, removed, refused).finished;
-    return { atoms: new Set(removed.atoms), arrows: goneArrows(loaded.molecule, removed), updated };
-  }, [loaded, removed, edits, rules, judged, dryRunWorks]);
+    const table = tableFor(rules, dryRunWorks);
+    const plainEdits = Object.fromEntries(Object.entries(edits).filter(([k]) => !createdKeys.has(k)));
+    const updated = editStates(table, molecule, plainEdits, removed, refused).finished;
+    const made = createdStates(table, data, molecule, edits, createdKeys, refused);
+    return { atoms: new Set(removed.atoms), arrows: goneArrows(molecule, removed), updated, created: made.finished, making: made.unfinished };
+  }, [loaded, molecule, removed, edits, rules, judged, dryRunWorks, createdKeys, workspace]);
 
   // BaseApi's dry run of the virtual changes (POST /model/validate), shortly after they settle: every rule BaseApi has,
   // its services' and the database's included, judges them as the apply would — and nothing is written
   useEffect(() => {
-    if (loaded.kind !== 'ready') return;
+    if (loaded.kind !== 'ready' || !molecule) return;
     const data = workspace.get().data;
     if (!data) return;
-    const planned = planChanges(data, loaded.molecule, edits, removed, rules.fields);
+    const planned = planChanges(data, molecule, edits, removed, rules.fields, createdKeys, workspace.get().added);
     if (planned.length === 0) { workspace.judged(NO_DRY_RUN); return; }
     if (missing.current) { workspace.judged({ kind: 'unavailable', reason: missing.current }); return; } // already said at load
     const abort = new AbortController();
@@ -81,11 +97,11 @@ export function ProjectDocument({ workspace, highlights, read = readProject, rea
       check(planned, fetch, abort.signal).then((run) => {
         if (run.kind === 'unavailable' && run.missing) missing.current = run.reason;
         const state = verdictOf(planned, run, rules.fields);
-        workspace.judged(state, dryRunLine(state, planned, (a) => loaded.molecule.atoms.get(a)?.name ?? a));
+        workspace.judged(state, dryRunLine(state, planned, (a) => molecule.atoms.get(a)?.name ?? a));
       }).catch(() => { /* superseded by a newer change */ });
     }, 600);
     return () => { clearTimeout(timer); abort.abort(); };
-  }, [loaded, edits, removed, rules, workspace, check]);
+  }, [loaded, molecule, createdKeys, edits, removed, rules, workspace, check]); // `added` changes `molecule` too
 
   useEffect(() => {
     let live = true;
@@ -130,7 +146,7 @@ export function ProjectDocument({ workspace, highlights, read = readProject, rea
       <div className="vcanvas" />
       {loaded.kind === 'ready' && (
         <Suspense fallback={<div className="doc-msg">Loading…</div>}>
-          <MoleculeView molecule={loaded.molecule} positions={loaded.positions} highlighted={lit} pinned={pinned} names={names} events={events} ghosts={ghosts} />
+          <MoleculeView molecule={molecule ?? loaded.molecule} positions={positions ?? loaded.positions} highlighted={lit} pinned={pinned} names={names} events={events} ghosts={ghosts} />
         </Suspense>
       )}
       {loaded.kind === 'loading' && <div className="doc-msg">Reading the project…</div>}

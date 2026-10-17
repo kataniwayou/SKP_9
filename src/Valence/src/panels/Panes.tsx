@@ -1,11 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useWorkspace, type Workspace } from '../app/workspace';
 import { PaneNote } from './PaneNote';
-
-/** The Toolbox in SKP Studio's frame, empty of business (stage 1, spec §3): it says what it will hold. */
-export function Toolbox() {
-  return <PaneNote pane="toolbox">Nothing to add yet: the entities to create come with the molecule.</PaneNote>;
-}
+export { Toolbox } from './Toolbox';
 
 /**
  * The Output pane: what Valence did and refused (spec §6) — deletions, refusals with their reason, undo and redo — one

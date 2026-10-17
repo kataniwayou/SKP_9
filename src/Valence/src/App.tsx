@@ -32,7 +32,7 @@ export function App({ storage, tabStorage }: AppProps) {
   const session = useMemo(() => readTabSession(tab, resolved), []);
   // the workflow filter (the main menu strip, 2026-10-16): the session keeps the picked workflows
   const highlights = useMemo(() => createHighlights(session?.highlighted ?? []), []);
-  const workspace = useMemo(() => createWorkspace({ pinned: session?.pinned ?? null, edits: session?.edits ?? {}, removed: session?.removed, history: session?.history }), []);
+  const workspace = useMemo(() => createWorkspace({ pinned: session?.pinned ?? null, edits: session?.edits ?? {}, removed: session?.removed, history: session?.history, created: session?.created, added: session?.added }), []);
   const pinned = useWorkspace(workspace, (s) => s.pinned);
   const dirty = useWorkspace(workspace, (s) => Object.keys(s.edits).length > 0 || s.removed.atoms.length > 0 || s.removed.arrows.length > 0);
   const documents = useMemo(() => documentOf(dirty), [dirty]);
@@ -41,8 +41,8 @@ export function App({ storage, tabStorage }: AppProps) {
   const dockState = useRef<SavedLayout | null>(session?.dock ?? null);
   const refused = useRef(false);
   const saver = useMemo(() => createSaver(() => {
-    const { pinned: pin, edits, removed, history } = workspace.get();
-    const kept = writeTabSession(tab, resolved, { version: SESSION_VERSION, dock: dockState.current, highlighted: [...highlights.get()], pinned: pin, edits: { ...edits }, removed, history });
+    const { pinned: pin, edits, removed, history, created, added } = workspace.get();
+    const kept = writeTabSession(tab, resolved, { version: SESSION_VERSION, dock: dockState.current, highlighted: [...highlights.get()], pinned: pin, edits: { ...edits }, removed, history, created: [...created], added: [...added] });
     if (!kept && !refused.current) setNotice((n) => ({ id: (n?.id ?? 0) + 1, text: 'This browser would not keep the session: a refresh may lose the layout' }));
     refused.current = !kept;
   }), [tab, resolved]);
@@ -51,13 +51,13 @@ export function App({ storage, tabStorage }: AppProps) {
   // the pin, the edits, the deletions and their history too (a refresh keeps them); hovering changes none, so it writes nothing
   useEffect(() => {
     let last = workspace.get();
-    return workspace.subscribe(() => { const now = workspace.get(); if (now.pinned !== last.pinned || now.edits !== last.edits || now.removed !== last.removed || now.history !== last.history) saver.schedule(); last = now; });
+    return workspace.subscribe(() => { const now = workspace.get(); if (now.pinned !== last.pinned || now.edits !== last.edits || now.removed !== last.removed || now.history !== last.history || now.created !== last.created || now.added !== last.added) saver.schedule(); last = now; });
   }, [workspace, saver]);
   const renderTool = (id: ToolId) => {
     switch (id) {
       case 'inspector': return <Inspector workspace={workspace} />;
       case 'output': return <Output workspace={workspace} />;
-      case 'toolbox': return <Toolbox />;
+      case 'toolbox': return <Toolbox workspace={workspace} />;
     }
   };
   useEffect(() => {

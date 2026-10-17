@@ -91,6 +91,24 @@ export function arrowRows(molecule: Molecule, atomKey: string): { label: string;
 }
 
 /**
+ * The atoms made from the Toolbox, split like edits (2026-10-17): finished once every field, as typed or as made, passes
+ * its rule (and BaseApi's dry run did not refuse it); until then unfinished — still drawn, as a create needs no edit to
+ * exist, but without its halo, and apply waits.
+ */
+export function createdStates(fieldTable: FieldTable, data: ProjectData, molecule: Molecule, edits: Readonly<Record<string, Readonly<Record<string, string>>>>,
+  created: ReadonlySet<string>, refused: ReadonlySet<string> = new Set()): { finished: Set<string>; unfinished: Set<string> } {
+  const finished = new Set<string>(), unfinished = new Set<string>();
+  for (const key of created) {
+    const atom = molecule.atoms.get(key);
+    const row = atom ? rowOf(data, atom.type, atom.id) : undefined;
+    if (!atom || !row) continue;
+    const broken = refused.has(key) || fieldTable[atom.type].some((spec) => spec.check(edits[key]?.[spec.key] ?? savedText(row, spec)) !== null);
+    (broken ? unfinished : finished).add(key);
+  }
+  return { finished, unfinished };
+}
+
+/**
  * The edited atoms, split by whether their edits are finished (the user, 2026-10-16): an edit counts as a change — drawn
  * as an update ghost — only when every edited field passes its rule; one breaking a rule is unfinished, marked in the
  * Inspector and drawn as nothing, and blocks apply until it is fixed or reverted. An edit to a field a rule has locked

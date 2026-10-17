@@ -21,7 +21,7 @@ export async function dryRun(changes: readonly PlannedChange[], fetchFn: typeof 
     const res = await fetchFn('/api/v1/model/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ changes: changes.map(({ op, table, id, row }) => (op === 'update' ? { op, table, id, row } : { op, table, id })) }),
+      body: JSON.stringify({ changes: changes.map(({ op, table, id, row }) => (op === 'delete' ? { op, table, id } : { op, table, id, row })) }),
       signal,
     });
     if (res.status === 404 || res.status === 405) return { kind: 'unavailable', reason: 'this BaseApi has no POST /model/validate yet', missing: true };

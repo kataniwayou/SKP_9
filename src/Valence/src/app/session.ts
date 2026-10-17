@@ -1,4 +1,5 @@
 import { parseLayout, type SavedLayout } from '../dock/layoutPersistence';
+import type { CreatedAtom } from './virtual';
 import type { Removed } from '../molecule/deletion';
 import type { Change, EditChange, History } from './workspace';
 
@@ -24,6 +25,9 @@ export interface Session {
   removed?: Removed;
   /** The shared undo / redo history of edits and deletions (the user, 2026-10-16: kept on refresh). Optional. */
   history?: History;
+  /** Made from the Toolbox, not applied (2026-10-17): atoms and drawn arrows. Optional, so the version stays 1. */
+  created?: CreatedAtom[];
+  added?: string[];
 }
 
 export function readSession(storage: Storage | null): Session | null {
@@ -59,6 +63,8 @@ export function readSession(storage: Storage | null): Session | null {
     ...(Object.keys(edits).length ? { edits } : {}),
     ...(removed && (removed.atoms.length || removed.arrows.length) ? { removed } : {}),
     ...(history && (history.past.length || history.future.length) ? { history } : {}),
+    ...(madeOf(value.created).length ? { created: madeOf(value.created) } : {}),
+    ...(strings(value.added).length ? { added: strings(value.added) } : {}),
   };
 }
 
@@ -79,8 +85,22 @@ function changes(v: unknown): Change[] {
       ...(Array.isArray(c.atoms) ? { atoms: strings(c.atoms) } : {}),
       ...(Array.isArray(c.arrows) ? { arrows: strings(c.arrows) } : {}),
       ...(typeof c.merge === 'string' ? { merge: c.merge } : {}),
+      ...(madeOf(c.created).length ? { created: madeOf(c.created) } : {}),
+      ...(madeOf(c.uncreated).length ? { uncreated: madeOf(c.uncreated) } : {}),
+      ...(Array.isArray(c.added) ? { added: strings(c.added) } : {}),
+      ...(Array.isArray(c.unadded) ? { unadded: strings(c.unadded) } : {}),
+      ...(Array.isArray(c.restored) ? { restored: strings(c.restored) } : {}),
     }];
   });
+}
+
+const TYPES_MADE = new Set(['wf', 'step', 'proc', 'schema', 'asg', 'cache']);
+/** The made atoms that are whole; a malformed one is dropped. */
+function madeOf(v: unknown): CreatedAtom[] {
+  if (!Array.isArray(v)) return [];
+  return v.flatMap((c): CreatedAtom[] => (isRecord(c) && typeof c.key === 'string' && typeof c.id === 'string' && typeof c.type === 'string' && TYPES_MADE.has(c.type)
+    && isRecord(c.row) && Array.isArray(c.pos) && c.pos.length === 3 && c.pos.every((n) => typeof n === 'number')
+    ? [{ key: c.key, id: c.id, type: c.type as CreatedAtom['type'], row: c.row, pos: [c.pos[0], c.pos[1], c.pos[2]] as CreatedAtom['pos'] }] : []));
 }
 
 /** False when the browser refuses (quota, blocked storage); never throws. */
