@@ -120,10 +120,20 @@ public sealed record ModelChangesDto(IReadOnlyList<ModelChangeDto> Changes);
 /// <param name="Table">The entity's table, as <c>GET /model/fields</c> names it.</param>
 /// <param name="Id">The row's id; for a create, the client's id for it, which later changes may name (BaseApi maps it to the id it gives).</param>
 /// <param name="Row">For a create or an update, the body a <c>POST</c> or <c>PUT</c> would send; absent for a delete.</param>
-public sealed record ModelChangeDto(string Op, string Table, Guid Id, System.Text.Json.JsonElement? Row);
+/// <param name="UpdatedAt">
+/// For an update or a delete, the row's <c>updatedAt</c> as the client read it: a row changed since (its <c>updatedAt</c>
+/// differs) is refused with a 409, so a change made elsewhere is never overwritten unseen. Absent: no such check.
+/// </param>
+public sealed record ModelChangeDto(string Op, string Table, Guid Id, System.Text.Json.JsonElement? Row, DateTime? UpdatedAt = null);
 
 /// <summary>The dry run's answer: whether every change passed, and each change's result in order.</summary>
 public sealed record ModelValidateResultDto(bool Ok, IReadOnlyList<ModelChangeResultDto> Results);
+
+/// <summary>
+/// The apply's answer (<c>POST /model/apply</c>): whether every change passed, whether they were kept (all of them, or
+/// none), each change's result in order, and each created row's client id → the id BaseApi gave it.
+/// </summary>
+public sealed record ModelApplyResultDto(bool Ok, bool Applied, IReadOnlyList<ModelChangeResultDto> Results, IReadOnlyDictionary<Guid, Guid> Made);
 
 /// <param name="Index">The change's place in the request.</param>
 /// <param name="Op">The change's op, as sent.</param>

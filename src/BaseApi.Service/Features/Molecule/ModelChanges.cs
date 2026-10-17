@@ -12,7 +12,9 @@ using Microsoft.Extensions.Options;
 namespace BaseApi.Service.Features.Molecule;
 
 /// <summary>
-/// Runs a set of changes as BaseApi would apply them — creates, updates and deletes — and keeps none of them: <c>POST /model/validate</c>. A client
+/// Runs a set of changes as BaseApi would apply them — creates, updates and deletes — and keeps none of them: <c>POST /model/validate</c>;
+/// or applies them, all or none: <c>POST /model/apply</c> runs the same way and commits only when every change passed
+/// (the user, 2026-10-17: the apply, approved). A client
 /// that holds its edits virtually (Valence) learns, before anything is written, whether every change passes every rule
 /// — the validators, the services' own checks (a frozen schema definition), the database's keys and unique indexes,
 /// and the delete guard of a running workflow — in the order it means to send them.
@@ -49,13 +51,33 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
 
     public async Task<ModelValidateResultDto> DryRunAsync(IReadOnlyList<ModelChangeDto> changes, HttpContext http, CancellationToken ct)
     {
+        var (results, _, _) = await RunAllAsync(changes, http, commit: false, ct);
+        return new ModelValidateResultDto(results.All(r => r.Ok), results);
+    }
+
+    public async Task<ModelApplyResultDto> ApplyAsync(IReadOnlyList<ModelChangeDto> changes, HttpContext http, CancellationToken ct)
+    {
+        var (results, made, applied) = await RunAllAsync(changes, http, commit: true, ct);
+        return new ModelApplyResultDto(results.All(r => r.Ok), applied, results, made);
+    }
+
+    /// <summary>
+    /// Every change in order in one transaction, a savepoint each. A dry run always rolls back; an apply commits when
+    /// every change passed, and otherwise rolls back too — all of them, or none.
+    /// </summary>
+    private async Task<(List<ModelChangeResultDto> Results, Dictionary<Guid, Guid> Made, bool Applied)> RunAllAsync(IReadOnlyList<ModelChangeDto> changes, HttpContext http, bool commit, CancellationToken ct)
+    {
         var tables = ModelEntities.ByTable(_db.Model);
         var strategy = _db.Database.CreateExecutionStrategy();
-        var results = await strategy.ExecuteAsync(async () =>
+        return await strategy.ExecuteAsync(async () =>
         {
             var list = new List<ModelChangeResultDto>(changes.Count);
             // a created row's client id → the id BaseApi gave it, for the changes after it
             var made = new Dictionary<Guid, Guid>();
+            // the rows whose updatedAt was checked: only a row's first change in the run is checked (a later one sees the
+            // updatedAt this run gave it, e.g. a deleted step's next-step rows cleared first)
+            var checkedRows = new HashSet<(string, Guid)>();
+            var applied = false;
             await using var tx = await _db.Database.BeginTransactionAsync(ct);
             try
             {
@@ -66,6 +88,7 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
                     await tx.CreateSavepointAsync(savepoint, ct);
                     try
                     {
+                        await CheckFreshAsync(change, tables, made, checkedRows, ct);
                         var status = await RunAsync(change, tables, made, ct);
                         list.Add(new ModelChangeResultDto(i, change.Op, change.Table, change.Id, true, status, null));
                     }
@@ -83,13 +106,37 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
             }
             finally
             {
-                await tx.RollbackAsync(CancellationToken.None); // a dry run: nothing is ever kept
+                if (commit && list.Count == changes.Count && list.All(r => r.Ok))
+                {
+                    await tx.CommitAsync(ct); // the apply: every change passed, all of them are kept
+                    applied = true;
+                }
+                else
+                {
+                    await tx.RollbackAsync(CancellationToken.None); // a dry run, or an apply with a refused change: none kept
+                }
                 _db.ChangeTracker.Clear();
             }
-            return list;
+            return (list, made, applied);
         });
-        return new ModelValidateResultDto(results.All(r => r.Ok), results);
     }
+
+    /// <summary>
+    /// An update or a delete that says when its row was read: refused with a 409 when the row was changed since (its
+    /// updatedAt differs, to the microsecond the database keeps). A row created in this run, or already changed by an
+    /// earlier change of it, is not checked; a row that is gone is left to the service (its 404).
+    /// </summary>
+    private async Task CheckFreshAsync(ModelChangeDto change, IReadOnlyDictionary<string, ModelEntity> tables, Dictionary<Guid, Guid> made, HashSet<(string, Guid)> checkedRows, CancellationToken ct)
+    {
+        if (change.UpdatedAt is not { } read || change.Op is not ("update" or "delete") || made.ContainsKey(change.Id)) return;
+        if (!tables.TryGetValue(change.Table ?? "", out var entity) || !checkedRows.Add((entity.Table, change.Id))) return;
+        var found = await _db.FindAsync(entity.Entity, [change.Id], ct);
+        if (found is not BaseApi.Core.Entities.BaseEntity row) return;
+        _db.Entry(found).State = EntityState.Detached; // the service reads it afresh
+        if (Micros(row.UpdatedAt) != Micros(read)) throw new ModelStaleException(entity.Table, change.Id, read, row.UpdatedAt);
+    }
+
+    private static long Micros(DateTime t) => (t.Kind == DateTimeKind.Local ? t.ToUniversalTime() : t).Ticks / 10;
 
     /// <summary>One change through its entity's service; the status the real call would answer on success.</summary>
     private async Task<int> RunAsync(ModelChangeDto change, IReadOnlyDictionary<string, ModelEntity> tables, Dictionary<Guid, Guid> made, CancellationToken ct)
@@ -171,6 +218,17 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
     /// </summary>
     private async Task<(int Status, JsonElement? Problem)> ProblemOfAsync(Exception ex, HttpContext http, CancellationToken ct)
     {
+        if (ex is ModelStaleException stale)
+        {
+            var problem = new ProblemDetails
+            {
+                Status = 409,
+                Title = "Changed since it was read",
+                Detail = $"This {stale.Table} row was changed in BaseApi at {stale.Current:O}, after it was read at {stale.Read:O}: refresh, then apply again.",
+            };
+            problem.Extensions["code"] = "stale";
+            return (StatusCodes.Status409Conflict, JsonSerializer.SerializeToElement(problem, _json));
+        }
         if (ex is ModelChangeException bad)
         {
             var body = JsonSerializer.SerializeToElement(new ProblemDetails { Status = 400, Title = "The change could not be read", Detail = bad.Message }, _json);
@@ -198,3 +256,12 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
 
 /// <summary>A change that cannot be read (an unknown table or op, a missing or malformed row): a 400 of its own.</summary>
 internal sealed class ModelChangeException(string message) : Exception(message);
+
+/// <summary>An update or delete of a row changed since the client read it: a 409 of its own (code <c>stale</c>).</summary>
+internal sealed class ModelStaleException(string table, Guid id, DateTime read, DateTime current) : Exception($"{table} {id} changed since it was read.")
+{
+    public string Table { get; } = table;
+    public Guid Id { get; } = id;
+    public DateTime Read { get; } = read;
+    public DateTime Current { get; } = current;
+}
