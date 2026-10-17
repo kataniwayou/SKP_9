@@ -76,8 +76,20 @@ export function ProjectDocument({ workspace, highlights, read = readProject, rea
     const refused = new Set(judged.kind === 'done' ? Object.entries(judged.byAtom).filter(([, v]) => !v.ok).map(([k]) => k) : []);
     const table = tableFor(rules, dryRunWorks);
     const plainEdits = Object.fromEntries(Object.entries(edits).filter(([k]) => !createdKeys.has(k)));
-    const updated = editStates(table, molecule, plainEdits, removed, refused).finished;
+    const updated = new Set(editStates(table, molecule, plainEdits, removed, refused).finished);
+    // a drawn arrow updates its tail's row (the user, 2026-10-17: a drop in the right place halos), so the tail breathes
+    // amber like an edited atom; a made tail is green already, a refused or deleted one is no update
     const made = createdStates(table, data, molecule, edits, createdKeys, refused);
+    for (const key of workspace.get().added) {
+      const [, tail, head] = key.split('|') as [string, string, string];
+      if (createdKeys.has(tail) || removed.atoms.includes(tail)) continue;
+      // an arrow to a made atom that does not pass yet is refused as a missing foreign key: that is the head's fault (it
+      // has its own note), not the tail's, so the tail still halos — any other refusal of the tail is its own
+      const v = judged.kind === 'done' ? judged.byAtom[tail] : undefined;
+      const headsFault = !!v && createdKeys.has(head) && !made.finished.has(head)
+        && Object.keys(v.fields).length === 0 && v.other.length > 0 && v.other.every((m) => /foreign key/i.test(m));
+      if (!refused.has(tail) || headsFault) updated.add(tail);
+    }
     return { atoms: new Set(removed.atoms), arrows: goneArrows(molecule, removed), updated, created: made.finished, making: made.unfinished };
   }, [loaded, molecule, removed, edits, rules, judged, dryRunWorks, createdKeys, workspace]);
 

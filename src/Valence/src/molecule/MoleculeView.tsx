@@ -38,7 +38,7 @@ export interface MoleculeEvents { hover(key: string | null): void; pin(key: stri
  */
 export interface Ghosts {
   atoms: ReadonlySet<string>; arrows: ReadonlySet<string>; updated?: ReadonlySet<string>;
-  /** Made from the Toolbox (2026-10-17): finished ones green with a halo, unfinished (`making`) green without. */
+  /** Made from the Toolbox (2026-10-17): green with a halo, finished or unfinished (`making`). */
   created?: ReadonlySet<string>; making?: ReadonlySet<string>;
 }
 
@@ -439,7 +439,8 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
       m.opacity = ghostly ? (on ? 0.45 : 0.3) : on ? 1 : 0.14;
       m.depthWrite = !ghostly;
       if (ghost) haloed.push({ a, color: GHOST });
-      else if (madeDone) haloed.push({ a, color: CREATED });
+      // made atoms breathe green from the moment they land, finished or not (the user, 2026-10-17)
+      else if (made) haloed.push({ a, color: CREATED });
       else if (updated) haloed.push({ a, color: UPDATED });
       else if (a === pinnedOne) haloed.push({ a, color: new THREE.Color(TYPES[a.atom.type].color) });
       // the pinned atom glows brighter than a hovered one, so it is found again among its neighbours

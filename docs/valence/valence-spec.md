@@ -581,3 +581,11 @@ of existing atoms; the dragged object is the size it will have on the canvas (ti
   next-step arrow aimed and drawn; refresh keeps made + drawn; Ctrl+Z; Delete takes back; no writes; no console errors).
   Unit tests 292; BaseApi 2164. Cluster suites: unlock 16/0, spheres 28/0, deletion rules 26/0 (one earlier run had the
   known session-timing flake). The cluster's BaseApi needs a redeploy for creates in the dry run.
+
+**Halos after a drop (the user, 2026-10-17: "when you drop toolbox component in the right place it should be in update mode meaning haloing").**
+A made atom breathes the green create halo from the moment it lands, finished or not; the Inspector note still says
+"unfinished: fill in …" until its fields pass. A drawn arrow updates its tail's row, so an existing tail breathes the amber
+update halo, like an atom edited in the Inspector; undo or Delete of the arrow takes the halo back. The atom dropped onto
+(a step's processor) has no halo: its row does not change. A tail BaseApi's dry run refuses loses its halo, except when the
+only refusal is the missing foreign key of an arrow to a made atom that does not pass yet: that is the head's fault, shown
+on the head.
