@@ -770,7 +770,10 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   raf = win.requestAnimationFrame(frame);
 
   // the browser checks read the scene from here (dev server only; never in a build)
-  if (import.meta.env.DEV) Object.assign(el, { __molecule: { camera, atoms, arrows, halos, radiusOf: (t: AtomType) => TYPES[t].r } });
+  // the browser suite's hook: always in development; in a production build only on a page opened with ?e2e (the user,
+  // 2026-10-17: run the full suite on the deployed Valence), so a normal visit carries nothing extra
+  const e2e = (() => { try { return new URLSearchParams(win.location.search).has('e2e'); } catch { return false; } })();
+  if (import.meta.env.DEV || e2e) Object.assign(el, { __molecule: { camera, atoms, arrows, halos, radiusOf: (t: AtomType) => TYPES[t].r } });
 
   // ---------- The Toolbox's drag (2026-10-17): sizes, targets and the aimed arrow ----------
   const tanHalfView = Math.tan(THREE.MathUtils.degToRad(FOV / 2));

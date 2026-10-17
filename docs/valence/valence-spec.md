@@ -635,3 +635,8 @@ The list is src/app/shortcuts.ts, beside the handlers; F5, Ctrl+O and Alt+W do n
   click outside closes it. Every row was done in the browser by Playwright (27 checks, 2026-10-17).
 - Each group opens and closes from its title, with its count (the user, 2026-10-17: "it's overloaded"): all closed at
   first, Expand all and Collapse all at the top; the groups a viewer left open are remembered in that browser.
+
+**The browser suite's hook in production (the user, 2026-10-17: run the full suite on the deployed Valence).**
+The canvas's test hook (`__molecule` on the canvas element: camera, atoms, arrows, halos) is always there in development;
+in a production build only on a page opened with `?e2e` (http://localhost:18082/?e2e), so a normal visit carries nothing
+extra. The full suite runs against the deployed bundle through nginx to the cluster's BaseApi, dry run only.
