@@ -589,3 +589,7 @@ update halo, like an atom edited in the Inspector; undo or Delete of the arrow t
 (a step's processor) has no halo: its row does not change. A tail BaseApi's dry run refuses loses its halo, except when the
 only refusal is the missing foreign key of an arrow to a made atom that does not pass yet: that is the head's fault, shown
 on the head.
+
+**A drop keeps the view (the user, 2026-10-17: "when I drop the new component it lost the center and all canvas moved").**
+A drop rebuilds the scene; the camera, its target and the atoms were kept, but the pan (Ctrl+drag, a slide of the picture
+by the lens shift, not a camera move) was not, so the whole picture jumped back by the pan. The pan is kept now too.

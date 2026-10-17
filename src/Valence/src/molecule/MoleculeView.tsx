@@ -43,7 +43,7 @@ export interface Ghosts {
 }
 
 /** The view kept across a rebuild (an atom made or taken back rebuilds the scene): the camera and where atoms stand. */
-interface SavedView { camera: Vec; target: Vec; up: Vec; atoms: Map<string, Vec> }
+interface SavedView { camera: Vec; target: Vec; up: Vec; shift: { x: number; y: number }; atoms: Map<string, Vec> }
 const NO_GHOSTS: Ghosts = { atoms: new Set(), arrows: new Set() };
 
 /**
@@ -713,6 +713,8 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   if (kept.view) {
     camera.position.set(...kept.view.camera); controls.target.set(...kept.view.target); camera.up.set(...kept.view.up);
     camera.lookAt(controls.target);
+    // the pan is a slide of the picture, not a camera move (the user, 2026-10-17: a drop "lost the center")
+    shift.x = kept.view.shift.x; shift.y = kept.view.shift.y; applyShift();
     kept.view.atoms.forEach((p, key) => { const a = atoms.get(key); if (a) { a.pos.set(...p); a.mesh.position.copy(a.pos); } });
     arrows.forEach(placeArrow);
   }
@@ -864,7 +866,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
     ghost(next) { ghosts = next; paint(); },
     rename(names) { atoms.forEach((a) => { a.label.textContent = names.get(a.atom.key) ?? a.atom.name; }); },
     dispose() {
-      kept.view = { camera: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), atoms: new Map([...atoms].map(([k, a]) => [k, a.pos.toArray()])) };
+      kept.view = { camera: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), shift: { ...shift }, atoms: new Map([...atoms].map(([k, a]) => [k, a.pos.toArray()])) };
       win.cancelAnimationFrame(raf);
       cleanups.forEach((c) => c());
       disposables.forEach((d) => d.dispose());
