@@ -796,7 +796,19 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   }
   // the page closing mid-turn (still coasting) or mid-drag: the view as it stands is kept
   listen(win, 'pagehide', () => { if (unreported || signature() !== lastSig) reportView(true); });
+  // the AI drawing's glide to the new places (0.9 s, eased); kept afterwards as a move by hand is
+  let gliding: { t0: number; atoms: { a: AtomView; from: THREE.Vector3; to: THREE.Vector3 }[] } | null = null;
+  function glide(now: number) {
+    if (!gliding) return;
+    const t = Math.min(1, (now - gliding.t0) / (win.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 1 : 900));
+    const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+    const touched = new Set<ArrowView>();
+    for (const g of gliding.atoms) { g.a.pos.lerpVectors(g.from, g.to, e); g.a.mesh.position.copy(g.a.pos); [...g.a.out, ...g.a.in].forEach((x) => touched.add(x)); }
+    touched.forEach(placeArrow);
+    if (t >= 1) { gliding = null; moves++; }
+  }
   function frame() {
+    glide(performance.now());
     if (!turning && (Math.abs(spin.x) > 1e-4 || Math.abs(spin.y) > 1e-4)) { turn(spin.x, spin.y); spin.x *= 0.9; spin.y *= 0.9; }
     easeZoom();
     controls.update();
@@ -919,6 +931,11 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
       aimed.head.position.copy(tip); aimed.head.quaternion.setFromUnitVectors(up, dir);
     },
     rekey(rename) { kept.rename = rename; },
+    positions: () => new Map([...atoms].map(([k, a]) => [k, a.pos.toArray() as Vec])),
+    place(places) {
+      const t0 = performance.now();
+      gliding = { t0, atoms: [...places].flatMap(([k, to]) => { const a = atoms.get(k); return a ? [{ a, from: a.pos.clone(), to: new THREE.Vector3(...to) }] : []; }) };
+    },
     onClick: null,
   });
   cleanups.push(() => { clearAim(); canvasBridge.set(null); });

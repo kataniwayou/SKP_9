@@ -26,6 +26,13 @@ export interface CanvasApi {
    * real key where its client key stood (`rename`: client key → real key), so nothing jumps.
    */
   rekey(rename: ReadonlyMap<string, string>): void;
+  /** Every atom's place now (the AI drawing reads them). */
+  positions(): Map<string, Vec>;
+  /**
+   * Moves these atoms to these places (the AI drawing, 2026-10-17), gliding there; the view is kept afterwards as after a
+   * move by hand. Atoms not named stay where they are.
+   */
+  place(places: ReadonlyMap<string, Vec>): void;
   /** While set, a click on the canvas is given to it (the atom under it, or null) instead of pinning. */
   onClick: ((atom: string | null) => void) | null;
 }

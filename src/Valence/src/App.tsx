@@ -4,6 +4,7 @@ import { browserTabStorage, createSaver, readTabSession, SESSION_VERSION, writeT
 import { ProjectDocument, PROJECT_ID, PROJECT_NAME } from './app/ProjectDocument';
 import { WorkflowFilter } from './app/WorkflowFilter';
 import { ApplyButton } from './app/Apply';
+import { Wand } from './app/Wand';
 import { DockShell, type DockDocument } from './dock/DockShell';
 import type { ToolId } from './dock/ids';
 import { browserStorage, type SavedLayout } from './dock/layoutPersistence';
@@ -78,7 +79,7 @@ export function App({ storage, tabStorage }: AppProps) {
       shortcuts={SHORTCUTS}
       activeDocumentId={PROJECT_ID}
       notice={notice}
-      status={<><WorkflowFilter workspace={workspace} highlights={highlights} /><ApplyButton workspace={workspace} /></>}
+      status={<><WorkflowFilter workspace={workspace} highlights={highlights} /><Wand workspace={workspace} highlights={highlights} /><ApplyButton workspace={workspace} /></>}
       onActivateDocument={() => {}}
       onCloseDocument={() => {}}
       onOpenWorkflow={() => {}}

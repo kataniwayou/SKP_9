@@ -680,3 +680,24 @@ extra. The full suite runs against the deployed bundle through nginx to the clus
 - Verified: unit test in `app/session.test.ts`; browser test (a real profile, the browser closed and reopened): camera,
   slide and all 137 atoms back within 0.02 px, a moved atom where it was moved, the draft beside it, a refresh, a close
   mid-turn; no writes to BaseApi.
+
+### The wand: AI drawing by the spine rules — built 2026-10-17 (the user: "based on SKP Studio … only for the selected workflows")
+
+- **Where:** the main menu strip, between the Workflows filter and Apply (SKP Studio's wand icon). Greyed until workflows
+  are picked in the filter ("Pick the workflows to draw in the Workflows filter first").
+- **What it sends:** the spine rules (`SPINE_RULES` in `src/ai/drawing.ts`, approved on the spine preview, 2026-10-17:
+  spine, branches round it, the ring round each step, shared atoms between their users, parallel lanes, overlaps) and the
+  picked workflows' atoms (`reachOf`, each by a short id `a1…`, with type, name, radius, a step's entry condition) and the
+  arrows among them. The model answers `{ "atoms": { "<id>": [x, y, z] } }`. It only places: nothing is added, removed or
+  relinked, and nothing reaches BaseApi.
+- **As SKP Studio's** (`WorkflowStudio/src/ai`): Kimi K3 through Valence's own nginx route `/ai/` (nginx adds the key; env
+  `KIMI_BASE_URL`, `KIMI_MODEL_ID`, `KIMI_API_KEY` in k8s/32-valence.yaml, the key committed empty; the dev server reads
+  the same env); streamed; a refused answer (an atom missing or unknown, not three numbers, not JSON) gets one correction
+  round; problems Valence can check (overlaps, a next-step arrow not pointing right) get one refinement round, kept when
+  it leaves no more; 60 s of silence ends a round, 15 min a press; the wand is "Cancel · n s · thinking/writing" while it runs.
+- **Applied:** moved so the picked workflows stay where they stood (the centre of their atoms' box), one pass pushes apart
+  what still overlaps (steps and workflows hold), the atoms glide there (0.9 s) and the view is kept in this browser as
+  after a move by hand. Atoms of other workflows stay put. The arrow beside the wand (↶) puts the last drawing back.
+  Not applied when the project changed while the model drew.
+- Verified: unit tests `src/ai/drawing.test.ts`, `src/app/Wand.test.tsx`; browser test with the real model on sc-chain
+  (32 atoms, 263 s): the 7 steps left to right 5.2 apart on one line, only its atoms moved, kept on refresh, Cancel, ↶.
