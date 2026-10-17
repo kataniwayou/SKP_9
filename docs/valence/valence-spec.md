@@ -640,3 +640,28 @@ The list is src/app/shortcuts.ts, beside the handlers; F5, Ctrl+O and Alt+W do n
 The canvas's test hook (`__molecule` on the canvas element: camera, atoms, arrows, halos) is always there in development;
 in a production build only on a page opened with `?e2e` (http://localhost:18082/?e2e), so a normal visit carries nothing
 extra. The full suite runs against the deployed bundle through nginx to the cluster's BaseApi, dry run only.
+
+### The apply — built 2026-10-17 (the user: all changes with the workflows they affect; preview approved)
+
+- **BaseApi `POST /model/apply`**: the dry run's machinery (`ModelChangeRunner`), committed when every change passed —
+  all of them, or none. The answer is the dry run's results plus `applied` and `made` (each created row's client id →
+  the id BaseApi gave it). Replaces the old assumption (§6c) of PUT/DELETE calls with no transaction across them.
+- **Stale-row check** (both the dry run and the apply): an update or delete carries the `updatedAt` Valence read; a row
+  changed since is refused with a 409 (`code: "stale"`): "changed since it was read: refresh, then apply again". Only a
+  row's first change in a run is checked (a deleted step's next-step rows clearing first changes it).
+- **Valence**: an **Apply N** button right of the menu strip, beside the Workflows filter (N: changed atoms). Greyed, its
+  tooltip saying why, until BaseApi's dry run passes every change and nothing is unfinished (nothing to apply, checking,
+  refused, unfinished, dry run unavailable). A click opens the confirmation: every change grouped as the canvas shows it
+  — new (green), updated (amber: edits before → after, arrows drawn or deleted), deleted (red: what goes with it) — with
+  the workflows each affects (a workflow is affected by what it reaches; an assignment no workflow lists, by its step's;
+  a new processor with no step: "no workflow yet"), and "all or nothing". Escape or Cancel closes it.
+- **Applied**: the project is read again without the loading state; the canvas keeps the camera and every atom's place,
+  the made atoms under their real ids (the canvas renames its kept positions, `CanvasApi.rekey`); edits, deletes, made
+  atoms, drawn arrows and the undo history are cleared; Output: "Applied N changes to BaseApi (a created, b updated, c
+  deleted)." **Refused**: nothing applied, everything stays, BaseApi's reasons on the atoms as with the dry run.
+  **Stale**: "Nothing applied: X changed in BaseApi since you loaded it. Refresh (your changes are kept), then apply
+  again." A change made in BaseApi behind Valence starts no dry run, so the apply's own check is what stops it.
+- Found by the apply's end-to-end check (local copy of the project): a deleted step's last update (its next-step rows
+  cleared first) sent its NOT NULL processor as null, and one deleted step naming another was deleted after it — every
+  deleted step's next-step rows now clear first, from the row as BaseApi holds it; and every canvas rebuild left its
+  WebGL context behind ("Too many active WebGL contexts", the tab could crash) — `renderer.forceContextLoss()` on dispose.

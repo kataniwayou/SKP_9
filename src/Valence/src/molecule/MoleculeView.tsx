@@ -61,7 +61,7 @@ export function MoleculeView({ molecule, positions, highlighted, pinned = null, 
 }) {
   const host = useRef<HTMLDivElement>(null);
   const painter = useRef<Painter | null>(null);
-  const kept = useRef<{ view?: SavedView }>({});
+  const kept = useRef<{ view?: SavedView; rename?: ReadonlyMap<string, string> }>({});
   const latest = useRef({ highlighted, pinned, names, events, ghosts });
   latest.current = { highlighted, pinned, names, events, ghosts };
 
@@ -124,7 +124,7 @@ function headOf(shaftR: number): { headGeom: THREE.LatheGeometry; headLen: numbe
   return { headGeom, headLen: L };
 }
 
-function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyMap<string, Vec>, events: MoleculeEvents, kept: { view?: SavedView } = {}): Painter & { dispose(): void } {
+function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyMap<string, Vec>, events: MoleculeEvents, kept: { view?: SavedView; rename?: ReadonlyMap<string, string> } = {}): Painter & { dispose(): void } {
   const doc = el.ownerDocument;
   const win = doc.defaultView ?? window;
   const labelsEl = el.querySelector<HTMLDivElement>('.mol-labels')!;
@@ -876,6 +876,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
       aimed.shaft.quaternion.setFromUnitVectors(up, dir); aimed.shaft.scale.set(1, len, 1);
       aimed.head.position.copy(tip); aimed.head.quaternion.setFromUnitVectors(up, dir);
     },
+    rekey(rename) { kept.rename = rename; },
     onClick: null,
   });
   cleanups.push(() => { clearAim(); canvasBridge.set(null); });
@@ -886,11 +887,17 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
     ghost(next) { ghosts = next; paint(); },
     rename(names) { atoms.forEach((a) => { a.label.textContent = names.get(a.atom.key) ?? a.atom.name; }); },
     dispose() {
-      kept.view = { camera: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), shift: { ...shift }, atoms: new Map([...atoms].map(([k, a]) => [k, a.pos.toArray()])) };
+      // after an apply, a made atom's place is kept under the id BaseApi gave it
+      const rename = kept.rename;
+      kept.rename = undefined;
+      kept.view = { camera: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), shift: { ...shift }, atoms: new Map([...atoms].map(([k, a]) => [rename?.get(k) ?? k, a.pos.toArray()])) };
       win.cancelAnimationFrame(raf);
       cleanups.forEach((c) => c());
       disposables.forEach((d) => d.dispose());
       renderer.dispose();
+      // dispose() keeps the WebGL context: every rebuild (a drop, an undo, an apply) left one behind until Chrome warned
+      // "Too many active WebGL contexts" and the tab could crash (found by the apply e2e, 2026-10-17)
+      renderer.forceContextLoss();
       canvas.remove();
       labelsEl.replaceChildren();
     },

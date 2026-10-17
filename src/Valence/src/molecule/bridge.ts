@@ -21,6 +21,11 @@ export interface CanvasApi {
   spotlight(keys: ReadonlySet<string> | null): void;
   /** A real arrow of `kind` from `tail` to the point, or onto `head`'s surface; null clears it. */
   aim(preview: { kind: ArrowKind; tail: string; x: number; y: number; head: string | null } | null): void;
+  /**
+   * After an apply (2026-10-17): the atoms made in Valence get the ids BaseApi gave them. The next rebuild places each
+   * real key where its client key stood (`rename`: client key → real key), so nothing jumps.
+   */
+  rekey(rename: ReadonlyMap<string, string>): void;
   /** While set, a click on the canvas is given to it (the atom under it, or null) instead of pinning. */
   onClick: ((atom: string | null) => void) | null;
 }

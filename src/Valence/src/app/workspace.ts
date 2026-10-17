@@ -95,6 +95,14 @@ export interface Workspace {
   canPaste(): boolean;
   /** Draws an arrow from the Toolbox, tail first, then head (the user, 2026-10-17); a refusal says why. */
   draw(kind: ArrowKind, tail: string, head: string): boolean;
+  /** A line in the Output pane. */
+  note(text: string, tone?: Message['tone']): void;
+  /**
+   * The apply kept every change (approved 2026-10-17): nothing is virtual any more. The project as BaseApi now holds it
+   * (null: it could not be read again; the page reads it afresh), the virtual changes and their history cleared, the
+   * pin carried to a made atom's real key (`rename`: client key → real key), and a line in the Output pane.
+   */
+  applied(data: ProjectData | null, molecule: Molecule | null, rename: ReadonlyMap<string, string>, line: string): void;
   undo(): void;
   redo(): void;
 }
@@ -305,6 +313,17 @@ export function createWorkspace(init: { pinned?: string | null; edits?: Edits; r
       }
       commit({ label: `draw ${t.name} → ${h.name}`, added: [key] }, { messages: say(`Drew ${t.name} → ${h.name} (${KINDS[kind].label}) in Valence (not applied).`) });
       return true;
+    },
+    note(text, tone = 'info') { set({ messages: say(text, tone) }); },
+    applied(data, molecule, rename, line) {
+      const pin = state.pinned ? rename.get(state.pinned) ?? state.pinned : null;
+      const cleared = { created: [], added: [], edits: {}, removed: NOTHING_REMOVED, history: NO_HISTORY, dryRun: NO_DRY_RUN, hovered: null, messages: say(line) };
+      if (data && molecule) {
+        state = { ...state, base: { data, molecule } };
+        set({ ...cleared, base: { data, molecule }, pinned: pin && molecule.atoms.has(pin) ? pin : null });
+      } else {
+        set({ ...cleared, pinned: null });
+      }
     },
     undo() {
       const change = state.history.past[state.history.past.length - 1];

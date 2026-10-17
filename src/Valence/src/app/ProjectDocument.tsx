@@ -11,6 +11,7 @@ import { tableFor } from '../molecule/rules';
 import { dryRunLine, NO_DRY_RUN, verdictOf } from '../molecule/verdict';
 import { useHighlights, type Highlights } from './highlights';
 import { Placer } from '../panels/Toolbox';
+import { applyBridge } from './Apply';
 import type { Copied } from './virtual';
 import { useWorkspace, type Workspace } from './workspace';
 
@@ -143,6 +144,23 @@ export function ProjectDocument({ workspace, highlights, read = readProject, rea
     });
     return () => { live = false; };
   }, [read, readRules, check, attempt, workspace]);
+
+  // After an apply (approved 2026-10-17): the project as BaseApi now holds it, read without the loading state, so the
+  // canvas stays as it stands — the camera, every atom's place, the made atoms' places under their real ids
+  useEffect(() => {
+    applyBridge.reload = async (rename, line) => {
+      const r = await read();
+      if (!r.ok) {
+        workspace.applied(null, null, rename, `${line} The project could not be read again (${r.message}): reading it afresh.`);
+        setAttempt((a) => a + 1);
+        return;
+      }
+      const molecule = buildMolecule(r.data);
+      setLoaded({ kind: 'ready', molecule, positions: layoutMolecule(molecule) });
+      workspace.applied(r.data, molecule, rename, line);
+    };
+    return () => { applyBridge.reload = null; };
+  }, [read, workspace]);
 
   // The canvas's keys, while it has focus (SKP Studio's, design/useDesignKeys.ts): Delete deletes the pinned atom or
   // arrow under the rules (spec §6); Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z redo, through edits and deletions alike.

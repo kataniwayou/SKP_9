@@ -3,6 +3,7 @@ import { createHighlights } from './app/highlights';
 import { browserTabStorage, createSaver, readTabSession, SESSION_VERSION, writeTabSession } from './app/session';
 import { ProjectDocument, PROJECT_ID, PROJECT_NAME } from './app/ProjectDocument';
 import { WorkflowFilter } from './app/WorkflowFilter';
+import { ApplyButton } from './app/Apply';
 import { DockShell, type DockDocument } from './dock/DockShell';
 import type { ToolId } from './dock/ids';
 import { browserStorage, type SavedLayout } from './dock/layoutPersistence';
@@ -35,7 +36,7 @@ export function App({ storage, tabStorage }: AppProps) {
   const highlights = useMemo(() => createHighlights(session?.highlighted ?? []), []);
   const workspace = useMemo(() => createWorkspace({ pinned: session?.pinned ?? null, edits: session?.edits ?? {}, removed: session?.removed, history: session?.history, created: session?.created, added: session?.added }), []);
   const pinned = useWorkspace(workspace, (s) => s.pinned);
-  const dirty = useWorkspace(workspace, (s) => Object.keys(s.edits).length > 0 || s.removed.atoms.length > 0 || s.removed.arrows.length > 0);
+  const dirty = useWorkspace(workspace, (s) => Object.keys(s.edits).length > 0 || s.removed.atoms.length > 0 || s.removed.arrows.length > 0 || s.created.length > 0 || s.added.length > 0);
   const documents = useMemo(() => documentOf(dirty), [dirty]);
   const [notice, setNotice] = useState<{ id: number; text: string } | undefined>(undefined);
 
@@ -73,7 +74,7 @@ export function App({ storage, tabStorage }: AppProps) {
       shortcuts={SHORTCUTS}
       activeDocumentId={PROJECT_ID}
       notice={notice}
-      status={<WorkflowFilter workspace={workspace} highlights={highlights} />}
+      status={<><WorkflowFilter workspace={workspace} highlights={highlights} /><ApplyButton workspace={workspace} /></>}
       onActivateDocument={() => {}}
       onCloseDocument={() => {}}
       onOpenWorkflow={() => {}}

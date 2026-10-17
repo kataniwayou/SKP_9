@@ -14,6 +14,11 @@ export interface PlannedChange {
   atom: string;
   /** Why this change is in the plan, for the Output pane. */
   why: string;
+  /**
+   * For an update or a delete of a row BaseApi holds, its `updatedAt` as it was read: BaseApi refuses the change if the
+   * row changed since (the apply's stale-row check, approved 2026-10-17).
+   */
+  updatedAt?: string;
 }
 
 /** The update DTO's link fields, as the arrows model.ts draws from them (spec §5). */
@@ -58,7 +63,10 @@ export function planChanges(data: ProjectData, molecule: Molecule, edits: Readon
     const out: Record<string, unknown> = {};
     for (const f of entity.fields) {
       const kind = LINKS[f.field];
-      const edited = deleted.has(key) ? undefined : edits[key]?.[f.field];
+      // a deleted row's last update (its next-step rows cleared before its delete) is the row as BaseApi holds it: its
+      // arrows count as gone with it, which would send its NOT NULL processor as null (found by the apply e2e, 2026-10-17)
+      if (deleted.has(key)) { out[f.field] = clearLinks.includes(f.field) ? [] : row[f.field] ?? null; continue; }
+      const edited = edits[key]?.[f.field];
       if (kind && f.type.endsWith('[]')) {
         const kept = molecule.arrows.filter((x) => x.from === key && x.kind === kind && !gone.has(arrowKey(x))).map((x) => molecule.atoms.get(x.to)!.id);
         out[f.field] = clearLinks.includes(f.field) ? [] : kept;
@@ -74,6 +82,11 @@ export function planChanges(data: ProjectData, molecule: Molecule, edits: Readon
     return out;
   }
 
+  /** When a row BaseApi holds was read (its updatedAt), for the stale-row check; nothing for a row without one. */
+  const readAt = (type: AtomType, id: string): { updatedAt?: string } => {
+    const at = rowOf(data, type, id)?.updatedAt;
+    return typeof at === 'string' ? { updatedAt: at } : {};
+  };
   const changes: PlannedChange[] = [];
   // atoms made from the Toolbox: a create each, its row as typed, with its arrows (the mandatory one and any drawn).
   // A new step's next steps that are new too would name rows not created yet (a foreign key BaseApi refuses, found by
@@ -106,20 +119,21 @@ export function planChanges(data: ProjectData, molecule: Molecule, edits: Readon
       if (!row) continue;
       const why = [editedFields.length ? `edits ${editedFields.join(', ')}` : '', lostArrows ? `${lostArrows} arrow${lostArrows === 1 ? '' : 's'} deleted` : '',
         drawn ? `${drawn} arrow${drawn === 1 ? '' : 's'} drawn` : ''].filter(Boolean).join('; ');
-      changes.push({ op: 'update', table: TYPES[type].table, id: atom.id, row, atom: atom.key, why: `${atom.name}: ${why}` });
+      changes.push({ op: 'update', table: TYPES[type].table, id: atom.id, row, atom: atom.key, why: `${atom.name}: ${why}`, ...readAt(type, atom.id) });
     }
   }
   for (const type of DELETE_ORDER) {
-    for (const key of removed.atoms) {
-      const atom = molecule.atoms.get(key);
-      if (!atom || atom.type !== type) continue;
-      // a step's own next-step rows hold a RESTRICT key to it: they go first, by an update of the step
-      if (type === 'step' && molecule.arrows.some((x) => x.from === key && x.kind === 'next')) {
-        const row = body(key, ['nextStepIds']);
-        if (row) changes.push({ op: 'update', table: TYPES[type].table, id: atom.id, row, atom: key, why: `${atom.name}: its next-step rows go before it` });
+    const going = removed.atoms.map((key) => molecule.atoms.get(key)).filter((a): a is NonNullable<typeof a> => !!a && a.type === type);
+    // a step's own next-step rows hold a RESTRICT key to the steps they name: every deleted step's go first, before any
+    // step is deleted (one deleted step naming another was deleted after it, found by the apply e2e, 2026-10-17)
+    if (type === 'step') {
+      for (const atom of going) {
+        if (!molecule.arrows.some((x) => x.from === atom.key && x.kind === 'next')) continue;
+        const row = body(atom.key, ['nextStepIds']);
+        if (row) changes.push({ op: 'update', table: TYPES[type].table, id: atom.id, row, atom: atom.key, why: `${atom.name}: its next-step rows go before it`, ...readAt(type, atom.id) });
       }
-      changes.push({ op: 'delete', table: TYPES[type].table, id: atom.id, atom: key, why: `${atom.name}: deleted` });
     }
+    for (const atom of going) changes.push({ op: 'delete', table: TYPES[type].table, id: atom.id, atom: atom.key, why: `${atom.name}: deleted`, ...readAt(type, atom.id) });
   }
   return changes;
 }
