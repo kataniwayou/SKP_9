@@ -633,3 +633,5 @@ The list is src/app/shortcuts.ts, beside the handlers; F5, Ctrl+O and Alt+W do n
   Read-only), the Workflows filter (click, Space/Enter, Escape) and windows (Ctrl+E, Ctrl+Shift+E, double-click and
   Ctrl+double-click a tab, right-click a tab, drag a tab, an auto-hidden side tab, View ▸ pane, Escape). Escape or a
   click outside closes it. Every row was done in the browser by Playwright (27 checks, 2026-10-17).
+- Each group opens and closes from its title, with its count (the user, 2026-10-17: "it's overloaded"): all closed at
+  first, Expand all and Collapse all at the top; the groups a viewer left open are remembered in that browser.

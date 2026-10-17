@@ -37,11 +37,21 @@ describe('App', () => {
     setup();
     fireEvent.click(within(screen.getByRole('menubar')).getByRole('menuitem', { name: 'Shortcuts' }));
     const sheet = screen.getByRole('dialog', { name: 'Shortcuts' });
+    // every group starts closed (the user, 2026-10-17: "it's overloaded"); its title opens it, Expand all opens them all
+    expect(sheet.querySelectorAll('.sc-row')).toHaveLength(0);
+    fireEvent.click(within(sheet).getByRole('button', { name: /Copy and paste/ }));
+    expect([...sheet.querySelectorAll('.sc-row kbd')].map((k) => k.textContent)).toEqual(['Ctrl+C', 'Ctrl+V']);
+    expect(within(sheet).getByRole('button', { name: /Copy and paste/ }).getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(within(sheet).getByRole('button', { name: /Copy and paste/ }));
+    expect(sheet.querySelectorAll('.sc-row')).toHaveLength(0);
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Expand all' }));
     const keys = [...sheet.querySelectorAll('.sc-row kbd')].map((k) => k.textContent);
     for (const k of ['Delete', 'Ctrl+Z', 'Ctrl+Y · Ctrl+Shift+Z', 'Ctrl+C', 'Ctrl+V', 'Escape', 'Ctrl+E', 'Ctrl+Shift+E', 'Ctrl+drag', 'Ctrl+drag an atom', 'Hover an atom', 'Right-drag', 'Pinch']) expect(keys).toContain(k);
     expect(keys).toHaveLength(SHORTCUTS.reduce((n, g) => n + g.items.length, 0));
     // two columns: the left's groups first, then the right's
-    expect([...sheet.querySelectorAll('.sc-h')].map((h) => h.textContent)).toEqual([...SHORTCUTS.filter((g) => g.column === 0), ...SHORTCUTS.filter((g) => g.column === 1)].map((g) => g.group));
+    expect([...sheet.querySelectorAll('.sc-h')].map((h) => h.textContent)).toEqual([...SHORTCUTS.filter((g) => g.column === 0), ...SHORTCUTS.filter((g) => g.column === 1)].map((g) => `▾${g.group}${g.items.length}`));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Collapse all' }));
+    expect(sheet.querySelectorAll('.sc-row')).toHaveLength(0);
   });
 
   it('has the workflow filter at the right of the menu strip (the user, 2026-10-16)', () => {
