@@ -7,6 +7,7 @@ import type { Rect } from './home';
 import { docPanelId, documentIdOf, isDocPanelId, isToolId, TOOL_IDS, TOOL_TITLES, type PaneId, type ToolId } from './ids';
 import { keyCommand } from './keys';
 import { browserStorage, readLayout, writeLayout, type SavedLayout } from './layoutPersistence';
+import { ShortcutSheet, type ShortcutGroup } from './ShortcutSheet';
 import { anchorBelow, Menu, type Anchor, type MenuEntry } from './Menu';
 import { DocumentHost, GroupActions, ShellProvider, StudioTab, ToolHost, Watermark, type DockDocument, type GroupAction, type ShellApi } from './parts';
 import { Picker, type PickerItem } from './Picker';
@@ -64,8 +65,8 @@ export interface DockShellProps {
   onRunCommand?: (op: 'start' | 'stop') => string | null;
   /** A tool pane's own entries at the top of its tab menu (e.g. Output's Clear, 2026-10-10). */
   toolMenu?: (id: ToolId) => MenuEntry[];
-  /** Every key stroke and mouse gesture, for the Shortcuts menu (the user, 2026-10-17): a title per group. */
-  shortcuts?: readonly { group: string; items: readonly { keys: string; does: string }[] }[];
+  /** Every key stroke and gesture, for the Shortcuts sheet on the menu strip (the user, 2026-10-17). */
+  shortcuts?: readonly ShortcutGroup[];
 }
 
 const COMPONENTS = { document: DocumentHost, tool: ToolHost };
@@ -396,12 +397,7 @@ export function DockShell(props: DockShellProps) {
           { id: 'reset', icon: '↺', label: 'Reset window layout', onSelect: () => { if (api) { reset(api); syncDocuments(api); showToast('Window layout reset'); } } },
         ];
       case 'Shortcuts':
-        // to read, not to run: choosing one only closes the menu
-        return (latest.current.props.shortcuts ?? []).flatMap((g, i): MenuEntry[] => [
-          ...(i > 0 ? ['separator' as const] : []),
-          { heading: g.group },
-          ...g.items.map((s, j): MenuEntry => ({ id: `sc-${i}-${j}`, label: s.does, kbd: s.keys, onSelect: () => {} })),
-        ]);
+        return []; // a sheet, not a dropdown (ShortcutSheet)
     }
   };
 
@@ -569,7 +565,9 @@ export function DockShell(props: DockShellProps) {
         </div>
       </div>
       {/* keyed: switching menus opens a new one, which focuses its first item and gives focus back to its own trigger */}
-      {menu && <Menu key={menu.label} label={menu.label} entries={menu.entries} anchor={menu.anchor} onClose={closeMenu} />}
+      {menu && (menu.strip === 'Shortcuts'
+        ? <ShortcutSheet groups={props.shortcuts ?? []} anchor={menu.anchor} onClose={closeMenu} />
+        : <Menu key={menu.label} label={menu.label} entries={menu.entries} anchor={menu.anchor} onClose={closeMenu} />)}
       {picker && workflows && (
         <Picker
           anchor={picker}

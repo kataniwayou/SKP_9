@@ -626,3 +626,10 @@ the canvas's keys (Delete, Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z), copy and paste (Ctrl+C
 then click, Escape), the canvas's mouse (click, drag, Ctrl+drag an atom, Ctrl+drag, wheel) and the windows' (Ctrl+E,
 Ctrl+Shift+E, double-click and Ctrl+double-click a tab, Escape). It is to read: choosing an entry only closes the menu.
 The list is src/app/shortcuts.ts, beside the handlers; F5, Ctrl+O and Alt+W do nothing in Valence and are not listed.
+- Expanded (the user, 2026-10-17: "add all the features like hover atom and ctrl you can relocate"; preview approved):
+  Shortcuts opens a sheet of two columns (one on a narrow window), 39 rows: canvas keys, copy and paste, hover (an atom,
+  an arrow, holding Ctrl), mouse (click, click empty, Ctrl+drag an atom, drag, the coast, Ctrl+drag, right-drag, wheel,
+  names on zoom), touch (one finger, a finger on an atom, pinch), the Toolbox (incl. search), the Inspector (type, Revert,
+  Read-only), the Workflows filter (click, Space/Enter, Escape) and windows (Ctrl+E, Ctrl+Shift+E, double-click and
+  Ctrl+double-click a tab, right-click a tab, drag a tab, an auto-hidden side tab, View ▸ pane, Escape). Escape or a
+  click outside closes it. Every row was done in the browser by Playwright (27 checks, 2026-10-17).

@@ -27,9 +27,7 @@ export interface MenuItem {
   tip?: string;
   onSelect: () => void;
 }
-/** A group's title inside a menu (the Shortcuts menu's Canvas, Mouse, Windows). */
-export interface MenuHeading { heading: string }
-export type MenuEntry = MenuItem | MenuHeading | 'separator';
+export type MenuEntry = MenuItem | 'separator';
 
 /**
  * A dropdown (mockup v49 .dropdown): the menu strip's menus and the window-position menu. It is
@@ -90,8 +88,6 @@ export function Menu({ entries, anchor, onClose, label }: { entries: readonly Me
       {entries.map((entry, i) =>
         entry === 'separator' ? (
           <div key={`sep${i}`} className="msep" role="separator" />
-        ) : 'heading' in entry ? (
-          <div key={`h${i}`} className="mhead" role="presentation">{entry.heading}</div>
         ) : (
           <div
             key={entry.id}
