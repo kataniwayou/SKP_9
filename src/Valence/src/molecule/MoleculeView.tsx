@@ -240,8 +240,12 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
         // the health glow (2026-10-18: "as the halo breathing just inside the atom boundaries"): the halo's own fall-off,
         // turned inward — brightest on the outline, fading toward the centre
         float healthT = clamp(1.0 - sphereOff / max(sphereOutline, 1e-6), 0.0, 1.0);
-        float healthA = min(0.9 * exp(-healthT * 4.5) + 0.5 * (1.0 - healthT) * (1.0 - healthT), 1.0);
+        // the glare (2026-10-18: "make the health light more glare"): a wider band at full colour, and light added on top
+        // of it, hottest on the rim, so it shines brighter than the colour itself
+        float healthA = min(exp(-healthT * 2.6) + 0.35 * (1.0 - healthT) * (1.0 - healthT), 1.0);
+        float healthHot = exp(-healthT * 7.0);
         outgoingLight = mix(outgoingLight, healthColor, healthGlow * healthA);
+        outgoingLight += healthColor * healthGlow * (0.55 * healthA + 0.9 * healthHot);
         #include <opaque_fragment>`);
     };
   }
@@ -448,7 +452,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
     }
     halos.forEach((h, a) => { if (!on.has(a)) h.visible = false; });
     // a deleted processor is a red ghost only: its health does not show
-    healthy.forEach((color, a) => { const g = glowOf(a); g.color.value.copy(color); g.glow.value = ghosts.atoms.has(a.atom.key) ? 0 : 0.85 * pulse; });
+    healthy.forEach((color, a) => { const g = glowOf(a); g.color.value.copy(color); g.glow.value = ghosts.atoms.has(a.atom.key) ? 0 : pulse; });
   }
 
   function paint() {
