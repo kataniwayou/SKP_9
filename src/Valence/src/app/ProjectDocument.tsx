@@ -7,7 +7,6 @@ import { createdStates, editStates } from '../molecule/fields';
 import { layoutMolecule, type Vec } from '../molecule/layout';
 import { buildMolecule, reachOf, type Molecule } from '../molecule/model';
 import { planChanges, type PlannedChange } from '../molecule/plan';
-import { tableFor } from '../molecule/rules';
 import { dryRunLine, NO_DRY_RUN, verdictOf } from '../molecule/verdict';
 import { useHighlights, type Highlights } from './highlights';
 import { Placer } from '../panels/Toolbox';
@@ -69,7 +68,6 @@ export function ProjectDocument({ workspace, highlights, view = null, onView, re
     return all;
   }, [loaded, created]);
   const judged = useWorkspace(workspace, (s) => s.dryRun);
-  const dryRunWorks = useWorkspace(workspace, (s) => s.dryRunWorks);
   // set when BaseApi answered that it has no dry run: not asked again until the page reloads
   const missing = useRef<string | null>(null);
   // the labels show the virtual entities' names (decision 8)
@@ -85,7 +83,7 @@ export function ProjectDocument({ workspace, highlights, view = null, onView, re
     const data = workspace.get().data;
     if (loaded.kind !== 'ready' || !molecule || !data) return undefined;
     const refused = new Set(judged.kind === 'done' ? Object.entries(judged.byAtom).filter(([, v]) => !v.ok).map(([k]) => k) : []);
-    const table = tableFor(rules, dryRunWorks);
+    const table = rules.table;
     const plainEdits = Object.fromEntries(Object.entries(edits).filter(([k]) => !createdKeys.has(k)));
     const updated = new Set(editStates(table, molecule, plainEdits, removed, refused).finished);
     // a drawn arrow updates its tail's row (the user, 2026-10-17: a drop in the right place halos), so the tail breathes
@@ -102,7 +100,7 @@ export function ProjectDocument({ workspace, highlights, view = null, onView, re
       if (!refused.has(tail) || headsFault) updated.add(tail);
     }
     return { atoms: new Set(removed.atoms), arrows: goneArrows(molecule, removed), updated, created: made.finished, making: made.unfinished };
-  }, [loaded, molecule, removed, edits, rules, judged, dryRunWorks, createdKeys, workspace]);
+  }, [loaded, molecule, removed, edits, rules, judged, createdKeys, workspace]);
 
   // BaseApi's dry run of the virtual changes (POST /model/validate), shortly after they settle: every rule BaseApi has,
   // its services' and the database's included, judges them as the apply would — and nothing is written
@@ -131,8 +129,7 @@ export function ProjectDocument({ workspace, highlights, view = null, onView, re
     setLoaded({ kind: 'loading' });
     // the rules come from BaseApi with the rows (decision 5); until then, and on an older BaseApi, the snapshot
     void readRules().then((source) => { if (live) workspace.rulesLoaded(source); });
-    // does this BaseApi have the dry run? An empty one says so before the first edit: then the code rules are BaseApi's
-    // alone from the start, with no stand-in showing first
+    // does this BaseApi have the dry run? An empty one says so before the first edit
     void check([]).then((run) => {
       if (run.kind === 'unavailable' && run.missing) missing.current = run.reason;
       if (!live || workspace.get().dryRun.kind !== 'idle') return;

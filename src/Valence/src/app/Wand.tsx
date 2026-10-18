@@ -3,7 +3,6 @@ import {
   AI_SILENCE_MS, AI_TOTAL_MS, correctionMessages, DrawingError, firstMessages, judgeDrawing, modelOf, placed, problemsOf,
   refinementMessages, requestDrawing, scopeOf, type ChatMessage, type Judged, type StreamProgress,
 } from '../ai/drawing';
-import type { Vec } from '../molecule/layout';
 import { canvasBridge } from '../molecule/bridge';
 import { useHighlights, type Highlights } from './highlights';
 import { Spinner } from './Spinner';
@@ -23,7 +22,8 @@ export function activityOf(round: Round, p: StreamProgress | null): string {
  * only for the selected workflows"): the model lays out the picked workflows by the spine rules. As SKP Studio's: the
  * answer is streamed; a refused answer gets one correction round, a drawing with problems left one refinement round,
  * kept when it leaves no more; a round is given up after 60 s of silence, a press after 15 min; Cancel stops it. The
- * drawing glides in and is kept in this browser like a move by hand; the arrow beside the wand puts the last one back.
+ * drawing glides in and is kept in this browser like a move by hand, and is one step of the shared history: Ctrl+Z puts
+ * the atoms back, Ctrl+Y draws them again (the user, 2026-10-18: no take-back button).
  */
 export function Wand({ workspace, highlights, fetchFn }: { workspace: Workspace; highlights: Highlights; fetchFn?: typeof fetch }) {
   const picked = useHighlights(highlights);
@@ -31,7 +31,6 @@ export function Wand({ workspace, highlights, fetchFn }: { workspace: Workspace;
   const [running, setRunning] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [activity, setActivity] = useState('');
-  const [undo, setUndo] = useState<{ places: Map<string, Vec>; label: string } | null>(null);
   const ctl = useRef<AbortController | null>(null);
   const progress = useRef<{ round: Round; p: StreamProgress | null }>({ round: 'drawing', p: null });
   useEffect(() => () => ctl.current?.abort(), []);
@@ -110,9 +109,8 @@ export function Wand({ workspace, highlights, fetchFn }: { workspace: Workspace;
       if (!now) { workspace.note('AI drawing not applied: the canvas is not shown', 'refused'); return; }
       const before = now.positions();
       const places = placed(scope, out.places, before);
-      setUndo({ places: new Map(scope.keys.flatMap((k) => (before.has(k) ? [[k, before.get(k)!] as const] : []))), label: what });
-      now.place(places);
-      workspace.note(`AI drawing applied: ${what} laid out by the spine rules, ${places.size} atoms placed${left.length ? `; left: ${left.join('; ').slice(0, 200)}` : ''}. The arrow beside the wand puts the places back.`);
+      workspace.drawn(`AI drawing of ${what}`, [...places].flatMap(([key, after]) => { const b = before.get(key); return b ? [{ key, before: b, after }] : []; }));
+      workspace.note(`AI drawing applied: ${what} laid out by the spine rules, ${places.size} atoms placed${left.length ? `; left: ${left.join('; ').slice(0, 200)}` : ''}. Ctrl+Z puts the places back.`);
     } catch (e) {
       const why = e instanceof DrawingError ? e.message : 'unexpected error';
       if (why === 'cancelled') workspace.note(timedOut && !c.signal.aborted ? `AI drawing failed: ${timeoutText()}` : 'AI drawing cancelled', timedOut && !c.signal.aborted ? 'refused' : 'info');
@@ -124,14 +122,6 @@ export function Wand({ workspace, highlights, fetchFn }: { workspace: Workspace;
     }
   }, [workspace, highlights, fetchFn]);
 
-  const putBack = () => {
-    const canvas = canvasBridge.get();
-    if (!undo || !canvas) return;
-    canvas.place(undo.places);
-    workspace.note(`AI drawing taken back: ${undo.label} back where it stood`);
-    setUndo(null);
-  };
-
   if (running) {
     return (
       <button type="button" className="wd-b busy" aria-busy aria-label="AI drawing: cancel" onClick={() => ctl.current?.abort()} data-tip="The model is drawing; click to cancel">
@@ -140,16 +130,11 @@ export function Wand({ workspace, highlights, fetchFn }: { workspace: Workspace;
     );
   }
   return (
-    <span className="wd">
-      <button type="button" className={blocked ? 'wd-b off' : 'wd-b'} aria-disabled={blocked !== null} aria-label={blocked ? `AI drawing: ${blocked}` : `AI drawing: lay out ${label}`}
-        data-tip={blocked ?? `AI drawing: lay out ${label} by the spine rules (only the atoms' places change; nothing is written to BaseApi)`}
-        onClick={() => { if (!blocked) void draw(); }}>
-        <WandIcon />
-      </button>
-      {undo && (
-        <button type="button" className="wd-b" aria-label="Take back the AI drawing" data-tip={`Take back the AI drawing of ${undo.label}`} onClick={putBack}>↶</button>
-      )}
-    </span>
+    <button type="button" className={blocked ? 'wd-b off' : 'wd-b'} aria-disabled={blocked !== null} aria-label={blocked ? `AI drawing: ${blocked}` : `AI drawing: lay out ${label}`}
+      data-tip={blocked ?? `AI drawing: lay out ${label} by the spine rules (only the atoms' places change; nothing is written to BaseApi; Ctrl+Z puts them back)`}
+      onClick={() => { if (!blocked) void draw(); }}>
+      <WandIcon />
+    </button>
   );
 }
 

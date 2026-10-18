@@ -13,7 +13,7 @@ export const SHORTCUTS: readonly ShortcutGroup[] = [
     group: 'Canvas — keys (click the canvas first)', column: 0,
     items: [
       { keys: 'Delete', does: 'Delete the pinned atom or arrow (or take back a new one)' },
-      { keys: 'Ctrl+Z', does: 'Undo' },
+      { keys: 'Ctrl+Z', does: 'Undo (an AI drawing too: its atoms glide back)' },
       { keys: 'Ctrl+Y · Ctrl+Shift+Z', does: 'Redo' },
     ],
   },

@@ -4,7 +4,6 @@ import { useWorkspace } from '../app/workspace';
 import { canDeleteArrow, canDeleteAtom, CONSEQUENCE, goneArrows, type Removed, type Verdict } from '../molecule/deletion';
 import { arrowRows, detailRows, editStates, rowOf, savedText, type FieldSpec, type Lock } from '../molecule/fields';
 import { arrowKey, BOND, isArrowKey, KINDS, TYPES, type Molecule } from '../molecule/model';
-import { tableFor } from '../molecule/rules';
 import type { AtomVerdict, DryRunState } from '../molecule/verdict';
 import { PaneNote } from './PaneNote';
 
@@ -31,7 +30,6 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
   const created = useWorkspace(workspace, (s) => s.created);
   const rules = useWorkspace(workspace, (s) => s.rules);
   const dry = useWorkspace(workspace, (s) => s.dryRun);
-  const dryRunWorks = useWorkspace(workspace, (s) => s.dryRunWorks);
   const [open, setOpen] = useState(readOpen);
 
   if (!data || !molecule) return <PaneNote pane="inspector">Reading the project…</PaneNote>;
@@ -48,7 +46,7 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
   const made = created.some((c) => c.key === key);
   const changed = edits[key] ?? {};
   const dirty = Object.keys(changed).length > 0;
-  const table = tableFor(rules, dryRunWorks);
+  const table = rules.table;
   const verdict = dry.kind === 'done' ? dry.byAtom[key] : undefined;
   const refusedByBaseApi = !!verdict && !verdict.ok;
   const states = dirty ? editStates(table, molecule, { [key]: changed }, removed, refusedByBaseApi ? new Set([key]) : undefined) : null;

@@ -5,7 +5,6 @@ import { canvasBridge } from '../molecule/bridge';
 import { createdStates, editStates } from '../molecule/fields';
 import { TYPES } from '../molecule/model';
 import { atomOfChange } from '../molecule/plan';
-import { tableFor } from '../molecule/rules';
 import { dryRunLine, verdictOf } from '../molecule/verdict';
 import { appliedLine, summarize, type ApplySummary, type ChangeRow } from './changes';
 import { useWorkspace, type Workspace } from './workspace';
@@ -32,7 +31,7 @@ function readiness(workspace: Workspace, summary: ApplySummary | null): { ready:
   if (dry.kind === 'unavailable') return { ready: false, tip: `Apply waits for BaseApi's dry run, which is not available: ${dry.reason}` };
   if (dry.kind !== 'done') return { ready: false, tip: 'Checking the changes with BaseApi…' };
   if (!dry.ok) return { ready: false, tip: `BaseApi's dry run refuses ${dry.refused} change${dry.refused === 1 ? '' : 's'}: fix ${dry.refused === 1 ? 'it' : 'them'} first (the marked atoms say why).` };
-  const table = tableFor(s.rules, s.dryRunWorks);
+  const table = s.rules.table;
   const createdKeys = new Set(s.created.map((c) => c.key));
   const plain = Object.fromEntries(Object.entries(s.edits).filter(([k]) => !createdKeys.has(k)));
   const unfinished = (s.molecule ? editStates(table, s.molecule, plain, s.removed, new Set()).unfinished.size : 0)

@@ -67,6 +67,28 @@ describe('Inspector', () => {
     expect(input('Version')).toHaveValue('1.0.0');
   });
 
+  it('marks a bad cron, items or payload at once while BaseApi\'s dry run answers too (the user, 2026-10-18)', () => {
+    const more: ProjectData = {
+      ...data,
+      workflows: [{ id: 'w1', name: 'flow', version: '1.0.0', description: null, entryStepIds: ['s1'], assignmentIds: ['a1'], cacheIds: ['k1'], cronExpression: null }],
+      assignments: [{ id: 'a1', name: 'cfg', version: '1.0.0', description: null, stepId: 's1', schemaId: 'c1', payload: '{}' }],
+      caches: [{ id: 'k1', name: 'store', version: '1.0.0', description: null, root: 'files', items: '{}' }],
+    } as unknown as ProjectData;
+    ws.loaded(more, buildMolecule(more));
+    act(() => ws.judged({ kind: 'idle' }, null, true));
+    expect(ws.get().dryRunWorks).toBe(true);
+    render(<Inspector workspace={ws} />);
+    const bad = (key: string, label: string, text: string) => {
+      act(() => ws.pin(key));
+      fireEvent.change(input(label), { target: { value: text } });
+      expect(input(label)).toHaveAttribute('aria-invalid', 'true');
+    };
+    bad(atomKey('wf', 'w1'), 'Cron expression', '* *');
+    expect(screen.getByText(/^CronExpression must be a valid 5- or 6-field cron expression/)).toBeInTheDocument();
+    bad(atomKey('cache', 'k1'), 'Items', '{');
+    bad(atomKey('asg', 'a1'), 'Payload', 'not json');
+  });
+
   it("freezes the schema's definition while a processor uses it, and opens it once that arrow is deleted", () => {
     act(() => ws.pin(C));
     render(<Inspector workspace={ws} />);

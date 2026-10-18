@@ -43,15 +43,19 @@ describe('the wand (the user, 2026-10-17)', () => {
     expect(wand).toHaveAttribute('aria-disabled', 'true');
   });
 
-  it('asks the model for the picked workflows, places its drawing on the canvas, and puts it back with the arrow', async () => {
+  it('asks the model for the picked workflows, places its drawing on the canvas as one step that undo puts back (no button)', async () => {
     const { workspace, placed } = setup([W1], () => JSON.stringify({ atoms: { a1: [-4.7, 0, 0], a2: [0, 0, 0], a3: [0, 2.7, 0] } }));
     fireEvent.click(screen.getByRole('button', { name: 'AI drawing: lay out flow' }));
     await waitFor(() => expect(placed).toHaveLength(1));
     const [drawn] = placed;
     expect(drawn!.get(atomKey('proc', 'p1'))![1] - drawn!.get(atomKey('step', 's1'))![1]).toBeCloseTo(2.7);
-    expect(workspace.get().messages.at(-1)!.text).toMatch(/^AI drawing applied: flow laid out by the spine rules, 3 atoms placed/);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Take back the AI drawing' })); });
+    expect(workspace.get().messages.at(-1)!.text).toMatch(/^AI drawing applied: flow laid out by the spine rules, 3 atoms placed.*Ctrl\+Z puts the places back\.$/);
+    expect(screen.queryByRole('button', { name: /Take back/ })).toBeNull();
+    expect(workspace.get().history.past.map((c) => c.label)).toEqual(['AI drawing of flow']);
+    act(() => workspace.undo());
     expect(placed[1]!.get(atomKey('proc', 'p1'))).toEqual([10, 9, 0]);
+    act(() => workspace.redo());
+    expect(placed[2]).toEqual(drawn);
   });
 
   it('a refused answer gets one correction round; refused twice, nothing is placed', async () => {

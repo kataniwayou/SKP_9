@@ -9,7 +9,9 @@ export type FieldTable = Readonly<Record<AtomType, readonly FieldSpec[]>>;
 /**
  * Stand-ins for BaseApi's `code` rules (a `Must` or `Custom` written as code, which a description cannot carry), so an
  * edit is checked while typing. They run only where BaseApi says a code rule exists, and BaseApi's own message is shown
- * when the rule has one; BaseApi stays the judge on apply. Keyed `table.field`.
+ * when the rule has one. They stay on while BaseApi's dry run answers too (the user, 2026-10-18: "turn on the local checks
+ * everywhere"), so a bad cron, payload or items is marked at once, not half a second later by the dry run alone; BaseApi
+ * stays the judge on apply. Keyed `table.field`.
  */
 const CODE_STANDINS: Readonly<Record<string, (text: string) => string | null>> = {
   'schemas.definition': (t) => {
@@ -54,7 +56,7 @@ function kindOf(f: ModelField): FieldKind {
 }
 
 /** One rule as a check of the editor's text; null when it passes or cannot apply to text. */
-function ruleCheck(table: string, f: ModelField, label: string, rule: ModelRule, standins: boolean): ((text: string) => string | null) | null {
+function ruleCheck(table: string, f: ModelField, label: string, rule: ModelRule): ((text: string) => string | null) | null {
   const own = rule.message;
   switch (rule.kind) {
     case 'required':
@@ -82,7 +84,7 @@ function ruleCheck(table: string, f: ModelField, label: string, rule: ModelRule,
     case 'equal':
       return (t) => (t !== rule.value ? own ?? `${label} must be ${rule.value}` : null);
     case 'code': {
-      const standin = standins ? CODE_STANDINS[`${table}.${f.field}`] : undefined;
+      const standin = CODE_STANDINS[`${table}.${f.field}`];
       if (!standin) return null;
       return (t) => { const p = standin(t); return p === null ? null : own ?? p; };
     }
@@ -92,9 +94,9 @@ function ruleCheck(table: string, f: ModelField, label: string, rule: ModelRule,
 }
 
 /** A field's spec, its checks built from BaseApi's rules in the order they run (the first failure is shown). */
-function specOf(table: string, f: ModelField, standins: boolean): FieldSpec {
+function specOf(table: string, f: ModelField): FieldSpec {
   const label = labelOf(f.field);
-  const checks = f.rules.map((r) => ({ r, check: ruleCheck(table, f, label, r, standins) })).filter((x) => x.check !== null);
+  const checks = f.rules.map((r) => ({ r, check: ruleCheck(table, f, label, r) })).filter((x) => x.check !== null);
   const refused = new Set(f.rules.filter((r) => r.kind === 'notEqual').map((r) => r.value));
   return {
     key: f.field,
@@ -117,33 +119,23 @@ function specOf(table: string, f: ModelField, standins: boolean): FieldSpec {
   };
 }
 
-/**
- * Every kind's writable non-arrow fields, from BaseApi's description of its update DTOs (`GET /model/fields`). Without
- * stand-ins, a code rule is left to BaseApi's dry run (`POST /model/validate`), which runs the rule itself.
- */
-export function fieldTable(fields: ModelFields, standins = true): FieldTable {
+/** Every kind's writable non-arrow fields, from BaseApi's description of its update DTOs (`GET /model/fields`). */
+export function fieldTable(fields: ModelFields): FieldTable {
   const out = {} as Record<AtomType, FieldSpec[]>;
   for (const type of Object.keys(TYPES) as AtomType[]) {
     const entity = fields.entities.find((e) => e.table === TYPES[type].table);
-    out[type] = entity ? entity.fields.filter((f) => !isArrow(f)).map((f) => specOf(entity.table, f, standins)) : [];
+    out[type] = entity ? entity.fields.filter((f) => !isArrow(f)).map((f) => specOf(entity.table, f)) : [];
   }
   return out;
 }
 
-/**
- * The rules in use: the description, where it came from, and its field table twice — with the code rules' stand-ins
- * (`table`), for while BaseApi's dry run is not available, and without them (`bare`), for while it is: then BaseApi
- * runs those rules itself and Valence keeps no copy of them.
- */
-export interface Rules { from: RulesSource['from']; etag: string; note: string; fields: ModelFields; table: FieldTable; bare: FieldTable }
+/** The rules in use: the description, where it came from, and its field table (the code rules' stand-ins included). */
+export interface Rules { from: RulesSource['from']; etag: string; note: string; fields: ModelFields; table: FieldTable }
 
 export const rulesOf = (source: RulesSource): Rules => ({
   from: source.from, etag: source.fields.etag, note: source.note, fields: source.fields,
-  table: fieldTable(source.fields, true), bare: fieldTable(source.fields, false),
+  table: fieldTable(source.fields),
 });
-
-/** The field table to check with: the bare one once BaseApi's dry run answers, else the one with stand-ins. */
-export const tableFor = (rules: Rules, dryRunAnswers: boolean): FieldTable => (dryRunAnswers ? rules.bare : rules.table);
 
 /** Before BaseApi answers: the bundled snapshot. */
 export const SNAPSHOT_RULES: Rules = rulesOf({ from: 'snapshot', fields: SNAPSHOT, note: 'Rules: the bundled snapshot of GET /model/fields (BaseApi not read yet).' });

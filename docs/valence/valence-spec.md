@@ -231,8 +231,8 @@ keeping its own copy; part 2 is a dry-run validate of the whole pending change s
   The workspace holds the rules in use; the Output pane says where they came from. A BaseApi without the endpoint (the
   cluster today) or no BaseApi: the snapshot, and the line says why. `fields.ts` holds no rule any more.
 - **What Valence still does itself:** stand-ins for the `code` rules BaseApi reports (definition JSON + JSON Schema,
-  payload JSON, cache root ":", items, cron field count) — only while BaseApi's dry run is not available (below), only
-  where BaseApi lists a code rule, with BaseApi's message when it has one; and the definition freeze lock (a service
+  payload JSON, cache root ":", items, cron field count) — always, also while BaseApi's dry run answers (the user,
+  2026-10-18: "turn on the local checks everywhere": the field is outlined at once), only where BaseApi lists a code rule, with BaseApi's message when it has one; and the definition freeze lock (a service
   rule, judged on the virtual entities; the dry run confirms it).
 - Verified with Playwright: live → "Rules: the bundled snapshot … (this BaseApi has no GET /model/fields yet)", checks
   with BaseApi's messages, entry condition without PreviousProcessing; the endpoint served (route interception) with the
@@ -265,12 +265,12 @@ answer `{ ok, results: [{ index, op, table, id, ok, status, problem }] }`, alway
   first (RESTRICT); a ghost's edits are not sent. `api/validate.ts` calls the dry run; `molecule/verdict.ts` maps the
   answers onto atoms and fields (validator errors by property → field; a key error's column → field; the rest per atom).
   The document runs it 600 ms after the virtual state settles (aborting a stale one) and once at load with no changes
-  (does this BaseApi have it?). While it answers, the code-rule stand-ins are off (`rules.bare`): the code rules are
-  BaseApi's alone. A refused atom is unfinished (no update ghost). Inspector: a red "BaseApi refuses it" / green "✓ BaseApi's
+  (does this BaseApi have it?). The code-rule stand-ins stay on beside it (2026-10-18; until then they were off while it
+  answered); a field's own problem is shown first, BaseApi's "BaseApi: …" when the field passes locally. A refused atom is unfinished (no update ghost). Inspector: a red "BaseApi refuses it" / green "✓ BaseApi's
   dry run passes this change (nothing was written)" box, "BaseApi: …" under the field, "◐ Unfinished edit: BaseApi's dry
   run refuses it". Output pane: one line per new answer ("Dry run by BaseApi: 5 changes, all pass (nothing was written)"
   / "… 1 of 1 refused — free-x — Definition: …"). A BaseApi without it (the cluster today): said once at load, never asked
-  again until reload; the stand-ins stay on.
+  again until reload.
 - Verified with Playwright on Valence → the local stack (a copy of the cluster's 137 rows, GET-only from the cluster):
   11/11 — rules from BaseApi; an invalid JSON Schema shown only by BaseApi's message (no local copy), unfinished, no halo;
   fixed → passes, amber halo; file-envelope's 4 slot clears + definition → "5 changes, all pass"; duplicate cache root →
@@ -465,7 +465,7 @@ processor, not the schema, and the processor update has no in-use check.
   the maximum zoom (`headtouch`: one arrow and its ball alone, flat colours, sampled along the arrow's screen axis): 17/17
   arrows into five atoms with **no background pixel between head and ball**; heads meeting the ball's face end within 1 px
   of the true tip (before: 2–3.6 px short, up to 1.25 px of background); every shaft's start inside its ball hidden (18/18).
-- **One history** (`app/workspace.ts`): field edits, Revert and deletions are steps in one undo / redo list (100 kept);
+- **One history** (`app/workspace.ts`): field edits, Revert, deletions (and, from 2026-10-18, AI drawings) are steps in one undo / redo list (100 kept);
   typing in one field is one step; a new change drops what could be redone. The session keeps the deletions and the
   history across a refresh (`removed`, `history`, optional, version 1).
 - Checked with Playwright on the live data: archive-expander refused (two steps run on it); archive-expander-config
@@ -697,7 +697,11 @@ extra. The full suite runs against the deployed bundle through nginx to the clus
   it leaves no more; 60 s of silence ends a round, 15 min a press; the wand is "Cancel · n s · thinking/writing" while it runs.
 - **Applied:** moved so the picked workflows stay where they stood (the centre of their atoms' box), one pass pushes apart
   what still overlaps (steps and workflows hold), the atoms glide there (0.9 s) and the view is kept in this browser as
-  after a move by hand. Atoms of other workflows stay put. The arrow beside the wand (↶) puts the last drawing back.
+  after a move by hand. Atoms of other workflows stay put. The drawing is one step of the shared history (the user,
+  2026-10-18: "no need to add button … provide undo/redo by keystroke"; the ↶ button removed): **Ctrl+Z** glides its
+  atoms back ("Undid: AI drawing of …"), **Ctrl+Y** / **Ctrl+Shift+Z** draws them again; it keeps its order among edits
+  and deletions, is kept on refresh (`moves`: each atom's place before and after), skips an atom no longer there, and is
+  cleared by an apply like the rest. A move by hand is no step (wand only, the user's choice).
   Not applied when the project changed while the model drew.
 - Verified: unit tests `src/ai/drawing.test.ts`, `src/app/Wand.test.tsx`; browser test with the real model on sc-chain
   (32 atoms, 263 s): the 7 steps left to right 5.2 apart on one line, only its atoms moved, kept on refresh, Cancel, ↶.

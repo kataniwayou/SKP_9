@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { RulesSource } from '../api/fields';
 import type { ProjectData } from '../api/project';
+import { canvasBridge } from '../molecule/bridge';
 import { canDeleteArrow, canDeleteAtom, deletedLine, goneArrows, NOTHING_REMOVED, type Removed } from '../molecule/deletion';
 import type { Vec } from '../molecule/layout';
 import { arrowKey, atomKey, buildMolecule, isArrowKey, KINDS, TYPES, type ArrowKind, type AtomType, type Molecule } from '../molecule/model';
@@ -14,6 +15,9 @@ export type Edits = Readonly<Record<string, Readonly<Record<string, string>>>>;
 
 /** One atom's edited fields before and after a change (null: not edited). */
 export interface EditChange { key: string; before: Readonly<Record<string, string>> | null; after: Readonly<Record<string, string>> | null }
+
+/** An atom moved by an AI drawing: where it stood before and where the drawing put it. */
+export interface Move { key: string; before: Vec; after: Vec }
 
 /**
  * One step of the shared history (the user, 2026-10-16: edits and deletions in one history, kept on refresh): edits,
@@ -32,6 +36,8 @@ export interface Change {
   unadded?: readonly AddedArrow[];
   /** Deleted arrows drawn again (forward: their delete is taken back). */
   restored?: readonly string[];
+  /** The places an AI drawing gave (the user, 2026-10-18: undone and redone by key, no button); a move by hand is no step. */
+  moves?: readonly Move[];
   merge?: string;
 }
 export interface History { past: readonly Change[]; future: readonly Change[] }
@@ -65,7 +71,7 @@ export interface WorkspaceState {
   rules: Rules;
   /** BaseApi's dry run of the virtual changes (`POST /model/validate`): what the apply would answer, change by change. */
   dryRun: DryRunState;
-  /** Whether BaseApi's dry run answers (its last run did): then it runs the code rules and Valence's stand-ins rest. */
+  /** Whether BaseApi's dry run answers (its last run did): then it judges every change; Valence's own checks run beside it. */
   dryRunWorks: boolean;
   /** The atom last copied (Ctrl+C), to paste as new ones (Ctrl+V); kept in Valence, not on the system clipboard. */
   clipboard: Copied | null;
@@ -97,6 +103,8 @@ export interface Workspace {
   draw(kind: ArrowKind, tail: string, head: string): boolean;
   /** A line in the Output pane. */
   note(text: string, tone?: Message['tone']): void;
+  /** Places an AI drawing on the canvas as one step of the history: Ctrl+Z puts the atoms back, Ctrl+Y draws them again. */
+  drawn(label: string, moves: readonly Move[]): void;
   /**
    * The apply kept every change (approved 2026-10-17): nothing is virtual any more. The project as BaseApi now holds it
    * (null: it could not be read again; the page reads it afresh), the virtual changes and their history cleared, the
@@ -161,6 +169,11 @@ export function createWorkspace(init: { pinned?: string | null; edits?: Edits; r
       created: change.created || change.uncreated ? made(state.created, change.created, change.uncreated, (a, b) => a.key === b.key) : state.created,
       added: change.added || change.unadded ? made(state.added, change.added, change.unadded, (a, b) => a === b) : state.added,
     };
+  }
+  /** The canvas's atoms glide to a drawing's places (forward) or back to where they stood; an atom it no longer has is skipped. */
+  function placeMoves(change: Change, forward: boolean) {
+    if (!change.moves?.length) return;
+    canvasBridge.get()?.place(new Map(change.moves.map((m) => [m.key, forward ? m.after : m.before])));
   }
   /** Does a change and records it; typing on in the same field replaces the last step's result instead of adding one. */
   function commit(change: Change, extra: Partial<WorkspaceState> = {}) {
@@ -329,11 +342,19 @@ export function createWorkspace(init: { pinned?: string | null; edits?: Edits; r
       const change = state.history.past[state.history.past.length - 1];
       if (!change) { set({ messages: say('Nothing to undo.') }); return; }
       set({ ...run(change, false), history: { past: state.history.past.slice(0, -1), future: [change, ...state.history.future] }, messages: say(`Undid: ${change.label}.`) });
+      placeMoves(change, false);
     },
     redo() {
       const [change, ...future] = state.history.future;
       if (!change) { set({ messages: say('Nothing to redo.') }); return; }
       set({ ...run(change, true), history: { past: [...state.history.past, change], future }, messages: say(`Redid: ${change.label}.`) });
+      placeMoves(change, true);
+    },
+    drawn(label, moves) {
+      if (moves.length === 0) return;
+      const change: Change = { label, moves };
+      commit(change);
+      placeMoves(change, true);
     },
   };
 }
