@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { healthLine, healthOf } from '../api/liveness';
 import type { Workspace } from '../app/workspace';
 import { useWorkspace } from '../app/workspace';
 import { canDeleteArrow, canDeleteAtom, CONSEQUENCE, goneArrows, type Removed, type Verdict } from '../molecule/deletion';
@@ -30,6 +31,7 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
   const created = useWorkspace(workspace, (s) => s.created);
   const rules = useWorkspace(workspace, (s) => s.rules);
   const dry = useWorkspace(workspace, (s) => s.dryRun);
+  const liveness = useWorkspace(workspace, (s) => s.liveness);
   const [open, setOpen] = useState(readOpen);
 
   if (!data || !molecule) return <PaneNote pane="inspector">Reading the project…</PaneNote>;
@@ -64,6 +66,11 @@ export function Inspector({ workspace }: { workspace: Workspace }) {
         <span className={preview ? 'insp-state' : 'insp-state is-pinned'}>{preview ? 'Preview · click the atom to pin it' : 'Pinned'}</span>
       </div>
       <div className="pbody">
+        {atom.type === 'proc' && (() => {
+          // the processor's health (2026-10-18), as its atom glows
+          const h = made ? 'undetermined' : healthOf(liveness, atom.id);
+          return <div className={`insp-health ${h}`} role="status"><b>Health</b> {healthLine(liveness, atom.id, made)}</div>;
+        })()}
         {ghost && (
           <div className="insp-virtual ghost">
             <span>● Deleted in Valence only, not applied</span><span className="insp-hint">Ctrl+Z on the canvas undoes it</span>

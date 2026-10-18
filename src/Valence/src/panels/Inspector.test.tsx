@@ -25,6 +25,19 @@ beforeEach(() => {
 const input = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
 
 describe('Inspector', () => {
+  it("shows a processor's health as its atom glows (the user, 2026-10-18)", () => {
+    act(() => ws.pin(P));
+    render(<Inspector workspace={ws} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Health Checking…');
+    act(() => ws.livenessRead({ kind: 'known', processors: new Map([['p1', { live: true, healthy: 2, replicas: 2, reason: null }]]) }));
+    expect(screen.getByRole('status')).toHaveTextContent('Health Healthy · 2 of 2 replicas healthy');
+    expect(screen.getByRole('status')).toHaveClass('insp-health', 'healthy');
+    act(() => ws.livenessRead({ kind: 'known', processors: new Map([['p1', { live: false, healthy: 0, replicas: 1, reason: 'no healthy replica (1 checked: 1 absent, 0 unhealthy, 0 stale, 0 malformed)' }]]) }));
+    expect(screen.getByRole('status')).toHaveClass('unhealthy');
+    act(() => ws.pin(S));
+    expect(screen.queryByRole('status')).toBeNull(); // only processors have a health
+  });
+
   it('says how to start when nothing is hovered or pinned', () => {
     render(<Inspector workspace={ws} />);
     expect(screen.getByText('Nothing selected. Hover an atom or arrow to preview it; click it to pin it.')).toBeInTheDocument();

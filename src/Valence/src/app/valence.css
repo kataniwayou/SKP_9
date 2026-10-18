@@ -48,6 +48,9 @@
   background: rgba(14, 24, 40, .78); border: 1px solid var(--line); border-radius: 6px; backdrop-filter: blur(6px); }
 .mol-legend span { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 .mol-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+/* processor health (2026-10-18): the glow sits inside the atom's rim, so its key is a ring */
+.mol-legend-health { display: flex; align-items: center; gap: 4px 10px; padding-left: 12px; border-left: 1px solid var(--line); }
+.mol-dot.ring { box-sizing: border-box; border: 2px solid; background: #e9e3d6; }
 
 /* the Inspector (spec §3c): preview or pinned, the virtual-change note, the one read-only show/hide section */
 .insp-head { display: flex; align-items: center; gap: 8px; }
@@ -74,6 +77,11 @@ select.input { font-family: var(--sans); font-size: 12.5px; }
 .insp-delete b { font-weight: 600; margin-right: 4px; color: var(--ink); }
 .insp-delete.no { border-color: rgba(242, 180, 90, .35); color: #f2b45a; }
 /* BaseApi's dry run of this atom's changes (POST /model/validate) */
+/* a processor's health (2026-10-18), coloured as its atom glows */
+.insp-health { margin: 8px 16px 0; padding: 6px 10px; border-radius: 6px; font-size: 12px; line-height: 1.45; border: 1px solid var(--line); color: var(--muted); }
+.insp-health b { font-weight: 600; margin-right: 6px; }
+.insp-health.healthy { border-color: rgba(74, 222, 128, .4); color: #4ade80; }
+.insp-health.unhealthy { border-color: rgba(255, 90, 90, .45); color: #ff8a8a; }
 .insp-dry { margin: 8px 16px 0; padding: 6px 10px; border-radius: 6px; font-size: 12px; line-height: 1.45; border: 1px solid var(--line); color: var(--muted); }
 .insp-dry b { font-weight: 600; color: var(--ink); display: block; }
 .insp-dry.ok { border-color: rgba(125, 211, 168, .35); color: #7dd3a8; }

@@ -21,7 +21,9 @@ const ok = (): Promise<ProjectResult> => Promise.resolve({ ok: true, data });
 // no BaseApi in jsdom: the rules from the snapshot, and no dry run
 const rulesStub = (): Promise<RulesSource> => Promise.resolve({ from: 'snapshot', fields: SNAPSHOT, note: 'Rules: the bundled snapshot (test).' });
 const noDryRun = (): Promise<DryRun> => Promise.resolve({ kind: 'unavailable', reason: 'test', missing: true });
-const offline = { readRules: rulesStub, check: noDryRun };
+// no network in the tests: BaseApi's health is not known
+const noHealth = () => Promise.resolve({ kind: 'unknown' as const, reason: 'test' });
+const offline = { readRules: rulesStub, check: noDryRun, readHealth: noHealth };
 
 describe('ProjectDocument', () => {
   it('reads the project and draws every row', async () => {

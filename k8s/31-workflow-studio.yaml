@@ -50,6 +50,12 @@ spec:
           ports:
             - containerPort: 8080
           env:
+            # BaseApi's address (2026-10-18): where nginx sends /api/. Scheme, host and port only — no path and no trailing
+            # slash, which would change the paths BaseApi receives. The host is looked up when the pod starts, so it must
+            # exist then (in the cluster: the BaseApi Service's name, in this namespace or as <name>.<namespace>). Empty: the
+            # pod does not start (nginx: invalid number of arguments in "proxy_pass").
+            - name: BASEAPI_URL
+              value: "http://baseapi-service:8080"
             # AI drawing (2026-10-11): the model for nginx's /ai/ route, supplied inline like the analyst's
             # (43-processor-analyst.yaml) rather than as a Kubernetes Secret. Any of the three empty: the studio runs and
             # /ai answers 503 ("AI drawing is not configured"). Env is read at start: editing one here rolls the pod.

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls.js';
+import type { Health } from '../api/liveness';
 import { canvasBridge } from './bridge';
 import type { CanvasView } from './view';
 import { extentOf, type Vec } from './layout';
@@ -18,6 +19,9 @@ const HOME = new THREE.Vector3(3, 8, 28).normalize();
 const FOV = 15;
 const LEGEND: readonly AtomType[] = ['wf', 'step', 'proc', 'schema', 'asg', 'cache'];
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
+/** A processor's health colour (2026-10-18), as SKP Studio's processor art: green, red, grey. */
+const HEALTH_HEX: Readonly<Record<Health, number>> = { healthy: 0x4ade80, unhealthy: 0xff5a5a, undetermined: 0x9aa3b2 };
+const HEALTH_WORD: Readonly<Record<Health, string>> = { healthy: 'healthy', unhealthy: 'unhealthy', undetermined: 'not known' };
 
 /** What the view changes in place, without building the scene again. */
 interface Painter {
@@ -28,6 +32,8 @@ interface Painter {
   ghost(ghosts: Ghosts): void;
   /** Labels show the virtual entities' names (decision 8): edited names by atom key. */
   rename(names: ReadonlyMap<string, string>): void;
+  /** Each processor's health by atom key (2026-10-18): it breathes inside the atom in that colour. */
+  health(health: ReadonlyMap<string, Health>): void;
 }
 
 /** What the view tells the page: the atom or arrow under the pointer, and a click's (null: empty canvas). Arrows by `arrowKey`. */
@@ -66,17 +72,19 @@ const NO_GHOSTS: Ghosts = { atoms: new Set(), arrows: new Set() };
  * nothing is hovered, keeps its neighbours in focus. `highlighted`: the atoms of the chosen workflows stand out and the
  * rest are dimmed; null highlights nothing.
  */
-export function MoleculeView({ molecule, positions, highlighted, pinned = null, names, events, ghosts = NO_GHOSTS, view = null }: {
+export function MoleculeView({ molecule, positions, highlighted, pinned = null, names, events, ghosts = NO_GHOSTS, health, view = null }: {
   molecule: Molecule; positions: ReadonlyMap<string, Vec>; highlighted: ReadonlySet<string> | null;
   pinned?: string | null; names?: ReadonlyMap<string, string>; events?: MoleculeEvents; ghosts?: Ghosts;
+  /** Each processor's health by atom key (2026-10-18); none: no glow. */
+  health?: ReadonlyMap<string, Health>;
   /** The view kept in this browser, to open on (the first build only; later builds keep the view as it stands). */
   view?: CanvasView | null;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const painter = useRef<Painter | null>(null);
   const kept = useRef<Kept>(view ? { view: savedOf(view) } : {});
-  const latest = useRef({ highlighted, pinned, names, events, ghosts });
-  latest.current = { highlighted, pinned, names, events, ghosts };
+  const latest = useRef({ highlighted, pinned, names, events, ghosts, health });
+  latest.current = { highlighted, pinned, names, events, ghosts, health };
 
   useEffect(() => {
     const el = host.current!;
@@ -90,6 +98,7 @@ export function MoleculeView({ molecule, positions, highlighted, pinned = null, 
     scene3.ghost(latest.current.ghosts);
     scene3.pin(latest.current.pinned);
     if (latest.current.names) scene3.rename(latest.current.names);
+    if (latest.current.health) scene3.health(latest.current.health);
     return () => { painter.current = null; scene3.dispose(); };
   }, [molecule, positions]);
 
@@ -97,6 +106,7 @@ export function MoleculeView({ molecule, positions, highlighted, pinned = null, 
   useEffect(() => { painter.current?.pin(pinned); }, [pinned]);
   useEffect(() => { painter.current?.ghost(ghosts); }, [ghosts]);
   useEffect(() => { if (names) painter.current?.rename(names); }, [names]);
+  useEffect(() => { if (health) painter.current?.health(health); }, [health]);
 
   return (
     // focusable: the canvas's keys (Delete, Ctrl+Z / Y) act while it has focus; a press on it gives it focus
@@ -104,6 +114,9 @@ export function MoleculeView({ molecule, positions, highlighted, pinned = null, 
       <div className="mol-labels" aria-hidden="true" />
       <div className="mol-legend" aria-label="Atom colours">
         {LEGEND.map((t) => <span key={t}><i className="mol-dot" style={{ background: hex(TYPES[t].color) }} />{TYPES[t].label}</span>)}
+        <span className="mol-legend-health" aria-label="Processor health">Processor health:
+          {(['healthy', 'unhealthy', 'undetermined'] as const).map((h) => <span key={h}><i className="mol-dot ring" style={{ borderColor: hex(HEALTH_HEX[h]) }} />{HEALTH_WORD[h]}</span>)}
+        </span>
       </div>
     </div>
   );
@@ -183,12 +196,17 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   const atomGeom = new THREE.PlaneGeometry(2, 2);
   const IMPOSTOR_VERTEX_DECL = 'varying vec3 vSphereCenter;\nvarying vec3 vQuadPos;\n';
   // projectionMatrix is the program's own uniform; three declares it for the vertex stage only
-  const IMPOSTOR_FRAGMENT_DECL = 'uniform float sphereRadius;\nuniform mat4 projectionMatrix;\nvarying vec3 vSphereCenter;\nvarying vec3 vQuadPos;\n';
+  const IMPOSTOR_FRAGMENT_DECL = 'uniform float sphereRadius;\nuniform mat4 projectionMatrix;\nuniform vec3 healthColor;\nuniform float healthGlow;\nvarying vec3 vSphereCenter;\nvarying vec3 vQuadPos;\n';
   /** Turns a standard material into a sphere impostor's: the circle, the ray-cast surface, its normal and depth. */
   function asImpostor(mat: THREE.MeshStandardMaterial, radius: number) {
     mat.customProgramCacheKey = () => 'valence-atom-impostor';
+    // the health glow's colour and strength, set by breathe() (0: none)
+    const glow: Glow = { color: { value: new THREE.Color() }, glow: { value: 0 } };
+    mat.userData.health = glow;
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.sphereRadius = { value: radius };
+      shader.uniforms.healthColor = glow.color;
+      shader.uniforms.healthGlow = glow.glow;
       shader.vertexShader = IMPOSTOR_VERTEX_DECL + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
         vSphereCenter = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
         vQuadPos = mvPosition.xyz;`);
@@ -219,9 +237,18 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
         nonPerturbedNormal = sphereNormal;`)
         .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace(/vViewPosition/g, '(-sphereHit)'))
         .replace('#include <opaque_fragment>', `diffuseColor.a *= sphereEdge;
+        // the health glow (2026-10-18: "as the halo breathing just inside the atom boundaries"): the halo's own fall-off,
+        // turned inward — brightest on the outline, fading toward the centre
+        float healthT = clamp(1.0 - sphereOff / max(sphereOutline, 1e-6), 0.0, 1.0);
+        float healthA = min(0.9 * exp(-healthT * 4.5) + 0.5 * (1.0 - healthT) * (1.0 - healthT), 1.0);
+        outgoingLight = mix(outgoingLight, healthColor, healthGlow * healthA);
         #include <opaque_fragment>`);
     };
   }
+  type Glow = { color: { value: THREE.Color }; glow: { value: number } };
+  const glowOf = (a: AtomView) => a.mesh.material.userData.health as Glow;
+  /** Each processor's health colour, by atom; breathe() makes it breathe. */
+  let healthy = new Map<AtomView, THREE.Color>();
   /** Picking meets the real sphere, not the disc's square. */
   const pickBall = new THREE.Sphere(), pickHit = new THREE.Vector3();
   function ballRaycast(this: THREE.Mesh, raycaster: THREE.Raycaster, hits: THREE.Intersection[]) {
@@ -420,6 +447,8 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
       h.material.uniforms.edge.value = Math.min((outline * 2) / size, 0.95);
     }
     halos.forEach((h, a) => { if (!on.has(a)) h.visible = false; });
+    // a deleted processor is a red ghost only: its health does not show
+    healthy.forEach((color, a) => { const g = glowOf(a); g.color.value.copy(color); g.glow.value = ghosts.atoms.has(a.atom.key) ? 0 : 0.85 * pulse; });
   }
 
   function paint() {
@@ -827,7 +856,8 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   // the browser suite's hook: always in development; in a production build only on a page opened with ?e2e (the user,
   // 2026-10-17: run the full suite on the deployed Valence), so a normal visit carries nothing extra
   const e2e = (() => { try { return new URLSearchParams(win.location.search).has('e2e'); } catch { return false; } })();
-  if (import.meta.env.DEV || e2e) Object.assign(el, { __molecule: { camera, atoms, arrows, halos, radiusOf: (t: AtomType) => TYPES[t].r } });
+  if (import.meta.env.DEV || e2e) Object.assign(el, { __molecule: { camera, atoms, arrows, halos, radiusOf: (t: AtomType) => TYPES[t].r,
+    glowOf: (key: string) => { const a = atoms.get(key); return a ? { color: '#' + glowOf(a).color.value.getHexString(), glow: glowOf(a).glow.value } : null; } } });
 
   // ---------- The Toolbox's drag (2026-10-17): sizes, targets and the aimed arrow ----------
   const tanHalfView = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
@@ -944,6 +974,10 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
     highlight(keys) { if (spotlit) { litBefore = keys && keys.size > 0 ? keys : null; return; } lit = keys && keys.size > 0 ? keys : null; paint(); },
     pin(key) { pinnedOne = key === null ? null : isArrowKey(key) ? arrowByKey.get(key) ?? null : atoms.get(key) ?? null; paint(); },
     ghost(next) { ghosts = next; paint(); },
+    health(next) {
+      healthy.forEach((_, a) => { glowOf(a).glow.value = 0; });
+      healthy = new Map([...next].flatMap(([k, h]) => { const a = atoms.get(k); return a ? [[a, new THREE.Color(HEALTH_HEX[h])] as const] : []; }));
+    },
     rename(names) { atoms.forEach((a) => { a.label.textContent = names.get(a.atom.key) ?? a.atom.name; }); },
     dispose() {
       // after an apply, a made atom's place is kept under the id BaseApi gave it

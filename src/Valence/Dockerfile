@@ -24,8 +24,11 @@ FROM ${NGINX_IMAGE}
 # with only these variables filled in, so nginx's own $variables stay: the model's base URL, id and key (env
 # KIMI_BASE_URL, KIMI_MODEL_ID, KIMI_API_KEY, set by k8s/32-valence.yaml; any empty: /ai answers 503) and the pod's DNS
 # resolvers (the /ai upstream is resolved per request).
-ENV KIMI_API_KEY=""     KIMI_BASE_URL=""     KIMI_MODEL_ID=""     NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1 \
-    NGINX_ENVSUBST_FILTER="^(KIMI_API_KEY|KIMI_BASE_URL|KIMI_MODEL_ID|NGINX_LOCAL_RESOLVERS)$"
+# BaseApi's address (env BASEAPI_URL, 2026-10-18; k8s/32-valence.yaml): scheme, host and port only, looked up when nginx
+# starts; the default is the cluster's service.
+ENV BASEAPI_URL="http://baseapi-service:8080" \
+    KIMI_API_KEY=""     KIMI_BASE_URL=""     KIMI_MODEL_ID=""     NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1 \
+    NGINX_ENVSUBST_FILTER="^(BASEAPI_URL|KIMI_API_KEY|KIMI_BASE_URL|KIMI_MODEL_ID|NGINX_LOCAL_RESOLVERS)$"
 COPY src/Valence/nginx.conf /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 8080

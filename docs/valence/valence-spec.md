@@ -705,3 +705,32 @@ extra. The full suite runs against the deployed bundle through nginx to the clus
   Not applied when the project changed while the model drew.
 - Verified: unit tests `src/ai/drawing.test.ts`, `src/app/Wand.test.tsx`; browser test with the real model on sc-chain
   (32 atoms, 263 s): the 7 steps left to right 5.2 apart on one line, only its atoms moved, kept on refresh, Cancel, ↶.
+
+### Processor health — built 2026-10-18 (the user: "the processors atoms must be illuminated based on their health … as the halo breathing just inside the atom boundaries")
+- **Read:** BaseApi's `GET /api/v1/processors/liveness` every 5 s while the page is shown (a hidden tab is not asked),
+  as SKP Studio's fallback poll; read defensively as SKP Studio reads it (`api/liveness.ts`). Nothing is written.
+- **Judged as SKP Studio judges:** `live` → **healthy**; listed but not live → **unhealthy** (with the reason: "no healthy
+  replica (n checked: a absent, u unhealthy, s stale, m malformed)"); not listed, not answered yet, or BaseApi not
+  answering → **undetermined** (every processor, not its last known colour). A processor made in Valence runs nowhere:
+  undetermined.
+- **Drawn:** inside the atom's outline, in the sphere impostor's own shader: the halo's fall-off turned inward (brightest
+  on the outline, fading toward the centre, the centre the processor's own colour), breathing with the halo's pulse
+  (still with reduced motion). Green `#4ade80`, red `#ff5a5a`, grey `#9aa3b2`. The change halos outside keep their
+  meaning; a deleted processor shows only its red ghost. The legend ends with "Processor health: healthy · unhealthy ·
+  not known" (ring keys).
+- **Inspector:** a Health line for a processor ("Healthy · 2 of 2 replicas healthy", "Unhealthy · no healthy replica (…)",
+  "Not known: …"), coloured as the glow. **Output:** a line when a processor's health changes (not the first report),
+  "Health: not known (…)" once when BaseApi stops answering, "Health: BaseApi answers again".
+- Verified: unit tests `src/api/liveness.test.ts` and the Inspector's; browser test with the cluster's rows (read once)
+  and the health answer stood in for: all 11 processors by BaseApi's answer, no other atom glows, it breathes, green /
+  red at the rim inside the outline on screen with the centre untouched and nothing outside, a change within one poll
+  with its Output line, the Inspector line, not listed → grey, BaseApi not answering → all grey said once, back again,
+  the legend, GET only.
+
+### BaseApi's address is a setting — 2026-10-18 (the user: "make the baseapi address a setting in the yaml, both for studio and valence")
+- `BASEAPI_URL` in `k8s/31-workflow-studio.yaml` and `k8s/32-valence.yaml` (default `http://baseapi-service:8080`, also the
+  image's default): nginx's `proxy_pass` for `/api/` (and SKP Studio's `/api/hubs/`) is written from it at container start,
+  by the same envsubst as the AI settings. Scheme, host and port only — no path, no trailing slash (that would change the
+  paths BaseApi receives). The host is looked up when nginx starts. Empty: nginx does not start.
+- Verified with both images against a stand-in BaseApi: `/api/v1/...` and `/api/hubs/...` arrive with their paths
+  unchanged; unset → the cluster's service; empty → "invalid number of arguments in proxy_pass", the pod does not start.

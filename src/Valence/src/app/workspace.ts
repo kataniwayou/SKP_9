@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { RulesSource } from '../api/fields';
+import { healthOf, NO_LIVENESS, type Liveness } from '../api/liveness';
 import type { ProjectData } from '../api/project';
 import { canvasBridge } from '../molecule/bridge';
 import { canDeleteArrow, canDeleteAtom, deletedLine, goneArrows, NOTHING_REMOVED, type Removed } from '../molecule/deletion';
@@ -75,6 +76,8 @@ export interface WorkspaceState {
   dryRunWorks: boolean;
   /** The atom last copied (Ctrl+C), to paste as new ones (Ctrl+V); kept in Valence, not on the system clipboard. */
   clipboard: Copied | null;
+  /** The processors' health as BaseApi last reported it (2026-10-18): each processor atom glows by it. */
+  liveness: Liveness;
 }
 
 export interface Workspace {
@@ -103,6 +106,8 @@ export interface Workspace {
   draw(kind: ArrowKind, tail: string, head: string): boolean;
   /** A line in the Output pane. */
   note(text: string, tone?: Message['tone']): void;
+  /** BaseApi's latest health report; a processor whose health changed since the last known one gets a line in the Output pane. */
+  livenessRead(next: Liveness): void;
   /** Places an AI drawing on the canvas as one step of the history: Ctrl+Z puts the atoms back, Ctrl+Y draws them again. */
   drawn(label: string, moves: readonly Move[]): void;
   /**
@@ -124,7 +129,7 @@ export function createWorkspace(init: { pinned?: string | null; edits?: Edits; r
   let state: WorkspaceState = {
     data: null, molecule: null, base: null, created: init.created ?? [], added: init.added ?? [],
     hovered: null, pinned: init.pinned ?? null, edits: init.edits ?? {},
-    removed: init.removed ?? NOTHING_REMOVED, history: init.history ?? NO_HISTORY, messages: [], rules: SNAPSHOT_RULES, dryRun: NO_DRY_RUN, dryRunWorks: false, clipboard: null,
+    removed: init.removed ?? NOTHING_REMOVED, history: init.history ?? NO_HISTORY, messages: [], rules: SNAPSHOT_RULES, dryRun: NO_DRY_RUN, dryRunWorks: false, clipboard: null, liveness: NO_LIVENESS,
   };
   let nextMessage = 1;
   const listeners = new Set<() => void>();
@@ -349,6 +354,28 @@ export function createWorkspace(init: { pinned?: string | null; edits?: Edits; r
       if (!change) { set({ messages: say('Nothing to redo.') }); return; }
       set({ ...run(change, true), history: { past: [...state.history.past, change], future }, messages: say(`Redid: ${change.label}.`) });
       placeMoves(change, true);
+    },
+    livenessRead(next) {
+      const before = state.liveness;
+      const lines: { text: string; tone: Message['tone'] }[] = [];
+      if (next.kind === 'unknown' && before.kind !== 'unknown') lines.push({ text: `Health: not known (${next.reason}); every processor shows grey until BaseApi answers`, tone: 'refused' });
+      if (next.kind === 'known' && before.kind === 'unknown') lines.push({ text: 'Health: BaseApi answers again', tone: 'info' });
+      // a change against the last known report; the first report is no change
+      const last = before.kind === 'known' ? before : null;
+      if (next.kind === 'known' && last && state.molecule) {
+        for (const a of state.molecule.atoms.values()) {
+          if (a.type !== 'proc') continue;
+          const was = healthOf(last, a.id), now = healthOf(next, a.id);
+          if (was === now) continue;
+          const p = next.processors.get(a.id.toLowerCase());
+          if (now === 'unhealthy') lines.push({ text: `Health: ${a.name} is unhealthy — ${p?.reason ?? ''}`, tone: 'refused' });
+          else if (now === 'healthy') lines.push({ text: `Health: ${a.name} is healthy (${p!.healthy} of ${p!.replicas} replica${p!.replicas === 1 ? '' : 's'})`, tone: 'info' });
+          else lines.push({ text: `Health: ${a.name} is no longer listed by BaseApi`, tone: 'refused' });
+        }
+      }
+      // while BaseApi does not answer, every processor is grey (as SKP Studio shows it), not its last known colour
+      for (const l of lines) state = { ...state, messages: say(l.text, l.tone) };
+      set({ liveness: next });
     },
     drawn(label, moves) {
       if (moves.length === 0) return;

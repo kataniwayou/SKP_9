@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { readFields, type RulesSource } from '../api/fields';
+import { healthOf, LIVENESS_POLL_MS, readLiveness, type Health, type Liveness } from '../api/liveness';
 import { readProject, type ProjectResult } from '../api/project';
 import { dryRun, type DryRun } from '../api/validate';
 import { goneArrows } from '../molecule/deletion';
@@ -42,13 +43,15 @@ export function litOf(molecule: Molecule, workflowKeys: readonly string[]): Read
  * toolbar on the canvas (the user, 2026-10-15); the workflow filter is on the main menu strip (2026-10-16) and sets the
  * molecule's base state: what the picked workflows reach stays, the rest fades.
  */
-export function ProjectDocument({ workspace, highlights, view = null, onView, read = readProject, readRules = readFields, check = dryRun }: {
+export function ProjectDocument({ workspace, highlights, view = null, onView, read = readProject, readRules = readFields, check = dryRun, readHealth = readLiveness }: {
   workspace: Workspace; highlights: Highlights; read?: () => Promise<ProjectResult>; readRules?: () => Promise<RulesSource>;
   /** The view kept in this browser (the camera and every atom's place), to open on. */
   view?: CanvasView | null;
   /** The view settled (`closing`: the page is closing): to keep in this browser. */
   onView?: (view: CanvasView, closing: boolean) => void;
   check?: (changes: readonly PlannedChange[], fetchFn?: typeof fetch, signal?: AbortSignal) => Promise<DryRun>;
+  /** The processors' health (2026-10-18), read every LIVENESS_POLL_MS while the page is shown. */
+  readHealth?: (fetchFn?: typeof fetch, signal?: AbortSignal) => Promise<Liveness>;
 }) {
   const [loaded, setLoaded] = useState<Loaded>({ kind: 'loading' });
   const pinned = useWorkspace(workspace, (s) => s.pinned);
@@ -68,6 +71,27 @@ export function ProjectDocument({ workspace, highlights, view = null, onView, re
     return all;
   }, [loaded, created]);
   const judged = useWorkspace(workspace, (s) => s.dryRun);
+  const liveness = useWorkspace(workspace, (s) => s.liveness);
+  // every processor atom glows by its health (the user, 2026-10-18); one made in Valence runs nowhere yet: grey
+  const health = useMemo(() => {
+    if (!molecule) return undefined;
+    const out = new Map<string, Health>();
+    for (const a of molecule.atoms.values()) if (a.type === 'proc') out.set(a.key, createdKeys.has(a.key) ? 'undetermined' : healthOf(liveness, a.id));
+    return out;
+  }, [molecule, liveness, createdKeys]);
+  useEffect(() => {
+    const abort = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      // a hidden tab is not asked; it is asked again once shown
+      if (typeof document === 'undefined' || !document.hidden) {
+        try { workspace.livenessRead(await readHealth(undefined, abort.signal)); } catch { if (abort.signal.aborted) return; }
+      }
+      if (!abort.signal.aborted) timer = setTimeout(() => { void poll(); }, LIVENESS_POLL_MS);
+    };
+    void poll();
+    return () => { abort.abort(); clearTimeout(timer); };
+  }, [workspace, readHealth]);
   // set when BaseApi answered that it has no dry run: not asked again until the page reloads
   const missing = useRef<string | null>(null);
   // the labels show the virtual entities' names (decision 8)
@@ -206,7 +230,7 @@ export function ProjectDocument({ workspace, highlights, view = null, onView, re
       <div className="vcanvas" />
       {loaded.kind === 'ready' && (
         <Suspense fallback={<div className="doc-msg">Loading…</div>}>
-          <MoleculeView molecule={molecule ?? loaded.molecule} positions={positions ?? loaded.positions} highlighted={lit} pinned={pinned} names={names} events={events} ghosts={ghosts} view={view} />
+          <MoleculeView molecule={molecule ?? loaded.molecule} positions={positions ?? loaded.positions} highlighted={lit} pinned={pinned} names={names} events={events} ghosts={ghosts} health={health} view={view} />
         </Suspense>
       )}
       {loaded.kind === 'loading' && <div className="doc-msg">Reading the project…</div>}
