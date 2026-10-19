@@ -183,7 +183,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
     for (const d of store.getState().docs) if (d.status.kind === 'loading') load(d.workflowId);
   }, []); // the restored documents only; later ones are loaded by openWorkflow
 
-  // Workspace › New workflow (2026-10-10): a blank document with only the hub, a workflow that exists only in the studio
+  // Workflow › New workflow (2026-10-10): a blank document with only the hub, a workflow that exists only in the studio
   // until its first Save creates it; named untitled (or untitled-2, …) so no listed or open workflow has its name
   const newWorkflow = useCallback(() => {
     const id = newId();
@@ -201,7 +201,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
     });
   }, [api, store, readList]);
 
-  // Workspace › Delete workflow… (2026-10-10): a fresh liveness reading and BaseApi's dry run first; the warning only
+  // Workflow › Delete workflow… (2026-10-10): a fresh liveness reading and BaseApi's dry run first; the warning only
   // then, with Cancel as its default; nothing destructive is sent before Continue. One deletion at a time per workflow.
   const deleting = useRef(new Set<string>());
   const deleteWorkflow = useCallback((id: string) => {

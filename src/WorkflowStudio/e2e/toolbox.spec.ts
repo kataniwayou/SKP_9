@@ -148,7 +148,7 @@ test('Toolbox: an empty step, the throwaway\'s processor onto it, a wire, an emp
 });
 
 test('Toolbox: an existing cache dropped into a new workflow is the same entity, linked; Save adds no cache row', async ({ page, request }) => {
-  await page.getByRole('menuitem', { name: 'Workspace' }).click();
+  await page.getByRole('menuitem', { name: 'Workflow' }).click();
   await page.getByRole('menuitem', { name: /^\W*New\b/ }).click();
   const panel = page.locator('.docpanel').filter({ has: page.locator('.crumb[data-tip^="untitled"]') });
   await expect(panel.locator('.react-flow__node-workflow')).toBeVisible();

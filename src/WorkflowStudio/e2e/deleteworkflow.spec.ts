@@ -2,7 +2,7 @@ import type { APIRequestContext, Page } from '@playwright/test';
 import { documentPanel, openWorkflow, tab } from './studio';
 import { createRunThrowaway, createThrowaway, expect, removeThrowaway, stopRunThrowaway, test } from './throwaway';
 
-// Workspace › Delete workflow… (the user's rules, 2026-10-10): a fresh liveness reading, BaseApi's dry run, then a
+// Workflow › Delete workflow… (the user's rules, 2026-10-10): a fresh liveness reading, BaseApi's dry run, then a
 // warning with Cancel (the default) and Continue; nothing destructive before Continue. Real mouse and keys, on this
 // run's `e2e-` throwaways only (the write guard allows only their dry run and real run).
 test.describe.configure({ mode: 'serial', retries: 0 });
@@ -19,16 +19,16 @@ const texts = async (page: Page) => page.locator('[data-pane="output"]').getByRo
   text: [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim(), red: el.classList.contains('err'),
 })));
 const deleteMenu = async (page: Page) => {
-  await page.getByRole('menuitem', { name: 'Workspace' }).click();
+  await page.getByRole('menuitem', { name: 'Workflow' }).click();
   await page.getByRole('menuitem', { name: /Delete…/ }).click();
 };
 
 test('a stopped workflow: the warning after the fresh reading and the dry run; Cancel sends nothing; Continue deletes it with its steps and assignment, never its cache or processor', async ({ page, request }) => {
   const t = await createThrowaway(request);
   try {
-    // the menu strip: Workspace, not File; Load workflow…, not Open
+    // the menu strip: Workflow, not File; Load workflow…, not Open
     await expect(page.getByRole('menuitem', { name: 'File' })).toHaveCount(0);
-    await page.getByRole('menuitem', { name: 'Workspace' }).click();
+    await page.getByRole('menuitem', { name: 'Workflow' }).click();
     await expect(page.getByRole('menuitem', { name: /Load…/ })).toBeVisible();
     await expect(page.getByRole('menuitem', { name: /Delete…/ })).toHaveAttribute('aria-disabled', 'true');
     await page.keyboard.press('Escape');
@@ -85,13 +85,13 @@ test('a stopped workflow: the warning after the fresh reading and the dry run; C
     expect(await status(request, `assignments/${t.assignmentId}`)).toBe(404);
     expect(await status(request, `caches/${t.cacheId}`)).toBe(200);
     expect(await status(request, `processors/${t.processorId}`)).toBe(200);
-    await page.getByRole('menuitem', { name: 'Workspace' }).click();
+    await page.getByRole('menuitem', { name: 'Workflow' }).click();
     await page.getByRole('menuitem', { name: /Load…/ }).click();
     await page.getByRole('textbox', { name: 'Search workflows' }).fill(t.tag);
     await expect(page.getByRole('listbox', { name: 'Workflows' }).getByText(t.workflow.label, { exact: true })).toHaveCount(0);
     await page.keyboard.press('Escape');
     await page.reload();
-    await expect(page.getByRole('menuitem', { name: 'Workspace' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Workflow' })).toBeVisible();
     await expect(tab(page, t.workflow.name)).toHaveCount(0);
   } finally {
     await removeThrowaway(request);
@@ -125,7 +125,7 @@ test('a running workflow: refused in red at the fresh reading, no warning, still
   }
 });
 
-test('Delete with the workflow picked, alone or with steps, is Workspace › Delete…: the same warning; Cancel leaves every pick in place (2026-10-10)', async ({ page, request }) => {
+test('Delete with the workflow picked, alone or with steps, is Workflow › Delete…: the same warning; Cancel leaves every pick in place (2026-10-10)', async ({ page, request }) => {
   const t = await createThrowaway(request);
   try {
     await openWorkflow(page, t.workflow);

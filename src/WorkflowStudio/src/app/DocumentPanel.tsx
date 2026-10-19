@@ -42,7 +42,7 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
   onSave?: () => void;
   /** Starts or stops the saved workflow (2026-10-09); without it Start and Stop stay disabled. */
   onRun?: (op: RunOp) => void;
-  /** Delete with the workflow picked (2026-10-10): Workspace › Delete…'s own path (fresh liveness, dry run, Cancel/Continue). */
+  /** Delete with the workflow picked (2026-10-10): Workflow › Delete…'s own path (fresh liveness, dry run, Cancel/Continue). */
   onDeleteWorkflow?: () => void;
 }) {
   const open = useStudio((s) => s.docs.find((d) => d.workflowId === workflowId) ?? null);
@@ -92,7 +92,7 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
           // copy, paste and delete (2026-10-10): the store does them, so the clipboard is shared by every document
           onCopy: () => store.dispatch({ type: 'copy', workflowId }),
           onPaste: () => store.dispatch({ type: 'paste', workflowId, newId }),
-          // the workflow picked, alone or with others (2026-10-10): Delete is Workspace › Delete…, nothing else; a new workflow
+          // the workflow picked, alone or with others (2026-10-10): Delete is Workflow › Delete…, nothing else; a new workflow
           // not saved yet has none in BaseApi, so it is not deleted (as the menu item waits)
           onDelete: () => {
             const doc = store.getState().docs.find((d) => d.workflowId === workflowId);

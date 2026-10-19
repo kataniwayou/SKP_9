@@ -4,7 +4,7 @@ import { place } from '../layout/placement';
 import type { Graph, Id } from '../model/graph';
 import type { StudioDocument } from './document';
 
-/** A new workflow's version until the Inspector changes it (2026-10-10, Workspace › New workflow). */
+/** A new workflow's version until the Inspector changes it (2026-10-10, Workflow › New workflow). */
 export const NEW_VERSION = '1.0.0';
 
 /**
@@ -18,7 +18,7 @@ export function untitledName(taken: Iterable<string>): string {
 }
 
 /**
- * A workflow that exists only in the studio until its first Save creates it (2026-10-10, Workspace › New workflow): a
+ * A workflow that exists only in the studio until its first Save creates it (2026-10-10, Workflow › New workflow): a
  * blank graph, only the workflow hub on the canvas, at its usual spot on the left. Nothing is read from BaseApi.
  */
 export async function newWorkflowDocument(workflowId: Id, name: string, version: string = NEW_VERSION): Promise<StudioDocument> {

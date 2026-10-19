@@ -2,7 +2,7 @@ import type { Locator, Page } from '@playwright/test';
 import { box, documentPanel, get, inspector, newWire, node, openWorkflow, pane, save, type Pt } from './studio';
 import { createThrowaway, expect, removeThrowaway, test, type Throwaway } from './throwaway';
 
-// Workspace › New workflow (the user's decisions, 2026-10-10), with the real mouse and keyboard: a blank document with only
+// Workflow › New workflow (the user's decisions, 2026-10-10), with the real mouse and keyboard: a blank document with only
 // the hub on the left, a workflow that exists only in the studio until its first Save creates it in BaseApi. Only this
 // run's throwaway entities are written (`e2e-8-…`); the guard lets a Save through only for a new workflow named after the
 // run's tag. The tests share the throwaway, so they run in order.
@@ -31,9 +31,9 @@ async function typeInto(page: Page, label: string, text: string): Promise<void> 
   await page.keyboard.type(text);
 }
 
-/** Workspace › New workflow with the real mouse: the new document's panel. */
+/** Workflow › New workflow with the real mouse: the new document's panel. */
 async function newWorkflow(page: Page): Promise<Locator> {
-  await menu(page, 'Workspace').click();
+  await menu(page, 'Workflow').click();
   const item = menu(page, /^\W*New\b/);
   await expect(item).toContainText('Ctrl+N');
   await item.click();
@@ -82,7 +82,7 @@ test('New: a blank document with the hub on the left; renamed in the Inspector; 
   await expect(panel.getByRole('button', { name: /Start/ })).toBeDisabled();
   await expect(panel.getByRole('button', { name: /Stop/ })).toBeDisabled();
   await expect(panel.getByRole('button', { name: /Start/ }).locator('..')).toHaveAttribute('data-tip', 'Not saved yet: BaseApi has no such workflow');
-  await menu(page, 'Workspace').click();
+  await menu(page, 'Workflow').click();
   await expect(menu(page, /Delete…/)).toBeDisabled();
   await page.keyboard.press('Escape');
 
@@ -115,7 +115,7 @@ test('New: a blank document with the hub on the left; renamed in the Inspector; 
   // an ordinary workflow from now on: Start offered, listed by the Load picker
   const saved = page.locator('.docpanel').filter({ has: page.locator(`.crumb[data-tip^="${name}"]`) });
   await expect(saved.getByRole('button', { name: /Start/ })).toBeEnabled();
-  await menu(page, 'Workspace').click();
+  await menu(page, 'Workflow').click();
   await expect(menu(page, /Delete…/)).toBeEnabled();
   await page.keyboard.press('Escape');
   await page.keyboard.press('Control+o');

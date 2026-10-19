@@ -25,7 +25,7 @@ export const created: {
   workflowId?: string; stepId?: string; stepBId?: string; extraStepIds?: string[]; assignmentId?: string; processorId?: string; schemaId?: string; cacheId?: string; tag?: string;
   /** More throwaway workflows of this run (copy and paste: a second one to paste into and to share a step with). */
   otherWorkflowIds?: string[];
-  /** New workflows a Save of this run created or tried to (Workspace › New workflow, 2026-10-10), recorded as the guard lets them through. */
+  /** New workflows a Save of this run created or tried to (Workflow › New workflow, 2026-10-10), recorded as the guard lets them through. */
   newWorkflowIds?: string[];
 } = {};
 
@@ -269,7 +269,7 @@ function refusal(r: Request): string | null {
   if (method === 'GET' || method === 'HEAD') return null;
   if (method === 'PUT' && created.workflowId !== undefined && path === `/api/v1/workflows/${created.workflowId}/design`) return null;
   if (method === 'PUT' && (created.otherWorkflowIds ?? []).some((id) => path === `/api/v1/workflows/${id}/design`)) return null;
-  // Workspace › New workflow (2026-10-10): the Save that creates a workflow named after this run's tag, and its later Saves
+  // Workflow › New workflow (2026-10-10): the Save that creates a workflow named after this run's tag, and its later Saves
   const design = /^\/api\/v1\/workflows\/([0-9a-f-]{36})\/design$/i.exec(path);
   if (method === 'PUT' && design && created.tag?.startsWith('e2e-')) {
     const id = design[1]!;
@@ -284,7 +284,7 @@ function refusal(r: Request): string | null {
   const diagram = /^\/api\/v1\/workflows\/([0-9a-f-]{36})\/diagram$/i.exec(path);
   if (method === 'PUT' && diagram && created.tag?.startsWith('e2e-')
     && [created.workflowId, ...(created.otherWorkflowIds ?? []), ...(created.newWorkflowIds ?? [])].includes(diagram[1]!)) return null;
-  // Workspace › Delete workflow… (2026-10-10): the dry run and the real run of this run's throwaway only
+  // Workflow › Delete workflow… (2026-10-10): the dry run and the real run of this run's throwaway only
   if (method === 'POST' && created.workflowId !== undefined && created.tag?.startsWith('e2e-') && path === `/api/v1/workflows/${created.workflowId}/delete`) return null;
   if (method === 'POST' && (path === '/api/v1/orchestration/start' || path === '/api/v1/orchestration/stop')
     && created.workflowId !== undefined && created.tag?.startsWith('e2e-') && r.postDataJSON() === created.workflowId) return null;

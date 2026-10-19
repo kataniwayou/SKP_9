@@ -21,7 +21,7 @@ async function storeWithNew(name = 'untitled') {
   return store;
 }
 
-describe('Workspace › New workflow (2026-10-10)', () => {
+describe('Workflow › New workflow (2026-10-10)', () => {
   it('names it untitled, or the first untitled-N no listed or open workflow has', () => {
     expect(untitledName([])).toBe('untitled');
     expect(untitledName(['orders', 'untitled'])).toBe('untitled-2');

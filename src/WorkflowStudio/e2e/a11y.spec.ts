@@ -14,16 +14,16 @@ test('a pane closes from the keyboard on its tab ×', async ({ page }) => {
 });
 
 test('a menu gives focus back to its button when Escape closes it', async ({ page }) => {
-  const file = page.getByRole('menuitem', { name: 'Workspace' });
+  const file = page.getByRole('menuitem', { name: 'Workflow' });
   await file.click();
-  await expect(page.getByRole('menu', { name: 'Workspace' })).toBeVisible();
+  await expect(page.getByRole('menu', { name: 'Workflow' })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(file).toBeFocused();
 });
 
 test('the picker opens the workflow chosen with the arrow keys', async ({ page, request }) => {
   const [first, second] = await liveWorkflows(request, 2);
-  await page.getByRole('menuitem', { name: 'Workspace' }).click();
+  await page.getByRole('menuitem', { name: 'Workflow' }).click();
   await page.getByRole('menuitem', { name: /Load…/ }).click();
   const box = page.getByRole('textbox', { name: 'Search workflows' });
   await expect(page.getByRole('listbox', { name: 'Workflows' }).getByText(first!.label, { exact: true })).toBeVisible();

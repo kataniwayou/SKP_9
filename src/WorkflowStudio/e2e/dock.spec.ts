@@ -221,7 +221,7 @@ test('menus, the picker and the tooltip open above a floating group', async ({ p
   await page.keyboard.press('Escape');
 
   // the picker: put the floating group under it, and the picker is still the topmost thing in the shared area
-  await page.getByRole('menuitem', { name: 'Workspace' }).click();
+  await page.getByRole('menuitem', { name: 'Workflow' }).click();
   await page.getByRole('menuitem', { name: /Load…/ }).click();
   const picker = page.locator('.picker');
   await expect(picker).toBeVisible();

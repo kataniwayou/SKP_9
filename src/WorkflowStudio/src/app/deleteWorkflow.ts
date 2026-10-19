@@ -38,7 +38,7 @@ function baseApiLines(dto: WorkflowDeleteOutcomeDto, at: string): LineDraft[] {
 }
 
 /**
- * Workspace › Delete workflow…, up to the warning (the user's rules, 2026-10-10). First a liveness reading taken after
+ * Workflow › Delete workflow…, up to the warning (the user's rules, 2026-10-10). First a liveness reading taken after
  * the request (`GET /orchestration/live` asked now; the status the studio already shows never counts): running, or no
  * reading within FRESH_READING_MS, and the deletion is refused. Then BaseApi's dry run, which reads the live set again
  * and does the whole deletion in a transaction it rolls back: refused, nothing more happens. Every step is logged in

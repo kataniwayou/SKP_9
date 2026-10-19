@@ -61,8 +61,8 @@ test('a workflow started and stopped elsewhere: its hidden tab, its hub, the pic
   await expect(panel.locator('.wf').first()).toHaveAttribute('data-started', 'true');
   await expect.poll(() => linesOf(page, wf.name)).toEqual([`${wf.name} running`]);
 
-  // the picker marks it running (real mouse: Workspace › Load workflow…)
-  await page.getByRole('menuitem', { name: 'Workspace' }).click();
+  // the picker marks it running (real mouse: Workflow › Load workflow…)
+  await page.getByRole('menuitem', { name: 'Workflow' }).click();
   await page.getByRole('menuitem', { name: /Load…/ }).click();
   await page.getByRole('textbox', { name: 'Search workflows' }).fill(wf.label);
   const option = page.getByRole('option', { name: new RegExp(wf.label) });

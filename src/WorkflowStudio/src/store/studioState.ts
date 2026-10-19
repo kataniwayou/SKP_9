@@ -67,7 +67,7 @@ export interface OpenDocument {
    */
   generation: number;
   /**
-   * A new workflow (2026-10-10, Workspace › New workflow): it exists only in the studio until its first Save creates it in
+   * A new workflow (2026-10-10, Workflow › New workflow): it exists only in the studio until its first Save creates it in
    * BaseApi. Its document is built locally, never read; Start, Stop and Delete workflow wait for that Save. Absent: false.
    */
   virtual?: boolean;
@@ -102,7 +102,7 @@ export type ToolboxPick =
 
 export type StudioAction =
   | { type: 'open'; workflowId: Id; name: string; version: string }
-  /** Workspace › New workflow (2026-10-10): a new workflow's document, ready at once and active; nothing in BaseApi yet. */
+  /** Workflow › New workflow (2026-10-10): a new workflow's document, ready at once and active; nothing in BaseApi yet. */
   | { type: 'new'; workflowId: Id; doc: StudioDocument }
   | { type: 'loaded'; workflowId: Id; doc: StudioDocument }
   | { type: 'failed'; workflowId: Id; message: string }

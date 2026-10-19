@@ -36,7 +36,7 @@ const apiWith = (
 const reads = (value: unknown) => () => Promise.resolve<ApiResult<unknown>>({ ok: true, value });
 const texts = (store: ReturnType<typeof createStudioStore>) => store.getState().output.map((l) => [l.level, l.text, l.name]);
 
-describe('Workspace › Delete workflow… (the user\'s rules, 2026-10-10)', () => {
+describe('Workflow › Delete workflow… (the user\'s rules, 2026-10-10)', () => {
   it('a fresh reading saying not running, then a clean dry run: the plan with the dry run\'s counts; nothing destructive sent', async () => {
     const store = await storeWithDoc();
     const { api, deleteWorkflow, listLive } = apiWith(reads([]));

@@ -155,7 +155,7 @@ export function Watermark() {
     <div className="empty">
       <div>
         <div className="e1">No workflow open</div>
-        <div className="e2">Workspace › Load… or Ctrl+O</div>
+        <div className="e2">Workflow › Load… or Ctrl+O</div>
         <button type="button" className="btn primary" onClick={(e) => shell.openPicker(anchorBelow(e.currentTarget))}>Load workflow…</button>
       </div>
     </div>

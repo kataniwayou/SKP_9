@@ -58,9 +58,9 @@ export async function liveWorkflows(request: APIRequestContext, count: number): 
   return found.slice(0, count);
 }
 
-/** Workspace › Load workflow…, search by unique name, Enter; waits until the canvas has drawn. */
+/** Workflow › Load workflow…, search by unique name, Enter; waits until the canvas has drawn. */
 export async function openWorkflow(page: Page, workflow: LiveWorkflow): Promise<void> {
-  await page.getByRole('menuitem', { name: 'Workspace' }).click();
+  await page.getByRole('menuitem', { name: 'Workflow' }).click();
   await page.getByRole('menuitem', { name: /Load…/ }).click();
   await page.getByRole('textbox', { name: 'Search workflows' }).fill(workflow.label);
   // on a cold dev server the list can still be loading: Enter on an empty list opens nothing
