@@ -26,3 +26,7 @@ k8s/
 
 **/node_modules/
 **/dist/
+
+# The offline kits' base-image tars (Studio-offline/images/, Valence-offline/images/) are loaded with docker load, never
+# read by a build; only the kits' npm-offline/ folders are.
+*-offline/images/

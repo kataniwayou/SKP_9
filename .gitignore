@@ -473,3 +473,8 @@ src/Valence/dist/
 # SKP Studio end-to-end output
 src/WorkflowStudio/test-results/
 src/WorkflowStudio/playwright-report/
+
+# The offline kits' base-image tars: large binaries carried to the offline machine beside the repo, not history. The
+# kits' npm-offline/ folders are tracked, as nugets/ is, so a clone can build Studio and Valence offline.
+/Studio-offline/images/
+/Valence-offline/images/

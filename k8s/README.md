@@ -41,6 +41,12 @@ kind load docker-image workflow-studio:local --name desktop
 kubectl apply -f k8s/31-workflow-studio.yaml
 ```
 
+Its AI drawing wand takes three plain environment variables in `k8s/31-workflow-studio.yaml`, not a
+Secret: `KIMI_BASE_URL`, `KIMI_MODEL_ID` and `KIMI_API_KEY`. The key is committed empty, which turns the
+wand off ("AI drawing is not configured"); put the key in your working copy only and never commit it.
+To build and deploy the Studio or Valence by hand on an offline machine, see
+`Studio-offline/README.md` and `Valence-offline/README.md`.
+
 Every application manifest uses `imagePullPolicy: IfNotPresent` against a `:local` tag, so there is
 no registry and nothing is ever pulled. The corollary is that rebuilding an image does **not**
 update a running pod — `kubectl rollout restart` is what picks up new bits.
