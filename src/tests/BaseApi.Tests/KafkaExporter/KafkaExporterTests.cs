@@ -54,9 +54,28 @@ public sealed class KafkaExporterTests
 
         await processor.ExecuteAsync(data, Payload(), E, CancellationToken.None);
 
-        var (topic, value) = Assert.Single(producer.Produced);
+        var (topic, value, _) = Assert.Single(producer.Produced);
         Assert.Equal("exports", topic);
         Assert.Equal(data, value);
+    }
+
+    /// <summary>
+    /// The mirror of the importer (2026-10-19, the user's "symmetric principle"): the record carries the execution
+    /// the step was dispatched with, so an importer reading the topic carries it on. Two dispatches with two ids, so
+    /// a producer that stamped a fixed or a remembered id would fail.
+    /// </summary>
+    [Fact]
+    public async Task StampsEachRecordWithTheExecutionItWasDispatchedWith()
+    {
+        var other = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        var producer = new FakeRecordProducer();
+        var (processor, _, _) = Build(new FakeRecordProducerFactory(producer));
+
+        await processor.ExecuteAsync(Input("first"), Payload(), E, CancellationToken.None);
+        processor.BeginDispatch(TestDispatch.State(Substitute.For<IQueueSender>(), C, W, S, P));
+        await processor.ExecuteAsync(Input("second"), Payload(), other, CancellationToken.None);
+
+        Assert.Equal([E, other], producer.Produced.Select(p => p.ExecutionId));
     }
 
     [Fact]

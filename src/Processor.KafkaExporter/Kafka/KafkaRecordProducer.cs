@@ -1,3 +1,4 @@
+using System.Text;
 using Confluent.Kafka;
 
 namespace Processor.KafkaExporter.Kafka;
@@ -36,11 +37,22 @@ public sealed class KafkaRecordProducer : IRecordProducer
     /// would be choosing an ordering guarantee on the author's behalf, and getting it wrong is worse
     /// than not offering it. If ordering ever matters, the key belongs in the step payload.
     /// </para>
+    /// <para>
+    /// The execution goes in the <see cref="RecordHeaders.ExecutionId"/> header as the GUID's <c>D</c> text in UTF-8,
+    /// exactly what <c>Processor.KafkaImporter</c> parses. A replayed export (see <c>KafkaExporterProcessor</c>) carries
+    /// the same id, so an importer downstream derives the same keys for the duplicate.
+    /// </para>
     /// </summary>
-    public async Task<string> ProduceAsync(string topic, byte[] value, CancellationToken ct)
+    public async Task<string> ProduceAsync(string topic, byte[] value, Guid executionId, CancellationToken ct)
     {
+        var message = new Message<Null, byte[]>
+        {
+            Value = value,
+            Headers = new Headers { { RecordHeaders.ExecutionId, Encoding.UTF8.GetBytes(executionId.ToString("D")) } },
+        };
+
         var result = await _inner
-            .ProduceAsync(topic, new Message<Null, byte[]> { Value = value }, ct)
+            .ProduceAsync(topic, message, ct)
             .ConfigureAwait(false);
 
         if (result.Status != PersistenceStatus.Persisted)

@@ -42,7 +42,8 @@ public sealed class KafkaExporterLiveTests
             byte[] value = [0xC3, 0x28, 0x00, 0xFF];
 
             using var producer = new KafkaRecordProducer(RealStack.KafkaBrokers, TimeSpan.FromSeconds(30));
-            var offset = await producer.ProduceAsync(topic, value, TestContext.Current.CancellationToken);
+            var execution = Guid.NewGuid();
+            var offset = await producer.ProduceAsync(topic, value, execution, TestContext.Current.CancellationToken);
 
             Assert.Contains(topic, offset);
 
@@ -60,6 +61,11 @@ public sealed class KafkaExporterLiveTests
             Assert.NotNull(read);
             Assert.Equal(value, read.Message.Value);
             Assert.Equal(offset, read.TopicPartitionOffset.ToString());
+
+            // The importer's contract (2026-10-19): the execution in the execution-id header, as the GUID's D text in
+            // UTF-8, read the way Processor.KafkaImporter reads it.
+            Assert.True(read.Message.Headers.TryGetLastBytes(RecordHeaders.ExecutionId, out var header));
+            Assert.Equal(execution.ToString("D"), System.Text.Encoding.UTF8.GetString(header));
 
             consumer.Close();
         }
@@ -90,7 +96,7 @@ public sealed class KafkaExporterLiveTests
         var clock = System.Diagnostics.Stopwatch.StartNew();
 
         await Assert.ThrowsAnyAsync<KafkaException>(() =>
-            producer.ProduceAsync("nowhere", [1, 2, 3], TestContext.Current.CancellationToken));
+            producer.ProduceAsync("nowhere", [1, 2, 3], Guid.NewGuid(), TestContext.Current.CancellationToken));
 
         // Generous against a 5s timeout, because the point is the ORDER OF MAGNITUDE: librdkafka's
         // default would have this sit for five minutes, and a dispatch cannot be interrupted while it

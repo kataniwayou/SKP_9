@@ -24,10 +24,14 @@ public interface IRecordProducer : IDisposable
     /// have persisted — throws. There is no third answer, because the step above has only two
     /// outcomes to report.
     /// </para>
+    /// <para>
+    /// <b><paramref name="executionId"/> rides the record's <see cref="RecordHeaders.ExecutionId"/> header</b>, never
+    /// the value, which goes out byte for byte (2026-10-19).
+    /// </para>
     /// </summary>
     /// <returns>
     /// The rendered topic/partition/offset the record landed at, for the log line. Rendered rather
     /// than typed so that no Confluent type crosses this seam.
     /// </returns>
-    Task<string> ProduceAsync(string topic, byte[] value, CancellationToken ct);
+    Task<string> ProduceAsync(string topic, byte[] value, Guid executionId, CancellationToken ct);
 }

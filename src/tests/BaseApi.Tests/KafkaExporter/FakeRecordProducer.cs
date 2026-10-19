@@ -11,7 +11,8 @@ internal sealed class FakeRecordProducer : IRecordProducer
 {
     private int _produceCalls;
 
-    public List<(string Topic, byte[] Value)> Produced { get; } = new();
+    /// <summary>Every produce, with the execution id it was asked to stamp in the record's header.</summary>
+    public List<(string Topic, byte[] Value, Guid ExecutionId)> Produced { get; } = new();
     public bool Disposed { get; private set; }
 
     /// <summary>1-based index of the ProduceAsync call that throws; null means none ever does.</summary>
@@ -26,10 +27,10 @@ internal sealed class FakeRecordProducer : IRecordProducer
     /// does not offer. Tests that care about the difference read <see cref="Produced"/>; tests about
     /// the step's outcome do not look at it at all.
     /// </summary>
-    public Task<string> ProduceAsync(string topic, byte[] value, CancellationToken ct)
+    public Task<string> ProduceAsync(string topic, byte[] value, Guid executionId, CancellationToken ct)
     {
         _produceCalls++;
-        Produced.Add((topic, value));
+        Produced.Add((topic, value, executionId));
 
         if (_produceCalls == ProduceThrowsOnCall)
         {

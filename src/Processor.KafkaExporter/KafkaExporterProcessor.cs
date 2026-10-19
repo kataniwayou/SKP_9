@@ -16,6 +16,12 @@ namespace Processor.KafkaExporter;
 /// producer's floor, and non-empty data.
 /// </para>
 /// <para>
+/// <b>The record carries the execution it was dispatched with</b> in its <c>execution-id</c> header (2026-10-19,
+/// the mirror of <c>Processor.KafkaImporter</c>, which takes each record's lineage from that header): an importer
+/// reading this topic carries the same execution on. The value is still written byte for byte, and the key is still
+/// null.
+/// </para>
+/// <para>
 /// <b>Kafka faults fail the step and are never redelivered.</b> A <see cref="KafkaException"/> from
 /// building or producing becomes a <see cref="FailedException"/>, and a producer that faulted on a
 /// write is discarded so the next dispatch builds a fresh one.
@@ -80,7 +86,7 @@ public sealed class KafkaExporterProcessor(
         string landed;
         try
         {
-            landed = await producer.ProduceAsync(config.Topic, data, ct).ConfigureAwait(false);
+            landed = await producer.ProduceAsync(config.Topic, data, executionId, ct).ConfigureAwait(false);
         }
         catch (KafkaException ex)
         {
