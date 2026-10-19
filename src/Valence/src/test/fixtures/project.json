@@ -58,7 +58,7 @@
    "cacheIds": [
     "04442aee-7906-4418-9213-bea0a445e1bc"
    ],
-   "cronExpression": "0 * * * * *"
+   "cronExpression": "*/10 * * * * *"
   },
   {
    "id": "4cd8af45-1295-43db-ab2e-e955dd82b5c5",
@@ -697,7 +697,7 @@
    "version": "1.0.0",
    "description": "records that a step reached a terminal outcome and where to look; carries no reason and no payload",
    "inputSchemaId": null,
-   "outputSchemaId": null,
+   "outputSchemaId": "e2997001-3711-4ef6-9af9-0dcb4b60a69e",
    "configSchemaId": null
   },
   {
@@ -899,6 +899,18 @@
    "name": "analyst-finding",
    "version": "4.0.0",
    "description": "Analyst output document v4: every insight carries classification (deterministic/transient), domain (system/data), severity, onset and evidenceKinds; severity is tied to classification (deterministic=high, transient=low)."
+  },
+  {
+   "id": "72a22cbf-de4b-4d6c-8077-329f5988fb5c",
+   "name": "outcome-record",
+   "version": "1.0.0",
+   "description": "outcome-recorder output: a pointer to a step outcome (correlation id, predecessor's execution id when it had one, recorded-at) — never the reason or the payload"
+  },
+  {
+   "id": "e2997001-3711-4ef6-9af9-0dcb4b60a69e",
+   "name": "outcome-record",
+   "version": "2.0.0",
+   "description": "outcome-recorder output: a pointer to a step outcome (correlation id, predecessor's execution id when it had one, the recorder's own workflow/step/processor position, recorded-at) — never the reason or the payload"
   }
  ],
  "assignments": [

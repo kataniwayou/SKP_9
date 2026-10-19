@@ -31,7 +31,7 @@ describe('ProjectDocument', () => {
     expect(screen.getByText('Reading the project…')).toBeInTheDocument();
     // the layout takes about half a second for the whole project
     const view = await screen.findByTestId('molecule', {}, { timeout: 5000 });
-    expect(Number(view.dataset.atoms)).toBe(7 + 47 + 11 + 24 + 47 + 1);
+    expect(Number(view.dataset.atoms)).toBe(7 + 47 + 11 + 26 + 47 + 1);
     expect(view.dataset.lit).toBe('');
   });
 
