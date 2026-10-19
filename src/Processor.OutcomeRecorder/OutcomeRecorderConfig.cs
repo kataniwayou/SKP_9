@@ -9,8 +9,8 @@ namespace Processor.OutcomeRecorder;
 /// <c>BaseProcessor{TConfig}</c> is the only door.
 /// <para>
 /// <b>There is nothing for a workflow author to choose.</b> Everything this processor records — the
-/// correlation id, the execution id, the moment — arrives on the dispatch or from the clock. A
-/// payload field could only ever restate or contradict one of them.
+/// correlation id, the execution id, the workflow/step/processor position, the moment — arrives on
+/// the dispatch or from the clock. A payload field could only ever restate or contradict one of them.
 /// <para>
 /// The one candidate is the outcome that dispatched this step, and it cannot come from here either:
 /// a payload field would state what the WORKFLOW wired rather than what the run did, and the two

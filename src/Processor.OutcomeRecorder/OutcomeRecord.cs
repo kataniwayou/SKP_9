@@ -33,12 +33,31 @@ namespace Processor.OutcomeRecorder;
 /// guid", and a consumer must be written for an absent field. <b>It is not the id of the branch this
 /// processor sends</b>, which may be freshly minted precisely because this one is absent.
 /// </param>
+/// <param name="WorkflowId">
+/// The workflow the dispatch belongs to, rendered "D". The predecessor's workflow too, since a
+/// dispatch never crosses workflows.
+/// </param>
+/// <param name="StepId">
+/// <b>THIS processor's step</b>, rendered "D" — what the dispatch carries, and the recorder records
+/// what it gets. It is not the step whose outcome was recorded: the orchestrator stamps a dispatch
+/// with the successor's position, and a workflow that wires every step to one recorder step gets
+/// the same value on every record. The outcome's own step is found by correlation id.
+/// </param>
+/// <param name="ProcessorId">
+/// <b>THIS processor's row</b>, rendered "D", for the reason <paramref name="StepId"/> gives.
+/// </param>
 /// <param name="RecordedAtUtc">
 /// When this record was written — milliseconds after the outcome, on a different pod. Enough to
 /// bound a query window and to tell two records in one lineage apart; not a clock to order events
 /// by.
 /// </param>
-internal sealed record OutcomeRecord(string CorrelationId, string? ExecutionId, DateTimeOffset RecordedAtUtc);
+internal sealed record OutcomeRecord(
+    string CorrelationId,
+    string? ExecutionId,
+    string WorkflowId,
+    string StepId,
+    string ProcessorId,
+    DateTimeOffset RecordedAtUtc);
 
 /// <summary>The one serializer configuration for the outcome record.</summary>
 internal static class OutcomeRecordJson

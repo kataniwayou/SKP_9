@@ -336,9 +336,9 @@ public sealed class OutcomeRecorderLiveTests
         //   opened, before anything downstream can fail -- so it survives independently of whatever
         //   the normalizer later does to the file's CONTENT.
         // - Every hop after the importer passes an ENVELOPE (bytes + ids), never the source path.
-        //   OutcomeRecorder's own record is exactly that envelope's tail: {correlationId,
-        //   executionId?, recordedAtUtc}, no path. So the importer's log line is the one and only
-        //   place downstream of the failure where an operator can still read the path back -- which
+        //   OutcomeRecorder's own record is exactly that envelope's ids: {correlationId,
+        //   executionId?, workflowId, stepId, processorId, recordedAtUtc}, no path. So the
+        //   importer's log line is the one and only place downstream of the failure where an operator can still read the path back -- which
         //   is why this test resolves it through Elasticsearch rather than through the record.
         var name = $"pathproof-{Guid.NewGuid():N}.zip";
         var path = SeedArchive(name);

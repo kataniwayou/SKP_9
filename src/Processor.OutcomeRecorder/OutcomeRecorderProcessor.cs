@@ -40,6 +40,11 @@ internal sealed class OutcomeRecorderProcessor(
             // "N". The one formatting decision in this assembly that can silently break the feature.
             CorrelationKeys.Render(CorrelationId),
             executionId == Guid.Empty ? null : executionId.ToString("D"),
+            // The dispatch's own position, as received — this step and this processor, not the
+            // predecessor's. See OutcomeRecord.
+            WorkflowId.ToString("D"),
+            StepId.ToString("D"),
+            ProcessorId.ToString("D"),
             clock.GetUtcNow());
 
         // THE LINEAGE THIS BRANCH TRAVELS ON, which is NOT always the one the record reports.

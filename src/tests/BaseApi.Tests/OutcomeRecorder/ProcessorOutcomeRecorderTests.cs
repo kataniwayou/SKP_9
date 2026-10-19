@@ -111,6 +111,27 @@ public sealed class ProcessorOutcomeRecorderTests
     }
 
     [Fact]
+    public async Task CarriesTheDispatchPositionItWasHandedDashed()
+    {
+        // The recorder records what it gets: its own workflow, step and processor off the dispatch,
+        // not the predecessor's -- the orchestrator stamps a dispatch with the successor's position.
+        var record = Record(await Run([], E));
+
+        Assert.Equal(W.ToString("D"), record.GetProperty("workflowId").GetString());
+        Assert.Equal(S.ToString("D"), record.GetProperty("stepId").GetString());
+        Assert.Equal(P.ToString("D"), record.GetProperty("processorId").GetString());
+    }
+
+    [Fact]
+    public async Task CarriesTheDispatchPositionEvenWhenThePredecessorHadNoLineage()
+    {
+        // Only the execution id depends on the predecessor; the position is always on the dispatch.
+        var record = Record(await Run([], Guid.Empty));
+
+        Assert.Equal(S.ToString("D"), record.GetProperty("stepId").GetString());
+    }
+
+    [Fact]
     public async Task StampsTheTimeFromTheClock()
     {
         var record = Record(await Run([], E));
@@ -136,13 +157,13 @@ public sealed class ProcessorOutcomeRecorderTests
     public async Task IgnoresTheInputItWasHanded()
     {
         // The orchestrator hands over the predecessor's input blob. It is neither parsed nor
-        // forwarded: a megabyte of arbitrary bytes produces the same three-field record as none.
+        // forwarded: a megabyte of arbitrary bytes produces the same six-field record as none.
         var cargo = new byte[1024 * 1024];
         Random.Shared.NextBytes(cargo);
 
         var record = Record(await Run(cargo, E));
 
-        Assert.Equal(3, record.EnumerateObject().Count());
+        Assert.Equal(6, record.EnumerateObject().Count());
     }
 
     [Fact]
