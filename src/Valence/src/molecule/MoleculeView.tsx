@@ -67,8 +67,8 @@ const NO_GHOSTS: Ghosts = { atoms: new Set(), arrows: new Set() };
  * The whole-project molecule (spec §2.7), drawn as the approved mock draws one workflow (docs/valence/molecule-mock.html),
  * over SKP Studio's dark ground: rows are atoms, foreign keys are arrows whose thickness is the bond class. Hover shows an
  * atom with its one-hop neighbours (no tooltip: the user, 2026-10-15); a drag turns the molecule about fixed axes (it
- * coasts on after a quick release), the wheel (or a pinch) zooms toward the canvas centre, a right drag or Ctrl + drag on empty canvas pans, and Ctrl + drag on
- * an atom moves that atom. A click (no drag) on an atom pins it, on empty canvas unpins; the pinned atom glows and, while
+ * coasts on after a quick release), the wheel (or a pinch) zooms toward the canvas centre, Ctrl + drag on empty canvas
+ * slides the picture, and Ctrl + drag on an atom moves that atom; a right drag does exactly what Ctrl + drag does. A click (no drag) on an atom pins it, on empty canvas unpins; the pinned atom glows and, while
  * nothing is hovered, keeps its neighbours in focus. `highlighted`: the atoms of the chosen workflows stand out and the
  * rest are dimmed; null highlights nothing.
  */
@@ -174,9 +174,10 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   const radius = extentOf(positions);
   const spread = [0, 1, 2].map((i) => Math.max(...[...positions.values()].map((p) => Math.abs(p[i]!)), 1));
 
-  // The trackball only pans (right drag, two fingers); turning and zooming are our own, below.
+  // The trackball only pans with two fingers; turning, zooming and the mouse's right drag (= Ctrl + drag) are our own, below.
   const controls = new TrackballControls(camera, canvas);
   controls.noRotate = true; controls.noZoom = true; controls.panSpeed = 0.8;
+  controls.mouseButtons.RIGHT = -1 as THREE.MOUSE; // no action: the right button is ours (the user, 2026-10-19)
   controls.staticMoving = false; controls.dynamicDampingFactor = 0.12;
   controls.keys = ['', '', '']; // no A/S/D mode keys
   cleanups.push(() => controls.dispose());
@@ -549,6 +550,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
 
   // Ctrl + drag moves an atom on a plane facing the camera through its centre; touch has no Ctrl, so a finger on an atom drags it.
   // Ctrl + drag on empty canvas moves the whole molecule along the screen's x and y (the user's, 2026-10-15).
+  // A mouse's right drag is exactly a Ctrl + drag, on an atom and on empty canvas (the user, 2026-10-19).
   // Cursors (the user's table, 2026-10-15): canvas slide — open hand ready, closed hand while dragging; moving an atom —
   // the four-way arrow, ready and while dragging; turning — the normal arrow at rest, a circular arrow while dragging.
   let overAtom = false, overCanvas = false, ctrlDown = false;
@@ -636,13 +638,18 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
     events.pin(keyOf(focusOf(pick(e))));
   });
 
+  // the mouse button a gesture was begun with (1 left, 2 right, as in `buttons`): it ends when that one is no longer down
+  let held = 1;
   listen(canvas, 'pointerdown', (e) => {
-    if (e.pointerType === 'mouse' ? e.button !== 0 : !e.isPrimary) { turning = null; return; }
+    if (e.pointerType === 'mouse' ? e.button !== 0 && e.button !== 2 : !e.isPrimary) { turning = null; return; }
+    // a right press is a Ctrl press
+    const ctrl = e.pointerType === 'mouse' && (e.ctrlKey || e.button === 2);
+    held = e.button === 2 ? 2 : 1;
     spin.x = spin.y = 0;
-    const hit = (e.pointerType !== 'mouse' || e.ctrlKey) ? pick(e) : null;
+    const hit = (e.pointerType !== 'mouse' || ctrl) ? pick(e) : null;
     const atom = hit?.object.userData.atom ? atoms.get(hit.object.userData.atom as string) : undefined;
     if (atom && grab(e, atom)) { turning = null; return; }
-    if (e.pointerType === 'mouse' && e.ctrlKey) {
+    if (ctrl) {
       turning = null;
       panning = { id: e.pointerId, x: e.clientX, y: e.clientY };
       controls.enabled = false;
@@ -655,8 +662,8 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
     setHand();
   });
   listen(win, 'pointermove', (e) => {
-    // a mouse with no button down: the release happened where we never heard it; end here, without a coast
-    if (e.pointerType === 'mouse' && !(e.buttons & 1) && (dragging || turning || panning)) { spin.x = spin.y = 0; drop(e); endPan(e); turning = null; setHand(); return; }
+    // a mouse without the gesture's button down: the release happened where we never heard it; end here, without a coast
+    if (e.pointerType === 'mouse' && !(e.buttons & held) && (dragging || turning || panning)) { spin.x = spin.y = 0; drop(e); endPan(e); turning = null; setHand(); return; }
     if (dragging && e.pointerId === dragging.id) { dragTo(e); return; }
     if (panning && e.pointerId === panning.id) { pan(e.clientX - panning.x, e.clientY - panning.y); panning.x = e.clientX; panning.y = e.clientY; return; }
     if (!turning || e.pointerId !== turning.id) return;
@@ -683,7 +690,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   listen(win, 'blur', () => { spin.x = spin.y = 0; turning = null; if (dragging) drop({ pointerId: dragging.id }); if (panning) endPan({ pointerId: panning.id }); ctrlDown = false; setHand(); });
   listen(canvas, 'pointermove', hover);
   listen(canvas, 'pointerleave', () => { overCanvas = false; if (dragging || panning) return; setFocus(null); overAtom = false; setHand(); });
-  // the dock's own right-click menus are for tabs; on the molecule a right drag pans
+  // the dock's own right-click menus are for tabs; on the molecule a right drag is a Ctrl + drag
   listen(canvas, 'contextmenu', (e) => e.preventDefault());
 
   // ---------- Zoom ----------

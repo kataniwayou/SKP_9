@@ -127,6 +127,8 @@ The user: "load the diagram by baseapi to canvas same as mock but darkmode". Bui
   wheel zoom, right-drag pan, Ctrl+drag an atom (open hand), **Ctrl+drag on empty canvas slides the picture along the screen's
   x and y** (the user, 2026-10-15) — a lens shift (`camera.setViewOffset`), not a camera move, so every atom moves exactly
   with the pointer (Playwright: 200 px drag = 200 px for every atom, also after a turn and zoomed in).
+  **Since 2026-10-19 a right drag is exactly a Ctrl+drag** (the user): on an atom it relocates the atom, on empty canvas it
+  slides the picture; the trackball's right-drag camera pan is gone (`mouseButtons.RIGHT = -1`), its two-finger pan stays.
   **The wheel and a pinch zoom toward the canvas centre** (the user, 2026-10-16). Our own zoom (`zoomBy`; the trackball's
   `noZoom`): the camera moves along the line from it through the canvas centre, so an atom put at the centre stays there at
   any depth (the trackball moved along the camera's axis, which a slide puts off-centre: atoms at the centre drifted

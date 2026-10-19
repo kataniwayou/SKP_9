@@ -41,7 +41,7 @@ export const SHORTCUTS: readonly ShortcutGroup[] = [
       { keys: 'Drag', does: 'Turn the molecule' },
       { keys: 'Drag, let go', does: 'Let go while moving: it keeps turning; hold still first: it stops' },
       { keys: 'Ctrl+drag', does: 'Slide the picture (the turning point stays)' },
-      { keys: 'Right-drag', does: 'Move the camera sideways' },
+      { keys: 'Right-drag', does: 'As Ctrl+drag: on an atom relocates it, on empty canvas slides the picture' },
       { keys: 'Wheel', does: 'Zoom toward the canvas centre' },
       { keys: 'Zoom in', does: "Names appear as you zoom in; a workflow's always" },
     ],
