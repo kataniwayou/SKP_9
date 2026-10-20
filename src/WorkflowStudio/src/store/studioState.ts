@@ -13,6 +13,8 @@ import { dropTool, type ToolItem } from '../design/toolDrop';
 import type { Point } from '../layout/geometry';
 import { commit, historyOf, redo, undo, type DesignHistory } from '../design/history';
 import { settleDesign } from '../design/settle';
+import { applyEdits } from '../design/apply';
+import { keepJunctions } from '../design/keepJunctions';
 import { isShortCircuitError } from '../design/shortCircuits';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { EMPTY_INSPECTOR, type InspectorState } from './inspector';
@@ -172,7 +174,7 @@ export type StudioAction =
    * A Toolbox tile dropped on this document's canvas at `at` (flow coordinates, 2026-10-11): a new step, cache or wire, an
    * existing cache linked, or an existing processor given to the step there. `roots`: every cache root BaseApi listed.
    */
-  | { type: 'toolDrop'; workflowId: Id; item: ToolItem; at: Point; newId: () => string; roots?: readonly string[] }
+  | { type: 'toolDrop'; workflowId: Id; item: ToolItem; at: Point; newId: () => string; roots?: readonly string[]; reach?: number }
   /** Delete: the picked steps, caches and wires leave the design (the hub is skipped), one history step. */
   | { type: 'deletePicks'; workflowId: Id }
   /** A Toolbox tile clicked (2026-10-11): the Inspector shows it read-only; null clears it. */
@@ -251,6 +253,11 @@ const redesign = (d: OpenDocument, design: DesignHistory): OpenDocument =>
   design === d.design ? d : prunedSelection({ ...d, design, picks: prunedPicks(d, design.draft) }, design.draft);
 
 /** A paste or a delete: one history step, the picks it leaves, and the Inspector on the one block picked (or nothing). */
+/** A commit's draft with the junctions the router moved kept where they were drawn (the user's ruling, 2026-10-20). */
+function keptDraft(d: OpenDocument, draft: Draft): Draft {
+  return d.status.kind !== 'ready' ? draft : keepJunctions(applyEdits(d.status.doc, d.edits, draft.blocks), d.design.draft, draft);
+}
+
 function blocksChanged(d: OpenDocument, draft: Draft, picks: Pick[]): OpenDocument {
   if (d.status.kind !== 'ready') return d;
   const graph = applyBlocks(d.status.doc, draft.blocks).graph;
@@ -259,7 +266,7 @@ function blocksChanged(d: OpenDocument, draft: Draft, picks: Pick[]): OpenDocume
     : only === SPHERE_NODE_ID ? { kind: 'workflow' }
       : only.startsWith(CACHE_NODE_PREFIX) ? { kind: 'cache', cacheId: only.slice(CACHE_NODE_PREFIX.length) }
         : graph.steps.has(only) ? { kind: 'step', stepId: only } : null;
-  const moved: OpenDocument = { ...d, design: commit(d.design, draft), picks };
+  const moved: OpenDocument = { ...d, design: commit(d.design, keptDraft(d, draft)), picks };
   return selectionKey(selection) === selectionKey(d.selection) ? moved : { ...moved, selection, inspector: EMPTY_INSPECTOR };
 }
 
@@ -301,7 +308,8 @@ function reduceDocs(state: StudioState, action: StudioAction): StudioState {
         const settled = d.restored ? settleDesign({ draft: d.design.draft, edits: d.edits }, action.doc).draft : null;
         const design = settled === null
           ? { design: historyOf(stored.draft), edits: stored.edits }
-          : settled === d.design.draft ? {} : { design: historyOf(settled) };
+          // its Undo and Redo steps from the session stay (the user's ruling, 2026-10-20)
+          : settled === d.design.draft ? {} : { design: { ...d.design, draft: settled, merge: null } };
         return { ...d, ...design, name: action.doc.graph.workflow.name, version: action.doc.graph.workflow.version, status: { kind: 'ready', doc: action.doc }, stored, restored: false, generation: d.generation + 1 };
       });
     case 'failed':
@@ -336,7 +344,7 @@ function reduceDocs(state: StudioState, action: StudioAction): StudioState {
       return update(state, action.workflowId, (d) => (samePicks(d.picks, action.picks) ? d : withPicks(d, action.picks)));
     case 'design':
       return update(state, action.workflowId, (d) => (designLocked(d) ? d : {
-        ...d, design: commit(d.design, action.draft, action.merge ?? null), picks: action.picks ?? d.picks,
+        ...d, design: commit(d.design, keptDraft(d, action.draft), action.merge ?? null), picks: action.picks ?? d.picks,
       }));
     case 'undo':
       return update(state, action.workflowId, (d) => (designLocked(d) ? d : redesign(d, undo(d.design))));
@@ -522,7 +530,7 @@ function reduceDocs(state: StudioState, action: StudioAction): StudioState {
     case 'toolDrop':
       return update(state, action.workflowId, (d) => {
         if (d.status.kind !== 'ready' || designLocked(d)) return d;
-        const dropped = dropTool(d.status.doc, d.edits, d.design.draft, action.item, action.at, action.newId);
+        const dropped = dropTool(d.status.doc, d.edits, d.design.draft, action.item, action.at, action.newId, action.reach);
         return dropped === null ? d : blocksChanged(d, dropped.draft, dropped.picks);
       });
     case 'deletePicks':

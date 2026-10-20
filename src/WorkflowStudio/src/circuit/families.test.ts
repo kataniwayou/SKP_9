@@ -52,14 +52,14 @@ describe('families (plan 9 §4)', () => {
     expect(t.nets).toHaveLength(2);
   });
 
-  it('a step fed its own input (through junctions, or by one wire) is never a link: it is named in selfFed (spec §2.2-4)', () => {
+  it('a step fed its own input (through junctions, or by one wire) is a link like any other, and named in selfFed (2026-10-20)', () => {
     const hidden = { h: w(at('s1'), at('s2')), x: w(on('h', 40), at('s1')) };
     expect(linkKeys(trace(hidden).links)).toContain('s1->s1');
     const t = circuitTrace(hidden, cond({ s1: 1, s2: 1 }));
-    expect([...linkKeys(t.links)]).toEqual(['s1->s2']);
+    expect([...linkKeys(t.links)].sort()).toEqual(['s1->s1', 's1->s2']);
     expect(t.selfFed).toEqual(['s1']);
     const plain = circuitTrace({ a: w(at('s3'), at('s3')) }, cond({ s3: 1 }));
-    expect(plain.links.size).toBe(0);
+    expect([...linkKeys(plain.links)]).toEqual(['s3->s3']);
     expect(plain.selfFed).toEqual(['s3']);
     expect(circuitTrace({ a: w(at('s1'), at('s2')) }, cond({ s2: 1 })).selfFed).toEqual([]);
   });

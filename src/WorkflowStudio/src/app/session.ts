@@ -35,6 +35,11 @@ export interface SessionDoc {
   design?: Draft;
   /** The unsaved entity edits (plan 8): absent when there are none. */
   edits?: EntityEdits;
+  /**
+   * The design's Undo and Redo steps (the user's ruling, 2026-10-20: Undo survives a refresh), oldest first; `design`
+   * is then the draft they lead to. Absent when there are none. Optional, so the version stays 1.
+   */
+  history?: { past: Draft[]; future: Draft[] };
   /** A new workflow BaseApi does not have yet (2026-10-10): built again locally, never read. Absent: an ordinary one. */
   virtual?: true;
 }
@@ -77,6 +82,7 @@ export function readSession(storage: Storage | null): Session | null {
       view: isView(d.view) ? d.view : null,
       ...(isDraft(d.draft) ? { draft: { trail: d.draft.trail } } : {}),
       ...designParts(d.design, d.edits),
+      ...historyPart(d.history),
       ...(d.virtual === true ? { virtual: true as const } : {}),
     });
   }
@@ -144,11 +150,29 @@ export function writeTabSession(tab: Storage | null, mirror: Storage | null, ses
  */
 export function keepSession(tab: Storage | null, mirror: Storage | null, session: Session): boolean {
   if (writeTabSession(tab, mirror, session)) return true;
+  // the Undo history before Output's log: its last steps first, then none (the drafts themselves are always kept)
+  if (session.docs.some((d) => d.history) && writeTabSession(tab, mirror, withHistory(session, SHORT_HISTORY))) return true;
+  session = withHistory(session, SHORT_HISTORY);
   const output = session.output ?? [];
   if (output.length > 100 && writeTabSession(tab, mirror, { ...session, output: output.slice(-100) })) return true;
   if (output.length === 0) return false;
   const { output: _, ...without } = session;
-  return writeTabSession(tab, mirror, without);
+  return writeTabSession(tab, mirror, without) || writeTabSession(tab, mirror, withHistory(without, 0));
+}
+
+/** How many Undo and Redo steps a document keeps in a session the browser found too big. */
+const SHORT_HISTORY = 20;
+
+/** Each document's Undo history cut to its last `depth` steps back and forth (0: none). */
+function withHistory(session: Session, depth: number): Session {
+  return {
+    ...session,
+    docs: session.docs.map((d) => {
+      if (!d.history) return d;
+      const { history, ...rest } = d;
+      return depth === 0 ? rest : { ...rest, history: { past: history.past.slice(-depth), future: history.future.slice(0, depth) } };
+    }),
+  };
 }
 
 /** The session for the current state: views of documents that are no longer open are dropped. */
@@ -159,6 +183,9 @@ export function sessionOf(state: StudioState, views: ReadonlyMap<string, SavedVi
       workflowId: d.workflowId, name: d.name, version: d.version, selection: d.selection, view: views.get(d.workflowId) ?? null,
       ...(d.inspector.trail.length > 0 ? { draft: { trail: d.inspector.trail } } : {}),
       ...(designDirty(d) ? { design: d.design.draft, edits: d.edits } : {}),
+      // with Undo or Redo steps the draft they lead to is kept too, unsaved or not
+      ...(d.design.past.length > 0 || d.design.future.length > 0
+        ? { design: d.design.draft, history: { past: d.design.past, future: d.design.future } } : {}),
       ...(d.virtual === true ? { virtual: true as const } : {}),
     })),
     activeId: state.activeId,
@@ -176,7 +203,7 @@ export function restoredState(session: Session | null): StudioState {
     docs: session.docs.map((d) => ({ workflowId: d.workflowId, name: d.name, version: d.version, status: { kind: 'loading' }, selection: d.selection,
       inspector: { ...EMPTY_INSPECTOR, trail: d.draft?.trail ?? [] },
       picks: picksOf(d.selection),
-      design: historyOf(d.design),
+      design: { ...historyOf(d.design), past: d.history?.past ?? [], future: d.history?.future ?? [] },
       edits: d.edits ?? EMPTY_EDITS,
       stored: null,
       restored: d.design !== undefined || d.edits !== undefined,
@@ -228,6 +255,13 @@ function designParts(design: unknown, edits: unknown): { design?: Draft; edits?:
   const draft = parseDraft(design);
   const parsed = parseEdits(edits);
   return { ...(draft !== null ? { design: draft } : {}), ...(parsed !== null ? { edits: parsed } : {}) };
+}
+
+function historyPart(value: unknown): { history?: { past: Draft[]; future: Draft[] } } {
+  if (!isRecord(value) || !Array.isArray(value.past) || !Array.isArray(value.future)) return {};
+  const drafts = (list: unknown[]) => list.map(parseDraft).filter((x): x is Draft => x !== null);
+  const past = drafts(value.past), future = drafts(value.future);
+  return past.length > 0 || future.length > 0 ? { history: { past, future } } : {};
 }
 
 function isView(value: unknown): value is SavedView {

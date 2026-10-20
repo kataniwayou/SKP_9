@@ -2,6 +2,8 @@ import { useSyncExternalStore } from 'react';
 import type { StudioDocument } from '../app/document';
 import type { Point } from '../layout/geometry';
 import type { Id } from '../model/graph';
+import type { Circuit } from '../circuit/circuit';
+import { DROP_REACH, toneOf } from './drop';
 import { judgeTool, type ToolItem, type ToolVerdict } from './toolDrop';
 
 /**
@@ -13,13 +15,15 @@ export interface DropTarget {
   el: Element;
   toFlow: (client: Point) => Point;
   shown: () => StudioDocument;
+  /** The circuit it shows (a Wire tile over a contact is judged as a dragged wire end there, 2026-10-20). */
+  circuit?: () => Readonly<Circuit>;
 }
 
 /** A Toolbox drag in progress: the tile, the pointer (screen), and the canvas under it with the verdict there. */
 export interface ToolDragState {
   item: ToolItem;
   client: Point;
-  over: { target: DropTarget; flow: Point; verdict: ToolVerdict; saving: boolean } | null;
+  over: { target: DropTarget; flow: Point; verdict: ToolVerdict; saving: boolean; reach: number } | null;
 }
 
 const targets = new Set<DropTarget>();
@@ -61,15 +65,20 @@ export const toolDrag = {
     const target = targetAt(doc, client);
     if (!target) { state = { ...state, client, over: null }; emit(); return; }
     const flow = target.toFlow(client);
-    state = { ...state, client, over: { target, flow, verdict: judgeTool(target.shown(), state.item, flow), saving: isSaving(target.workflowId) } };
+    // the drop reach of a dragged wire end: DROP_REACH screen px, in flow px at this zoom
+    const reach = DROP_REACH * Math.abs(target.toFlow({ x: client.x + 1, y: client.y }).x - flow.x);
+    const wiring = target.circuit ? { circuit: target.circuit(), reach } : undefined;
+    state = { ...state, client, over: { target, flow, verdict: judgeTool(target.shown(), state.item, flow, wiring), saving: isSaving(target.workflowId), reach } };
     emit();
   },
-  end(): { item: ToolItem; workflowId: Id; at: Point } | null {
+  end(): { item: ToolItem; workflowId: Id; at: Point; reach: number } | null {
     const s = state;
     state = null;
     emit();
-    if (!s?.over || s.over.saving || s.over.verdict.kind === 'noStep' || s.over.verdict.kind === 'linked') return null;
-    return { item: s.item, workflowId: s.over.target.workflowId, at: s.over.flow };
+    if (!s?.over || s.over.saving) return null;
+    const v = s.over.verdict;
+    if (v.kind === 'noStep' || v.kind === 'linked' || (v.kind === 'wire' && toneOf(v.why) === 'no')) return null;
+    return { item: s.item, workflowId: s.over.target.workflowId, at: s.over.flow, reach: s.over.reach };
   },
   cancel(): void {
     if (state === null) return;

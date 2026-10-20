@@ -5,7 +5,7 @@ import { selectionForPicks } from '../canvas/selection';
 import { togglePick, type Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
 import { addCircuitWire, freeWithout, NEW_WIRE_PREFIX, openJoinedOn, sameEnd, setBends, setEnd, type Circuit, type End, type Side } from '../circuit/circuit';
-import { endPointOf, hubStart, type WireRoute } from '../layout/circuitRoute';
+import { endPointOf, hubStart, routeCircuit, type WireRoute } from '../layout/circuitRoute';
 import { clearBends, clearDragged, clearRun, legPath } from '../layout/detour';
 import { clampLanding, PMID, snap, STEP_W, type Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
@@ -20,7 +20,7 @@ import { circuitOf, removeWires, withCircuit, type Draft } from './draft';
 import { landBody, type BodyLanding } from './bodyDrop';
 import { landWires, type RunLanding, type WireRun } from './keyBody';
 import { cutPaths, cutTargets, cutWire, holdDrawn, squareAt, squaresOf, type Square } from './cut';
-import { applyDrop, endOf, judgeDrop, pointOfTarget, roleOf, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
+import { applyDrop, DROP_REACH, endOf, judgeDrop, pointOfTarget, roleOf, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
 import { overlapJudge } from './overlapJudge';
 import { newId } from './ids';
@@ -71,8 +71,6 @@ function ghostPath(from: Point, to: Point, side: Side, boxes: Box[], avoid?: (pt
 /** Below this many screen pixels a press is a click, not a drag. */
 const MOVE_START = 3;
 
-/** How far outside a block's border or a line (screen px) a dragged end already counts as over it. */
-const DROP_REACH = 8;
 
 export interface Gesture {
   run: (e: ReactPointerEvent, onMove: (p: Point) => void, onEnd: (cancelled: boolean, moved: boolean) => void) => void;
@@ -216,7 +214,8 @@ export function useWireGestures(
     };
     const shaped = (s: { bends: Bends | null; headY: number | null }): Draft => withCircuit(base, saved, shapedCircuit(s));
     // each move judges the core as it would be drawn (a lead from the hub or a junction does not move); the nets do not change
-    const judge = overlapJudge(shown.current, wire.id, circuit);
+    // a run dragged by hand: lying on another net's wire is a short circuit, automatic or not (the user's ruling, 2026-10-20)
+    const judge = overlapJudge(shown.current, wire.id, circuit, 'strict');
     let short = false;
     setResize(k % 2 === 0 ? 'ns' : 'ew');
     run(e, (p) => {
@@ -417,13 +416,26 @@ export function useWireGestures(
     // a drop that keeps the drawn shape lies where it is drawn: on a wire it may not share a line with it is a short
     // circuit (rule 2); one the router draws again takes a free track by itself
     const judge = overlapJudge(shown.current, wire.id, circuit);
-    const overlaps = (t: DropTarget, path: Pt[]): boolean => (t.on === 'open' || keepShape()) && judge(path, () => dropped(t));
+    // what a drop on a contact draws once committed (2026-10-20: the label and the ghost show exactly that, so a drop that
+    // reads "join here" never commits a route lying on another wire): the circuit it makes, routed; one per pointer spot
+    let routed: { key: string; points: Pt[] | null } | null = null;
+    const committed = (t: DropTarget): Pt[] | null => {
+      const key = JSON.stringify([t, legs.path, legs.end]);
+      if (routed?.key !== key) {
+        const r = routeCircuit(dropped(t), { placement: shown.current.placement, steps: shown.current.graph.steps }).find((x) => x.id === wire.id);
+        routed = { key, points: r ? [...r.points] : null };
+      }
+      return routed.points;
+    };
+    const overlaps = (t: DropTarget, path: Pt[]): boolean => judge(path, () => dropped(t));
     setResize('move');
     dropGesture(e, {
       id: wire.id, ghost: wire.id, side, circuit, own, overlaps,
       step: (p) => { legs = moveLegs(legs, p); },
       path: (t) => {
         if (t.on === 'open') return stored(openPath());
+        const drawn = toneOf(judgeDrop(shown.current, circuit, wire.id, side, t)) === 'no' ? null : committed(t);
+        if (drawn) return drawn;
         const { core, lead } = into(t);
         return stored(simplify([...core, ...lead]));
       },

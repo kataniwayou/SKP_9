@@ -40,6 +40,26 @@ describe('InspectorService (plan 8 §3.3: reads, then design edits)', () => {
     expect(doc().inspector.readError).toBe('This step no longer exists.');
   });
 
+  it('reads a step and a cache the Toolbox made from the design graph, with no GET and no "no longer exists" (2026-10-20)', async () => {
+    const getEntity = vi.fn().mockResolvedValue(notFound);
+    const { service, store, flush, doc } = await setup(getEntity);
+    store.dispatch({ type: 'toolDrop', workflowId: 'wf1', item: { kind: 'step' }, at: { x: 800, y: 400 }, newId: () => 'n1' });
+    store.dispatch({ type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 'n1' } });
+    service.read('wf1');
+    await flush();
+    expect(getEntity).not.toHaveBeenCalled();
+    expect(doc().inspector.readError).toBeNull();
+    expect(doc().inspector.saved).toMatchObject({ key: 'step:n1', dto: { id: 'n1', name: 'step', version: '1.0.0', entryCondition: 1 } });
+
+    store.dispatch({ type: 'toolDrop', workflowId: 'wf1', item: { kind: 'newCache' }, at: { x: 800, y: 800 }, newId: () => 'c9' });
+    store.dispatch({ type: 'select', workflowId: 'wf1', selection: { kind: 'cache', cacheId: 'c9' } });
+    service.read('wf1');
+    await flush();
+    expect(getEntity).not.toHaveBeenCalled();
+    expect(doc().inspector.readError).toBeNull();
+    expect(doc().inspector.saved).toMatchObject({ key: 'cache:c9', dto: { id: 'c9', root: '' } });
+  });
+
   it('turns typed text into a design edit: an entry condition is a number, a blank nullable field is null; nothing is written', async () => {
     const { service, flush, doc, writes } = await setup();
     service.read('wf1');

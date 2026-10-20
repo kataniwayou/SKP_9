@@ -371,12 +371,12 @@ describe('wire gestures', () => {
     expect(design.onCommit).not.toHaveBeenCalled();
   });
 
-  it('a head joined where its own step would feed itself is refused: "same step"', async () => {
+  it('a head joined where its own step feeds itself joins (free style, 2026-10-20): "join here"', async () => {
     const doc = await three();
     const design = designOf({ picks: [{ kind: 'wire', id: 's2->s3' }] });
     const { container } = canvasOf(doc, design);
-    expect(dragEnd(container, 's2->s3', 'head', onLine(doc, 's1->s2')).text).toBe('same step');
-    expect(design.onCommit).not.toHaveBeenCalled();
+    expect(dragEnd(container, 's2->s3', 'head', onLine(doc, 's1->s2')).text).toBe('join here');
+    expect(design.onCommit).toHaveBeenCalled();
   });
 
   it('a junction that closes a loop of wires is refused: "short circuit"', async () => {

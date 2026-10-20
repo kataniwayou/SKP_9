@@ -1,5 +1,7 @@
 import type { StudioDocument } from '../app/document';
-import { NEW_WIRE_PREFIX } from '../circuit/circuit';
+import { NEW_WIRE_PREFIX, type Circuit, type CircuitWire, type End, type Side } from '../circuit/circuit';
+import { contactOn, routeCircuit } from '../layout/circuitRoute';
+import type { Pt } from '../layout/router';
 import { CACHE_H, CACHE_W, snap, STEP_H, STEP_W, type Point } from '../layout/geometry';
 import { CACHE_NODE_PREFIX, cacheNodeId, SPHERE_NODE_ID } from '../layout/nodeIds';
 import type { Cache, Id, Processor, Schema } from '../model/graph';
@@ -8,7 +10,9 @@ import { applyDraft, applyEdits } from './apply';
 import type { Blocks } from './blocks';
 import type { EntityEdits } from './design';
 import { circuitOf, withCircuit, type Draft } from './draft';
-import { blockAt } from './hit';
+import { endOf, judgeDrop, pointOfTarget, targetOf, toneOf, dropLabel, type DropTarget as WireTarget, type Verdict } from './drop';
+import { blockAt, wireAt } from './hit';
+import { overlapJudge } from './overlapJudge';
 
 /**
  * What a Toolbox tile drags (2026-10-11): a new, empty step or cache, a new undecided wire (each a new virtual entity, as a
@@ -32,11 +36,14 @@ export const DROPPED_WIRE = 96;
  */
 export type ToolVerdict =
   | { kind: 'place' }
+  /** A Wire tile over a contact (2026-10-20): judged as a dragged wire end there; `points`: the wire as it would be drawn. */
+  | { kind: 'wire'; target: Exclude<WireTarget, { on: 'open' }>; why: Verdict; points: Pt[] | null }
   | { kind: 'assign' | 'replace'; stepId: Id }
   | { kind: 'noStep' }
   | { kind: 'linked'; cacheId: Id };
 
-export function judgeTool(shown: StudioDocument, item: ToolItem, p: Point): ToolVerdict {
+export function judgeTool(shown: StudioDocument, item: ToolItem, p: Point, wiring?: { circuit: Readonly<Circuit>; reach: number }): ToolVerdict {
+  if (item.kind === 'wire' && wiring) return judgeWireTool(shown, wiring.circuit, p, wiring.reach);
   if (item.kind === 'processor') {
     const over = blockAt(shown, p);
     if (over === null || over === SPHERE_NODE_ID || over.startsWith(CACHE_NODE_PREFIX) || !shown.graph.steps.has(over)) return { kind: 'noStep' };
@@ -55,7 +62,60 @@ export function toolLabel(v: ToolVerdict, saving = false): { text: string; tone:
     case 'replace': return { text: 'replace processor', tone: 'ok' };
     case 'noStep': return { text: 'drop on a step', tone: 'no' };
     case 'linked': return { text: 'already in this workflow', tone: 'no' };
+    case 'wire': return { text: dropLabel(v.why), tone: toneOf(v.why) === 'no' ? 'no' : 'ok' };
   }
+}
+
+/** The id a Wire tile's wire is judged under while it is dragged (it gets its own when dropped). */
+const TOOL_WIRE = `${NEW_WIRE_PREFIX}tool`;
+
+/** The end of a Wire tile's wire that lands on contact `t`: a step's input takes its head, an output or the hub its tail. */
+const contactSide = (t: WireTarget): Side => (t.on === 'step' && t.side === 'out') || t.on === 'hub' ? 'tail' : 'head';
+
+/**
+ * A Wire tile dropped on contact `t` (the user's request, 2026-10-20): that end on the contact, the other open
+ * `DROPPED_WIRE` away from it — left of a step's input, right of an output, out from the hub along its angle, square off a
+ * line it joins — so it is drawn as a short straight stub, automatic, ready to be dragged on.
+ */
+export function toolWire(shown: StudioDocument, t: Exclude<WireTarget, { on: 'open' }>): CircuitWire {
+  const p = pointOfTarget(shown, t);
+  const away = (dx: number, dy: number): End => ({ on: 'open', x: snap(p.x + dx), y: snap(p.y + dy) });
+  const end = endOf(t);
+  switch (t.on) {
+    case 'step': return t.side === 'in' ? { tail: away(-DROPPED_WIRE, 0), head: end } : { tail: end, head: away(DROPPED_WIRE, 0) };
+    case 'hub': {
+      const r = (t.angle * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
+      return { tail: end, head: Math.abs(c) >= Math.abs(s) ? away(Math.sign(c) * DROPPED_WIRE, 0) : away(0, Math.sign(s) * DROPPED_WIRE) };
+    }
+    case 'wire': {
+      const host = shown.wires.find((w) => w.id === t.host);
+      const upright = host ? contactOn(host.points, t.at).vertical : false;
+      return { tail: upright ? away(DROPPED_WIRE, 0) : away(0, DROPPED_WIRE), head: end };
+    }
+  }
+}
+
+/**
+ * A Wire tile held at `p` (flow) over `shown`, whose circuit is `circuit`: over a step side, the hub or a line within
+ * `reach` (flow px), the same verdict a dragged wire end gets there — "connect here", "join here", or its refusal — and a
+ * short circuit when the wire as it would be drawn lies on another net's wire (rule 2); elsewhere a free wire is placed.
+ */
+export function judgeWireTool(shown: StudioDocument, circuit: Readonly<Circuit>, p: Point, reach: number): ToolVerdict {
+  const over = blockAt(shown, p, reach);
+  const line = over === null ? wireAt(shown, p, reach) : null;
+  const t = targetOf(shown, circuit, p, over, line);
+  if (t.on === 'open') return { kind: 'place' };
+  const side = contactSide(t);
+  const laid = toolWire(shown, t);
+  // judged as its contact end dragged onto `t`, the other end already where it will lie
+  const held: Circuit = { ...circuit, [TOOL_WIRE]: side === 'head' ? { tail: laid.tail, head: { on: 'open', x: p.x, y: p.y } } : { tail: { on: 'open', x: p.x, y: p.y }, head: laid.head } };
+  let why = judgeDrop(shown, held, TOOL_WIRE, side, t);
+  if (toneOf(why) === 'no') return { kind: 'wire', target: t, why, points: null };
+  const after: Circuit = { ...circuit, [TOOL_WIRE]: laid };
+  const drawn = routeCircuit(after, { placement: shown.placement, steps: shown.graph.steps }).find((w) => w.id === TOOL_WIRE);
+  const points = drawn ? [...drawn.points] : null;
+  if (points && overlapJudge(shown, TOOL_WIRE, circuit, 'strict')(points, () => after)) why = 'short';
+  return { kind: 'wire', target: t, why, points };
 }
 
 /** The box a dropped block takes, centred on the pointer and on the 8 px grid (flow coordinates). */
@@ -88,12 +148,12 @@ const NEW_STEP_CONDITION = 1;
  * (`judgeTool`): a processor not on a step, or a cache already in this workflow.
  */
 export function dropTool(
-  base: StudioDocument, edits: EntityEdits, draft: Draft, item: ToolItem, p: Point, newId: () => string,
+  base: StudioDocument, edits: EntityEdits, draft: Draft, item: ToolItem, p: Point, newId: () => string, reach = 0,
 ): { draft: Draft; picks: Pick[] } | null {
   const saved = applyEdits(base, edits, draft.blocks);
   const shown = applyDraft(saved, draft);
-  const verdict = judgeTool(shown, item, p);
-  if (verdict.kind === 'noStep' || verdict.kind === 'linked') return null;
+  const verdict = judgeTool(shown, item, p, { circuit: circuitOf(saved, draft), reach });
+  if (verdict.kind === 'noStep' || verdict.kind === 'linked' || (verdict.kind === 'wire' && toneOf(verdict.why) === 'no')) return null;
   const b = draft.blocks;
   const withBlocks = (blocks: Blocks): Draft => ({ ...draft, blocks });
 
@@ -148,7 +208,9 @@ export function dropTool(
       const [a, z] = wireLanding(p);
       const id = `${NEW_WIRE_PREFIX}${newId()}`;
       const circuit = copy(circuitOf(saved, draft));
-      circuit[id] = { tail: { on: 'open', x: a.x, y: a.y }, head: { on: 'open', x: z.x, y: z.y }, bends: { xs: [a.x], ys: [] } };
+      // on a contact: that end connected or joined there, the other open beside it (2026-10-20); else a free wire
+      circuit[id] = verdict.kind === 'wire' ? toolWire(shown, verdict.target)
+        : { tail: { on: 'open', x: a.x, y: a.y }, head: { on: 'open', x: z.x, y: z.y }, bends: { xs: [a.x], ys: [] } };
       return { draft: withCircuit(draft, saved, circuit), picks: [{ kind: 'wire', id }] };
     }
   }

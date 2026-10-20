@@ -53,8 +53,9 @@ export function shortedWires(nets: readonly Net[], overlapping: Iterable<string>
 }
 
 /**
- * The current as Save writes it (plan 9 §7): short-circuited nets left out, and a step's current reaching its own
- * input (a hidden self-loop, or one wire on both its sides) is never a link (§2.2-4): those steps are in `selfFed`.
+ * The current as Save writes it (plan 9 §7): short-circuited nets left out. A step's current reaching its own input (one
+ * wire on both its sides, or through junctions) is a link like any other (the user's ruling, 2026-10-20: free style);
+ * those steps are also named in `selfFed`.
  */
 export function circuitTrace(
   circuit: Readonly<Circuit>,
@@ -68,9 +69,8 @@ export function circuitTrace(
   const links = new Map<SourceId, Id[]>();
   const selfFed: Id[] = [];
   for (const [s, ts] of t.links) {
-    const kept = ts.filter((x) => x !== s);
-    if (kept.length < ts.length) selfFed.push(s);
-    if (kept.length > 0) links.set(s, kept);
+    if (ts.includes(s as Id)) selfFed.push(s as Id);
+    if (ts.length > 0) links.set(s, [...ts]);
   }
   return { links, loop: t.loop, nets, selfFed, shorted };
 }

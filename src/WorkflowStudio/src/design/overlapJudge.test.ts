@@ -38,6 +38,8 @@ describe('overlapJudge (the user\'s rule 2, 2026-10-09)', () => {
     // s1 -> s2 shaped by hand: it stays (automatic, it would move a track over: the coordinator's ruling)
     expect(judge(on, () => pin(d, laid(d, on), 's1->s2'))).toBe(true);
     expect(judge(on, () => laid(d, on))).toBe(false);
+    // a run dragged by hand (strict): on the automatic one too, which is not moved aside (the user's ruling, 2026-10-20)
+    expect(overlapJudge(d, 'w:f', circuitOf(d, EMPTY_DRAFT), 'strict')(on, () => laid(d, on))).toBe(true);
     expect(judge(beside, () => laid(d, beside))).toBe(false);
     expect(judge(across, () => laid(d, across))).toBe(false);
   });
@@ -75,6 +77,7 @@ describe('overlapJudge (the user\'s rule 2, 2026-10-09)', () => {
     const x = hub[up]![0], lo = Math.min(hub[up - 1]![1], hub[up]![1]) + 24, hi = Math.max(hub[up - 1]![1], hub[up]![1]) - 24;
     const path: Pt[] = [[x - 40, lo], [x, lo], [x, hi], [x + 40, hi]];
     expect(overlapJudge(d, 'w:f', circuitOf(d, EMPTY_DRAFT))(path, () => laid(d, path))).toBe(false);
+    expect(overlapJudge(d, 'w:f', circuitOf(d, EMPTY_DRAFT), 'strict')(path, () => laid(d, path))).toBe(true);
     expect(overlapJudge(d, 'w:f', circuitOf(d, EMPTY_DRAFT))(path, () => pin(d, laid(d, path), 'wf->s1'))).toBe(true);
   });
 });

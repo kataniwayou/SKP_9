@@ -86,8 +86,8 @@ describe('reconcile (plan 9 §7, §8; decision 6)', () => {
     expect(out.y!.tail.on).toBe('open');
   });
 
-  it('a hidden self-loop is never written, so it is not unexpected either: settle keeps it as Save sees it', async () => {
-    const d = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+  it('a hidden self-loop the saved lists name (s1 feeds itself, 2026-10-20) is expected: settle keeps it', async () => {
+    const d = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2', 's1'] }), stepDto('s2')] }));
     const c: Circuit = { ...plainOf(d), 'w:x': { tail: on('s1->s2', 40), head: at('s1') } };
     expect(reconcile(c, expectedLinks(d, {}, null), d)).toEqual(c);
   });

@@ -43,12 +43,12 @@ describe('judgeDrop (plan 9 §3, §4, §6)', () => {
     expect(judgeDrop(d, c, 's1->s2', 'head', { on: 'open', x: 0, y: 0 })).toBe('move');
   });
 
-  it('refuses the wrong side, a head on the hub, and both ends on one step', async () => {
+  it('refuses the wrong side and a head on the hub; both ends on one step connect (free style, 2026-10-20)', async () => {
     const d = await doc(), c = circuitOfDoc(d);
     expect(judgeDrop(d, c, 's1->s2', 'head', step('s3', 'out'))).toBe('wrongSide');
     expect(judgeDrop(d, c, 's2->s3', 'tail', step('s1', 'in'))).toBe('wrongSide');
     expect(judgeDrop(d, c, 's1->s2', 'head', { on: 'hub', angle: 0 })).toBe('hubTail');
-    expect(judgeDrop(d, c, 's1->s2', 'head', step('s1', 'in'))).toBe('sameStep');
+    expect(judgeDrop(d, c, 's1->s2', 'head', step('s1', 'in'))).toBe('connect');
   });
 
   it('allows a cycle through steps', async () => {
@@ -67,9 +67,9 @@ describe('judgeDrop (plan 9 §3, §4, §6)', () => {
     expect(judgeDrop(d, headOn, 's4->s5', 'tail', wire('s1->s2', 80))).toBe('sameWire');
   });
 
-  it('refuses a tail on the output of the step its own head is on', async () => {
+  it('a tail on the output of the step its own head is on connects: a step feeding itself (2026-10-20)', async () => {
     const d = await doc(), c = circuitOfDoc(d);
-    expect(judgeDrop(d, c, 's1->s2', 'tail', step('s2', 'out'))).toBe('sameStep');
+    expect(judgeDrop(d, c, 's1->s2', 'tail', step('s2', 'out'))).toBe('connect');
   });
 
   it('joins a head onto a wire of its family', async () => {
@@ -77,10 +77,10 @@ describe('judgeDrop (plan 9 §3, §4, §6)', () => {
     expect(judgeDrop(d, c, 'wf->s4', 'head', wire('s2->s3'))).toBe('join');
   });
 
-  it('refuses a step fed its own input through junctions (a hidden self-loop) as "same step"', async () => {
+  it('a step fed its own input through junctions joins like any other (free style, 2026-10-20)', async () => {
     const d = await doc(), c = circuitOfDoc(d);
-    expect(judgeDrop(d, c, 's2->s3', 'head', wire('s1->s2'))).toBe('sameStep');
-    expect(judgeDrop(d, c, 'wf->s1', 'tail', wire('s1->s2'))).toBe('sameStep');
+    expect(judgeDrop(d, c, 's2->s3', 'head', wire('s1->s2'))).toBe('join');
+    expect(judgeDrop(d, c, 'wf->s1', 'tail', wire('s1->s2'))).toBe('join');
   });
 
   it('refuses a junction that closes a loop of wires as a short circuit', async () => {
@@ -155,9 +155,9 @@ describe('judgeDrop (plan 9 §3, §4, §6)', () => {
   });
 
   it('labels and tones every verdict', () => {
-    const all: Verdict[] = ['connect', 'join', 'move', 'wrongSide', 'sameStep', 'sameWire', 'short', 'hubTail'];
-    expect(all.map(dropLabel)).toEqual(['connect here', 'join here', 'move here', 'wrong side', 'same step', 'same wire', 'short circuit', 'only a tail on the workflow']);
-    expect(all.map(toneOf)).toEqual(['ok', 'ok', 'move', 'no', 'no', 'no', 'no', 'no']);
+    const all: Verdict[] = ['connect', 'join', 'move', 'wrongSide', 'sameWire', 'short', 'hubTail'];
+    expect(all.map(dropLabel)).toEqual(['connect here', 'join here', 'move here', 'wrong side', 'same wire', 'short circuit', 'only a tail on the workflow']);
+    expect(all.map(toneOf)).toEqual(['ok', 'ok', 'move', 'no', 'no', 'no', 'no']);
   });
 });
 
@@ -237,8 +237,8 @@ describe('direction-less wires (the user\'s rule D, 2026-10-09)', () => {
     // joined on s1 -> s2 (Completed), its other end onto s5 (Failed) as a head: a short circuit
     const c = free(circuitOfDoc(d), 'w:j', { on: 'wire', host: 's1->s2', at: 40 }, open(300, 300));
     expect(judgeDrop(d, c, 'w:j', 'head', step('s5', 'in'))).toBe('short');
-    // joined on s1 -> s2, its other end onto s2's output: its tail on s2, its head into s1 -> s2, so s2 feeds itself
-    expect(judgeDrop(d, c, 'w:j', 'head', step('s2', 'out'))).toBe('sameStep');
+    // joined on s1 -> s2, its other end onto s2's output: its tail on s2, its head into s1 -> s2, so s2 feeds itself (allowed)
+    expect(judgeDrop(d, c, 'w:j', 'head', step('s2', 'out'))).toBe('connect');
   });
 
   it('applyDrop turns a direction-less wire round when the end dropped becomes the other one, its bends with it; same id', async () => {
@@ -343,6 +343,6 @@ describe('the wire as lifted (review 2026-10-09)', () => {
     expect(judgeDrop(d, c, 'w:f', 'tail', step('s1', 'in'))).toBe('connect');
     // onto s4's output: s4 would feed itself through the junction
     expect(judgeDrop(d, c, 'w:f', 'tail', step('s4', 'out'))).toBe('connect');
-    expect(judgeDrop(d, c, 'w:f', 'head', step('s4', 'in'))).toBe('sameStep');
+    expect(judgeDrop(d, c, 'w:f', 'head', step('s4', 'in'))).toBe('connect');
   });
 });

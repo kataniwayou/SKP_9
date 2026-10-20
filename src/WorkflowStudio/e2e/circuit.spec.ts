@@ -153,7 +153,7 @@ test('rule 4: a head and a tail each join another wire at a chosen point, a fill
   expect(await pointsOf(panel, ad)).toEqual(own);
 });
 
-test('rule 5: a head on a step\'s right side and a tail on its left side are refused ("wrong side"); a head on its own tail\'s step is "same step"; each slides along its own side', async ({ page }) => {
+test('rule 5: a head on a step\'s right side and a tail on its left side are refused ("wrong side"); a head on its own tail\'s step connects (free style, 2026-10-20); each slides along its own side', async ({ page }) => {
   const panel = await open(page);
   const ab = `${t.a}->${t.b}`, bc = `${t.b}->${t.c}`;
   const before = await pointsOf(panel, ab);
@@ -162,9 +162,9 @@ test('rule 5: a head on a step\'s right side and a tail on its left side are ref
   const bcBefore = await pointsOf(panel, bc);
   expect(await dragEnd(page, panel, bc, 'tail', await onSide(panel, t.b, 'in'))).toBe('wrong side');
   expect(await pointsOf(panel, bc)).toEqual(bcBefore);
-  // a -> b's head on a's own input: both ends on one step
-  expect(await dragEnd(page, panel, ab, 'head', await onSide(panel, t.a, 'in'))).toBe('same step');
-  expect(await pointsOf(panel, ab)).toEqual(before);
+  // a -> b's head on a's own input: both ends on one step, a step feeding itself (allowed, the user's ruling 2026-10-20)
+  expect(await dragEnd(page, panel, ab, 'head', await onSide(panel, t.a, 'in'))).toBe('connect here');
+  await expect.poll(async () => (await pointsOf(panel, ab)).at(-1)![0]).toBe((await flowBox(panel, t.a)).x);
   // slid along their sides: a head (step-attached) on b's input, a tail on b's output
   const b = await flowBox(panel, t.b);
   expect(await dragEnd(page, panel, ab, 'head', await onSide(panel, t.b, 'in', 0.75))).toBe('connect here');
@@ -337,13 +337,15 @@ test('base circuit: current flows one way, from the hub to the steps: a tail nev
   expect(await dashOf(panel, id)).toBe('none');
 });
 
-test('a wire loop and a hidden self-loop are refused', async ({ page }) => {
+test('a wire loop is refused; a hidden self-loop joins (free style, 2026-10-20)', async ({ page }) => {
   const panel = await open(page);
   const ab = `${t.a}->${t.b}`;
-  // b -> c's head on a -> b would feed b its own input
+  // b -> c's head on a -> b feeds b its own input: allowed now; undone again
   const bcBefore = await pointsOf(panel, `${t.b}->${t.c}`);
-  expect(await dragEnd(page, panel, `${t.b}->${t.c}`, 'head', await pointOnWire(panel, ab, 0.5, 12))).toBe('same step');
-  expect(await pointsOf(panel, `${t.b}->${t.c}`)).toEqual(bcBefore);
+  expect(await dragEnd(page, panel, `${t.b}->${t.c}`, 'head', await pointOnWire(panel, ab, 0.5, 12))).toBe('join here');
+  await expect(edge(panel, `${t.b}->${t.c}`).locator('circle.nx-joint')).toHaveCount(1);
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => pointsOf(panel, `${t.b}->${t.c}`)).toEqual(bcBefore);
   // a new wire from d joined on a -> b, then a -> b's head on that wire: current would come back round wires alone
   const id = await newWire(page, panel, t.d, await pointOnWire(panel, ab, 0.5, 12));
   await expect(edge(panel, id).locator('circle.nx-joint')).toHaveCount(1);
@@ -357,10 +359,10 @@ test('position along a wire decides what current reaches: a head joined before a
   const ab = `${t.a}->${t.b}`;
   // b -> c taps a -> b in its middle (fan-out)
   expect(await dragEnd(page, panel, `${t.b}->${t.c}`, 'tail', await pointOnWire(panel, ab, 0.5, 12))).toBe('join here');
-  // a wire from c's output joined upstream of the tap would bring c's current back into c through the tap
+  // a wire from c's output joined upstream of the tap brings c's current back into c through the tap (allowed, 2026-10-20)
   const id = await newWire(page, panel, t.c, await emptySpot(panel));
-  expect(await dragEnd(page, panel, id, 'head', await pointOnWire(panel, ab, 0.15, 12))).toBe('same step');
-  await expect(edge(panel, id).locator('circle.nx-joint')).toHaveCount(0);
+  expect(await dragEnd(page, panel, id, 'head', await pointOnWire(panel, ab, 0.15, 12))).toBe('join here');
+  await expect(edge(panel, id).locator('circle.nx-joint')).toHaveCount(1);
   // downstream of the tap it reaches b only: allowed (a loop through steps)
   expect(await dragEnd(page, panel, id, 'head', await pointOnWire(panel, ab, 0.85, 12))).toBe('join here');
   await expect(edge(panel, id).locator('circle.nx-joint')).toHaveCount(1);
@@ -824,8 +826,9 @@ test('rule C: the corners drawn are kept when the end connects; only the last le
   const b = await flowBox(panel, t.b);
   await pickWire(page, panel, id);
   const head = await centreOf(endSquare(panel, id, 'head'));
-  // down under a, right to short of b, down, then right into b's input half
-  const legs: [number, number][] = [[hx, b.y + 48], [b.x - 32, b.y + 48], [b.x - 32, b.y + 128], [b.x + 24, b.y + 128]];
+  // down under a and below b, right to short of b, up, then right into b's input half (clear of a -> b, which drops on
+  // x 552 above b's input: the corners kept, the route drawn must not lie on it, the user's rule 2 — 2026-10-20)
+  const legs: [number, number][] = [[hx, b.y + 176], [b.x - 32, b.y + 176], [b.x - 32, b.y + 128], [b.x + 24, b.y + 128]];
   await page.mouse.move(head.x, head.y);
   await page.mouse.down();
   for (const q of legs) {
@@ -840,9 +843,11 @@ test('rule C: the corners drawn are kept when the end connects; only the last le
   const close = (a: [number, number] | undefined, q: [number, number]) => expect(Math.hypot(a![0] - q[0], a![1] - q[1])).toBeLessThanOrEqual(8);
   expect(p[0]).toEqual(before[0]);
   close(p[1], [hx, hy]);
-  close(p[2], [hx, b.y + 48]);
-  close(p[3], [b.x - 32, b.y + 48]);
-  close(p[4], [b.x - 32, b.y + 128]);
+  close(p[2], [hx, b.y + 176]);
+  // the last upright keeps its heights; the router squares it into the contact a lead of up to 16 px nearer b
+  close(p[3], [p[3]![0], b.y + 176]);
+  close(p[4], [p[3]![0], b.y + 128]);
+  expect(Math.abs(p[3]![0] - (b.x - 32))).toBeLessThanOrEqual(16);
   expect(p).toHaveLength(6);
   // connected to b: in b's colour, solid
   expect(await colourOf(panel, id)).toBe(TEAL);

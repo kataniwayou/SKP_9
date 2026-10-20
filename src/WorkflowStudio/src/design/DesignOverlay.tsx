@@ -34,6 +34,8 @@ export interface DesignOverlayProps {
   tool?: {
     box: { x: number; y: number; w: number; h: number } | null;
     line: readonly [Point, Point] | null;
+    /** A Wire tile over a contact (2026-10-20): the wire as the drop would draw it. */
+    path?: readonly Pt[] | null;
     label: { text: string; tone: 'ok' | 'no'; at: Point } | null;
   } | null;
   /** The part of a wire an end released here would cut away, drawn faded (the user's rule, 2026-10-09). */
@@ -71,6 +73,7 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
         {gone && gone.length > 1 && <path className="design-gone" d={pathOf(gone)} strokeWidth={4 * k} />}
         {tool?.box && <rect className="design-tool-landing" x={tool.box.x} y={tool.box.y} width={tool.box.w} height={tool.box.h} strokeWidth={1.5 * k} strokeDasharray={`${6 * k} ${4 * k}`} />}
         {tool?.line && <path className="design-tool-wire" d={`M${tool.line[0].x} ${tool.line[0].y}H${tool.line[1].x}`} strokeWidth={2 * k} strokeDasharray={`${5 * k} ${4 * k}`} />}
+        {tool?.path && tool.path.length > 1 && <path className="design-tool-wire" d={tool.path.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x} ${y}`).join(' ')} strokeWidth={2 * k} strokeDasharray={`${5 * k} ${4 * k}`} />}
         {tool?.label && (
           <g className={`design-drop-label ${tool.label.tone}`} transform={`translate(${tool.label.at.x + 14 * k} ${tool.label.at.y + 14 * k}) scale(${k})`}>
             <rect x={0} y={0} rx={4} height={LABEL_H} width={tool.label.text.length * LABEL_FONT * 0.56 + 2 * LABEL_PAD} />

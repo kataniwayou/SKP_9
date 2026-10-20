@@ -91,9 +91,9 @@ describe('buildDesignRequest (plan 8 §4.2)', () => {
     expect(body.workflow.entryStepIds).toBeNull();
   });
 
-  it('never sends a step as its own next step: a hidden self-loop or one wire on both its sides writes nothing (§2.2-4)', async () => {
+  it('sends a step as its own next step when it feeds itself, through a junction or by one wire (free style, 2026-10-20)', async () => {
     const base = await loadedDocument(graphDto({
-      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      workflow: workflowDto({ entryStepIds: ['s1', 's3'] }),
       steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3')],
     }));
     // s1's output back into s1 through a junction on s1 -> s2, and s3 wired onto itself
@@ -103,8 +103,9 @@ describe('buildDesignRequest (plan 8 §4.2)', () => {
 
     const body = buildDesignRequest(base, applyDesign(base, draft, EMPTY_EDITS), { draft, edits: EMPTY_EDITS });
 
-    for (const s of body.steps) expect(s.nextStepIds ?? []).not.toContain(s.id);
-    expect(body.steps).toEqual([]);
+    const next = (id: string) => body.steps.find((s) => s.id === id)?.nextStepIds;
+    expect(next('s1')).toEqual(['s2', 's1']);
+    expect(next('s3')).toEqual(['s3']);
     expect(Object.keys(body.layout.wires)).toEqual(expect.arrayContaining(['w:a', 'w:b']));
   });
 

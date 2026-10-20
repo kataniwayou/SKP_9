@@ -188,7 +188,7 @@ export function Toolbox() {
       const drop = toolDrag.end();
       if (!drop) return;
       store.dispatch({ type: 'activate', workflowId: drop.workflowId });
-      store.dispatch({ type: 'toolDrop', workflowId: drop.workflowId, item: drop.item, at: drop.at, newId, roots: (lists?.caches ?? []).map((c) => c.root) });
+      store.dispatch({ type: 'toolDrop', workflowId: drop.workflowId, item: drop.item, at: drop.at, reach: drop.reach, newId, roots: (lists?.caches ?? []).map((c) => c.root) });
     };
     const cancel = () => { stop(); if (dragging) toolDrag.cancel(); };
     const key = (ev: KeyboardEvent) => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); cancel(); } };

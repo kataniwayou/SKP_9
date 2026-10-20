@@ -14,7 +14,8 @@ import { useRubberBand } from '../design/useRubberBand';
 import { useWireGestures } from '../design/useWireGestures';
 import { registerDropTarget, useToolDrag } from '../design/toolDrag';
 import { landingBox, toolLabel, wireLanding } from '../design/toolDrop';
-import { cacheNodeId } from '../layout/nodeIds';
+import { cacheNodeId, SPHERE_NODE_ID } from '../layout/nodeIds';
+import { toneOf } from '../design/drop';
 import { Menu, anchorAt, type Anchor } from '../dock/Menu';
 import { togglePick, type Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
@@ -127,6 +128,8 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const shownDoc = useMemo(() => (design ? applyDraft(doc, preview ?? design.draft) : doc), [doc, design?.draft, preview]);
   const shownRef = useRef(shownDoc);
   shownRef.current = shownDoc;
+  const draftRef = useRef(design?.draft);
+  draftRef.current = design?.draft;
   const flow = useMemo(() => toFlow(shownDoc, fitter), [shownDoc, fitter]);
   const marked = useMemo(() => (design ? withPicks(flow.nodes, flow.edges, design.picks) : flow), [flow, design?.picks]);
   const selected = useMemo(() => withSelection(marked.nodes, selection), [marked.nodes, selection]);
@@ -149,10 +152,10 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   useEffect(() => {
     if (!designing || !container.current) return undefined;
     return registerDropTarget({
-      workflowId, el: container.current, shown: () => shownRef.current,
+      workflowId, el: container.current, shown: () => shownRef.current, circuit: () => circuitOf(doc, draftRef.current ?? EMPTY_DRAFT),
       toFlow: (c) => screenToFlowPosition(c, { snapToGrid: false }),
     });
-  }, [designing, workflowId, screenToFlowPosition]);
+  }, [designing, workflowId, screenToFlowPosition, doc]);
   const toolDrag = useToolDrag();
   const toolOver = toolDrag?.over && toolDrag.over.target.el === container.current ? toolDrag.over : null;
   const tool = useMemo(() => {
@@ -161,9 +164,15 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     const label = toolLabel(v, toolOver.saving);
     const box = v.kind === 'place' && !toolOver.saving ? landingBox(toolDrag.item, toolOver.flow) : null;
     const line = v.kind === 'place' && !toolOver.saving && toolDrag.item.kind === 'wire' ? wireLanding(toolOver.flow) : null;
+    // a Wire tile over a contact (2026-10-20): the step or hub outlined, a line haloed, as for a dragged wire end
+    const wire = v.kind === 'wire' ? v : null;
+    const wireTone = wire && (toneOf(wire.why) === 'no' ? 'no' as const : 'ok' as const);
     const node = v.kind === 'assign' || v.kind === 'replace' ? { id: v.stepId, tone: 'ok' as const }
-      : v.kind === 'linked' ? { id: cacheNodeId(v.cacheId), tone: 'no' as const } : null;
-    return { box, line, node, label: label && { ...label, at: toolOver.flow } };
+      : v.kind === 'linked' ? { id: cacheNodeId(v.cacheId), tone: 'no' as const }
+        : wire && wireTone && wire.target.on !== 'wire' ? { id: wire.target.on === 'step' ? wire.target.step : SPHERE_NODE_ID, tone: wireTone } : null;
+    const halo = wire && wireTone && wire.target.on === 'wire' ? { id: wire.target.host, tone: wireTone } : null;
+    const path = wire && wireTone === 'ok' ? wire.points : null;
+    return { box, line, path, node, halo, label: label && { ...label, at: toolOver.flow } };
   }, [toolDrag, toolOver]);
   const shown = useMemo(() => {
     const marked = wiring.hints.filter((h) => !h.line).reduce(withHint, selected);
@@ -178,8 +187,9 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     // the line under a dragged end: green when the end may join it, red when refused (plan 7 §6.1, plan 9 §6)
     const line = wiring.hints.find((h) => h.line && h.id === e.id && h.tone !== 'move');
     if (line && line.tone !== 'move') data = { ...data, halo: line.tone };
+    if (tool?.halo && tool.halo.id === e.id) data = { ...data, halo: tool.halo.tone };
     return data === e.data ? e : { ...e, data };
-  }), [marked.edges, wiring.ghost, wiring.hints]);
+  }), [marked.edges, wiring.ghost, wiring.hints, tool]);
   // picks naming wires that are gone (after an undo) draw nothing; while an end square is dragged its wire's squares
   // stay where they were when the drag began: they are what it may be released on (the user's rule, 2026-10-09)
   const pickedWires = useMemo(

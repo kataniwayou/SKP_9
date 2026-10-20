@@ -10,7 +10,7 @@ import { deletePicked } from './clipboard';
 import { EMPTY_EDITS, storedDesignOf } from './design';
 import { circuitOf, EMPTY_DRAFT } from './draft';
 import { layoutOf } from './layoutDesign';
-import { dropTool, judgeTool, uniqueName, type ToolItem } from './toolDrop';
+import { dropTool, judgeTool, toolLabel, uniqueName, type ToolItem } from './toolDrop';
 
 // s1 (processor p1), wired from the hub; cache k1 in the workflow
 const doc = () => loadedDocument(graphDto({
@@ -135,5 +135,63 @@ describe('Toolbox drops (the user\'s rules, 2026-10-11)', () => {
   it('names: the first of base, base-2, base-3 … not taken', () => {
     expect(uniqueName('step', new Set())).toBe('step');
     expect(uniqueName('step', new Set(['step', 'step-2']))).toBe('step-3');
+  });
+});
+
+describe("a Wire tile dropped straight on a contact (the user's request, 2026-10-20)", () => {
+  // s1 (entry) -> s2; s3 a second entry step, its output free
+  const three = () => loadedDocument(graphDto({
+    workflow: workflowDto({ entryStepIds: ['s1', 's3'] }),
+    steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3')],
+  }));
+  const judge = (base: Awaited<ReturnType<typeof three>>, p: { x: number; y: number }) => judgeTool(base, { kind: 'wire' }, p, { circuit: circuitOf(base, EMPTY_DRAFT), reach: 8 });
+
+  it("on a step's input: \"connect here\"; dropped, its head is on that input and its tail open 96 px to the left", async () => {
+    const base = await three();
+    const s3 = base.placement.steps.get('s3')!;
+    // above the hub's wire, which takes the input's centre
+    const p = { x: s3.x + 4, y: s3.y + 48 };
+    expect(judge(base, p)).toMatchObject({ kind: 'wire', why: 'connect', target: { on: 'step', step: 's3', side: 'in' } });
+    expect(toolLabel(judge(base, p))).toEqual({ text: 'connect here', tone: 'ok' });
+    const r = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'wire' }, p, ids, 8)!;
+    const w = circuitOf(base, r.draft)[r.picks[0]!.id]!;
+    expect(w.head).toEqual({ on: 'step', step: 's3', y: 48 });
+    expect(w.tail).toEqual({ on: 'open', x: s3.x - 96, y: s3.y + 48 });
+    expect(w.bends).toBeUndefined();
+  });
+
+  it("on a step's output: its tail there, its head open 96 px to the right; on the hub: its tail on the ring", async () => {
+    const base = await three();
+    const s3 = base.placement.steps.get('s3')!;
+    const r = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'wire' }, { x: s3.x + STEP_W - 4, y: s3.y + 96 }, ids, 8)!;
+    const w = circuitOf(base, r.draft)[r.picks[0]!.id]!;
+    expect(w.tail).toEqual({ on: 'step', step: 's3', y: 96 });
+    expect(w.head).toEqual({ on: 'open', x: s3.x + STEP_W + 96, y: s3.y + 96 });
+    const { cx, cy } = base.placement.sphere;
+    expect(judge(base, { x: cx, y: cy - 90 })).toMatchObject({ kind: 'wire', why: 'connect', target: { on: 'hub' } });
+    const h = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'wire' }, { x: cx, y: cy - 90 }, ids, 8)!;
+    expect(circuitOf(base, h.draft)[h.picks[0]!.id]!.tail).toMatchObject({ on: 'hub' });
+  });
+
+  it("on a wire's line: \"join here\", a junction there; on empty canvas a free wire as before", async () => {
+    const base = await three();
+    const host = base.wires.find((x) => x.id === 's1->s2')!;
+    const run = host.points.findIndex((q, i) => i > 0 && q[1] === host.points[i - 1]![1] && Math.abs(q[0] - host.points[i - 1]![0]) >= 32);
+    const p = { x: (host.points[run]![0] + host.points[run - 1]![0]) / 2, y: host.points[run]![1] };
+    expect(judge(base, p)).toMatchObject({ kind: 'wire', why: 'join', target: { on: 'wire', host: 's1->s2' } });
+    const r = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'wire' }, p, ids, 8)!;
+    expect(circuitOf(base, r.draft)[r.picks[0]!.id]!.head).toMatchObject({ on: 'wire', host: 's1->s2' });
+    expect(judge(base, at)).toEqual({ kind: 'place' });
+  });
+
+  it('a stub that would lie on a wire of another net is a short circuit: red, and released there nothing is dropped', async () => {
+    const base = await three();
+    const s2 = base.placement.steps.get('s2')!;
+    // s2's input already takes s1 -> s2 at its centre; a new stub into s2's input at the same height runs back along it
+    const p = { x: s2.x + 4, y: s2.y + 96 };
+    const v = judge(base, p);
+    expect(v).toMatchObject({ kind: 'wire', why: 'short' });
+    expect(toolLabel(v)).toEqual({ text: 'short circuit', tone: 'no' });
+    expect(dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'wire' }, p, ids, 8)).toBeNull();
   });
 });

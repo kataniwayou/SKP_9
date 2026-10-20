@@ -26,11 +26,16 @@ const within = (s: Stretch, t: Stretch): boolean => {
  * shares a stretch of line with a wire that may not share one with it in `after` (`mayShare`), and that stretch is new.
  * A stretch the two wires already shared as drawn before the drag is excused only when that was already a short circuit,
  * or allowed only because both were automatic (the router left them there): one allowed because they were one net or a
- * bus is not, since the gesture may be what parts them (final check 2026-10-09). `before` is the circuit before the drag. A wire shaped by hand stays where it is; an
- * automatic one takes a free track around a shape drawn by hand if it can, so then the circuit after the drop is drawn
- * and asked (rarely: only when the path lies on an automatic wire of another net).
+ * bus is not, since the gesture may be what parts them (final check 2026-10-09). `before` is the circuit before the drag.
+ * `aside` (an end, a body or a key drop): a wire shaped by hand stays where it is, an automatic one takes a free track
+ * around the drop if it can, so then the circuit after the drop is drawn and asked (only when the path lies on an
+ * automatic wire of another net). `strict` (a run dragged by hand, a Toolbox stub): lying on a wire of another net is a
+ * short circuit whether it is shaped by hand or automatic; the automatic one is not moved aside to make room (the user's
+ * ruling, 2026-10-20: a run laid on another family's wire is refused as "short circuit").
  */
-export function overlapJudge(shown: StudioDocument, id: string, was: Readonly<Circuit>): OverlapJudge {
+export type OverlapMode = 'aside' | 'strict';
+
+export function overlapJudge(shown: StudioDocument, id: string, was: Readonly<Circuit>, mode: OverlapMode = 'aside'): OverlapJudge {
   const index = new LineIndex();
   for (const w of shown.wires) if (w.id !== id) index.add(w.id, w.points);
   const mine = shown.wires.find((w) => w.id === id);
@@ -48,7 +53,7 @@ export function overlapJudge(shown: StudioDocument, id: string, was: Readonly<Ci
     const share = mayShare(c, netsOf(c, conditionOf));
     const clash = hits.map(([x]) => x).filter((x) => !share(id, x));
     if (clash.length === 0) return false;
-    if (clash.some((x) => !Object.hasOwn(c, x) || (c[x]!.bends?.xs.length ?? 0) > 0)) return true;
+    if (mode === 'strict' || clash.some((x) => !Object.hasOwn(c, x) || (c[x]!.bends?.xs.length ?? 0) > 0)) return true;
     // automatic wires may step aside: ask the drawing after the drop, still counting new stretches only
     const routes = routeCircuit(c, { placement: shown.placement, steps: shown.graph.steps });
     const drawn = routes.find((r) => r.id === id);

@@ -183,7 +183,7 @@ describe('the design draft (plan 4)', () => {
   const storageWith = (session: unknown) => { const st = memoryStorage(); st.setItem(SESSION_KEY, JSON.stringify(session)); return st; };
   const draft = { ...EMPTY_DRAFT, steps: { s1: { x: 8, y: 16 } } };
 
-  it('keeps a document draft across a write and a read, with an empty history', async () => {
+  it("keeps a document draft across a write and a read, with its Undo history (the user's ruling, 2026-10-20)", async () => {
     let state = reduce(reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' }),
       { type: 'loaded', workflowId: 'wf1', doc: await loadedDocument() });
     state = reduce(state, { type: 'design', workflowId: 'wf1', draft });
@@ -191,7 +191,31 @@ describe('the design draft (plan 4)', () => {
     writeSession(storage, sessionOf(state, new Map(), null));
     const back = restoredState(readSession(storage));
     expect(back.docs[0]!.design.draft).toEqual(draft);
-    expect(back.docs[0]!.design.past).toEqual([]);
+    expect(back.docs[0]!.design.past).toEqual([EMPTY_DRAFT]);
+  });
+
+  it('Undo and Redo survive a refresh: the restored document undoes to the draft before, and redoes it again', async () => {
+    const doc = await loadedDocument();
+    const one = { ...EMPTY_DRAFT, sphere: { x: 160, y: 160 } }, two = { ...EMPTY_DRAFT, sphere: { x: 320, y: 160 } };
+    let state = reduce(reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' }), { type: 'loaded', workflowId: 'wf1', doc });
+    state = reduce(state, { type: 'design', workflowId: 'wf1', draft: one });
+    state = reduce(state, { type: 'design', workflowId: 'wf1', draft: two });
+    state = reduce(state, { type: 'undo', workflowId: 'wf1' });
+    // the refresh: written, read back, loaded again
+    const storage = memoryStorage();
+    writeSession(storage, sessionOf(state, new Map(), null));
+    let back = reduce(restoredState(readSession(storage)), { type: 'loaded', workflowId: 'wf1', doc });
+    const d = () => back.docs[0]!.design;
+    expect(d().draft).toEqual(one);
+    expect([d().past.length, d().future]).toEqual([1, [two]]);
+    back = reduce(back, { type: 'redo', workflowId: 'wf1' });
+    expect(d().draft).toEqual(two);
+    back = reduce(back, { type: 'undo', workflowId: 'wf1' });
+    back = reduce(back, { type: 'undo', workflowId: 'wf1' });
+    expect(d().draft).toEqual(EMPTY_DRAFT);
+    // undone back to the stored design: nothing unsaved, yet the Redo steps are still kept by the next write
+    const again = sessionOf(back, new Map(), null).docs[0]!;
+    expect(again.history?.future).toEqual([one, two]);
   });
 
   it('drops a malformed design draft (review focus 2)', () => {

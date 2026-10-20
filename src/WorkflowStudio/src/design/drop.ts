@@ -9,6 +9,9 @@ import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
 import type { Bends } from '../layout/shape';
 import type { Id } from '../model/graph';
 
+/** How far outside a block's border or a line (screen px) a dragged end already counts as over it. */
+export const DROP_REACH = 8;
+
 /** What a dragged end is over (plan 9 §6): a step's input or output side, the hub's ring, a wire's line, or nothing. */
 export type DropTarget =
   | { on: 'step'; step: Id; side: 'in' | 'out'; y: number }
@@ -17,7 +20,7 @@ export type DropTarget =
   | { on: 'open'; x: number; y: number };
 
 /** `needsStep`: a direction-less wire already joined on one wire's line, its other end onto another line (rule D). */
-export type Refusal = 'wrongSide' | 'sameStep' | 'sameWire' | 'short' | 'hubTail' | 'needsStep';
+export type Refusal = 'wrongSide' | 'sameWire' | 'short' | 'hubTail' | 'needsStep';
 /**
  * `connect`: onto a terminal; `join`: onto a wire; `move`: the end is or stays open there (decision 12); `cut` and
  * `deleteWire`: an end square released on one of its own wire's squares (the user's rule, 2026-10-09).
@@ -69,10 +72,10 @@ export function beforeDrop(shown: StudioDocument, circuit: Readonly<Circuit>): B
 /**
  * What dropping wire `id`'s `side` end on `t` does (plan 9 §3, §4, §6; decision 7). Open anywhere ('move'); a step
  * side or the hub ('connect'); a wire ('join'). Refused: a head on a step's output or a tail on its input
- * ('wrongSide'), a head on the hub ('hubTail'), both ends on one step ('sameStep'), an end on its own wire or both
- * ends on one wire ('sameWire'); then a wire brought onto a closed loop of wires ('short'; a loop already there
- * elsewhere does not hide a new one), a step fed its own input through junctions ('sameStep'), and a family
- * brought into a net that then holds two or more ('short'). A loop, a
+ * ('wrongSide'), a head on the hub ('hubTail'), an end on its own wire or both ends on one wire ('sameWire'); then a
+ * wire brought onto a closed loop of wires ('short'; a loop already there elsewhere does not hide a new one), and a
+ * family brought into a net that then holds two or more ('short'). A step may feed itself, by one wire or through
+ * junctions: free style, nothing but a short circuit is refused (the user's ruling, 2026-10-20). A loop, a
  * self-feed or a short circuit already there before the drop does not refuse it: in a net already shorted (an
  * Inspector edit) an end may still slide along its side or its host, as long as no wire of the net gains a family.
  * A wire that is direction-less once lifted by this end (rule D, 2026-10-09; its other end on no step or hub) is never
@@ -101,7 +104,6 @@ function judged(shown: StudioDocument, was: Readonly<Circuit>, circuit: Readonly
     if (side === 'head') return 'hubTail';
   } else if (t.on === 'step') {
     if ((side === 'head') !== (t.side === 'in')) return 'wrongSide';
-    if (other.on === 'step' && other.step === t.step) return 'sameStep';
   } else {
     if (t.host === id || (other.on === 'wire' && other.host === t.host)) return 'sameWire';
     if (!Object.hasOwn(circuit, t.host)) return 'move';
@@ -109,7 +111,6 @@ function judged(shown: StudioDocument, was: Readonly<Circuit>, circuit: Readonly
   const after = setEnd(circuit, id, side, endOf(t));
   const before = beforeDrop(shown, was);
   for (const x of loopWires(after)) if (!before.looped.has(x)) return 'short';
-  for (const [s, ts] of trace(after).links) if (ts.includes(s) && !before.links.get(s)?.includes(s)) return 'sameStep';
   const net = netsOf(after, (s: Id) => shown.graph.steps.get(s)?.entryCondition).find((n) => n.wires.includes(id));
   if (net && net.families.length > 1) {
     const had = before.families();
@@ -202,7 +203,6 @@ export function dropLabel(v: Verdict): string {
     case 'join': return 'join here';
     case 'move': return 'move here';
     case 'wrongSide': return 'wrong side';
-    case 'sameStep': return 'same step';
     case 'sameWire': return 'same wire';
     case 'short': return 'short circuit';
     case 'hubTail': return 'only a tail on the workflow';

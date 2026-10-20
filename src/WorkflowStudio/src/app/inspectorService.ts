@@ -6,6 +6,7 @@ import { newId } from '../design/ids';
 import { applyBlocks, type NewAssignment } from '../design/blocks';
 import type { Id } from '../model/graph';
 import { fieldValue, type FieldSpec } from '../store/entityForms';
+import { graphBaseOf } from '../store/inspectorBase';
 import { crumbLabel, targetKey, type InspectorTarget } from '../store/inspectorTarget';
 import { shownTargetOf, type OpenDocument } from '../store/studioState';
 import type { StudioStore } from '../store/studioStore';
@@ -42,6 +43,13 @@ function madeUp(doc: OpenDocument, target: InspectorTarget): EntityReadDto | nul
     if (op?.op === 'create' && op.id === target.id) {
       return { id: op.id, name: '', version: '', description: null, stepId: target.stepId, payload: '' } as AssignmentReadDto;
     }
+  }
+  // a step or cache the design made (pasted, or from the Toolbox, 2026-10-20): BaseApi has no row to read until Save, and the
+  // graph carries every field its form shows
+  const blocks = doc.design.draft.blocks;
+  if (doc.status.kind === 'ready' && ((target.kind === 'step' && Object.hasOwn(blocks.steps, target.id)) || (target.kind === 'cache' && Object.hasOwn(blocks.caches, target.id)))) {
+    const base = graphBaseOf(applyBlocks(doc.status.doc, blocks).graph, target);
+    if (base !== null) return base.values as unknown as EntityReadDto;
   }
   if (target.kind === 'schema' && target.id === '' && doc.status.kind === 'ready') {
     const p = applyBlocks(doc.status.doc, doc.design.draft.blocks).graph.processors.get(target.processorId);
