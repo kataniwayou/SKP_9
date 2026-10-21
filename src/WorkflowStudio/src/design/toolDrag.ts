@@ -4,7 +4,8 @@ import type { Point } from '../layout/geometry';
 import type { Id } from '../model/graph';
 import type { Circuit } from '../circuit/circuit';
 import { DROP_REACH, toneOf } from './drop';
-import { judgeTool, type ToolItem, type ToolVerdict } from './toolDrop';
+import { guideBoxes, NO_GUIDES, SNAP_REACH_PX, snapToGuides, type Guides } from './guides';
+import { judgeTool, landingBox, type ToolItem, type ToolVerdict } from './toolDrop';
 
 /**
  * A workflow canvas that takes Toolbox drops (2026-10-11): its element (what the pointer is over), its workflow, how a
@@ -23,7 +24,11 @@ export interface DropTarget {
 export interface ToolDragState {
   item: ToolItem;
   client: Point;
-  over: { target: DropTarget; flow: Point; verdict: ToolVerdict; saving: boolean; reach: number } | null;
+  /**
+   * `flow`: where the drop lands (a block's pointer point moved by the guides it snaps to, so `landingBox` of it is the
+   * snapped box); `guides`: the dynamic grid shown meanwhile (plan 10).
+   */
+  over: { target: DropTarget; flow: Point; verdict: ToolVerdict; saving: boolean; reach: number; guides: Guides } | null;
 }
 
 /**
@@ -43,6 +48,18 @@ const hotSpots = (item: ToolItem, client: Point): Point[] =>
   item.kind === 'wire'
     ? [WIRE_TIP, WIRE_TAIL].map((o) => ({ x: client.x + o.x, y: client.y + o.y }))
     : [client];
+
+/**
+ * A block tile over a canvas (plan 10, Visio's dynamic grid): its box centred on `p`, unrounded, snapped to the guides
+ * within `reach` (flow px); `p` moved on each axis a guide caught, so `landingBox` lands it there (the others it rounds to
+ * the grid). Null for a tile that lands no block (a wire, a processor).
+ */
+function onGrid(shown: StudioDocument, item: ToolItem, p: Point, reach: number): { flow: Point; guides: Guides } | null {
+  const box = landingBox(item, p);
+  if (!box) return null;
+  const g = snapToGuides({ id: '', x: p.x - box.w / 2, y: p.y - box.h / 2, w: box.w, h: box.h }, guideBoxes(shown), reach);
+  return { flow: { x: g.hit.x ? p.x + g.dx : p.x, y: g.hit.y ? p.y + g.dy : p.y }, guides: { lines: g.lines, gaps: g.gaps } };
+}
 
 const targets = new Set<DropTarget>();
 let state: ToolDragState | null = null;
@@ -87,9 +104,12 @@ export const toolDrag = {
       if (!target) continue;
       const flow = target.toFlow(hot);
       // the drop reach of a dragged wire end: DROP_REACH screen px, in flow px at this zoom
-      const reach = DROP_REACH * Math.abs(target.toFlow({ x: hot.x + 1, y: hot.y }).x - flow.x);
+      const perPx = Math.abs(target.toFlow({ x: hot.x + 1, y: hot.y }).x - flow.x);
+      const reach = DROP_REACH * perPx;
       const wiring = target.circuit ? { circuit: target.circuit(), reach } : undefined;
-      const here = { target, flow, verdict: judgeTool(target.shown(), item, flow, wiring), saving: isSaving(target.workflowId), reach };
+      const verdict = judgeTool(target.shown(), item, flow, wiring);
+      const snapped = verdict.kind === 'place' ? onGrid(target.shown(), item, flow, SNAP_REACH_PX * perPx) : null;
+      const here = { target, flow: snapped?.flow ?? flow, verdict, saving: isSaving(target.workflowId), reach, guides: snapped?.guides ?? NO_GUIDES };
       // on a contact (connect, join, or refused there) this point decides; else only the first point (a wire's tip) counts
       if (here.verdict.kind === 'wire') { over = here; break; }
       if (k === 0) over = here;
