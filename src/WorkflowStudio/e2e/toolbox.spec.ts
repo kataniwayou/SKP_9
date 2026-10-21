@@ -175,3 +175,24 @@ test('Toolbox: an existing cache dropped into a new workflow is the same entity,
   expect((await get<{ cacheIds: string[] }>(request, `workflows/${id}`)).cacheIds).toEqual([t.cacheId]);
   expect((await get<{ id: string }[]>(request, 'caches')).length).toBe(cachesBefore);
 });
+
+test('the Toolbox pane resized with the real mouse: the Wire stays under the Empty step, in the one column every tile takes (2026-10-21)', async ({ page }) => {
+  const step = tileOf(page, 'step'), wire = tileOf(page, 'wire');
+  await expect(wire).toBeVisible();
+  // the sash on the Toolbox's right edge
+  const edge = async () => (await box(toolbox(page))).x + (await box(toolbox(page))).width;
+  for (const to of [480, 700, 320]) {
+    const b = await box(toolbox(page));
+    const x = await edge(), y = b.y + b.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(to, y, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(edge).toBeGreaterThan(to - 12);
+    const s = await box(step), w = await box(wire), p = await box(tileOf(page, 'processor').first());
+    expect(Math.round(w.x)).toBe(Math.round(s.x));
+    expect(Math.round(w.width)).toBe(Math.round(s.width));
+    expect(w.y).toBeGreaterThanOrEqual(s.y + s.height);
+    expect(Math.round(w.width)).toBe(Math.round(p.width));
+  }
+});

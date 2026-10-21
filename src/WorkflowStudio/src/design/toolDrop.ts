@@ -124,10 +124,10 @@ export function landingBox(item: ToolItem, p: Point): { x: number; y: number; w:
   return size && { x: snap(p.x - size.w / 2), y: snap(p.y - size.h / 2), ...size };
 }
 
-/** A dropped wire's two ends: from the pointer, on the grid, `DROPPED_WIRE` to the right. */
+/** A dropped wire's two ends: its head at `p` (the ghost's arrow tip), on the grid, its tail `DROPPED_WIRE` to the left. */
 export const wireLanding = (p: Point): [Point, Point] => {
-  const a = { x: snap(p.x), y: snap(p.y) };
-  return [a, { x: a.x + DROPPED_WIRE, y: a.y }];
+  const z = { x: snap(p.x), y: snap(p.y) };
+  return [{ x: z.x - DROPPED_WIRE, y: z.y }, z];
 };
 
 /** `base`, then `base-2`, `base-3`, … : the first not in `taken`. */

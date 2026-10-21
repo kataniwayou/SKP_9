@@ -26,6 +26,17 @@ export interface ToolDragState {
   over: { target: DropTarget; flow: Point; verdict: ToolVerdict; saving: boolean; reach: number } | null;
 }
 
+/**
+ * Where a Wire tile's ghost has its arrow tip, from the pointer (screen px): the ghost is centred on the pointer and drawn
+ * 120 px wide from the 120-wide art, whose tip is at x 106. The tip, not the pointer, is what touches a contact (the
+ * user's request, 2026-10-21).
+ */
+export const WIRE_TIP: Point = { x: 46, y: 0 };
+
+/** The screen point a drag of `item` is judged at: a wire's tip, anything else the pointer. */
+const hotSpot = (item: ToolItem, client: Point): Point =>
+  item.kind === 'wire' ? { x: client.x + WIRE_TIP.x, y: client.y + WIRE_TIP.y } : client;
+
 const targets = new Set<DropTarget>();
 let state: ToolDragState | null = null;
 const listeners = new Set<() => void>();
@@ -62,11 +73,12 @@ export const toolDrag = {
   },
   move(doc: Document, client: Point, isSaving: (workflowId: Id) => boolean): void {
     if (!state) return;
-    const target = targetAt(doc, client);
+    const hot = hotSpot(state.item, client);
+    const target = targetAt(doc, hot);
     if (!target) { state = { ...state, client, over: null }; emit(); return; }
-    const flow = target.toFlow(client);
+    const flow = target.toFlow(hot);
     // the drop reach of a dragged wire end: DROP_REACH screen px, in flow px at this zoom
-    const reach = DROP_REACH * Math.abs(target.toFlow({ x: client.x + 1, y: client.y }).x - flow.x);
+    const reach = DROP_REACH * Math.abs(target.toFlow({ x: hot.x + 1, y: hot.y }).x - flow.x);
     const wiring = target.circuit ? { circuit: target.circuit(), reach } : undefined;
     state = { ...state, client, over: { target, flow, verdict: judgeTool(target.shown(), state.item, flow, wiring), saving: isSaving(target.workflowId), reach } };
     emit();

@@ -37,15 +37,15 @@ describe('Toolbox drops (the user\'s rules, 2026-10-11)', () => {
     expect(buildDesignRequest(base, shown, { draft: r.draft, edits: EMPTY_EDITS }).newSteps).toEqual([expect.objectContaining({ id, processorId: null })]);
   });
 
-  it('a wire: a new free wire, open at both ends, 96 px horizontal from the pointer, picked', async () => {
+  it('a wire: a new free wire, open at both ends, its head at the tip, 96 px horizontal, picked', async () => {
     const base = await doc();
     const r = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'wire' }, at, ids)!;
     const id = r.picks[0]!.id;
     expect(r.picks[0]!.kind).toBe('wire');
     const w = circuitOf(base, r.draft)[id]!;
-    expect([w.tail, w.head]).toEqual([{ on: 'open', x: 1000, y: 600 }, { on: 'open', x: 1096, y: 600 }]);
+    expect([w.tail, w.head]).toEqual([{ on: 'open', x: 904, y: 600 }, { on: 'open', x: 1000, y: 600 }]);
     const drawn = applyDesign(base, r.draft, EMPTY_EDITS).wires.find((x) => x.id === id)!;
-    expect(drawn.points).toEqual([[1000, 600], [1096, 600]]);
+    expect(drawn.points).toEqual([[904, 600], [1000, 600]]);
   });
 
   it('an empty cache: a new virtual cache with no root yet (drawn dashed with a ⚠ until one is set), saved as a new cache', async () => {
