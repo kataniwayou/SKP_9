@@ -236,9 +236,11 @@ export function useWireGestures(
       const now = latest;
       short = judge(simplify(core), () => shapedCircuit(now));
       setHints(short ? [{ id: null, line: false, tone: 'no', why: 'short', at: p }] : []);
-      setPreview(shaped(latest));
+      // Visio's: the wire stays put and its new route is drawn dashed; nothing is rerouted until release (plan 10)
+      const drawn = routeCircuit(shapedCircuit(now), { placement: shown.current.placement, steps: shown.current.graph.steps }).find((x) => x.id === wire.id);
+      setGhost(drawn ? { wire: wire.id, points: [...drawn.points] } : null);
     }, (cancelled, moved) => {
-      setPreview(null);
+      setGhost(null);
       setHints([]);
       if (cancelled || !moved || short) return;
       const ty = latest.headY === null ? ends.ty : step ? step.y + latest.headY : latest.headY;

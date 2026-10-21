@@ -34,6 +34,8 @@ const pointsOfD = (d: string): [number, number][] => [...d.matchAll(/[ML]([-\d.e
 const rightAngled = (pts: readonly (readonly [number, number])[]) => pts.length >= 2 && pts.every((p, i) => i === 0 || p[0] === pts[i - 1]![0] || p[1] === pts[i - 1]![1]);
 /** A wire as drawn: its trace's points. */
 const wirePath = (container: HTMLElement, id: string) => pointsOfD(container.querySelector(`[data-testid="rf__edge-${id}"] path.w`)!.getAttribute('d')!);
+/** The dashed preview of a dragged wire's new route (Visio's, plan 10): the wire itself stays put until release. */
+const ghostPath = (container: HTMLElement) => pointsOfD(container.querySelector('path.design-ghost')!.getAttribute('d')!);
 /** 100 % zoom: jsdom's fit is so small that a short run's square would hide under its end dots (as it does on screen). */
 const AT_100 = { x: 0, y: 0, zoom: 1, followFit: false };
 
@@ -458,7 +460,9 @@ describe('wire gestures', () => {
     const y = centre('y', 'height');
     fireEvent.pointerDown(run(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(container, { x: 544, y }), pointerId: 1 });
-    expect(centre('x', 'width')).toBeCloseTo(544);
+    // the squares stay on the wire, which stays put; the dashed preview has the run at 544 (Visio, plan 10)
+    expect(centre('x', 'width')).toBeCloseTo(528);
+    expect(ghostPath(container).some(([x]) => Math.abs(x - 544) < 0.01)).toBe(true);
     fireEvent.keyDown(document.body, { key: 'Escape' });
   });
 
@@ -616,8 +620,9 @@ describe('wire gestures', () => {
     const down = { x: h0[0], y: s2.y + STEP_H + 32 };
     fireEvent.pointerDown(one.container.querySelector('.design-wire[data-wire="s1->s2"] .design-handle.end[data-end="head"]')!, { button: 0, ...screenOf(one.container, { x: h0[0], y: h0[1] }), pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(one.container, down), pointerId: 1 });
-    // while dragged the wire is the L already
-    expect(wirePath(one.container, 's1->s2')).toEqual([[t0[0], t0[1]], [h0[0], h0[1]], [down.x, down.y]]);
+    // while dragged the dashed preview is the L already; the wire itself stays put until release (Visio, plan 10)
+    expect(ghostPath(one.container)).toEqual([[t0[0], t0[1]], [h0[0], h0[1]], [down.x, down.y]]);
+    expect(wirePath(one.container, 's1->s2')).toEqual([[t0[0], t0[1]], [h0[0], h0[1]]]);
     expect(one.container.querySelector('.design-drop-label')!.textContent).toBe('move here');
     fireEvent.pointerUp(document, { ...screenOf(one.container, down), pointerId: 1 });
     const [l] = commits(first)[0]!;

@@ -184,7 +184,8 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const edges = useMemo(() => marked.edges.map((e) => {
     if (e.type !== 'cable' || !e.data) return e;
     let data = e.data;
-    if (dragged && e.id === dragged.id) data = { ...data, points: dragged.points, ...(wiring.ghost?.faded ? { faded: true } : {}) };
+    // the dragged wire stays where it was, faded, until release; its new route is the overlay's dashed ghost (Visio, plan 10)
+    if (dragged && e.id === dragged.id) data = { ...data, faded: true };
     // the line under a dragged end: green when the end may join it, red when refused (plan 7 §6.1, plan 9 §6)
     const line = wiring.hints.find((h) => h.line && h.id === e.id && h.tone !== 'move');
     if (line && line.tone !== 'move') data = { ...data, halo: line.tone };
@@ -286,7 +287,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onMoveEnd={(_event, v) => report(v)}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} guides={toolOver?.guides ?? guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost && !wiring.ghost.wire ? wiring.ghost.points : null} hints={wiring.hints} gone={wiring.ghost?.gone ?? null} tool={tool} />}
+              {design && <DesignOverlay band={band} guides={toolOver?.guides ?? guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost?.points ?? null} hints={wiring.hints} gone={wiring.ghost?.gone ?? null} tool={tool} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize initial={savedSize} />
