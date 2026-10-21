@@ -346,3 +346,20 @@ describe('the wire as lifted (review 2026-10-09)', () => {
     expect(judgeDrop(d, c, 'w:f', 'head', step('s4', 'in'))).toBe('connect');
   });
 });
+
+describe("Visio's glue reach (plan 10 phase 2, measured ~10 px for a shape, ~12 for a point)", () => {
+  it('reaches 10 screen px for a step side or the hub, 12 for a line', async () => {
+    const { DROP_REACH, LINE_REACH } = await import('./drop');
+    expect(DROP_REACH).toBe(10);
+    expect(LINE_REACH).toBe(12);
+  });
+
+  it('a point 9 px outside a step side is over the step at zoom 1, and 11 px outside is not', async () => {
+    const { blockAt } = await import('./hit');
+    const { DROP_REACH } = await import('./drop');
+    const d = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1')] }));
+    const s1 = d.placement.steps.get('s1')!;
+    expect(blockAt(d, { x: s1.x - 9, y: s1.y + 80 }, DROP_REACH)).toBe('s1');
+    expect(blockAt(d, { x: s1.x - 11, y: s1.y + 80 }, DROP_REACH)).toBeNull();
+  });
+});

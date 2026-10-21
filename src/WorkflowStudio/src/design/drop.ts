@@ -9,8 +9,10 @@ import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
 import type { Bends } from '../layout/shape';
 import type { Id } from '../model/graph';
 
-/** How far outside a block's border or a line (screen px) a dragged end already counts as over it. */
-export const DROP_REACH = 8;
+/** How far outside a block's border (screen px) a dragged end already counts as over it: Visio's ~10 px (plan 10). */
+export const DROP_REACH = 10;
+/** How far off a wire's line (screen px) a dragged end counts as on it: Visio's ~12 px for a point (plan 10). */
+export const LINE_REACH = 12;
 
 /** What a dragged end is over (plan 9 §6): a step's input or output side, the hub's ring, a wire's line, or nothing. */
 export type DropTarget =

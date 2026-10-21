@@ -36,6 +36,8 @@ export interface DesignOverlayProps {
     line: readonly [Point, Point] | null;
     /** A Wire tile over a contact (2026-10-20): the wire as the drop would draw it. */
     path?: readonly Pt[] | null;
+    /** Where the Wire tile's end would land (plan 10): drawn as Visio's square. */
+    contact?: Point | null;
     label: { text: string; tone: 'ok' | 'no'; at: Point } | null;
   } | null;
   /** The part of a wire an end released here would cut away, drawn faded (the user's rule, 2026-10-09). */
@@ -47,7 +49,7 @@ const LINE = 1.5, GHOST = 1.6, LABEL_H = 18, LABEL_PAD = 6, LABEL_FONT = 11.5;
 /** Visio's dynamic grid (plan 10, measured): guides overshoot 8 px; a gap's arrow 18 px off its pair, ticks ±10, heads 6 long. */
 const OVERSHOOT = 8, GAP_OFF = 18, TICK = 10, HEAD = 6;
 /** Visio's connector handles (plan 10 phase 2, measured): end 8 px across, run dot 6, bend dot 4 (radii). */
-const END_DOT = 4, RUN_DOT = 3, BEND_DOT = 2;
+const END_DOT = 4, RUN_DOT = 3, BEND_DOT = 2, CONTACT = 10;
 
 /** An equal gap as Visio draws it: a line with an arrow head at each end, between two ticks, beside its pair. */
 function GapArrow({ gap, k }: { gap: GapMark; k: number }) {
@@ -111,6 +113,12 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
             <text x={LABEL_PAD} y={LABEL_H / 2 + LABEL_FONT * 0.36} fontSize={LABEL_FONT}>{tool.label.text}</text>
           </g>
         )}
+        {[...hints.map((h) => h.contact && { at: h.contact, tone: h.tone }), tool?.contact && tool.label && { at: tool.contact, tone: tool.label.tone }]
+          .map((c, i) => c && (c.tone === 'ok' || c.tone === 'no') && (
+            // Visio's landing square: where the end would glue, green; red where it is refused (plan 10)
+            <rect key={`c${i}`} className={`design-contact ${c.tone}`} x={c.at.x - (CONTACT / 2) * k} y={c.at.y - (CONTACT / 2) * k}
+              width={CONTACT * k} height={CONTACT * k} strokeWidth={2 * k} />
+          ))}
         {hints.map((hint, i) => {
           const label = dropLabel(hint.why);
           return (

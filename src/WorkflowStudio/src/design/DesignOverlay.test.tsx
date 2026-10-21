@@ -87,3 +87,28 @@ describe("a picked wire's ends and dots, as Visio's (plan 10 phase 2)", () => {
     if (bends.length) expect(bends[0]!.getAttribute('r')).toBe('2');
   });
 });
+
+describe("Visio's landing square (plan 10 phase 2)", () => {
+  function withHint(tone: 'ok' | 'no') {
+    const { container } = render(
+      <ReactFlowProvider>
+        <div style={{ width: 800, height: 600 }}>
+          <ReactFlow nodes={[]} edges={[]} defaultViewport={{ x: 0, y: 0, zoom: 1 }}>
+            <DesignOverlay band={null} guides={{ lines: [], gaps: [] }} wires={[]} bendsOf={() => ({ xs: [], ys: [] })} onSegment={() => {}} onEnd={() => {}} ghost={null}
+              hints={[{ id: 's1', line: false, tone, why: tone === 'ok' ? 'connect' : 'wrongSide', at: { x: 120, y: 60 }, contact: { x: 100, y: 50 } }]} />
+          </ReactFlow>
+        </div>
+      </ReactFlowProvider>,
+    );
+    return container;
+  }
+
+  it('draws a 10 screen px square frame centred on where the end would land, green when it glues', () => {
+    const sq = withHint('ok').querySelector('rect.design-contact.ok')!;
+    expect([num(sq, 'x'), num(sq, 'y'), num(sq, 'width'), num(sq, 'height')]).toEqual([95, 45, 10, 10]);
+  });
+
+  it('red when refused', () => {
+    expect(withHint('no').querySelector('rect.design-contact.no')).not.toBeNull();
+  });
+});

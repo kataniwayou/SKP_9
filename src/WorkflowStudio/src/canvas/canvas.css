@@ -71,7 +71,7 @@
 
 /* plan 4: the block under a dragged wire end (green: the drop is allowed; red: refused), the ghost wire, and the connection points */
 /* --inv (1 / zoom, set on the canvas) keeps the outline 3 px on screen at any zoom */
-.studio-canvas .react-flow__node.drop-ok { outline: calc(3px * var(--inv, 1)) solid #34D399; outline-offset: calc(4px * var(--inv, 1)); border-radius: 8px; }
+.studio-canvas .react-flow__node.drop-ok { outline: calc(3px * var(--inv, 1)) solid #5BC85B; outline-offset: calc(4px * var(--inv, 1)); border-radius: 8px; }
 .studio-canvas .react-flow__node.drop-no { outline: calc(3px * var(--inv, 1)) solid #F87171; outline-offset: calc(4px * var(--inv, 1)); border-radius: 8px; }
 /* plan 9: released here the end is open (grey) */
 .studio-canvas .react-flow__node.drop-move { outline: calc(3px * var(--inv, 1)) solid #9AA7B8; outline-offset: calc(4px * var(--inv, 1)); border-radius: 8px; }
@@ -89,3 +89,7 @@
 .design-drop-label text { fill: var(--ink); font-family: var(--sans); }
 /* a connection point is 12 px on screen at any zoom, centred on its spot (left/top in flow units) */
 .nx-port { position: absolute; width: calc(12px * var(--inv, 1)); height: calc(12px * var(--inv, 1)); transform: translate(-50%, -50%); border: 0; background: transparent; box-sizing: border-box; opacity: 0; cursor: pointer; } /* the connection point: a hit area only, never drawn */
+/* Visio's landing square (plan 10 phase 2): where a dragged end would glue */
+.design-contact { fill: none; }
+.design-contact.ok { stroke: #5BC85B; }
+.design-contact.no { stroke: #F87171; }

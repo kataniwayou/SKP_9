@@ -20,7 +20,7 @@ import { circuitOf, removeWires, withCircuit, type Draft } from './draft';
 import { landBody, type BodyLanding } from './bodyDrop';
 import { landWires, type RunLanding, type WireRun } from './keyBody';
 import { cutPaths, cutTargets, cutWire, holdDrawn, squareAt, squaresOf, type Square } from './cut';
-import { applyDrop, DROP_REACH, endOf, judgeDrop, pointOfTarget, roleOf, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
+import { applyDrop, DROP_REACH, endOf, LINE_REACH, judgeDrop, pointOfTarget, roleOf, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
 import { overlapJudge } from './overlapJudge';
 import { newId } from './ids';
@@ -34,6 +34,8 @@ export interface DropHint {
   /** Green: the end connects or joins; grey: it is or stays open; red: it snaps back. */
   tone: 'ok' | 'move' | 'no';
   why: Verdict;
+  /** Where the end would land (a step side, the hub's ring, a wire's line), drawn as Visio's square; null when open. */
+  contact?: Point | null;
   /** The pointer (a body drag: the end), in flow coordinates. */
   at: Point;
 }
@@ -276,12 +278,13 @@ export function useWireGestures(
       }
       const reach = DROP_REACH / getZoom();
       const over = blockAt(shown.current, p, reach);
-      const line = over === null ? wireAt(shown.current, p, reach, { id: o.id, side: o.side }) : null;
+      const line = over === null ? wireAt(shown.current, p, LINE_REACH / getZoom(), { id: o.id, side: o.side }) : null;
       target = targetOf(shown.current, o.circuit, p, over, line);
       verdict = judgeDrop(shown.current, o.circuit, o.id, o.side, target);
       const path = o.path(target);
       if (toneOf(verdict) !== 'no' && o.overlaps?.(target, path)) verdict = 'short';
-      setHints([{ id: line ? line.id : over, line: line !== null, tone: toneOf(verdict), why: verdict, at: p }]);
+      const contact = target.on === 'open' ? null : pointOfTarget(shown.current, target);
+      setHints([{ id: line ? line.id : over, line: line !== null, tone: toneOf(verdict), why: verdict, at: p, contact }]);
       setGhost({ wire: o.ghost, points: path });
     }, (cancelled) => {
       setGhost(null);
