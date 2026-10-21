@@ -7,7 +7,7 @@ import type { Selection } from '../store/selection';
 import { addCircuitWire, freeWithout, NEW_WIRE_PREFIX, openJoinedOn, sameEnd, setBends, setEnd, type Circuit, type End, type Side } from '../circuit/circuit';
 import { endPointOf, hubStart, routeCircuit, type WireRoute } from '../layout/circuitRoute';
 import { clearBends, clearDragged, clearRun, legPath } from '../layout/detour';
-import { clampLanding, PMID, snap, STEP_W, type Point } from '../layout/geometry';
+import { clampLanding, LANDING_MAX, LANDING_MIN, GRID, PMID, snap, STEP_W, type Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import { simplify, type Box, type Pt } from '../layout/router';
 import { dragSegment, normalize, pointsOfShape, shapeFromPoints, type Bends } from '../layout/shape';
@@ -23,6 +23,10 @@ import { cutPaths, cutTargets, cutWire, holdDrawn, squareAt, squaresOf, type Squ
 import { applyDrop, DROP_REACH, endOf, LINE_REACH, judgeDrop, pointOfTarget, roleOf, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
 import { overlapJudge } from './overlapJudge';
+import { snapRun } from './runSnap';
+import { SNAP_REACH_PX } from './guides';
+import { mayShare } from '../layout/overlaps';
+import { netsOf } from '../circuit/families';
 import { newId } from './ids';
 
 /** What a dragged wire end is over (plan 9 §6): the block outlined or the line haloed (tone), the verdict, and where the pointer is, for the label. */
@@ -180,13 +184,15 @@ export function useWireGestures(
   const [hints, setHints] = useState<DropHint[]>([]);
   // the drag's cursor: a horizontal run (even k) moves up and down, a vertical one sideways; an end square any way (rule 14)
   const [resize, setResize] = useState<'ns' | 'ew' | 'move' | null>(null);
+  // a dragged run's alignment guide (plan 10 phase 2, Visio's): the line it snapped to, across the run's own axis
+  const [runGuide, setRunGuide] = useState<{ axis: 'x' | 'y'; v: number } | null>(null);
   const designRef = useRef(design);
   designRef.current = design;
 
   // design mode ending mid-drag drops the drag and its preview
   const designOff = design === undefined;
   useEffect(() => {
-    if (designOff) { abort(); setPreview(null); setGhost(null); setHints([]); }
+    if (designOff) { abort(); setPreview(null); setGhost(null); setHints([]); setRunGuide(null); }
   }, [designOff]); // abort and setPreview read refs and React state setters: no need to re-run for them
 
   /**
@@ -220,7 +226,18 @@ export function useWireGestures(
     const judge = overlapJudge(shown.current, wire.id, circuit, 'strict');
     let short = false;
     setResize(k % 2 === 0 ? 'ns' : 'ew');
-    run(e, (p) => {
+    // Visio's guide (plan 10 phase 2): the run snaps to block edges and centres, the head step's landing heights (the run
+    // that slides the head) and runs of wires it may share a line with, within 12 screen px
+    const axis = k % 2 === 0 ? 'y' : 'x';
+    const manual = setBends(circuit, wire.id, bends);
+    const share = mayShare(manual, netsOf(manual, (s) => shown.current.graph.steps.get(s)?.entryCondition));
+    const landings: number[] = [];
+    if (step && k === 2 * bends.xs.length) for (let y = LANDING_MIN; y <= LANDING_MAX; y += GRID) landings.push(step.y + y);
+    const reach = SNAP_REACH_PX / getZoom();
+    run(e, (pointer) => {
+      const snapped = snapRun(axis === 'x' ? pointer.x : pointer.y, axis, shown.current, wire.id, reach, (x) => share(wire.id, x), landings);
+      setRunGuide(snapped.at === null ? null : { axis, v: snapped.at });
+      const p = axis === 'x' ? { x: snapped.v, y: pointer.y } : { x: pointer.x, y: snapped.v };
       const r = dragSegment(bends, k, p, ends);
       if ('landingY' in r) {
         const headY = step ? clampLanding(r.landingY - step.y) : r.landingY;
@@ -242,6 +259,7 @@ export function useWireGestures(
     }, (cancelled, moved) => {
       setGhost(null);
       setHints([]);
+      setRunGuide(null);
       if (cancelled || !moved || short) return;
       const ty = latest.headY === null ? ends.ty : step ? step.y + latest.headY : latest.headY;
       const tidy = latest.bends ? normalize({ ...ends, ty }, latest.bends) : null;
@@ -592,5 +610,5 @@ export function useWireGestures(
   }), [shown]);
 
   // a run or end drag's cursor only while that drag runs; a body drag and a new wire keep the closed hand
-  return { gestures, startSegment, startEnd, ghost, hints, active, running, resize: active ? resize : null, keys };
+  return { gestures, startSegment, startEnd, ghost, hints, runGuide, active, running, resize: active ? resize : null, keys };
 }

@@ -63,8 +63,8 @@ describe('wire gestures', () => {
     const handle = container.querySelector('.design-handle.seg[data-k="0"]')!;
     fireEvent.pointerDown(handle, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
     expect(container.querySelector('.studio-canvas')!.classList.contains('gesture')).toBe(true);
-    fireEvent.pointerMove(handle.ownerDocument, { clientX: 100, clientY: 164, pointerId: 1 });
-    fireEvent.pointerUp(handle.ownerDocument, { clientX: 100, clientY: 164, pointerId: 1 });
+    fireEvent.pointerMove(handle.ownerDocument, { clientX: 100, clientY: 184, pointerId: 1 });
+    fireEvent.pointerUp(handle.ownerDocument, { clientX: 100, clientY: 184, pointerId: 1 });
     expect(design.onCommit).toHaveBeenCalledTimes(1);
     expect(vi.mocked(design.onCommit).mock.calls[0]![0].wires!['s1->s2']!.bends).not.toBeNull();
     expect(container.querySelector('.studio-canvas')!.classList.contains('gesture')).toBe(false);
@@ -95,6 +95,27 @@ describe('wire gestures', () => {
       return c !== undefined && Math.max(a[0], c[0]) > s2.x && Math.min(a[0], c[0]) < s2.x + STEP_W && Math.max(a[1], c[1]) > s2.y && Math.min(a[1], c[1]) < s2.y + STEP_H;
     });
     expect(into).toBe(false);
+  });
+
+  it("a run dragged within 12 screen px of a step's edge snaps to it and shows Visio's guide there until release (plan 10 phase 2)", async () => {
+    const doc = await three();
+    const s1 = doc.placement.steps.get('s1')!, s2 = doc.placement.steps.get('s2')!;
+    const low = s1.y + STEP_H + 48;
+    const draft = setShape(EMPTY_DRAFT, doc, 's1->s2', { bends: { xs: [s1.x + STEP_W + 16, s2.x - 16], ys: [low] }, landing: null });
+    const design = designOf({ draft, picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const handle = container.querySelector('.design-handle.seg[data-k="2"]')!;
+    const x = s1.x + STEP_W + 100;
+    // the low run, dragged 10 px under the steps' bottom edge
+    const edge = s1.y + STEP_H;
+    fireEvent.pointerDown(handle, { button: 0, ...screenOf(container, { x, y: low }), pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, { x, y: edge + 10 }), pointerId: 1 });
+    const guide = container.querySelector('line.design-guide.run')!;
+    expect(guide).not.toBeNull();
+    expect([Number(guide.getAttribute('y1')), Number(guide.getAttribute('y2'))]).toEqual([edge, edge]);
+    fireEvent.pointerUp(document, { ...screenOf(container, { x, y: edge + 10 }), pointerId: 1 });
+    expect(container.querySelector('line.design-guide.run')).toBeNull();
+    expect(vi.mocked(design.onCommit).mock.calls[0]![0].wires!['s1->s2']!.bends!.ys).toEqual([edge]);
   });
 
   it('a run square shows the way its run moves, and keeps that double arrow while it is dragged', async () => {

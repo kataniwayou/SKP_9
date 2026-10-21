@@ -40,6 +40,8 @@ export interface DesignOverlayProps {
     contact?: Point | null;
     label: { text: string; tone: 'ok' | 'no'; at: Point } | null;
   } | null;
+  /** A dragged run's alignment guide (plan 10 phase 2, Visio's): a full-length dashed line at `v` across `axis`. */
+  runGuide?: { axis: 'x' | 'y'; v: number } | null;
   /** The part of a wire an end released here would cut away, drawn faded (the user's rule, 2026-10-09). */
   gone?: Pt[] | null;
 }
@@ -48,6 +50,8 @@ export interface DesignOverlayProps {
 const LINE = 1.5, GHOST = 1.6, LABEL_H = 18, LABEL_PAD = 6, LABEL_FONT = 11.5;
 /** Visio's dynamic grid (plan 10, measured): guides overshoot 8 px; a gap's arrow 18 px off its pair, ticks ±10, heads 6 long. */
 const OVERSHOOT = 8, GAP_OFF = 18, TICK = 10, HEAD = 6;
+/** A run's guide runs the canvas's whole length (flow px either way). */
+const FAR = 100000;
 /** Visio's connector handles (plan 10 phase 2, measured): end 8 px across, run dot 6, bend dot 4 (radii). */
 const END_DOT = 4, RUN_DOT = 3, BEND_DOT = 2, CONTACT = 10;
 
@@ -74,7 +78,7 @@ function GapArrow({ gap, k }: { gap: GapMark; k: number }) {
  * wire's squares (§4.2, Visio; plan 9 rule 14): one on each end (tail and head, on whatever they are), one in the
  * middle of each run of its core (no mark on a bend); and the ghost of a new wire while it is drawn (§4.5).
  */
-export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hints = [], gone = null, tool = null }: DesignOverlayProps) {
+export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hints = [], gone = null, tool = null, runGuide = null }: DesignOverlayProps) {
   // one screen pixel in flow units
   const k = 1 / useStore((s) => s.transform[2]);
   return (
@@ -88,6 +92,8 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
             strokeWidth={k} strokeDasharray={`${4 * k} ${3 * k}`} />;
         })}
         {guides.gaps.map((g, i) => <GapArrow key={`g${i}`} gap={g} k={k} />)}
+        {runGuide && <line className="design-guide run" x1={runGuide.axis === 'x' ? runGuide.v : -FAR} y1={runGuide.axis === 'x' ? -FAR : runGuide.v}
+          x2={runGuide.axis === 'x' ? runGuide.v : FAR} y2={runGuide.axis === 'x' ? FAR : runGuide.v} strokeWidth={k} strokeDasharray={`${4 * k} ${3 * k}`} />}
         {wires.map((w) => {
           // Visio's (plan 10): glued ends a green dot, open ends a hollow circle (8 px); a 6 px dot on each run, a 4 px dot
           // on each bend (never pressed: a run drag moves it)
