@@ -296,7 +296,7 @@ test('rule 13: a wire with one end open is dashed in its family\'s colour; with 
   expect(await dashOf(panel, ad)).not.toBe('none');
 });
 
-test('rule 14: a picked wire shows its squares; its end squares show the four-way cursor, also while dragged', async ({ page }) => {
+test('rule 14: a picked wire shows its squares; its end squares show the four-way cursor, the crosshair while dragged (plan 10)', async ({ page }) => {
   const panel = await open(page);
   const ab = `${t.a}->${t.b}`;
   await expect(panel.locator(`.design-wire[data-wire="${ab}"] .design-handle`)).toHaveCount(0);
@@ -312,8 +312,9 @@ test('rule 14: a picked wire shows its squares; its end squares show the four-wa
   await page.mouse.move(at.x, at.y);
   await page.mouse.down();
   await page.mouse.move(at.x + 40, at.y + 40, { steps: 4 });
-  await expect(panel.locator('.studio-canvas')).toHaveClass(/gesture-move/);
-  expect(await cursorAt(page, { x: at.x + 40, y: at.y + 40 })).toBe('move');
+  // held, Visio's crosshair while the end is placed (plan 10 phase 2)
+  await expect(panel.locator('.studio-canvas')).toHaveClass(/gesture-cross/);
+  expect(await cursorAt(page, { x: at.x + 40, y: at.y + 40 })).toBe('crosshair');
   await page.keyboard.press('Escape');
   await page.mouse.up();
 });
@@ -492,14 +493,14 @@ function shiftOf(before: [number, number][], after: [number, number][]): { dx: n
   return { dx, dy };
 }
 
-test('drag rules: the open hand on a wire\'s body and the closed hand while it is dragged; two-headed arrows on run squares, the four-headed one on end squares', async ({ page }) => {
+test('drag rules: Visio\'s four-way arrow on a wire\'s body, also while it is dragged; two-headed arrows on run squares, the four-headed one on end squares (plan 10)', async ({ page }) => {
   const panel = await open(page);
   const ab = `${t.a}->${t.b}`;
   const before = await pointsOf(panel, ab);
-  // not picked: the open hand
+  // not picked: the four-way arrow
   let body = await pointOnWire(panel, ab, 0.3);
   await page.mouse.move(body.x, body.y);
-  expect(await cursorAt(page, body)).toBe('grab');
+  expect(await cursorAt(page, body)).toBe('move');
   await pickWire(page, panel, ab);
   const runs = await panel.locator(`.design-wire[data-wire="${ab}"] .design-handle.seg`).all();
   expect(runs.length).toBeGreaterThanOrEqual(1);
@@ -513,16 +514,16 @@ test('drag rules: the open hand on a wire\'s body and the closed hand while it i
     await page.mouse.move(c.x, c.y);
     expect(await cursorAt(page, c)).toBe('move');
   }
-  // picked: still the open hand off the squares; pressed and dragged, the closed hand on the canvas the whole way
+  // picked: still the four-way arrow off the squares; pressed and dragged, the four-way arrow on the canvas the whole way
   body = await pointOnWire(panel, ab, 0.3);
   await page.mouse.move(body.x, body.y);
-  expect(await cursorAt(page, body)).toBe('grab');
+  expect(await cursorAt(page, body)).toBe('move');
   await page.mouse.down();
   for (const [dx, dy] of [[16, 24], [40, 64], [72, 96]] as const) {
     await page.mouse.move(body.x + dx, body.y + dy, { steps: 3 });
-    await expect(panel.locator('.studio-canvas')).toHaveClass(/\bgesture\b/);
-    await expect(panel.locator('.studio-canvas')).not.toHaveClass(/gesture-(ns|ew|move)/);
-    expect(await cursorAt(page, { x: body.x + dx, y: body.y + dy })).toBe('grabbing');
+    await expect(panel.locator('.studio-canvas')).toHaveClass(/\bgesture-move\b/);
+    await expect(panel.locator('.studio-canvas')).not.toHaveClass(/gesture-(ns|ew|cross)/);
+    expect(await cursorAt(page, { x: body.x + dx, y: body.y + dy })).toBe('move');
   }
   // Escape puts it back
   await page.keyboard.press('Escape');
@@ -658,7 +659,7 @@ async function freeWire(page: Page, panel: Locator, from: string, avoid: Pt[] = 
   return id;
 }
 
-test('cursors (rule A): the open hand only on a wire\'s body, never on a square; four-way on end squares, two-way on run squares; the closed hand while the body is dragged', async ({ page }) => {
+test('cursors (rule A, Visio\'s since plan 10): four-way on a wire\'s body and on end squares, two-way on run squares; four-way while the body is dragged', async ({ page }) => {
   const panel = await open(page);
   const ab = `${t.a}->${t.b}`;
   await pickWire(page, panel, ab);
@@ -672,10 +673,10 @@ test('cursors (rule A): the open hand only on a wire\'s body, never on a square;
   }
   const body = await pointOnWire(panel, ab, 0.3);
   await page.mouse.move(body.x, body.y);
-  expect(await cursorAt(page, body)).toBe('grab');
+  expect(await cursorAt(page, body)).toBe('move');
   await page.mouse.down();
   await page.mouse.move(body.x + 40, body.y + 60, { steps: 4 });
-  expect(await cursorAt(page, { x: body.x + 40, y: body.y + 60 })).toBe('grabbing');
+  expect(await cursorAt(page, { x: body.x + 40, y: body.y + 60 })).toBe('move');
   await page.keyboard.press('Escape');
   await page.mouse.up();
 });
@@ -1042,7 +1043,10 @@ test('cut: an end square released on one of its own run squares cuts the wire th
   await expect(panel.locator('.design-gone')).toHaveCount(1);
   // the run's middle on the 8 px grid: where its square is and where it cuts
   const mid: [number, number] = [before[1]![0], Math.round((before[1]![1] + before[2]![1]) / 16) * 8];
-  await expect.poll(() => pointsOf(panel, ab)).toEqual([before[0], before[1], mid]);
+  // the wire stays put meanwhile; the part kept is the dashed preview (Visio, plan 10 phase 2)
+  const ghost = async () => [...((await panel.locator('path.design-ghost').getAttribute('d')) ?? '').matchAll(/[ML]([-\d.e]+)[ ,]([-\d.e]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+  await expect.poll(ghost).toEqual([before[0], before[1], mid]);
+  expect(await pointsOf(panel, ab)).toEqual(before);
   // the squares stay where they were when the drag began
   expect(await centreOf(runSquare(panel, ab, 1))).toEqual(sq);
   await page.mouse.up();

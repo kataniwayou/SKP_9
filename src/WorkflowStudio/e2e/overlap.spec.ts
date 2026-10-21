@@ -106,9 +106,15 @@ test('rule 2: a run square dragged onto another net\'s wire is refused: "short c
   await pressTo(page, from, { x: from.x + (d.x - b.x) * z, y: from.y });
   expect(await labelsOf(panel)).toEqual(['short circuit']);
   await expect(panel.locator('.design-drop-label.no')).toHaveCount(1);
-  await expect(red(panel, ad)).toHaveCount(1);
+  // the wire stays put under its dashed preview (Visio, plan 10 phase 2); the stretch the preview would share with
+  // a -> d is drawn red, on a -> d's upright run
+  const short = panel.locator('path.design-short');
+  await expect(short).toHaveCount(1);
+  const xs = [...((await short.getAttribute('d')) ?? '').matchAll(/[ML]([-\d.e]+) /g)].map((m) => Number(m[1]));
+  expect(new Set(xs)).toEqual(new Set([d.x]));
   await shot(page, '4-run-square-refused');
   await page.mouse.up();
+  await expect(short).toHaveCount(0);
   // released there: it snaps back
   await expect.poll(() => pointsOf(panel, ab)).toEqual(was);
   await expect(red(panel, ad)).toHaveCount(0);

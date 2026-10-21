@@ -40,6 +40,8 @@ export interface DesignOverlayProps {
     contact?: Point | null;
     label: { text: string; tone: 'ok' | 'no'; at: Point } | null;
   } | null;
+  /** Where the dragged wire's new route would lie on a wire it may not share a line with (a short circuit), drawn red. */
+  shorts?: readonly Pt[][];
   /** A dragged run's alignment guide (plan 10 phase 2, Visio's): a full-length dashed line at `v` across `axis`. */
   runGuide?: { axis: 'x' | 'y'; v: number } | null;
   /** The part of a wire an end released here would cut away, drawn faded (the user's rule, 2026-10-09). */
@@ -78,7 +80,7 @@ function GapArrow({ gap, k }: { gap: GapMark; k: number }) {
  * wire's squares (§4.2, Visio; plan 9 rule 14): one on each end (tail and head, on whatever they are), one in the
  * middle of each run of its core (no mark on a bend); and the ghost of a new wire while it is drawn (§4.5).
  */
-export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hints = [], gone = null, tool = null, runGuide = null }: DesignOverlayProps) {
+export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hints = [], gone = null, tool = null, runGuide = null, shorts = [] }: DesignOverlayProps) {
   // one screen pixel in flow units
   const k = 1 / useStore((s) => s.transform[2]);
   return (
@@ -110,6 +112,7 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
         })}
         {ghost && <path className="design-ghost" d={pathOf(ghost)} strokeWidth={GHOST * k} strokeDasharray={`${6 * k} ${4 * k}`} />}
         {gone && gone.length > 1 && <path className="design-gone" d={pathOf(gone)} strokeWidth={4 * k} />}
+        {shorts.map((st, i) => <path key={`sh${i}`} className="design-short" d={pathOf(st)} strokeWidth={3 * k} />)}
         {tool?.box && <rect className="design-tool-landing" x={tool.box.x} y={tool.box.y} width={tool.box.w} height={tool.box.h} strokeWidth={1.5 * k} strokeDasharray={`${6 * k} ${4 * k}`} />}
         {tool?.line && <path className="design-tool-wire" d={`M${tool.line[0].x} ${tool.line[0].y}H${tool.line[1].x}`} strokeWidth={2 * k} strokeDasharray={`${5 * k} ${4 * k}`} />}
         {tool?.path && tool.path.length > 1 && <path className="design-tool-wire" d={tool.path.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x} ${y}`).join(' ')} strokeWidth={2 * k} strokeDasharray={`${5 * k} ${4 * k}`} />}

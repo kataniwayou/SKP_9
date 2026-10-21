@@ -87,7 +87,9 @@ body.tool-cross, body.tool-cross *, body.tool-cross .studio-canvas .react-flow__
 .design-tool-wire { fill: none; stroke: var(--undetermined); pointer-events: none; }
 /* the part an end square released on its own wire's square would cut away (the user's rule, 2026-10-09) */
 .design-gone { fill: none; stroke: #F87171; stroke-opacity: .45; stroke-linecap: round; }
-.studio-canvas .wire.faded { opacity: .3; }
+/* a dragged run's short circuit: where it would lie on another net's wire, as the wires' own overlap mark */
+.design-short { fill: none; stroke: #F87171; stroke-linecap: butt; filter: drop-shadow(0 0 3px #F87171); }
+.studio-canvas .wire.faded { opacity: .45; } /* plan 10: a held wire (and one a release would delete) at 45 % */
 .design-drop-label rect { stroke-width: 1; }
 .design-drop-label.ok rect { fill: rgba(6, 40, 30, .92); stroke: #34D399; }
 .design-drop-label.no rect { fill: rgba(45, 10, 10, .92); stroke: #F87171; }

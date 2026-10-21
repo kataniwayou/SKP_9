@@ -118,6 +118,23 @@ describe('wire gestures', () => {
     expect(vi.mocked(design.onCommit).mock.calls[0]![0].wires!['s1->s2']!.bends!.ys).toEqual([edge]);
   });
 
+  it("a run is not snapped onto a step's side it would lie along (it would be pushed off): no guide, the drag as without the snap", async () => {
+    const doc = await three();
+    const s1 = doc.placement.steps.get('s1')!, s2 = doc.placement.steps.get('s2')!;
+    const low = s1.y + STEP_H + 48;
+    const draft = setShape(EMPTY_DRAFT, doc, 's1->s2', { bends: { xs: [s1.x + STEP_W + 16, s2.x - 32], ys: [low] }, landing: null });
+    const design = designOf({ draft, picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    // the run that comes back up into s2, dragged 8 px short of s2's left side (which it would lie along)
+    const handle = container.querySelector('.design-handle.seg[data-k="3"]')!;
+    const y = (low + s2.y + PMID) / 2;
+    fireEvent.pointerDown(handle, { button: 0, ...screenOf(container, { x: s2.x - 32, y }), pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: s2.x - 8, y }), pointerId: 1 });
+    expect(container.querySelector('line.design-guide.run')).toBeNull();
+    fireEvent.pointerUp(document, { ...screenOf(container, { x: s2.x - 8, y }), pointerId: 1 });
+    expect(vi.mocked(design.onCommit).mock.calls[0]![0].wires!['s1->s2']!.bends!.xs).toEqual([s1.x + STEP_W + 16, s2.x - 8]);
+  });
+
   it('a run square shows the way its run moves, and keeps that double arrow while it is dragged', async () => {
     const doc = await two();
     const s1 = doc.placement.steps.get('s1')!, s2 = doc.placement.steps.get('s2')!;

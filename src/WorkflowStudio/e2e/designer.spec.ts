@@ -577,12 +577,12 @@ test('every end square has the four-way move cursor, a junction\'s too; a juncti
   const q = await centreOf(endSquare(panel, a, 'head'));
   await page.mouse.move(q.x, q.y);
   expect(await cursorAt(page, q)).toEqual({ cursor: 'move', cls: expect.stringMatching(/design-handle end/) });
-  // held, the canvas keeps the four-way cursor; dropped on its own step's input, the wire is plain again
+  // held, the canvas shows Visio's crosshair (plan 10 phase 2); dropped on its own step's input, the wire is plain again
   const own = a.split('->')[1]!;
   const o = await inputOf(panel, own);
   await page.mouse.down();
   await page.mouse.move(o.x, o.y, { steps: 10 });
-  await expect(panel.locator('.studio-canvas')).toHaveClass(/gesture-move/);
+  await expect(panel.locator('.studio-canvas')).toHaveClass(/gesture-cross/);
   await expect(node(panel, own)).toHaveClass(/drop-ok/);
   await page.mouse.up();
   await expect(wire(panel, a).locator('circle.nx-joint')).toHaveCount(0);
@@ -763,7 +763,9 @@ test('a picked new wire has squares on its ends and runs: a run square reshapes 
   await page.mouse.move(s0.x, s0.y);
   await page.mouse.down();
   await page.mouse.move(empty!.x, empty!.y, { steps: 10 });
-  await expect.poll(() => kept.locator('path.w').getAttribute('d')).not.toBe(shaped);
+  // Visio's (plan 10 phase 2): the wire stays put, faded, and its new route is the dashed preview
+  await expect(again.locator('path.design-ghost')).toHaveCount(1);
+  expect(await kept.locator('path.w').getAttribute('d')).toBe(shaped);
   await expect(again.locator('.design-drop-label')).toHaveText('move here');
   await page.keyboard.press('Escape');
   await page.mouse.up();

@@ -54,6 +54,8 @@ export interface WireGhost {
   points: Pt[];
   gone?: Pt[];
   faded?: boolean;
+  /** The stretches the new route would share with wires it may not share a line with (a short circuit), drawn red. */
+  shorts?: Pt[][];
 }
 
 /** An end square's drag over its own wire's squares: what it is over, what the canvas shows, what a release does. */
@@ -235,28 +237,45 @@ export function useWireGestures(
     const landings: number[] = [];
     if (step && k === 2 * bends.xs.length) for (let y = LANDING_MIN; y <= LANDING_MAX; y += GRID) landings.push(step.y + y);
     const reach = SNAP_REACH_PX / getZoom();
-    run(e, (pointer) => {
-      const snapped = snapRun(axis === 'x' ? pointer.x : pointer.y, axis, shown.current, wire.id, reach, (x) => share(wire.id, x), landings);
-      setRunGuide(snapped.at === null ? null : { axis, v: snapped.at });
-      const p = axis === 'x' ? { x: snapped.v, y: pointer.y } : { x: pointer.x, y: snapped.v };
+    // the other wires as drawn, for the red stretches of a short circuit (the user's rule 2: red where it lies on them)
+    const others = new LineIndex();
+    for (const w of shown.current.wires) if (w.id !== wire.id) others.add(w.id, w.points);
+    type Shaped = { bends: Bends | null; headY: number | null };
+    // the shape a pointer at `p` gives, from the shape before (`was`): the run under it moved, the rest around the blocks
+    const shapeAt = (p: Point, was: Shaped): { state: Shaped; core: Pt[] } => {
       const r = dragSegment(bends, k, p, ends);
+      let state: Shaped;
       if ('landingY' in r) {
         const headY = step ? clampLanding(r.landingY - step.y) : r.landingY;
         const ty = step ? step.y + headY : headY;
-        latest = { bends: bends.xs.length > 0 ? clearBends({ ...ends, ty }, bends, boxes) : null, headY };
+        state = { bends: bends.xs.length > 0 ? clearBends({ ...ends, ty }, bends, boxes) : null, headY };
       } else {
         // the run under the pointer is pushed off any block it would lie on; the rest detours around blocks
         const moved = clearRun(r.bends, ends, draggedRun(bends.xs.length, k), boxes);
-        latest = { bends: clearBends(ends, moved, boxes), headY: latest.headY };
+        state = { bends: clearBends(ends, moved, boxes), headY: was.headY };
       }
-      const ty = latest.headY === null ? ends.ty : step ? step.y + latest.headY : latest.headY;
-      const core = latest.bends ? pointsOfShape({ ...ends, ty }, latest.bends) : [[ends.sx, ends.sy], [ends.tx, ty]] as Pt[];
+      const ty = state.headY === null ? ends.ty : step ? step.y + state.headY : state.headY;
+      return { state, core: state.bends ? pointsOfShape({ ...ends, ty }, state.bends) : [[ends.sx, ends.sy], [ends.tx, ty]] as Pt[] };
+    };
+    const i = axis === 'x' ? 0 : 1;
+    // a run lies at `v` across the axis: the snap held (the run was not pushed off a block it would lie along)
+    const lies = (core: Pt[], v: number) => core.some((a, j) => j > 0 && a[i] === v && core[j - 1]![i] === v && a[1 - i] !== core[j - 1]![1 - i]);
+    run(e, (pointer) => {
+      const snapped = snapRun(axis === 'x' ? pointer.x : pointer.y, axis, shown.current, wire.id, reach, (x) => share(wire.id, x), landings);
+      let shapedNow = shapeAt(axis === 'x' ? { x: snapped.v, y: pointer.y } : { x: pointer.x, y: snapped.v }, latest);
+      // snapped onto a line the run may not keep (a block's side it would lie along): the drag as without the snap, no guide
+      const held = snapped.at !== null && lies(shapedNow.core, snapped.at);
+      if (snapped.at !== null && !held) shapedNow = shapeAt(pointer, latest);
+      setRunGuide(held ? { axis, v: snapped.at! } : null);
+      latest = shapedNow.state;
+      const core = shapedNow.core;
       const now = latest;
       short = judge(simplify(core), () => shapedCircuit(now));
-      setHints(short ? [{ id: null, line: false, tone: 'no', why: 'short', at: p }] : []);
+      setHints(short ? [{ id: null, line: false, tone: 'no', why: 'short', at: pointer }] : []);
       // Visio's: the wire stays put and its new route is drawn dashed; nothing is rerouted until release (plan 10)
       const drawn = routeCircuit(shapedCircuit(now), { placement: shown.current.placement, steps: shown.current.graph.steps }).find((x) => x.id === wire.id);
-      setGhost(drawn ? { wire: wire.id, points: [...drawn.points] } : null);
+      const shorts = short && drawn ? [...others.stretches(drawn.points, (x) => !share(wire.id, x)).values()].flat().map((st) => [...st]) : [];
+      setGhost(drawn ? { wire: wire.id, points: [...drawn.points], ...(shorts.length > 0 ? { shorts } : {}) } : null);
     }, (cancelled, moved) => {
       setGhost(null);
       setHints([]);
