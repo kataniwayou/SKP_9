@@ -1,6 +1,6 @@
 import type { StudioDocument } from '../app/document';
 import { NEW_WIRE_PREFIX, type Circuit, type CircuitWire, type End, type Side } from '../circuit/circuit';
-import { contactOn, routeCircuit } from '../layout/circuitRoute';
+import { contactOn, hubLead, routeCircuit } from '../layout/circuitRoute';
 import type { Pt } from '../layout/router';
 import { CACHE_H, CACHE_W, snap, STEP_H, STEP_W, type Point } from '../layout/geometry';
 import { CACHE_NODE_PREFIX, cacheNodeId, SPHERE_NODE_ID } from '../layout/nodeIds';
@@ -74,7 +74,7 @@ const contactSide = (t: WireTarget): Side => (t.on === 'step' && t.side === 'out
 
 /**
  * A Wire tile dropped on contact `t` (the user's request, 2026-10-20): that end on the contact, the other open
- * `DROPPED_WIRE` away from it — left of a step's input, right of an output, out from the hub along its angle, square off a
+ * `DROPPED_WIRE` away from it — left of a step's input, right of an output, along the run a hub wire starts, square off a
  * line it joins — so it is drawn as a short straight stub, automatic, ready to be dragged on.
  */
 export function toolWire(shown: StudioDocument, t: Exclude<WireTarget, { on: 'open' }>): CircuitWire {
@@ -84,8 +84,11 @@ export function toolWire(shown: StudioDocument, t: Exclude<WireTarget, { on: 'op
   switch (t.on) {
     case 'step': return t.side === 'in' ? { tail: away(-DROPPED_WIRE, 0), head: end } : { tail: end, head: away(DROPPED_WIRE, 0) };
     case 'hub': {
-      const r = (t.angle * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
-      return { tail: end, head: Math.abs(c) >= Math.abs(s) ? away(Math.sign(c) * DROPPED_WIRE, 0) : away(0, Math.sign(s) * DROPPED_WIRE) };
+      // a hub tail's run starts right of the ring (above or below it from the left half, hubLead): the open head lies
+      // `DROPPED_WIRE` along that run, so the stub is drawn out of the ring and straight on — never back round the hub
+      // (the user's report, 2026-10-21); at the run's own height, off the grid as a ring point may be, so it stays straight
+      const start = hubLead(shown.placement.sphere.cx, shown.placement.sphere.cy, t.angle).start;
+      return { tail: end, head: { on: 'open', x: snap(start.x + DROPPED_WIRE), y: start.y } };
     }
     case 'wire': {
       const host = shown.wires.find((w) => w.id === t.host);

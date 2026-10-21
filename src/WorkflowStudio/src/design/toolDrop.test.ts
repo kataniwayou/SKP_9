@@ -173,6 +173,31 @@ describe("a Wire tile dropped straight on a contact (the user's request, 2026-10
     expect(circuitOf(base, h.draft)[h.picks[0]!.id]!.tail).toMatchObject({ on: 'hub' });
   });
 
+  it('on the hub anywhere round its ring: out of the ring and straight on to the right, never back round the hub (2026-10-21)', async () => {
+    // a workflow with room beside its hub (no step yet)
+    const base = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: [] }), steps: [] }));
+    const { cx, cy } = base.placement.sphere;
+    // the left side, the top, the bottom, low on the left, high on the right, the right
+    for (const deg of [180, -90, 90, 135, -45, 0]) {
+      const r = (deg * Math.PI) / 180;
+      const p = { x: cx + 90 * Math.cos(r), y: cy + 90 * Math.sin(r) };
+      const v = judge(base, p);
+      expect(v, `${deg}°`).toMatchObject({ kind: 'wire', why: 'connect', target: { on: 'hub' } });
+      if (v.kind !== 'wire' || v.points === null) throw new Error(`${deg}°: no drawing`);
+      const pts = v.points;
+      // the ring lead (one point from the right half, two from the left), then one run to the right, ending at the head
+      expect(pts.length, `${deg}° ${JSON.stringify(pts)}`).toBeLessThanOrEqual(3);
+      const [a, z] = [pts.at(-2)!, pts.at(-1)!];
+      expect(a[1], `${deg}°`).toBe(z[1]);
+      expect(z[0] - a[0], `${deg}°`).toBeGreaterThan(0);
+      expect(Math.min(...pts.map((q) => q[0])), `${deg}°`).toBeGreaterThanOrEqual(cx - 96);
+      const h = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'wire' }, p, ids, 8)!;
+      const w = circuitOf(base, h.draft)[h.picks[0]!.id]!;
+      expect(w.tail).toMatchObject({ on: 'hub' });
+      expect(applyDesign(base, h.draft, EMPTY_EDITS).wires.find((x) => x.id === h.picks[0]!.id)!.points).toEqual(pts);
+    }
+  });
+
   it("on a wire's line: \"join here\", a junction there; on empty canvas a free wire as before", async () => {
     const base = await three();
     const host = base.wires.find((x) => x.id === 's1->s2')!;

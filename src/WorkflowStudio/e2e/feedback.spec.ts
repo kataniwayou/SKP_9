@@ -157,6 +157,31 @@ test('the Wire tile\'s arrow tip makes the contact, not the pointer behind it (2
   expect(Math.abs(head[1]! - tipFlow[1]!)).toBeLessThanOrEqual(8);
 });
 
+test('a Wire tile dropped on the left side of the hub: out of the ring and straight on to the right, never round the hub (2026-10-21)', async ({ page }) => {
+  const panel = await open(page);
+  const hub = await box(node(panel, 'wf'));
+  const z = await zoomOf(panel);
+  const top = await flowToPage(panel, [0, 0]);
+  const cx = ((hub.x + hub.width / 2) - top.x) / z, cy = ((hub.y + hub.height / 2) - top.y) / z;
+  for (const [x, y] of [[cx - 90, cy], [cx - 64, cy - 64]] as const) {
+    const before = await wireIds(panel);
+    const held = await holdWireTile(page, panel, [x, y]);
+    expect(held.labels).toEqual(['connect here']);
+    expect(held.lit).toEqual(['wf']);
+    const made = await release(page, panel, before);
+    expect(made).toHaveLength(1);
+    await expect(edge(panel, made[0]!).locator('circle.nx-src')).toHaveCount(1);
+    const pts = await wirePoints(panel, made[0]!);
+    // the ring lead (along the ring's side to above or below it), then one run to the right, ending at the head
+    expect(pts.length).toBeLessThanOrEqual(3);
+    const [a, b] = [pts.at(-2)!, pts.at(-1)!];
+    expect(b[1]).toBe(a[1]);
+    expect(b[0]).toBeGreaterThan(cx);
+    expect(Math.min(...pts.map((q) => q[0]))).toBeGreaterThanOrEqual(cx - 96);
+  }
+  await shot(page, '3-tile-hub-left');
+});
+
 test('a Wire tile on a contact where its stub would lie on another wire is "short circuit", red, and drops nothing', async ({ page }) => {
   const panel = await open(page);
   const c = await flowAt(panel, t.c);
