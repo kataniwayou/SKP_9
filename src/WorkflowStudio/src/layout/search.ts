@@ -9,6 +9,8 @@ const NEAR = 2;
 const BESIDE = 4;
 /** What a px costs on another net's run: a short circuit, so in effect never, but a route always exists. */
 const ON_COST = 1000;
+/** What crossing another net's run costs (a line jump): a tidy drawing crosses little. */
+const CROSS = 48;
 
 interface Run { at: number; lo: number; hi: number }
 
@@ -44,20 +46,28 @@ export class Tracks {
     this.sorted = true;
   }
 
-  /** How many px of the run a → b lie on another net's run, and how many beside one (parallel, nearer than a track). */
-  near(a: Pt, b: Pt): { on: number; beside: number } {
+  /**
+   * How many px of the run a → b lie on another net's run, how many beside one (parallel, nearer than a track), and how
+   * many runs it crosses (one on its far end's line counts, one on its near end's does not, so a path's runs count each
+   * crossing once).
+   */
+  near(a: Pt, b: Pt): { on: number; beside: number; crosses: number } {
     this.sort();
     const levelRun = a[1] === b[1];
-    const runs = levelRun ? this.level : this.upright;
+    const runs = levelRun ? this.level : this.upright, across = levelRun ? this.upright : this.level;
     const at = levelRun ? a[1] : a[0];
     const lo = levelRun ? Math.min(a[0], b[0]) : Math.min(a[1], b[1]), hi = levelRun ? Math.max(a[0], b[0]) : Math.max(a[1], b[1]);
-    let on = 0, beside = 0;
+    let on = 0, beside = 0, crosses = 0;
     for (let i = lowerBound(runs, at - TRACK + 0.01); i < runs.length && runs[i]!.at < at + TRACK; i++) {
       const r = runs[i]!, shared = Math.min(hi, r.hi) - Math.max(lo, r.lo);
       if (shared <= 0) continue;
       if (Math.abs(r.at - at) < 0.01) on += shared; else beside += shared;
     }
-    return { on, beside };
+    for (let i = lowerBound(across, lo + 0.01); i < across.length && across[i]!.at <= hi; i++) {
+      const r = across[i]!;
+      if (r.lo < at && at < r.hi) crosses++;
+    }
+    return { on, beside, crosses };
   }
 
   costOf(points: readonly Pt[]): { on: number; beside: number } {
@@ -149,7 +159,7 @@ export function routeBlocks(s: Pt, t: Pt, src: Box, tgt: Box, boxes: readonly Bo
     const port = (box.id === src.id && p[1] === sy && q[1] === sy) || (box.id === tgt.id && p[1] === ty && q[1] === ty);
     return inside(p, q, box, port ? 0 : HALF_CLEAR);
   };
-  const found = search(s, t, bx, boxes, tracks, shut, bound) ?? search(s, t, bx, boxes, tracks, shut, null);
+  const found = search(s, t, bx, boxes, tracks, shut, own, bound) ?? search(s, t, bx, boxes, tracks, shut, own, null);
   if (found) return simplify(found);
   return route(sx, sy, tx, ty, src.id, tgt.id, 0, [...boxes]);
 }
@@ -160,12 +170,13 @@ interface Bound { x1: number; x2: number; y1: number; y2: number }
 const DX = [1, 0, -1, 0], DY = [0, 1, 0, -1];
 
 /**
- * Dijkstra over (grid node, heading), costs compared in order: [length + bends + clearance + other nets' runs, Σ upright
+ * Dijkstra over (grid node, heading), costs compared in order: [length + bends + other blocks' clearance + other nets'
+ * runs on, beside and crossed, Σ upright
  * length × its distance from the target's stub (`hug`, its x), level length below the source's line]. From the output
  * `a` straight out (+x), to the input `b` straight in (+x): the stubs are not fixed, the clearance's cost keeps them
  * 64 long where nothing is in the way. `shut` says which runs go too near a block. Null when no way exists.
  */
-function search(a: Pt, b: Pt, hug: number, boxes: readonly Box[], tracks: Tracks, shut: (p: Pt, q: Pt, box: Box) => boolean, bound: Bound | null): Pt[] | null {
+function search(a: Pt, b: Pt, hug: number, boxes: readonly Box[], tracks: Tracks, shut: (p: Pt, q: Pt, box: Box) => boolean, ownBox: (box: Box) => boolean, bound: Bound | null): Pt[] | null {
   const within = (box: Box) => bound === null
     || (box.x - STUB < bound.x2 && box.x + box.w + STUB > bound.x1 && box.y - STUB < bound.y2 && box.y + box.h + STUB > bound.y1);
   const near = boxes.filter(within);
@@ -200,11 +211,12 @@ function search(a: Pt, b: Pt, hug: number, boxes: readonly Box[], tracks: Tracks
       const p = pt(n), q = pt(ni + W * nj);
       if (!near.some((box) => shut(p, q, box))) {
         const len = Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]);
+        // a block's clearance counts round the blocks it passes, not its own (its stubs are inside theirs)
         let soft = 0;
-        for (const box of near) soft += lengthInside(p, q, box, STUB);
+        for (const box of near) if (!ownBox(box)) soft += lengthInside(p, q, box, STUB);
         const tr = tracks.near(p, q);
         const level = d === 0 || d === 2;
-        c = [len + NEAR * soft + ON_COST * tr.on + BESIDE * tr.beside, level ? 0 : len * Math.abs(p[0] - hug), level && p[1] > a[1] ? len : 0];
+        c = [len + NEAR * soft + ON_COST * tr.on + BESIDE * tr.beside + CROSS * tr.crosses, level ? 0 : len * Math.abs(p[0] - hug), level && p[1] > a[1] ? len : 0];
       }
     }
     edges.set(k, c);

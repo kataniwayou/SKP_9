@@ -54,8 +54,13 @@ test('two wires out of one step of one colour may lie on each other (nothing red
   // it is a short circuit, refused
   const a = await box(node(panel, t.a));
   expect(await dragEnd(page, panel, ad, 'tail', { x: a.x + a.width * 0.85, y: a.y + a.height * 0.95 })).toBe('connect here');
-  const d = await shapeByHand(page, panel, ad);
+  const shaped = await shapeByHand(page, panel, ad);
   const from = await upright(panel, ab);
+  // its upright 32 right of a -> b's (and a -> c's, laid on it): a run dragged there is beyond the 12 px snap to a -> c's
+  // line, which may share it, and to b's left side (plan 10 phase 2)
+  expect(await dragRunAcross(page, panel, ad, shaped, from.x + 32 - shaped.x)).toEqual([]);
+  const d = await upright(panel, ad);
+  expect(d.x).toBe(from.x + 32);
   expect(Math.min(d.hi, from.hi) - Math.max(d.lo, from.lo), 'their upright runs share heights').toBeGreaterThan(8);
   await pickWire(page, panel, ab);
   const sq = await squareOn(panel, ab, from);

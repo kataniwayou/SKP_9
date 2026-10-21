@@ -5,6 +5,7 @@ import { plainCircuit, type Circuit, type CircuitWire, type End } from '../circu
 import { SPHERE_R, STEP_W } from './geometry';
 import { contactOn, endPointOf, ripUpBetter, routeCircuit, routeWires } from './circuitRoute';
 import { hitsOf } from './router';
+import { jumpsOf } from './jumps';
 import { overlapsOf, sharesNet } from './overlaps';
 import { netsOf } from '../circuit/families';
 import { shapeFromPoints } from './shape';
@@ -394,6 +395,18 @@ describe("Visio's router in the circuit (plan 10 phase 3, spec §4.2)", () => {
     const r = await fan(2, { a: [352, 320], b: [704, 32], c: [704, 608] });
     expect(r.get('a->b')!.points[0]).toEqual([576, 400]);
     expect(r.get('a->c')!.points[0]).toEqual([576, 432]);
+  });
+
+  it("two nets leaving one output downward nest, the lower one turning first, so they never cross", async () => {
+    const r = await fan(2, { a: [352, 32], b: [704, 320], c: [704, 608] });
+    expect(jumpsOf([...r.values()])).toEqual(new Map());
+    const ab = r.get('a->b')!.points, ac = r.get('a->c')!.points;
+    expect(ac[1]).toEqual([640, ac[0]![1]]);
+    expect(ab[1]![0]).toBe(672);
+    // and upward the same, mirrored
+    const up = await fan(2, { a: [352, 608], b: [704, 32], c: [704, 320] });
+    expect(jumpsOf([...up.values()])).toEqual(new Map());
+    expect(up.get('a->b')!.points[1]![0]).toBe(640);
   });
 
   it('a fan-in lands a track (32) apart', async () => {

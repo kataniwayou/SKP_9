@@ -760,11 +760,20 @@ test('rule B: a wire with one end still connected, dragged by its body, moves wh
 test('rule B with D: both ends of a moved wire over one step\'s input: the first connects (it is the head), the second is "wrong side" (red) and stays open, moved with the wire', async ({ page }) => {
   const panel = await open(page);
   const id = `wf->${t.a}`;
+  // a moved 64 nearer the hub, so its wire is shorter than half a step (the layout's gap is 128 since plan 10 phase 3)
+  const grab = await centreOf(node(panel, t.a).locator('.nx-sn')), zoom = await zoomOf(panel);
+  await page.mouse.move(grab.x, grab.y);
+  await page.mouse.down();
+  await page.mouse.move(grab.x - 20, grab.y, { steps: 3 });
+  await page.mouse.move(grab.x - 64 * zoom, grab.y, { steps: 6 });
+  await page.mouse.up();
   const before = await pointsOf(panel, id);
   expect(before).toHaveLength(2);
+  expect(before[1]![0] - before[0]![0]).toBe(64);
   const b = await flowBox(panel, t.b);
-  // its tail end into b's input half, 16 short of the side; its head end 64 further in
-  const dx = b.x + 16 - before[0]![0], dy = b.y + 96 - before[0]![1];
+  // its tail end into b's input half, 16 short of the side; its head end 64 further in; a track (32) below b's processor
+  // middle, where a -> b lands, so neither end is within a line's reach of it
+  const dx = b.x + 16 - before[0]![0], dy = b.y + 128 - before[0]![1];
   const z = await zoomOf(panel);
   const from = await pointOnWire(panel, id, 0.5);
   await page.mouse.move(from.x, from.y);
@@ -782,8 +791,8 @@ test('rule B with D: both ends of a moved wire over one step\'s input: the first
   await expect.poll(() => pointsOf(panel, id)).not.toEqual(before);
   const after = await pointsOf(panel, id);
   // the end that reached b first is its head now, on b's input side; the other is its tail, open where it was moved to
-  expect(after.at(-1)).toEqual([b.x, b.y + 96]);
-  expect(after[0]).toEqual([b.x + 64, b.y + 96]);
+  expect(after.at(-1)).toEqual([b.x, b.y + 128]);
+  expect(after[0]).toEqual([b.x + 64, b.y + 128]);
   expect(await colourOf(panel, id)).toBe(TEAL);
   expect(await dashOf(panel, id)).not.toBe('none');
   await expect(edge(panel, id).locator('path.nx-head')).toHaveCount(1);
@@ -1174,8 +1183,9 @@ test('cut is the end square\'s alone: a run square or the body dragged onto the 
 
 test('cut: an entry wire cut while the hub fans out its tails stays exactly where it was drawn, cut on the grid (review 2026-10-09)', async ({ page }) => {
   const panel = await open(page);
-  // a second entry wire: the hub's automatic tails now leave 8 above and below its centre, off its 15 degree points
-  await newWire(page, panel, 'wf', await onSide(panel, t.b, 'in'));
+  // a second entry wire, of another net (into d, Failed): the hub's automatic tails now leave 16 above and below its
+  // centre, a track apart, off its 15 degree points (one net's would share the centre, plan 10 phase 3)
+  await newWire(page, panel, 'wf', await onSide(panel, t.d, 'in'));
   const id = `wf->${t.a}`;
   const before = await pointsOf(panel, id);
   const hub = await flowBox(panel, 'wf');

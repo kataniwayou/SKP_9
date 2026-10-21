@@ -903,7 +903,18 @@ test('a joined wire\'s tail moved open keeps its junction; with no end on a step
   const host = await wire(panel, b).locator('path.w').first().getAttribute('stroke');
 
   // still picked after the join: its tail square off its step, onto empty canvas
-  const tail = await centreOf(endSquare(panel, a, 'tail'));
+  // zoomed in, the tail square may lie under the Toolbox floating over the canvas: scrolled (the canvas pans on the wheel)
+  // toward the canvas's middle until it is the square there
+  const flow = (await panel.locator('.react-flow').boundingBox())!;
+  let tail = await centreOf(endSquare(panel, a, 'tail'));
+  const uncovered = (q: { x: number; y: number }) => page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.classList.contains('design-handle') === true, q);
+  for (let i = 0; i < 6 && !(await uncovered(tail)); i++) {
+    await page.mouse.move(flow.x + flow.width / 2, flow.y + flow.height / 2);
+    await page.mouse.wheel(tail.x - (flow.x + flow.width / 2), tail.y - (flow.y + flow.height / 2));
+    await settledView(page, panel.locator('.react-flow__viewport'));
+    tail = await centreOf(endSquare(panel, a, 'tail'));
+  }
+  expect(await uncovered(tail), 'the tail square is not covered').toBe(true);
   const empty = await emptySpot(panel, [tail, between]);
   expect(empty, 'no empty spot on the canvas').not.toBeNull();
   expect(await dragReading(page, panel, tail, empty!)).toBe('move here');

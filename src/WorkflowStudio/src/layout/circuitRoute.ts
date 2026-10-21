@@ -208,6 +208,25 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     return undefined;
   };
 
+  /**
+   * The wires in the order they are routed: by id, but the automatic tails of one source in the order they turn, so their
+   * uprights nest and never cross (plan 10 phase 3): those leaving downward the lowest first (it takes the inner track,
+   * its stub), those leaving upward the highest first, level ones before both.
+   */
+  const turnOrder = (): string[] => {
+    const order = [...ids];
+    const at = new Map(ids.map((id, i) => [id, i]));
+    for (const members of groups.values()) {
+      const key = (id: string) => {
+        const from = departY.get(id)!, to = landed.get(id) ?? aim(id).y;
+        return to === from ? -Infinity : to > from ? -from : from;
+      };
+      const slots = members.map((id) => at.get(id)!).sort((p, q) => p - q);
+      const turned = [...members].sort((p, q) => key(p) - key(q) || (p < q ? -1 : p > q ? 1 : 0));
+      slots.forEach((slot, k) => { order[slot] = turned[k]!; });
+    }
+    return order;
+  };
   const out = new Map<string, WireRoute>();
   const busy = new Set<string>();
   const routeOne = (id: string): WireRoute | undefined => {
@@ -366,7 +385,7 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
   const joined = (id: string) => wire(id).tail.on === 'wire' || wire(id).head.on === 'wire';
   for (const id of ids) if (shapedByHand(id) && !joined(id)) routeOne(id);
   for (const id of ids) if (shapedByHand(id)) routeOne(id);
-  for (const id of ids) routeOne(id);
+  for (const id of turnOrder()) routeOne(id);
 
   // two automatic wires of different nets still on each other (the one drawn later found no free track): each is drawn
   // again against everything else, and keeps its new track only when that lies on fewer wires (review 2026-10-09).

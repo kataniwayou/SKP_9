@@ -127,13 +127,14 @@ test('rule 2: an end square whose drawn leg lies on another net\'s wire is refus
   // a -> b shaped by hand (its upright run a grid step across): it stays where it is
   const b = await shapeByHand(page, panel, ab);
   const was = await pointsOf(panel, bc);
-  expect(was).toEqual([[800, 352], [864, 352]]);
-  expect(b.lo < 240 && b.hi >= 352, 'a -> b comes down past y 240 into b').toBe(true);
+  // b's output to c's input, straight (the 128 px layout gap since plan 10 phase 3)
+  expect(was).toEqual([[928, 416], [1056, 416]]);
+  expect(b.lo < 240 && b.hi >= 416, 'a -> b comes down past y 240 into b').toBe(true);
   // b -> c's tail drawn up off b's output, over b, then down along a -> b's upright run past where it turns into b
   // (a leg drawn through a step goes around it, spec §4.2, so the leg is drawn clear of b)
   await pickWire(page, panel, bc);
   const tail = await centreOf(endSquare(panel, bc, 'tail'));
-  await pressTo(page, tail, await flowToPage(panel, [b.x, b.hi + 48]), [await flowToPage(panel, [800, 240]), await flowToPage(panel, [b.x, 240])]);
+  await pressTo(page, tail, await flowToPage(panel, [b.x, b.hi + 48]), [await flowToPage(panel, [928, 240]), await flowToPage(panel, [b.x, 240])]);
   expect(await labelsOf(panel)).toEqual(['short circuit']);
   await shot(page, '5-end-square-refused');
   await page.mouse.up();
@@ -149,10 +150,11 @@ test('rule 2: a crossing is no short circuit: an end square drawn across a live 
   // b -> c's tail up off b's output, then left across a -> b's upright run
   await pickWire(page, panel, bc);
   const tail = await centreOf(endSquare(panel, bc, 'tail'));
-  await pressTo(page, tail, await flowToPage(panel, [b.x - 16, 240]), await flowToPage(panel, [800, 240]));
+  // (32 short of a -> b's upright: beyond a line's 12 px reach, which would join it)
+  await pressTo(page, tail, await flowToPage(panel, [b.x - 32, 240]), await flowToPage(panel, [928, 240]));
   expect(await labelsOf(panel)).toEqual(['move here']);
   await page.mouse.up();
-  await expect.poll(() => pointsOf(panel, bc)).toEqual([[864, 352], [800, 352], [800, 240], [b.x - 16, 240]].reverse());
+  await expect.poll(() => pointsOf(panel, bc)).toEqual([[1056, 416], [928, 416], [928, 240], [b.x - 32, 240]].reverse());
   // it crosses a -> b, which has not moved
   expect(await pointsOf(panel, ab)).toEqual(abWas);
   expect(b.lo < 240 && b.hi > 240, 'it crosses a -> b').toBe(true);
@@ -183,20 +185,21 @@ test('rule 2: wires of one net may share a line: a fan-out wire run up its trunk
 
 test('a wire the router brought into a junction from the line\'s far side keeps that side when a run square shapes it (review 2026-10-09)', async ({ page }) => {
   const panel = await open(page);
-  // a wire from d poured into a -> b at its corner: one jog above it is a -> d's line, so it comes in from below
+  // a wire from d poured into a -> b at its corner (where a -> b turns down, at its stub), reached a jog off its line
+  const corner = (await pointsOf(panel, `${t.a}->${t.b}`))[1]!;
   await node(panel, t.d).hover();
-  const id = await newWire(page, panel, t.d, await flowToPage(panel, [552, 168]));
+  const id = await newWire(page, panel, t.d, await flowToPage(panel, corner));
   await expect(edge(panel, id).locator('circle.nx-joint')).toHaveCount(1);
   const before = await pointsOf(panel, id);
-  expect(before.at(-1)).toEqual([552, 168]);
-  expect(before.at(-2)![1]).toBeGreaterThan(168);
+  expect(before.at(-1)).toEqual(corner);
+  expect(Math.abs(before.at(-2)![1] - corner[1])).toBe(16);
   // its longest upright run dragged a grid step across: shaped by hand now
   const run = await upright(panel, id);
   expect(await dragRunAcross(page, panel, id, run, 8)).toEqual([]);
   await expect.poll(async () => (await upright(panel, id)).x).toBe(run.x + 8);
   const after = await pointsOf(panel, id);
-  // still reached from below, nothing red
-  expect(after.at(-1)).toEqual([552, 168]);
+  // still reached from the same side, nothing red
+  expect(after.at(-1)).toEqual(corner);
   expect(after.at(-2)).toEqual(before.at(-2));
   await expect(panel.locator('path.nx-overlap')).toHaveCount(0);
 });
