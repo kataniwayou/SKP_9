@@ -19,11 +19,11 @@ function overlaps(a: { x: number; y: number }, b: { x: number; y: number }) {
 }
 
 describe('place', () => {
-  it('lays out a never-laid-out chain in columns 288 apart with the sphere one column left', async () => {
+  it('lays out a never-laid-out chain in columns 352 apart (a 128 px gap, 15 mm in Visio) with the hub 128 left of the first', async () => {
     const p = await place(input());
 
-    expect(p.steps.get('a')!.x).toBe(288);
-    expect(p.steps.get('b')!.x).toBe(576);
+    expect(p.steps.get('a')!.x).toBe(352);
+    expect(p.steps.get('b')!.x).toBe(704);
     expect(p.sphere.cx).toBe(128);
     // spec §9: after layout every step border lies on a 32 px line
     for (const pos of p.steps.values()) {
@@ -52,7 +52,7 @@ describe('place', () => {
 
     const a = p.steps.get('a')!, b = p.steps.get('b')!;
     expect(a).toEqual({ x: 288, y: 32 });
-    expect(b.y).toBeGreaterThanOrEqual(a.y + STEP_H + 64);
+    expect(b.y).toBeGreaterThanOrEqual(a.y + STEP_H + 128);
     expect(b.x % GRID).toBe(0);
   });
 
@@ -63,6 +63,7 @@ describe('place', () => {
     const p1 = p.steps.get('p1')!, p2 = p.steps.get('p2')!;
     const lowestWired = Math.max(p.steps.get('a')!.y, p.steps.get('b')!.y);
     expect(p1.y).toBeGreaterThan(lowestWired);
+    expect(p1.y).toBeGreaterThanOrEqual(lowestWired + STEP_H + 128);
     expect(p1.y).toBe(p2.y);
     for (const [i, pi] of all) for (const [j, pj] of all) if (i < j) expect(overlaps(pi, pj)).toBe(false);
   });
@@ -74,8 +75,8 @@ describe('place', () => {
     }));
     const { cx, cy } = p.sphere;
 
-    expect(p.caches.get('c1')).toEqual({ x: cx - 80, y: cy + 96 + 64 });
-    expect(p.caches.get('c2')).toEqual({ x: cx - 80, y: cy + 96 + 64 + 192 });
+    expect(p.caches.get('c1')).toEqual({ x: cx - 80, y: cy + 96 + 128 });
+    expect(p.caches.get('c2')).toEqual({ x: cx - 80, y: cy + 96 + 128 + 192 });
     expect(p.caches.get('c3')).toEqual({ x: 1000, y: 1000 });
   });
 

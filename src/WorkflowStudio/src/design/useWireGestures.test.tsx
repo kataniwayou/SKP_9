@@ -524,18 +524,18 @@ describe('wire gestures', () => {
   // ---- runs of a manual wire, and of a wire whose head is on a junction ----
   it('the run squares of a manual wire follow the drag', async () => {
     const doc = await two();
-    const shaped = setShape(EMPTY_DRAFT, doc, 's1->s2', { bends: { xs: [528, 560], ys: [400] }, landing: null });
+    const shaped = setShape(EMPTY_DRAFT, doc, 's1->s2', { bends: { xs: [592, 624], ys: [464] }, landing: null });
     const { container } = canvasOf(doc, designOf({ draft: shaped, picks: [{ kind: 'wire', id: 's1->s2' }] }));
     const run = () => container.querySelector('.design-handle.seg[data-k="1"]')!;
     // a run dot's centre
     const centre = (axis: 'x' | 'y', _size?: 'width' | 'height') => Number(run().getAttribute(axis === 'x' ? 'cx' : 'cy'));
-    expect(centre('x', 'width')).toBeCloseTo(528);
+    expect(centre('x', 'width')).toBeCloseTo(592);
     const y = centre('y', 'height');
     fireEvent.pointerDown(run(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
-    fireEvent.pointerMove(document, { ...screenOf(container, { x: 544, y }), pointerId: 1 });
-    // the squares stay on the wire, which stays put; the dashed preview has the run at 544 (Visio, plan 10)
-    expect(centre('x', 'width')).toBeCloseTo(528);
-    expect(ghostPath(container).some(([x]) => Math.abs(x - 544) < 0.01)).toBe(true);
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: 608, y }), pointerId: 1 });
+    // the squares stay on the wire, which stays put; the dashed preview has the run at 608 (Visio, plan 10)
+    expect(centre('x', 'width')).toBeCloseTo(592);
+    expect(ghostPath(container).some(([x]) => Math.abs(x - 608) < 0.01)).toBe(true);
     fireEvent.keyDown(document.body, { key: 'Escape' });
   });
 
@@ -810,12 +810,12 @@ describe('wire gestures', () => {
 });
 
 describe('a run drag on a wire the router left on another (re-review 2026-10-09)', () => {
-  // the review's seed 12345, trial 150: two automatic wires into s16 (s8 -> s16 one of them) share an upright run before
-  // s16 (the gap there is too crowded to give each its own track)
+  // the review's seed 12345: the first workflow where two automatic wires share an upright run, one of them (b) on its
+  // first upright (the gap there too crowded to give each its own track: trial 150 before plan 10 phase 3's router)
   const crowded = async () => {
     let seed = 12345;
     const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
-    for (let trial = 0; ; trial++) {
+    for (let trial = 0; trial < 300; trial++) {
       const n = 3 + Math.floor(rnd() * 14);
       const ids = Array.from({ length: n }, (_, i) => `s${i + 1}`);
       const steps = ids.map((id, i) => {
@@ -824,16 +824,21 @@ describe('a run drag on a wire the router left on another (re-review 2026-10-09)
         return stepDto(id, { nextStepIds: next, entryCondition: (1 + Math.floor(rnd() * 3)) as 1 | 2 | 3 });
       });
       const entries = ids.filter((_, i) => i === 0 || rnd() < 0.15);
-      if (trial === 150) return loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: entries }), steps }));
+      const doc = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: entries }), steps }));
+      for (const o of overlapsOf(doc.wires)) {
+        for (const id of [o.a, o.b]) {
+          const w = doc.wires.find((x) => x.id === id)!;
+          const upright = w.core.points.length > 3 && w.core.points[1]![0] === w.core.points[2]![0];
+          if (upright && o.stretches.some(([p, q]) => p[0] === q[0] && p[0] === w.core.points[1]![0])) return { doc, pair: o, b: w };
+        }
+      }
     }
+    throw new Error('no crowded workflow');
   };
 
   it('a run moved a grid step keeps the stretch it already shared: no "short circuit", committed', async () => {
-    const doc = await crowded();
-    // two wires into s16 share a stretch as the router drew them (not a short circuit: both automatic)
-    const pair = overlapsOf(doc.wires).find((o) => o.a.endsWith('->s16') && o.b.endsWith('->s16'))!;
-    expect(pair).toBeDefined();
-    const b = doc.wires.find((w) => w.id === 's8->s16')!;
+    const { doc, pair, b } = await crowded();
+    // two wires share a stretch as the router drew them (not a short circuit: both automatic)
     expect([pair.a, pair.b]).toContain(b.id);
     expect(b.short).toBe(false);
     expect(b.core.points[1]![0]).toBe(b.core.points[2]![0]);

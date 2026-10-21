@@ -48,7 +48,7 @@ describe('routeWires', () => {
         const [x0, y0] = w.points[i - 1]!, [x1, y1] = w.points[i]!;
         expect(x0 === x1 || y0 === y1).toBe(true);
       }
-      for (const [x, y] of w.points) { expect(x % 8).toBe(0); expect(y % 8).toBe(0); }
+      for (const [x, y] of w.points) { expect(Math.abs(x % 8)).toBe(0); expect(Math.abs(y % 8)).toBe(0); }
     }
     expect(wires.map((w) => w.id).sort()).toEqual(['a->a', 'a->b', 'b->a', 'wf->a']);
   });

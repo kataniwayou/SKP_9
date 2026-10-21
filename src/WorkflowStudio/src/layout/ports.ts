@@ -1,5 +1,8 @@
 import type { Id } from '../model/graph';
-import { GRID, BAND_BOTTOM, BAND_TOP, CAP_H, PMID, PORT_GAP, STEP_H, STRAIGHT_MIN_GAP } from './geometry';
+import { GRID, BAND_BOTTOM, BAND_TOP, CAP_H, PMID, STEP_H, STRAIGHT_MIN_GAP, TRACK } from './geometry';
+
+/** How far apart the wires arriving on one step land: a track (plan 10 phase 3, spec §4.2). */
+const SLOT = TRACK;
 import type { Placement } from './placement';
 
 /** The sphere as a wire source. */
@@ -20,10 +23,10 @@ export interface Arrival {
  * other wire bends and lands near the processor middle, on the nearest free 8 px slot (the side it
  * comes from first), skipping slots outside the step's landing extent. If that walk cannot keep
  * every bent arrival in the extent, the bent arrivals are packed into the extent's free slots
- * instead (so any fan-in that can fit, fits). Arrivals into one step stay at least 16 apart.
+ * instead (so any fan-in that can fit, fits). Arrivals into one step stay at least 32 apart (a track).
  *
  * Landing extent: step-local 40 (just below the title cap) to 160 inclusive; the bottom edge
- * (step-local 160, the bottom corner) counts as on the step. It holds 8 slots 16 apart; a larger
+ * (step-local 160, the bottom corner) counts as on the step. It holds 4 slots 32 apart; a larger
  * fan-in spills past the extent rather than break the spacing.
  *
  * Arrival by arrival (plan 9): two wires from one source into one step each land.
@@ -36,7 +39,7 @@ export function landingsOf(arrivals: readonly Arrival[], placement: Placement): 
     const p = placement.steps.get(target)!;
     const top = p.y + BAND_TOP, bottom = p.y + BAND_BOTTOM, middle = p.y + PMID;
     const used: number[] = [];
-    const free = (y: number) => !used.some((u) => Math.abs(u - y) < PORT_GAP);
+    const free = (y: number) => !used.some((u) => Math.abs(u - y) < SLOT);
     const landed = new Map<string, number>();
     for (const a of list) {
       if (a.y < top || a.y > bottom || a.x > p.x - STRAIGHT_MIN_GAP) continue;
@@ -49,7 +52,7 @@ export function landingsOf(arrivals: readonly Arrival[], placement: Placement): 
     const bent = list.filter((a) => !landed.has(a.key)).sort((a, b) => a.y - b.y);
     if (bent.length > 0) {
       const walkUsed = [...used];
-      const walkFree = (y: number) => !walkUsed.some((u) => Math.abs(u - y) < PORT_GAP);
+      const walkFree = (y: number) => !walkUsed.some((u) => Math.abs(u - y) < SLOT);
       const walked = new Map<string, number>();
       for (const a of bent) {
         const y = nearestFreeSlot(middle, a.y < middle ? -1 : 1, lo, hi, walkFree);
@@ -68,10 +71,10 @@ export function landingsOf(arrivals: readonly Arrival[], placement: Placement): 
   return result;
 }
 
-/** The free slot nearest `d` in steps of 16 inside the band, or null when the band is full. */
+/** The free slot nearest `d` in steps of a slot inside the band, or null when the band is full. */
 function nearestFreeInBand(d: number, top: number, bottom: number, free: (y: number) => boolean): number | null {
   for (let k = 0; ; k++) {
-    const down = d + k * PORT_GAP, up = d - k * PORT_GAP;
+    const down = d + k * SLOT, up = d - k * SLOT;
     const downIn = down <= bottom, upIn = up >= top;
     if (!downIn && !upIn) return null;
     if (downIn && free(down)) return down;
@@ -92,12 +95,12 @@ function nearestFreeSlot(middle: number, direction: 1 | -1, lo: number, hi: numb
   throw new Error('no free landing slot');
 }
 
-/** Greedy leftmost packing of the 8 px slots in [lo, hi] that are 16 apart from `used` and from each other (maximal count). */
+/** Greedy leftmost packing of the 8 px slots in [lo, hi] that are a slot apart from `used` and from each other (maximal count). */
 function packSlots(lo: number, hi: number, used: number[]): number[] {
   const slots: number[] = [];
   for (let y = lo; y <= hi; y += GRID) {
-    if (used.some((u) => Math.abs(u - y) < PORT_GAP)) continue;
-    if (slots.length === 0 || y - slots[slots.length - 1]! >= PORT_GAP) slots.push(y);
+    if (used.some((u) => Math.abs(u - y) < SLOT)) continue;
+    if (slots.length === 0 || y - slots[slots.length - 1]! >= SLOT) slots.push(y);
   }
   return slots;
 }

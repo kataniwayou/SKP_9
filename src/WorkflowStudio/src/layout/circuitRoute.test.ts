@@ -164,14 +164,14 @@ describe('direction-less wires and overlaps (the user\'s rules 1 and 2, 2026-10-
     const doc = await four();
     const c: Circuit = {
       ...plainCircuit(['s1', 's3'], doc.graph.steps, (id) => doc.placement.steps.has(id)),
-      // s1 -> s2 shaped by hand where it is ([512,128] -> [576,128]; automatic, it would move a track over)
-      's1->s2': shaped(at('s1'), at('s2'), [512]),
+      // s1 -> s2 shaped by hand where it is ([576,128] -> [704,128]; automatic, it would move a track over)
+      's1->s2': shaped(at('s1'), at('s2'), [640]),
       // exactly over it
-      f: shaped(open(512, 128), open(576, 128), [512]),
+      f: shaped(open(576, 128), open(704, 128), [640]),
     };
     const routes = byId(routeCircuit(c, ctxOf(doc)));
-    expect(routes.get('f')).toMatchObject({ short: true, overlaps: [[[512, 128], [576, 128]]], shortWith: ['s1->s2'] });
-    expect(routes.get('s1->s2')).toMatchObject({ short: true, overlaps: [[[512, 128], [576, 128]]], shortWith: ['f'], condition: 1 });
+    expect(routes.get('f')).toMatchObject({ short: true, overlaps: [[[576, 128], [704, 128]]], shortWith: ['s1->s2'] });
+    expect(routes.get('s1->s2')).toMatchObject({ short: true, overlaps: [[[576, 128], [704, 128]]], shortWith: ['f'], condition: 1 });
     expect(routes.get('s3->s4')!.short).toBe(false);
     expect('overlaps' in routes.get('s3->s4')!).toBe(false);
   });
@@ -188,49 +188,50 @@ describe('direction-less wires and overlaps (the user\'s rules 1 and 2, 2026-10-
 
   it('the router never lays an automatic wire on a wire of another net: it takes a free track beside a shape drawn by hand', async () => {
     const doc = await four();
-    // the hub's automatic wire into s1 runs up x = 248 from 232 to 128; a hand-drawn wire lies on that track
+    // the hub's automatic wire into s1 runs up x = 288 (its 64 px stub) from 272 to 128; a hand-drawn wire lies on that track
     const plain = byId(routeCircuit(plainCircuit(['s1', 's3'], doc.graph.steps, (id) => doc.placement.steps.has(id)), ctxOf(doc)));
-    expect(plain.get('wf->s1')!.points).toEqual([[224, 232], [248, 232], [248, 128], [288, 128]]);
-    const m = shaped(open(232, 150), open(264, 200), [248]);
+    expect(plain.get('wf->s1')!.points).toEqual([[224, 272], [288, 272], [288, 128], [352, 128]]);
+    const m = shaped(open(272, 184), open(304, 240), [288]);
     // listed last, it is still drawn first: the automatic wire goes round it
     const routes = byId(routeCircuit({ ...plainCircuit(['s1', 's3'], doc.graph.steps, (id) => doc.placement.steps.has(id)), m }, ctxOf(doc)));
     const r = routes.get('wf->s1')!;
-    expect([r.points[0], r.points.at(-1)]).toEqual([[224, 232], [288, 128]]);
+    expect([r.points[0], r.points.at(-1)]).toEqual([[224, 272], [352, 128]]);
     expect(r.points).not.toEqual(plain.get('wf->s1')!.points);
     expect([r.short, routes.get('m')!.short]).toEqual([false, false]);
-    expect(routes.get('m')!.points).toEqual([[232, 150], [248, 150], [248, 200], [264, 200]]);
+    expect(routes.get('m')!.points).toEqual([[272, 184], [288, 184], [288, 240], [304, 240]]);
   });
 
   it('only a shape drawn by hand lies on another net\'s wire: then both are short circuits', async () => {
     const doc = await four();
     const c: Circuit = {
       ...plainCircuit(['s1', 's3'], doc.graph.steps, (id) => doc.placement.steps.has(id)),
-      'wf->s1': shaped({ on: 'hub', angle: null }, at('s1'), [248]),
-      m: shaped(open(232, 150), open(264, 200), [248]),
+      'wf->s1': shaped({ on: 'hub', angle: null }, at('s1'), [288]),
+      m: shaped(open(272, 184), open(304, 240), [288]),
     };
     const routes = byId(routeCircuit(c, ctxOf(doc)));
     expect(routes.get('wf->s1')).toMatchObject({ short: true, shortWith: ['m'] });
-    expect(routes.get('m')).toMatchObject({ short: true, overlaps: [[[248, 150], [248, 200]]] });
+    expect(routes.get('m')).toMatchObject({ short: true, overlaps: [[[288, 184], [288, 240]]] });
   });
 });
 
 describe("the router keeps off other nets' wires at a junction too (the user's rule 2, 2026-10-09)", () => {
-  it("a head joined at a corner of its host comes in from the line's other side when its usual side lies on another net's wire", async () => {
-    // a -> b runs right from a, then down to b; a -> d (Failed) runs right just above it
+  it("a head joined at a corner of its host lands on it, keeps off another net's wire, and stays there once shaped by hand", async () => {
+    // a -> b runs right from a, then down to b; a -> d (Failed) runs right a track (32) above it
     const doc = await loadedDocument(graphDto({
       workflow: workflowDto({ entryStepIds: ['a'] }),
       steps: [stepDto('c'), stepDto('d', { entryCondition: 2 }), stepDto('b', { nextStepIds: ['c'] }), stepDto('a', { nextStepIds: ['b', 'd'] })],
     }));
     const ctx = { placement: doc.placement, steps: doc.graph.steps };
     const plain = byId(routeCircuit(plainCircuit(['a'], doc.graph.steps, () => true), ctx));
-    expect(plain.get('a->b')!.points).toEqual([[512, 168], [552, 168], [552, 352], [576, 352]]);
-    expect(plain.get('a->d')!.points).toEqual([[512, 152], [576, 152]]);
-    // a wire from d poured into a -> b at its corner (40 along): one jog above the corner is a -> d's line
-    const c: Circuit = { ...plainCircuit(['a'], doc.graph.steps, () => true), n: w(at('d'), { on: 'wire', host: 'a->b', at: 40 }) };
+    expect(plain.get('a->b')!.points).toEqual([[576, 176], [640, 176], [640, 416], [704, 416]]);
+    expect(plain.get('a->d')!.points).toEqual([[576, 144], [704, 144]]);
+    // a wire from d poured into a -> b at its corner (64 along)
+    const c: Circuit = { ...plainCircuit(['a'], doc.graph.steps, () => true), n: w(at('d'), { on: 'wire', host: 'a->b', at: 64 }) };
     const routes = byId(routeCircuit(c, ctx));
     const n = routes.get('n')!;
-    expect(n.points.at(-1)).toEqual([552, 168]);
-    expect(n.points.at(-2)).toEqual([552, 184]);
+    expect(n.points.at(-1)).toEqual([640, 176]);
+    // on its own host's line is its own net; on a -> d's would be a short
+    expect(overlapsOf([...routes.values()]).filter((o) => [o.a, o.b].includes('n') && ![o.a, o.b].includes('a->b'))).toEqual([]);
     expect([...routes.values()].some((r) => r.short)).toBe(false);
     // shaped by hand from what is drawn (a run square's first drag): it stays exactly there, the junction reached from
     // the same side (review 2026-10-09)
@@ -240,21 +241,21 @@ describe("the router keeps off other nets' wires at a junction too (the user's r
   });
 
   it("an automatic wire whose usual track around a block lies on another net's wire takes another track around it, never one through it", async () => {
-    // p -> r goes round q (below it, along y 216); both-open wires shaped by hand lie on every level it could go round q
-    // by (above q at 8, below it at 216, below every block at 248): only a way through q is free of them
+    // p -> r goes round q (below it, along y 256, its clearance); both-open wires shaped by hand lie on the levels it
+    // could go round q by at full and at half clearance (above q at -32 and 0, below it at 256 and 224)
     const doc = await loadedDocument(graphDto({
       workflow: workflowDto({ entryStepIds: ['p'] }),
       steps: [stepDto('p', { nextStepIds: ['q', 'r'] }), stepDto('q', { nextStepIds: ['r'] }), stepDto('r')],
     }));
     const ctx = { placement: doc.placement, steps: doc.graph.steps };
     const plain = plainCircuit(['p'], doc.graph.steps, () => true);
-    expect(byId(routeCircuit(plain, ctx)).get('p->r')!.points).toEqual([[512, 168], [544, 168], [544, 216], [840, 216], [840, 168], [864, 168]]);
-    const lying = (y: number): CircuitWire => ({ tail: { on: 'open', x: 600, y }, head: { on: 'open', x: 780, y }, bends: { xs: [600], ys: [] } });
-    const c: Circuit = { ...plain, f8: lying(8), f216: lying(216), f248: lying(248) };
+    expect(byId(routeCircuit(plain, ctx)).get('p->r')!.points).toEqual([[576, 160], [640, 160], [640, 256], [992, 256], [992, 160], [1056, 160]]);
+    const lying = (y: number): CircuitWire => ({ tail: { on: 'open', x: 680, y }, head: { on: 'open', x: 960, y }, bends: { xs: [680], ys: [] } });
+    const c: Circuit = { ...plain, fa: lying(-32), fb: lying(0), fc: lying(224), fd: lying(256) };
     const r = byId(routeCircuit(c, ctx)).get('p->r')!;
     expect(r.short).toBe(false);
     expect(hitsOf(r.core.points, stepBoxId('p'), stepBoxId('r'), blockBoxes(doc.placement))).toBe(0);
-    expect(r.points).not.toEqual([[512, 168], [864, 168]]);
+    expect(r.points).not.toEqual([[576, 160], [1056, 160]]);
   });
 });
 
@@ -305,12 +306,12 @@ describe('the router after the review of 2026-10-09 (the coordinator\'s ruling)'
   it('an automatic wire with no free track moves its own heights: a straight wire under a shape drawn by hand goes one track over', async () => {
     const doc = await four();
     const ctx = ctxOf(doc);
-    expect(byId(routeCircuit(plainCircuit(['s1', 's3'], doc.graph.steps, () => true), ctx)).get('s1->s2')!.points).toEqual([[512, 128], [576, 128]]);
+    expect(byId(routeCircuit(plainCircuit(['s1', 's3'], doc.graph.steps, () => true), ctx)).get('s1->s2')!.points).toEqual([[576, 128], [704, 128]]);
     // a both-open wire shaped by hand lies along the middle of s1 -> s2's only run
-    const c: Circuit = { ...plainCircuit(['s1', 's3'], doc.graph.steps, () => true), f: { tail: { on: 'open', x: 520, y: 128 }, head: { on: 'open', x: 568, y: 128 }, bends: { xs: [520], ys: [] } } };
+    const c: Circuit = { ...plainCircuit(['s1', 's3'], doc.graph.steps, () => true), f: { tail: { on: 'open', x: 584, y: 128 }, head: { on: 'open', x: 696, y: 128 }, bends: { xs: [584], ys: [] } } };
     const r = byId(routeCircuit(c, ctx)).get('s1->s2')!;
     expect(r.short).toBe(false);
-    expect([r.points[0]![0], r.points.at(-1)![0]]).toEqual([512, 576]);
+    expect([r.points[0]![0], r.points.at(-1)![0]]).toEqual([576, 704]);
     expect(r.points.some((p) => p[1] !== 128)).toBe(true);
   });
 });
@@ -366,5 +367,68 @@ describe('ripUpBetter: when a wire drawn again keeps its new track (final check 
     expect(ripUpBetter(s(0, 0, 1, 900), s(0, 0, 2, 100))).toBe(true);
     expect(ripUpBetter(s(0, 0, 1, 100), s(0, 0, 1, 200))).toBe(true);
     expect(ripUpBetter(s(0, 0, 1, 100), s(0, 0, 1, 100))).toBe(false);
+  });
+});
+
+describe("Visio's router in the circuit (plan 10 phase 3, spec §4.2)", () => {
+  /** a feeds b and c; the canvas holds them where `at` puts them. */
+  const fan = async (cOf: 1 | 2, at: Record<string, [number, number]>) => {
+    const doc = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['a'] }),
+      steps: [stepDto('a', { nextStepIds: ['b', 'c'] }), stepDto('b'), stepDto('c', { entryCondition: cOf })],
+    }));
+    for (const [id, [x, y]] of Object.entries(at)) doc.placement.steps.set(id, { x, y });
+    return byId(routeCircuit(plainCircuit(['a'], doc.graph.steps, () => true), ctxOf(doc)));
+  };
+
+  it("one net's fan-out leaves one point and shares one trunk at the source's 64 px stub, splitting where they part", async () => {
+    const r = await fan(1, { a: [352, 320], b: [704, 32], c: [704, 608] });
+    const ab = r.get('a->b')!.points, ac = r.get('a->c')!.points;
+    expect(ab.slice(0, 2)).toEqual([[576, 416], [640, 416]]);
+    expect(ac.slice(0, 2)).toEqual([[576, 416], [640, 416]]);
+    expect(ab[2]![0]).toBe(640);
+    expect(ac[2]![0]).toBe(640);
+  });
+
+  it('tails of different nets leave a track (32) apart', async () => {
+    const r = await fan(2, { a: [352, 320], b: [704, 32], c: [704, 608] });
+    expect(r.get('a->b')!.points[0]).toEqual([576, 400]);
+    expect(r.get('a->c')!.points[0]).toEqual([576, 432]);
+  });
+
+  it('a fan-in lands a track (32) apart', async () => {
+    const doc = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's2'] }),
+      steps: [stepDto('s1', { nextStepIds: ['t'] }), stepDto('s2', { nextStepIds: ['t'] }), stepDto('t')],
+    }));
+    doc.placement.steps.set('s1', { x: 352, y: 32 });
+    doc.placement.steps.set('s2', { x: 352, y: 608 });
+    doc.placement.steps.set('t', { x: 704, y: 320 });
+    const r = byId(routeCircuit(plainCircuit(['s1', 's2'], doc.graph.steps, () => true), ctxOf(doc)));
+    const y1 = r.get('s1->t')!.points.at(-1)![1], y2 = r.get('s2->t')!.points.at(-1)![1];
+    expect(Math.abs(y1 - y2)).toBe(32);
+  });
+
+  it("a step wired to one behind and below it turns back Visio's way, through the free band 64 above the target", async () => {
+    const r = await fan(1, { a: [704, 32], b: [352, 352], c: [1408, 32] });
+    expect(r.get('a->b')!.points).toEqual([[928, 128], [992, 128], [992, 288], [288, 288], [288, 448], [352, 448]]);
+  });
+
+  it('routes a workflow of 30 steps and 40 wires quickly (spec: under 50 ms in the browser)', async () => {
+    const ids = Array.from({ length: 30 }, (_, i) => `n${i}`);
+    const steps = ids.map((id, i) => {
+      const col = Math.floor(i / 5), row = i % 5;
+      const next = col < 5 ? [ids[(col + 1) * 5 + row]!, ...(row % 2 === 0 && row < 4 ? [ids[(col + 1) * 5 + row + 1]!] : [])] : [];
+      return stepDto(id, { nextStepIds: next, entryCondition: (1 + (i % 3)) as 1 | 2 | 3 });
+    });
+    const doc = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ids.slice(0, 5) }), steps }));
+    const c = plainCircuit(doc.graph.workflow.entryStepIds, doc.graph.steps, (id) => doc.placement.steps.has(id));
+    expect(Object.keys(c).length).toBeGreaterThanOrEqual(40);
+    routeCircuit(c, ctxOf(doc));
+    const t0 = performance.now();
+    for (let k = 0; k < 5; k++) routeCircuit(c, ctxOf(doc));
+    const ms = (performance.now() - t0) / 5;
+    console.log(`routeCircuit, 30 steps / ${Object.keys(c).length} wires: ${ms.toFixed(1)} ms`);
+    expect(ms).toBeLessThan(150);
   });
 });

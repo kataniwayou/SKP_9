@@ -5,7 +5,7 @@ import type { EndKind } from '../../layout/circuitRoute';
 import type { Stretch } from '../../layout/overlaps';
 import type { Pt } from '../../layout/router';
 import { useLiveArt } from '../liveArt';
-import { pathOf } from '../svgPath';
+import { pathOf, pathWithJumps } from '../svgPath';
 
 export type CableEdgeData = {
   points: Pt[];
@@ -29,6 +29,8 @@ export type CableEdgeData = {
   free?: boolean;
   /** Its end square is over its other end square: released, it is deleted (drawn faded meanwhile). */
   faded?: boolean;
+  /** Where its level runs jump other wires (plan 10 phase 3, Visio's line jumps); absent when none. */
+  jumps?: Pt[];
 };
 export type CableEdgeType = Edge<CableEdgeData, 'cable'>;
 
@@ -50,10 +52,11 @@ export function arrowHead(prev: Pt, tip: Pt): string {
  * chevron, on a terminal or open alike; an end on another wire is a filled circle instead (red in a short circuit).
  * A direction-less wire (`free`: no end on a step or the hub, rule D) has neither ring nor chevron, only its circles.
  * A stretch it shares with a wire of another net (`overlaps`, a short circuit) is drawn red over its line.
- * While `flowing` (the workflow is started) a solid wire carries a pulse toward its head.
+ * While `flowing` (the workflow is started) a solid wire carries a pulse toward its head. Where another wire crosses a
+ * level run, the run jumps it with a small arc (`jumps`, Visio's line jumps).
  */
-export function CableEdgeView({ points, colour, delay, picked, flowing, halo, dashed, tailOn = 'terminal', headOn = 'terminal', short, free, faded, overlaps }: CableEdgeData & { flowing: boolean }) {
-  const d = pathOf(points);
+export function CableEdgeView({ points, colour, delay, picked, flowing, halo, dashed, tailOn = 'terminal', headOn = 'terminal', short, free, faded, overlaps, jumps }: CableEdgeData & { flowing: boolean }) {
+  const d = pathWithJumps(points, jumps ?? []);
   const first = points[0]!, tip = points[points.length - 1]!;
   const dot = (p: Pt) => <circle className={short ? 'nx-joint short' : 'nx-joint'} cx={p[0]} cy={p[1]} r={4.5} />;
 

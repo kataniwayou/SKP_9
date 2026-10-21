@@ -1,4 +1,4 @@
-import { COLUMN_PITCH, GRID, STEP_W, snap } from './geometry';
+import { GRID, snap } from './geometry';
 
 export type Pt = readonly [number, number];
 
@@ -16,6 +16,8 @@ const HIT_COST = 5000;
 const OWN_INSET = 4;
 const HIT_MARGIN = 3;
 export const CLEARANCE = 24;
+/** The free gap between two columns of the layout this menu of shapes was made for (before plan 10 phase 3's 128). */
+const COLUMN_GAP = 64;
 
 function segmentHits(a: Pt, b: Pt, box: Box): boolean {
   const x1 = Math.min(a[0], b[0]), x2 = Math.max(a[0], b[0]);
@@ -113,9 +115,9 @@ export function route(sx: number, sy: number, tx: number, ty: number, srcId: str
 
   // The U's first vertical must stay in the free gap right of the source: at least one grid step off
   // its edge (a large negative fan-out nudge must not pull it back through the source) and at least
-  // one grid step short of the next column (the gap is COLUMN_PITCH - STEP_W = 64; a large positive
+  // one grid step short of the next column (the gap is COLUMN_GAP = 64; a large positive
   // nudge must not land it on the neighbouring block's edge).
-  const x1 = sx + clamp(CLEARANCE + nudge + spread, GRID, COLUMN_PITCH - STEP_W - GRID), x2 = tx - CLEARANCE - Math.abs(spread);
+  const x1 = sx + clamp(CLEARANCE + nudge + spread, GRID, COLUMN_GAP - GRID), x2 = tx - CLEARANCE - Math.abs(spread);
   const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
   const span = boxes.filter((b) => b.x < hi + 20 && b.x + b.w > lo - 20);
   const levels = new Set<number>();
@@ -129,7 +131,7 @@ export function route(sx: number, sy: number, tx: number, ty: number, srcId: str
   }
   if (levels.size === 0) levels.add(Math.max(sy, ty) + CLEARANCE);
   // the U with no spread: its first upright, its level and its last upright where they usually are
-  const x10 = sx + clamp(CLEARANCE + nudge, GRID, COLUMN_PITCH - STEP_W - GRID), x20 = tx - CLEARANCE;
+  const x10 = sx + clamp(CLEARANCE + nudge, GRID, COLUMN_GAP - GRID), x20 = tx - CLEARANCE;
   for (const level of levels) {
     // a spread U goes further out: above the blocks higher, below them lower
     const ly = spread === 0 ? level : level + (level < Math.min(sy, ty) ? -1 : 1) * Math.abs(spread);

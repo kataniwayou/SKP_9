@@ -77,8 +77,8 @@ describe('AI drawing (2026-10-11)', () => {
     }));
     const { cy } = applyDraft(d, EMPTY_DRAFT).placement.sphere;
     const startY = (draft: Draft, id: string) => pointsOf(d, draft, id)[0]![1];
-    // automatic: already symmetric, 16 px apart
-    expect([startY(EMPTY_DRAFT, 'wf->a'), startY(EMPTY_DRAFT, 'wf->b')].map((y) => y - cy).sort((x, y) => x - y)).toEqual([-8, 8]);
+    // automatic: one point on the centre, the two of one colour sharing a trunk (Visio's fan-out, plan 10 phase 3)
+    expect([startY(EMPTY_DRAFT, 'wf->a'), startY(EMPTY_DRAFT, 'wf->b')].map((y) => y - cy)).toEqual([0, 0]);
     const snap = relationsOf(d, EMPTY_DRAFT);
     const out = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ wires: { 'wf->a': { tail: { y: cy - 16 } }, 'wf->b': { tail: { y: cy + 16 } } } }));
     expect(out.ok).toBe(true);
@@ -96,10 +96,10 @@ describe('AI drawing (2026-10-11)', () => {
     const d = await doc();
     const draft = joined(d);
     const snap = relationsOf(d, draft);
-    // s3 moved along the row, onto a column (x 288 + k × 288, the user's check, 2026-10-12)
-    const good = judgeDrawing(d, draft, snap, '{"blocks":{"s3":{"x":1152,"y":96}}}');
+    // s3 moved along the row, onto a column (x 352 + k × 352 since plan 10 phase 3, the user's check, 2026-10-12)
+    const good = judgeDrawing(d, draft, snap, '{"blocks":{"s3":{"x":1408,"y":96}}}');
     expect(good.ok).toBe(true);
-    if (good.ok) expect(applyDraft(d, good.draft).placement.steps.get('s3')).toEqual({ x: 1152, y: 96 });
+    if (good.ok) expect(applyDraft(d, good.draft).placement.steps.get('s3')).toEqual({ x: 1408, y: 96 });
     // the junction moved onto s1 -> s2 (a Completed wire): another net, so another meaning
     const other = pointsOf(d, draft, 's1->s2');
     const mid = [(other[0]![0] + other[other.length - 1]![0]) / 2, other[0]![1]];
@@ -197,9 +197,10 @@ describe('AI drawing (2026-10-11)', () => {
     const snap = relationsOf(d, EMPTY_DRAFT);
     const b = applyDraft(d, EMPTY_DRAFT).placement.steps.get('b')!;
     const lane = b.y - 64;
-    // the lane alone, with the router's end order (the skip below at both ends): over the row it crosses both row wires
+    // the lane alone, with the router's end order: a's two tails, of one colour, leave one point (Visio's fan-out, plan 10
+    // phase 3), so over the row it crosses only b -> c, at its head end
     const alone = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ wires: { 'a->c': { lane } } }));
-    expect(alone).toMatchObject({ ok: true, crossings: 2 });
+    expect(alone).toMatchObject({ ok: true, crossings: 1 });
     // with the skip on top at both ends (rule 9's order): no crossing
     const out = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ wires: {
       'a->c': { lane, tail: { y: 144 }, head: { y: 152 } }, 'a->b': { tail: { y: 160 } }, 'b->c': { head: { y: 168 } },
@@ -229,14 +230,14 @@ describe('AI drawing (2026-10-11)', () => {
     const d = await doc();
     const snap = relationsOf(d, EMPTY_DRAFT);
     // f far to the right and below, on a column (the user's check, 2026-10-12): s1 -> f runs a level trunk under s2; s2 -> f joins it
-    const moved = parsePlan('{"blocks":{"f":{"x":1728,"y":480}}}', d, EMPTY_DRAFT);
+    const moved = parsePlan('{"blocks":{"f":{"x":1760,"y":480}}}', d, EMPTY_DRAFT);
     const placed = applyPlan(d, EMPTY_DRAFT, moved);
     const trunk = pointsOf(d, placed, 's1->f');
     const out2 = pointsOf(d, placed, 's2->f')[0]!;
     const level = trunk.findIndex((p, i) => i > 0 && p[1] === trunk[i - 1]![1] && Math.max(p[0], trunk[i - 1]![0]) > out2[0] + 64 && p[1] > out2[1]);
     expect(level).toBeGreaterThan(0);
     const at = [out2[0] + 48, trunk[level]![1]];
-    const out = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ blocks: { f: { x: 1728, y: 480 } }, wires: { 's2->f': { head: { junction: { host: 's1->f', x: at[0], y: at[1] } } } } }));
+    const out = judgeDrawing(d, EMPTY_DRAFT, snap, JSON.stringify({ blocks: { f: { x: 1760, y: 480 } }, wires: { 's2->f': { head: { junction: { host: 's1->f', x: at[0], y: at[1] } } } } }));
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     const pts = pointsOf(d, out.draft, 's2->f');

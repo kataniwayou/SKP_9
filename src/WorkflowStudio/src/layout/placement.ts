@@ -1,6 +1,6 @@
 import ELK from 'elkjs/lib/elk.bundled.js';
 import type { Id } from '../model/graph';
-import { CACHE_PITCH, CACHE_W, CELL, COLUMN_PITCH, PMID, SPHERE_R, STEP_H, STEP_W, snap, type Point } from './geometry';
+import { CACHE_PITCH, CACHE_W, CELL, COLUMN_PITCH, LAYOUT_GAP, PMID, SPHERE_R, STEP_H, STEP_W, snap, type Point } from './geometry';
 import type { LayoutDoc } from './layoutDoc';
 
 export interface Sphere {
@@ -29,14 +29,14 @@ export interface PlacementInput {
 const elk = new ELK();
 const SPHERE_NODE = '__sphere__';
 const MARGIN = 32;                 // the canvas origin is a whole cell; blocks start one cell in
-const FIRST_COLUMN_X = 288;        // the sphere spans 32..224, one column pitch left of the steps
-const GAP = 64;                    // two cells between blocks
+const GAP = LAYOUT_GAP;            // Visio's 15 mm between blocks (plan 10 phase 3), room for a wire's stubs and tracks
+const FIRST_COLUMN_X = MARGIN + 2 * SPHERE_R + GAP; // the sphere spans 32..224, one gap left of the steps
 const DEFAULT_SPHERE: Sphere = { cx: MARGIN + SPHERE_R, cy: MARGIN + SPHERE_R };
 
 /**
  * Where every block sits. Stored positions win (snapped to 8 px). Wired steps with no stored position
  * are laid out by elkjs (layered, left to right) and then put on the cell grid: elk's layers become
- * columns 288 apart and its y values are snapped to 32, so every step border lies on a 32 px line
+ * columns 352 apart and its y values are snapped to 32, so every step border lies on a 32 px line
  * (spec §9). When some blocks are stored, the newly placed group goes below them so nothing overlaps.
  * Parked steps with no position go in a row below everything; caches stack under the sphere.
  */

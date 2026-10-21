@@ -69,11 +69,15 @@ export class Tracks {
     return { on, beside };
   }
 
-  /** The lines a track off each run lies on: upright (x) ones and level (y) ones, its ends a track past included. */
+  /**
+   * The lines a track off each run lies on, upright (x) ones and level (y) ones, its ends a track past included; and
+   * half and a quarter of a track off, dearer (beside it) but a way through where the tracks are full ("where they can").
+   */
   lines(): { xs: number[]; ys: number[] } {
     const xs: number[] = [], ys: number[] = [];
-    for (const r of this.upright) { xs.push(r.at - TRACK, r.at + TRACK); ys.push(r.lo - TRACK, r.hi + TRACK); }
-    for (const r of this.level) { ys.push(r.at - TRACK, r.at + TRACK); xs.push(r.lo - TRACK, r.hi + TRACK); }
+    const off = [TRACK, TRACK / 2, TRACK / 4];
+    for (const r of this.upright) { for (const o of off) xs.push(r.at - o, r.at + o); ys.push(r.lo - TRACK, r.hi + TRACK); }
+    for (const r of this.level) { for (const o of off) ys.push(r.at - o, r.at + o); xs.push(r.lo - TRACK, r.hi + TRACK); }
     return { xs, ys };
   }
 }
@@ -134,14 +138,19 @@ export function routeBlocks(s: Pt, t: Pt, src: Box, tgt: Box, boxes: readonly Bo
   base = simplify(base);
   if (kept(base)) return base;
 
-  const a: Pt = [ax, sy], b: Pt = [bx, ty];
   const lo = (...v: number[]) => Math.min(...v), hi = (...v: number[]) => Math.max(...v);
   const bound = {
     x1: lo(ax, bx, src.x, tgt.x) - 3 * STUB, x2: hi(ax, bx, src.x + src.w, tgt.x + tgt.w) + 3 * STUB,
     y1: lo(sy, ty, src.y, tgt.y) - 3 * STUB, y2: hi(sy, ty, src.y + src.h, tgt.y + tgt.h) + 3 * STUB,
   };
-  const found = search(a, b, sy, boxes, tracks, own, bound) ?? search(a, b, sy, boxes, tracks, own, null);
-  if (found) return simplify([s, ...found, t]);
+  // the search keeps half the clearance off its own blocks too, but along its own port's line (the stub)
+  const shut = (p: Pt, q: Pt, box: Box) => {
+    if (!own(box)) return inside(p, q, box, HALF_CLEAR);
+    const port = (box.id === src.id && p[1] === sy && q[1] === sy) || (box.id === tgt.id && p[1] === ty && q[1] === ty);
+    return inside(p, q, box, port ? 0 : HALF_CLEAR);
+  };
+  const found = search(s, t, bx, boxes, tracks, shut, bound) ?? search(s, t, bx, boxes, tracks, shut, null);
+  if (found) return simplify(found);
   return route(sx, sy, tx, ty, src.id, tgt.id, 0, [...boxes]);
 }
 
@@ -152,10 +161,11 @@ const DX = [1, 0, -1, 0], DY = [0, 1, 0, -1];
 
 /**
  * Dijkstra over (grid node, heading), costs compared in order: [length + bends + clearance + other nets' runs, Σ upright
- * length × its distance from the target's stub, level length below the source's line]. From `a` heading +x (the stub
- * just left), to `b` not heading -x (the stub into the target follows, heading +x). Null when no way exists.
+ * length × its distance from the target's stub (`hug`, its x), level length below the source's line]. From the output
+ * `a` straight out (+x), to the input `b` straight in (+x): the stubs are not fixed, the clearance's cost keeps them
+ * 64 long where nothing is in the way. `shut` says which runs go too near a block. Null when no way exists.
  */
-function search(a: Pt, b: Pt, sy: number, boxes: readonly Box[], tracks: Tracks, own: (box: Box) => boolean, bound: Bound | null): Pt[] | null {
+function search(a: Pt, b: Pt, hug: number, boxes: readonly Box[], tracks: Tracks, shut: (p: Pt, q: Pt, box: Box) => boolean, bound: Bound | null): Pt[] | null {
   const within = (box: Box) => bound === null
     || (box.x - STUB < bound.x2 && box.x + box.w + STUB > bound.x1 && box.y - STUB < bound.y2 && box.y + box.h + STUB > bound.y1);
   const near = boxes.filter(within);
@@ -188,13 +198,13 @@ function search(a: Pt, b: Pt, sy: number, boxes: readonly Box[], tracks: Tracks,
     let c: [number, number, number] | null = null;
     if (ni >= 0 && ni < W && nj >= 0 && nj < H) {
       const p = pt(n), q = pt(ni + W * nj);
-      if (!near.some((box) => inside(p, q, box, own(box) ? 0 : HALF_CLEAR))) {
+      if (!near.some((box) => shut(p, q, box))) {
         const len = Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]);
         let soft = 0;
         for (const box of near) soft += lengthInside(p, q, box, STUB);
         const tr = tracks.near(p, q);
         const level = d === 0 || d === 2;
-        c = [len + NEAR * soft + ON_COST * tr.on + BESIDE * tr.beside, level ? 0 : len * Math.abs(p[0] - b[0]), level && p[1] > sy ? len : 0];
+        c = [len + NEAR * soft + ON_COST * tr.on + BESIDE * tr.beside, level ? 0 : len * Math.abs(p[0] - hug), level && p[1] > a[1] ? len : 0];
       }
     }
     edges.set(k, c);
@@ -207,21 +217,19 @@ function search(a: Pt, b: Pt, sy: number, boxes: readonly Box[], tracks: Tracks,
   const less = (p0: number, p1: number, p2: number, q0: number, q1: number, q2: number) =>
     p0 !== q0 ? p0 < q0 : p1 !== q1 ? p1 < q1 : p2 < q2;
   const heap = new Heap(less);
+  // A*: the primary cost is never below the length still to go
+  const togo = (n: number) => { const p = pt(n); return Math.abs(p[0] - b[0]) + Math.abs(p[1] - b[1]); };
   const s0 = start * 4;
   d0[s0] = 0;
-  heap.push(0, 0, 0, s0);
-  let best = -1, b0 = Infinity, b1 = 0, b2 = 0;
+  heap.push(togo(start), 0, 0, s0);
+  let best = -1;
   while (heap.size > 0) {
-    const [c0, c1, c2, k] = heap.pop();
+    const [f0, c1, c2, k] = heap.pop();
+    const n = k >> 2, d = k & 3, c0 = f0 - togo(n);
     if (c0 !== d0[k] || c1 !== d1[k] || c2 !== d2[k]) continue;
-    if (best >= 0 && !less(c0, c1, c2, b0, b1, b2)) break;
-    const n = k >> 2, d = k & 3;
-    if (n === goal && d !== 2) {
-      const f0 = c0 + (d === 0 ? 0 : BEND);
-      if (best < 0 || less(f0, c1, c2, b0, b1, b2)) { best = k; b0 = f0; b1 = c1; b2 = c2; }
-    }
+    if (n === goal && d === 0) { best = k; break; }
     for (let nd = 0; nd < 4; nd++) {
-      if (nd === (d + 2) % 4) continue;
+      if (nd === (d + 2) % 4 || (n === start && nd !== 0) || n === goal) continue;
       const e = edge(n, nd);
       if (e === null) continue;
       const nn = n + DX[nd]! + W * DY[nd]!;
@@ -229,7 +237,7 @@ function search(a: Pt, b: Pt, sy: number, boxes: readonly Box[], tracks: Tracks,
       const e0 = c0 + e[0] + (nd === d ? 0 : BEND), e1 = c1 + e[1], e2 = c2 + e[2];
       if (less(e0, e1, e2, d0[nk]!, d1[nk]!, d2[nk]!)) {
         d0[nk] = e0; d1[nk] = e1; d2[nk] = e2; prev[nk] = k;
-        heap.push(e0, e1, e2, nk);
+        heap.push(e0 + togo(nn), e1, e2, nk);
       }
     }
   }

@@ -61,6 +61,12 @@ describe('CableEdgeView', () => {
     expect(render(<svg><CableEdgeView points={[[0, 8], [64, 8]]} colour="#2DD4BF" delay={0} flowing={false} /></svg>).container.querySelector('path.nx-overlap')).toBeNull();
   });
 
+  it("draws Visio's line jumps on its trace and its pulse, not on its hit band (plan 10 phase 3)", () => {
+    const { container } = render(<svg><CableEdgeView points={[[0, 8], [64, 8]]} jumps={[[32, 8]]} colour="#2DD4BF" delay={0} flowing /></svg>);
+    expect(container.querySelector('path.w')!.getAttribute('d')).toBe('M0 8 L24 8 A8 8 0 0 1 40 8 L64 8');
+    expect(container.querySelector('.nx-pulse')!.getAttribute('d')).toBe('M0 8 L24 8 A8 8 0 0 1 40 8 L64 8');
+  });
+
   it('points an arrow head along the last run, whichever way it runs', () => {
     expect(arrowHead([0, 8], [64, 8])).toBe('M55 2L64 8L55 14');
     expect(arrowHead([64, 0], [64, 40])).toBe('M70 31L64 40L58 31');

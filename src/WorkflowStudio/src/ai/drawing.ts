@@ -6,7 +6,7 @@ import { circuitOf, moveBlocks, withCircuit, type Draft } from '../design/draft'
 import { nodeBox } from '../design/hit';
 import { writtenLists } from '../design/shortCircuits';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
-import { clampLanding, GRID, PMID, PORT_GAP, snap, STEP_H, STEP_W } from '../layout/geometry';
+import { clampLanding, GRID, PMID, snap, STEP_H, STEP_W, TRACK } from '../layout/geometry';
 import { JOG } from '../layout/shape';
 import { blockBoxes } from '../layout/wires';
 import type { Pt } from '../layout/router';
@@ -111,7 +111,7 @@ export function graphOf(edited: StudioDocument, draft: Draft): object {
       points: w.points,
     };
   });
-  return { grid: GRID, portGap: PORT_GAP, blocks, wires };
+  return { grid: GRID, portGap: TRACK, blocks, wires };
 }
 
 /** The system and user messages for one drawing. */

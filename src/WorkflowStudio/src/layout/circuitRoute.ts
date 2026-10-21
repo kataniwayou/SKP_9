@@ -2,13 +2,14 @@ import { isAutomatic, isFree, plainCircuit, type Circuit, type CircuitWire, type
 import { netsOf, shortedWires } from '../circuit/families';
 import type { Id, Step } from '../model/graph';
 import { clearPath } from './detour';
-import { GRID, PMID, PORT_GAP, SPHERE_R, STEP_W, clampLanding, offset, snap, type Point } from './geometry';
+import { GRID, PMID, SPHERE_R, STEP_W, TRACK, clampLanding, offset, snap, type Point } from './geometry';
 import { CONTACT_MARGIN, lengthOf, ownEnds, pointAt } from './junctions';
 import { LineIndex, mayShare, overlapsOf, sharesNet, type Stretch } from './overlaps';
 import type { Placement } from './placement';
 import { landingsOf, WORKFLOW_SOURCE, type Arrival, type SourceId } from './ports';
-import { hitsOf, route, simplify, type Pt, type RouteAvoid } from './router';
-import { JOG, pointsOfShape, type Ends } from './shape';
+import { hitsOf, route, simplify, type Box, type Pt, type RouteAvoid } from './router';
+import { routeBlocks, Tracks } from './search';
+import { JOG, pointsOfShape, shapeFromPoints, type Ends } from './shape';
 import { blockBoxes, SPHERE_BOX_ID, stepBoxId, type WiringInput } from './wires';
 
 /** What one end of a drawn wire is on (plan 9 §5): a ring or an arrow head on a terminal or open, a filled circle on a junction. */
@@ -127,6 +128,9 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     }
     return { x: 0, y: 0 };
   };
+  const conditionOf = (id: Id) => steps.get(id)?.entryCondition;
+  const nets = netsOf(circuit, conditionOf);
+  const sameNet = sharesNet(circuit, nets);
   const groups = new Map<SourceId, string[]>();
   for (const id of ids) {
     const t = wire(id).tail;
@@ -134,11 +138,18 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     const s = t.on === 'step' && t.y === null && stepAt(t.step) ? t.step : t.on === 'hub' && t.angle === null && t.dy === undefined ? WORKFLOW_SOURCE : null;
     if (s !== null) groups.set(s, [...(groups.get(s) ?? []), id]);
   }
+  // the tails of one source that share a net (or are its same-colour siblings, rule G's bus) leave at one height and
+  // share one trunk, as Visio's fan-out does; each other group leaves a track (32) away (plan 10 phase 3, spec §4.2)
   const departY = new Map<string, number>(), nudge = new Map<string, number>();
   for (const [s, members] of groups) {
     const ordered = [...members].sort((a, b) => { const p = aim(a), q = aim(b); return p.y - q.y || p.x - q.x || (a < b ? -1 : a > b ? 1 : 0); });
+    const classes: string[][] = [];
+    for (const id of ordered) {
+      const c = classes.find((m) => m.some((x) => sameNet(id, x)));
+      if (c) c.push(id); else classes.push([id]);
+    }
     const base = s === WORKFLOW_SOURCE ? placement.sphere.cy : placement.steps.get(s)!.y + PMID;
-    ordered.forEach((id, k) => { const o = offset(k, ordered.length, PORT_GAP); departY.set(id, base + o); nudge.set(id, o); });
+    classes.forEach((m, k) => { const o = offset(k, classes.length, TRACK); for (const id of m) { departY.set(id, base + o); nudge.set(id, o); } });
   }
 
   const { cx, cy } = placement.sphere;
@@ -170,16 +181,20 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
   }
   const landed = landingsOf(arrivals, placement);
 
-  const conditionOf = (id: Id) => steps.get(id)?.entryCondition;
   const families = new Map<string, number[]>();
-  const nets = netsOf(circuit, conditionOf);
   for (const n of nets) for (const w of n.wires) families.set(w, n.families);
   // what is drawn so far, so an automatic wire keeps off every wire of another net where it can (rule 2): it takes a
   // track of its own. Which overlaps are short circuits is `mayShare` (two automatic wires never are).
   const share = mayShare(circuit, nets);
-  const sameNet = sharesNet(circuit, nets);
+  const boxById = new Map<string, Box>(boxes.map((b) => [b.id, b]));
   let taken = new LineIndex();
   const clashes = (id: string, pts: Pt[]): number => taken.count(pts, (x) => !sameNet(id, x));
+  /** The runs of every wire drawn so far of another net than `id`'s, for Visio's router to keep off. */
+  const othersOf = (id: string): Tracks => {
+    const t = new Tracks();
+    for (const [x, r] of out) if (x !== id && !sameNet(id, x)) t.add(r.points);
+    return t;
+  };
   /** The family of the step a wire's head chain goes into: what a wire of a shorted net is drawn in (decision 10). */
   const headFamily = (id: string): number | undefined => {
     const seen = new Set<string>();
@@ -219,6 +234,9 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     const T: Placed = tail ?? placedAt(head ? { x: head.at.x - BESIDE, y: head.at.y } : { x: 0, y: 0 });
     const H: Placed = head ?? placedAt({ x: T.at.x + BESIDE, y: T.at.y });
 
+    // both ends on blocks and no shape of its own: Visio's router (plan 10 phase 3), which keeps off other nets' runs
+    // itself, so no spread of tracks is searched for it
+    const searched = !(w.bends && w.bends.xs.length > 0) && T.box !== '' && H.box !== '' && boxById.has(T.box) && boxById.has(H.box);
     // a junction on a level run is left and reached square-on, one jog off the line (plan 7 §5.3), on the side the other
     // end is (`flip`: the other side)
     const drawWith = (flipTail: boolean, flipHead: boolean, spread: number, avoid = true, at: { sy?: number; ty?: number } = {}, mix = false): { ends: Ends; core: Pt[]; points: Pt[] } => {
@@ -242,13 +260,27 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
         }
         if (flipHead && !H.vertical) ty = snap(2 * H.contact[1] - ty, GRID);
       }
-      const ends: Ends = { sx, sy, tx, ty };
       const o: RouteAvoid = avoid ? { spread, mix, avoid: (pts) => clashes(id, pts) } : { spread };
-      const core = w.bends && w.bends.xs.length > 0
-        ? simplify(pointsOfShape(ends, w.bends))
-        : T.box !== '' && H.box !== ''
-          ? route(sx, sy, tx, ty, T.box, H.box, nudge.get(id) ?? 0, boxes, o)
-          : clearPath(route(sx, sy, tx, ty, T.box, H.box, 0, boxes, o), boxes);
+      const coreTo = (ty: number) => w.bends && w.bends.xs.length > 0
+        ? simplify(pointsOfShape({ sx, sy, tx, ty }, w.bends))
+        : searched
+          ? routeBlocks([sx, sy], [tx, ty], boxById.get(T.box)!, boxById.get(H.box)!, boxes, avoid ? othersOf(id) : new Tracks())
+          : T.box !== '' && H.box !== ''
+            ? route(sx, sy, tx, ty, T.box, H.box, nudge.get(id) ?? 0, boxes, o)
+            : clearPath(route(sx, sy, tx, ty, T.box, H.box, 0, boxes, o), boxes);
+      let core = coreTo(ty);
+      // an automatic wire reaches a level junction from the side its last run comes from, as the shape it becomes when a
+      // run is first dragged does (above): that drag never moves it (plan 10 phase 3)
+      if (!b && H.contact && !H.vertical && !flipHead && at.ty === undefined) {
+        const ys = shapeFromPoints(core).ys;
+        const from = ys.length > 0 ? ys[ys.length - 1]! : sy;
+        const side = snap(from > H.contact[1] ? H.contact[1] + JOG : H.contact[1] - JOG, GRID);
+        if (side !== ty) {
+          const again = coreTo(side);
+          if (hitsOf(again, T.box, H.box, boxes) <= hitsOf(core, T.box, H.box, boxes)) { ty = side; core = again; }
+        }
+      }
+      const ends: Ends = { sx, sy, tx, ty };
       return { ends, core, points: lead.length === 0 && leadIn.length === 0 ? core : simplify([...lead, ...core, ...leadIn]) };
     };
     let drawn = drawWith(false, false, 0);
@@ -278,7 +310,7 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
       && (clashes(id, [[x0, y0], [x0 + GRID, y0]]) > 0 || clashes(id, [[x1 - GRID, y1], [x1, y1]]) > 0);
     // the usual tracks spread first; only then every mix of a U's parts moved and not (a wider, dearer search)
     search: for (const mix of [false, true]) {
-      for (let k = mix ? 1 : 0; !finished() && !stub && k <= (shaped ? 0 : SPREADS); k++) {
+      for (let k = mix ? 1 : 0; !finished() && !stub && k <= (shaped || searched ? 0 : SPREADS); k++) {
         for (const [ft, fh] of flips) {
           for (const spread of k === 0 ? [0] : [k * GRID, -k * GRID]) {
             if (k === 0 && !ft && !fh) continue;

@@ -324,7 +324,7 @@ describe('the wire as lifted (review 2026-10-09)', () => {
 
   it('not turned: a head moved keeps the junction\'s distance from the tail; a tail moved, its distance from the head', async () => {
     const d = await doc();
-    const c0 = addCircuitWire(circuitOfDoc(d), 'w:w', { tail: { on: 'step', step: 's3', y: null }, head: open(900, 900) });
+    const c0 = addCircuitWire(circuitOfDoc(d), 'w:w', { tail: { on: 'step', step: 's3', y: null }, head: open(1400, 1400) });
     const c = addCircuitWire(c0, 'w:g', { tail: { on: 'wire', host: 'w:w', at: 40 }, head: open(100, 1200) });
     const head = applyDrop(c, 'w:w', 'head', step('s5', 'in'), placing(d, c));
     expect(along(d, head.circuit, 'w:w', 'w:g', 'tail')).toBeCloseTo(40, 6);

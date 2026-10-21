@@ -46,15 +46,16 @@ describe('overlapJudge (the user\'s rule 2, 2026-10-09)', () => {
 
   it('a directed wire laid on its own net (joined on that wire) may share its line; direction-less, it may not', async () => {
     const d = await doc();
-    // the hub's wire into s1 runs up x = 248 from 232 to 128; w:t is joined on that run (64 along: at y 192) and runs up it
-    expect(pointsOf(d, 'wf->s1')).toEqual([[224, 232], [248, 232], [248, 128], [288, 128]]);
-    const path: Pt[] = [[248, 192], [248, 144], [288, 144]];
+    // the hub's wire into s1 runs up x = 288 (its stub) from 272 to 128; w:t is joined on that run (104 along: at y 232)
+    // and runs up it
+    expect(pointsOf(d, 'wf->s1')).toEqual([[224, 272], [288, 272], [288, 128], [352, 128]]);
+    const path: Pt[] = [[288, 232], [288, 144], [352, 144]];
     const tap = (head: Circuit[string]['head']): Circuit =>
-      addCircuitWire(circuitOf(d, EMPTY_DRAFT), 'w:t', { tail: { on: 'wire', host: 'wf->s1', at: 64 }, head, bends: { xs: [248], ys: [] } });
+      addCircuitWire(circuitOf(d, EMPTY_DRAFT), 'w:t', { tail: { on: 'wire', host: 'wf->s1', at: 104 }, head, bends: { xs: [288], ys: [] } });
     // into s1: one net with the hub's wire, one family
     expect(overlapJudge(d, 'w:t', circuitOf(d, EMPTY_DRAFT))(path, () => tap({ on: 'step', step: 's1', y: 112 }))).toBe(false);
     // open at its head: direction-less, in no net
-    expect(overlapJudge(d, 'w:t', circuitOf(d, EMPTY_DRAFT))(path, () => tap({ on: 'open', x: 288, y: 144 }))).toBe(true);
+    expect(overlapJudge(d, 'w:t', circuitOf(d, EMPTY_DRAFT))(path, () => tap({ on: 'open', x: 352, y: 144 }))).toBe(true);
   });
 
   it('a short circuit already there before the drag does not count again', async () => {

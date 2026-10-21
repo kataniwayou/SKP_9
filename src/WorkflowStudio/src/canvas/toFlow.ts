@@ -1,6 +1,7 @@
 import { Position, type NodeHandle } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
 import { CACHE_H, CACHE_W, PMID, SPHERE_R, STEP_H, STEP_W } from '../layout/geometry';
+import { jumpsOf } from '../layout/jumps';
 import { tetherPoints } from '../layout/wires';
 import { SPHERE_NODE_ID, cacheNodeId } from '../layout/nodeIds';
 import { WORKFLOW_SOURCE } from '../layout/ports';
@@ -94,6 +95,7 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
 
   // every wire of the circuit (plan 9 §5): React Flow needs a node at each end, so a wire hangs on its tail's
   // terminal, else its head's step, else the hub (whose `ring` target handle takes it)
+  const jumps = jumpsOf(wires);
   const edges: StudioEdge[] = wires.map((w, i) => {
     const tailNode = w.source === null ? null : w.source === WORKFLOW_SOURCE ? SPHERE_NODE_ID : w.source;
     const node = tailNode ?? w.target ?? SPHERE_NODE_ID;
@@ -104,7 +106,7 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
       data: {
         points: w.points, colour: w.condition === null ? UNDECIDED_COLOUR : conditionInfo(w.condition).colour,
         delay: -Math.round(i * 41) / 100 || 0, dashed: !w.solid, tailOn: w.tailOn, headOn: w.headOn, short: w.short, ...(w.free ? { free: true } : {}),
-        ...(w.overlaps ? { overlaps: w.overlaps } : {}),
+        ...(w.overlaps ? { overlaps: w.overlaps } : {}), ...(jumps.has(w.id) ? { jumps: jumps.get(w.id)! } : {}),
       },
     };
   });

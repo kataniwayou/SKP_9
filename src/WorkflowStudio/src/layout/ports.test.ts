@@ -52,42 +52,42 @@ describe('landingsOf: the landing rule (spec §5.2)', () => {
     expect(land(p, [{ source: 'a', target: 'b' }]).get('b')!.get('a')).toBe(32 + 96);
   });
 
-  it('keeps every arrival into one step at least 16 apart, even for a fan-in of 8', () => {
+  it('keeps every arrival into one step at least 32 apart (a track, plan 10 phase 3), even for a fan-in of 8', () => {
     const steps: Record<string, [number, number]> = { t: [864, 320] };
     const wires: WireEnd[] = [];
     for (let k = 0; k < 8; k++) { steps[`s${k}`] = [288, 32 + k * 192]; wires.push({ source: `s${k}`, target: 't' }); }
     const ys = [...land(placement(steps), wires).get('t')!.values()].sort((a, b) => a - b);
 
     expect(ys).toHaveLength(8);
-    for (let i = 1; i < ys.length; i++) expect(ys[i]! - ys[i - 1]!).toBeGreaterThanOrEqual(16);
+    for (let i = 1; i < ys.length; i++) expect(ys[i]! - ys[i - 1]!).toBeGreaterThanOrEqual(32);
     for (const y of ys) expect(y % 8).toBe(0);
   });
 
   const arrivals = (steps: Record<string, [number, number]>, wires: WireEnd[]) =>
     [...land(placement(steps), wires).get('t')!.values()].sort((a, b) => a - b);
-  const spaced = (ys: number[]) => { for (let i = 1; i < ys.length; i++) expect(ys[i]! - ys[i - 1]!).toBeGreaterThanOrEqual(16); };
+  const spaced = (ys: number[]) => { for (let i = 1; i < ys.length; i++) expect(ys[i]! - ys[i - 1]!).toBeGreaterThanOrEqual(32); };
 
   it('terminates when departures fill the band, and every arrival stays on the step', () => {
-    // t at y 320: band 382..450. Six sources whose departures (y + 96) all fall inside it. A band holds at most 5 slots 16 apart, so one wire takes the band-full path.
+    // t at y 320: band 382..450. Three sources whose departures (y + 96) all fall inside it, 8 apart: one lands straight, one a slot down, one takes the band-full path.
     const steps: Record<string, [number, number]> = { t: [864, 320] };
     const wires: WireEnd[] = [];
-    for (let k = 0; k < 6; k++) { steps[`s${k}`] = [288, 288 + k * 8]; wires.push({ source: `s${k}`, target: 't' }); }
+    for (let k = 0; k < 3; k++) { steps[`s${k}`] = [288, 288 + k * 8]; wires.push({ source: `s${k}`, target: 't' }); }
     const ys = arrivals(steps, wires);
 
-    expect(ys).toHaveLength(6);
+    expect(ys).toHaveLength(3);
     spaced(ys);
     for (const y of ys) { expect(y % 8).toBe(0); expect(y).toBeGreaterThanOrEqual(320 + 40); expect(y).toBeLessThanOrEqual(320 + 160); }
   });
 
-  it('keeps all 8 bent arrivals of a fan-in of 8 on the step', () => {
+  it('keeps all 4 bent arrivals of a fan-in of 4 on the step (it has room for 4 slots 32 apart below its cap)', () => {
     const steps: Record<string, [number, number]> = { t: [864, 320] };
     const wires: WireEnd[] = [];
-    for (let k = 0; k < 8; k++) { steps[`s${k}`] = [288, 32 + k * 192]; wires.push({ source: `s${k}`, target: 't' }); }
+    for (let k = 0; k < 4; k++) { steps[`s${k}`] = [288, 32 + k * 192]; wires.push({ source: `s${k}`, target: 't' }); }
     const ys = arrivals(steps, wires);
     for (const y of ys) { expect(y).toBeGreaterThanOrEqual(320 + 40); expect(y).toBeLessThanOrEqual(320 + 160); }
   });
 
-  it('terminates for a fan-in of 12, keeping every arrival 16 apart and on the grid', () => {
+  it('terminates for a fan-in of 12, keeping every arrival 32 apart and on the grid', () => {
     const steps: Record<string, [number, number]> = { t: [864, 320] };
     const wires: WireEnd[] = [];
     for (let k = 0; k < 12; k++) { steps[`s${k}`] = [288, 32 + k * 192]; wires.push({ source: `s${k}`, target: 't' }); }
@@ -96,30 +96,30 @@ describe('landingsOf: the landing rule (spec §5.2)', () => {
     expect(ys).toHaveLength(12);
     spaced(ys);
     for (const y of ys) expect(y % 8).toBe(0);
-    // a step has room for 8 slots 16 apart below its cap: the first 8 are on it
-    expect(ys.filter((y) => y >= 320 + 40 && y <= 320 + 160).length).toBeGreaterThanOrEqual(8);
+    // a step has room for 4 slots 32 apart below its cap: the first 4 are on it
+    expect(ys.filter((y) => y >= 320 + 40 && y <= 320 + 160).length).toBeGreaterThanOrEqual(4);
   });
 
-  it('keeps all 8 arrivals on the step when one straight landing is 8 off the bent walk phase', () => {
+  it('keeps all 4 arrivals on the step when one straight landing is 8 off the bent walk phase', () => {
     // p (fan-out 2: t then z) departs t at 448 - 8 = 440, in t's band: a straight landing at step-local 120.
     const steps: Record<string, [number, number]> = { t: [864, 320], p: [576, 352], z: [864, 640] };
     const wires: WireEnd[] = [{ source: 'p', target: 't' }, { source: 'p', target: 'z' }];
-    for (let k = 1; k <= 7; k++) { steps[`r${k}`] = [1152, 32 + k * 96]; wires.push({ source: `r${k}`, target: 't' }); }
+    for (let k = 1; k <= 3; k++) { steps[`r${k}`] = [1152, 32 + k * 96]; wires.push({ source: `r${k}`, target: 't' }); }
     const ys = arrivals(steps, wires);
 
-    expect(ys).toHaveLength(8);
+    expect(ys).toHaveLength(4);
     spaced(ys);
     expect(ys).toContain(320 + 120);
     for (const y of ys) { expect(y % 8).toBe(0); expect(y).toBeGreaterThanOrEqual(320 + 40); expect(y).toBeLessThanOrEqual(320 + 160); }
   });
 
-  it('property: a fan-in of 8 lands on the step whenever a 16-spaced packing around the straight landings exists', () => {
+  it('property: a fan-in of 4 lands on the step whenever a 32-spaced packing around the straight landings exists', () => {
     let seed = 12345;
     const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
     for (let trial = 0; trial < 300; trial++) {
       const steps: Record<string, [number, number]> = { t: [864, 320] };
       const wires: WireEnd[] = [];
-      for (let k = 0; k < 8; k++) {
+      for (let k = 0; k < 4; k++) {
         const x = [288, 576, 1152][rnd(3)]!;
         steps[`s${k}`] = [x, rnd(100) * 8];
         wires.push({ source: `s${k}`, target: 't' });
@@ -137,17 +137,17 @@ describe('landingsOf: the landing rule (spec §5.2)', () => {
       const straight = [...into].filter(([s, y]) => y === deps.get(s)!.get('t')).map(([, y]) => y);
       let packed = 0, last = -Infinity;
       for (let y = 320 + 40; y <= 320 + 160; y += 8) {
-        if (straight.some((u) => Math.abs(u - y) < 16)) continue;
-        if (y - last >= 16) { packed++; last = y; }
+        if (straight.some((u) => Math.abs(u - y) < 32)) continue;
+        if (y - last >= 32) { packed++; last = y; }
       }
-      if (packed >= 8 - straight.length) for (const y of ys) { expect(y).toBeGreaterThanOrEqual(320 + 40); expect(y).toBeLessThanOrEqual(320 + 160); }
+      if (packed >= 4 - straight.length) for (const y of ys) { expect(y).toBeGreaterThanOrEqual(320 + 40); expect(y).toBeLessThanOrEqual(320 + 160); }
     }
   });
 });
 describe('landingsOf (plan 9: arrivals by wire, so two wires from one source into one step both land)', () => {
-  it('keeps two arrivals from the same place 16 apart', () => {
+  it('keeps two arrivals from the same place 32 apart', () => {
     const placement = { sphere: { cx: 0, cy: 0 }, steps: new Map([['t', { x: 600, y: 0 }]]), caches: new Map() };
     const landed = landingsOf([{ key: 'a', target: 't', y: 96, x: 224 }, { key: 'b', target: 't', y: 96, x: 224 }], placement);
-    expect(Math.abs(landed.get('a')! - landed.get('b')!)).toBeGreaterThanOrEqual(16);
+    expect(Math.abs(landed.get('a')! - landed.get('b')!)).toBeGreaterThanOrEqual(32);
   });
 });

@@ -29,7 +29,16 @@ export const CACHE_W = 160;
 export const CACHE_H = 160;
 /** Caches stack under the hub one cache plus one cell apart. */
 export const CACHE_PITCH = CACHE_H + CELL;
-export const COLUMN_PITCH = 288;
+/** Visio's routing lengths carried over (plan 10 phase 3, spec §4.2; 1 mm = 8.96 px, snapped): a wire's stub out of
+ * and into a block and its clearance round one (7.5 mm), the least clearance through a narrow gap (half of it), the
+ * spacing of other nets' parallel runs, fan-out groups and landing slots (3.175 mm, up), a line jump's width (2.2 mm),
+ * and the automatic layout's gap between blocks (15 mm). */
+export const STUB = 64;
+export const HALF_CLEAR = 32;
+export const TRACK = 32;
+export const JUMP = 16;
+export const LAYOUT_GAP = 128;
+export const COLUMN_PITCH = STEP_W + LAYOUT_GAP;
 
 export interface Point {
   x: number;
