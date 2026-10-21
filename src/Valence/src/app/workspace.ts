@@ -313,23 +313,25 @@ export function createWorkspace(init: { pinned?: string | null; edits?: Edits; r
       const d = DRAWABLE[kind];
       if (!molecule || !d) return false;
       const t = molecule.atoms.get(tail), h = molecule.atoms.get(head);
+      // as the Inspector and the canvas label show them: a name typed in the Inspector, else the stored one
+      const named = (key: string) => state.edits[key]?.name || molecule.atoms.get(key)?.name || key;
       const refuse = (why: string) => { set({ messages: say(why, 'refused') }); return false; };
       if (!t || t.type !== d.tail || state.removed.atoms.includes(tail)) return refuse(`${KINDS[kind].label} starts at a ${TYPES[d.tail].label.toLowerCase()}.`);
       if (!h || h.type !== d.head || state.removed.atoms.includes(head)) return refuse(`${KINDS[kind].label} ends at a ${TYPES[d.head].label.toLowerCase()}.`);
-      if (kind === 'next' && tail === head) return refuse(`${t.name} cannot be its own next step.`);
+      if (kind === 'next' && tail === head) return refuse(`${named(tail)} cannot be its own next step.`);
       const key = `${kind}|${tail}|${head}`;
       const there = molecule.arrows.find((x) => arrowKey(x) === key);
-      if (there && !state.removed.arrows.includes(key)) return refuse(`${t.name} → ${h.name} (${KINDS[kind].label}) is already there.`);
+      if (there && !state.removed.arrows.includes(key)) return refuse(`${named(tail)} → ${named(head)} (${KINDS[kind].label}) is already there.`);
       if (there) {
         // drawn again where it was deleted: the delete is taken back
-        commit({ label: `draw ${t.name} → ${h.name}`, restored: [key] }, { messages: say(`Drew ${t.name} → ${h.name} again (${KINDS[kind].label}); its delete is taken back.`) });
+        commit({ label: `draw ${named(tail)} → ${named(head)}`, restored: [key] }, { messages: say(`Drew ${named(tail)} → ${named(head)} again (${KINDS[kind].label}); its delete is taken back.`) });
         return true;
       }
       if (!d.list) {
         const taken = molecule.arrows.find((x) => x.kind === kind && x.from === tail && !state.removed.arrows.includes(arrowKey(x)));
-        if (taken) return refuse(`${t.name} already has a ${KINDS[kind].label.toLowerCase()} (${molecule.atoms.get(taken.to)?.name}): delete that arrow first.`);
+        if (taken) return refuse(`${named(tail)} already has a ${KINDS[kind].label.toLowerCase()} (${named(taken.to)}): delete that arrow first.`);
       }
-      commit({ label: `draw ${t.name} → ${h.name}`, added: [key] }, { messages: say(`Drew ${t.name} → ${h.name} (${KINDS[kind].label}) in Valence (not applied).`) });
+      commit({ label: `draw ${named(tail)} → ${named(head)}`, added: [key] }, { messages: say(`Drew ${named(tail)} → ${named(head)} (${KINDS[kind].label}) in Valence (not applied).`) });
       return true;
     },
     note(text, tone = 'info') { set({ messages: say(text, tone) }); },

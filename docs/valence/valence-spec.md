@@ -736,3 +736,18 @@ extra. The full suite runs against the deployed bundle through nginx to the clus
   paths BaseApi receives). The host is looked up when nginx starts. Empty: nginx does not start.
 - Verified with both images against a stand-in BaseApi: `/api/v1/...` and `/api/hubs/...` arrive with their paths
   unchanged; unset → the cluster's service; empty → "invalid number of arguments in proxy_pass", the pod does not start.
+
+### The browser suite — built 2026-10-21 (the user: "thorough Valence tests")
+- **Where:** `src/Valence/e2e/` (10 spec files, 55 tests), `playwright.config.ts`; `npm run e2e` in `src/Valence` (from
+  PowerShell). Its own Vite on port 5184, software WebGL (swiftshader), reduced motion, one worker; real mouse drags.
+- **BaseApi is a stand-in** (`e2e/standin.ts`): the six tables from `src/test/fixtures/project.json` (the cluster's rows,
+  with a valid definition, source hash, payload and items filled in), `GET /model/fields` from the snapshot, liveness and
+  the dry run answered by the test; the wand's model too (`/ai/`). Every other non-GET is aborted and recorded; after
+  every test the suite checks nothing was written and the page logged no error. `VALENCE_E2E_LIVE=1` reads the cluster's
+  BaseApi instead (GETs and the dry run only). The suite needs the dev server (it picks atoms through the canvas bridge).
+- **Covers:** the shell and menus, the Shortcuts sheet, the Toolbox (making atoms, drawing arrows, refusals, Escape),
+  rule #1 deletes and arrow deletes, Ctrl+drag and right drag, wheel zoom, names on zoom, arrowheads on their ball, copy
+  and paste, undo/redo across a refresh, the view kept, field checks, the definition unlock, the dry run passing and
+  refusing, the Apply dialog (never applied), the Workflows filter, the wand, processor health.
+- **Fixed with it:** a drawn arrow's Output line ("Drew a → b …") and its undo label named made atoms "new step"; they
+  now use the name typed in the Inspector, as the canvas label does (`workspace.draw`).

@@ -57,6 +57,17 @@ describe('the workspace makes atoms and draws arrows (approved 2026-10-17)', () 
     expect(w.get().messages.at(-1)!.text).toMatch(/already has a processor → input schema/i);
   });
 
+  it('names the atoms of a drawn arrow as the Inspector shows them: a name typed there, not the stored one', () => {
+    const w = ws();
+    const n = w.create('step', P, [0, 0, 0])!;
+    w.edit(n, 'name', 'typed-step', '');
+    w.edit(S, 'name', 's1-renamed', 's1');
+    expect(w.draw('next', S, n)).toBe(true);
+    expect(w.get().messages.at(-1)!.text).toBe('Drew s1-renamed → typed-step (Step → next Step) in Valence (not applied).');
+    w.undo();
+    expect(w.get().messages.at(-1)!.text).toBe('Undid: draw s1-renamed → typed-step.');
+  });
+
   it('takes back a made atom with the drawn arrows touching it; a deleted arrow drawn again takes its delete back', () => {
     const w = ws();
     const n = w.create('step', P, [0, 0, 0])!;
