@@ -149,7 +149,10 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
       if (c) c.push(id); else classes.push([id]);
     }
     const base = s === WORKFLOW_SOURCE ? placement.sphere.cy : placement.steps.get(s)!.y + PMID;
-    classes.forEach((m, k) => { const o = offset(k, classes.length, TRACK); for (const id of m) { departY.set(id, base + o); nudge.set(id, o); } });
+    // within the side, below a step's title cap (review 2026-10-22): many groups move closer than a track, a grid step
+    // at the least
+    const gap = classes.length < 2 ? 0 : Math.max(GRID, Math.min(TRACK, Math.floor((2 * DEPART_HALF) / (classes.length - 1) / GRID) * GRID));
+    classes.forEach((m, k) => { const o = offset(k, classes.length, gap); for (const id of m) { departY.set(id, base + o); nudge.set(id, o); } });
   }
 
   const { cx, cy } = placement.sphere;
@@ -253,8 +256,10 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     const T: Placed = tail ?? placedAt(head ? { x: head.at.x - BESIDE, y: head.at.y } : { x: 0, y: 0 });
     const H: Placed = head ?? placedAt({ x: T.at.x + BESIDE, y: T.at.y });
 
-    // both ends on blocks and no shape of its own: Visio's router (plan 10 phase 3), which keeps off other nets' runs
-    // itself, so no spread of tracks is searched for it
+    // both ends on blocks and no shape of its own: Visio's router (plan 10 phase 3) draws its usual track, keeping off
+    // other nets' runs itself; only when that is through a block or on another net's wire (blocks packed closer than
+    // half the clearance, a gap too narrow for a track of its own) are the old menu's spread tracks searched as well
+    // (review 2026-10-22)
     const searched = !(w.bends && w.bends.xs.length > 0) && T.box !== '' && H.box !== '' && boxById.has(T.box) && boxById.has(H.box);
     // a junction on a level run is left and reached square-on, one jog off the line (plan 7 §5.3), on the side the other
     // end is (`flip`: the other side)
@@ -282,7 +287,7 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
       const o: RouteAvoid = avoid ? { spread, mix, avoid: (pts) => clashes(id, pts) } : { spread };
       const coreTo = (ty: number) => w.bends && w.bends.xs.length > 0
         ? simplify(pointsOfShape({ sx, sy, tx, ty }, w.bends))
-        : searched
+        : searched && spread === 0 && !mix
           ? routeBlocks([sx, sy], [tx, ty], boxById.get(T.box)!, boxById.get(H.box)!, boxes, avoid ? othersOf(id) : new Tracks())
           : T.box !== '' && H.box !== ''
             ? route(sx, sy, tx, ty, T.box, H.box, nudge.get(id) ?? 0, boxes, o)
@@ -312,7 +317,8 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     const scoreOf = (d: { core: Pt[]; points: Pt[] }) => [blocksOf(d), clashes(id, d.points)] as const;
     let best = scoreOf(drawn);
     // the blocks the usual track crosses anyway (avoiding nothing): no search for fewer (most wires cross none)
-    const fewest = best[0] === 0 ? 0 : blocksOf(drawWith(false, false, 0, false));
+    // (Visio's router's own way round is not the measure: it may have found none, review 2026-10-22)
+    const fewest = best[0] === 0 || searched ? 0 : blocksOf(drawWith(false, false, 0, false));
     const finished = () => best[1] === 0 && best[0] <= fewest;
     const tryOne = (d: { ends: Ends; core: Pt[]; points: Pt[] }) => {
       const s = scoreOf(d);
@@ -329,7 +335,7 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
       && (clashes(id, [[x0, y0], [x0 + GRID, y0]]) > 0 || clashes(id, [[x1 - GRID, y1], [x1, y1]]) > 0);
     // the usual tracks spread first; only then every mix of a U's parts moved and not (a wider, dearer search)
     search: for (const mix of [false, true]) {
-      for (let k = mix ? 1 : 0; !finished() && !stub && k <= (shaped || searched ? 0 : SPREADS); k++) {
+      for (let k = mix ? 1 : 0; !finished() && !stub && k <= (shaped ? 0 : SPREADS); k++) {
         for (const [ft, fh] of flips) {
           for (const spread of k === 0 ? [0] : [k * GRID, -k * GRID]) {
             if (k === 0 && !ft && !fh) continue;
@@ -435,6 +441,9 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
   return routes;
 }
 
+/** How far either way of its processor middle (or the hub's centre) a source's groups of tails leave: a step's side
+ * below its title cap and short of its bottom corner (96 - 40 = 56, 160 - 16 - 96 = 48). */
+const DEPART_HALF = 48;
 /** How many grid steps either way an automatic wire is moved at most to find a track no other net's wire lies on. */
 const SPREADS = 6;
 /** How many grid steps up or down along its side an automatic end is moved at most, when no track is free. */

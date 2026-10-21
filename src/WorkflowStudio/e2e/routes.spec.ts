@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
-import { blocks, centreOf, documentPanel, dragReading, edge, expect, node, openWorkflow, test, wirePoints, zoomOf, type Pt } from './studio';
+import { blocks, centreOf, documentPanel, dragReading, edge, expect, node, openWorkflow, test, wirePoints, zoomOf } from './studio';
 import { createCircuitThrowaway, removeThrowaway, type CircuitThrowaway } from './throwaway';
 
 // Plan 10 phase 3 (Visio is the authority, 2026-10-22): the router, with the real mouse. Blocks are dragged where Visio's

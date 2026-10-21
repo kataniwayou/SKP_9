@@ -427,6 +427,85 @@ describe("Visio's router in the circuit (plan 10 phase 3, spec §4.2)", () => {
     expect(r.get('a->b')!.points).toEqual([[928, 128], [992, 128], [992, 288], [288, 288], [288, 448], [352, 448]]);
   });
 
+  /** Steps placed where `at` says; `next` their wires; `cond` their entry conditions; entries the first. */
+  const placed = async (next: Record<string, string[]>, at: Record<string, [number, number]>, cond: Record<string, number> = {}) => {
+    const ids = Object.keys(at);
+    const doc = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: [ids[0]!] }),
+      steps: ids.map((id) => stepDto(id, { nextStepIds: next[id] ?? [], entryCondition: (cond[id] ?? 1) as 1 })),
+    }));
+    for (const [id, [x, y]] of Object.entries(at)) doc.placement.steps.set(id, { x, y });
+    const c = plainCircuit([ids[0]!], doc.graph.steps, () => true);
+    return { doc, c, routes: routeCircuit(c, ctxOf(doc)) };
+  };
+  const throughBlocks = (doc: Awaited<ReturnType<typeof four>>, r: ReturnType<typeof routeCircuit>[number]) =>
+    hitsOf(r.core.points, r.source === 'wf' ? SPHERE_BOX_ID : stepBoxId(r.source!), stepBoxId(r.target!), blockBoxes(doc.placement));
+
+  it('blocks packed closer than half the clearance: still never through a block (review 2026-10-22)', async () => {
+    // a neighbour 16 px right of a's output; a neighbour 16 px left of b's input
+    const one = await placed({ a: ['b'] }, { a: [352, 32], n: [592, 32], b: [1056, 400] });
+    expect(throughBlocks(one.doc, one.routes.find((r) => r.id === 'a->b')!)).toBe(0);
+    const two = await placed({ a: ['b'] }, { a: [0, 400], n: [512, 32], b: [752, 32] });
+    expect(throughBlocks(two.doc, two.routes.find((r) => r.id === 'a->b')!)).toBe(0);
+  });
+
+  it("a 64 px gap (an old layout's): wires of different nets still never lie on each other (rule G, review 2026-10-22)", async () => {
+    // 30 steps on the old layout's lattice: columns 288 apart, rows 224 (gaps of 64, one line at half the clearance)
+    const ids = Array.from({ length: 30 }, (_, i) => `n${i}`);
+    const steps = ids.map((id, i) => {
+      const col = Math.floor(i / 5), row = i % 5;
+      const next = col < 5 ? [ids[(col + 1) * 5 + row]!, ...(row % 2 === 0 && row < 4 ? [ids[(col + 1) * 5 + row + 1]!] : [])] : [];
+      return stepDto(id, { nextStepIds: next, entryCondition: (1 + (i % 3)) as 1 | 2 | 3 });
+    });
+    const doc = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ids.slice(0, 5) }), steps }));
+    ids.forEach((id, i) => doc.placement.steps.set(id, { x: 288 + 288 * Math.floor(i / 5), y: 32 + 224 * (i % 5) }));
+    const c = plainCircuit(doc.graph.workflow.entryStepIds, doc.graph.steps, (id) => doc.placement.steps.has(id));
+    const routes = routeCircuit(c, ctxOf(doc));
+    const same = sharesNet(c, netsOf(c, (id) => doc.graph.steps.get(id)?.entryCondition));
+    expect(overlapsOf(routes).filter((o) => !same(o.a, o.b))).toEqual([]);
+  });
+
+  it("five nets out of one step leave within its side, below its title cap (review 2026-10-22)", async () => {
+    const at: Record<string, [number, number]> = { a: [352, 400] };
+    const cond: Record<string, number> = {};
+    for (let k = 1; k <= 5; k++) { at[`t${k}`] = [1056, -400 + k * 288]; cond[`t${k}`] = k; }
+    const { routes } = await placed({ a: ['t1', 't2', 't3', 't4', 't5'] }, at, cond);
+    for (const r of routes.filter((x) => x.source === 'a')) {
+      expect(r.points[0]![1]).toBeGreaterThanOrEqual(400 + 40);
+      expect(r.points[0]![1]).toBeLessThanOrEqual(400 + 144);
+    }
+  });
+
+  it('routes random untouched workflows quickly: on average under 15 ms, none over 150 ms even beside the parallel suite (alone the worst is about 40; spec: 50 ms in the browser)', async () => {
+    let seed = 4242;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    const times: number[] = [];
+    for (let trial = 0; trial < 80; trial++) {
+      const n = 3 + Math.floor(rnd() * 13);
+      const ids = Array.from({ length: n }, (_, i) => `s${i + 1}`);
+      const steps = ids.map((id, i) => {
+        const next: string[] = [];
+        for (let j = 0; j < n; j++) if (j !== i && rnd() < (j > i ? 0.3 : 0.05)) next.push(ids[j]!);
+        return stepDto(id, { nextStepIds: next, entryCondition: (1 + Math.floor(rnd() * 3)) as 1 | 2 | 3 });
+      });
+      const doc = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ids.filter((_, i) => i === 0 || rnd() < 0.15) }), steps }));
+      const c = plainCircuit(doc.graph.workflow.entryStepIds, doc.graph.steps, (id) => doc.placement.steps.has(id));
+      // warm, as the canvas routes on every change; the fastest of three, so other tests running alongside do not count
+      routeCircuit(c, ctxOf(doc));
+      let fastest = Infinity;
+      for (let k = 0; k < 3; k++) {
+        const t0 = performance.now();
+        routeCircuit(c, ctxOf(doc));
+        fastest = Math.min(fastest, performance.now() - t0);
+      }
+      times.push(fastest);
+    }
+    const mean = times.reduce((a, b) => a + b, 0) / times.length, worst = Math.max(...times);
+    console.log(`routeCircuit on 80 random workflows: mean ${mean.toFixed(1)} ms, worst ${worst.toFixed(1)} ms`);
+    expect(worst).toBeLessThan(150);
+    expect(mean).toBeLessThan(15);
+  }, 120_000);
+
   it('routes a workflow of 30 steps and 40 wires quickly (spec: under 50 ms in the browser)', async () => {
     const ids = Array.from({ length: 30 }, (_, i) => `n${i}`);
     const steps = ids.map((id, i) => {
