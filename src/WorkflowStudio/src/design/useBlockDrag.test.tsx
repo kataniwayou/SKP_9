@@ -35,9 +35,10 @@ function setup(doc: StudioDocument, picks: Pick[], zoom = 1) {
   const target = document.body;
   const node = (id: string): Node => ({ id, type: 'step', position: doc.placement.steps.get(id)!, data: {} });
   // React Flow hands over the first move past its threshold, whose target may be the window
-  const start = (id: string) => act(() => {
-    result.current.notePress(blockOf(id));
-    result.current.onNodeDragStart!({ target: window } as unknown as MouseEvent, node(id), []);
+  // `press`: where the button went down; `begin`: where the pointer was when React Flow started the drag (past its threshold)
+  const start = (id: string, press?: { x: number; y: number }, begin?: { x: number; y: number }) => act(() => {
+    result.current.notePress(blockOf(id), press);
+    result.current.onNodeDragStart!({ target: window, ...(begin ? { clientX: begin.x, clientY: begin.y } : {}) } as unknown as MouseEvent, node(id), []);
   });
   const move = (id: string, x: number, y: number) => act(() => result.current.onNodesChange!([{ type: 'position', id, position: { x, y }, dragging: true } as NodeChange]));
   const stop = (id: string) => act(() => result.current.onNodeDragStop!({ target: window } as unknown as MouseEvent, node(id), []));
@@ -127,6 +128,28 @@ describe('dragging blocks', () => {
     t.move('s1', s2.x + 6, s1.y + 4000);
     expect(t.setPreview.mock.lastCall![0]!.steps.s1!.x).toBe(snap(s2.x + 6));
     expect(t.setGuides.mock.lastCall![0].lines).toEqual([]);
+    t.stop('s1');
+  });
+
+  it('the block follows the pointer from the press, not from where React Flow started the drag (no lag; Visio)', async () => {
+    const doc = await two();
+    const s1 = doc.placement.steps.get('s1')!;
+    const t = setup(doc, [], 1);
+    // pressed at (100, 3000), the drag started 12 px later; React Flow then reports moves from that start: the pointer
+    // 48 px on is reported as 36 (which the grid alone would round to 40)
+    t.start('s1', { x: 100, y: 3000 }, { x: 112, y: 3000 });
+    t.move('s1', s1.x + 2000 + 36, s1.y + 4000);
+    expect(t.setPreview.mock.lastCall![0]!.steps.s1!.x).toBe(s1.x + 2000 + 48);
+    t.stop('s1');
+  });
+
+  it('the press offset counts in flow px at the zoom (200%: 16 screen px are 8 flow px)', async () => {
+    const doc = await two();
+    const s1 = doc.placement.steps.get('s1')!;
+    const t = setup(doc, [], 2);
+    t.start('s1', { x: 100, y: 3000 }, { x: 116, y: 3000 });
+    t.move('s1', s1.x + 2000 + 8, s1.y + 4000);
+    expect(t.setPreview.mock.lastCall![0]!.steps.s1!.x).toBe(s1.x + 2000 + 16);
     t.stop('s1');
   });
 

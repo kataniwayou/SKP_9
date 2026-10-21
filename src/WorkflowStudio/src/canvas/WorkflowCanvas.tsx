@@ -240,7 +240,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
           // an arrow let go drops the wires it held (the closed hand's release); so does leaving the canvas or a press
           onKeyUp={design ? (e) => { if (isArrow(e.key)) wiring.keys.release(); } : undefined}
           onBlur={design ? () => wiring.keys.release() : undefined}
-          onPointerDownCapture={design ? (e) => { wiring.keys.release(); e.currentTarget.focus({ preventScroll: true }); drag.notePress(e.target as Element); onPointerDownCapture(e); } : undefined}>
+          onPointerDownCapture={design ? (e) => { wiring.keys.release(); e.currentTarget.focus({ preventScroll: true }); drag.notePress(e.target as Element, { x: e.clientX, y: e.clientY }); onPointerDownCapture(e); } : undefined}>
           <DesignContext.Provider value={design ? wiring.gestures : null}>
             <ReactFlow
               nodes={shown}

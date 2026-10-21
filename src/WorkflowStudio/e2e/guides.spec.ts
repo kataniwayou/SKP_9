@@ -173,3 +173,21 @@ test('Escape while held leaves no guide and no draft; dragged out and back, no d
   expect((await boxOf(panel, t.d)).y).toBe(d0.y);
   await expect(page.getByText('● design draft')).toHaveCount(0);
 });
+
+test('the block follows the pointer from the press, with no lag (a 12 px first step, then 60 px across and 200 down)', async ({ page }) => {
+  const panel = await open(page);
+  const d0 = await boxOf(panel, t.d);
+  const z = await zoomOf(panel);
+  const from = await grip(panel, t.d);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 12, from.y);
+  await page.mouse.move(from.x + 60, from.y + 200, { steps: 10 });
+  await frames(page);
+  const held = await boxOf(panel, t.d);
+  // within half a grid step (and whatever guide it may snap to: none lies in reach of this spot)
+  expect(Math.abs((held.x - d0.x) - 60 / z)).toBeLessThanOrEqual(4);
+  expect(Math.abs((held.y - d0.y) - 200 / z)).toBeLessThanOrEqual(4);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+});

@@ -16,6 +16,11 @@ interface Drag {
   /** The picked wires, moved with the blocks as one unit (decision 8, 2026-10-10). */
   wires: string[];
   start: Map<string, Point>;
+  /**
+   * How far (flow px) the pointer went between the press and React Flow starting the drag (past its threshold): React
+   * Flow measures from its start, so the block would lag the pointer by it; added back to every position it reports.
+   */
+  lag: Point;
   base: Draft;
   preview: Draft | null;
   cancelled: boolean;
@@ -39,7 +44,7 @@ export interface BlockDrag {
    * and hands over that move, whose target is wherever the pointer is then (or the window): the press
    * says which part of the block was grabbed (a processor die picks the processor) and in which window.
    */
-  notePress: (target: Element) => void;
+  notePress: (target: Element, at?: Point) => void;
   onNodeDragStart?: OnNodeDrag;
   onNodesChange?: OnNodesChange;
   onNodeDragStop?: OnNodeDrag;
@@ -60,6 +65,7 @@ export function useBlockDrag(
 ): BlockDrag {
   const drag = useRef<Drag | null>(null);
   const pressed = useRef<Element | null>(null);
+  const pressAt = useRef<Point | null>(null);
   // a drag React Flow will never stop (the canvas unmounts, or design mode ends mid-drag) must not leave
   // its Escape listener behind: it would swallow every later Escape in that window
   useEffect(() => () => { drag.current?.stopEscape(); drag.current = null; }, []);
@@ -83,7 +89,7 @@ export function useBlockDrag(
     return d;
   };
 
-  const onNodeDragStart: OnNodeDrag = (_event, node) => {
+  const onNodeDragStart: OnNodeDrag = (event, node) => {
     end();
     const doc = shown.current;
     if (!nodeBox(doc, node.id)) return;
@@ -109,8 +115,13 @@ export function useBlockDrag(
     // the picked wires go with the picked blocks (a block that was not picked moves alone); one gone after an undo is skipped
     const circuit = circuitOf(saved, design.draft);
     const wires = picked ? wirePickIds(design.picks).filter((id) => Object.hasOwn(circuit, id)) : [];
+    const at = pressAt.current, z = zoom();
+    // a touch drag has no clientX on the event itself: its first touch has
+    const p = 'touches' in event ? event.touches[0] : event;
+    const lag = at && p && Number.isFinite(p.clientX) && Number.isFinite(p.clientY) && z > 0
+      ? { x: (p.clientX - at.x) / z, y: (p.clientY - at.y) / z } : { x: 0, y: 0 };
     drag.current = {
-      primary: node.id, ids, wires,
+      primary: node.id, ids, wires, lag,
       start: new Map(ids.map((id) => { const b = nodeBox(doc, id)!; return [id, { x: b.x, y: b.y }] as const; })),
       base: design.draft, preview: null, cancelled: false,
       selectAfter: picked ? undefined : selectionFromClick(node, target, doc.graph),
@@ -124,7 +135,8 @@ export function useBlockDrag(
     const change = changes.find((c) => c.type === 'position' && c.id === d.primary);
     if (!change || change.type !== 'position' || !change.position) return;
     const start = d.start.get(d.primary)!;
-    const raw = change.position;
+    // from the press, not from where React Flow started the drag: the block stays under the pointer (Visio)
+    const raw = { x: change.position.x + d.lag.x, y: change.position.y + d.lag.y };
     let dx = snap(raw.x) - start.x, dy = snap(raw.y) - start.y;
     const box = nodeBox(shown.current, d.primary);
     if (box) {
@@ -155,6 +167,6 @@ export function useBlockDrag(
     if (d.selectAfter !== undefined) onSelect?.(d.selectAfter, [{ kind: 'node', id: d.primary }]);
   };
 
-  const notePress = (target: Element) => { pressed.current = target; };
+  const notePress = (target: Element, at?: Point) => { pressed.current = target; pressAt.current = at ?? null; };
   return { notePress, onNodeDragStart, onNodesChange, onNodeDragStop, dragging };
 }
