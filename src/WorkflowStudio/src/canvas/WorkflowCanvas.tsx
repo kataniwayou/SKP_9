@@ -7,7 +7,7 @@ import { DesignContext } from '../design/DesignContext';
 import { DesignOverlay } from '../design/DesignOverlay';
 import type { DesignProps } from '../design/designProps';
 import { circuitOf, EMPTY_DRAFT, resetShape, type Draft } from '../design/draft';
-import type { GuideLine } from '../design/guides';
+import { NO_GUIDES, type Guides } from '../design/guides';
 import { useBlockDrag } from '../design/useBlockDrag';
 import { isArrow, useDesignKeys } from '../design/useDesignKeys';
 import { useRubberBand } from '../design/useRubberBand';
@@ -19,7 +19,6 @@ import { toneOf } from '../design/drop';
 import { Menu, anchorAt, type Anchor } from '../dock/Menu';
 import { togglePick, type Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
-import { GRID } from '../layout/geometry';
 import { shapeFromPoints } from '../layout/shape';
 import type { WireRoute } from '../layout/circuitRoute';
 import { CableEdge } from './edges/CableEdge';
@@ -79,7 +78,6 @@ const resettable = (doc: StudioDocument, draft: Draft, wireId: string): boolean 
 const PRO_OPTIONS = { hideAttribution: true } as const;
 
 /** Every block's top-left corner lands on the 8 px grid while it is dragged (spec §3.4). */
-const SNAP_GRID: [number, number] = [GRID, GRID];
 /**
  * A press on a block that moves this many screen pixels or fewer is a click, more is a drag. Both are
  * set: React Flow's drag swallows the click after any movement beyond its click distance (0 by default).
@@ -124,7 +122,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
 
   // a gesture's draft while it runs; null: the committed draft is shown
   const [preview, setPreview] = useState<Draft | null>(null);
-  const [guides, setGuides] = useState<GuideLine[]>([]);
+  const [guides, setGuides] = useState<Guides>(NO_GUIDES);
   const shownDoc = useMemo(() => (design ? applyDraft(doc, preview ?? design.draft) : doc), [doc, design?.draft, preview]);
   const shownRef = useRef(shownDoc);
   shownRef.current = shownDoc;
@@ -136,7 +134,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const suppressPaneClick = useRef(false);
   const suppressNodeClick = useRef(false);
   const { band, banding, pressing, onPointerDownCapture } = useRubberBand(shownRef, design, onSelect, suppressPaneClick);
-  const drag = useBlockDrag(doc, shownRef, design, setPreview, setGuides, onSelect, suppressNodeClick);
+  const drag = useBlockDrag(doc, shownRef, design, setPreview, setGuides, onSelect, suppressNodeClick, () => flowStore.getState().transform[2]);
   const wiring = useWireGestures(doc, shownRef, design, setPreview, onSelect);
   // --inv (1 / zoom) lets canvas.css keep drop outlines and connection points one size on screen at any zoom
   const zoom = useStore((s) => s.transform[2]);
@@ -259,8 +257,6 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               minZoom={0.1}
               maxZoom={4}
               nodesDraggable={design !== undefined}
-              snapToGrid={design !== undefined}
-              snapGrid={SNAP_GRID}
               nodeDragThreshold={DRAG_START}
               nodeClickDistance={DRAG_START}
               onNodeDragStart={drag.onNodeDragStart}

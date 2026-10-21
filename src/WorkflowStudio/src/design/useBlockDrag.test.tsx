@@ -13,13 +13,13 @@ import { useBlockDrag } from './useBlockDrag';
 const two = () => loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch', nextStepIds: ['s2'] }), stepDto('s2', { name: 'store' })] }));
 const designOf = (picks: Pick[]): DesignProps => ({ draft: EMPTY_DRAFT, picks, onPick: vi.fn(), onCommit: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() });
 
-function setup(doc: StudioDocument, picks: Pick[]) {
+function setup(doc: StudioDocument, picks: Pick[], zoom = 1) {
   const design = designOf(picks);
   const setPreview = vi.fn<(d: Draft | null) => void>();
   const setGuides = vi.fn();
   const onSelect = vi.fn();
   const suppress = { current: false };
-  const { result, rerender, unmount } = renderHook(({ on }: { on: boolean }) => useBlockDrag(doc, { current: doc }, on ? design : undefined, setPreview, setGuides, onSelect, suppress), { initialProps: { on: true } });
+  const { result, rerender, unmount } = renderHook(({ on }: { on: boolean }) => useBlockDrag(doc, { current: doc }, on ? design : undefined, setPreview, setGuides, onSelect, suppress, () => zoom), { initialProps: { on: true } });
   const blocks = new Map<string, HTMLElement>();
   const blockOf = (id: string) => {
     if (!blocks.has(id)) {
@@ -63,7 +63,7 @@ describe('dragging blocks', () => {
     expect(t.design.onCommit).toHaveBeenCalledTimes(1);
     expect(t.design.onCommit).toHaveBeenCalledWith(preview);
     expect(t.setPreview).toHaveBeenLastCalledWith(null);
-    expect(t.setGuides).toHaveBeenLastCalledWith([]);
+    expect(t.setGuides).toHaveBeenLastCalledWith({ lines: [], gaps: [] });
     expect(t.onSelect).not.toHaveBeenCalled();
     expect(t.suppress.current).toBe(true);
   });
@@ -92,7 +92,41 @@ describe('dragging blocks', () => {
     t.move('s1', s1.x + 2000 + 4, s2.y + 8);
     const preview = t.setPreview.mock.lastCall![0]!;
     expect(preview.steps.s1!.y).toBe(s2.y);
-    expect(t.setGuides.mock.lastCall![0]).toContainEqual(expect.objectContaining({ y1: s2.y + 96, y2: s2.y + 96 }));
+    expect(t.setGuides.mock.lastCall![0].lines).toContainEqual(expect.objectContaining({ y1: s2.y + 96, y2: s2.y + 96 }));
+    t.stop('s1');
+  });
+
+  it('the reach is 12 screen px at any zoom, matched before grid rounding (plan 10): 5 flow px off at 200% snaps', async () => {
+    const doc = await two();
+    const s1 = doc.placement.steps.get('s1')!, s2 = doc.placement.steps.get('s2')!;
+    const t = setup(doc, [], 2);
+    t.start('s1');
+    t.move('s1', s1.x + 2000 + 4, s2.y + 5);
+    expect(t.setPreview.mock.lastCall![0]!.steps.s1!.y).toBe(s2.y);
+    t.stop('s1');
+  });
+
+  it('16 screen px off at 100% does not snap: the block is rounded to the grid', async () => {
+    const doc = await two();
+    const s1 = doc.placement.steps.get('s1')!, s2 = doc.placement.steps.get('s2')!;
+    const t = setup(doc, [], 1);
+    t.start('s1');
+    // 48 below s2's top: the nearest pair (s1's processor middle at 144 against s2's bottom at 160) is 16 away
+    t.move('s1', s1.x + 2000 + 4, s2.y + 48);
+    expect(t.setPreview.mock.lastCall![0]!.steps.s1!.y).toBe(s2.y + 48);
+    expect(t.setGuides.mock.lastCall![0].lines.filter((l: { y1: number; y2: number }) => l.y1 === l.y2)).toEqual([]);
+    t.stop('s1');
+  });
+
+  it('a group drag never snaps to a block of the group (only blocks that stay put are references)', async () => {
+    const doc = await two();
+    const s1 = doc.placement.steps.get('s1')!, s2 = doc.placement.steps.get('s2')!;
+    const t = setup(doc, [{ kind: 'node', id: 's1' }, { kind: 'node', id: 's2' }]);
+    t.start('s1');
+    // s1's left edge 6 px right of s2's starting one, far below everything: s2 moves with s1, so nothing lines up
+    t.move('s1', s2.x + 6, s1.y + 4000);
+    expect(t.setPreview.mock.lastCall![0]!.steps.s1!.x).toBe(snap(s2.x + 6));
+    expect(t.setGuides.mock.lastCall![0].lines).toEqual([]);
     t.stop('s1');
   });
 
@@ -106,7 +140,7 @@ describe('dragging blocks', () => {
     act(() => { prevented = !fireEvent.keyDown(t.target, { key: 'Escape' }); });
     expect(prevented).toBe(true);
     expect(t.setPreview).toHaveBeenLastCalledWith(null);
-    expect(t.setGuides).toHaveBeenLastCalledWith([]);
+    expect(t.setGuides).toHaveBeenLastCalledWith({ lines: [], gaps: [] });
     t.move('s1', s1.x + 2003, s1.y + 4005);
     expect(t.setPreview).toHaveBeenLastCalledWith(null);
     t.stop('s1');
@@ -149,7 +183,7 @@ describe('dragging blocks', () => {
     t.move('s1', s1.x + 1003, s1.y + 4005);
     act(() => t.rerender({ on: false }));
     expect(t.setPreview).toHaveBeenLastCalledWith(null);
-    expect(t.setGuides).toHaveBeenLastCalledWith([]);
+    expect(t.setGuides).toHaveBeenLastCalledWith({ lines: [], gaps: [] });
     expect(fireEvent.keyDown(t.target, { key: 'Escape' })).toBe(true);
     expect(t.design.onPick).toHaveBeenCalledTimes(1);
     t.unmount();

@@ -8,14 +8,14 @@ import type { Point } from '../layout/geometry';
 import { pathOf } from '../canvas/svgPath';
 import { squaresOf, SQUARE } from './cut';
 import { dropLabel } from './drop';
-import type { GuideLine } from './guides';
+import type { GapMark, Guides } from './guides';
 import type { FlowRect } from './hit';
 import type { DropHint } from './useWireGestures';
 
 export interface DesignOverlayProps {
   band: FlowRect | null;
-  /** Alignment guides while blocks are dragged (spec §3.4). */
-  guides: GuideLine[];
+  /** Alignment lines and equal-gap marks while a block is dragged or dropped from the Toolbox (plan 10, Visio's dynamic grid). */
+  guides: Guides;
   /** The picked wires, as shown. */
   wires: WireRoute[];
   /** A wire's shape as bends (its own manual bends, else the router's): its run squares follow it. */
@@ -44,6 +44,26 @@ export interface DesignOverlayProps {
 
 /** On-screen sizes (px) that do not shrink with the zoom: at the fitted zoom a 2 px line would vanish. */
 const LINE = 1.5, GHOST = 1.6, LABEL_H = 18, LABEL_PAD = 6, LABEL_FONT = 11.5;
+/** Visio's dynamic grid (plan 10, measured): guides overshoot 8 px; a gap's arrow 18 px off its pair, ticks ±10, heads 6 long. */
+const OVERSHOOT = 8, GAP_OFF = 18, TICK = 10, HEAD = 6;
+
+/** An equal gap as Visio draws it: a line with an arrow head at each end, between two ticks, beside its pair. */
+function GapArrow({ gap, k }: { gap: GapMark; k: number }) {
+  const off = gap.at + GAP_OFF * k, t = TICK * k, h = HEAD * k, w = h / 2;
+  // along: the gap's own axis; across: the arrow's offset line
+  const pt = (along: number, across: number) => (gap.axis === 'x' ? `${along} ${across}` : `${across} ${along}`);
+  const seg = (a1: number, c1: number, a2: number, c2: number) => (gap.axis === 'x'
+    ? { x1: a1, y1: c1, x2: a2, y2: c2 } : { x1: c1, y1: a1, x2: c2, y2: a2 });
+  return (
+    <g className="design-gap" strokeWidth={k}>
+      <line {...seg(gap.from, off, gap.to, off)} />
+      <line {...seg(gap.from, off - t, gap.from, off + t)} />
+      <line {...seg(gap.to, off - t, gap.to, off + t)} />
+      <path className="design-gap-head" d={`M${pt(gap.from, off)} L${pt(gap.from + h, off - w)} L${pt(gap.from + h, off + w)} Z`} />
+      <path className="design-gap-head" d={`M${pt(gap.to, off)} L${pt(gap.to - h, off - w)} L${pt(gap.to - h, off + w)} Z`} />
+    </g>
+  );
+}
 
 /**
  * Drawn above the blocks in flow coordinates: the rubber band (spec §3.2), the alignment guides (§3.4), and a picked
@@ -57,7 +77,13 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
     <ViewportPortal>
       <svg className="design-overlay" width={1} height={1}>
         {band && <rect className="design-band" x={band.x0} y={band.y0} width={band.x1 - band.x0} height={band.y1 - band.y0} strokeWidth={k} strokeDasharray={`${4 * k} ${3 * k}`} />}
-        {guides.map((l, i) => <line key={i} className="design-guide" x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} strokeWidth={k} />)}
+        {guides.lines.map((l, i) => {
+          // Visio's: dashed, overshooting both blocks a little along the line (plan 10)
+          const o = OVERSHOOT * k, flat = l.y1 === l.y2;
+          return <line key={i} className="design-guide" x1={l.x1 - (flat ? o : 0)} y1={l.y1 - (flat ? 0 : o)} x2={l.x2 + (flat ? o : 0)} y2={l.y2 + (flat ? 0 : o)}
+            strokeWidth={k} strokeDasharray={`${4 * k} ${3 * k}`} />;
+        })}
+        {guides.gaps.map((g, i) => <GapArrow key={`g${i}`} gap={g} k={k} />)}
         {wires.map((w) => {
           const sq = (x: number, y: number) => ({ x: x - (SQUARE / 2) * k, y: y - (SQUARE / 2) * k, width: SQUARE * k, height: SQUARE * k, strokeWidth: LINE * k });
           return (

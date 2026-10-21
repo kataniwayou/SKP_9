@@ -50,7 +50,10 @@
 .design-overlay { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 /* widths and dashes of the overlay's marks are set in DesignOverlay, in screen pixels (they do not shrink with the zoom) */
 .design-band { fill: rgba(125, 211, 252, .08); stroke: var(--accent); }
-.design-guide { stroke: #fff; filter: drop-shadow(0 0 2px rgba(125, 211, 252, .9)); }
+/* Visio's dynamic grid (plan 10, sampled from Visio): green dashed guides and green equal-gap arrows */
+.design-guide { stroke: #5BC85B; }
+.design-gap line { stroke: #5BC85B; }
+.design-gap .design-gap-head { fill: #5BC85B; stroke: none; }
 .design-handle { pointer-events: all; cursor: pointer; }
 .design-handle.end { fill: var(--accent); stroke: #04111F; cursor: move; }
 .design-handle.seg { fill: var(--panel); stroke: var(--accent); }

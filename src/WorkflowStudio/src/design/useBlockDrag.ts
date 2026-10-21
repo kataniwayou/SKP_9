@@ -1,13 +1,13 @@
 import { useEffect, useRef, type MutableRefObject } from 'react';
 import type { NodeChange, OnNodeDrag, OnNodesChange } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
-import { GRID, PMID, snap, type Point } from '../layout/geometry';
+import { PMID, snap, type Point } from '../layout/geometry';
 import type { Selection } from '../store/selection';
 import { nodePickIds, wirePickIds, type Pick } from '../store/picks';
 import { selectionFromClick } from '../canvas/selection';
 import type { DesignProps } from './designProps';
 import { circuitOf, moveGroup, type Draft } from './draft';
-import { guideBoxes, snapToGuides, type GuideLine } from './guides';
+import { guideBoxes, NO_GUIDES, SNAP_REACH_PX, snapToGuides, type Guides } from './guides';
 import { nodeBox } from './hit';
 
 interface Drag {
@@ -52,9 +52,11 @@ export function useBlockDrag(
   shown: MutableRefObject<StudioDocument>,
   design: DesignProps | undefined,
   setPreview: (d: Draft | null) => void,
-  setGuides: (lines: GuideLine[]) => void,
+  setGuides: (guides: Guides) => void,
   onSelect: ((selection: Selection | null, picks?: Pick[]) => void) | undefined,
   suppressNodeClick: MutableRefObject<boolean>,
+  /** Screen px per flow px now: the guides' reach is in screen px (plan 10). */
+  zoom: () => number,
 ): BlockDrag {
   const drag = useRef<Drag | null>(null);
   const pressed = useRef<Element | null>(null);
@@ -66,7 +68,7 @@ export function useBlockDrag(
     if (!designOff || !drag.current) return;
     drag.current.stopEscape();
     drag.current = null;
-    setGuides([]);
+    setGuides(NO_GUIDES);
     setPreview(null);
   }, [designOff, setGuides, setPreview]);
   const dragging = () => drag.current !== null;
@@ -76,7 +78,7 @@ export function useBlockDrag(
     const d = drag.current;
     drag.current = null;
     d?.stopEscape();
-    setGuides([]);
+    setGuides(NO_GUIDES);
     setPreview(null);
     return d;
   };
@@ -98,7 +100,7 @@ export function useBlockDrag(
       e.preventDefault(); // the dock's Escape skips a key already handled
       e.stopPropagation();
       drag.current.cancelled = true;
-      setGuides([]);
+      setGuides(NO_GUIDES);
       setPreview(null);
       // a block the drag picked is unpicked again: everything goes back (spec §5.3)
       if (!picked) design.onPick(before);
@@ -122,14 +124,18 @@ export function useBlockDrag(
     const change = changes.find((c) => c.type === 'position' && c.id === d.primary);
     if (!change || change.type !== 'position' || !change.position) return;
     const start = d.start.get(d.primary)!;
-    let dx = snap(change.position.x) - start.x, dy = snap(change.position.y) - start.y;
+    const raw = change.position;
+    let dx = snap(raw.x) - start.x, dy = snap(raw.y) - start.y;
     const box = nodeBox(shown.current, d.primary);
     if (box) {
+      // Visio's dynamic grid (plan 10): matched at the unrounded position within 12 screen px; an axis no guide caught
+      // is rounded to the grid
       const others = guideBoxes(shown.current).filter((b) => !d.ids.includes(b.id));
-      const mid = shown.current.placement.steps.has(d.primary) ? { mid: start.y + dy + PMID } : {};
-      const g = snapToGuides({ id: d.primary, x: start.x + dx, y: start.y + dy, w: box.w, h: box.h, ...mid }, others, GRID);
-      dx += g.dx; dy += g.dy;
-      setGuides(g.lines);
+      const mid = shown.current.placement.steps.has(d.primary) ? { mid: raw.y + PMID } : {};
+      const g = snapToGuides({ id: d.primary, x: raw.x, y: raw.y, w: box.w, h: box.h, ...mid }, others, SNAP_REACH_PX / zoom());
+      if (g.hit.x) dx = raw.x + g.dx - start.x;
+      if (g.hit.y) dy = raw.y + g.dy - start.y;
+      setGuides({ lines: g.lines, gaps: g.gaps });
     }
     // back where it started: nothing to show, and the drop makes no step
     const moved = new Map(d.ids.map((id) => { const s = d.start.get(id)!; return [id, { x: s.x + dx, y: s.y + dy }] as const; }));
