@@ -1,7 +1,7 @@
 import { useEffect, useRef, type MutableRefObject } from 'react';
 import type { NodeChange, OnNodeDrag, OnNodesChange } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
-import { PMID, snap, type Point } from '../layout/geometry';
+import { GRID, PMID, snap, type Point } from '../layout/geometry';
 import type { Selection } from '../store/selection';
 import { nodePickIds, wirePickIds, type Pick } from '../store/picks';
 import { selectionFromClick } from '../canvas/selection';
@@ -127,7 +127,7 @@ export function useBlockDrag(
     if (box) {
       const others = guideBoxes(shown.current).filter((b) => !d.ids.includes(b.id));
       const mid = shown.current.placement.steps.has(d.primary) ? { mid: start.y + dy + PMID } : {};
-      const g = snapToGuides({ id: d.primary, x: start.x + dx, y: start.y + dy, w: box.w, h: box.h, ...mid }, others);
+      const g = snapToGuides({ id: d.primary, x: start.x + dx, y: start.y + dy, w: box.w, h: box.h, ...mid }, others, GRID);
       dx += g.dx; dy += g.dy;
       setGuides(g.lines);
     }
