@@ -75,3 +75,15 @@ describe('blockAt caches (plan 7, one hit test)', () => {
     expect(blockAt(doc, { x: c.x + CACHE_W + 5, y: c.y + CACHE_H + 5 }, 8)).toBe('cache:c1');
   });
 });
+
+describe('blockAt picks the nearest block in reach (final review 2026-10-21: at 25 % the reach is 40 flow px)', () => {
+  it('two steps 40 px apart, the pointer 8 px under the upper one: the upper one, whatever the order they were placed in', async () => {
+    const doc = await two();
+    const placement = { ...doc.placement, steps: new Map([['s2', { x: 2000, y: 200 }], ['s1', { x: 2000, y: 0 }]]) };
+    const near = { ...doc, placement };
+    expect(blockAt(near, { x: 2100, y: 168 }, 40)).toBe('s1');
+    expect(blockAt(near, { x: 2100, y: 192 }, 40)).toBe('s2');
+    // inside a block is distance 0: it wins over one in reach
+    expect(blockAt(near, { x: 2100, y: 150 }, 40)).toBe('s1');
+  });
+});

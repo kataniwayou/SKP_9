@@ -7,7 +7,7 @@ import type { Selection } from '../store/selection';
 import { addCircuitWire, freeWithout, NEW_WIRE_PREFIX, openJoinedOn, sameEnd, setBends, setEnd, type Circuit, type End, type Side } from '../circuit/circuit';
 import { endPointOf, hubStart, routeCircuit, type WireRoute } from '../layout/circuitRoute';
 import { clearBends, clearDragged, clearRun, legPath } from '../layout/detour';
-import { clampLanding, LANDING_MAX, LANDING_MIN, GRID, PMID, snap, STEP_W, type Point } from '../layout/geometry';
+import { clampLanding, PMID, snap, STEP_W, type Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import { simplify, type Box, type Pt } from '../layout/router';
 import { dragSegment, normalize, pointsOfShape, shapeFromPoints, type Bends } from '../layout/shape';
@@ -23,7 +23,7 @@ import { cutPaths, cutTargets, cutWire, holdDrawn, squareAt, squaresOf, type Squ
 import { applyDrop, DROP_REACH, endOf, LINE_REACH, judgeDrop, pointOfTarget, roleOf, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
 import { overlapJudge } from './overlapJudge';
-import { snapRun } from './runSnap';
+import { heldSnap, snapRun } from './runSnap';
 import { SNAP_REACH_PX } from './guides';
 import { mayShare } from '../layout/overlaps';
 import { netsOf } from '../circuit/families';
@@ -229,13 +229,14 @@ export function useWireGestures(
     const judge = overlapJudge(shown.current, wire.id, circuit, 'strict');
     let short = false;
     setResize(k % 2 === 0 ? 'ns' : 'ew');
-    // Visio's guide (plan 10 phase 2): the run snaps to block edges and centres, the head step's landing heights (the run
+    // Visio's guide (plan 10 phase 2): the run snaps to block edges and centres, the head step's processor middle (the run
     // that slides the head) and runs of wires it may share a line with, within 12 screen px
     const axis = k % 2 === 0 ? 'y' : 'x';
     const manual = setBends(circuit, wire.id, bends);
     const share = mayShare(manual, netsOf(manual, (s) => shown.current.graph.steps.get(s)?.entryCondition));
-    const landings: number[] = [];
-    if (step && k === 2 * bends.xs.length) for (let y = LANDING_MIN; y <= LANDING_MAX; y += GRID) landings.push(step.y + y);
+    // the run that slides a step-glued head: its step's processor middle (where the router lands it), not every grid
+    // line of the side, which the grid already gives (final review 2026-10-21)
+    const landings = step && k === 2 * bends.xs.length ? [step.y + PMID] : [];
     const reach = SNAP_REACH_PX / getZoom();
     // the other wires as drawn, for the red stretches of a short circuit (the user's rule 2: red where it lies on them)
     const others = new LineIndex();
@@ -262,13 +263,13 @@ export function useWireGestures(
     const lies = (core: Pt[], v: number) => core.some((a, j) => j > 0 && a[i] === v && core[j - 1]![i] === v && a[1 - i] !== core[j - 1]![1 - i]);
     run(e, (pointer) => {
       const snapped = snapRun(axis === 'x' ? pointer.x : pointer.y, axis, shown.current, wire.id, reach, (x) => share(wire.id, x), landings);
-      let shapedNow = shapeAt(axis === 'x' ? { x: snapped.v, y: pointer.y } : { x: pointer.x, y: snapped.v }, latest);
-      // snapped onto a line the run may not keep (a block's side it would lie along): the drag as without the snap, no guide
-      const held = snapped.at !== null && lies(shapedNow.core, snapped.at);
-      if (snapped.at !== null && !held) shapedNow = shapeAt(pointer, latest);
-      setRunGuide(held ? { axis, v: snapped.at! } : null);
-      latest = shapedNow.state;
-      const core = shapedNow.core;
+      // a snap is kept only where the run stays on its line and makes no short circuit the plain drag would not
+      const shortOf = (x: { state: Shaped; core: Pt[] }) => judge(simplify(x.core), () => shapedCircuit(x.state));
+      const kept = heldSnap(snapped.at, shapeAt(axis === 'x' ? { x: snapped.v, y: pointer.y } : { x: pointer.x, y: snapped.v }, latest),
+        () => shapeAt(pointer, latest), (x) => lies(x.core, snapped.at!), shortOf);
+      setRunGuide(kept.guide === null ? null : { axis, v: kept.guide });
+      latest = kept.shape.state;
+      const core = kept.shape.core;
       const now = latest;
       short = judge(simplify(core), () => shapedCircuit(now));
       setHints(short ? [{ id: null, line: false, tone: 'no', why: 'short', at: pointer }] : []);
@@ -422,7 +423,8 @@ export function useWireGestures(
     const own: OwnSquares = {
       at: (p) => squareAt(squares, p, zoomK),
       preview: (q) => {
-        if (q.kind === 'end') return { wire: wire.id, points: wire.points, gone: wire.points, faded: true };
+        // over its other end square the whole wire goes: faded, with no new route to preview
+        if (q.kind === 'end') return { wire: wire.id, points: [], gone: wire.points, faded: true };
         const { kept, gone } = cutPaths(wire, shape, side, q.k);
         return { wire: wire.id, points: kept, gone };
       },

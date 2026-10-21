@@ -35,3 +35,17 @@ export function snapRun(
   for (const c of candidates) if (Math.abs(c - v) <= reach && (at === null || Math.abs(c - v) < Math.abs(at - v))) at = c;
   return { v: at ?? v, at };
 }
+
+/**
+ * Whether a dragged run keeps its snap to `at` (null: nothing snapped): it does when the shape snapped there still lies
+ * on that line (`keeps`: a run pushed off a block side it would lie along does not) and is no short circuit the drag
+ * without the snap would not be (a block line can lie on another net's wire). Otherwise the drag is as without the snap
+ * (`raw`), with no guide.
+ */
+export function heldSnap<T>(at: number | null, snapped: T, raw: () => T, keeps: (s: T) => boolean, shorts: (s: T) => boolean): { shape: T; guide: number | null } {
+  if (at === null) return { shape: snapped, guide: null };
+  if (keeps(snapped) && !shorts(snapped)) return { shape: snapped, guide: at };
+  const plain = raw();
+  if (keeps(snapped) && shorts(plain)) return { shape: snapped, guide: at };
+  return { shape: plain, guide: null };
+}

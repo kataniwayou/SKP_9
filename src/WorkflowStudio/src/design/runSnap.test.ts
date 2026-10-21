@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { StudioDocument } from '../app/document';
 import type { Pt } from '../layout/router';
-import { snapRun } from './runSnap';
+import { heldSnap, snapRun } from './runSnap';
 
 /** A canvas with one step at (400, 0), the hub far off, and the given wires as drawn. */
 function doc(wires: { id: string; points: Pt[] }[]): StudioDocument {
@@ -45,5 +45,25 @@ describe("a dragged run's alignment guide and snap (plan 10 phase 2, Visio)", ()
 
   it('gives at: null and the value unchanged with nothing in reach', () => {
     expect(snapRun(700, 'x', doc([]), 'w', 12, all)).toEqual({ v: 700, at: null });
+  });
+});
+
+describe('whether a snap is kept (final review 2026-10-21)', () => {
+  const raw = 'raw', snapped = 'snapped';
+  const keeps = (s: string) => s === snapped;
+  it('keeps a snap the run still lies on, with its guide', () => {
+    expect(heldSnap(40, snapped, () => raw, keeps, () => false)).toEqual({ shape: snapped, guide: 40 });
+  });
+  it('drops a snap the run was pushed off (a block side it would lie along): the raw drag, no guide', () => {
+    expect(heldSnap(40, snapped, () => raw, () => false, () => false)).toEqual({ shape: raw, guide: null });
+  });
+  it("drops a snap that makes a short circuit the raw drag does not (a block line on another net's wire)", () => {
+    expect(heldSnap(40, snapped, () => raw, keeps, (s) => s === snapped)).toEqual({ shape: raw, guide: null });
+  });
+  it('keeps the snap when the raw drag is a short circuit too', () => {
+    expect(heldSnap(40, snapped, () => raw, keeps, () => true)).toEqual({ shape: snapped, guide: 40 });
+  });
+  it('nothing snapped: the shape as dragged, no guide', () => {
+    expect(heldSnap(null, raw, () => raw, keeps, () => false)).toEqual({ shape: raw, guide: null });
   });
 });

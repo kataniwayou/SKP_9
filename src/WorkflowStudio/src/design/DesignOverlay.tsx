@@ -110,7 +110,7 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
             </g>
           );
         })}
-        {ghost && <path className="design-ghost" d={pathOf(ghost)} strokeWidth={GHOST * k} strokeDasharray={`${6 * k} ${4 * k}`} />}
+        {ghost && ghost.length > 1 && <path className="design-ghost" d={pathOf(ghost)} strokeWidth={GHOST * k} strokeDasharray={`${6 * k} ${4 * k}`} />}
         {gone && gone.length > 1 && <path className="design-gone" d={pathOf(gone)} strokeWidth={4 * k} />}
         {shorts.map((st, i) => <path key={`sh${i}`} className="design-short" d={pathOf(st)} strokeWidth={3 * k} />)}
         {tool?.box && <rect className="design-tool-landing" x={tool.box.x} y={tool.box.y} width={tool.box.w} height={tool.box.h} strokeWidth={1.5 * k} strokeDasharray={`${6 * k} ${4 * k}`} />}

@@ -135,6 +135,39 @@ describe('wire gestures', () => {
     expect(vi.mocked(design.onCommit).mock.calls[0]![0].wires!['s1->s2']!.bends!.xs).toEqual([s1.x + STEP_W + 16, s2.x - 8]);
   });
 
+  it("a head's run slid along its step's side snaps to the processor middle only: no guide elsewhere on the side (final review 2026-10-21)", async () => {
+    const doc = await two();
+    const s2 = doc.placement.steps.get('s2')!;
+    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const handle = container.querySelector('.design-handle.seg[data-k="0"]')!;
+    const x = s2.x - 40;
+    fireEvent.pointerDown(handle, { button: 0, ...screenOf(container, { x, y: s2.y + PMID }), pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, { x, y: s2.y + 40 }), pointerId: 1 });
+    expect(container.querySelector('line.design-guide.run')).toBeNull();
+    fireEvent.pointerMove(document, { ...screenOf(container, { x, y: s2.y + PMID + 6 }), pointerId: 1 });
+    expect(Number(container.querySelector('line.design-guide.run')!.getAttribute('y1'))).toBe(s2.y + PMID);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.pointerUp(document, { pointerId: 1 });
+  });
+
+  it("an end square held over the wire's other end square previews the whole wire going: no dashed new route (final review 2026-10-21)", async () => {
+    const doc = await two();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const head = container.querySelector('.design-handle.end[data-end="head"]')!;
+    const tail = container.querySelector('.design-handle.end[data-end="tail"]')!;
+    const at = (el: Element) => ({ x: Number(el.getAttribute('cx')), y: Number(el.getAttribute('cy')) });
+    fireEvent.pointerDown(head, { button: 0, ...screenOf(container, at(head)), pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: at(tail).x + 20, y: at(tail).y }), pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, at(tail)), pointerId: 1 });
+    expect(container.querySelector('.design-drop-label')!.textContent).toBe('delete wire');
+    expect(container.querySelector('path.design-gone')).not.toBeNull();
+    expect(container.querySelector('path.design-ghost')).toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.pointerUp(document, { pointerId: 1 });
+  });
+
   it('a run square shows the way its run moves, and keeps that double arrow while it is dragged', async () => {
     const doc = await two();
     const s1 = doc.placement.steps.get('s1')!, s2 = doc.placement.steps.get('s2')!;

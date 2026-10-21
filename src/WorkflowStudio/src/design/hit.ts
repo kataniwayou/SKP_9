@@ -46,15 +46,18 @@ export function itemsInRect(doc: StudioDocument, r: FlowRect): Pick[] {
 
 /**
  * The block under a point by node id: a step, the hub or a cache (a dragged wire end is judged over each:
- * the rules refuse a cache as "not a step"), or null; `reach` grows each block on every side.
+ * the rules refuse a cache as "not a step"), or null; `reach` grows each block on every side. Of the blocks in reach the
+ * nearest wins (inside one is 0 away; at a low zoom the reach covers a gap between two blocks, final review 2026-10-21).
  */
 export function blockAt(doc: StudioDocument, p: Point, reach = 0): string | null {
-  const within = (x: number, y: number, w: number, h: number) => p.x >= x - reach && p.x <= x + w + reach && p.y >= y - reach && p.y <= y + h + reach;
-  for (const [id, at] of doc.placement.steps) if (within(at.x, at.y, STEP_W, STEP_H)) return id;
+  const away = (x: number, y: number, w: number, h: number) => Math.hypot(Math.max(x - p.x, 0, p.x - x - w), Math.max(y - p.y, 0, p.y - y - h));
+  let best: { id: string; gap: number } | null = null;
+  const consider = (id: string, gap: number) => { if (gap <= reach && (best === null || gap < best.gap)) best = { id, gap }; };
+  for (const [id, at] of doc.placement.steps) consider(id, away(at.x, at.y, STEP_W, STEP_H));
   const { cx, cy } = doc.placement.sphere;
-  if (Math.hypot(p.x - cx, p.y - cy) <= SPHERE_R + reach) return SPHERE_NODE_ID;
-  for (const [id, at] of doc.placement.caches) if (within(at.x, at.y, CACHE_W, CACHE_H)) return cacheNodeId(id);
-  return null;
+  consider(SPHERE_NODE_ID, Math.max(0, Math.hypot(p.x - cx, p.y - cy) - SPHERE_R));
+  for (const [id, at] of doc.placement.caches) consider(cacheNodeId(id), away(at.x, at.y, CACHE_W, CACHE_H));
+  return (best as { id: string } | null)?.id ?? null;
 }
 
 /**
