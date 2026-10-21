@@ -170,8 +170,11 @@ export function Toolbox() {
         toolDrag.start(item, from);
       }
       toolDrag.move(win.document, { x: ev.clientX, y: ev.clientY }, isSaving);
+      // Visio's crosshair while a wire's end is placed over a canvas (plan 10 phase 2)
+      if (item.kind === 'wire') win.document.body.classList.toggle('tool-cross', toolDrag.get()?.over != null);
     };
     const stop = () => {
+      if (item.kind === 'wire') win.document.body.classList.remove('tool-cross');
       win.removeEventListener('pointermove', move);
       win.removeEventListener('pointerup', up);
       win.removeEventListener('pointercancel', cancel);

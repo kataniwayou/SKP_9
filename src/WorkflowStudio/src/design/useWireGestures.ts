@@ -182,8 +182,9 @@ export function useWireGestures(
   const [ghost, setGhost] = useState<WireGhost | null>(null);
   // one per dragged end: an end square's drag has one, a body drag one per end (rule B, 2026-10-09)
   const [hints, setHints] = useState<DropHint[]>([]);
-  // the drag's cursor: a horizontal run (even k) moves up and down, a vertical one sideways; an end square any way (rule 14)
-  const [resize, setResize] = useState<'ns' | 'ew' | 'move' | null>(null);
+  // the drag's cursor (Visio's, plan 10 phase 2): a horizontal run (even k) moves up and down, a vertical one sideways; an
+  // end being placed (a dragged end, a new wire) the crosshair; a whole wire moved the four-way arrow
+  const [resize, setResize] = useState<'ns' | 'ew' | 'move' | 'cross' | null>(null);
   // a dragged run's alignment guide (plan 10 phase 2, Visio's): the line it snapped to, across the run's own axis
   const [runGuide, setRunGuide] = useState<{ axis: 'x' | 'y'; v: number } | null>(null);
   const designRef = useRef(design);
@@ -451,7 +452,7 @@ export function useWireGestures(
       return routed.points;
     };
     const overlaps = (t: DropTarget, path: Pt[]): boolean => judge(path, () => dropped(t));
-    setResize('move');
+    setResize('cross');
     dropGesture(e, {
       id: wire.id, ghost: wire.id, side, circuit, own, overlaps,
       step: (p) => { legs = moveLegs(legs, p); },
@@ -496,7 +497,7 @@ export function useWireGestures(
     // a grid step was made: from then on the press is a drag, even back where it began
     let travelled = false;
     const toggle = e.ctrlKey;
-    setResize(null);
+    setResize('move');
     run(e, (p) => {
       // `|| 0`: a snapped -0 is no move
       const dx = snap(p.x - from.x) || 0, dy = snap(p.y - from.y) || 0;
@@ -539,7 +540,7 @@ export function useWireGestures(
     const tail: End = source === WORKFLOW_SOURCE ? { on: 'hub', angle: null } : { on: 'step', step: source, y: null };
     const circuit = addCircuitWire(circuitOf(saved, base), id, { tail, head: { on: 'open', x: from.x, y: from.y } });
     const boxes = blockBoxes(placement);
-    setResize(null);
+    setResize('cross');
     dropGesture(e, {
       id, ghost: null, side: 'head', circuit,
       path: (t) => ghostPath(from, pointOfTarget(shown.current, t), 'head', boxes),

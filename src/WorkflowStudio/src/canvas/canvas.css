@@ -36,12 +36,14 @@
 /* plan 4 (spec §3.1): an arrow off the blocks and on the scroll bars, a hand on blocks and wires, a closed hand while dragging */
 .studio-canvas .react-flow__pane, .studio-canvas .react-flow__pane.draggable, .studio-canvas .react-flow__pane.selection { cursor: default; }
 .studio-canvas .react-flow__pane.dragging { cursor: grabbing; }
-.studio-canvas .react-flow__node, .studio-canvas .react-flow__node.draggable { cursor: pointer; }
-.studio-canvas .react-flow__node.draggable.dragging, .studio-canvas.gesture, .studio-canvas.gesture * { cursor: grabbing !important; }
+.studio-canvas .react-flow__node { cursor: pointer; }
+.studio-canvas.gesture, .studio-canvas.gesture * { cursor: grabbing !important; }
+/* Visio's cursors in design mode (plan 10 phase 2): the four-way arrow on blocks and wire bodies, held while dragged */
+.studio-canvas .react-flow__node.draggable, .studio-canvas .react-flow__node.draggable.dragging { cursor: move !important; }
 .sb .th { cursor: default; }
 .studio-canvas .nx-hit { fill: none; stroke: transparent; stroke-width: 8; pointer-events: stroke; cursor: pointer; }
-/* design mode: a wire's body takes the open hand (dragged, the whole wire moves; `.gesture` gives the closed hand) */
-.studio-canvas .nx-hit.grab { cursor: grab; }
+/* design mode: a wire's body takes Visio's four-way arrow (dragged, the whole wire moves) */
+.studio-canvas .nx-hit.grab { cursor: move; }
 .studio-canvas:focus { outline: none; }
 /* the design overlay's layer stacks above every lifted block and wire, so neither a picked wire's own hit band
    nor a picked block covers a picked wire's handles (spec §4.1); the layer takes no pointer events itself, only
@@ -68,6 +70,10 @@
 .studio-canvas.gesture.gesture-ns, .studio-canvas.gesture.gesture-ns * { cursor: ns-resize !important; }
 .studio-canvas.gesture.gesture-ew, .studio-canvas.gesture.gesture-ew * { cursor: ew-resize !important; }
 .studio-canvas.gesture.gesture-move, .studio-canvas.gesture.gesture-move * { cursor: move !important; }
+/* Visio's crosshair while an end is placed: a dragged end, a new wire from a connection point (plan 10 phase 2) */
+.studio-canvas.gesture.gesture-cross, .studio-canvas.gesture.gesture-cross * { cursor: crosshair !important; }
+/* the Toolbox's Wire tile over a canvas: the crosshair over everything the pointer crosses, blocks included */
+body.tool-cross, body.tool-cross *, body.tool-cross .studio-canvas .react-flow__node.draggable { cursor: crosshair !important; }
 
 /* plan 4: the block under a dragged wire end (green: the drop is allowed; red: refused), the ghost wire, and the connection points */
 /* --inv (1 / zoom, set on the canvas) keeps the outline 3 px on screen at any zoom */
@@ -88,7 +94,7 @@
 .design-drop-label.move rect { fill: rgba(20, 26, 36, .92); stroke: #9AA7B8; }
 .design-drop-label text { fill: var(--ink); font-family: var(--sans); }
 /* a connection point is 12 px on screen at any zoom, centred on its spot (left/top in flow units) */
-.nx-port { position: absolute; width: calc(12px * var(--inv, 1)); height: calc(12px * var(--inv, 1)); transform: translate(-50%, -50%); border: 0; background: transparent; box-sizing: border-box; opacity: 0; cursor: pointer; } /* the connection point: a hit area only, never drawn */
+.nx-port { position: absolute; width: calc(12px * var(--inv, 1)); height: calc(12px * var(--inv, 1)); transform: translate(-50%, -50%); border: 0; background: transparent; box-sizing: border-box; opacity: 0; cursor: crosshair; } /* the connection point: a hit area only, never drawn */
 /* Visio's landing square (plan 10 phase 2): where a dragged end would glue */
 .design-contact { fill: none; }
 .design-contact.ok { stroke: #5BC85B; }

@@ -86,4 +86,34 @@ describe('Toolbox (2026-10-11)', () => {
       el.remove();
     }
   });
+
+  it("the Wire tile shows Visio's crosshair while over a canvas, and the cursor comes back off it and on release (plan 10 phase 2)", async () => {
+    setup(lists);
+    const doc = await loadedDocument();
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    const unregister = registerDropTarget({ workflowId: 'wf1', el, shown: () => doc, toFlow: (c) => ({ x: c.x * 2, y: c.y * 2 }) });
+    const had = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: vi.fn((x: number) => (x > 100 ? el : document.body)) });
+    try {
+      const tile = await screen.findByRole('button', { name: 'Drag an undecided wire' });
+      fireEvent.pointerDown(tile, { button: 0, clientX: 10, clientY: 10 });
+      fireEvent.pointerMove(window, { clientX: 500, clientY: 300 });
+      expect(document.body.classList.contains('tool-cross')).toBe(true);
+      fireEvent.pointerMove(window, { clientX: 20, clientY: 20 });
+      expect(document.body.classList.contains('tool-cross')).toBe(false);
+      fireEvent.pointerMove(window, { clientX: 500, clientY: 300 });
+      fireEvent.pointerUp(window, { clientX: 500, clientY: 300 });
+      expect(document.body.classList.contains('tool-cross')).toBe(false);
+      // a block tile never takes it
+      fireEvent.pointerDown(await screen.findByRole('button', { name: 'Drag an empty step' }), { button: 0, clientX: 10, clientY: 10 });
+      fireEvent.pointerMove(window, { clientX: 500, clientY: 300 });
+      expect(document.body.classList.contains('tool-cross')).toBe(false);
+      fireEvent.keyDown(window, { key: 'Escape' });
+    } finally {
+      if (had) Object.defineProperty(document, 'elementFromPoint', had); else delete (document as unknown as Record<string, unknown>).elementFromPoint;
+      unregister();
+      el.remove();
+    }
+  });
 });

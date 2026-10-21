@@ -140,12 +140,12 @@ describe('wire gestures', () => {
     expect(canvas.classList.contains('gesture-ns')).toBe(true);
     fireEvent.pointerUp(across.ownerDocument, { clientX: 100, clientY: 100, pointerId: 1 });
 
-    // an end drag shows the four-way cursor (plan 9 rule 14), not a run's double arrow
+    // an end drag shows Visio's crosshair while the end is placed (plan 10 phase 2), not a run's double arrow
     fireEvent.pointerDown(container.querySelector('.design-handle.end[data-end="head"]')!, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
-    expect(canvas.classList.contains('gesture-move')).toBe(true);
+    expect(canvas.classList.contains('gesture-cross')).toBe(true);
     expect(canvas.classList.contains('gesture-ns')).toBe(false);
     fireEvent.pointerUp(document, { clientX: 100, clientY: 100, pointerId: 1 });
-    expect(canvas.classList.contains('gesture-move')).toBe(false);
+    expect(canvas.classList.contains('gesture-cross')).toBe(false);
   });
 
   it('handles, outline and ghost keep their size on screen whatever the zoom', async () => {
@@ -282,15 +282,15 @@ describe('wire gestures', () => {
     return read;
   };
 
-  it('a picked wire has a square on each end with the four-way cursor, kept while dragged (rule 14)', async () => {
+  it("a picked wire has a dot on each end; dragged, it shows Visio's crosshair (plan 10 phase 2)", async () => {
     const doc = await two();
     const { container } = canvasOf(doc, designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] }));
     expect(container.querySelectorAll('.design-wire[data-wire="s1->s2"] .design-handle.end')).toHaveLength(2);
     const canvas = container.querySelector('.studio-canvas')!;
     fireEvent.pointerDown(container.querySelector('.design-handle.end[data-end="tail"]')!, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
-    expect(canvas.classList.contains('gesture-move')).toBe(true);
+    expect(canvas.classList.contains('gesture-cross')).toBe(true);
     fireEvent.pointerUp(document, { clientX: 100, clientY: 100, pointerId: 1 });
-    expect(canvas.classList.contains('gesture-move')).toBe(false);
+    expect(canvas.classList.contains('gesture-cross')).toBe(false);
   });
 
   it('a head dropped on another step\'s input connects there: green "connect here", the same wire, one step', async () => {
@@ -462,6 +462,8 @@ describe('wire gestures', () => {
     fireEvent.pointerDown(container.querySelector('.react-flow__node[data-id="s2"] .nx-port')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     fireEvent.pointerMove(document, { ...screenOf(container, EMPTY_AT), pointerId: 1 });
     expect(container.querySelector('.design-drop-label')!.textContent).toBe('move here');
+    // Visio's crosshair while the new wire's end is placed (plan 10 phase 2)
+    expect(container.querySelector('.studio-canvas')!.classList.contains('gesture-cross')).toBe(true);
     fireEvent.pointerUp(document, { ...screenOf(container, EMPTY_AT), pointerId: 1 });
     const [draft, options] = commits(design)[0]!;
     const id = Object.keys(draft.wires!).find((k) => k.startsWith('w:'))!;
@@ -549,7 +551,7 @@ describe('wire gestures', () => {
     expect(ro.container.querySelector('.react-flow__edge[data-id="s1->s2"] .nx-hit')!.getAttribute('class')).toBe('nx-hit');
   });
 
-  it('dragging any wire\'s body moves the whole wire rigidly, snapped to the grid: every point shifted, both ends open, its shape kept as bends; one step, picked; the closed hand while dragged', async () => {
+  it('dragging any wire\'s body moves the whole wire rigidly, snapped to the grid: every point shifted, both ends open, its shape kept as bends; one step, picked; Visio\'s move cursor while dragged', async () => {
     const doc = await three();
     const draft = bent(doc);
     const design = designOf({ draft });
@@ -559,12 +561,12 @@ describe('wire gestures', () => {
     const from = onLine(applyDraft(doc, draft), 's1->s2', 0.3);
     pressBody(container, 's1->s2', from);
     const canvas = container.querySelector('.studio-canvas')!;
-    expect(canvas.getAttribute('class')).toBe('studio-canvas gesture');
+    expect(canvas.getAttribute('class')).toBe('studio-canvas gesture gesture-move');
     fireEvent.pointerMove(document, { ...screenOf(container, { x: from.x + 43, y: from.y + 213 }), pointerId: 1 });
     // the preview: the whole wire, moved
     const moved = translatePoints(before, 40, 216);
     expect(wirePath(container, 's1->s2')).toEqual(moved);
-    expect(canvas.getAttribute('class')).toBe('studio-canvas gesture');
+    expect(canvas.getAttribute('class')).toBe('studio-canvas gesture gesture-move');
     fireEvent.pointerUp(document, { ...screenOf(container, { x: from.x + 43, y: from.y + 213 }), pointerId: 1 });
     expect(commits(design)).toHaveLength(1);
     const [next, options] = commits(design)[0]!;
