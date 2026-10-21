@@ -15,7 +15,7 @@ describe('alignment guides (Visio dynamic grid, plan 10)', () => {
   });
 
   it('does nothing 16 px off with a 12 px reach', () => {
-    expect(snapToGuides(step('a', 16, 400), [step('b', 0, 0)], 12)).toEqual({ dx: 0, dy: 0, hit: { x: false, y: false }, lines: [], gaps: [] });
+    expect(snapToGuides(step('a', 16, 400), [step('b', 0, 0)], 12)).toEqual({ dx: 0, dy: 0, x: 16, y: 400, hit: { x: false, y: false }, lines: [], gaps: [] });
   });
 
   it('matches an unrounded position (5 flow px is 10 screen px at 200%)', () => {
@@ -57,6 +57,26 @@ describe('alignment guides (Visio dynamic grid, plan 10)', () => {
       expect(hub.mid).toBe(hub.y + hub.h / 2);
       const g = snapToGuides(step('m', 2000, hub.mid! - 96 + 6), [hub], 12);
       expect(g.dy).toBe(-6);
+    });
+  });
+
+  describe('a snapped position is exact (final review, Important 1)', () => {
+    // a cache centred under a step: the step's centre at 512, the cache 160 wide, so its left edge belongs at 432
+    const s = step('S', 400, 0);
+    const cacheAt = (x: number) => ({ id: 'k', x, y: 600, w: 160, h: 160 });
+
+    it('a fractional pointer snapped to a centre lands exactly, and the centre line is drawn', () => {
+      for (const raw of [438.40375466255585, 425.71234567891234, 431.1, 440.3]) {
+        const g = snapToGuides(cacheAt(raw), [s], 12);
+        expect(g.x).toBe(432);
+        expect(g.lines).toContainEqual(expect.objectContaining({ x1: 512, x2: 512 }));
+      }
+    });
+
+    it('an equal-gap snap from a fractional position lands exactly and marks the gaps', () => {
+      const g = snapToGuides(step('D', 586.30000000000001, 0), [step('A', 0, 0), step('B', 288, 0)], 12);
+      expect(g.x).toBe(576);
+      expect(g.gaps).toHaveLength(2);
     });
   });
 

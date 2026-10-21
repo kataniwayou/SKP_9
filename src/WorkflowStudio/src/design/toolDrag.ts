@@ -58,7 +58,7 @@ function onGrid(shown: StudioDocument, item: ToolItem, p: Point, reach: number):
   const box = landingBox(item, p);
   if (!box) return null;
   const g = snapToGuides({ id: '', x: p.x - box.w / 2, y: p.y - box.h / 2, w: box.w, h: box.h }, guideBoxes(shown), reach);
-  return { flow: { x: g.hit.x ? p.x + g.dx : p.x, y: g.hit.y ? p.y + g.dy : p.y }, guides: { lines: g.lines, gaps: g.gaps } };
+  return { flow: { x: g.hit.x ? g.x + box.w / 2 : p.x, y: g.hit.y ? g.y + box.h / 2 : p.y }, guides: { lines: g.lines, gaps: g.gaps } };
 }
 
 const targets = new Set<DropTarget>();

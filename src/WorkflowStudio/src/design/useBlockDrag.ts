@@ -133,8 +133,8 @@ export function useBlockDrag(
       const others = guideBoxes(shown.current).filter((b) => !d.ids.includes(b.id));
       const mid = shown.current.placement.steps.has(d.primary) ? { mid: raw.y + PMID } : {};
       const g = snapToGuides({ id: d.primary, x: raw.x, y: raw.y, w: box.w, h: box.h, ...mid }, others, SNAP_REACH_PX / zoom());
-      if (g.hit.x) dx = raw.x + g.dx - start.x;
-      if (g.hit.y) dy = raw.y + g.dy - start.y;
+      if (g.hit.x) dx = g.x - start.x;
+      if (g.hit.y) dy = g.y - start.y;
       setGuides({ lines: g.lines, gaps: g.gaps });
     }
     // back where it started: nothing to show, and the drop makes no step
