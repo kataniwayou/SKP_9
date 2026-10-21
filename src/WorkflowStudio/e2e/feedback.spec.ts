@@ -38,13 +38,16 @@ const flowAt = (panel: Locator, id: string) => node(panel, id).evaluate((el) => 
 });
 const frames = (page: Page) => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(null)))));
 
-/** Where the Wire tile's ghost has its arrow tip, right of the pointer (screen px; toolDrag's WIRE_TIP). */
-const TIP = 46;
-/** Presses the Wire tile and holds it with its arrow tip at flow point `to` (the button stays down); the feedback read there. */
-async function holdWireTile(page: Page, panel: Locator, to: readonly [number, number]) {
+/** Where the Wire tile's ghost has its arrow tip, right of the pointer, and its tail's ring, left of it (screen px; toolDrag's WIRE_TIP, WIRE_TAIL). */
+const TIP = 46, TAIL = -50;
+/**
+ * Presses the Wire tile and holds it with its arrow tip (or its tail's ring, `by`) at flow point `to` (the button stays
+ * down); the feedback read there.
+ */
+async function holdWireTile(page: Page, panel: Locator, to: readonly [number, number], by: 'tip' | 'tail' = 'tip') {
   const from = await centreOf(tile(page, 'wire'));
-  const tip = await flowToPage(panel, to);
-  const at = { x: tip.x - TIP, y: tip.y };
+  const end = await flowToPage(panel, to);
+  const at = { x: end.x - (by === 'tip' ? TIP : TAIL), y: end.y };
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(from.x + 20, from.y + 5, { steps: 3 });
@@ -121,7 +124,8 @@ test('the Wire tile\'s arrow tip makes the contact, not the pointer behind it (2
   const panel = await open(page);
   const d = await flowAt(panel, t.d);
   const z = await zoomOf(panel);
-  // the tip 20 px short of d's input: nothing yet; the ghost's arrow tip drawn there, where the drag is judged
+  // the tip 20 px short of d's input: d not lit (the tail's ring, 96 px further left, may touch a block there); the ghost's
+  // arrow tip drawn there, where the drag is judged
   const before = await wireIds(panel);
   const short: [number, number] = [d.x - 20 / z, d.y + 48];
   let held = await holdWireTile(page, panel, short);
@@ -130,8 +134,7 @@ test('the Wire tile\'s arrow tip makes the contact, not the pointer behind it (2
   const tip = await flowToPage(panel, short);
   expect(Math.abs(ghost.x + 106 - tip.x)).toBeLessThanOrEqual(1);
   expect(Math.abs(ghost.y + ghost.height / 2 - tip.y)).toBeLessThanOrEqual(1);
-  expect(held.labels).toEqual([]);
-  expect(held.lit).toEqual([]);
+  expect(held.lit).not.toContain(t.d);
   // the tip on d's edge, the pointer still 46 px outside d: "connect here", d lit
   held = await holdWireTile(page, panel, [d.x, d.y + 48]);
   expect(held.labels).toEqual(['connect here']);
@@ -155,6 +158,36 @@ test('the Wire tile\'s arrow tip makes the contact, not the pointer behind it (2
   const tipFlow = [(spot.x - top.x) / z, (spot.y - top.y) / z];
   expect(Math.abs(head[0]! - tipFlow[0]!)).toBeLessThanOrEqual(8);
   expect(Math.abs(head[1]! - tipFlow[1]!)).toBeLessThanOrEqual(8);
+});
+
+test('the tail ring of the Wire tile makes the contact too: on an output, on the hub (2026-10-21)', async ({ page }) => {
+  const panel = await open(page);
+  const c = await flowAt(panel, t.c);
+  // the tail's ring on c's output (c feeds nothing), the tip out in the open: "connect here", c lit; released, the tail
+  // on c's output and the head open 96 px right, where the ghost's tip was
+  let before = await wireIds(panel);
+  let held = await holdWireTile(page, panel, [c.x + 224, c.y + 72], 'tail');
+  expect(held.labels).toEqual(['connect here']);
+  expect(held.lit).toEqual([t.c]);
+  await shot(page, '4-tail-on-output');
+  let made = await release(page, panel, before);
+  expect(made).toHaveLength(1);
+  const pts = await wirePoints(panel, made[0]!);
+  expect(pts[0]).toEqual([c.x + 224, c.y + 72]);
+  expect(pts.at(-1)).toEqual([c.x + 224 + 96, c.y + 72]);
+  await expect(edge(panel, made[0]!).locator('circle.nx-src')).toHaveCount(1);
+
+  // the tail's ring on the top of the hub's ring: "connect here", the hub lit; released, a tail on the workflow
+  const hub = await box(node(panel, 'wf'));
+  const z = await zoomOf(panel);
+  const top = await flowToPage(panel, [0, 0]);
+  before = await wireIds(panel);
+  held = await holdWireTile(page, panel, [((hub.x + hub.width / 2) - top.x) / z, ((hub.y + 10) - top.y) / z], 'tail');
+  expect(held.labels).toEqual(['connect here']);
+  expect(held.lit).toEqual(['wf']);
+  made = await release(page, panel, before);
+  expect(made).toHaveLength(1);
+  await expect(edge(panel, made[0]!).locator('circle.nx-src')).toHaveCount(1);
 });
 
 test('a Wire tile dropped on the left side of the hub: out of the ring and straight on to the right, never round the hub (2026-10-21)', async ({ page }) => {

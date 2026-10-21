@@ -32,10 +32,17 @@ export interface ToolDragState {
  * user's request, 2026-10-21).
  */
 export const WIRE_TIP: Point = { x: 46, y: 0 };
+/** Where its tail's ring is, from the pointer (screen px): the art's ring at x 10. It touches a contact too (2026-10-21). */
+export const WIRE_TAIL: Point = { x: -50, y: 0 };
 
-/** The screen point a drag of `item` is judged at: a wire's tip, anything else the pointer. */
-const hotSpot = (item: ToolItem, client: Point): Point =>
-  item.kind === 'wire' ? { x: client.x + WIRE_TIP.x, y: client.y + WIRE_TIP.y } : client;
+/**
+ * The screen points a drag of `item` is judged at, first to last: a wire's tip, then its tail's ring (the first that
+ * touches a contact wins; touching none, the tip is where a free wire lands); anything else at the pointer.
+ */
+const hotSpots = (item: ToolItem, client: Point): Point[] =>
+  item.kind === 'wire'
+    ? [WIRE_TIP, WIRE_TAIL].map((o) => ({ x: client.x + o.x, y: client.y + o.y }))
+    : [client];
 
 const targets = new Set<DropTarget>();
 let state: ToolDragState | null = null;
@@ -73,14 +80,21 @@ export const toolDrag = {
   },
   move(doc: Document, client: Point, isSaving: (workflowId: Id) => boolean): void {
     if (!state) return;
-    const hot = hotSpot(state.item, client);
-    const target = targetAt(doc, hot);
-    if (!target) { state = { ...state, client, over: null }; emit(); return; }
-    const flow = target.toFlow(hot);
-    // the drop reach of a dragged wire end: DROP_REACH screen px, in flow px at this zoom
-    const reach = DROP_REACH * Math.abs(target.toFlow({ x: hot.x + 1, y: hot.y }).x - flow.x);
-    const wiring = target.circuit ? { circuit: target.circuit(), reach } : undefined;
-    state = { ...state, client, over: { target, flow, verdict: judgeTool(target.shown(), state.item, flow, wiring), saving: isSaving(target.workflowId), reach } };
+    const item = state.item;
+    let over: ToolDragState['over'] = null;
+    for (const [k, hot] of hotSpots(item, client).entries()) {
+      const target = targetAt(doc, hot);
+      if (!target) continue;
+      const flow = target.toFlow(hot);
+      // the drop reach of a dragged wire end: DROP_REACH screen px, in flow px at this zoom
+      const reach = DROP_REACH * Math.abs(target.toFlow({ x: hot.x + 1, y: hot.y }).x - flow.x);
+      const wiring = target.circuit ? { circuit: target.circuit(), reach } : undefined;
+      const here = { target, flow, verdict: judgeTool(target.shown(), item, flow, wiring), saving: isSaving(target.workflowId), reach };
+      // on a contact (connect, join, or refused there) this point decides; else only the first point (a wire's tip) counts
+      if (here.verdict.kind === 'wire') { over = here; break; }
+      if (k === 0) over = here;
+    }
+    state = { ...state, client, over };
     emit();
   },
   end(): { item: ToolItem; workflowId: Id; at: Point; reach: number } | null {
