@@ -131,8 +131,31 @@ gets a short L or a straight line (`shots/11-overtaking.png`, bottom). Studio fi
 **right**, into its **left**. Hub tails start on its ring, wherever they were dropped, as today.
 
 **The user's ruling (2026-10-21): "step's sides stay fixed, and workflow too."** No top or bottom entry, and no change to
-where wires leave the hub. A target behind its source still gets a U-turn. The new router (§4.2.1) makes it as short and
-tidy as Visio's spacing allows: a 64 px stub, the nearer side round each block, tracks 32 px apart, no doubled lines.
+where wires leave the hub. A target behind its source still gets a U-turn.
+
+**The U-turn is drawn Visio's way (the user's clarification, 2026-10-21).** These are Visio's U-turns with point glue
+(the same fixed sides as Studio), measured in `automation-findings.txt`, pages "glue and moves" and "overtaking"; mm on
+the page:
+- **Target behind, at the same height** (A3 right → B3 left, B3 left of A3): out of the source 7.5 mm, up to 7.5 mm
+  above the shapes' tops, straight back across, down 7.5 mm before the target, into its left side:
+  `(139.5,55.9) → (147,55.9) → (147,70.9) → (30.8,70.9) → (30.8,55.9) → (38.3,55.9)`.
+- **Target behind and below:** out 7.5 mm, down to 7.5 mm above the target's top, which is the free band between the
+  two shapes, back across to 7.5 mm before the target, down to its middle, into it:
+  `(88.7,152.4) → (96.2,152.4) → (96.2,91.2) → (56.2,91.2) → (56.2,76.2) → (63.7,76.2)`.
+- **Target behind, overlapping in height:** over the top of both, 7.5 mm above the higher top, then down and in.
+
+The rule, for Studio's router (§4.2.1), every distance being the stub or clearance (64 px):
+- leave square out of the output by the stub;
+- go up or down;
+- run back across;
+- come down or up to the input's height the stub before the input;
+- go in square.
+
+The return run lies **in the free band between the two blocks** when they don't overlap in height: one clearance off
+the block it passes nearer, on the target's side as Visio did. Otherwise it goes **over the top of both**, one clearance
+above the higher top. On a tie it goes up, as Visio did. Never round the whole canvas, never further out than that
+clearance unless a block is in the way, and then the nearer side round it. Two U-turns side by side take tracks 32 px
+apart.
 
 ### 4.4 Wires: squares, ends and glue feedback
 
@@ -253,5 +276,7 @@ These keep their rules and get only the new look and the new router:
 
 - **Fixed sides:** a step's sides stay fixed (input left, output right), and the workflow hub's ring keeps its rules
   (§4.3).
+- **The U-turn is Visio's:** a wire whose target is behind its source turns the way Visio's does, tight to the blocks
+  at clearance distance through the free band or over the top (§4.3).
 - **Guides for every component:** steps, the hub and caches all get the alignment and equal-gap guide lines, as dragged
   blocks and as references. Caches are never wired (§4.1).
