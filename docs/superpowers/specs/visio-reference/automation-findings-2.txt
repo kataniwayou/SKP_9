@@ -1,0 +1,50 @@
+=== paste keeps glue? (real clipboard, then the pasted B moved) ===
+  copied [A, B and the wire]: pasted 2 shapes, 1 wires
+    pasted wire: BeginX->A, EndX->B; begin (129.2,105.2) end (167.7,105.2) mm
+    pasted B moved 25 mm down -> pasted wire begin (116.7,97.7) end (167.7,79.8) mm
+    pasted A at (116.7,105.2) mm
+    pasted B at (180.2,79.8) mm
+  copied [the wire alone]: pasted 0 shapes, 1 wires
+    pasted wire: unglued; begin (129.2,105.2) end (167.7,105.2) mm
+  copied [A and the wire]: pasted 1 shapes, 1 wires
+    pasted wire: BeginX->A; begin (140.3,105.2) end (178.8,105.2) mm
+    pasted A at (127.8,105.2) mm
+
+=== Check Diagram (flowchart rules) ===
+  [UngluedConnector] Connector is not glued at both ends. (category Connectivity)
+  [StartWithoutTerminator] Flowchart shape has no incoming connectors and is not a Start/End shape. (category Start / End)
+  [EndWithoutTerminator] Flowchart shape has no outgoing connectors and is not a Start/End shape. (category Start / End)
+  [NoStartTerminator] Flowchart does not start with a Start/End shape. (category Start / End)
+  [NoEndTerminator] Flowchart does not end with a Start/End shape. (category Start / End)
+  [UnconnectedShape] Flowchart shape is not connected to any other shape. (category Connectivity)
+  [TerminatorInMiddle] Start/End shape has both incoming and outgoing connectors. (category Connectivity)
+  [TooFewOutConns] Decision shape should have more than one outgoing connector. (category Connectivity)
+  [NonFlowchartShape] Connected shape is not recognized as a Flowchart shape. (category Connectivity)
+  [NoShapeText] Flowchart shape has no text label. (category Text)
+  [OutsideCFF] Flowchart shapes should belong to a Swimlane. (category Cross - Functional)
+
+=== line jumps ===
+  page LineJumpCode=1 LineJumpStyle=0 LineJumpFactorX=0.66666666666667 LineJumpFactorY=0.66666666666667
+  LineJumpCode=0: arcs on the horizontal wire 0, on the vertical wire 0
+  LineJumpCode=1: arcs on the horizontal wire 1, on the vertical wire 0
+  LineJumpCode=2: arcs on the horizontal wire 0, on the vertical wire 1
+  LineJumpCode=3: arcs on the horizontal wire 0, on the vertical wire 1
+  LineJumpCode=4: arcs on the horizontal wire 0, on the vertical wire 1
+  LineJumpStyle=0: horizontal wire row types 138,139,140,139
+  LineJumpStyle=1: horizontal wire row types 138,139,140,139
+  LineJumpStyle=2: horizontal wire row types 138,139,138,139
+  LineJumpStyle=3: horizontal wire row types 138,139,193,139
+  LineJumpStyle=4: horizontal wire row types 138,139,193,139
+  LineJumpStyle=5: horizontal wire row types 138,139,193,139
+  LineJumpStyle=6: horizontal wire row types 138,139,193,139
+  arc row: end X 52.1 mm, bow A -1.1 mm (from 49.9 mm)
+
+=== arrows and direction ===
+  new wire: BeginArrow=THEMEVAL("ConnectorBegin") (0) EndArrow=THEMEVAL("ConnectorEnd") (4) EndArrowSize=2 LineWeight=0.4 LineColor=THEMEVAL("ConnectorColor",0) Rounding=THEMEVAL("ConnectorRounding")
+  end handles: begin glued at (37.9,152.4) mm on A's right side; end on B's left side; drawn from A (begin) to B (end)
+  Reverse Ends: BeginX->A, EndX->B; begin (37.9,152.4) end (89.1,152.4) mm
+
+=== overlapping shapes and a wire between touching shapes ===
+  A and B 0.6 mm apart, A.right->B.left: begin (63.3,152.4) end (62.4,152.4) mm
+  same pair, dynamic glue: begin (50.8,144.9) end (74.9,144.9) mm
+  C and D overlapping, C.right->D.left: begin (63.3,76.2) end (45.9,78.7) mm

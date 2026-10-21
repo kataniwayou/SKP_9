@@ -1,0 +1,63 @@
+calibration: A box px 884,1000,482,550; B box px 1250,1366,602,672; 122.0 px per inch
+drawn: path(mm) (63.3,177.8) (70.8,177.8) (70.8,152.4) (114.5,152.4) | right angles: True | glue BeginX->A part 101, EndX->B part 3 | ConFixedCode 0 | B 25x15 mm at (127,152.4)
+cursor over empty canvas: arrow
+cursor over a shape body (A): custom#789549
+cursor over a wire, not selected: custom#789549
+cursor over the selected wire: its begin end (glued to a point): custom#71830317
+cursor over the selected wire: its end (glued to the shape): custom#71830317
+cursor over the selected wire: a segment's middle handle: custom#12062025
+cursor over the selected wire: its line away from handles: custom#71830317
+cursor over a selected shape: its body: arrow
+cursor over a selected shape: a corner handle: custom#8391327
+cursor over a selected shape: a side handle: custom#12062025
+cursor over a selected shape: the top handle: custom#461945
+cursor over Connector tool: empty canvas: custom#2624897
+cursor over Connector tool: a shape body: custom#2034805
+cursor over Connector tool: a contact point: custom#2034805
+cursor over dragging a segment (held): custom#12062025
+its vertical run dragged 80 px sideways: path(mm) (63.3,177.8) (87.5,177.8) (87.5,152.4) (114.5,152.4) | right angles: True | glue BeginX->A part 101, EndX->B part 3 | ConFixedCode 3 | B 25x15 mm at (127,152.4)
+the same run dragged 50 px left and 60 px down (diagonally): path(mm) (63.3,177.8) (77.1,177.8) (77.1,152.4) (114.5,152.4) | right angles: True | glue BeginX->A part 101, EndX->B part 3 | ConFixedCode 3 | B 25x15 mm at (127,152.4)
+both undone: path(mm) (63.3,177.8) (70.8,177.8) (70.8,152.4) (114.5,152.4) | right angles: True | glue BeginX->A part 101, EndX->B part 3 | ConFixedCode 0 | B 25x15 mm at (127,152.4)
+B resized by its bottom-right corner (+70, +60 px): path(mm) (63.3,177.8) (70.8,177.8) (70.8,146.3) (114.5,146.3) | right angles: True | glue BeginX->A part 101, EndX->B part 3 | ConFixedCode 0 | B 45.5x27.3 mm at (137.2,146.3)
+B nudged with the Down arrow key 5 times: path(mm) (63.3,177.8) (70.8,177.8) (70.8,140) (114.5,140) | right angles: True | glue BeginX->A part 101, EndX->B part 3 | ConFixedCode 0 | B 25x15 mm at (127,140)
+B dragged 200 px left and 160 px down (now below-left of A's right side): path(mm) (63.3,177.8) (68.1,177.8) (68.1,120) (72.5,120) | right angles: True | glue BeginX->A part 101, EndX->B part 3 | ConFixedCode 0 | B 25x15 mm at (85,120)
+done
+calibration: A box px 884,1000,482,550; B box px 1250,1366,602,672; 122.0 px per inch
+drawn: path(mm) (63.3,177.8) (70.8,177.8) (70.8,152.4) (114.5,152.4) | right angles: True | glue BeginX->A part 101, EndX->B part 3 | ConFixedCode 0 | B 25x15 mm at (127,152.4)
+label text on the wire: 'yes'
+labelled wire, B moved 120 px right and 150 px down: path(mm) (63.3,177.8) (70.8,177.8) (70.8,121.2) (140,121.2) | right angles: True | glue BeginX->A part 101, EndX->B part 3 | ConFixedCode 0 | B 25x15 mm at (152.5,121.2)
+the wire dragged by its first run 40 px right and 120 px down: path(mm) (71.7,152.7) (71.7,127.3) (122.9,127.3) | right angles: True | glue  | ConFixedCode 0 | B 25x15 mm at (127,152.4)
+AutoConnect arrow clicked: shapes 3 -> 5
+  its new wire: BeginX->Process part 3, EndX->Process.4 part 3
+  new shape Process.4 at (50.8,147.8) mm
+done
+calibration: A box px 884,1000,482,550; B box px 1250,1366,602,672; 122.0 px per inch
+drawn: path(mm) (63.3,177.8) (70.8,177.8) (70.8,152.4) (114.5,152.4) | right angles: True | glue BeginX->A part 101, EndX->B part 3 | ConFixedCode 0 | B 25x15 mm at (127,152.4)
+cursor over dragging a wire end: open canvas: custom#7015759
+cursor over dragging a wire end: over a shape body (green outline): custom#7015759
+cursor over dragging a wire end: over a contact point (green square): custom#7015759
+after Escape during the end drag (expect unchanged): path(mm) (63.3,177.8) (70.8,177.8) (70.8,152.4) (114.5,152.4) | right angles: True | glue BeginX->A part 101, EndX->B part 3 | ConFixedCode 0 | B 25x15 mm at (127,152.4)
+cursor over Connector tool, drawing: open canvas: custom#7015759
+cursor over Connector tool, drawing: over a shape body: custom#7015759
+cursor over Connector tool, drawing: over a contact point: custom#7015759
+wires after Escape while drawing: 1 (expect 1)
+cursor over an AutoConnect arrow: custom#3476481
+cursor over a wire label, wire not selected: custom#3476481
+cursor over a wire label, wire selected (its label handle): custom#24774931
+cursor over dragging a shape: custom#24774931
+cursor over dragging a shape with Ctrl held (copy): custom#6687161
+STOPPED: STOPPED: our Visio is not the foreground window; no input sent (line 43)
+calibration: A box px 884,1000,482,550; B box px 1250,1366,602,672; 122.0 px per inch
+drawn: path(mm) (63.3,177.8) (70.8,177.8) (70.8,152.4) (114.5,152.4) | right angles: True | glue BeginX->A part 101, EndX->B part 3 | ConFixedCode 0 | B 25x15 mm at (127,152.4)
+A at (2,7) in, B at (4,7) in: edge gap 25.8 mm; D at (5.5,4.8) in, 122.0 px per inch
+alignment: released 3 px below level with A -> D lands 0.0 px below level (SNAPPED level)
+alignment: released 6 px below level with A -> D lands 0.0 px below level (SNAPPED level)
+alignment: released 10 px below level with A -> D lands 0.0 px below level (SNAPPED level)
+alignment: released 16 px below level with A -> D lands 13.4 px below level (not snapped)
+equal gap: released 3 px past the equal-gap spot -> D lands 0.0 px past it (SNAPPED to the equal gap); level: True
+equal gap: released 6 px past the equal-gap spot -> D lands 0.0 px past it (SNAPPED to the equal gap); level: True
+equal gap: released 10 px past the equal-gap spot -> D lands 0.0 px past it (SNAPPED to the equal gap); level: True
+equal gap: released 16 px past the equal-gap spot -> D lands 12.5 px past it (not snapped); level: True
+vertical equal gap: released 6 px past -> D lands -219.6 px past (not snapped); in line: False
+between A and B, released 6 px off their middle -> D lands 6.2 px off (not snapped)
+done
