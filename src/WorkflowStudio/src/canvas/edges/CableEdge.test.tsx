@@ -1,6 +1,6 @@
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { arrowHead, CableEdgeView } from './CableEdge';
+import { arrowHead, CableEdge, CableEdgeView } from './CableEdge';
 
 describe('CableEdgeView', () => {
   it('draws the trace, a ring at the source and an open chevron whose tip is the landing', () => {
@@ -61,7 +61,12 @@ describe('CableEdgeView', () => {
     expect(render(<svg><CableEdgeView points={[[0, 8], [64, 8]]} colour="#2DD4BF" delay={0} flowing={false} /></svg>).container.querySelector('path.nx-overlap')).toBeNull();
   });
 
-  it("draws Visio's line jumps on its trace and its pulse, not on its hit band (plan 10 phase 3)", () => {
+  it('its hit band follows its jumps too, so a click on an arc picks the wire (review 2026-10-22)', () => {
+    const { container } = render(<svg><CableEdge {...({ id: 'w', data: { points: [[0, 8], [64, 8]], jumps: [[32, 8]], colour: '#2DD4BF', delay: 0 } } as unknown as Parameters<typeof CableEdge>[0])} /></svg>);
+    expect(container.querySelector('path.nx-hit')!.getAttribute('d')).toBe('M0 8 L24 8 A8 8 0 0 1 40 8 L64 8');
+  });
+
+  it("draws Visio's line jumps on its trace and its pulse (plan 10 phase 3)", () => {
     const { container } = render(<svg><CableEdgeView points={[[0, 8], [64, 8]]} jumps={[[32, 8]]} colour="#2DD4BF" delay={0} flowing /></svg>);
     expect(container.querySelector('path.w')!.getAttribute('d')).toBe('M0 8 L24 8 A8 8 0 0 1 40 8 L64 8');
     expect(container.querySelector('.nx-pulse')!.getAttribute('d')).toBe('M0 8 L24 8 A8 8 0 0 1 40 8 L64 8');

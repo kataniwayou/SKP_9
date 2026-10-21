@@ -81,8 +81,9 @@ export function CableEdge({ id, data }: EdgeProps<CableEdgeType>) {
     <>
       <CableEdgeView {...data} flowing={started} />
       {/* an invisible band about 8 px wide, so the hand cursor and clicks need no pixel precision (spec §4.1); in design
-          mode the open hand: pressed and dragged, the whole wire moves (the user's rule, 2026-10-08) */}
-      <path className={gestures ? 'nx-hit grab' : 'nx-hit'} d={pathOf(data.points)} onPointerDown={gestures ? (e) => gestures.wirePointerDown(id, e) : undefined} />
+          mode the open hand: pressed and dragged, the whole wire moves (the user's rule, 2026-10-08); along its jumps' arcs too,
+          so a click on one picks the wire (review 2026-10-22) */}
+      <path className={gestures ? 'nx-hit grab' : 'nx-hit'} d={pathWithJumps(data.points, data.jumps ?? [])} onPointerDown={gestures ? (e) => gestures.wirePointerDown(id, e) : undefined} />
     </>
   );
 }

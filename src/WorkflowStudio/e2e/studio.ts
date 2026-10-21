@@ -334,8 +334,9 @@ export const labelsOf = (panel: Locator) => panel.locator('.design-drop-label').
 export const runSquare = (panel: Locator, id: string, k: number): Locator => panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg[data-k="${k}"]`);
 /** A wire's points in flow coordinates, read from its drawn path. */
 export async function wirePoints(panel: Locator, id: string): Promise<P[]> {
-  // the hit band carries the route's own points; the trace adds line jumps' arcs (plan 10 phase 3)
-  const d = (await edge(panel, id).locator('path.nx-hit').first().getAttribute('d')) ?? '';
+  // the route's own points: a line jump's arc (plan 10 phase 3) and the point it starts at are left out, as it lies on its
+  // level run
+  const d = ((await edge(panel, id).locator('path.nx-hit').first().getAttribute('d')) ?? '').replace(/L[-\d.e]+ [-\d.e]+ A[-\d.e]+ [-\d.e]+ 0 0 [01] [-\d.e]+ [-\d.e]+ ?/g, '');
   return [...d.matchAll(/[ML]([-\d.e]+)[ ,]([-\d.e]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
 }
 /** A wire's longest upright run: its x, its top and bottom, and its index (run k: points k -> k + 1). */
