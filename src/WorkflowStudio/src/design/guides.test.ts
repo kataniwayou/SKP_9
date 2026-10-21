@@ -37,6 +37,29 @@ describe('alignment guides (Visio dynamic grid, plan 10)', () => {
     expect(tops).toEqual([{ x1: 600, y1: 0, x2: 1224, y2: 0 }]);
   });
 
+  describe('like to like only (Visio, measured 2026-10-21: a top off a bottom, a centre off an edge, a left off a right do not snap)', () => {
+    it("a top 6 px off another's bottom does not snap", () => {
+      expect(snapToGuides(step('m', 1000, 166), [step('o', 0, 0)], 12).hit.y).toBe(false);
+    });
+    it("a centre 6 px off another's top does not snap", () => {
+      expect(snapToGuides(step('m', 1000, -74), [step('o', 0, 0)], 12).hit.y).toBe(false);
+    });
+    it("a left edge 6 px off another's right edge does not snap", () => {
+      expect(snapToGuides(step('m', 230, 1000), [step('o', 0, 0)], 12).hit.x).toBe(false);
+    });
+    it("a centre near another's processor middle does not snap to it (only middle to middle)", () => {
+      // m's centre (y + 80 = 100) 4 px off o's processor middle (96); every like-to-like pair 20 px off: no hit
+      expect(snapToGuides(step('m', 1000, 20), [step('o', 0, 0)], 12).hit.y).toBe(false);
+    });
+    it("the hub's centre is its processor middle: a step's middle lines up with it, so the wire runs straight", async () => {
+      const doc = await loadedDocument(graphDto({ steps: [stepDto('s1')] }));
+      const hub = guideBoxes(doc).find((b) => b.id === 'wf')!;
+      expect(hub.mid).toBe(hub.y + hub.h / 2);
+      const g = snapToGuides(step('m', 2000, hub.mid! - 96 + 6), [hub], 12);
+      expect(g.dy).toBe(-6);
+    });
+  });
+
   describe('equal gaps (Visio dynamic grid)', () => {
     // A and B: a gap of 64 in a row; B's right edge at 512
     const A = step('A', 0, 0), B = step('B', 288, 0);
@@ -96,11 +119,12 @@ describe('alignment guides (Visio dynamic grid, plan 10)', () => {
     });
   });
 
-  it('boxes every block of a document, with a processor middle on steps only', async () => {
+  it('boxes every block of a document, with a processor middle on steps and the hub (its centre)', async () => {
     const doc = await loadedDocument(graphDto({ steps: [stepDto('s1')] }));
     const boxes = guideBoxes(doc);
     const s1 = doc.placement.steps.get('s1')!;
     expect(boxes.find((b) => b.id === 's1')).toEqual({ id: 's1', x: s1.x, y: s1.y, w: 224, h: 160, mid: s1.y + 96 });
-    expect(boxes.find((b) => b.id === 'wf')?.mid).toBeUndefined();
+    const wf = boxes.find((b) => b.id === 'wf')!;
+    expect(wf.mid).toBe(wf.y + wf.h / 2);
   });
 });

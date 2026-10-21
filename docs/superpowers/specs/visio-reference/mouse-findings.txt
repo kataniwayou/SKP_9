@@ -61,3 +61,16 @@ equal gap: released 16 px past the equal-gap spot -> D lands 12.5 px past it (no
 vertical equal gap: released 6 px past -> D lands -219.6 px past (not snapped); in line: False
 between A and B, released 6 px off their middle -> D lands 6.2 px off (not snapped)
 done
+calibration: A box px 884,1000,482,550; B box px 1250,1366,602,672; 122.0 px per inch
+drawn: path(mm) (63.3,177.8) (70.8,177.8) (70.8,152.4) (114.5,152.4) | right angles: True | glue BeginX->A part 101, EndX->B part 3 | ConFixedCode 0 | B 25x15 mm at (127,152.4)
+staggered pair (A-B not overlapping vertically): D released 6 px past the equal gap, level with B -> lands 6.5 px past (not snapped: only pairs in the row count)
+CONTROL (A-B in D's row): released 6 px past -> lands 0.0 px past (SNAPPED)
+D level with A (B not in that row), released 6 px past the equal-gap spot -> lands 0.0 px past (SNAPPED)
+done
+calibration: A box px 884,1000,482,550; B box px 1250,1366,602,672; 122.0 px per inch
+drawn: path(mm) (63.3,177.8) (70.8,177.8) (70.8,152.4) (114.5,152.4) | right angles: True | glue BeginX->A part 101, EndX->B part 3 | ConFixedCode 0 | B 25x15 mm at (127,152.4)
+D's top released 6 px off A's bottom -> D's top lands 1.4 px off (not snapped)
+D's centre released 6 px off A's top -> lands 1.4 px off (not snapped)
+D's left released 6 px off B's right -> lands 4.3 px off (not snapped)
+control: D's top 6 px off A's top -> lands 0.0 px off (SNAPPED)
+done

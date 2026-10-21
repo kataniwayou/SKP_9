@@ -67,8 +67,8 @@ Studio must stay at least as good as it is today on these.
 
 | | Visio (measured) | Studio today | Studio after |
 |---|---|---|---|
-| Alignment snap | edges and centres; snapped at 3, 6 and 10 px off, not at 16 | edges, centres, processor middle; reach 8 **flow** px (4 screen px at the 49% fit zoom) | edges, centres **and processor middle** (kept: it makes wires straight). **Reach 12 screen px**, at any zoom, results kept on the 8 px grid |
-| Equal gaps | snaps when a gap to a neighbour equals an existing gap; at 3, 6 and 10 px, not 16; also stays aligned | none | **new**, §4.1.1 |
+| Alignment snap | edges and centres, **like to like only**: a top to tops, a centre to centres, a left edge to left edges. A top 6 px off a bottom, a centre off a top, or a left off a right did not snap (measured with a snapping control, `scripts/ui7.ps1`). Snapped at 3, 6 and 10 px off, not at 16. | any coordinate to any (top to bottom, centre to processor middle…); reach 8 **flow** px (4 screen px at the 49% fit zoom) | **like to like**, plus processor middle to processor middle (kept: it makes wires straight). The hub's centre counts as its processor middle, because hub wires leave at that height. **Reach 12 screen px**, at any zoom, matched before grid rounding |
+| Equal gaps | snaps when a gap to a neighbour equals an existing gap **in its own row or column**; at 3, 6 and 10 px, not 16; also stays aligned. A pair offset up or down (not overlapping in height) does **not** count (measured with a snapping control, `scripts/ui6.ps1`). | none | **new**, §4.1.1 |
 | Guide look | green dashed lines through every matching edge or centre, from the dragged block to the nearest block it matches (`shots/ui5-align-held-6px.png`) | a line per exact match (`.design-guide`) | Visio's: green dashed, 1 screen px, through every match, dragged block to nearest matching block |
 | Equal-gap look | a green dimension arrow with end ticks under **each** of the equal gaps (`shots/ui5-gap-held-6px.png`) | none | Visio's: arrows with ticks under every gap of that size in the row or column |
 | Centring between two | no snap | none | none (Visio doesn't) |

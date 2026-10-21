@@ -3,7 +3,10 @@ import { PMID } from '../layout/geometry';
 import { cacheNodeId, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { nodeBox } from './hit';
 
-/** A block for the guides, by React Flow node id; `mid` is a step's processor middle (absolute). */
+/**
+ * A block for the guides, by React Flow node id; `mid` is a step's processor middle (absolute), and the hub's centre:
+ * wires leave the hub at its centre's height and land at a step's processor middle, so middles lined up run straight.
+ */
 export interface GuideBox { id: string; x: number; y: number; w: number; h: number; mid?: number }
 export interface GuideLine { x1: number; y1: number; x2: number; y2: number }
 
@@ -12,13 +15,19 @@ export function guideBoxes(doc: StudioDocument): GuideBox[] {
   const out: GuideBox[] = [];
   for (const id of ids) {
     const b = nodeBox(doc, id);
-    if (b) out.push({ id, ...b, ...(doc.placement.steps.has(id) ? { mid: b.y + PMID } : {}) });
+    if (!b) continue;
+    const mid = doc.placement.steps.has(id) ? b.y + PMID : id === SPHERE_NODE_ID ? b.y + b.h / 2 : undefined;
+    out.push({ id, ...b, ...(mid !== undefined ? { mid } : {}) });
   }
   return out;
 }
 
-const xsOf = (b: GuideBox) => [b.x, b.x + b.w / 2, b.x + b.w];
-const ysOf = (b: GuideBox) => [b.y, b.y + b.h / 2, b.y + b.h, ...(b.mid !== undefined ? [b.mid] : [])];
+// Like to like only (Visio, measured 2026-10-21): a left edge lines up with left edges, a centre with centres, a
+// processor middle with middles; each list holds a block's coordinates by kind, null where it has none of that kind.
+const xsOf = (b: GuideBox): (number | null)[] => [b.x, b.x + b.w / 2, b.x + b.w];
+const ysOf = (b: GuideBox): (number | null)[] => [b.y, b.y + b.h / 2, b.y + b.h, b.mid ?? null];
+/** Whether `b` has coordinate `v` of kind `k` in `of`. */
+const has = (of: (b: GuideBox) => (number | null)[], b: GuideBox, k: number, v: number) => of(b)[k] === v;
 
 /**
  * An equal-gap mark (Visio's dimension arrow, plan 10): axis 'x' is a horizontal gap from x `from` to x `to`, drawn
@@ -33,12 +42,17 @@ export const NO_GUIDES: Guides = { lines: [], gaps: [] };
 /** How near (screen px, at any zoom) a block snaps to a guide: Visio snapped 3, 6 and 10 px off, not 16 (plan 10). */
 export const SNAP_REACH_PX = 12;
 
-/** The smallest offset within `reach` that lines one of `mine` up with one of `theirs`; null when none does. */
-function best(mine: number[], theirs: number[], reach: number): number | null {
+/** The smallest offset within `reach` that lines a coordinate of `moving` up with the same kind of another block's; null when none does. */
+function best(of: (b: GuideBox) => (number | null)[], moving: GuideBox, others: readonly GuideBox[], reach: number): number | null {
   let found: number | null = null;
-  for (const m of mine) for (const t of theirs) {
-    const d = t - m;
-    if (Math.abs(d) <= reach && (found === null || Math.abs(d) < Math.abs(found))) found = d;
+  const mine = of(moving);
+  for (const o of others) {
+    of(o).forEach((t, k) => {
+      const m = mine[k];
+      if (t === null || m === null || m === undefined) return;
+      const d = t - m;
+      if (Math.abs(d) <= reach && (found === null || Math.abs(d) < Math.abs(found))) found = d;
+    });
   }
   return found;
 }
@@ -54,8 +68,8 @@ const apart = (a0: number, a1: number, b0: number, b1: number) => Math.max(0, b0
  */
 export function snapToGuides(moving: GuideBox, others: readonly GuideBox[], reach: number): { dx: number; dy: number; hit: { x: boolean; y: boolean } } & Guides {
   // per axis the smaller move wins between an alignment and an equal gap (plan 10 §8)
-  const ax = smaller(best(xsOf(moving), others.flatMap(xsOf), reach), gapSnap(moving, others, reach, X));
-  const ay = smaller(best(ysOf(moving), others.flatMap(ysOf), reach), gapSnap(moving, others, reach, Y));
+  const ax = smaller(best(xsOf, moving, others, reach), gapSnap(moving, others, reach, X));
+  const ay = smaller(best(ysOf, moving, others, reach), gapSnap(moving, others, reach, Y));
   const dx = ax ?? 0, dy = ay ?? 0;
   const m: GuideBox = { ...moving, x: moving.x + dx, y: moving.y + dy, ...(moving.mid !== undefined ? { mid: moving.mid + dy } : {}) };
   return { dx, dy, hit: { x: ax !== null, y: ay !== null }, lines: linesOf(m, others), gaps: [...gapMarks(m, others, X), ...gapMarks(m, others, Y)] };
@@ -124,17 +138,21 @@ function gapMarks(m: GuideBox, others: readonly GuideBox[], a: Axis): GapMark[] 
   return pairs.filter((x) => equal.includes(x.gap)).map((x) => a.mark(x.p, x.q));
 }
 
-/** One line per coordinate of `m` that some block matches exactly, spanning `m` and the nearest such block. */
+/** One line per coordinate of `m` that some block has exactly, of the same kind, spanning `m` and the nearest such block. */
 function linesOf(m: GuideBox, others: readonly GuideBox[]): GuideLine[] {
   const lines: GuideLine[] = [];
-  for (const x of new Set(xsOf(m))) {
-    const near = nearest(others.filter((o) => xsOf(o).includes(x)), (o) => apart(m.y, m.y + m.h, o.y, o.y + o.h));
-    if (near) lines.push({ x1: x, y1: Math.min(m.y, near.y), x2: x, y2: Math.max(m.y + m.h, near.y + near.h) });
-  }
-  for (const y of new Set(ysOf(m))) {
-    const near = nearest(others.filter((o) => ysOf(o).includes(y)), (o) => apart(m.x, m.x + m.w, o.x, o.x + o.w));
-    if (near) lines.push({ x1: Math.min(m.x, near.x), y1: y, x2: Math.max(m.x + m.w, near.x + near.w), y2: y });
-  }
+  const seen = new Set<string>();
+  const add = (l: GuideLine) => { const key = `${l.x1},${l.y1},${l.x2},${l.y2}`; if (!seen.has(key)) { seen.add(key); lines.push(l); } };
+  xsOf(m).forEach((x, k) => {
+    if (x === null) return;
+    const near = nearest(others.filter((o) => has(xsOf, o, k, x)), (o) => apart(m.y, m.y + m.h, o.y, o.y + o.h));
+    if (near) add({ x1: x, y1: Math.min(m.y, near.y), x2: x, y2: Math.max(m.y + m.h, near.y + near.h) });
+  });
+  ysOf(m).forEach((y, k) => {
+    if (y === null) return;
+    const near = nearest(others.filter((o) => has(ysOf, o, k, y)), (o) => apart(m.x, m.x + m.w, o.x, o.x + o.w));
+    if (near) add({ x1: Math.min(m.x, near.x), y1: y, x2: Math.max(m.x + m.w, near.x + near.w), y2: y });
+  });
   return lines;
 }
 
