@@ -37,6 +37,65 @@ describe('alignment guides (Visio dynamic grid, plan 10)', () => {
     expect(tops).toEqual([{ x1: 600, y1: 0, x2: 1224, y2: 0 }]);
   });
 
+  describe('equal gaps (Visio dynamic grid)', () => {
+    // A and B: a gap of 64 in a row; B's right edge at 512
+    const A = step('A', 0, 0), B = step('B', 288, 0);
+    const sorted = (gaps: readonly { axis: string; from: number; to: number; at: number }[]) => [...gaps].sort((p, q) => p.from - q.from);
+
+    it('snaps to repeat a row gap 10 px off, and marks both gaps', () => {
+      const g = snapToGuides(step('D', 586, 0), [A, B], 12);
+      expect([g.dx, g.dy]).toEqual([-10, 0]);
+      expect(sorted(g.gaps)).toEqual([{ axis: 'x', from: 224, to: 288, at: 160 }, { axis: 'x', from: 512, to: 576, at: 160 }]);
+    });
+
+    it('does not snap 16 px off', () => {
+      const g = snapToGuides(step('D', 592, 0), [A, B], 12);
+      expect(g.dx).toBe(0);
+      expect(g.gaps).toEqual([]);
+    });
+
+    it('snaps from the right neighbour too', () => {
+      const g = snapToGuides(step('D', 600, 0), [A, B, step('C', 900, 0)], 12);
+      expect(g.dx).toBe(12);
+      expect(sorted(g.gaps)).toEqual([{ axis: 'x', from: 224, to: 288, at: 160 }, { axis: 'x', from: 836, to: 900, at: 160 }]);
+    });
+
+    it('snaps in a column', () => {
+      const g = snapToGuides(step('D', 0, 456), [step('A2', 0, 0), step('B2', 0, 224)], 12);
+      expect(g.dy).toBe(-8);
+      expect(sorted(g.gaps)).toEqual([{ axis: 'y', from: 160, to: 224, at: 224 }, { axis: 'y', from: 384, to: 448, at: 224 }]);
+    });
+
+    it("takes gaps only from pairs in the dragged block's row", () => {
+      const g = snapToGuides(step('D', 586, 600), [A, B], 12);
+      expect(g.dx).toBe(0);
+      expect(g.gaps).toEqual([]);
+    });
+
+    it('the smaller move wins between alignment and an equal gap on one axis', () => {
+      const g = snapToGuides(step('D', 586, 0), [A, B, step('E', 580, 400)], 12);
+      expect(g.dx).toBe(-6);
+      expect(g.gaps).toEqual([]);
+    });
+
+    it('ignores touching or overlapping blocks as gaps', () => {
+      const g = snapToGuides(step('D', 470, 0), [step('A', 0, 0), step('B', 224, 0)], 12);
+      expect(g.dx).toBe(0);
+      expect(g.gaps).toEqual([]);
+    });
+
+    it('the nearest candidate wins at a wide reach (25% zoom = 48 flow px)', () => {
+      const g = snapToGuides(step('D', 600, 0), [A, B], 48);
+      expect(g.dx).toBe(-24);
+    });
+
+    it("counts the hub's square box", () => {
+      const g = snapToGuides(step('T', 548, 16), [{ id: 'wf', x: 0, y: 0, w: 192, h: 192 }, step('S', 256, 16)], 12);
+      expect(g.dx).toBe(-4);
+      expect(g.gaps).toContainEqual({ axis: 'x', from: 192, to: 256, at: 192 });
+    });
+  });
+
   it('boxes every block of a document, with a processor middle on steps only', async () => {
     const doc = await loadedDocument(graphDto({ steps: [stepDto('s1')] }));
     const boxes = guideBoxes(doc);

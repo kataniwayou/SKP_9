@@ -53,11 +53,75 @@ const apart = (a0: number, a1: number, b0: number, b1: number) => Math.max(0, b0
  * (Visio's). A guide on blocks that are on the 8 px grid keeps the block on it.
  */
 export function snapToGuides(moving: GuideBox, others: readonly GuideBox[], reach: number): { dx: number; dy: number; hit: { x: boolean; y: boolean } } & Guides {
-  const ax = best(xsOf(moving), others.flatMap(xsOf), reach);
-  const ay = best(ysOf(moving), others.flatMap(ysOf), reach);
+  // per axis the smaller move wins between an alignment and an equal gap (plan 10 §8)
+  const ax = smaller(best(xsOf(moving), others.flatMap(xsOf), reach), gapSnap(moving, others, reach, X));
+  const ay = smaller(best(ysOf(moving), others.flatMap(ysOf), reach), gapSnap(moving, others, reach, Y));
   const dx = ax ?? 0, dy = ay ?? 0;
   const m: GuideBox = { ...moving, x: moving.x + dx, y: moving.y + dy, ...(moving.mid !== undefined ? { mid: moving.mid + dy } : {}) };
-  return { dx, dy, hit: { x: ax !== null, y: ay !== null }, lines: linesOf(m, others), gaps: [] };
+  return { dx, dy, hit: { x: ax !== null, y: ay !== null }, lines: linesOf(m, others), gaps: [...gapMarks(m, others, X), ...gapMarks(m, others, Y)] };
+}
+
+const smaller = (a: number | null, b: number | null): number | null => (a === null ? b : b === null || Math.abs(a) <= Math.abs(b) ? a : b);
+
+/** One axis of a box: along it (`lo`, `len`) and across it (`clo`, `clen`); `mark` builds a gap mark between two boxes. */
+interface Axis {
+  lo: (b: GuideBox) => number; len: (b: GuideBox) => number; clo: (b: GuideBox) => number; clen: (b: GuideBox) => number;
+  mark: (p: GuideBox, q: GuideBox) => GapMark;
+}
+const X: Axis = {
+  lo: (b) => b.x, len: (b) => b.w, clo: (b) => b.y, clen: (b) => b.h,
+  mark: (p, q) => ({ axis: 'x', from: p.x + p.w, to: q.x, at: Math.max(p.y + p.h, q.y + q.h) }),
+};
+const Y: Axis = {
+  lo: (b) => b.y, len: (b) => b.h, clo: (b) => b.x, clen: (b) => b.w,
+  mark: (p, q) => ({ axis: 'y', from: p.y + p.h, to: q.y, at: Math.max(p.x + p.w, q.x + q.w) }),
+};
+
+/** The blocks in `m`'s row along `a` (their spans across `a` overlap `m`'s), in order along `a`. */
+const rowOf = (m: GuideBox, others: readonly GuideBox[], a: Axis) =>
+  others.filter((o) => Math.min(a.clo(o) + a.clen(o), a.clo(m) + a.clen(m)) - Math.max(a.clo(o), a.clo(m)) > 0)
+    .sort((p, q) => a.lo(p) - a.lo(q));
+
+/** Each pair of blocks next to each other along `a` (none between them) with a gap over 0, and that gap. */
+function pairsOf(row: readonly GuideBox[], a: Axis): { p: GuideBox; q: GuideBox; gap: number }[] {
+  const out: { p: GuideBox; q: GuideBox; gap: number }[] = [];
+  for (const p of row) {
+    const end = a.lo(p) + a.len(p);
+    const after = row.filter((r) => a.lo(r) >= end);
+    if (after.length === 0) continue;
+    const q = after.reduce((b, r) => (a.lo(r) < a.lo(b) ? r : b));
+    const between = row.some((r) => r !== p && r !== q && a.lo(r) < a.lo(q) && a.lo(r) + a.len(r) > end);
+    const gap = a.lo(q) - end;
+    if (!between && gap > 0) out.push({ p, q, gap });
+  }
+  return out;
+}
+
+/**
+ * Visio's equal gaps (plan 10 §4.1.1): the smallest move within `reach` that makes `m`'s gap to its nearest neighbour
+ * along `a` (before or after it) equal a gap between two blocks next to each other in its row; ties to the earlier side.
+ */
+function gapSnap(m: GuideBox, others: readonly GuideBox[], reach: number, a: Axis): number | null {
+  const row = rowOf(m, others, a);
+  const gaps = pairsOf(row, a).map((x) => x.gap);
+  const mid = a.lo(m) + a.len(m) / 2;
+  const before = row.filter((o) => a.lo(o) + a.len(o) <= mid).reduce<GuideBox | null>((b, o) => (b === null || a.lo(o) + a.len(o) > a.lo(b) + a.len(b) ? o : b), null);
+  const after = row.filter((o) => a.lo(o) >= mid).reduce<GuideBox | null>((b, o) => (b === null || a.lo(o) < a.lo(b) ? o : b), null);
+  let found: number | null = null;
+  const consider = (d: number) => { if (Math.abs(d) <= reach && (found === null || Math.abs(d) < Math.abs(found))) found = d; };
+  for (const g of gaps) {
+    if (before) consider(g - (a.lo(m) - (a.lo(before) + a.len(before))));
+    if (after) consider(a.lo(after) - g - (a.lo(m) + a.len(m)));
+  }
+  return found;
+}
+
+/** At `m`'s final place: every pair next to each other in its row (`m` included) whose gap equals one of `m`'s own gaps. */
+function gapMarks(m: GuideBox, others: readonly GuideBox[], a: Axis): GapMark[] {
+  const pairs = pairsOf([...rowOf(m, others, a), m].sort((p, q) => a.lo(p) - a.lo(q)), a);
+  const own = pairs.filter((x) => x.p === m || x.q === m);
+  const equal = own.filter((o) => pairs.some((x) => x !== o && x.gap === o.gap)).map((o) => o.gap);
+  return pairs.filter((x) => equal.includes(x.gap)).map((x) => a.mark(x.p, x.q));
 }
 
 /** One line per coordinate of `m` that some block matches exactly, spanning `m` and the nearest such block. */
