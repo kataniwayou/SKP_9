@@ -16,7 +16,8 @@ export const SQUARE = 9;
  */
 export type Square =
   | { kind: 'run'; k: number; x: number; y: number; vertical: boolean; cuts: boolean }
-  | { kind: 'end'; side: Side; x: number; y: number };
+  /** `glued`: on a step side, the hub or a wire (drawn as Visio's green dot); else open (a hollow circle), plan 10. */
+  | { kind: 'end'; side: Side; x: number; y: number; glued: boolean };
 
 /**
  * A run square is drawn only where an end square does not cover it: on a run too short on screen, the end
@@ -46,7 +47,14 @@ export function squaresOf(w: WireRoute, bends: Bends, k: number): Square[] {
     const cuts = !((x === a[0] && y === a[1]) || (x === b[0] && y === b[1]));
     runs.push(cuts ? { kind: 'run', k: h.k, x, y, vertical: h.vertical, cuts } : { kind: 'run', k: h.k, x: h.x, y: h.y, vertical: h.vertical, cuts });
   }
-  return [...runs, { kind: 'end', side: 'tail', x: ends.sx, y: ends.sy }, { kind: 'end', side: 'head', x: ends.tx, y: ends.ty }];
+  return [...runs,
+    { kind: 'end', side: 'tail', x: ends.sx, y: ends.sy, glued: w.tailOn !== 'open' },
+    { kind: 'end', side: 'head', x: ends.tx, y: ends.ty, glued: w.headOn !== 'open' }];
+}
+
+/** The corners of a picked wire's core, where Visio draws a small dot (plan 10): never pressed, a run drag moves them. */
+export function bendsOf(w: WireRoute, bends: Bends): { x: number; y: number }[] {
+  return pointsOfShape(w.core.ends, bends).slice(1, -1).map(([x, y]) => ({ x, y }));
 }
 
 /** What an end square being dragged (`side`) may be released on: the run squares that cut, and the other end's square. */

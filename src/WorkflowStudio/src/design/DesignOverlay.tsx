@@ -6,7 +6,7 @@ import type { Bends } from '../layout/shape';
 import type { Pt } from '../layout/router';
 import type { Point } from '../layout/geometry';
 import { pathOf } from '../canvas/svgPath';
-import { squaresOf, SQUARE } from './cut';
+import { bendsOf as cornersOf, squaresOf } from './cut';
 import { dropLabel } from './drop';
 import type { GapMark, Guides } from './guides';
 import type { FlowRect } from './hit';
@@ -46,6 +46,8 @@ export interface DesignOverlayProps {
 const LINE = 1.5, GHOST = 1.6, LABEL_H = 18, LABEL_PAD = 6, LABEL_FONT = 11.5;
 /** Visio's dynamic grid (plan 10, measured): guides overshoot 8 px; a gap's arrow 18 px off its pair, ticks ±10, heads 6 long. */
 const OVERSHOOT = 8, GAP_OFF = 18, TICK = 10, HEAD = 6;
+/** Visio's connector handles (plan 10 phase 2, measured): end 8 px across, run dot 6, bend dot 4 (radii). */
+const END_DOT = 4, RUN_DOT = 3, BEND_DOT = 2;
 
 /** An equal gap as Visio draws it: a line with an arrow head at each end, between two ticks, beside its pair. */
 function GapArrow({ gap, k }: { gap: GapMark; k: number }) {
@@ -85,13 +87,16 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
         })}
         {guides.gaps.map((g, i) => <GapArrow key={`g${i}`} gap={g} k={k} />)}
         {wires.map((w) => {
-          const sq = (x: number, y: number) => ({ x: x - (SQUARE / 2) * k, y: y - (SQUARE / 2) * k, width: SQUARE * k, height: SQUARE * k, strokeWidth: LINE * k });
+          // Visio's (plan 10): glued ends a green dot, open ends a hollow circle (8 px); a 6 px dot on each run, a 4 px dot
+          // on each bend (never pressed: a run drag moves it)
           return (
             <g key={w.id} className="design-wire" data-wire={w.id}>
+              {cornersOf(w, bendsOf(w)).map((b, i) => <circle key={`b${i}`} className="design-bend" cx={b.x} cy={b.y} r={BEND_DOT * k} />)}
               {squaresOf(w, bendsOf(w), k).map((s) => (s.kind === 'run'
-                ? <rect key={`s${s.k}`} className={s.vertical ? 'design-handle seg v' : 'design-handle seg h'} data-k={s.k} {...sq(s.x, s.y)}
+                ? <circle key={`s${s.k}`} className={s.vertical ? 'design-handle seg v' : 'design-handle seg h'} data-k={s.k} cx={s.x} cy={s.y} r={RUN_DOT * k}
                   onPointerDown={(e) => onSegment(w, s.k, e)} />
-                : <rect key={s.side} className="design-handle end" data-end={s.side} {...sq(s.x, s.y)} onPointerDown={(e) => onEnd(w, s.side, e)} />))}
+                : <circle key={s.side} className={`design-handle end ${s.glued ? 'glued' : 'open'}`} data-end={s.side} cx={s.x} cy={s.y} r={END_DOT * k}
+                  strokeWidth={LINE * k} onPointerDown={(e) => onEnd(w, s.side, e)} />))}
             </g>
           );
         })}

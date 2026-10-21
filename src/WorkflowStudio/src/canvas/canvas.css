@@ -55,8 +55,12 @@
 .design-gap line { stroke: #5BC85B; }
 .design-gap .design-gap-head { fill: #5BC85B; stroke: none; }
 .design-handle { pointer-events: all; cursor: pointer; }
-.design-handle.end { fill: var(--accent); stroke: #04111F; cursor: move; }
-.design-handle.seg { fill: var(--panel); stroke: var(--accent); }
+/* Visio's connector handles (plan 10 phase 2): a glued end a green dot in a white ring, an open end a hollow circle */
+.design-handle.end { cursor: move; }
+.design-handle.end.glued { fill: #5BC85B; stroke: #fff; }
+.design-handle.end.open { fill: #fff; stroke: #8A97A8; }
+.design-handle.seg { fill: var(--accent); stroke: none; }
+.design-bend { fill: var(--accent); pointer-events: none; }
 /* a run square shows the way its run moves (Visio): a horizontal run goes up and down, a vertical one sideways;
    an end square moves its end any way (plan 9 rule 14); a body drag keeps the closed hand (.gesture alone) */
 .design-handle.seg.h { cursor: ns-resize; }

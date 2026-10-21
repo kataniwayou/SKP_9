@@ -1,16 +1,21 @@
 import { render } from '@testing-library/react';
 import { ReactFlow, ReactFlowProvider } from '@xyflow/react';
 import { describe, expect, it } from 'vitest';
+import { graphDto, stepDto, workflowDto } from '../api/fixtures';
+import { loadedDocument } from '../app/fixtures';
+import { plainCircuit, setEnd } from '../circuit/circuit';
+import { routeCircuit, type WireRoute } from '../layout/circuitRoute';
+import { shapeFromPoints } from '../layout/shape';
 import { DesignOverlay } from './DesignOverlay';
 import type { Guides } from './guides';
 
 /** The overlay at zoom 1 (one screen px is one flow px), inside a React Flow viewport as the canvas has it. */
-function overlay(guides: Guides) {
+function overlay(guides: Guides, wires: WireRoute[] = []) {
   const { container } = render(
     <ReactFlowProvider>
       <div style={{ width: 800, height: 600 }}>
         <ReactFlow nodes={[]} edges={[]} defaultViewport={{ x: 0, y: 0, zoom: 1 }}>
-          <DesignOverlay band={null} guides={guides} wires={[]} bendsOf={() => ({ xs: [], ys: [] })} onSegment={() => {}} onEnd={() => {}} ghost={null} />
+          <DesignOverlay band={null} guides={guides} wires={wires} bendsOf={(w) => shapeFromPoints(w.core.points)} onSegment={() => {}} onEnd={() => {}} ghost={null} />
         </ReactFlow>
       </div>
     </ReactFlowProvider>,
@@ -47,5 +52,38 @@ describe("the dynamic grid drawn as Visio's (plan 10 phase 1)", () => {
     expect(segs).toContainEqual([242, 160, 242, 224]);
     expect(segs).toContainEqual([232, 160, 252, 160]);
     expect(segs).toContainEqual([232, 224, 252, 224]);
+  });
+});
+
+describe("a picked wire's ends and dots, as Visio's (plan 10 phase 2)", () => {
+  // s1 -> s2 with a bend: s2 placed lower than s1 by hand is not needed, the router's wire is enough; its head opened
+  async function wires() {
+    const d = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
+    const c = plainCircuit(d.graph.workflow.entryStepIds, d.graph.steps, (id) => d.placement.steps.has(id));
+    const ctx = { placement: d.placement, steps: d.graph.steps };
+    const glued = routeCircuit(c, ctx).find((w) => w.id === 's1->s2')!;
+    const opened = routeCircuit(setEnd(c, 's1->s2', 'head', { on: 'open', x: 2000, y: 2000 }), ctx).find((w) => w.id === 's1->s2')!;
+    return { glued, opened };
+  }
+
+  it('draws glued ends as green dots and open ends as hollow circles, 8 screen px', async () => {
+    const { glued, opened } = await wires();
+    let c = overlay({ lines: [], gaps: [] }, [glued]);
+    expect(c.querySelectorAll('circle.design-handle.end.glued')).toHaveLength(2);
+    expect(c.querySelector('circle.design-handle.end')!.getAttribute('r')).toBe('4');
+    c = overlay({ lines: [], gaps: [] }, [opened]);
+    expect(c.querySelectorAll('circle.design-handle.end.open')).toHaveLength(1);
+    expect(c.querySelectorAll('circle.design-handle.end.glued')).toHaveLength(1);
+  });
+
+  it('draws run handles as 6 px dots and a 4 px dot at every bend', async () => {
+    const { opened } = await wires();
+    const c = overlay({ lines: [], gaps: [] }, [opened]);
+    const runs = c.querySelectorAll('circle.design-handle.seg');
+    expect(runs.length).toBeGreaterThan(0);
+    expect(runs[0]!.getAttribute('r')).toBe('3');
+    const bends = c.querySelectorAll('circle.design-bend');
+    expect(bends.length).toBe(Math.max(0, opened.core.points.length - 2));
+    if (bends.length) expect(bends[0]!.getAttribute('r')).toBe('2');
   });
 });

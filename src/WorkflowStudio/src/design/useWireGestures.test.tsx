@@ -130,10 +130,11 @@ describe('wire gestures', () => {
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] })} onSelect={vi.fn()} />);
     const zoom = Number(/scale\(([-\d.e]+)\)/.exec((container.querySelector('.react-flow__viewport') as HTMLElement).style.transform)![1]);
     const end = container.querySelector('.design-handle.end')!;
-    expect(end.tagName).toBe('rect');
-    expect(Number(end.getAttribute('width')) * zoom).toBeCloseTo(9);
+    // Visio's handles (plan 10 phase 2): an 8 px end circle and a 6 px run dot on screen
+    expect(end.tagName).toBe('circle');
+    expect(2 * Number(end.getAttribute('r')) * zoom).toBeCloseTo(8);
     const square = container.querySelector('.design-handle.seg')!;
-    expect(Number(square.getAttribute('width')) * zoom).toBeCloseTo(9);
+    expect(2 * Number(square.getAttribute('r')) * zoom).toBeCloseTo(6);
     // the node outline (CSS) scales by the canvas's --inv
     expect(Number((container.querySelector('.studio-canvas') as HTMLElement).style.getPropertyValue('--inv')) * zoom).toBeCloseTo(1);
   });
@@ -451,8 +452,8 @@ describe('wire gestures', () => {
     const shaped = setShape(EMPTY_DRAFT, doc, 's1->s2', { bends: { xs: [528, 560], ys: [400] }, landing: null });
     const { container } = canvasOf(doc, designOf({ draft: shaped, picks: [{ kind: 'wire', id: 's1->s2' }] }));
     const run = () => container.querySelector('.design-handle.seg[data-k="1"]')!;
-    // a square's centre (its size is in screen pixels, so its corner moves with the zoom)
-    const centre = (axis: 'x' | 'y', size: 'width' | 'height') => Number(run().getAttribute(axis)) + Number(run().getAttribute(size)) / 2;
+    // a run dot's centre
+    const centre = (axis: 'x' | 'y', _size?: 'width' | 'height') => Number(run().getAttribute(axis === 'x' ? 'cx' : 'cy'));
     expect(centre('x', 'width')).toBeCloseTo(528);
     const y = centre('y', 'height');
     fireEvent.pointerDown(run(), { button: 0, clientX: -500, clientY: -500, pointerId: 1 });

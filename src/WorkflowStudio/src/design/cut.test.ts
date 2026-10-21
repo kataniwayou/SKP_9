@@ -5,7 +5,7 @@ import { addCircuitWire, isFree, plainCircuit, setEnd, shapedByHand, type Circui
 import { endPointOf, routeCircuit } from '../layout/circuitRoute';
 import { lengthOf } from '../layout/junctions';
 import { pointsOfShape, shapeFromPoints } from '../layout/shape';
-import { cutPaths, cutTargets, cutWire, holdDrawn, squareAt, squaresOf } from './cut';
+import { bendsOf, cutPaths, cutTargets, cutWire, holdDrawn, squareAt, squaresOf } from './cut';
 import { circuitOf, EMPTY_DRAFT, resetShape, withCircuit } from './draft';
 
 // s1 -> s2 (Completed); a Z-shaped wire w:z from s1 to s2's input with its own bends
@@ -219,5 +219,33 @@ describe('short runs and Reset route after a cut (re-review 2026-10-09)', () => 
     expect(reset.held).toBeUndefined();
     // reconnected afterwards: plain again
     expect(setEnd(circuitOf(d, resetShape(draft, d, 'wf->s1')), 'wf->s1', 'head', { on: 'step', step: 's1', y: null })['wf->s1']!.tail).toEqual({ on: 'hub', angle: null });
+  });
+});
+
+describe("a picked wire's ends and dots, as Visio's (plan 10 phase 2)", () => {
+  const endOf = (sq: ReturnType<typeof squaresOf>, side: 'tail' | 'head') => sq.find((q) => q.kind === 'end' && q.side === side)!;
+
+  it('an end on a step is glued; an open end is not', async () => {
+    const { d, c, bends, wire } = await zWire();
+    expect(endOf(squaresOf(wire, bends, 1), 'tail')).toMatchObject({ glued: true });
+    expect(endOf(squaresOf(wire, bends, 1), 'head')).toMatchObject({ glued: true });
+    const open = setEnd(c, 'w:z', 'head', { on: 'open', x: 1200, y: 600 });
+    const w2 = routeOf(d, open, 'w:z');
+    expect(endOf(squaresOf(w2, shapeFromPoints(w2.core.points), 1), 'head')).toMatchObject({ glued: false });
+  });
+
+  it('an end on another wire (a junction) is glued', async () => {
+    const { d, c } = await zWire();
+    const host = routeOf(d, c, 's1->s2');
+    const joined = setEnd(c, 'w:z', 'head', { on: 'wire', host: 's1->s2', at: Math.round(lengthOf([host.points]) / 2) });
+    const w2 = routeOf(d, joined, 'w:z');
+    expect(endOf(squaresOf(w2, shapeFromPoints(w2.core.points), 1), 'head')).toMatchObject({ glued: true });
+  });
+
+  it("gives the core's corners as bend dots", async () => {
+    const { wire, bends } = await zWire();
+    const core = pointsOfShape(wire.core.ends, bends);
+    expect(bendsOf(wire, bends)).toEqual(core.slice(1, -1).map(([x, y]) => ({ x, y })));
+    expect(bendsOf(wire, bends).length).toBeGreaterThanOrEqual(4);
   });
 });
