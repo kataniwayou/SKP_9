@@ -492,9 +492,10 @@ export function useWireGestures(
   };
 
   /**
-   * Drags a wire by its body (the user's rules B and D, 2026-10-09), any wire, picked or not, with the closed hand: the
+   * Drags a wire by its body (the user's rules B and D, 2026-10-09), any wire, picked or not, with Visio's four-way arrow: the
    * whole wire moves rigidly, its drawn path frozen and shifted by the pointer's movement snapped to the grid, and
-   * detached from everything, connected ends too (`landBody`): the closed hand never stretches a leg. Each end is
+   * detached from everything, connected ends too (`landBody`): a body drag never stretches a leg. The wire stays put, faded,
+   * under a dashed preview of where it lands until release (Visio, plan 10). Each end is
    * judged over what is under it as an end square's is, with its label and outline; one over a contact it may take
    * shifts the wire exactly onto it (the end that got there first decides), and released, every end over a contact
    * it may take connects (the wire has no direction while moved: the sides decide it); the others stay open. Moved
@@ -518,6 +519,8 @@ export function useWireGestures(
     // a grid step was made: from then on the press is a drag, even back where it began
     let travelled = false;
     const toggle = e.ctrlKey;
+    const others = new LineIndex();
+    for (const w of shown.current.wires) if (w.id !== wire.id) others.add(w.id, w.points);
     setResize('move');
     run(e, (p) => {
       // `|| 0`: a snapped -0 is no move
@@ -526,11 +529,17 @@ export function useWireGestures(
       if (!travelled || (landing && landing.rawX === dx && landing.rawY === dy)) return;
       const l = landBody(shown.current, circuit, wire.id, points, drawnAt, dx, dy, landing?.first ?? null, DROP_REACH / getZoom(), judge);
       landing = { ...l, rawX: dx, rawY: dy };
-      // shifted back exactly where it was: drawn as it was
-      setPreview(l.dx === 0 && l.dy === 0 ? null : withCircuit(base, saved, l.preview));
       setHints(l.ends.map((x) => ({ id: x.id, line: x.line, tone: toneOf(x.verdict), why: x.verdict, at: x.at })));
+      // shifted back exactly where it was: drawn as it was
+      if (l.dx === 0 && l.dy === 0) { setGhost(null); return; }
+      // Visio's: the wire stays put, faded, and the moved wire is drawn dashed; nothing is rerouted until release (plan 10)
+      const drawn = routeCircuit(l.preview, { placement: shown.current.placement, steps: shown.current.graph.steps }).find((x) => x.id === wire.id);
+      // a short circuit: the stretches it would share with wires it may not share a line with, red (the user's rule 2)
+      const share = mayShare(l.preview, netsOf(l.preview, (st) => shown.current.graph.steps.get(st)?.entryCondition));
+      const shorts = drawn && l.ends.some((x) => x.verdict === 'short') ? [...others.stretches(drawn.points, (x) => !share(wire.id, x)).values()].flat().map((st) => [...st]) : [];
+      setGhost(drawn ? { wire: wire.id, points: [...drawn.points], ...(shorts.length > 0 ? { shorts } : {}) } : null);
     }, (cancelled, pressMoved) => {
-      setPreview(null);
+      setGhost(null);
       setHints([]);
       if (cancelled) return;
       const pick: Pick = { kind: 'wire', id: wire.id };
@@ -631,6 +640,6 @@ export function useWireGestures(
     },
   }), [shown]);
 
-  // a run or end drag's cursor only while that drag runs; a body drag and a new wire keep the closed hand
+  // a drag's cursor only while that drag runs (a run's double arrow, an end's crosshair, a body's four-way arrow)
   return { gestures, startSegment, startEnd, ghost, hints, runGuide, active, running, resize: active ? resize : null, keys };
 }

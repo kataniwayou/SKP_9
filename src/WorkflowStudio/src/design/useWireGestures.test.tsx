@@ -613,9 +613,11 @@ describe('wire gestures', () => {
     const canvas = container.querySelector('.studio-canvas')!;
     expect(canvas.getAttribute('class')).toBe('studio-canvas gesture gesture-move');
     fireEvent.pointerMove(document, { ...screenOf(container, { x: from.x + 43, y: from.y + 213 }), pointerId: 1 });
-    // the preview: the whole wire, moved
+    // the dashed preview: the whole wire, moved; the wire itself stays put, faded, until release (Visio, plan 10)
     const moved = translatePoints(before, 40, 216);
-    expect(wirePath(container, 's1->s2')).toEqual(moved);
+    expect(ghostPath(container)).toEqual(moved);
+    expect(wirePath(container, 's1->s2')).toEqual(before);
+    expect(container.querySelector('[data-testid="rf__edge-s1->s2"] g.wire.faded')).not.toBeNull();
     expect(canvas.getAttribute('class')).toBe('studio-canvas gesture gesture-move');
     fireEvent.pointerUp(document, { ...screenOf(container, { x: from.x + 43, y: from.y + 213 }), pointerId: 1 });
     expect(commits(design)).toHaveLength(1);

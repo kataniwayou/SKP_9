@@ -691,9 +691,11 @@ test('rule B: a connected wire dragged away by its body and dropped back where i
   await page.mouse.down();
   await page.mouse.move(from.x + away.x, from.y + away.y, { steps: 8 });
   await frames(page);
-  // away: both ends open, each labelled; grey and dashed while it is moved
+  // away: both ends open, each labelled; the wire stays put, faded, and where it lands is the dashed preview (Visio, plan 10)
   expect(await labelsOf(panel)).toEqual(['move here', 'move here']);
-  expect(await dashOf(panel, ab)).not.toBe('none');
+  await expect(panel.locator('path.design-ghost')).toHaveCount(1);
+  await expect(edge(panel, ab).locator('g.wire.faded')).toHaveCount(1);
+  expect(await pointsOf(panel, ab)).toEqual(before);
   // back where it was pressed: both ends are over their sides again, each block outlined green
   await page.mouse.move(from.x, from.y, { steps: 8 });
   await frames(page);
