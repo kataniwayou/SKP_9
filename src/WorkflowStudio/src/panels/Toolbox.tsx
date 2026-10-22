@@ -39,13 +39,17 @@ function StepArt({ fitter }: { fitter: TextFitter }) {
   );
 }
 
-/** The undecided wire, as the legend and the canvas draw it: grey, dashed, open at both ends. */
+/**
+ * The undecided wire, as the legend and the canvas draw it: grey, dashed, open at both ends; in a processor tile's box
+ * (184 by 88), its name under it (2026-10-22: the Blocks tiles size as the processors' do).
+ */
 function WireArt() {
   return (
-    <svg className="tb-art tb-wire" viewBox="0 0 120 40" aria-hidden="true">
-      <circle className="lg-ring" cx="10" cy="20" r="4" />
-      <path className="lg-undecided" d="M14 20H104" />
-      <path className="lg-arrow" d="M96 12L106 20L96 28" />
+    <svg className="tb-art tb-wire" viewBox="0 0 184 88" aria-hidden="true">
+      <circle className="lg-ring" cx="22" cy="38" r="5" />
+      <path className="lg-undecided" d="M27 38H158" />
+      <path className="lg-arrow" d="M150 29L161 38L150 47" />
+      <text className="tb-wire-name" x="92" y="70">undecided wire</text>
     </svg>
   );
 }
@@ -225,8 +229,8 @@ export function Toolbox() {
           <>
             <div className="tb-h">Blocks</div>
             <div className="tb-row">
-              {tile('step', { kind: 'step' }, 'an empty step', <StepArt fitter={fitter} />, <><b>Empty step</b><span>a new step, no processor</span></>)}
-              {tile('wire', { kind: 'wire' }, 'an undecided wire', <WireArt />, <><b>Wire</b><span>undecided, open at both ends</span></>)}
+              {tile('step', { kind: 'step' }, 'an empty step', <StepArt fitter={fitter} />, null)}
+              {tile('wire', { kind: 'wire' }, 'an undecided wire', <WireArt />, null)}
             </div>
             <div className="tb-h">Processors <span className="tb-count">{lists ? processors.length : '…'}</span></div>
             {error && <div className="note tb-error">Could not read the lists: {error}</div>}

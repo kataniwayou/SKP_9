@@ -194,5 +194,8 @@ test('the Toolbox pane resized with the real mouse: the Wire stays under the Emp
     expect(Math.round(w.width)).toBe(Math.round(s.width));
     expect(w.y).toBeGreaterThanOrEqual(s.y + s.height);
     expect(Math.round(w.width)).toBe(Math.round(p.width));
+    // the Blocks tiles are a processor tile's size at every width (2026-10-22)
+    expect(Math.round(s.height)).toBe(Math.round(p.height));
+    expect(Math.round(w.height)).toBe(Math.round(p.height));
   }
 });

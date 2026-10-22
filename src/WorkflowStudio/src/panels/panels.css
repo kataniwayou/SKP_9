@@ -149,8 +149,8 @@ fieldset.plain { border: 0; margin: 0; padding: 0; min-width: 0; }
 /* changed in the active design, not saved yet: the Inspector's "unsaved changes" orange */
 .tb-unsaved { position: absolute; top: 4px; right: 6px; font-size: 10px; line-height: 1; color: var(--x); pointer-events: none; }
 .tb-art { display: block; flex: none; overflow: visible; }
-.tb-step { width: 100%; height: auto; max-height: 72px; }
-.tb-wire { width: 100%; height: 32px; }
+/* the Blocks tiles take a processor tile's box (184 by 88) and grow with the pane as it does (2026-10-22) */
+.tb-step, .tb-wire { width: 100%; height: auto; aspect-ratio: 184 / 88; }
 .tb-proc { width: 100%; height: auto; }
 .tb-cache { width: 56px; height: 56px; }
 .tb-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: 11px; color: var(--muted); }
@@ -162,6 +162,7 @@ fieldset.plain { border: 0; margin: 0; padding: 0; min-width: 0; }
 .tb-wire .lg-ring { fill: #060c17; stroke: #8A97A8; stroke-width: 1.6; }
 .tb-wire .lg-undecided { fill: none; stroke: #8A97A8; stroke-width: 2; stroke-dasharray: 6 4; }
 .tb-wire .lg-arrow { fill: none; stroke: #8A97A8; stroke-width: 2; stroke-linejoin: miter; }
+.tb-wire .tb-wire-name { fill: #8A97A8; font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-anchor: middle; }
 /* follows the pointer while a tile is dragged; never under the pointer itself (the canvas below is what it is over) */
 /* centred on the pointer, as the canvas's landing box is (toolDrop.landingBox) */
 .tb-ghost { position: fixed; z-index: var(--z-tip); pointer-events: none; opacity: .8; width: 120px; transform: translate(-50%, -50%); filter: drop-shadow(0 4px 10px rgba(0, 0, 0, .5)); }
