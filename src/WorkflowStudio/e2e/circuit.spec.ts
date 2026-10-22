@@ -691,11 +691,19 @@ test('rule B: a connected wire dragged away by its body and dropped back where i
   await page.mouse.down();
   await page.mouse.move(from.x + away.x, from.y + away.y, { steps: 8 });
   await frames(page);
-  // away: both ends open, each labelled; the wire stays put, faded, and where it lands is the dashed preview (Visio, plan 10)
+  // away: both ends open, each labelled. Visio's body drag (`shots/ui3-wire-body-held.png`, the user's ruling 2026-10-22,
+  // as blocks have): the wire itself stays as it is; a faded copy of it, its own colour, ring and arrow, lies where it lands
   expect(await labelsOf(panel)).toEqual(['move here', 'move here']);
-  await expect(panel.locator('path.design-ghost')).toHaveCount(1);
-  await expect(edge(panel, ab).locator('g.wire.faded')).toHaveCount(1);
+  const copy = panel.locator('g.design-wire-copy');
+  await expect(copy).toHaveCount(1);
+  await expect(panel.locator('path.design-ghost')).toHaveCount(0);
+  await expect(edge(panel, ab).locator('g.wire.faded')).toHaveCount(0);
   expect(await pointsOf(panel, ab)).toEqual(before);
+  await expect(copy.locator('path.nx-head')).toHaveCount(1);
+  await expect(copy.locator('circle.nx-src')).toHaveCount(1);
+  expect(await copy.locator('path.w').getAttribute('stroke')).toBe(await colourOf(panel, ab));
+  expect(Number(await copy.evaluate((e) => getComputedStyle(e).opacity))).toBe(0.5);
+  await panel.screenshot({ path: 'test-results/body-drag-held.png' });
   // back where it was pressed: both ends are over their sides again, each block outlined green
   await page.mouse.move(from.x, from.y, { steps: 8 });
   await frames(page);

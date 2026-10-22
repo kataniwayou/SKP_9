@@ -158,12 +158,18 @@ describe('wire gestures', () => {
     const head = container.querySelector('.design-handle.end[data-end="head"]')!;
     const tail = container.querySelector('.design-handle.end[data-end="tail"]')!;
     const at = (el: Element) => ({ x: Number(el.getAttribute('cx')), y: Number(el.getAttribute('cy')) });
+    const faded = () => container.querySelector('[data-testid="rf__edge-s1->s2"] g.wire.faded');
     fireEvent.pointerDown(head, { button: 0, ...screenOf(container, at(head)), pointerId: 1 });
-    fireEvent.pointerMove(document, { ...screenOf(container, { x: at(tail).x + 20, y: at(tail).y }), pointerId: 1 });
+    fireEvent.pointerMove(document, { ...screenOf(container, { x: at(tail).x + 20, y: at(tail).y + 300 }), pointerId: 1 });
+    // held away from its own squares (Visio's end drag; the user's ruling, 2026-10-22): the wire stays as it is, previewed
+    expect(container.querySelector('path.design-ghost')).not.toBeNull();
+    expect(faded()).toBeNull();
     fireEvent.pointerMove(document, { ...screenOf(container, at(tail)), pointerId: 1 });
     expect(container.querySelector('.design-drop-label')!.textContent).toBe('delete wire');
     expect(container.querySelector('path.design-gone')).not.toBeNull();
     expect(container.querySelector('path.design-ghost')).toBeNull();
+    // over its other end square the release deletes it: only then is it drawn faded
+    expect(faded()).not.toBeNull();
     fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.pointerUp(document, { pointerId: 1 });
   });
@@ -613,11 +619,13 @@ describe('wire gestures', () => {
     const canvas = container.querySelector('.studio-canvas')!;
     expect(canvas.getAttribute('class')).toBe('studio-canvas gesture gesture-move');
     fireEvent.pointerMove(document, { ...screenOf(container, { x: from.x + 43, y: from.y + 213 }), pointerId: 1 });
-    // the dashed preview: the whole wire, moved; the wire itself stays put, faded, until release (Visio, plan 10)
+    // Visio's body drag (`shots/ui3-wire-body-held.png`; the user's ruling, 2026-10-22): the wire itself stays as it is,
+    // and a faded copy of it, its own art, lies moved where the release puts it; no dashed preview
     const moved = translatePoints(before, 40, 216);
-    expect(ghostPath(container)).toEqual(moved);
+    expect(pointsOfD(container.querySelector('g.design-wire-copy path.w')!.getAttribute('d')!)).toEqual(moved);
+    expect(container.querySelector('path.design-ghost')).toBeNull();
     expect(wirePath(container, 's1->s2')).toEqual(before);
-    expect(container.querySelector('[data-testid="rf__edge-s1->s2"] g.wire.faded')).not.toBeNull();
+    expect(container.querySelector('[data-testid="rf__edge-s1->s2"] g.wire.faded')).toBeNull();
     expect(canvas.getAttribute('class')).toBe('studio-canvas gesture gesture-move');
     fireEvent.pointerUp(document, { ...screenOf(container, { x: from.x + 43, y: from.y + 213 }), pointerId: 1 });
     expect(commits(design)).toHaveLength(1);

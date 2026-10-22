@@ -56,6 +56,11 @@ export interface WireGhost {
   faded?: boolean;
   /** The stretches the new route would share with wires it may not share a line with (a short circuit), drawn red. */
   shorts?: Pt[][];
+  /**
+   * A wire moved whole (Visio's body drag, `shots/ui3-wire-body-held.png`; the user's ruling, 2026-10-22): the wire stays
+   * as it is and a faded copy of it, its own art, lies on `points`, where the release puts it.
+   */
+  body?: boolean;
 }
 
 /** An end square's drag over its own wire's squares: what it is over, what the canvas shows, what a release does. */
@@ -494,8 +499,8 @@ export function useWireGestures(
   /**
    * Drags a wire by its body (the user's rules B and D, 2026-10-09), any wire, picked or not, with Visio's four-way arrow: the
    * whole wire moves rigidly, its drawn path frozen and shifted by the pointer's movement snapped to the grid, and
-   * detached from everything, connected ends too (`landBody`): a body drag never stretches a leg. The wire stays put, faded,
-   * under a dashed preview of where it lands until release (Visio, plan 10). Each end is
+   * detached from everything, connected ends too (`landBody`): a body drag never stretches a leg. The wire stays as it is,
+   * and a faded copy of it shows where it lands until release (Visio's, the user's ruling 2026-10-22). Each end is
    * judged over what is under it as an end square's is, with its label and outline; one over a contact it may take
    * shifts the wire exactly onto it (the end that got there first decides), and released, every end over a contact
    * it may take connects (the wire has no direction while moved: the sides decide it); the others stay open. Moved
@@ -532,12 +537,12 @@ export function useWireGestures(
       setHints(l.ends.map((x) => ({ id: x.id, line: x.line, tone: toneOf(x.verdict), why: x.verdict, at: x.at })));
       // shifted back exactly where it was: drawn as it was
       if (l.dx === 0 && l.dy === 0) { setGhost(null); return; }
-      // Visio's: the wire stays put, faded, and the moved wire is drawn dashed; nothing is rerouted until release (plan 10)
+      // Visio's: the wire stays as it is, and a faded copy of it lies where it lands; nothing is rerouted until release
       const drawn = routeCircuit(l.preview, { placement: shown.current.placement, steps: shown.current.graph.steps }).find((x) => x.id === wire.id);
       // a short circuit: the stretches it would share with wires it may not share a line with, red (the user's rule 2)
       const share = mayShare(l.preview, netsOf(l.preview, (st) => shown.current.graph.steps.get(st)?.entryCondition));
       const shorts = drawn && l.ends.some((x) => x.verdict === 'short') ? [...others.stretches(drawn.points, (x) => !share(wire.id, x)).values()].flat().map((st) => [...st]) : [];
-      setGhost(drawn ? { wire: wire.id, points: [...drawn.points], ...(shorts.length > 0 ? { shorts } : {}) } : null);
+      setGhost(drawn ? { wire: wire.id, points: [...drawn.points], body: true, ...(shorts.length > 0 ? { shorts } : {}) } : null);
     }, (cancelled, pressMoved) => {
       setGhost(null);
       setHints([]);

@@ -25,7 +25,7 @@ import { togglePick, type Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
 import { shapeFromPoints } from '../layout/shape';
 import type { WireRoute } from '../layout/circuitRoute';
-import { CableEdge } from './edges/CableEdge';
+import { CableEdge, type CableEdgeData } from './edges/CableEdge';
 import { TetherEdge } from './edges/TetherEdge';
 import { FIT_VIEW_OPTIONS } from './fitOptions';
 import { FollowFitContext, FollowSize } from './followSize';
@@ -207,18 +207,25 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     return { ends, tone: splitTone(s.why), label: at && { text: splitLabel(s.why), at: { x: at[0], y: at[1] } } };
   }, [held, toolOver, shownDoc]);
   // a wire whose end is dragged follows the pointer: the wire, its handles and its runs (spec §4.4)
-  const dragged = wiring.ghost?.wire ? { id: wiring.ghost.wire, points: wiring.ghost.points } : null;
+  const dragged = wiring.ghost?.wire ? { id: wiring.ghost.wire, points: wiring.ghost.points, body: wiring.ghost.body === true, going: wiring.ghost.faded === true } : null;
   const edges = useMemo(() => marked.edges.map((e) => {
     if (e.type !== 'cable' || !e.data) return e;
     let data = e.data;
-    // the dragged wire stays where it was, faded, until release; its new route is the overlay's dashed ghost (Visio, plan 10)
-    if (dragged && e.id === dragged.id) data = { ...data, faded: true };
+    // held, the wire stays as it is (Visio's; the user's rulings, 2026-10-22): an end drag's new route is the overlay's
+    // dashed ghost, a body drag's the overlay's faded copy; only a wire a release would delete is drawn faded
+    if (dragged?.going && e.id === dragged.id) data = { ...data, faded: true };
     // the line under a dragged end: green when the end may join it, red when refused (plan 7 §6.1, plan 9 §6)
     const line = wiring.hints.find((h) => h.line && h.id === e.id && h.tone !== 'move');
     if (line && line.tone !== 'move') data = { ...data, halo: line.tone };
     if (tool?.halo && tool.halo.id === e.id) data = { ...data, halo: tool.halo.tone };
     return data === e.data ? e : { ...e, data };
   }), [marked.edges, wiring.ghost, wiring.hints, tool]);
+  // a wire moved whole: its own art (colour, ring, arrow, dashes) on the route where the release puts it, for the copy
+  const bodyCopy = useMemo(() => {
+    if (!dragged?.body) return null;
+    const e = marked.edges.find((x) => x.id === dragged.id);
+    return e?.type === 'cable' && e.data ? { ...(e.data as CableEdgeData), points: dragged.points, picked: false, halo: undefined, faded: false } : null;
+  }, [dragged?.body, dragged?.id, dragged?.points, marked.edges]);
   // picks naming wires that are gone (after an undo) draw nothing; while an end square is dragged its wire's squares
   // stay where they were when the drag began: they are what it may be released on (the user's rule, 2026-10-09)
   const pickedWires = useMemo(
@@ -314,7 +321,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onMoveEnd={(_event, v) => report(v)}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} guides={toolOver?.guides ?? guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost?.points ?? null} hints={wiring.hints} gone={wiring.ghost?.gone ?? null} runGuide={wiring.runGuide} shorts={wiring.ghost?.shorts} tool={tool} copies={heldWires} split={split} />}
+              {design && <DesignOverlay band={band} guides={toolOver?.guides ?? guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={dragged?.body ? null : wiring.ghost?.points ?? null} bodyCopy={bodyCopy} hints={wiring.hints} gone={wiring.ghost?.gone ?? null} runGuide={wiring.runGuide} shorts={wiring.ghost?.shorts} tool={tool} copies={heldWires} split={split} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize initial={savedSize} />

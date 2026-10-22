@@ -94,7 +94,8 @@ body.tool-cross, body.tool-cross *, body.tool-cross .studio-canvas .react-flow__
 .design-gone { fill: none; stroke: #F87171; stroke-opacity: .45; stroke-linecap: round; }
 /* a dragged run's short circuit: where it would lie on another net's wire, as the wires' own overlap mark */
 .design-short { fill: none; stroke: #F87171; stroke-linecap: butt; filter: drop-shadow(0 0 3px #F87171); }
-.studio-canvas .wire.faded { opacity: .45; } /* plan 10: a held wire (and one a release would delete) at 45 % */
+.design-wire-copy { opacity: .5; pointer-events: none; } /* Visio's body drag: the wire's faded copy where it lands (2026-10-22) */
+.studio-canvas .wire.faded { opacity: .45; } /* a wire a release would delete (its end square over its other one), at 45 % */
 .design-drop-label rect { stroke-width: 1; }
 .design-drop-label.ok rect { fill: rgba(6, 40, 30, .92); stroke: #34D399; }
 .design-drop-label.no rect { fill: rgba(45, 10, 10, .92); stroke: #F87171; }

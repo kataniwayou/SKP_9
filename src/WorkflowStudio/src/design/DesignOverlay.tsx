@@ -5,6 +5,7 @@ import type { WireRoute } from '../layout/circuitRoute';
 import type { Bends } from '../layout/shape';
 import type { Pt } from '../layout/router';
 import type { Point } from '../layout/geometry';
+import { CableEdgeView, type CableEdgeData } from '../canvas/edges/CableEdge';
 import { pathOf } from '../canvas/svgPath';
 import { bendsOf as cornersOf, squaresOf } from './cut';
 import { dropLabel } from './drop';
@@ -48,6 +49,8 @@ export interface DesignOverlayProps {
   gone?: Pt[] | null;
   /** The picked wires a held block drag takes along, where the release puts them, dashed (Visio, plan 10 phase 4). */
   copies?: readonly Pt[][];
+  /** A wire moved whole: its own art where the release puts it, faded (Visio's body drag, the user's ruling 2026-10-22). */
+  bodyCopy?: CableEdgeData | null;
   /**
    * An empty step held over a wire's run (Visio, plan 10 §4.6): the wire's two ends as filled squares, green when the
    * release splits it, red when refused; `label`: what the release does there (null: the Toolbox's own label says it).
@@ -89,7 +92,7 @@ function GapArrow({ gap, k }: { gap: GapMark; k: number }) {
  * wire's squares (§4.2, Visio; plan 9 rule 14): one on each end (tail and head, on whatever they are), one in the
  * middle of each run of its core (no mark on a bend); and the ghost of a new wire while it is drawn (§4.5).
  */
-export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hints = [], gone = null, tool = null, runGuide = null, shorts = [], copies = [], split = null }: DesignOverlayProps) {
+export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hints = [], gone = null, tool = null, runGuide = null, shorts = [], copies = [], split = null, bodyCopy = null }: DesignOverlayProps) {
   // one screen pixel in flow units
   const k = 1 / useStore((s) => s.transform[2]);
   return (
@@ -119,6 +122,7 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
             </g>
           );
         })}
+        {bodyCopy && bodyCopy.points.length > 1 && <g className="design-wire-copy"><CableEdgeView {...bodyCopy} flowing={false} /></g>}
         {ghost && ghost.length > 1 && <path className="design-ghost" d={pathOf(ghost)} strokeWidth={GHOST * k} strokeDasharray={`${6 * k} ${4 * k}`} />}
         {copies.map((c, i) => <path key={`c${i}`} className="design-ghost" d={pathOf(c)} strokeWidth={GHOST * k} strokeDasharray={`${6 * k} ${4 * k}`} />)}
         {gone && gone.length > 1 && <path className="design-gone" d={pathOf(gone)} strokeWidth={4 * k} />}

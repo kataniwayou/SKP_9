@@ -6,7 +6,7 @@ import { createCircuitThrowaway, removeThrowaway, type CircuitThrowaway } from '
 
 // Plan 10 phase 2 (Visio is the authority, 2026-10-21): a wire's looks and feedback, with the real mouse. A picked wire's
 // glued ends are green dots, open ends hollow; a held end outlines the block it would glue to in green, with a green
-// landing square, within 10 screen px of a side; the dragged wire stays put, faded, under a dashed preview until
+// landing square, within 10 screen px of a side; the dragged wire stays as it is under a dashed preview until
 // release; a dragged run snaps to a block edge within 12 screen px and shows the guide; blocks take the four-way arrow,
 // a placed end the crosshair. The workflow is the circuit throwaway (`e2e-9-…`: wf -> a, a -> b, a -> d (Failed),
 // b -> c; one cache); nothing is saved.
@@ -83,15 +83,15 @@ test('a held end 9 screen px outside a side is over it; 12 px outside it is not'
   await page.mouse.up();
 });
 
-test('while held, the wire stays put faded under a dashed preview; Escape puts everything back', async ({ page }) => {
+test('while held, the wire stays as it is under a dashed preview; Escape puts everything back', async ({ page }) => {
   const panel = await open(page);
   const path = edge(panel, ab()).locator('path.w').first();
   const before = await path.getAttribute('d');
   await pickWire(page, panel, ab());
   await pressTo(page, await centreOf(endSquare(panel, ab(), 'head')), await besideC(panel, -4));
-  await expect(edge(panel, ab()).locator('g.wire.faded')).toHaveCount(1);
-  // at 45 % (plan 10's constraint)
-  expect(await edge(panel, ab()).locator('g.wire.faded').evaluate((e) => getComputedStyle(e).opacity)).toBe('0.45');
+  // Visio's end drag (`shots/ui-end-dragged-in-open.png`; the user's ruling, 2026-10-22): not faded, only previewed
+  await expect(edge(panel, ab()).locator('g.wire.faded')).toHaveCount(0);
+  expect(await edge(panel, ab()).locator('g.wire').first().evaluate((e) => getComputedStyle(e).opacity)).toBe('1');
   expect(await path.getAttribute('d')).toBe(before);
   const ghost = panel.locator('path.design-ghost');
   await expect(ghost).toHaveCount(1);
