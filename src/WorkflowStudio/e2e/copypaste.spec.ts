@@ -67,7 +67,10 @@ test('a rectangle round the hub, a, b and their wire: Ctrl+C, Ctrl+V pastes a an
   const hub = await box(node(panel, 'wf')), ba = await box(node(panel, t.a)), bb = await box(node(panel, t.b));
   const x0 = Math.min(hub.x, ba.x, bb.x) - 12, y0 = Math.min(hub.y, ba.y, bb.y) - 12;
   const x1 = Math.max(hub.x + hub.width, ba.x + ba.width, bb.x + bb.width) + 12, y1 = Math.max(hub.y + hub.height, ba.y + ba.height, bb.y + bb.height) + 12;
+  // the rectangle is a Ctrl+drag (the user, 2026-10-22: a plain left drag pans)
+  await page.keyboard.down('Control');
   await drag(page, { x: x0, y: y0 }, { x: x1, y: y1 });
+  await page.keyboard.up('Control');
   for (const id of ['wf', t.a, t.b]) await expect(node(panel, id)).toHaveClass(/studio-pick/);
   await expect(edge(panel, `${t.a}->${t.b}`).locator('.wire.picked')).toHaveCount(1);
 

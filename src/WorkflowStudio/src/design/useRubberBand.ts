@@ -15,19 +15,21 @@ const onEmptyCanvas = (target: Element) =>
   target.closest('.react-flow__pane') !== null && target.closest('.react-flow__node, .react-flow__edge, .react-flow__handle, .design-handle, .nx-port') === null;
 
 /**
- * The rectangle on empty canvas (spec §3.2): a left-button drag that does not start on a block or a wire
- * picks what lies wholly inside; with Ctrl it adds. Space+drag stays React Flow's pan.
+ * The rectangle on empty canvas (spec §3.2; the user, 2026-10-22): a Ctrl+left-button drag that does not start on a
+ * block or a wire picks what lies wholly inside; with Shift too it adds. A plain left drag there is React Flow's pan
+ * (`ctrl`: Ctrl is held, so the canvas turns that pan off meanwhile), as are the middle button and Space+drag.
  */
 export function useRubberBand(
   shown: MutableRefObject<StudioDocument>,
   design: DesignProps | undefined,
   onSelect: ((selection: Selection | null, picks?: Pick[]) => void) | undefined,
   suppressPaneClick: MutableRefObject<boolean>,
-): { band: FlowRect | null; banding: boolean; pressing: () => boolean; onPointerDownCapture: (e: ReactPointerEvent) => void } {
+): { band: FlowRect | null; banding: boolean; ctrl: boolean; pressing: () => boolean; onPointerDownCapture: (e: ReactPointerEvent) => void } {
   const { screenToFlowPosition } = useReactFlow();
   const domNode = useStore((s) => s.domNode);
   const [band, setBand] = useState<FlowRect | null>(null);
   const space = useRef(false);
+  const [ctrl, setCtrl] = useState(false);
   // the window the canvas is drawn in (a pop-out has its own); a press from another one rebinds the keys
   const [owner, setOwner] = useState<Document | null>(null);
   const keysOn = owner ?? domNode?.ownerDocument ?? null;
@@ -37,18 +39,25 @@ export function useRubberBand(
 
   useEffect(() => {
     if (keysOn === null) return;
-    const down = (e: KeyboardEvent) => { if (e.key === ' ') space.current = true; };
-    const up = (e: KeyboardEvent) => { if (e.key === ' ') space.current = false; };
+    const down = (e: KeyboardEvent) => { if (e.key === ' ') space.current = true; if (e.key === 'Control') setCtrl(true); };
+    const up = (e: KeyboardEvent) => { if (e.key === ' ') space.current = false; if (e.key === 'Control') setCtrl(false); };
+    // a Ctrl let go in another window (Alt+Tab) sends no keyup here
+    const blur = () => setCtrl(false);
+    const win = keysOn.defaultView;
     keysOn.addEventListener('keydown', down);
     keysOn.addEventListener('keyup', up);
-    return () => { keysOn.removeEventListener('keydown', down); keysOn.removeEventListener('keyup', up); space.current = false; };
+    win?.addEventListener('blur', blur);
+    return () => {
+      keysOn.removeEventListener('keydown', down); keysOn.removeEventListener('keyup', up); win?.removeEventListener('blur', blur);
+      space.current = false; setCtrl(false);
+    };
   }, [keysOn]);
 
   const onPointerDownCapture = (e: ReactPointerEvent) => {
     const target = e.target as Element;
     const doc = target.ownerDocument;
     if (doc !== keysOn) setOwner(doc);
-    if (!design || !onSelect || e.button !== 0 || space.current || !onEmptyCanvas(target)) return;
+    if (!design || !onSelect || e.button !== 0 || !e.ctrlKey || space.current || !onEmptyCanvas(target)) return;
     const picked = design.picks;
     const start = { x: e.clientX, y: e.clientY };
     const a = screenToFlowPosition(start);
@@ -96,7 +105,7 @@ export function useRubberBand(
       if (!moved) return;
       swallowPaneClick();
       const inside = itemsInRect(shown.current, rectOf(a, screenToFlowPosition({ x: ev.clientX, y: ev.clientY })));
-      const picks = ev.ctrlKey ? [...picked, ...inside.filter((p) => !picked.some((q) => pickKey(q) === pickKey(p)))] : inside;
+      const picks = ev.shiftKey ? [...picked, ...inside.filter((p) => !picked.some((q) => pickKey(q) === pickKey(p)))] : inside;
       onSelect(selectionForPicks(picks, null, shown.current.graph), picks);
     };
     doc.addEventListener('pointermove', move);
@@ -106,7 +115,7 @@ export function useRubberBand(
     running.current = stop;
   };
 
-  // a rectangle is a drag: the canvas shows the closed hand once it has moved (spec §3.1)
+  // `banding`: the rectangle has moved (the canvas keeps the arrow then: the closed hand is the pan's, 2026-10-22)
   // `pressing`: a press on empty canvas is down (a rectangle, or a click not yet released)
-  return { band, banding: band !== null, pressing: () => running.current !== null, onPointerDownCapture };
+  return { band, banding: band !== null, ctrl, pressing: () => running.current !== null, onPointerDownCapture };
 }

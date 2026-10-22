@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { box, documentPanel, esc, expect, floatOver, groupOf, inspector, liveWorkflows, openWorkflow, overlap, selectProcessor, tab, test, type LiveWorkflow } from './studio';
+import { box, documentPanel, emptySpot, esc, expect, floatOver, groupOf, inspector, liveWorkflows, openWorkflow, overlap, selectProcessor, tab, test, type LiveWorkflow } from './studio';
 import { createChainThrowaway, removeThrowaway } from './throwaway';
 
 // Spec §9, slice 3a. Read-only against the live BaseApi: GETs only.
@@ -165,42 +165,32 @@ async function canvasFollowsItsSize(page: Page, wf: LiveWorkflow): Promise<void>
   expect(Math.abs((await view()).dx - zoomed.dx)).toBeLessThanOrEqual(4);
 }
 
-test('scroll bars appear only when needed, and dragging or clicking them pans', async ({ page }) => {
+test('no scroll bars: a left drag on empty canvas pans the drawing with the closed hand, and keeps the picks (the user, 2026-10-22)', async ({ page }) => {
   const [wf] = workflows;
   await openWorkflow(page, wf!);
   const panel = documentPanel(page, wf!);
-  const h = panel.getByTestId('scrollbar-h');
-  const viewportX = async () => Number((await panel.locator('.react-flow__viewport').getAttribute('style'))!.match(/translate\((-?[\d.]+)px/)![1]);
-
-  // fitted: everything is in view, so no bars
-  await expect(h).toBeHidden();
-  await expect(panel.getByTestId('scrollbar-v')).toBeHidden();
-
-  for (let i = 0; i < 4; i++) await panel.getByRole('button', { name: 'Zoom in' }).click();
-  await expect(h).toBeVisible();
-
-  // dragging the thumb to the right moves the drawing to the left
-  const thumb = h.locator('.th');
-  const t = await box(thumb);
-  const x0 = await viewportX();
-  await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
+  await expect(panel.locator('.sb')).toHaveCount(0);
+  const at = async () => (await panel.locator('.react-flow__viewport').getAttribute('style'))!.match(/translate\((-?[\d.]+)px, (-?[\d.]+)px\)/)!.slice(1).map(Number);
+  for (let i = 0; i < 2; i++) await panel.getByRole('button', { name: 'Zoom in' }).click();
+  // a step picked first: the pan's release must not clear it
+  const first = panel.locator('.react-flow__node-step').first();
+  await first.locator('.nx-sn').click();
+  await expect(first).toHaveClass(/studio-pick/);
+  const from = await emptySpot(panel);
+  const [x0, y0] = await at();
+  await page.mouse.move(from.x, from.y);
   await page.mouse.down();
-  await page.mouse.move(t.x + t.width / 2 + 60, t.y + t.height / 2, { steps: 4 });
+  await page.mouse.move(from.x - 60, from.y - 40, { steps: 6 });
+  // the closed hand while it pans, and no rectangle
+  expect(await page.evaluate(({ x, y }) => getComputedStyle(document.elementFromPoint(x, y)!).cursor, { x: from.x - 60, y: from.y - 40 })).toBe('grabbing');
+  await expect(panel.locator('.design-band')).toHaveCount(0);
+  await page.mouse.move(from.x - 120, from.y - 80, { steps: 6 });
   await page.mouse.up();
-  const x1 = await viewportX();
-  expect(x1).toBeLessThan(x0);
-
-  // clicking the track beyond the thumb pages the same way
-  const track = await box(h);
-  const after = await box(thumb);
-  test.skip(after.x + after.width > track.x + track.width - 8, 'the thumb already reaches the end of the track');
-  await page.mouse.click(track.x + track.width - 4, track.y + track.height / 2);
-  expect(await viewportX()).toBeLessThan(x1);
-
-  await panel.getByRole('button', { name: 'Fit' }).click();
-  await expect(h).toBeHidden();
+  const [x1, y1] = await at();
+  expect(Math.round(x0 - x1)).toBe(120);
+  expect(Math.round(y0 - y1)).toBe(80);
+  await expect(first).toHaveClass(/studio-pick/);
 });
-
 test('menus, the picker and the tooltip open above a floating group', async ({ page }) => {
   const [wf] = workflows;
   await openWorkflow(page, wf!);

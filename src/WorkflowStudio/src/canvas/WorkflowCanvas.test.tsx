@@ -89,7 +89,7 @@ describe('WorkflowCanvas', () => {
       expect(container.querySelector('.wf')!.getAttribute('data-started')).toBe('true');
     });
 
-    it('shows no React Flow attribution badge (it would sit on the horizontal scroll bar)', async () => {
+    it('shows no React Flow attribution badge', async () => {
       const { container } = render(<WorkflowCanvas doc={await twoSteps()} fitter={fitter} width={1200} height={800} />);
       expect(container.querySelector('.react-flow__node')).not.toBeNull();
       expect(container.querySelector('.react-flow__attribution')).toBeNull();
@@ -291,12 +291,12 @@ describe('WorkflowCanvas', () => {
       expect(container.querySelector('.react-flow__edge[data-id="s1->s2"] .wire')!.getAttribute('class')).toContain('picked');
     });
 
-    it('a rectangle on empty canvas picks what lies inside; its closing click does not clear them', async () => {
+    it('a Ctrl+drag rectangle on empty canvas picks what lies inside; its closing click does not clear them (the user, 2026-10-22: a plain left drag pans)', async () => {
       const doc = await two();
       const onSelect = vi.fn();
       const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf()} onSelect={onSelect} />);
       const pane = container.querySelector('.react-flow__pane')!;
-      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5 });
+      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5, ctrlKey: true });
       fireEvent.pointerMove(document, { clientX: 0, clientY: 0 });
       expect(container.ownerDocument.querySelector('.design-band')).not.toBeNull();
       fireEvent.pointerUp(document, { clientX: 1e5, clientY: 1e5 });
@@ -313,7 +313,7 @@ describe('WorkflowCanvas', () => {
       const onSelect = vi.fn();
       const { container, unmount } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf({ picks: [{ kind: 'node', id: 's1' }] })} onSelect={onSelect} />);
       const pane = container.querySelector('.react-flow__pane')!;
-      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5 });
+      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5, ctrlKey: true });
       fireEvent.pointerMove(document, { clientX: 0, clientY: 0 });
       expect(container.ownerDocument.querySelector('.design-band')).not.toBeNull();
       const outside = vi.fn();
@@ -335,7 +335,7 @@ describe('WorkflowCanvas', () => {
       window.removeEventListener('keydown', later);
       expect(later).toHaveBeenCalled();
       // and a rectangle cut short by an unmount leaves no Escape listener behind
-      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5 });
+      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5, ctrlKey: true });
       fireEvent.pointerMove(document, { clientX: 0, clientY: 0 });
       unmount();
       const after = vi.fn();
@@ -358,18 +358,31 @@ describe('WorkflowCanvas', () => {
       expect(onSelect).not.toHaveBeenCalled();
     });
 
-    it('the canvas shows the closed hand while a rectangle is drawn, not for a press that has not moved', async () => {
+    it('a rectangle shows no closed hand (that is the pan cursor, the user 2026-10-22): the canvas is marked banding once it moves', async () => {
       const doc = await two();
       const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf()} onSelect={vi.fn()} />);
       const canvas = container.querySelector('.studio-canvas')!;
       const pane = container.querySelector('.react-flow__pane')!;
-      fireEvent.pointerDown(pane, { button: 0, clientX: 5, clientY: 5 });
+      fireEvent.pointerDown(pane, { button: 0, clientX: 5, clientY: 5, ctrlKey: true });
       fireEvent.pointerMove(document, { clientX: 6, clientY: 6 });
-      expect(canvas.classList.contains('gesture')).toBe(false);
+      expect(canvas.classList.contains('banding')).toBe(false);
       fireEvent.pointerMove(document, { clientX: 300, clientY: 300 });
-      expect(canvas.classList.contains('gesture')).toBe(true);
-      fireEvent.pointerUp(document, { clientX: 300, clientY: 300 });
+      expect(canvas.classList.contains('banding')).toBe(true);
       expect(canvas.classList.contains('gesture')).toBe(false);
+      fireEvent.pointerUp(document, { clientX: 300, clientY: 300 });
+      expect(canvas.classList.contains('banding')).toBe(false);
+    });
+
+    it('a plain left drag on empty canvas draws no rectangle and picks nothing: it pans (the user, 2026-10-22)', async () => {
+      const doc = await two();
+      const onSelect = vi.fn();
+      const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf()} onSelect={onSelect} />);
+      const pane = container.querySelector('.react-flow__pane')!;
+      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5 });
+      fireEvent.pointerMove(document, { clientX: 0, clientY: 0 });
+      expect(container.ownerDocument.querySelector('.design-band')).toBeNull();
+      fireEvent.pointerUp(document, { clientX: 1e5, clientY: 1e5 });
+      expect(onSelect).not.toHaveBeenCalled();
     });
 
     it('blocks can be dragged in design mode only', async () => {
@@ -398,7 +411,7 @@ describe('WorkflowCanvas', () => {
       const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={design} onSelect={vi.fn()} />);
       const canvas = container.querySelector('.studio-canvas')!;
       const pane = container.querySelector('.react-flow__pane')!;
-      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5 });
+      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5, ctrlKey: true });
       fireEvent.pointerMove(document, { clientX: 0, clientY: 0 });
       fireEvent.keyDown(canvas, { key: 'ArrowUp' });
       fireEvent.keyDown(canvas, { key: 'z', ctrlKey: true });
@@ -421,19 +434,24 @@ describe('WorkflowCanvas', () => {
       expect(design.onCommit).not.toHaveBeenCalled();
     });
 
-    it('a rectangle with Ctrl adds to the picks; a press that does not move is a click', async () => {
+    it('a rectangle with Ctrl+Shift adds to the picks, with Ctrl alone it replaces them; a press that does not move is a click', async () => {
       const doc = await two();
       const onSelect = vi.fn();
       const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} design={designOf({ picks: [{ kind: 'wire', id: 'gone' }] })} onSelect={onSelect} />);
       const pane = container.querySelector('.react-flow__pane')!;
-      fireEvent.pointerDown(pane, { button: 0, clientX: 5, clientY: 5 });
+      fireEvent.pointerDown(pane, { button: 0, clientX: 5, clientY: 5, ctrlKey: true });
       fireEvent.pointerUp(document, { clientX: 6, clientY: 6 });
       expect(onSelect).not.toHaveBeenCalled();
-      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5 });
+      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5, ctrlKey: true });
       fireEvent.pointerMove(document, { clientX: 1e5, clientY: 1e5 });
-      fireEvent.pointerUp(document, { clientX: 1e5, clientY: 1e5, ctrlKey: true });
+      fireEvent.pointerUp(document, { clientX: 1e5, clientY: 1e5, ctrlKey: true, shiftKey: true });
       expect(onSelect.mock.calls[0]![1][0]).toEqual({ kind: 'wire', id: 'gone' });
       expect(onSelect.mock.calls[0]![1]).toContainEqual({ kind: 'node', id: 's2' });
+      fireEvent.pointerDown(pane, { button: 0, clientX: -1e5, clientY: -1e5, ctrlKey: true });
+      fireEvent.pointerMove(document, { clientX: 1e5, clientY: 1e5 });
+      fireEvent.pointerUp(document, { clientX: 1e5, clientY: 1e5, ctrlKey: true });
+      expect(onSelect.mock.calls[1]![1]).not.toContainEqual({ kind: 'wire', id: 'gone' });
+      expect(onSelect.mock.calls[1]![1]).toContainEqual({ kind: 'node', id: 's2' });
     });
   });
 

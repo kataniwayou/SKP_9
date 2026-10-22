@@ -12,15 +12,6 @@
 .studio-canvas .react-flow__handle { opacity: 0; pointer-events: none; min-width: 0; min-height: 0; width: 1px; height: 1px; border: 0; }
 
 /* legend */
-/* overlay scroll bars (mockup v50 .sb); ScrollBars.tsx's TRACK_INSET is 12 + 24 */
-.sb { position: absolute; z-index: 5; border-radius: 6px; background: rgba(10, 18, 32, .55); }
-.sb.off { display: none; }
-.sb .th { position: absolute; border-radius: 5px; background: rgba(125, 211, 252, .30); cursor: grab; transition: background .15s; }
-.sb:hover .th, .sb.active .th { background: rgba(125, 211, 252, .62); }
-.sb.h { left: 12px; right: 24px; bottom: 6px; height: 10px; }
-.sb.v { top: 12px; bottom: 24px; right: 6px; width: 10px; }
-.sb.h .th { top: 2px; bottom: 2px; }
-.sb.v .th { left: 2px; right: 2px; }
 .legend { position: absolute; left: 16px; bottom: 22px; z-index: 5; display: flex; gap: 14px; align-items: center; padding: 8px 12px;
   background: rgba(14, 24, 40, .86); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: 8px; font-size: 12px; color: var(--muted); }
 .cmark { white-space: nowrap; }
@@ -33,11 +24,14 @@
 .zoom button.fit { width: 38px; font-size: 11px; font-family: var(--sans); }
 .zoom output { font-family: var(--mono); font-size: 12px; width: 52px; text-align: center; color: var(--muted); }
 
-/* plan 4 (spec §3.1): an arrow off the blocks and on the scroll bars, a hand on blocks and wires, a closed hand while dragging */
+/* plan 4 (spec §3.1): an arrow off the blocks, a hand on blocks and wires, a closed hand while dragging; a left drag on
+   empty canvas pans (the user, 2026-10-22): the closed hand everywhere while it does, the arrow while a Ctrl+drag rectangle runs */
 .studio-canvas .react-flow__pane, .studio-canvas .react-flow__pane.draggable, .studio-canvas .react-flow__pane.selection { cursor: default; }
 .studio-canvas .react-flow__pane.dragging { cursor: grabbing; }
 .studio-canvas .react-flow__node { cursor: pointer; }
 .studio-canvas.gesture, .studio-canvas.gesture * { cursor: grabbing !important; }
+.studio-canvas:has(.react-flow__pane.dragging), .studio-canvas:has(.react-flow__pane.dragging) * { cursor: grabbing !important; }
+.studio-canvas.banding, .studio-canvas.banding * { cursor: default !important; }
 /* Visio's cursors in design mode (plan 10 phase 2): the four-way arrow on blocks and wire bodies, held while dragged */
 .studio-canvas .react-flow__node.draggable, .studio-canvas .react-flow__node.draggable.dragging { cursor: move !important; }
 /* a held block drag (plan 10 phase 4): Visio's copy, faded in a light-blue dashed outline, never pressed; the four-way arrow everywhere */
@@ -45,7 +39,6 @@
 .studio-canvas .react-flow__node.nx-copy { outline: calc(1px * var(--inv)) dashed #66b2ff; outline-offset: 0; }
 .studio-canvas .react-flow__node.nx-copy > * { opacity: .5; }
 .studio-canvas .react-flow__node.nx-copy, .studio-canvas .react-flow__node.nx-copy * { pointer-events: none !important; }
-.sb .th { cursor: default; }
 .studio-canvas .nx-hit { fill: none; stroke: transparent; stroke-width: 8; pointer-events: stroke; cursor: pointer; }
 /* design mode: a wire's body takes Visio's four-way arrow (dragged, the whole wire moves) */
 .studio-canvas .nx-hit.grab { cursor: move; }

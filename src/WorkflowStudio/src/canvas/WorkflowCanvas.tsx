@@ -35,7 +35,6 @@ import type { TextFitter } from './fitText';
 import type { SavedView } from './savedView';
 import { GridBackground } from './GridBackground';
 import { Legend } from './Legend';
-import { ScrollBars } from './ScrollBars';
 import { CacheNode } from './nodes/CacheNode';
 import { StepNode } from './nodes/StepNode';
 import { WorkflowNode } from './nodes/WorkflowNode';
@@ -79,7 +78,7 @@ const resettable = (doc: StudioDocument, draft: Draft, wireId: string): boolean 
   return Object.hasOwn(c, wireId) && shapedByHand(c[wireId]!);
 };
 
-/** React Flow's attribution badge is hidden (MIT licence): it would sit on the horizontal scroll bar. */
+/** React Flow's attribution badge is hidden (MIT licence). */
 const PRO_OPTIONS = { hideAttribution: true } as const;
 
 /** Every block's top-left corner lands on the 8 px grid while it is dragged (spec §3.4). */
@@ -89,15 +88,19 @@ const PRO_OPTIONS = { hideAttribution: true } as const;
  */
 const DRAG_START = 2;
 
+/** The mouse buttons that pan (0 left, 1 middle): stable arrays, so React Flow is not re-set on every render. */
+const PAN_LEFT_MIDDLE = [0, 1];
+const PAN_MIDDLE = [1];
+
 /** Design mode turns off React Flow's own selection keys and keyboard moves: picks live in the store. */
 const DESIGN_KEYS = { multiSelectionKeyCode: null, selectionKeyCode: null, disableKeyboardA11y: true } as const;
 
 /**
- * The workflow canvas. Pan with Space+drag, the middle button or the wheel; Ctrl+wheel zooms at
- * the pointer (spec §5.4). Slice 3a makes it clickable (spec §6.1): a step, a processor die, a
+ * The workflow canvas. Pan with a left drag on empty canvas (the closed hand, the user 2026-10-22; no scroll bars), the
+ * middle button, Space+drag or the wheel; Ctrl+wheel zooms at the pointer (spec §5.4). Slice 3a makes it clickable (spec §6.1): a step, a processor die, a
  * cache or the sphere can be selected. React Flow's own selection stays off: the selection lives in
  * the store and is drawn with a class. Without `design` nothing can be dragged or connected; with it
- * (plan 4) the canvas shows the draft over the document, and a click, a Ctrl+click or a rectangle on
+ * (plan 4) the canvas shows the draft over the document, and a click, a Ctrl+click or a Ctrl+drag rectangle on
  * empty canvas picks blocks and wires (spec §3).
  */
 export function WorkflowCanvas(props: Props) {
@@ -140,7 +143,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const selected = useMemo(() => withSelection(marked.nodes, selection), [marked.nodes, selection]);
   const suppressPaneClick = useRef(false);
   const suppressNodeClick = useRef(false);
-  const { band, banding, pressing, onPointerDownCapture } = useRubberBand(shownRef, design, onSelect, suppressPaneClick);
+  const { band, banding, ctrl, pressing, onPointerDownCapture } = useRubberBand(shownRef, design, onSelect, suppressPaneClick);
   const drag = useBlockDrag(doc, shownRef, design, setHeld, setGuides, onSelect, suppressNodeClick, () => flowStore.getState().transform[2]);
   const wiring = useWireGestures(doc, shownRef, design, setPreview, onSelect);
   // --inv (1 / zoom) lets canvas.css keep drop outlines and connection points one size on screen at any zoom
@@ -287,7 +290,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   return (
     <FollowFitContext.Provider value={followFit}>
       <LiveArtContext.Provider value={live}>
-        <div ref={container} className={banding || wiring.active ? `studio-canvas gesture${wiring.resize ? ` gesture-${wiring.resize}` : ''}` : held ? 'studio-canvas block-drag' : 'studio-canvas'} style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%', '--inv': String(1 / zoom) } as CSSProperties}
+        <div ref={container} className={wiring.active ? `studio-canvas gesture${wiring.resize ? ` gesture-${wiring.resize}` : ''}` : banding ? 'studio-canvas banding' : held ? 'studio-canvas block-drag' : 'studio-canvas'} style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%', '--inv': String(1 / zoom) } as CSSProperties}
           tabIndex={design ? 0 : undefined}
           onKeyDown={design ? onKeyDown : undefined}
           // an arrow let go drops the wires it held (the closed hand's release); so does leaving the canvas or a press
@@ -322,7 +325,8 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               panOnScroll
               zoomOnScroll={false}
               zoomActivationKeyCode="Control"
-              panOnDrag={[1]}
+              // a left drag pans (the user, 2026-10-22), but not with Ctrl held: Ctrl+drag is the rectangle
+              panOnDrag={ctrl ? PAN_MIDDLE : PAN_LEFT_MIDDLE}
               panActivationKeyCode="Space"
               zoomOnDoubleClick={false}
               deleteKeyCode={null}
@@ -340,7 +344,6 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize initial={savedSize} />
-          <ScrollBars />
           <Legend />
           {children}
         </div>

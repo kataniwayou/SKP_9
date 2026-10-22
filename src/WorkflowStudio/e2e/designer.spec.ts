@@ -98,7 +98,7 @@ test('a moved step takes its wires with it; the draft is marked; a refresh keeps
   await expect.poll(() => pathOf(again, `${a}->${b}`)).toBe(before);
 });
 
-test('Ctrl+click and a rectangle pick several items; a wire click names the wire', async ({ page }) => {
+test('Ctrl+click and a Ctrl+drag rectangle pick several items; a wire click names the wire', async ({ page }) => {
   const panel = await open(page);
   const { a, b } = chain!;
   await node(panel, a).locator('.nx-sn').click();
@@ -106,7 +106,10 @@ test('Ctrl+click and a rectangle pick several items; a wire click names the wire
   await expect(inspector(page).getByText('2 items selected')).toBeVisible();
 
   const box = (await node(panel, a).boundingBox())!;
+  // the rectangle is a Ctrl+drag (the user, 2026-10-22: a plain left drag pans)
+  await page.keyboard.down('Control');
   await drag(page, { x: box.x - 12, y: box.y - 12 }, { x: box.x + box.width + 12, y: box.y + box.height + 12 });
+  await page.keyboard.up('Control');
   await expect(node(panel, a)).toHaveClass(/studio-pick/);
 
   const p = await pointOnWire(panel, `${a}->${b}`);
