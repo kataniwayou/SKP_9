@@ -37,4 +37,13 @@ describe("line jumps at crossings (plan 10 phase 3, spec §4.2: Visio's arc on t
     ]);
     expect(j.get('h')).toEqual([[300, 100], [100, 100]]);
   });
+
+  it("keeps every crossing, those nearer than a jump too: the path draws them as one arc (phase 3's deferred list)", () => {
+    const j = jumpsOf([
+      { id: 'h', points: [[0, 100], [400, 100]] },
+      { id: 'v1', points: [[200, 0], [200, 300]] },
+      { id: 'v2', points: [[208, 0], [208, 300]] },
+    ]);
+    expect(j.get('h')).toEqual([[200, 100], [208, 100]]);
+  });
 });

@@ -4,7 +4,8 @@ import type { Pt } from './router';
 /**
  * Where each wire jumps another (plan 10 phase 3, spec §4.2: Visio's line jumps): on its level runs, at every point an
  * upright run of another wire crosses it, in order along the run. A crossing within half a jump of either run's end is
- * none (a junction, a bend or an end is there), nor is a wire crossing itself.
+ * none (a junction, a bend or an end is there), nor is a wire crossing itself. Crossings nearer than a jump are all
+ * kept: the path draws them as one arc (`pathWithJumps`).
  */
 export function jumpsOf(lines: readonly { id: string; points: readonly Pt[] }[]): Map<string, Pt[]> {
   const half = JUMP / 2;
@@ -26,11 +27,7 @@ export function jumpsOf(lines: readonly { id: string; points: readonly Pt[] }[])
         .filter((u) => u.id !== l.id && u.x - lo >= half && hi - u.x >= half && y - u.lo >= half && u.hi - y >= half)
         .map((u) => u.x)
         .sort((p, q) => (b[0] > a[0] ? p - q : q - p));
-      for (const x of xs) {
-        const last = found[found.length - 1];
-        // two uprights nearer than a jump share one arc
-        if (!last || last[1] !== y || Math.abs(last[0] - x) >= JUMP) found.push([x, y]);
-      }
+      for (const x of xs) found.push([x, y]);
     }
     if (found.length > 0) out.set(l.id, found);
   }

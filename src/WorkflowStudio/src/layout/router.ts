@@ -33,9 +33,15 @@ function segmentInside(a: Pt, b: Pt, box: Box): boolean {
 }
 
 /**
- * How many blocks the segments cross. The first segment may touch its source's own box and the last its target's (it
- * leaves or reaches it at its border), but neither may run through it (review 2026-10-09: a U level on the arrival line
- * drove a wire through its own target).
+ * What a segment through a block counts, against 1 for one only along its border: a border is the lesser harm, and
+ * the only way where blocks stand a grid step apart (phase 3's deferred list: a wire went through its target there).
+ */
+const THROUGH = 4;
+
+/**
+ * How many blocks the segments cross: `THROUGH` for each run through one, 1 for each only touching one's border. The
+ * first segment may touch its source's own box and the last its target's (it leaves or reaches it at its border), but
+ * neither may run through it (review 2026-10-09: a U level on the arrival line drove a wire through its own target).
  */
 export function hitsOf(pts: readonly Pt[], srcId: string, tgtId: string, boxes: readonly Box[]): number {
   let hits = 0;
@@ -43,7 +49,8 @@ export function hitsOf(pts: readonly Pt[], srcId: string, tgtId: string, boxes: 
     const a = pts[i]!, b = pts[i + 1]!;
     for (const box of boxes) {
       const own = (box.id === srcId && i === 0) || (box.id === tgtId && i === pts.length - 2);
-      if (own ? segmentInside(a, b, box) : segmentHits(a, b, box)) hits++;
+      if (segmentInside(a, b, box)) hits += THROUGH;
+      else if (!own && segmentHits(a, b, box)) hits++;
     }
   }
   return hits;

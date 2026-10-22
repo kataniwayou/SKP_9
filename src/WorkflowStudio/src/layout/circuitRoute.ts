@@ -164,7 +164,13 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
       return p ? placedAt({ x: p.x + STEP_W, y: t.y === null ? departY.get(id)! : p.y + clampLanding(t.y) }, stepBoxId(t.step)) : null;
     }
     if (t.on === 'hub') {
-      if (t.angle === null) return placedAt({ x: cx + SPHERE_R, y: t.dy !== undefined ? cy + t.dy : departY.get(id)! }, SPHERE_BOX_ID);
+      if (t.angle === null) {
+        // it starts on the ring at its height, a short level lead in from the hub's square (phase 3's deferred list:
+        // 48 off the centre the square's side is 13 px off the ring)
+        const y = t.dy !== undefined ? cy + t.dy : departY.get(id)!;
+        const ring: Pt = [tenth(cx + Math.sqrt(Math.max(0, SPHERE_R ** 2 - (y - cy) ** 2))), y];
+        return placedAt({ x: cx + SPHERE_R, y }, SPHERE_BOX_ID, [ring]);
+      }
       const own = wire(id).bends;
       const h = hubStart(cx, cy, t.angle, own && own.xs.length > 0 ? own.xs[0]! : null);
       return placedAt(h.start, '', h.lead);

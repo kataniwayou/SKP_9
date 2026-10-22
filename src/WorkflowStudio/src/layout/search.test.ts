@@ -99,7 +99,24 @@ describe('the search, when the base shape is refused (spec §4.2.1)', () => {
     expect(orthogonal(pts)).toBe(true);
     expect(tracks.costOf(pts)).toEqual({ on: 0, beside: 0 });
   });
+
+  it("nests a track (32) inside another net's run on the source's stub, as Visio's fan-out does", () => {
+    // a target behind and below; another net's upright where the U's first upright would be (992)
+    const a = step('a', 704, 32), b = step('b', 352, 320);
+    const tracks = new Tracks();
+    tracks.add([[992, -200], [992, 700]]);
+    const pts = wire(a, b, [a, b], tracks);
+    expect(tracks.costOf(pts)).toEqual({ on: 0, beside: 0 });
+    expect(pts[1]).toEqual([960, 128]);
+  });
 });
+
+/** How far the run p → q keeps off `box` (0 when it touches or enters it). */
+function gapTo(p: Pt, q: Pt, box: Box): number {
+  const dx = Math.max(box.x - Math.max(p[0], q[0]), Math.min(p[0], q[0]) - (box.x + box.w), 0);
+  const dy = Math.max(box.y - Math.max(p[1], q[1]), Math.min(p[1], q[1]) - (box.y + box.h), 0);
+  return Math.max(dx, dy);
+}
 
 describe('every route (fuzzed)', () => {
   it('starts and ends on its ports square-on, is right-angled, and never runs inside a block', () => {
@@ -121,6 +138,30 @@ describe('every route (fuzzed)', () => {
       expect(pts[pts.length - 2]![0]).toBeLessThan(inp(b)[0]);
       expect(orthogonal(pts)).toBe(true);
       expect(clear(pts, boxes)).toBe(true);
+    }
+  });
+
+  it("keeps a track (32) off its own blocks, but for its stubs, when other nets' runs make it work hard (phase 3's deferred list)", () => {
+    let seed = 11;
+    const rand = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+    for (let n = 0; n < 600; n++) {
+      // blocks on a 352 × 288 lattice, a grid step or three off it, some cells empty
+      const boxes: Box[] = [];
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) if (rand() < 0.6) boxes.push(step(`b${i}${j}`, i * 352 + Math.floor(rand() * 4) * 8, j * 288 + Math.floor(rand() * 4) * 8));
+      if (boxes.length < 2) continue;
+      const a = boxes[Math.floor(rand() * boxes.length)]!, b = boxes[Math.floor(rand() * boxes.length)]!;
+      if (a === b) continue;
+      // other nets' runs, a track off every block as the router draws them
+      const tracks = new Tracks();
+      for (let r = 0; r < 6; r++) {
+        const x = Math.floor(rand() * 180) * 8, y = Math.floor(rand() * 150) * 8, l = 200 + Math.floor(rand() * 60) * 8;
+        const run: Pt[] = rand() < 0.5 ? [[x, y], [x, y + l]] : [[x, y], [x + l, y]];
+        if (!boxes.some((box) => gapTo(run[0]!, run[1]!, box) < 32)) tracks.add(run);
+      }
+      const pts = wire(a, b, boxes, tracks);
+      for (let i = 2; i < pts.length - 1; i++) {
+        for (const box of [a, b]) expect(gapTo(pts[i - 1]!, pts[i]!, box), `trial ${n} run ${i}: ${JSON.stringify(pts)}`).toBeGreaterThanOrEqual(32);
+      }
     }
   });
 });

@@ -178,7 +178,8 @@ interface Ends { sx: number; sy: number; tx: number; ty: number; src: string; tg
 const DX = [1, 0, -1, 0], DY = [0, 1, 0, -1];
 
 /**
- * Dijkstra over (grid node, heading), costs compared in order: [length + bends + other blocks' clearance + other nets'
+ * Dijkstra over (grid node, heading), costs compared in order: [length + bends + blocks' clearance (its own blocks' only
+ * nearer than a track, and not along its ports' lines) + other nets'
  * runs on, beside and crossed, Σ upright
  * length × its distance from the target's stub (`hug`, its x), level length below the source's line]. From the output
  * `a` straight out (+x), to the input `b` straight in (+x): the stubs are not fixed, the clearance's cost keeps them
@@ -234,15 +235,19 @@ function search(e: Ends, hug: number, boxes: readonly Box[], tracks: Tracks, col
     const x1 = Math.min(p[0], q[0]), x2 = Math.max(p[0], q[0]), y1 = Math.min(p[1], q[1]), y2 = Math.max(p[1], q[1]);
     const levelRun = y1 === y2;
     const byPort = (x1 >= e.sx && x2 <= e.sx + STUB) || (x1 >= e.tx - STUB && x2 <= e.tx);
-    // a block's clearance counts round the blocks it passes, not its own (its stubs are inside theirs)
+    // a block's clearance counts round the blocks it passes; round its own only nearer than a track (phase 3's deferred
+    // list: a hard search turned 8 px off its own block), so a wire still nests a track inside another net's as Visio's
+    // fan-out does, and never along its ports' lines (its stubs)
     let soft = 0;
     for (const m of levelRun ? rowBoxes[j]! : colBoxes[i]!) {
       const k = kind[m]!;
-      const g = byPort || (levelRun && (((k & 1) !== 0 && y1 === e.sy) || ((k & 2) !== 0 && y1 === e.ty))) ? 0 : HALF_CLEAR;
+      const stub = levelRun && (((k & 1) !== 0 && y1 === e.sy) || ((k & 2) !== 0 && y1 === e.ty));
+      const g = byPort || stub ? 0 : HALF_CLEAR;
       if (x2 > X1[m]! - g && x1 < X2[m]! + g && y2 > Y1[m]! - g && y1 < Y2[m]! + g) return 2;
-      if (k !== 0) continue;
-      if (levelRun) { if (y1 > Y1[m]! - STUB && y1 < Y2[m]! + STUB) soft += Math.max(0, Math.min(x2, X2[m]! + STUB) - Math.max(x1, X1[m]! - STUB)); }
-      else if (x1 > X1[m]! - STUB && x1 < X2[m]! + STUB) soft += Math.max(0, Math.min(y2, Y2[m]! + STUB) - Math.max(y1, Y1[m]! - STUB));
+      if (stub) continue;
+      const c = k === 0 ? STUB : TRACK;
+      if (levelRun) { if (y1 > Y1[m]! - c && y1 < Y2[m]! + c) soft += Math.max(0, Math.min(x2, X2[m]! + c) - Math.max(x1, X1[m]! - c)); }
+      else if (x1 > X1[m]! - c && x1 < X2[m]! + c) soft += Math.max(0, Math.min(y2, Y2[m]! + c) - Math.max(y1, Y1[m]! - c));
     }
     const len = x2 - x1 + y2 - y1;
     const tr = tracks.near(p, q);

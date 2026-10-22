@@ -4,7 +4,7 @@ import { loadedDocument } from '../app/fixtures';
 import { plainCircuit, type Circuit, type CircuitWire, type End } from '../circuit/circuit';
 import { SPHERE_R, STEP_W } from './geometry';
 import { contactOn, endPointOf, ripUpBetter, routeCircuit, routeWires } from './circuitRoute';
-import { hitsOf } from './router';
+import { hitsOf, type Pt } from './router';
 import { jumpsOf } from './jumps';
 import { overlapsOf, sharesNet } from './overlaps';
 import { netsOf } from '../circuit/families';
@@ -44,6 +44,23 @@ describe('routeCircuit (plan 9 §5)', () => {
     // after the ring point, nothing inside the hub
     for (const p of [...top.slice(1), ...left.slice(1)]) expect(Math.hypot(p[0] - cx, p[1] - cy)).toBeGreaterThanOrEqual(SPHERE_R - 0.5);
     expect(routes.get('top')).toMatchObject({ source: 'wf', tailOn: 'terminal' });
+  });
+
+  it("automatic hub tails start on the hub's ring at every height they leave at, and run out level (phase 3's deferred list)", async () => {
+    // four nets out of the hub: their tails leave 32 apart, up to 48 off its centre
+    const doc = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['a', 'b', 'c', 'd'] }),
+      steps: (['a', 'b', 'c', 'd'] as const).map((id, k) => stepDto(id, { entryCondition: k as 0 })),
+    }));
+    const { cx, cy } = doc.placement.sphere;
+    const routes = routeCircuit(plainCircuit(['a', 'b', 'c', 'd'], doc.graph.steps, () => true), ctxOf(doc));
+    expect(new Set(routes.map((r) => r.points[0]![1])).size).toBe(4);
+    for (const r of routes) {
+      const [p, q] = r.points as [Pt, Pt];
+      expect(Math.abs(Math.hypot(p[0] - cx, p[1] - cy) - SPHERE_R), r.id).toBeLessThan(0.1);
+      expect(q[1], r.id).toBe(p[1]);
+      expect(q[0], r.id).toBeGreaterThan(p[0]);
+    }
   });
 
   it('a tail and a head slid along their sides start and end where they were put, anywhere short of the corners (rule 5, ruling)', async () => {
@@ -447,6 +464,22 @@ describe("Visio's router in the circuit (plan 10 phase 3, spec §4.2)", () => {
     expect(throughBlocks(one.doc, one.routes.find((r) => r.id === 'a->b')!)).toBe(0);
     const two = await placed({ a: ['b'] }, { a: [0, 400], n: [512, 32], b: [752, 32] });
     expect(throughBlocks(two.doc, two.routes.find((r) => r.id === 'a->b')!)).toBe(0);
+  });
+
+  it("a step 8 px left of its target and higher: its wire rides the blocks' borders, never through one (phase 3's deferred list)", async () => {
+    // a gap of one grid step: no clean way in, but along a border is better than through a block
+    for (const dy of [64, 96, 160, 200]) {
+      const { routes } = await placed({ a: ['b'] }, { a: [352, 32], b: [352 + STEP_W + 8, 32 + dy] });
+      const r = routes.find((x) => x.id === 'a->b')!;
+      const blocks = [{ x: 352, y: 32 }, { x: 352 + STEP_W + 8, y: 32 + dy }];
+      for (let i = 1; i < r.points.length; i++) {
+        const p = r.points[i - 1]!, q = r.points[i]!;
+        for (const b of blocks) {
+          const inside = Math.max(p[0], q[0]) > b.x && Math.min(p[0], q[0]) < b.x + STEP_W && Math.max(p[1], q[1]) > b.y && Math.min(p[1], q[1]) < b.y + 160;
+          expect(inside, `dy ${dy}: run ${JSON.stringify([p, q])} in the block at ${b.x}, ${b.y}`).toBe(false);
+        }
+      }
+    }
   });
 
   it("a 64 px gap (an old layout's): wires of different nets still never lie on each other (rule G, review 2026-10-22)", async () => {
