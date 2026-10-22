@@ -24,10 +24,12 @@
 .zoom button.fit { width: 38px; font-size: 11px; font-family: var(--sans); }
 .zoom output { font-family: var(--mono); font-size: 12px; width: 52px; text-align: center; color: var(--muted); }
 
-/* plan 4 (spec §3.1): an arrow off the blocks, a hand on blocks and wires, a closed hand while dragging; a left drag on
-   empty canvas pans (the user, 2026-10-22): the closed hand everywhere while it does, the arrow while a Ctrl+drag rectangle runs */
+/* plan 4 (spec §3.1): an arrow off the blocks, a hand on blocks and wires, a closed hand while dragging; a Ctrl+drag on
+   empty canvas pans (the user, 2026-10-22): the closed hand on empty canvas while Ctrl is held and everywhere while it pans,
+   the arrow while a left-drag rectangle runs */
 .studio-canvas .react-flow__pane, .studio-canvas .react-flow__pane.draggable, .studio-canvas .react-flow__pane.selection { cursor: default; }
 .studio-canvas .react-flow__pane.dragging { cursor: grabbing; }
+.studio-canvas.ctrl-pan .react-flow__pane { cursor: grabbing; }
 .studio-canvas .react-flow__node { cursor: pointer; }
 .studio-canvas.gesture, .studio-canvas.gesture * { cursor: grabbing !important; }
 .studio-canvas:has(.react-flow__pane.dragging), .studio-canvas:has(.react-flow__pane.dragging) * { cursor: grabbing !important; }

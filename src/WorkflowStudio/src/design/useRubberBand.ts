@@ -15,9 +15,9 @@ const onEmptyCanvas = (target: Element) =>
   target.closest('.react-flow__pane') !== null && target.closest('.react-flow__node, .react-flow__edge, .react-flow__handle, .design-handle, .nx-port') === null;
 
 /**
- * The rectangle on empty canvas (spec §3.2; the user, 2026-10-22): a Ctrl+left-button drag that does not start on a
- * block or a wire picks what lies wholly inside; with Shift too it adds. A plain left drag there is React Flow's pan
- * (`ctrl`: Ctrl is held, so the canvas turns that pan off meanwhile), as are the middle button and Space+drag.
+ * The rectangle on empty canvas (spec §3.2; the user, 2026-10-22): a left-button drag that does not start on a block or
+ * a wire picks what lies wholly inside; with Shift it adds. With Ctrl held the drag is React Flow's pan instead (`ctrl`:
+ * Ctrl is held, so the canvas shows the closed hand), as are the middle button and Space+drag.
  */
 export function useRubberBand(
   shown: MutableRefObject<StudioDocument>,
@@ -57,7 +57,7 @@ export function useRubberBand(
     const target = e.target as Element;
     const doc = target.ownerDocument;
     if (doc !== keysOn) setOwner(doc);
-    if (!design || !onSelect || e.button !== 0 || !e.ctrlKey || space.current || !onEmptyCanvas(target)) return;
+    if (!design || !onSelect || e.button !== 0 || e.ctrlKey || space.current || !onEmptyCanvas(target)) return;
     const picked = design.picks;
     const start = { x: e.clientX, y: e.clientY };
     const a = screenToFlowPosition(start);

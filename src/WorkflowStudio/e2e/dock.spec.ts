@@ -165,12 +165,13 @@ async function canvasFollowsItsSize(page: Page, wf: LiveWorkflow): Promise<void>
   expect(Math.abs((await view()).dx - zoomed.dx)).toBeLessThanOrEqual(4);
 }
 
-test('no scroll bars: a left drag on empty canvas pans the drawing with the closed hand, and keeps the picks (the user, 2026-10-22)', async ({ page }) => {
+test('no scroll bars: a Ctrl+drag on empty canvas pans with the closed hand and keeps the picks; a plain left drag draws the rectangle (the user, 2026-10-22)', async ({ page }) => {
   const [wf] = workflows;
   await openWorkflow(page, wf!);
   const panel = documentPanel(page, wf!);
   await expect(panel.locator('.sb')).toHaveCount(0);
   const at = async () => (await panel.locator('.react-flow__viewport').getAttribute('style'))!.match(/translate\((-?[\d.]+)px, (-?[\d.]+)px\)/)!.slice(1).map(Number);
+  const cursorAt = (x: number, y: number) => page.evaluate((p) => getComputedStyle(document.elementFromPoint(p.x, p.y)!).cursor, { x, y });
   for (let i = 0; i < 2; i++) await panel.getByRole('button', { name: 'Zoom in' }).click();
   // a step picked first: the pan's release must not clear it
   const first = panel.locator('.react-flow__node-step').first();
@@ -179,17 +180,34 @@ test('no scroll bars: a left drag on empty canvas pans the drawing with the clos
   const from = await emptySpot(panel);
   const [x0, y0] = await at();
   await page.mouse.move(from.x, from.y);
+  expect(await cursorAt(from.x, from.y)).toBe('default');
+  // Ctrl held: the closed hand on empty canvas at once, before any press
+  await page.keyboard.down('Control');
+  await expect.poll(() => cursorAt(from.x, from.y)).toBe('grabbing');
   await page.mouse.down();
   await page.mouse.move(from.x - 60, from.y - 40, { steps: 6 });
   // the closed hand while it pans, and no rectangle
-  expect(await page.evaluate(({ x, y }) => getComputedStyle(document.elementFromPoint(x, y)!).cursor, { x: from.x - 60, y: from.y - 40 })).toBe('grabbing');
+  expect(await cursorAt(from.x - 60, from.y - 40)).toBe('grabbing');
   await expect(panel.locator('.design-band')).toHaveCount(0);
   await page.mouse.move(from.x - 120, from.y - 80, { steps: 6 });
   await page.mouse.up();
+  await page.keyboard.up('Control');
   const [x1, y1] = await at();
   expect(Math.round(x0 - x1)).toBe(120);
   expect(Math.round(y0 - y1)).toBe(80);
   await expect(first).toHaveClass(/studio-pick/);
+
+  // Ctrl let go: the arrow again on empty canvas; a plain left drag there is the rectangle, the arrow kept, the view still
+  const spot = await emptySpot(panel);
+  await expect.poll(() => cursorAt(spot.x, spot.y)).toBe('default');
+  await page.mouse.move(spot.x, spot.y);
+  await page.mouse.down();
+  await page.mouse.move(spot.x + 30, spot.y + 20, { steps: 6 });
+  await expect(panel.locator('.design-band')).toHaveCount(1);
+  expect(await cursorAt(spot.x + 30, spot.y + 20)).toBe('default');
+  await page.mouse.up();
+  await expect(panel.locator('.design-band')).toHaveCount(0);
+  expect(await at()).toEqual([x1, y1]);
 });
 test('menus, the picker and the tooltip open above a floating group', async ({ page }) => {
   const [wf] = workflows;
