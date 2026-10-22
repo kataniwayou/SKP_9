@@ -110,16 +110,40 @@ try {
     N ("{0}: after: {1}; wires {2}" -f $name, (& $all), (Wires))
   }
 
-  # our layout gap scaled to Visio's shape (128 of a 224 px step), released in the middle and near B
-  Scene 'narrow' ($w * 128 / 224)
-  Scene 'narrow-nearB' ($w * 128 / 224) 0.85
-  # a gap D just fits with nothing to spare on either side, and one with room
-  Scene 'snug' ($w + 0.4)
-  Scene 'wide' ($w * 3) 0.7
-  # the page's avenue doubled: does D land further from A, and B get pushed further?
-  $page.PageSheet.CellsU('AvenueSizeX').FormulaU = '30 mm'
-  Scene 'avenue30' ($w * 128 / 224)
-  N 'done'
+  # (2026-10-22, second question) source and head in different rows: A feeds S level with it and B a row below (as
+  # Studio's layout draws a fan-out); D dropped on A -> B. Where does D land, and what moves?
+  function Rows($name, $gap) {
+    foreach ($s in @($page.Shapes)) { $s.Delete() }
+    $step = $w + $gap
+    $script:A = $page.Drop($procM, 2, 7); $A.Text = 'A'
+    $script:Sib = $page.Drop($procM, 2 + $step, 7); $Sib.Text = 'S'
+    $script:B = $page.Drop($procM, 2 + $step, 7 - 0.6 - $gap); $B.Text = 'B'
+    $script:C = $page.Drop($procM, 2 + 2 * $step, 7 - 0.6 - $gap); $C.Text = 'C'
+    $k1 = $page.Drop($conM, 0, 0); $k1.CellsU('BeginX').GlueTo($A.CellsSRC(1, 1, 0)); $k1.CellsU('EndX').GlueTo($Sib.CellsSRC(1, 1, 0))
+    $k2 = $page.Drop($conM, 1, 1); $k2.CellsU('BeginX').GlueTo($A.CellsSRC(1, 1, 0)); $k2.CellsU('EndX').GlueTo($B.CellsSRC(1, 1, 0))
+    $k3 = $page.Drop($conM, 1, 2); $k3.CellsU('BeginX').GlueTo($B.CellsSRC(1, 1, 0)); $k3.CellsU('EndX').GlueTo($C.CellsSRC(1, 1, 0))
+    $script:D = $page.Drop($procM, 2 + $step / 2, 3.6); $D.Text = 'D'
+    $win.DeselectAll(); Start-Sleep -Milliseconds 900
+    $all = { (@($A, $Sib, $B, $C, $D) | ForEach-Object { Spot $_ }) -join '; ' }
+    N ("{0}: gap {1} mm; before: {2}; wires {3}" -f $name, (& $mm $gap), (& $all), (Wires))
+    # the middle of A -> B's longest run, from its geometry
+    $pts = @(); $ox = $k2.CellsU('PinX').ResultIU - $k2.CellsU('LocPinX').ResultIU; $oy = $k2.CellsU('PinY').ResultIU - $k2.CellsU('LocPinY').ResultIU
+    for ($r = 1; $r -lt $k2.RowCount(10); $r++) { $pts += , @(($ox + $k2.CellsSRC(10, $r, 0).ResultIU), ($oy + $k2.CellsSRC(10, $r, 1).ResultIU)) }
+    $best = $null; $len = -1
+    for ($i = 1; $i -lt $pts.Count; $i++) { $l = [math]::Abs($pts[$i][0] - $pts[$i - 1][0]) + [math]::Abs($pts[$i][1] - $pts[$i - 1][1]); if ($l -gt $len) { $len = $l; $best = @((($pts[$i][0] + $pts[$i - 1][0]) / 2), (($pts[$i][1] + $pts[$i - 1][1]) / 2)) } }
+    N ("{0}: A -> B path(mm) {1}; dropped at ({2},{3}) mm" -f $name, (($pts | ForEach-Object { "({0},{1})" -f (& $mm $_[0]), (& $mm $_[1]) }) -join ' '), (& $mm $best[0]), (& $mm $best[1]))
+    $from = S ($D.CellsU('PinX').ResultIU) ($D.CellsU('PinY').ResultIU)
+    $to = S $best[0] $best[1]
+    Click $empty[0] $empty[1]
+    Down $from[0] $from[1]; Glide $from[0] $from[1] $to[0] $to[1] 25; MoveTo $to[0] $to[1]; Start-Sleep -Milliseconds 900
+    Shot "$name-held" $view[0] $view[1] $view[2] $view[3]
+    Up
+    Click $empty[0] $empty[1]; Start-Sleep -Milliseconds 500
+    Shot "$name-after" $view[0] $view[1] $view[2] $view[3]
+    N ("{0}: after: {1}; wires {2}" -f $name, (& $all), (Wires))
+  }
+  Rows 'rows-narrow' ($w * 128 / 224)
+  Rows 'rows-wide' ($w * 2)  N 'done'
 } catch { N "STOPPED: $($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))" }
 finally {
   foreach ($d in $v.Documents) { $d.Saved = $true }

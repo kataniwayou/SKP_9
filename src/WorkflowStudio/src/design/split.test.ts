@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { graphDto, stepDto, workflowDto } from '../api/fixtures';
+import { cacheDto, graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { addCircuitWire, plainCircuit, type Circuit } from '../circuit/circuit';
-import { STEP_H, STEP_W } from '../layout/geometry';
+import { CACHE_H, CACHE_W, LAYOUT_GAP, PMID, SPHERE_R, STEP_H, STEP_W } from '../layout/geometry';
 import { applyDraft } from './apply';
 import { EMPTY_DRAFT } from './draft';
-import { judgeSplit, splitAt, splitCircuit, splitLabel, splitTone, wireUnder } from './split';
+import { judgeSplit, splitAt, splitCircuit, splitLabel, splitPlace, splitTone, wireUnder } from './split';
 
 // wf -> s1 -> s2 -> s3, and s4 -> s5 (s5 of family 2)
 const doc = () => loadedDocument(graphDto({
@@ -124,5 +124,85 @@ describe('judging a split (plan 10 §4.6)', () => {
     const c = circuitOfDoc(d);
     expect(splitAt(d, c, boxOn(d, 's1->s2'), 'n', 1)).toMatchObject({ wire: 's1->s2', why: 'insert' });
     expect(splitAt(d, c, { x: -5000, y: -5000, w: STEP_W, h: STEP_H }, 'n', 1)).toBeNull();
+  });
+});
+
+describe("where the split's step lands (Visio, measured 2026-10-22; the user's choice (a))", () => {
+  const at = (x: number, y: number) => ({ x, y });
+
+  it('one layout gap past the source step, level with it, wherever it was released; the head and all it feeds move right to keep one gap', async () => {
+    const d = await doc();
+    const s1 = d.placement.steps.get('s1')!, s2 = d.placement.steps.get('s2')!, s3 = d.placement.steps.get('s3')!;
+    const p = splitPlace(d, circuitOfDoc(d), 's1->s2', 'n');
+    expect(p.box).toEqual({ x: s1.x + STEP_W + LAYOUT_GAP, y: s1.y, w: STEP_W, h: STEP_H });
+    // s2 must start one gap past the new step: s2 and s3 (fed by s2) move by the same amount, rows kept
+    const dx = p.box.x + STEP_W + LAYOUT_GAP - s2.x;
+    expect(dx).toBeGreaterThan(0);
+    expect(p.moved).toEqual(new Map([['s2', at(s2.x + dx, s2.y)], ['s3', at(s3.x + dx, s3.y)]]));
+  });
+
+  it('with room already, nothing moves', async () => {
+    const loaded = await doc();
+    const d = applyDraft(loaded, { ...EMPTY_DRAFT, steps: { s2: { x: 1400, y: 64 }, s3: { x: 1752, y: 64 } } });
+    const p = splitPlace(d, circuitOfDoc(d), 's1->s2', 'n');
+    expect(p.box.x).toBe(d.placement.steps.get('s1')!.x + STEP_W + LAYOUT_GAP);
+    expect(p.moved.size).toBe(0);
+  });
+
+  it('from the hub: one gap right of its ring, its processor middle level with the hub\'s centre', async () => {
+    const d = await doc();
+    const { cx, cy } = d.placement.sphere;
+    const p = splitPlace(d, circuitOfDoc(d), 'wf->s1', 'n');
+    expect(p.box).toMatchObject({ x: cx + SPHERE_R + LAYOUT_GAP, y: cy - PMID });
+    expect(p.moved.get('s1')!.x).toBe(p.box.x + STEP_W + LAYOUT_GAP);
+  });
+
+  it('a block that stays in the way (choice (a)): the group goes on right, in its rows, until it is one gap clear of it', async () => {
+    // the same workflow with a cache k1
+    const loaded = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'], cacheIds: ['k1'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2', { nextStepIds: ['s3'] }), stepDto('s3')],
+      caches: [cacheDto('k1')],
+    }));
+    const first = splitPlace(loaded, circuitOfDoc(loaded), 's1->s2', 'n');
+    // a cache parked where s3 would land
+    const k = first.moved.get('s3')!;
+    const d = applyDraft(loaded, { ...EMPTY_DRAFT, caches: { k1: { x: k.x + 40, y: k.y } } });
+    const p = splitPlace(d, circuitOfDoc(d), 's1->s2', 'n');
+    const cache = { x: k.x + 40, y: k.y, w: CACHE_W, h: CACHE_H };
+    const clear = (b: { x: number; y: number }) => b.x >= cache.x + cache.w + LAYOUT_GAP || b.x + STEP_W <= cache.x - LAYOUT_GAP;
+    for (const [id, b] of p.moved) {
+      expect(b.y, id).toBe(d.placement.steps.get(id)!.y);
+      expect(clear(b), id).toBe(true);
+    }
+    // the least such push, on the grid
+    const dx = p.moved.get('s2')!.x - d.placement.steps.get('s2')!.x;
+    expect(dx % 8).toBe(0);
+    expect([...p.moved.values()].every((b) => clear({ x: b.x - 8, y: b.y }))).toBe(false);
+  });
+  it('source and head in different rows (Visio, measured): one gap past the source, in the head\'s row; the head moves on, the other branch stays', async () => {
+    // s1 feeds s2 and s3: one column, two rows
+    const d = await loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2', 's3'] }), stepDto('s2'), stepDto('s3')] }));
+    const s1 = d.placement.steps.get('s1')!, s2 = d.placement.steps.get('s2')!, s3 = d.placement.steps.get('s3')!;
+    expect(s3.y).not.toBe(s1.y);
+    const p = splitPlace(d, circuitOfDoc(d), 's1->s3', 'n');
+    expect(p.box).toMatchObject({ x: s1.x + STEP_W + LAYOUT_GAP, y: s3.y });
+    expect(p.moved).toEqual(new Map([['s3', at(p.box.x + STEP_W + LAYOUT_GAP, s3.y)]]));
+    expect(s2).toEqual(d.placement.steps.get('s2'));
+  });
+
+  it("the step's own spot too near a block that stays (choice (a)): it goes on right in its row until clear, its head after it", async () => {
+    const loaded = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'], cacheIds: ['k1'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')],
+      caches: [cacheDto('k1')],
+    }));
+    const s1 = loaded.placement.steps.get('s1')!;
+    // a cache parked just under where the step would land, closer than a gap
+    const d = applyDraft(loaded, { ...EMPTY_DRAFT, caches: { k1: { x: s1.x + STEP_W + LAYOUT_GAP, y: s1.y + STEP_H + 64 } } });
+    const p = splitPlace(d, circuitOfDoc(d), 's1->s2', 'n');
+    expect(p.box.y).toBe(s1.y);
+    expect(p.box.x).toBe(s1.x + STEP_W + LAYOUT_GAP + CACHE_W + LAYOUT_GAP);
+    expect(p.moved.get('s2')!.x).toBe(p.box.x + STEP_W + LAYOUT_GAP);
   });
 });

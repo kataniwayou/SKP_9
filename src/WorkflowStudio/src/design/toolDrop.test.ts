@@ -3,7 +3,7 @@ import { cacheDto, graphDto, processorDto, schemaDto, stepDto, workflowDto } fro
 import { cacheFromDto, processorFromDto, schemaFromDto } from '../api/toModel';
 import { loadedDocument } from '../app/fixtures';
 import { buildDesignRequest } from '../app/saveDesign';
-import { snap, STEP_H, STEP_W } from '../layout/geometry';
+import { LAYOUT_GAP, snap, STEP_H, STEP_W } from '../layout/geometry';
 import { applyDesign } from './apply';
 import { parseBlocks } from './blocks';
 import { deletePicked } from './clipboard';
@@ -236,6 +236,11 @@ describe('an empty step dropped on a wire splits it (Visio, plan 10 §4.6)', () 
     const r = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'step' }, p, ids, 8)!;
     const id = r.picks[0]!.id;
     expect(r.draft.blocks.steps[id]).toBeDefined();
+    // Visio's landing (2026-10-22): one layout gap past s1, level with it; s2 pushed one gap past the new step
+    const s1 = base.placement.steps.get('s1')!;
+    const placed = applyDesign(base, r.draft, EMPTY_EDITS).placement.steps;
+    expect(placed.get(id)).toEqual({ x: s1.x + STEP_W + LAYOUT_GAP, y: s1.y });
+    expect(placed.get('s2')).toEqual({ x: s1.x + 2 * (STEP_W + LAYOUT_GAP), y: base.placement.steps.get('s2')!.y });
     const c = circuitOf(base, r.draft);
     expect(c['s1->s2']!.head).toEqual({ on: 'step', step: id, y: null });
     const added = Object.entries(c).find(([k]) => k.startsWith('w:'))!;

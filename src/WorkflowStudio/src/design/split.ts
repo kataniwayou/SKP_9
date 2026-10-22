@@ -1,15 +1,17 @@
 import type { StudioDocument } from '../app/document';
 import { isFree, setEnd, splitWire, type Circuit, type End } from '../circuit/circuit';
 import { netsOf } from '../circuit/families';
-import { loopWires } from '../circuit/trace';
+import { loopWires, trace } from '../circuit/trace';
 import { contactOn, routeCircuit } from '../layout/circuitRoute';
-import { snap } from '../layout/geometry';
+import { GRID, LAYOUT_GAP, PMID, snap, SPHERE_R, STEP_H, STEP_W, type Point } from '../layout/geometry';
+import { cacheNodeId, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { nearestOn } from '../layout/junctions';
 import type { Pt } from '../layout/router';
 import type { Id, Step } from '../model/graph';
 import { applyDraft } from './apply';
-import { circuitOf, withCircuit, type Draft } from './draft';
+import { circuitOf, moveBlocks, withCircuit, type Draft } from './draft';
 import { beforeDrop } from './drop';
+import { nodeBox } from './hit';
 
 /**
  * What dropping an empty step on a wire does (Visio, plan 10 §4.6): `insert` splits it through the step; refused on a
@@ -19,11 +21,16 @@ import { beforeDrop } from './drop';
  */
 export type SplitWhy = 'insert' | 'noDirection' | 'short';
 
-/** A held step over a wire: the wire it covers, what the drop does, and how far along the wire (drawn) it goes in. */
+/**
+ * A held step over a wire: the wire it covers, what the drop does, how far along the wire (drawn) it goes in, where the
+ * step lands and the steps that move to make room (`splitPlace`).
+ */
 export interface Split {
   wire: string;
   why: SplitWhy;
   at: number;
+  box: Box;
+  moved: ReadonlyMap<Id, Point>;
 }
 
 export function splitLabel(why: SplitWhy): string {
@@ -90,14 +97,15 @@ const PROBE = 'w:split';
 type Box = { x: number; y: number; w: number; h: number };
 
 /**
- * The routing context with `step` (family `condition`) at `box`, for a step the drawing may not have yet (a Toolbox
- * drop) or has elsewhere (one dragged).
+ * The routing context with `step` (family `condition`) at `box` and the steps `moved` where they go, for a step the
+ * drawing may not have yet (a Toolbox drop) or has elsewhere (one dragged).
  */
-function contextWith(shown: StudioDocument, step: Id, condition: number, box: Box) {
+function contextWith(shown: StudioDocument, step: Id, condition: number, box: Box, moved: ReadonlyMap<Id, Point> = new Map()) {
   const steps = new Map(shown.graph.steps);
   const own = shown.graph.steps.get(step);
   steps.set(step, { ...(own ?? { id: step, name: '', version: '', description: null, processorId: null, nextStepIds: [] }), entryCondition: condition } as Step);
   const placed = new Map(shown.placement.steps);
+  for (const [s, p] of moved) placed.set(s, p);
   placed.set(step, { x: box.x, y: box.y });
   return { placement: { ...shown.placement, steps: placed }, steps };
 }
@@ -105,11 +113,12 @@ function contextWith(shown: StudioDocument, step: Id, condition: number, box: Bo
 /**
  * Wire `id` split through step `step`, whose family (entry condition) is `condition`, `where.at` along its drawn line
  * (which half each junction on it goes with): judged as any connection is (`judgeDrop`'s rules): a loop of wires, or a
- * net gaining a family it did not have, refuses it. With `where.box` (where the step lands), the halves are drawn there
- * too: one that lies on a wire of another net it did not lie on before is a short circuit (rule 2).
+ * net gaining a family it did not have, refuses it. With `where.box` (where the step lands, `where.moved` the steps moved
+ * to make room), the halves are drawn there too: one that lies on a wire of another net it did not lie on before is a
+ * short circuit (rule 2).
  */
 export function judgeSplit(
-  shown: StudioDocument, circuit: Readonly<Circuit>, id: string, step: Id, condition: number, where: { at: number; box?: Box } = { at: Infinity },
+  shown: StudioDocument, circuit: Readonly<Circuit>, id: string, step: Id, condition: number, where: { at: number; box?: Box; moved?: ReadonlyMap<Id, Point> } = { at: Infinity },
 ): SplitWhy {
   const w = circuit[id];
   if (w === undefined || isFree(w)) return 'noDirection';
@@ -127,7 +136,7 @@ export function judgeSplit(
   if (where.box) {
     // the halves as the router draws them with the step in place; a short circuit the old wire was in already is no new one
     const was = new Set(shown.wires.find((r) => r.id === id)?.shortWith ?? []);
-    for (const r of routeCircuit(after, contextWith(shown, step, condition, where.box))) {
+    for (const r of routeCircuit(after, contextWith(shown, step, condition, where.box, where.moved))) {
       if (r.id !== id && r.id !== PROBE) continue;
       if ((r.shortWith ?? []).some((x) => x !== id && x !== PROBE && !was.has(x))) return 'short';
     }
@@ -136,8 +145,8 @@ export function judgeSplit(
 }
 
 /**
- * A step's box held at `box`: the wire it covers, the verdict there (its halves drawn with the step at `box`), and how far
- * along the wire the box's centre is; null over no wire. The last answer is kept: a drag asks again for every pointer
+ * A step's box held at `box`: the wire it covers, the verdict there, and how far along the wire the box's centre is; the
+ * step lands and the others make room as `splitPlace` says (its halves are judged drawn so); null over no wire. The last answer is kept: a drag asks again for every pointer
  * move, mostly with the step still on the same grid point.
  */
 let last: { key: unknown[]; split: Split | null } | null = null;
@@ -147,20 +156,23 @@ export function splitAt(shown: StudioDocument, circuit: Readonly<Circuit>, box: 
   const wire = wireUnder(shown, circuit, box, skip);
   const route = wire === null ? undefined : shown.wires.find((r) => r.id === wire);
   const at = route ? nearestOn([route.points], [box.x + box.w / 2, box.y + box.h / 2]).at : 0;
-  const split = wire === null ? null : { wire, why: judgeSplit(shown, circuit, wire, step, condition, { at, box }), at };
+  const place = wire === null ? null : splitPlace(shown, circuit, wire, step);
+  const split = wire === null || place === null ? null
+    : { wire, why: judgeSplit(shown, circuit, wire, step, condition, { at, ...place }), at, ...place };
   last = { key, split };
   return split;
 }
 
 /**
- * The release of a split (plan 10 §4.6): `draft` (the step already where it lands, over `saved`) with wire `split.wire`
- * split through `step`, the new half `newId`. Every end that was joined on the wire stays with its half and is put at
+ * The release of a split (plan 10 §4.6): `draft` (over `saved`, which has `step`) with the step where the split lands it,
+ * the steps it moves moved (`splitPlace`), and wire `split.wire` split through it, the new half `newId`. Every end that was joined on the wire stays with its half and is put at
  * the point of that half, as now drawn, nearest where it was drawn in `shown` (junctions keep their place, the user's
  * ruling 2026-10-20).
  */
 export function commitSplit(saved: StudioDocument, shown: StudioDocument, draft: Draft, split: Split, step: Id, newId: string): Draft {
-  const was = circuitOf(saved, draft);
-  const next = withCircuit(draft, saved, splitCircuit(was, split.wire, step, newId, split.at));
+  const placed = moveBlocks(draft, saved, new Map([...split.moved, [step, { x: split.box.x, y: split.box.y }]]));
+  const was = circuitOf(saved, placed);
+  const next = withCircuit(placed, saved, splitCircuit(was, split.wire, step, newId, split.at));
   const line = shown.wires.find((r) => r.id === split.wire)?.points;
   const joined = Object.entries(was).flatMap(([k, x]) => (['tail', 'head'] as const)
     .flatMap((side) => (x[side].on === 'wire' && x[side].host === split.wire ? [{ k, side, at: x[side].at }] : [])));
@@ -173,4 +185,48 @@ export function commitSplit(saved: StudioDocument, shown: StudioDocument, draft:
     if (half) c = setEnd(c, j.k, j.side, { on: 'wire', host, at: snap(nearestOn([half], contactOn(line, j.at).p).at) });
   }
   return withCircuit(next, saved, c);
+}
+
+/** How far the group may be pushed looking for room before giving up (flow px): far past any real workflow. */
+const PUSH_LIMIT = 20000;
+
+/**
+ * Where a step splitting wire `id` lands, and what moves to make room (Visio, measured 2026-10-22,
+ * `visio-reference/scripts/ui8.ps1`): wherever it was released, the step lands one layout gap (Visio's avenue) past the
+ * wire's source (a source step's right side, the hub's ring, else the wire's drawn start), in the head step's row (the
+ * source's row when the head is no step: the hub's centre at its processor middle). The head and every step its current
+ * reaches after it move right together, just far enough to start one gap past the new step; blocks not wired after it
+ * never move. Where the step, or the group, would come within a gap of a block that stays, it goes on right on the grid,
+ * in its row, until it is clear (the user's choice (a), 2026-10-22; Visio searches a free spot instead and may move it
+ * down).
+ */
+export function splitPlace(shown: StudioDocument, circuit: Readonly<Circuit>, id: string, step: Id): { box: Box; moved: Map<Id, Point> } {
+  const w = circuit[id]!;
+  const steps = shown.placement.steps;
+  const { cx, cy } = shown.placement.sphere;
+  const start = shown.wires.find((r) => r.id === id)?.points[0] ?? [0, 0];
+  const from = w.tail.on === 'step' ? steps.get(w.tail.step) : undefined;
+  const head = w.head.on === 'step' && w.head.step !== step && steps.has(w.head.step) ? w.head.step : null;
+  const x = from ? from.x + STEP_W + LAYOUT_GAP : w.tail.on === 'hub' ? cx + SPHERE_R + LAYOUT_GAP : snap(start[0] + LAYOUT_GAP);
+  const y = head !== null ? steps.get(head)!.y : from ? from.y : w.tail.on === 'hub' ? cy - PMID : snap(start[1] - PMID);
+  // the head and every step its current reaches, never the source or the new step
+  const group = new Set<Id>(head === null ? [] : [head]);
+  const links = trace(circuit).links;
+  for (const s of group) for (const t of links.get(s) ?? []) if (t !== step && (w.tail.on !== 'step' || t !== w.tail.step) && steps.has(t)) group.add(t);
+  // every block that stays, the hub and the caches included
+  const others = [SPHERE_NODE_ID, ...[...steps.keys()].filter((s) => !group.has(s) && s !== step), ...[...shown.placement.caches.keys()].map(cacheNodeId)]
+    .flatMap((n) => { const b = nodeBox(shown, n); return b ? [b] : []; });
+  const near = (a: Box, b: Box) => Math.max(0, b.x - (a.x + a.w), a.x - (b.x + b.w)) < LAYOUT_GAP && Math.max(0, b.y - (a.y + a.h), a.y - (b.y + b.h)) < LAYOUT_GAP;
+  const clear = (a: Box) => !others.some((o) => near(a, o));
+  const box = { x, y, w: STEP_W, h: STEP_H };
+  while (!clear(box) && box.x - x < PUSH_LIMIT) box.x += GRID;
+  const moved = new Map<Id, Point>();
+  if (head === null) return { box, moved };
+  const need = box.x + STEP_W + LAYOUT_GAP - steps.get(head)!.x;
+  if (need <= 0) return { box, moved };
+  const fits = (dx: number) => [...group].every((s) => { const p = steps.get(s)!; return clear({ x: p.x + dx, y: p.y, w: STEP_W, h: STEP_H }); });
+  let dx = Math.ceil(need / GRID) * GRID;
+  while (!fits(dx) && dx < PUSH_LIMIT) dx += GRID;
+  for (const s of group) { const p = steps.get(s)!; moved.set(s, { x: p.x + dx, y: p.y }); }
+  return { box, moved };
 }

@@ -13,7 +13,7 @@ import { circuitOf, withCircuit, type Draft } from './draft';
 import { endOf, judgeDrop, pointOfTarget, targetOf, toneOf, dropLabel, type DropTarget as WireTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
 import { overlapJudge } from './overlapJudge';
-import { commitSplit, splitAt, splitLabel, splitTone, type SplitWhy } from './split';
+import { commitSplit, splitAt, splitLabel, splitTone, type Split } from './split';
 
 /**
  * What a Toolbox tile drags (2026-10-11): a new, empty step or cache, a new undecided wire (each a new virtual entity, as a
@@ -40,7 +40,7 @@ export type ToolVerdict =
   /** A Wire tile over a contact (2026-10-20): judged as a dragged wire end there; `points`: the wire as it would be drawn. */
   | { kind: 'wire'; target: Exclude<WireTarget, { on: 'open' }>; why: Verdict; points: Pt[] | null }
   /** An empty step over a wire's run (Visio, plan 10 §4.6): released, the wire splits through it, or the refusal. */
-  | { kind: 'split'; wire: string; why: SplitWhy; at: number }
+  | ({ kind: 'split' } & Split)
   | { kind: 'assign' | 'replace'; stepId: Id }
   | { kind: 'noStep' }
   | { kind: 'linked'; cacheId: Id };

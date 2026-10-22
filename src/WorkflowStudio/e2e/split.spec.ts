@@ -21,6 +21,11 @@ const tileOf = (page: Page, tool: string) => page.locator(`[data-pane="toolbox"]
 const stepIds = (panel: Locator) => panel.locator('.react-flow__node-step').evaluateAll((els) => els.map((e) => e.getAttribute('data-id')!));
 const squares = (panel: Locator, tone: 'ok' | 'no') => panel.locator(`.design-split-end.${tone}`);
 const near = (a: Pt, b: Pt, d = 3) => Math.hypot(a.x - b.x, a.y - b.y) <= d;
+/** A block's top left in flow coordinates, from its transform. */
+const topLeft = (el: Locator): Promise<Pt> => el.evaluate((e) => {
+  const m = /translate\(([-\d.e]+)px, ?([-\d.e]+)px\)/.exec((e as HTMLElement).style.transform)!;
+  return { x: Number(m[1]), y: Number(m[2]) };
+});
 
 async function open(page: Page): Promise<Locator> {
   await openWorkflow(page, t.workflow);
@@ -55,6 +60,7 @@ test('a Toolbox step held over b -> c: its ends green, "insert here"; released, 
   const before = await stepIds(panel);
   const wire = `${t.b}->${t.c}`;
   const whole = await wirePoints(panel, wire);
+  const b0 = await topLeft(node(panel, t.b)), c0 = await topLeft(node(panel, t.c));
   await holdTile(page, 'step', await pointOnWire(panel, wire));
   await onEnds(panel, 'ok', wire);
   expect(await labelsOf(panel)).toContain('insert here');
@@ -66,6 +72,9 @@ test('a Toolbox step held over b -> c: its ends green, "insert here"; released, 
   await expect.poll(async () => (await stepIds(panel)).length).toBe(before.length + 1);
   const made = (await stepIds(panel)).find((id) => !before.includes(id))!;
   const at = await box(node(panel, made));
+  // Visio's landing: one layout gap (128) past b, level with it; c pushed to start one gap past the new step
+  expect(await topLeft(node(panel, made))).toEqual({ x: b0.x + 224 + 128, y: b0.y });
+  expect(await topLeft(node(panel, t.c))).toEqual({ x: b0.x + 2 * (224 + 128), y: c0.y });
   // b -> c now ends on the new step's input; a new wire runs from its output into c
   const z = await zoomOf(panel);
   const into = await wirePoints(panel, wire);
@@ -75,13 +84,14 @@ test('a Toolbox step held over b -> c: its ends green, "insert here"; released, 
   const out = await newWires(panel).first().getAttribute('data-id');
   const outPts = await wirePoints(panel, out!);
   expect(outPts[0]![0]).toBeCloseTo(flowLeft + at.width / z, 0);
-  expect(outPts.at(-1)).toEqual(whole.at(-1));
+  expect(outPts.at(-1)![0]).toBe((await topLeft(node(panel, t.c))).x);
   await panel.screenshot({ path: 'test-results/split-toolbox-done.png' });
   await panel.getByRole('button', { name: /Undo/ }).click();
   await frames(page);
   expect(await stepIds(panel)).toEqual(before);
   await expect(newWires(panel)).toHaveCount(0);
   expect(await wirePoints(panel, wire)).toEqual(whole);
+  expect(await topLeft(node(panel, t.c))).toEqual(c0);
 });
 
 test('an empty step on the canvas dragged onto a -> b: held marked, released split; one Undo leaves the step where it was', async ({ page }) => {
@@ -95,6 +105,7 @@ test('an empty step on the canvas dragged onto a -> b: held marked, released spl
   const wire = `${t.a}->${t.b}`;
   const whole = await wirePoints(panel, wire);
   const placed = await box(node(panel, made));
+  const a0 = await topLeft(node(panel, t.a)), b0 = await topLeft(node(panel, t.b)), d0 = await topLeft(node(panel, t.d));
   // pressed on its name, carried onto the wire's run
   const from = await centreOf(node(panel, made).locator('.nx-sn'));
   const target = await pointOnWire(panel, wire);
@@ -111,10 +122,14 @@ test('an empty step on the canvas dragged onto a -> b: held marked, released spl
   await page.mouse.up();
   await frames(page);
   await expect(squares(panel, 'ok')).toHaveCount(0);
+  // Visio's landing: one gap past a, in b's row (a -> b runs down a row); b moves one column on, d (a's other branch) stays
+  expect(await topLeft(node(panel, made))).toEqual({ x: a0.x + 224 + 128, y: b0.y });
+  expect(await topLeft(node(panel, t.b))).toEqual({ x: a0.x + 2 * (224 + 128), y: b0.y });
+  expect(await topLeft(node(panel, t.d))).toEqual(d0);
   const flowLeft = await node(panel, made).evaluate((e) => Number(/translate\(([-\d.e]+)px/.exec((e as HTMLElement).style.transform)![1]));
   expect((await wirePoints(panel, wire)).at(-1)![0]).toBe(flowLeft);
   await expect(newWires(panel)).toHaveCount(1);
-  expect((await wirePoints(panel, (await newWires(panel).first().getAttribute('data-id'))!)).at(-1)).toEqual(whole.at(-1));
+  expect((await wirePoints(panel, (await newWires(panel).first().getAttribute('data-id'))!)).at(-1)![0]).toBe((await topLeft(node(panel, t.b))).x);
   // one Undo: the wire whole again, the step back where it was dropped
   await panel.getByRole('button', { name: /Undo/ }).click();
   await frames(page);

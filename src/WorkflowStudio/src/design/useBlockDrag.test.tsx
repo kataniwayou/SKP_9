@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import type { StudioDocument } from '../app/document';
 import { loadedDocument } from '../app/fixtures';
-import { snap, STEP_H, STEP_W } from '../layout/geometry';
+import { LAYOUT_GAP, snap, STEP_H, STEP_W } from '../layout/geometry';
 import type { Pick } from '../store/picks';
 import type { DesignProps } from './designProps';
 import { addCircuitWire } from '../circuit/circuit';
@@ -288,7 +288,10 @@ describe('an empty step dropped on a wire splits it (Visio, plan 10 §4.6)', () 
     t.stop('e1');
     expect(t.design.onCommit).toHaveBeenCalledTimes(1);
     const after = (t.design.onCommit as ReturnType<typeof vi.fn>).mock.lastCall![0] as Draft;
-    expect(after.steps.e1).toEqual(held.draft.steps.e1);
+    // Visio's landing (2026-10-22): one layout gap past s1, level with it, wherever released; s2 pushed one gap past it
+    const s1 = doc.placement.steps.get('s1')!;
+    expect(after.steps.e1).toEqual({ x: s1.x + STEP_W + LAYOUT_GAP, y: s1.y });
+    expect(after.steps.s2).toEqual({ x: s1.x + 2 * (STEP_W + LAYOUT_GAP), y: doc.placement.steps.get('s2')!.y });
     const c = circuitOf(doc, after);
     expect(c['s1->s2']!.head).toEqual({ on: 'step', step: 'e1', y: null });
     const added = Object.entries(c).filter(([k]) => k.startsWith('w:'));

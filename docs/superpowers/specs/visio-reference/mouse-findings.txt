@@ -88,3 +88,9 @@ wide: after: A (50.8,177.8) mm; B (150.8,177.8) mm; C (250.8,177.8) mm; F (350.8
 avenue30: gap 14.3 mm, released 0.5 of the way from A's right to B's left; before: A (50.8,177.8) mm; B (90.1,177.8) mm; C (129.4,177.8) mm; F (168.7,177.8) mm; G (129.4,137.2) mm; E (109.7,157.5) mm; D (70.4,106.7) mm
 avenue30: after: A (50.8,177.8) mm; B (200,177.8) mm; C (239.3,177.8) mm; F (168.7,177.8) mm; G (239.3,137.2) mm; E (109.7,157.5) mm; D (105.8,177.8) mm; wires [BeginX->A, EndX->D] [BeginX->B, EndX->C] [BeginX->B, EndX->G] [BeginX->D, EndX->B]
 done
+rows-narrow: gap 14.3 mm; before: A (50.8,177.8) mm; S (90.1,177.8) mm; B (90.1,148.3) mm; C (129.4,148.3) mm; D (70.4,91.4) mm; wires [BeginX->A, EndX->S] [BeginX->A, EndX->B] [BeginX->B, EndX->C]
+rows-narrow: A -> B path(mm) (50.8,170.3) (50.8,148.3) (77.6,148.3); dropped at (64.2,148.3) mm
+rows-narrow: after: A (50.8,177.8) mm; S (90.1,177.8) mm; B (90.1,148.3) mm; C (129.4,148.3) mm; D (50.8,148.3) mm; wires [BeginX->A, EndX->S] [BeginX->A, EndX->D] [BeginX->B, EndX->C] [BeginX->D, EndX->B]
+rows-wide: gap 50 mm; before: A (50.8,177.8) mm; S (125.8,177.8) mm; B (125.8,112.6) mm; C (200.8,112.6) mm; D (88.3,91.4) mm; wires [BeginX->A, EndX->S] [BeginX->A, EndX->B] [BeginX->B, EndX->C]
+rows-wide: A -> B path(mm) (50.8,170.3) (50.8,112.6) (113.3,112.6); dropped at (82,112.6) mm
+rows-wide: after: A (50.8,177.8) mm; S (125.8,177.8) mm; B (125.8,112.6) mm; C (200.8,112.6) mm; D (85.8,112.6) mm; wires [BeginX->A, EndX->S] [BeginX->A, EndX->D] [BeginX->B, EndX->C] [BeginX->D, EndX->B]
