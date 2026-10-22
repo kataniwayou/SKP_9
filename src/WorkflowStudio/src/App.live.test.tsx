@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from './api/client';
 import { workflowDto } from './api/fixtures';
 import { App, LIVE_MARK_DELAY_MS } from './App';
+import { RETRY_MS } from './live/liveClient';
 import { fakeHub, snap } from './test/fakeHub';
 import { memoryStorage } from './test/memoryStorage';
 
@@ -87,24 +88,32 @@ describe('live push in the studio (2026-10-10)', () => {
   });
 
   it('while the hub is not connected the status area says live updates are reconnecting and the app polls; connected again, the mark goes', async () => {
-    const hub = fakeHub();
-    const api = fakeApi();
-    vi.mocked(api.listLive).mockResolvedValue({ ok: true, value: [ZETA] });
-    render(<App api={api} storage={memoryStorage()} hub={hub.factory} />);
-    expect(screen.queryByRole('status', { name: 'Live updates' })).toBeNull();   // still connecting at start: no mark yet
-    await act(async () => { hub.last().starting.reject(new Error('refused')); });
-    await waitFor(() => expect(screen.getByRole('status', { name: 'Live updates' })).toHaveTextContent('live updates reconnecting'), { timeout: LIVE_MARK_DELAY_MS + 2000 });
-    expect(api.listLive).toHaveBeenCalled();
-    openPicker();
-    expect(within(await screen.findByRole('option', { name: /zeta/ })).getByRole('img', { name: 'running' })).toBeInTheDocument();   // from the poll
-    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    // fake timers: the mark's delay and the retry's wait are stepped through, not waited out (near Vitest's 5 s timeout)
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const hub = fakeHub();
+      const api = fakeApi();
+      vi.mocked(api.listLive).mockResolvedValue({ ok: true, value: [ZETA] });
+      render(<App api={api} storage={memoryStorage()} hub={hub.factory} />);
+      expect(screen.queryByRole('status', { name: 'Live updates' })).toBeNull();   // still connecting at start: no mark yet
+      await act(async () => { hub.last().starting.reject(new Error('refused')); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(LIVE_MARK_DELAY_MS); });
+      expect(screen.getByRole('status', { name: 'Live updates' })).toHaveTextContent('live updates reconnecting');
+      expect(api.listLive).toHaveBeenCalled();
+      openPicker();
+      expect(within(await screen.findByRole('option', { name: /zeta/ })).getByRole('img', { name: 'running' })).toBeInTheDocument();   // from the poll
+      fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
 
-    // a retry connects; its snapshot replaces what the poll said
-    await waitFor(() => expect(hub.conns.length).toBeGreaterThan(1), { timeout: 3000 });
-    await act(async () => { hub.last().starting.resolve(); });
-    await act(async () => { hub.last().snapshots.shift()!.resolve(snap(9, [])); });
-    expect(screen.queryByRole('status', { name: 'Live updates' })).toBeNull();
-    expect(logLines()).toEqual(['zeta stopped']);
+      // a retry connects; its snapshot replaces what the poll said
+      await act(async () => { await vi.advanceTimersByTimeAsync(RETRY_MS[1]!); });
+      expect(hub.conns.length).toBeGreaterThan(1);
+      await act(async () => { hub.last().starting.resolve(); });
+      await act(async () => { hub.last().snapshots.shift()!.resolve(snap(9, [])); });
+      expect(screen.queryByRole('status', { name: 'Live updates' })).toBeNull();
+      expect(logLines()).toEqual(['zeta stopped']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('without a hub (a test api) the app polls the two GET endpoints, once for the whole app', async () => {

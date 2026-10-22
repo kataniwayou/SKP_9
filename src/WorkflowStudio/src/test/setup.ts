@@ -1,6 +1,10 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { afterEach } from 'vitest';
+
+// findBy/waitFor wait 3 s, not Testing Library's 1 s: under the full suite's load a document's opening can take
+// longer than 1 s (App.test's "opens a workflow as a tab" failed so, 2026-10-22). They still answer as soon as it is.
+configure({ asyncUtilTimeout: 3000 });
 
 // Vitest globals are off, so Testing Library does not unmount between tests by itself.
 // The page keeps its session in this tab's sessionStorage by default, and writes it when it unmounts:
