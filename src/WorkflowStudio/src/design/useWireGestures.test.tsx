@@ -396,17 +396,40 @@ describe('wire gestures', () => {
     expect(draft.entries).toEqual(['s1', 's3']);
   });
 
-  it('a tail dropped on the hub keeps no corners: a wire shaped by hand, or drawn round the ring, is routed again from the ring (the user, 2026-10-22)', async () => {
+  it('a tail dropped on the hub keeps the shape the wire had: an end joined on it stays where it was (the user, 2026-10-22)', async () => {
     const doc = await three();
-    const s2 = doc.placement.steps.get('s2')!;
-    const shaped = setShape(EMPTY_DRAFT, doc, 's2->s3', { bends: { xs: [s2.x + STEP_W + 40], ys: [] }, landing: null });
+    // a detour below the row: out of s2, down, along, up into s3
+    const s2 = doc.placement.steps.get('s2')!, s3 = doc.placement.steps.get('s3')!;
+    const x2 = s3.x - 40, low = s2.y + 320;
+    const shaped = setShape(EMPTY_DRAFT, doc, 's2->s3', { bends: { xs: [s2.x + STEP_W + 40, x2], ys: [low] }, landing: null });
     const design = designOf({ draft: shaped, picks: [{ kind: 'wire', id: 's2->s3' }] });
     const { container } = canvasOf(doc, design);
     const { cx, cy } = doc.placement.sphere;
     expect(dragEnd(container, 's2->s3', 'tail', { x: cx - 2, y: cy - 60 }).text).toBe('connect here');
     const [draft] = commits(design)[0]!;
     expect(draft.wires!['s2->s3']!.tail).toEqual({ on: 'hub', angle: 270 });
-    expect(draft.wires!['s2->s3']!.bends).toBeUndefined();
+    // the part by s3, the end that stayed, is where it was
+    expect(draft.wires!['s2->s3']!.bends?.xs.at(-1)).toBe(x2);
+    expect(draft.wires!['s2->s3']!.bends?.ys).toContain(low);
+  });
+
+  it('a tail moved round the ring and dropped on the hub keeps no corner drawn in the drag (the user, 2026-10-22)', async () => {
+    const doc = await three();
+    const design = designOf({ picks: [{ kind: 'wire', id: 's2->s3' }] });
+    const { container } = canvasOf(doc, design);
+    const { cx, cy } = doc.placement.sphere;
+    const handle = container.querySelector('.design-wire[data-wire="s2->s3"] .design-handle.end[data-end="tail"]')!;
+    const from = handle.getBoundingClientRect();
+    fireEvent.pointerDown(handle, { button: 0, clientX: from.x, clientY: from.y, pointerId: 1 });
+    // a staircase of turns on the way: right of the hub, over its top, down its left side to the bottom
+    for (let a = 0; a <= 270; a += 15) {
+      const r = (-a * Math.PI) / 180;
+      fireEvent.pointerMove(document, { ...screenOf(container, { x: cx + 40 * Math.cos(r), y: cy + 40 * Math.sin(r) }), pointerId: 1 });
+    }
+    fireEvent.pointerUp(document, { ...screenOf(container, { x: cx, y: cy + 40 }), pointerId: 1 });
+    const [draft] = commits(design)[0]!;
+    expect(draft.wires!['s2->s3']!.tail).toMatchObject({ on: 'hub' });
+    expect(draft.wires!['s2->s3']!.bends ?? null).toBeNull();
   });
 
   it('an end released on empty canvas is open there, grey "move here"; both ends may be open', async () => {

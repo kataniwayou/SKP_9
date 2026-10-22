@@ -401,13 +401,17 @@ export function useWireGestures(
     /** The bends of a path drawn from the end that stays (`oriented`), its lead before the core left out. */
     const bendsOf = (oriented: readonly Pt[]) => shapeFromPoints(stored(coreFrom(oriented, fixed)));
     // an automatic wire with no corner fixed in this drag is routed again onto a step or a line (as before); onto the hub
-    // every wire is (the user, 2026-10-22): an end moved round the ring draws no corners, so it moves there freely
-    const keepShape = (t?: DropTarget) => t?.on !== 'hub' && (rec.bends !== undefined || legs.drawn);
+    // no corner fixed in this drag counts (the user, 2026-10-22): an end moved round the ring draws none, so it moves there
+    // freely, and a wire with a shape of its own keeps that shape (an end joined on it stays where it was, rule D)
+    const keepShape = (t?: DropTarget) => rec.bends !== undefined || (t?.on !== 'hub' && legs.drawn);
+    /** The corners the drop keeps: onto the hub only the wire's own, none fixed in this drag. */
+    const penOf = (t: DropTarget): Pt[] => (t.on === 'hub' ? legs.path.slice(0, legs.floor) : legs.path);
     /** The path into target `t` from the end that stays (a hub's lead at the dragged end apart), and that lead. */
     const into = (t: DropTarget): { core: Pt[]; lead: Pt[] } => {
       // the end this one is once dropped: a direction-less wire's end takes the role the side or the hub gives it
       const role: Side = freeWithout(rec, side) ? roleOf(t) ?? side : side;
-      const a = legs.path[legs.path.length - 1]!;
+      const pen = penOf(t);
+      const a = pen[pen.length - 1]!;
       let start = pointOfTarget(shown.current, t), lead: Pt[] = [];
       if (t.on === 'hub') {
         // as the wire will be drawn there: a shape kept starts at the ring point on the grid (`hubStart`)
@@ -423,10 +427,10 @@ export function useWireGestures(
       // the last leg: on along the anchor's way when it is vertical, then square into the contact from the side a wire
       // takes it (a head from the left, a tail to the right), so the corner drawn there stays; otherwise routed as a
       // wire leaves its tail (from the anchor to a head, from a tail to the anchor)
-      const square = legs.axis === 'v' && (t.on === 'wire' || (role === 'head' ? a[0] <= start.x : a[0] >= start.x));
+      const square = t.on !== 'hub' && legs.axis === 'v' && (t.on === 'wire' || (role === 'head' ? a[0] <= start.x : a[0] >= start.x));
       const leg = ghostPath({ x: a[0], y: a[1] }, start, role, boxes, avoid);
       const fromAnchor: Pt[] = square ? [[a[0], start.y], [start.x, start.y]] : role === 'head' ? leg : [...leg].reverse();
-      return { core: simplify([...legs.path, ...fromAnchor]), lead };
+      return { core: simplify([...pen, ...fromAnchor]), lead };
     };
     // the wire's own squares as they are now, but the one being dragged: what it may be released on to cut the wire
     const shape = rec.bends ?? shapeFromPoints(wire.core.points);
@@ -462,7 +466,7 @@ export function useWireGestures(
       } else {
         // the corners drawn are kept and only the last leg routed in (rule C); a direction-less wire the drop turns
         // round turns its bends with it (rule D)
-        const keep = t.on === 'hub' ? null : keepShape(t) ? bendsOf(into(t).core) : undefined;
+        const keep = keepShape(t) ? bendsOf(into(t).core) : t.on === 'hub' ? null : undefined;
         const place = { routes: shown.current.wires, ctx: { placement: shown.current.placement, steps: shown.current.graph.steps } };
         next = applyDrop(circuit, wire.id, side, t, place, keep === undefined || keep === null ? keep : keep.xs.length > 0 ? keep : null).circuit;
       }
