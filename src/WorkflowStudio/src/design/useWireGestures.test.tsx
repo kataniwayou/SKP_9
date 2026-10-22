@@ -396,6 +396,19 @@ describe('wire gestures', () => {
     expect(draft.entries).toEqual(['s1', 's3']);
   });
 
+  it('a tail dropped on the hub keeps no corners: a wire shaped by hand, or drawn round the ring, is routed again from the ring (the user, 2026-10-22)', async () => {
+    const doc = await three();
+    const s2 = doc.placement.steps.get('s2')!;
+    const shaped = setShape(EMPTY_DRAFT, doc, 's2->s3', { bends: { xs: [s2.x + STEP_W + 40], ys: [] }, landing: null });
+    const design = designOf({ draft: shaped, picks: [{ kind: 'wire', id: 's2->s3' }] });
+    const { container } = canvasOf(doc, design);
+    const { cx, cy } = doc.placement.sphere;
+    expect(dragEnd(container, 's2->s3', 'tail', { x: cx - 2, y: cy - 60 }).text).toBe('connect here');
+    const [draft] = commits(design)[0]!;
+    expect(draft.wires!['s2->s3']!.tail).toEqual({ on: 'hub', angle: 270 });
+    expect(draft.wires!['s2->s3']!.bends).toBeUndefined();
+  });
+
   it('an end released on empty canvas is open there, grey "move here"; both ends may be open', async () => {
     const doc = await two();
     const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });

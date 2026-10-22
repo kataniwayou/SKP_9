@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
-import { box, documentPanel, emptySpot, expect, newWires, node, openWorkflow, test, wirePoints, zoomOf, type Pt } from './studio';
+import { box, centreOf, documentPanel, emptySpot, endSquare, expect, newWires, node, openWorkflow, pickWire, test, wirePoints, zoomOf, type Pt } from './studio';
 import { createCircuitThrowaway, removeThrowaway, type CircuitThrowaway } from './throwaway';
 
 // Plan 10 phase 6 (spec §4.8): Visio's AutoConnect arrows, with the real mouse (measured: `scripts/ui9.ps1`). Hovered, a
@@ -145,4 +145,26 @@ test("an arrow taken away under the pointer leaves no landing box behind: a wire
   await page.mouse.move(far.x + 40, far.y + 40, { steps: 4 });
   await frames(page);
   await expect(panel.locator('.design-tool-landing')).toHaveCount(0);
+});
+
+test("a hub tail moved round the ring meets no resistance: released on the hub it keeps no corners drawn on the way (the user, 2026-10-22)", async ({ page }) => {
+  const panel = await open(page);
+  const id = `wf->${t.a}`;
+  await pickWire(page, panel, id);
+  const hub = await box(node(panel, 'wf'));
+  const c = { x: hub.x + hub.width / 2, y: hub.y + hub.height / 2 }, r = hub.width * 0.4;
+  const from = await centreOf(endSquare(panel, id, 'tail'));
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  // round the ring, inside it: from the right over the top and the left side to the bottom
+  for (let a = 0; a >= -270; a -= 10) await page.mouse.move(c.x + r * Math.cos((a * Math.PI) / 180), c.y + r * Math.sin((a * Math.PI) / 180), { steps: 2 });
+  await page.mouse.up();
+  await frames(page);
+  // the wire starts on the ring at the bottom (90 degrees) and nothing of it runs inside the hub
+  const z = await zoomOf(panel);
+  const pts = await wirePoints(panel, id);
+  const centre = await panel.locator('.react-flow__node[data-id="wf"]').evaluate((n) => { const m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec((n as HTMLElement).style.transform)!; return { x: Number(m[1]) + (n as HTMLElement).offsetWidth / 2, y: Number(m[2]) + (n as HTMLElement).offsetHeight / 2 }; });
+  const R = hub.width / z / 2;
+  expect(Math.round(pts[0]![1] - centre.y)).toBe(Math.round(R));
+  for (const p of pts.slice(1)) expect(Math.hypot(p[0] - centre.x, p[1] - centre.y)).toBeGreaterThanOrEqual(R - 1);
 });

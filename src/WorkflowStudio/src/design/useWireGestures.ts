@@ -400,8 +400,9 @@ export function useWireGestures(
     };
     /** The bends of a path drawn from the end that stays (`oriented`), its lead before the core left out. */
     const bendsOf = (oriented: readonly Pt[]) => shapeFromPoints(stored(coreFrom(oriented, fixed)));
-    // an automatic wire with no corner fixed in this drag is routed again onto a step, the hub or a line (as before)
-    const keepShape = () => rec.bends !== undefined || legs.drawn;
+    // an automatic wire with no corner fixed in this drag is routed again onto a step or a line (as before); onto the hub
+    // every wire is (the user, 2026-10-22): an end moved round the ring draws no corners, so it moves there freely
+    const keepShape = (t?: DropTarget) => t?.on !== 'hub' && (rec.bends !== undefined || legs.drawn);
     /** The path into target `t` from the end that stays (a hub's lead at the dragged end apart), and that lead. */
     const into = (t: DropTarget): { core: Pt[]; lead: Pt[] } => {
       // the end this one is once dropped: a direction-less wire's end takes the role the side or the hub gives it
@@ -411,11 +412,11 @@ export function useWireGestures(
       if (t.on === 'hub') {
         // as the wire will be drawn there: a shape kept starts at the ring point on the grid (`hubStart`)
         const { cx, cy } = shown.current.placement.sphere;
-        const h = hubStart(cx, cy, t.angle, keepShape() ? a[0] : null);
+        const h = hubStart(cx, cy, t.angle, keepShape(t) ? a[0] : null);
         start = h.start;
         lead = [...h.lead].reverse();
       }
-      if (!keepShape()) {
+      if (!keepShape(t)) {
         const leg = ghostPath({ x: sx, y: sy }, start, role, boxes, avoid);
         return { core: role === 'head' ? leg : [...leg].reverse(), lead };
       }
@@ -461,9 +462,9 @@ export function useWireGestures(
       } else {
         // the corners drawn are kept and only the last leg routed in (rule C); a direction-less wire the drop turns
         // round turns its bends with it (rule D)
-        const keep = keepShape() ? bendsOf(into(t).core) : undefined;
+        const keep = t.on === 'hub' ? null : keepShape(t) ? bendsOf(into(t).core) : undefined;
         const place = { routes: shown.current.wires, ctx: { placement: shown.current.placement, steps: shown.current.graph.steps } };
-        next = applyDrop(circuit, wire.id, side, t, place, keep === undefined ? undefined : keep.xs.length > 0 ? keep : null).circuit;
+        next = applyDrop(circuit, wire.id, side, t, place, keep === undefined || keep === null ? keep : keep.xs.length > 0 ? keep : null).circuit;
       }
       // a host detached (an end dropped open): the ends joined on it open where they are drawn (spec §2.2-6)
       if (was.on !== 'open' && end.on === 'open') next = openJoinedOn(next, [wire.id], endPointOf(shown.current.wires));
