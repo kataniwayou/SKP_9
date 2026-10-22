@@ -37,6 +37,18 @@ describe('a wire moved whole (the user\'s rule B, 2026-10-09)', () => {
     expect(l.result).toBe(l.preview);
   });
 
+  it("an end 11 px off a line joins it: a line's reach is Visio's 12 to a block's 10 (spec §4.4; tidy-up 2026-10-22)", async () => {
+    const d = await doc(), c0 = plain(d);
+    // s1 -> s2 runs level between the two steps; a free upright wire below its middle, its upper end 100 under the line
+    const line = drawn(d, c0, 's1->s2');
+    const y = line[0]![1], x = (line[0]![0] + line.at(-1)![0]) / 2;
+    const pts: Pt[] = [[x, y + 200], [x, y + 100]];
+    const c = free(c0, 'w:f', pts);
+    // moved up 89: its upper end 11 under the line, with a block's reach of 10
+    const l = landBody(d, c, 'w:f', pts, endPointOf(d.wires), 0, -89, null, 10);
+    expect(l.ends[1]).toMatchObject({ verdict: 'join', line: true, id: 's1->s2' });
+  });
+
   it('dropped back a grid step off where it was: both ends connect again, a tail and a head, the shape exactly as moved', async () => {
     const d = await doc(), c = plain(d);
     const pts = drawn(d, c, 's1->s2');

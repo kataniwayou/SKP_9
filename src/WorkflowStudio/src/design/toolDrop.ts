@@ -10,7 +10,7 @@ import { applyDraft, applyEdits } from './apply';
 import type { Blocks } from './blocks';
 import type { EntityEdits } from './design';
 import { circuitOf, withCircuit, type Draft } from './draft';
-import { endOf, judgeDrop, pointOfTarget, targetOf, toneOf, dropLabel, type DropTarget as WireTarget, type Verdict } from './drop';
+import { endOf, judgeDrop, lineReachOf, pointOfTarget, targetOf, toneOf, dropLabel, type DropTarget as WireTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
 import { overlapJudge } from './overlapJudge';
 import { commitSplit, splitAt, splitLabel, splitTone, type Split } from './split';
@@ -112,13 +112,13 @@ export function toolWire(shown: StudioDocument, t: Exclude<WireTarget, { on: 'op
 }
 
 /**
- * A Wire tile held at `p` (flow) over `shown`, whose circuit is `circuit`: over a step side, the hub or a line within
- * `reach` (flow px), the same verdict a dragged wire end gets there — "connect here", "join here", or its refusal — and a
+ * A Wire tile held at `p` (flow) over `shown`, whose circuit is `circuit`: over a step side or the hub within `reach`
+ * (flow px, a block's drop reach), or a line within a line's (`lineReachOf`), the same verdict a dragged wire end gets there — "connect here", "join here", or its refusal — and a
  * short circuit when the wire as it would be drawn lies on another net's wire (rule 2); elsewhere a free wire is placed.
  */
 export function judgeWireTool(shown: StudioDocument, circuit: Readonly<Circuit>, p: Point, reach: number): ToolVerdict {
   const over = blockAt(shown, p, reach);
-  const line = over === null ? wireAt(shown, p, reach) : null;
+  const line = over === null ? wireAt(shown, p, lineReachOf(reach)) : null;
   const t = targetOf(shown, circuit, p, over, line);
   if (t.on === 'open') return { kind: 'place' };
   const side = contactSide(t);

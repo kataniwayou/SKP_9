@@ -5,7 +5,7 @@ import { GRID, snap, SPHERE_R, type Point } from '../layout/geometry';
 import type { Pt } from '../layout/router';
 import { shapeFromPoints } from '../layout/shape';
 import { translatePoints } from '../layout/wireMove';
-import { applyDrop, judgeDrop, pointOfTarget, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
+import { applyDrop, judgeDrop, lineReachOf, pointOfTarget, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
 import type { OverlapJudge } from './overlapJudge';
 
@@ -85,7 +85,7 @@ export function landBody(
   };
   const look = (c: Readonly<Circuit>, at: Point) => {
     const over = blockAt(shown, at, reach);
-    const line = over === null ? wireAt(shown, at, reach, null, id) : null;
+    const line = over === null ? wireAt(shown, at, lineReachOf(reach), null, id) : null;
     return { target: targetOf(shown, c, at, over, line), id: line ? line.id : over, line: line !== null };
   };
   // the x of the frozen shape's first vertical run from each end (what a tail on the hub starts towards)

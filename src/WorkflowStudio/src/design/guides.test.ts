@@ -139,6 +139,24 @@ describe('alignment guides (Visio dynamic grid, plan 10)', () => {
     });
   });
 
+  describe('tidy-up (phase 1 review)', () => {
+    it("an axis no guide caught is rounded to the grid before the other axis's lines are measured", () => {
+      // y snaps level with b; x (1003) is caught by nothing and lands on the grid at 1000: the line ends at its right edge there
+      const g = snapToGuides(step('a', 1003, 4), [step('b', 0, 0)], 12);
+      expect(g.hit).toEqual({ x: false, y: true });
+      expect(g.lines).toContainEqual({ x1: 0, y1: 0, x2: 1000 + 224, y2: 0 });
+    });
+
+    it('the equal-gap row is the one the block lands in after its y snap, not the one it was released in', () => {
+      // A and B 100 apart in a row (0..160); C far right a little lower (156..316). M released at 164, just below the row,
+      // snaps up level with C (156), into the row, 105 past B: it then takes the row's gap of 100
+      const g = snapToGuides(step('M', 653, 164), [step('A', 0, 0), step('B', 324, 0), step('C', 2000, 156)], 12);
+      expect(g.y).toBe(156);
+      expect(g.hit.x).toBe(true);
+      expect(g.x).toBe(648);
+    });
+  });
+
   it('boxes every block of a document, with a processor middle on steps and the hub (its centre)', async () => {
     const doc = await loadedDocument(graphDto({ steps: [stepDto('s1')] }));
     const boxes = guideBoxes(doc);

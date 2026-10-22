@@ -13,6 +13,8 @@ import type { Id } from '../model/graph';
 export const DROP_REACH = 10;
 /** How far off a wire's line (screen px) a dragged end counts as on it: Visio's ~12 px for a point (plan 10). */
 export const LINE_REACH = 12;
+/** A block's drop reach in flow px (`DROP_REACH` screen px at some zoom) turned into a line's at the same zoom. */
+export const lineReachOf = (reach: number): number => (reach * LINE_REACH) / DROP_REACH;
 
 /** What a dragged end is over (plan 9 §6): a step's input or output side, the hub's ring, a wire's line, or nothing. */
 export type DropTarget =

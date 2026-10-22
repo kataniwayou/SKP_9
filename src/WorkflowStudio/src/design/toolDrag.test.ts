@@ -57,6 +57,14 @@ describe("a Wire tile touches a contact with its tip or its tail's ring (the use
     expect(over?.flow.x).toBeCloseTo(704);
   });
 
+  it("its tip 11 screen px off a line joins it: a line's reach is Visio's 12, a block's 10 (spec §4.4; tidy-up 2026-10-22)", async () => {
+    // s1 -> s2 runs level at s1's processor middle (y 416) from 576 to 704; the tip 11 below it, clear of both steps' reach
+    const doc = await three();
+    expect(doc.wires.find((w) => w.id === 's1->s2')!.points).toEqual([[576, 416], [704, 416]]);
+    const over = await hold({ x: 640 - (WIRE_TIP.x - WIRE_TAIL.x), y: 427 });
+    expect(over?.verdict).toMatchObject({ kind: 'wire', why: 'join', target: { on: 'wire', host: 's1->s2' } });
+  });
+
   it('neither on a contact: a free wire placed with its head at the tip; the tip off every canvas: nothing', async () => {
     const free = await hold({ x: 700, y: 600 });
     expect(free?.verdict).toEqual({ kind: 'place' });

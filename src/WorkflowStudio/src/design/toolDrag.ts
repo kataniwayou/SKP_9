@@ -104,14 +104,15 @@ export const toolDrag = {
       const target = targetAt(doc, hot);
       if (!target) continue;
       const flow = target.toFlow(hot);
-      // the drop reach of a dragged wire end: DROP_REACH screen px, in flow px at this zoom
+      const shown = target.shown();
+      // a dragged wire end's reach to a block, DROP_REACH screen px, in flow px at this zoom (a line's is derived from it)
       const perPx = Math.abs(target.toFlow({ x: hot.x + 1, y: hot.y }).x - flow.x);
       const reach = DROP_REACH * perPx;
       const wiring = target.circuit ? { circuit: target.circuit(), reach } : undefined;
-      let verdict = judgeTool(target.shown(), item, flow, wiring);
+      let verdict = judgeTool(shown, item, flow, wiring);
       // a step over a wire (plan 10 §4.6) lands on the grid too, and is judged again where it lands
-      const snapped = verdict.kind === 'place' || verdict.kind === 'split' ? onGrid(target.shown(), item, flow, SNAP_REACH_PX * perPx) : null;
-      if (snapped && item.kind === 'step') verdict = judgeTool(target.shown(), item, snapped.flow, wiring);
+      const snapped = verdict.kind === 'place' || verdict.kind === 'split' ? onGrid(shown, item, flow, SNAP_REACH_PX * perPx) : null;
+      if (snapped && item.kind === 'step') verdict = judgeTool(shown, item, snapped.flow, wiring);
       const here = { target, flow: snapped?.flow ?? flow, verdict, saving: isSaving(target.workflowId), reach, guides: snapped?.guides ?? NO_GUIDES };
       // on a contact (connect, join, or refused there) this point decides; else only the first point (a wire's tip) counts
       if (here.verdict.kind === 'wire') { over = here; break; }

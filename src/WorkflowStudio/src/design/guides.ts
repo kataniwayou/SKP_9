@@ -1,5 +1,5 @@
 import type { StudioDocument } from '../app/document';
-import { PMID } from '../layout/geometry';
+import { PMID, snap } from '../layout/geometry';
 import { cacheNodeId, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { nodeBox } from './hit';
 
@@ -67,13 +67,16 @@ const apart = (a0: number, a1: number, b0: number, b1: number) => Math.max(0, b0
  * (Visio's). A guide on blocks that are on the 8 px grid keeps the block on it.
  */
 export function snapToGuides(moving: GuideBox, others: readonly GuideBox[], reach: number): { dx: number; dy: number; x: number; y: number; hit: { x: boolean; y: boolean } } & Guides {
-  // per axis the smaller move wins between an alignment and an equal gap (plan 10 §8)
-  const ax = smaller(best(xsOf, moving, others, reach), gapSnap(moving, others, reach, X));
+  // per axis the smaller move wins between an alignment and an equal gap (plan 10 §8); y first, so x's equal gap is
+  // looked for in the row the block lands in (tidy-up 2026-10-22)
   const ay = smaller(best(ysOf, moving, others, reach), gapSnap(moving, others, reach, Y));
+  const level = ay === null ? moving : { ...moving, y: moving.y + ay, ...(moving.mid !== undefined ? { mid: moving.mid + ay } : {}) };
+  const ax = smaller(best(xsOf, level, others, reach), gapSnap(level, others, reach, X));
   const dx = ax ?? 0, dy = ay ?? 0;
   // where it lands, exactly: an offset added back to an unrounded position leaves float noise (432.00000000000006),
-  // which would miss the exact matches that draw the lines and marks, and turn a drag back to the start into a step
-  const x = ax === null ? moving.x : exact(moving.x + dx), y = ay === null ? moving.y : exact(moving.y + dy);
+  // which would miss the exact matches that draw the lines and marks, and turn a drag back to the start into a step;
+  // an axis no guide caught lands on the grid (the caller rounds it so), and the lines and marks are measured there
+  const x = ax === null ? snap(moving.x) : exact(moving.x + dx), y = ay === null ? snap(moving.y) : exact(moving.y + dy);
   const m: GuideBox = { ...moving, x, y, ...(moving.mid !== undefined ? { mid: exact(moving.mid + (y - moving.y)) } : {}) };
   return { dx, dy, x, y, hit: { x: ax !== null, y: ay !== null }, lines: linesOf(m, others), gaps: [...gapMarks(m, others, X), ...gapMarks(m, others, Y)] };
 }
