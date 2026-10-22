@@ -8,7 +8,7 @@ import { DesignOverlay } from '../design/DesignOverlay';
 import type { DesignProps } from '../design/designProps';
 import { circuitOf, EMPTY_DRAFT, resetShape, type Draft } from '../design/draft';
 import { NO_GUIDES, type Guides } from '../design/guides';
-import { useBlockDrag } from '../design/useBlockDrag';
+import { useBlockDrag, type Held } from '../design/useBlockDrag';
 import { isArrow, useDesignKeys } from '../design/useDesignKeys';
 import { useRubberBand } from '../design/useRubberBand';
 import { useWireGestures } from '../design/useWireGestures';
@@ -124,6 +124,8 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   // a gesture's draft while it runs; null: the committed draft is shown
   const [preview, setPreview] = useState<Draft | null>(null);
   const [guides, setGuides] = useState<Guides>(NO_GUIDES);
+  // a held block drag: the blocks stay put, their faded copies move (Visio, plan 10 phase 4)
+  const [held, setHeld] = useState<Held | null>(null);
   const shownDoc = useMemo(() => (design ? applyDraft(doc, preview ?? design.draft) : doc), [doc, design?.draft, preview]);
   const shownRef = useRef(shownDoc);
   shownRef.current = shownDoc;
@@ -135,7 +137,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   const suppressPaneClick = useRef(false);
   const suppressNodeClick = useRef(false);
   const { band, banding, pressing, onPointerDownCapture } = useRubberBand(shownRef, design, onSelect, suppressPaneClick);
-  const drag = useBlockDrag(doc, shownRef, design, setPreview, setGuides, onSelect, suppressNodeClick, () => flowStore.getState().transform[2]);
+  const drag = useBlockDrag(doc, shownRef, design, setHeld, setGuides, onSelect, suppressNodeClick, () => flowStore.getState().transform[2]);
   const wiring = useWireGestures(doc, shownRef, design, setPreview, onSelect);
   // --inv (1 / zoom) lets canvas.css keep drop outlines and connection points one size on screen at any zoom
   const zoom = useStore((s) => s.transform[2]);
@@ -177,8 +179,19 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   }, [toolDrag, toolOver]);
   const shown = useMemo(() => {
     const marked = wiring.hints.filter((h) => !h.line).reduce(withHint, selected);
-    return tool?.node ? withHint(marked, tool.node) : marked;
-  }, [selected, wiring.hints, tool]);
+    const hinted = tool?.node ? withHint(marked, tool.node) : marked;
+    if (!held) return hinted;
+    // Visio's held copy: the block's art, faded, in a light-blue dashed outline, where the release puts it; never pressed
+    const copies = flow.nodes.filter((n) => held.ids.includes(n.id)).map((n) => ({
+      ...n, id: `copy:${n.id}`, position: { x: n.position.x + held.dx, y: n.position.y + held.dy },
+      className: n.className ? `${n.className} nx-copy` : 'nx-copy', draggable: false, selectable: false, selected: false, zIndex: 1000,
+    }));
+    return [...hinted, ...copies] as typeof hinted;
+  }, [selected, wiring.hints, tool, held, flow.nodes]);
+  // the picked wires the held blocks take along, where the release puts them
+  const heldWires = useMemo(() => (held
+    ? shownDoc.wires.filter((w) => held.wires.includes(w.id)).map((w) => w.core.points.map(([x, y]) => [x + held.dx, y + held.dy] as [number, number]))
+    : []), [held, shownDoc]);
   // a wire whose end is dragged follows the pointer: the wire, its handles and its runs (spec §4.4)
   const dragged = wiring.ghost?.wire ? { id: wiring.ghost.wire, points: wiring.ghost.points } : null;
   const edges = useMemo(() => marked.edges.map((e) => {
@@ -238,7 +251,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
   return (
     <FollowFitContext.Provider value={followFit}>
       <LiveArtContext.Provider value={live}>
-        <div ref={container} className={banding || wiring.active ? `studio-canvas gesture${wiring.resize ? ` gesture-${wiring.resize}` : ''}` : 'studio-canvas'} style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%', '--inv': String(1 / zoom) } as CSSProperties}
+        <div ref={container} className={banding || wiring.active ? `studio-canvas gesture${wiring.resize ? ` gesture-${wiring.resize}` : ''}` : held ? 'studio-canvas block-drag' : 'studio-canvas'} style={{ position: 'relative', width: width ?? '100%', height: height ?? '100%', '--inv': String(1 / zoom) } as CSSProperties}
           tabIndex={design ? 0 : undefined}
           onKeyDown={design ? onKeyDown : undefined}
           // an arrow let go drops the wires it held (the closed hand's release); so does leaving the canvas or a press
@@ -287,7 +300,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onMoveEnd={(_event, v) => report(v)}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} guides={toolOver?.guides ?? guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost?.points ?? null} hints={wiring.hints} gone={wiring.ghost?.gone ?? null} runGuide={wiring.runGuide} shorts={wiring.ghost?.shorts} tool={tool} />}
+              {design && <DesignOverlay band={band} guides={toolOver?.guides ?? guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost?.points ?? null} hints={wiring.hints} gone={wiring.ghost?.gone ?? null} runGuide={wiring.runGuide} shorts={wiring.ghost?.shorts} tool={tool} copies={heldWires} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize initial={savedSize} />

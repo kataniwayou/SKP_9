@@ -7,19 +7,19 @@ import { loadedDocument } from '../app/fixtures';
 import { snap } from '../layout/geometry';
 import type { Pick } from '../store/picks';
 import type { DesignProps } from './designProps';
-import { EMPTY_DRAFT, type Draft } from './draft';
-import { useBlockDrag } from './useBlockDrag';
+import { EMPTY_DRAFT } from './draft';
+import { useBlockDrag, type Held } from './useBlockDrag';
 
 const two = () => loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch', nextStepIds: ['s2'] }), stepDto('s2', { name: 'store' })] }));
 const designOf = (picks: Pick[]): DesignProps => ({ draft: EMPTY_DRAFT, picks, onPick: vi.fn(), onCommit: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() });
 
 function setup(doc: StudioDocument, picks: Pick[], zoom = 1) {
   const design = designOf(picks);
-  const setPreview = vi.fn<(d: Draft | null) => void>();
+  const setHeld = vi.fn<(h: Held | null) => void>();
   const setGuides = vi.fn();
   const onSelect = vi.fn();
   const suppress = { current: false };
-  const { result, rerender, unmount } = renderHook(({ on }: { on: boolean }) => useBlockDrag(doc, { current: doc }, on ? design : undefined, setPreview, setGuides, onSelect, suppress, () => zoom), { initialProps: { on: true } });
+  const { result, rerender, unmount } = renderHook(({ on }: { on: boolean }) => useBlockDrag(doc, { current: doc }, on ? design : undefined, setHeld, setGuides, onSelect, suppress, () => zoom), { initialProps: { on: true } });
   const blocks = new Map<string, HTMLElement>();
   const blockOf = (id: string) => {
     if (!blocks.has(id)) {
@@ -42,7 +42,7 @@ function setup(doc: StudioDocument, picks: Pick[], zoom = 1) {
   });
   const move = (id: string, x: number, y: number) => act(() => result.current.onNodesChange!([{ type: 'position', id, position: { x, y }, dragging: true } as NodeChange]));
   const stop = (id: string) => act(() => result.current.onNodeDragStop!({ target: window } as unknown as MouseEvent, node(id), []));
-  return { design, setPreview, setGuides, onSelect, suppress, start, move, stop, target, rerender, unmount };
+  return { design, setHeld, setGuides, onSelect, suppress, start, move, stop, target, rerender, unmount };
 }
 
 describe('dragging blocks', () => {
@@ -53,7 +53,7 @@ describe('dragging blocks', () => {
     t.start('s1');
     expect(t.design.onPick).not.toHaveBeenCalled();
     t.move('s1', s1.x + 1003, s1.y + 4005);
-    const preview = t.setPreview.mock.lastCall![0]!;
+    const preview = t.setHeld.mock.lastCall![0]!.draft;
     const dx = preview.steps.s1!.x - s1.x, dy = preview.steps.s1!.y - s1.y;
     expect(preview.steps.s2).toEqual({ x: s2.x + dx, y: s2.y + dy });
     expect(Object.keys(preview.steps).sort()).toEqual(['s1', 's2']);
@@ -63,7 +63,7 @@ describe('dragging blocks', () => {
     t.stop('s1');
     expect(t.design.onCommit).toHaveBeenCalledTimes(1);
     expect(t.design.onCommit).toHaveBeenCalledWith(preview);
-    expect(t.setPreview).toHaveBeenLastCalledWith(null);
+    expect(t.setHeld).toHaveBeenLastCalledWith(null);
     expect(t.setGuides).toHaveBeenLastCalledWith({ lines: [], gaps: [] });
     expect(t.onSelect).not.toHaveBeenCalled();
     expect(t.suppress.current).toBe(true);
@@ -77,7 +77,7 @@ describe('dragging blocks', () => {
     expect(t.design.onPick).toHaveBeenCalledWith([{ kind: 'node', id: 's1' }]);
     // React Flow drags every selected node too: only the grabbed block's change counts
     t.move('s1', s1.x + 1003, s1.y + 4005);
-    const preview = t.setPreview.mock.lastCall![0]!;
+    const preview = t.setHeld.mock.lastCall![0]!.draft;
     expect(Object.keys(preview.steps)).toEqual(['s1']);
     t.stop('s1');
     expect(t.design.onCommit).toHaveBeenCalledWith(preview);
@@ -91,7 +91,7 @@ describe('dragging blocks', () => {
     t.start('s1');
     // a column away from both, with s1's processor middle 8 px below s2's
     t.move('s1', s1.x + 2000 + 4, s2.y + 8);
-    const preview = t.setPreview.mock.lastCall![0]!;
+    const preview = t.setHeld.mock.lastCall![0]!.draft;
     expect(preview.steps.s1!.y).toBe(s2.y);
     expect(t.setGuides.mock.lastCall![0].lines).toContainEqual(expect.objectContaining({ y1: s2.y + 96, y2: s2.y + 96 }));
     t.stop('s1');
@@ -103,7 +103,7 @@ describe('dragging blocks', () => {
     const t = setup(doc, [], 2);
     t.start('s1');
     t.move('s1', s1.x + 2000 + 4, s2.y + 5);
-    expect(t.setPreview.mock.lastCall![0]!.steps.s1!.y).toBe(s2.y);
+    expect(t.setHeld.mock.lastCall![0]!.draft.steps.s1!.y).toBe(s2.y);
     t.stop('s1');
   });
 
@@ -114,7 +114,7 @@ describe('dragging blocks', () => {
     t.start('s1');
     // 48 below s2's top: the nearest pair (s1's processor middle at 144 against s2's bottom at 160) is 16 away
     t.move('s1', s1.x + 2000 + 4, s2.y + 48);
-    expect(t.setPreview.mock.lastCall![0]!.steps.s1!.y).toBe(s2.y + 48);
+    expect(t.setHeld.mock.lastCall![0]!.draft.steps.s1!.y).toBe(s2.y + 48);
     expect(t.setGuides.mock.lastCall![0].lines.filter((l: { y1: number; y2: number }) => l.y1 === l.y2)).toEqual([]);
     t.stop('s1');
   });
@@ -126,7 +126,7 @@ describe('dragging blocks', () => {
     t.start('s1');
     // s1's left edge 6 px right of s2's starting one, far below everything: s2 moves with s1, so nothing lines up
     t.move('s1', s2.x + 6, s1.y + 4000);
-    expect(t.setPreview.mock.lastCall![0]!.steps.s1!.x).toBe(snap(s2.x + 6));
+    expect(t.setHeld.mock.lastCall![0]!.draft.steps.s1!.x).toBe(snap(s2.x + 6));
     expect(t.setGuides.mock.lastCall![0].lines).toEqual([]);
     t.stop('s1');
   });
@@ -139,7 +139,7 @@ describe('dragging blocks', () => {
     // 48 px on is reported as 36 (which the grid alone would round to 40)
     t.start('s1', { x: 100, y: 3000 }, { x: 112, y: 3000 });
     t.move('s1', s1.x + 2000 + 36, s1.y + 4000);
-    expect(t.setPreview.mock.lastCall![0]!.steps.s1!.x).toBe(s1.x + 2000 + 48);
+    expect(t.setHeld.mock.lastCall![0]!.draft.steps.s1!.x).toBe(s1.x + 2000 + 48);
     t.stop('s1');
   });
 
@@ -149,8 +149,25 @@ describe('dragging blocks', () => {
     const t = setup(doc, [], 2);
     t.start('s1', { x: 100, y: 3000 }, { x: 116, y: 3000 });
     t.move('s1', s1.x + 2000 + 8, s1.y + 4000);
-    expect(t.setPreview.mock.lastCall![0]!.steps.s1!.x).toBe(s1.x + 2000 + 16);
+    expect(t.setHeld.mock.lastCall![0]!.draft.steps.s1!.x).toBe(s1.x + 2000 + 16);
     t.stop('s1');
+  });
+
+  it("while held only a copy moves (Visio, plan 10 phase 4): the held blocks, their offset and the picked wires; the drawing's own draft is untouched until the drop", async () => {
+    const doc = await two();
+    const s1 = doc.placement.steps.get('s1')!;
+    const t = setup(doc, [{ kind: 'node', id: 's1' }, { kind: 'node', id: 's2' }, { kind: 'wire', id: 's1->s2' }]);
+    t.start('s1');
+    t.move('s1', s1.x + 1003, s1.y + 4005);
+    const held = t.setHeld.mock.lastCall![0]!;
+    expect(held.ids.sort()).toEqual(['s1', 's2']);
+    expect(held.wires).toEqual(['s1->s2']);
+    expect(held.dx).toBe(held.draft.steps.s1!.x - s1.x);
+    expect(held.dy).toBe(held.draft.steps.s1!.y - s1.y);
+    expect(t.design.onCommit).not.toHaveBeenCalled();
+    t.stop('s1');
+    expect(t.design.onCommit).toHaveBeenCalledWith(held.draft);
+    expect(t.setHeld).toHaveBeenLastCalledWith(null);
   });
 
   it('Escape cancels the drag: everything goes back and no step is made', async () => {
@@ -162,10 +179,10 @@ describe('dragging blocks', () => {
     let prevented = false;
     act(() => { prevented = !fireEvent.keyDown(t.target, { key: 'Escape' }); });
     expect(prevented).toBe(true);
-    expect(t.setPreview).toHaveBeenLastCalledWith(null);
+    expect(t.setHeld).toHaveBeenLastCalledWith(null);
     expect(t.setGuides).toHaveBeenLastCalledWith({ lines: [], gaps: [] });
     t.move('s1', s1.x + 2003, s1.y + 4005);
-    expect(t.setPreview).toHaveBeenLastCalledWith(null);
+    expect(t.setHeld).toHaveBeenLastCalledWith(null);
     t.stop('s1');
     expect(t.design.onCommit).not.toHaveBeenCalled();
     expect(t.design.onPick).not.toHaveBeenCalled();
@@ -205,7 +222,7 @@ describe('dragging blocks', () => {
     t.start('s1');
     t.move('s1', s1.x + 1003, s1.y + 4005);
     act(() => t.rerender({ on: false }));
-    expect(t.setPreview).toHaveBeenLastCalledWith(null);
+    expect(t.setHeld).toHaveBeenLastCalledWith(null);
     expect(t.setGuides).toHaveBeenLastCalledWith({ lines: [], gaps: [] });
     expect(fireEvent.keyDown(t.target, { key: 'Escape' })).toBe(true);
     expect(t.design.onPick).toHaveBeenCalledTimes(1);
@@ -221,7 +238,7 @@ describe('dragging blocks', () => {
     t.start('s1');
     t.move('s1', s1.x + 1003, s1.y + 4005);
     t.move('s1', s1.x + 2, s1.y - 3);
-    expect(t.setPreview).toHaveBeenLastCalledWith(null);
+    expect(t.setHeld).toHaveBeenLastCalledWith(null);
     t.stop('s1');
     expect(t.design.onCommit).not.toHaveBeenCalled();
   });

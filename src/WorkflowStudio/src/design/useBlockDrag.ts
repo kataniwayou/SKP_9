@@ -30,9 +30,22 @@ interface Drag {
 }
 
 /**
+ * What a held block drag shows (Visio, plan 10 phase 4): the blocks stay put and a faded copy of each moves by (dx, dy);
+ * the picked wires that go with them are drawn dashed, moved as much. `draft` is what the release commits; nothing is
+ * rerouted until then.
+ */
+export interface Held {
+  draft: Draft;
+  ids: string[];
+  wires: string[];
+  dx: number;
+  dy: number;
+}
+
+/**
  * Block dragging through React Flow (spec §3.4). The picked blocks move together, snapped to 8 px and
- * onto alignment guides; wires re-route live from the preview draft. A block that was not picked moves
- * alone. Escape cancels; the drop is one history step (spec §5.3).
+ * onto alignment guides; while held only their copies move, and the wires reroute on release (Visio, plan 10
+ * phase 4). A block that was not picked moves alone. Escape cancels; the drop is one history step (spec §5.3).
  *
  * The canvas is controlled and React Flow's changes are never applied: React Flow drags every node with
  * `selected` set (the picks, and before a re-render the old ones), so only the grabbed block's position
@@ -56,7 +69,7 @@ export function useBlockDrag(
   saved: StudioDocument,
   shown: MutableRefObject<StudioDocument>,
   design: DesignProps | undefined,
-  setPreview: (d: Draft | null) => void,
+  setHeld: (h: Held | null) => void,
   setGuides: (guides: Guides) => void,
   onSelect: ((selection: Selection | null, picks?: Pick[]) => void) | undefined,
   suppressNodeClick: MutableRefObject<boolean>,
@@ -75,8 +88,8 @@ export function useBlockDrag(
     drag.current.stopEscape();
     drag.current = null;
     setGuides(NO_GUIDES);
-    setPreview(null);
-  }, [designOff, setGuides, setPreview]);
+    setHeld(null);
+  }, [designOff, setGuides, setHeld]);
   const dragging = () => drag.current !== null;
   if (!design) return { notePress: () => {}, dragging };
 
@@ -85,7 +98,7 @@ export function useBlockDrag(
     drag.current = null;
     d?.stopEscape();
     setGuides(NO_GUIDES);
-    setPreview(null);
+    setHeld(null);
     return d;
   };
 
@@ -107,7 +120,7 @@ export function useBlockDrag(
       e.stopPropagation();
       drag.current.cancelled = true;
       setGuides(NO_GUIDES);
-      setPreview(null);
+      setHeld(null);
       // a block the drag picked is unpicked again: everything goes back (spec §5.3)
       if (!picked) design.onPick(before);
     };
@@ -152,7 +165,7 @@ export function useBlockDrag(
     // back where it started: nothing to show, and the drop makes no step
     const moved = new Map(d.ids.map((id) => { const s = d.start.get(id)!; return [id, { x: s.x + dx, y: s.y + dy }] as const; }));
     d.preview = dx === 0 && dy === 0 ? null : moveGroup(d.base, saved, moved, d.wires, dx, dy);
-    setPreview(d.preview);
+    setHeld(d.preview && { draft: d.preview, ids: d.ids, wires: d.wires, dx, dy });
   };
 
   const onNodeDragStop: OnNodeDrag = () => {

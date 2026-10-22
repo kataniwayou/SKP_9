@@ -46,6 +46,8 @@ export interface DesignOverlayProps {
   runGuide?: { axis: 'x' | 'y'; v: number } | null;
   /** The part of a wire an end released here would cut away, drawn faded (the user's rule, 2026-10-09). */
   gone?: Pt[] | null;
+  /** The picked wires a held block drag takes along, where the release puts them, dashed (Visio, plan 10 phase 4). */
+  copies?: readonly Pt[][];
 }
 
 /** On-screen sizes (px) that do not shrink with the zoom: at the fitted zoom a 2 px line would vanish. */
@@ -80,7 +82,7 @@ function GapArrow({ gap, k }: { gap: GapMark; k: number }) {
  * wire's squares (§4.2, Visio; plan 9 rule 14): one on each end (tail and head, on whatever they are), one in the
  * middle of each run of its core (no mark on a bend); and the ghost of a new wire while it is drawn (§4.5).
  */
-export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hints = [], gone = null, tool = null, runGuide = null, shorts = [] }: DesignOverlayProps) {
+export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hints = [], gone = null, tool = null, runGuide = null, shorts = [], copies = [] }: DesignOverlayProps) {
   // one screen pixel in flow units
   const k = 1 / useStore((s) => s.transform[2]);
   return (
@@ -111,6 +113,7 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
           );
         })}
         {ghost && ghost.length > 1 && <path className="design-ghost" d={pathOf(ghost)} strokeWidth={GHOST * k} strokeDasharray={`${6 * k} ${4 * k}`} />}
+        {copies.map((c, i) => <path key={`c${i}`} className="design-ghost" d={pathOf(c)} strokeWidth={GHOST * k} strokeDasharray={`${6 * k} ${4 * k}`} />)}
         {gone && gone.length > 1 && <path className="design-gone" d={pathOf(gone)} strokeWidth={4 * k} />}
         {shorts.map((st, i) => <path key={`sh${i}`} className="design-short" d={pathOf(st)} strokeWidth={3 * k} />)}
         {tool?.box && <rect className="design-tool-landing" x={tool.box.x} y={tool.box.y} width={tool.box.w} height={tool.box.h} strokeWidth={1.5 * k} strokeDasharray={`${6 * k} ${4 * k}`} />}

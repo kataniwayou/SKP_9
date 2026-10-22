@@ -40,6 +40,10 @@
 .studio-canvas.gesture, .studio-canvas.gesture * { cursor: grabbing !important; }
 /* Visio's cursors in design mode (plan 10 phase 2): the four-way arrow on blocks and wire bodies, held while dragged */
 .studio-canvas .react-flow__node.draggable, .studio-canvas .react-flow__node.draggable.dragging { cursor: move !important; }
+/* a held block drag (plan 10 phase 4): Visio's copy, faded in a light-blue dashed outline, never pressed; the four-way arrow everywhere */
+.studio-canvas.block-drag, .studio-canvas.block-drag * { cursor: move !important; }
+.studio-canvas .react-flow__node.nx-copy { opacity: .5; outline: calc(1px * var(--inv)) dashed #66b2ff; outline-offset: 0; }
+.studio-canvas .react-flow__node.nx-copy, .studio-canvas .react-flow__node.nx-copy * { pointer-events: none !important; }
 .sb .th { cursor: default; }
 .studio-canvas .nx-hit { fill: none; stroke: transparent; stroke-width: 8; pointer-events: stroke; cursor: pointer; }
 /* design mode: a wire's body takes Visio's four-way arrow (dragged, the whole wire moves) */
