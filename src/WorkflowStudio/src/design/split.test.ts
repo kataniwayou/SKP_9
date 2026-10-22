@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
-import { addCircuitWire, plainCircuit, setEnd, type Circuit } from '../circuit/circuit';
+import { addCircuitWire, plainCircuit, type Circuit } from '../circuit/circuit';
 import { STEP_H, STEP_W } from '../layout/geometry';
-import { judgeSplit, splitAt, splitLabel, splitTone, wireUnder } from './split';
+import { applyDraft } from './apply';
+import { EMPTY_DRAFT } from './draft';
+import { judgeSplit, splitAt, splitCircuit, splitLabel, splitTone, wireUnder } from './split';
 
 // wf -> s1 -> s2 -> s3, and s4 -> s5 (s5 of family 2)
 const doc = () => loadedDocument(graphDto({
@@ -48,13 +50,51 @@ describe('judging a split (plan 10 §4.6)', () => {
     expect(splitTone('insert')).toBe('ok');
   });
 
-  it('refused: a wire with junctions on it (the step would sit among them)', async () => {
+  it('a wire with junctions on it splits too (the user\'s ruling, 2026-10-22): judged by family like any connection', async () => {
     const d = await doc();
-    const c = setEnd(circuitOfDoc(d), 's2->s3', 'tail', { on: 'wire', host: 's1->s2', at: 40 });
-    expect(judgeSplit(d, c, 's1->s2', 'n', 1)).toBe('junctionWire');
-    expect(splitTone('junctionWire')).toBe('no');
+    // a branch off s1 -> s2's line, 40 along it, into s3 (family 1, as s2)
+    const c = addCircuitWire(circuitOfDoc(d), 'w:b', { tail: { on: 'wire', host: 's1->s2', at: 40 }, head: { on: 'step', step: 's3', y: null } });
+    expect(judgeSplit(d, c, 's1->s2', 'n', 1, { at: 80 })).toBe('insert');
+    // a step of family 2 inserted past the junction: the branch stays on the half into the step, family 2 meets s3's 1
+    expect(judgeSplit(d, c, 's1->s2', 'n', 2, { at: 80 })).toBe('short');
+    // inserted before the junction: the branch goes with the half out of the step, into s2 (family 1): no clash
+    expect(judgeSplit(d, c, 's1->s2', 'n', 2, { at: 20 })).toBe('insert');
   });
 
+  it('the junctions before the insertion point stay on the old wire, those after it go to the new one', () => {
+    const c: Circuit = {
+      h: { tail: { on: 'step', step: 's1', y: null }, head: { on: 'step', step: 's2', y: null } },
+      x: { tail: { on: 'wire', host: 'h', at: 16 }, head: { on: 'step', step: 's3', y: null } },
+      y: { tail: { on: 'step', step: 's4', y: null }, head: { on: 'wire', host: 'h', at: 96 } },
+    };
+    const out = splitCircuit(c, 'h', 'n', 'w:n', 48);
+    expect(out.x!.tail).toEqual({ on: 'wire', host: 'h', at: 16 });
+    expect(out.y!.head).toMatchObject({ on: 'wire', host: 'w:n' });
+    expect(out.h!.head).toEqual({ on: 'step', step: 'n', y: null });
+  });
+
+  it('refused: a half that cannot help lying on a wire of another net (rule 2, a short circuit)', async () => {
+    // s2 moved far right, so a step fits between it and s1
+    const loaded = await doc();
+    const d = applyDraft(loaded, { ...EMPTY_DRAFT, steps: { s2: { x: 1400, y: loaded.placement.steps.get('s2')!.y } } });
+    const s1 = d.placement.steps.get('s1')!;
+    const box = { x: s1.x + STEP_W + 400, y: s1.y, w: STEP_W, h: STEP_H };
+    // free wires laid level off the new step's output at every height it could leave at: the router has no free track
+    const blocked = (dy: number) => {
+      let c = circuitOfDoc(d);
+      for (let y = box.y; y <= box.y + STEP_H; y += 8) {
+        c = addCircuitWire(c, `w:o${y}`, { tail: { on: 'open', x: box.x + STEP_W + 8, y: y + dy }, head: { on: 'open', x: box.x + STEP_W + 56, y: y + dy }, bends: { xs: [box.x + STEP_W + 8], ys: [] } });
+      }
+      return { c, shown: applyDraft(d, { ...EMPTY_DRAFT, steps: { s2: { x: 1400, y: d.placement.steps.get('s2')!.y } }, wires: c }) };
+    };
+    const on = blocked(0);
+    expect(judgeSplit(on.shown, on.c, 's1->s2', 'n', 1, { at: 100, box })).toBe('short');
+    // families alone see nothing wrong: only drawing the halves finds it
+    expect(judgeSplit(on.shown, on.c, 's1->s2', 'n', 1, { at: 100 })).toBe('insert');
+    // the same wires well below the step: inserted
+    const off = blocked(600);
+    expect(judgeSplit(off.shown, off.c, 's1->s2', 'n', 1, { at: 100, box })).toBe('insert');
+  });
   it('refused: a direction-less wire', async () => {
     const d = await doc();
     const c = addCircuitWire(circuitOfDoc(d), 'w:f', { tail: { on: 'open', x: 0, y: 0 }, head: { on: 'open', x: 200, y: 0 } });
@@ -82,7 +122,7 @@ describe('judging a split (plan 10 §4.6)', () => {
   it('splitAt: the covered wire and its verdict, or null', async () => {
     const d = await doc();
     const c = circuitOfDoc(d);
-    expect(splitAt(d, c, boxOn(d, 's1->s2'), 'n', 1)).toEqual({ wire: 's1->s2', why: 'insert' });
+    expect(splitAt(d, c, boxOn(d, 's1->s2'), 'n', 1)).toMatchObject({ wire: 's1->s2', why: 'insert' });
     expect(splitAt(d, c, { x: -5000, y: -5000, w: STEP_W, h: STEP_H }, 'n', 1)).toBeNull();
   });
 });

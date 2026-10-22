@@ -284,7 +284,7 @@ describe('an empty step dropped on a wire splits it (Visio, plan 10 §4.6)', () 
     t.start('e1');
     t.move('e1', p.x, p.y);
     const held = t.setHeld.mock.lastCall![0]!;
-    expect(held.split).toEqual({ wire: 's1->s2', why: 'insert' });
+    expect(held.split).toMatchObject({ wire: 's1->s2', why: 'insert' });
     t.stop('e1');
     expect(t.design.onCommit).toHaveBeenCalledTimes(1);
     const after = (t.design.onCommit as ReturnType<typeof vi.fn>).mock.lastCall![0] as Draft;
@@ -319,7 +319,7 @@ describe('an empty step dropped on a wire splits it (Visio, plan 10 §4.6)', () 
     const p = onRun(applyDraft(doc, wired), 'w:b');
     t.start('e2');
     t.move('e2', p.x, p.y);
-    expect(t.setHeld.mock.lastCall![0]!.split).toEqual({ wire: 'w:b', why: 'short' });
+    expect(t.setHeld.mock.lastCall![0]!.split).toMatchObject({ wire: 'w:b', why: 'short' });
     t.stop('e2');
     expect(t.design.onCommit).not.toHaveBeenCalled();
     // as Escape does: the step the drag picked is unpicked again, and the Inspector does not follow it

@@ -1,37 +1,41 @@
 import type { StudioDocument } from '../app/document';
-import { isFree, splitWire, type Circuit } from '../circuit/circuit';
+import { isFree, setEnd, splitWire, type Circuit, type End } from '../circuit/circuit';
 import { netsOf } from '../circuit/families';
 import { loopWires } from '../circuit/trace';
+import { contactOn, routeCircuit } from '../layout/circuitRoute';
+import { snap } from '../layout/geometry';
 import { nearestOn } from '../layout/junctions';
 import type { Pt } from '../layout/router';
-import type { Id } from '../model/graph';
+import type { Id, Step } from '../model/graph';
+import { applyDraft } from './apply';
+import { circuitOf, withCircuit, type Draft } from './draft';
 import { beforeDrop } from './drop';
 
 /**
  * What dropping an empty step on a wire does (Visio, plan 10 §4.6): `insert` splits it through the step; refused on a
- * wire with junctions on it (`junctionWire`: the step would sit among them), on a direction-less wire (`noDirection`),
- * and where the new step brings a second family into a net or closes a loop of wires (`short`).
+ * direction-less wire (`noDirection`), and where a short circuit would follow (`short`): the new step brings a second
+ * family into a net (a junction joins wires of one family only: the user's ruling, 2026-10-22), closes a loop of wires,
+ * or a half is drawn on a wire of another net (rule 2).
  */
-export type SplitWhy = 'insert' | 'junctionWire' | 'noDirection' | 'short';
+export type SplitWhy = 'insert' | 'noDirection' | 'short';
 
-/** A held step over a wire: the wire it covers and what the drop does. */
+/** A held step over a wire: the wire it covers, what the drop does, and how far along the wire (drawn) it goes in. */
 export interface Split {
   wire: string;
   why: SplitWhy;
+  at: number;
 }
 
 export function splitLabel(why: SplitWhy): string {
   switch (why) {
     case 'insert': return 'insert here';
-    case 'junctionWire': return 'wires join this wire';
+
     case 'noDirection': return 'wire has no direction';
     case 'short': return 'short circuit';
   }
 }
 
 export const splitTone = (why: SplitWhy): 'ok' | 'no' => (why === 'insert' ? 'ok' : 'no');
-
-type Box = { x: number; y: number; w: number; h: number };
 
 /** The run from `a` to `b` passes through the box (Liang–Barsky clipping). */
 function crosses(a: Pt, b: Pt, r: Box): boolean {
@@ -63,19 +67,53 @@ export function wireUnder(shown: StudioDocument, circuit: Readonly<Circuit>, box
   return best?.id ?? null;
 }
 
+/**
+ * Wire `id` split through step `step` `at` along its drawn line (`splitWire`): the ends joined on it before that point
+ * stay on it (the half into the step), those past it go to `newId` (the half out of the step), as far past the point
+ * as they were. `pinSplit` puts them back on the halves as drawn.
+ */
+export function splitCircuit(c: Readonly<Circuit>, id: string, step: Id, newId: string, at: number): Circuit {
+  const out = splitWire(c, id, step, newId);
+  if (out === c) return out;
+  const moved = (e: End): End => (e.on === 'wire' && e.host === id && e.at > at ? { on: 'wire', host: newId, at: e.at - at } : e);
+  for (const [k, x] of Object.entries(out)) {
+    if (k === id || k === newId) continue;
+    const tail = moved(x.tail), head = moved(x.head);
+    if (tail !== x.tail || head !== x.head) out[k] = { ...x, tail, head };
+  }
+  return out;
+}
+
 /** The id the split's new wire is judged under (it gets its own when dropped). */
 const PROBE = 'w:split';
 
+type Box = { x: number; y: number; w: number; h: number };
+
 /**
- * Wire `id` split through step `step`, whose family (entry condition) is `condition`: judged as any connection is
- * (`judgeDrop`'s rules): a loop of wires or a net gaining a second family that was not there before refuses it.
+ * The routing context with `step` (family `condition`) at `box`, for a step the drawing may not have yet (a Toolbox
+ * drop) or has elsewhere (one dragged).
  */
-export function judgeSplit(shown: StudioDocument, circuit: Readonly<Circuit>, id: string, step: Id, condition: number): SplitWhy {
+function contextWith(shown: StudioDocument, step: Id, condition: number, box: Box) {
+  const steps = new Map(shown.graph.steps);
+  const own = shown.graph.steps.get(step);
+  steps.set(step, { ...(own ?? { id: step, name: '', version: '', description: null, processorId: null, nextStepIds: [] }), entryCondition: condition } as Step);
+  const placed = new Map(shown.placement.steps);
+  placed.set(step, { x: box.x, y: box.y });
+  return { placement: { ...shown.placement, steps: placed }, steps };
+}
+
+/**
+ * Wire `id` split through step `step`, whose family (entry condition) is `condition`, `where.at` along its drawn line
+ * (which half each junction on it goes with): judged as any connection is (`judgeDrop`'s rules): a loop of wires, or a
+ * net gaining a family it did not have, refuses it. With `where.box` (where the step lands), the halves are drawn there
+ * too: one that lies on a wire of another net it did not lie on before is a short circuit (rule 2).
+ */
+export function judgeSplit(
+  shown: StudioDocument, circuit: Readonly<Circuit>, id: string, step: Id, condition: number, where: { at: number; box?: Box } = { at: Infinity },
+): SplitWhy {
   const w = circuit[id];
   if (w === undefined || isFree(w)) return 'noDirection';
-  const joined = Object.values(circuit).some((x) => (x.tail.on === 'wire' && x.tail.host === id) || (x.head.on === 'wire' && x.head.host === id));
-  if (joined) return 'junctionWire';
-  const after = splitWire(circuit, id, step, PROBE);
+  const after = splitCircuit(circuit, id, step, PROBE, where.at);
   const before = beforeDrop(shown, circuit);
   for (const x of loopWires(after)) if (!before.looped.has(x)) return 'short';
   const conditionOf = (s: Id) => (s === step ? condition : shown.graph.steps.get(s)?.entryCondition);
@@ -86,11 +124,53 @@ export function judgeSplit(shown: StudioDocument, circuit: Readonly<Circuit>, id
     if (net.families.length < 2 || !(net.wires.includes(id) || net.wires.includes(PROBE))) continue;
     if (net.wires.some((x) => net.families.some((f) => !had(x).includes(f)))) return 'short';
   }
+  if (where.box) {
+    // the halves as the router draws them with the step in place; a short circuit the old wire was in already is no new one
+    const was = new Set(shown.wires.find((r) => r.id === id)?.shortWith ?? []);
+    for (const r of routeCircuit(after, contextWith(shown, step, condition, where.box))) {
+      if (r.id !== id && r.id !== PROBE) continue;
+      if ((r.shortWith ?? []).some((x) => x !== id && x !== PROBE && !was.has(x))) return 'short';
+    }
+  }
   return 'insert';
 }
 
-/** A step's box held at `box`: the wire it covers and the verdict there, or null over no wire. */
+/**
+ * A step's box held at `box`: the wire it covers, the verdict there (its halves drawn with the step at `box`), and how far
+ * along the wire the box's centre is; null over no wire. The last answer is kept: a drag asks again for every pointer
+ * move, mostly with the step still on the same grid point.
+ */
+let last: { key: unknown[]; split: Split | null } | null = null;
 export function splitAt(shown: StudioDocument, circuit: Readonly<Circuit>, box: Box, step: Id, condition: number, skip: Id | null = null): Split | null {
+  const key = [shown, circuit, box.x, box.y, box.w, box.h, step, condition, skip];
+  if (last && last.key.length === key.length && last.key.every((k, i) => k === key[i])) return last.split;
   const wire = wireUnder(shown, circuit, box, skip);
-  return wire === null ? null : { wire, why: judgeSplit(shown, circuit, wire, step, condition) };
+  const route = wire === null ? undefined : shown.wires.find((r) => r.id === wire);
+  const at = route ? nearestOn([route.points], [box.x + box.w / 2, box.y + box.h / 2]).at : 0;
+  const split = wire === null ? null : { wire, why: judgeSplit(shown, circuit, wire, step, condition, { at, box }), at };
+  last = { key, split };
+  return split;
+}
+
+/**
+ * The release of a split (plan 10 §4.6): `draft` (the step already where it lands, over `saved`) with wire `split.wire`
+ * split through `step`, the new half `newId`. Every end that was joined on the wire stays with its half and is put at
+ * the point of that half, as now drawn, nearest where it was drawn in `shown` (junctions keep their place, the user's
+ * ruling 2026-10-20).
+ */
+export function commitSplit(saved: StudioDocument, shown: StudioDocument, draft: Draft, split: Split, step: Id, newId: string): Draft {
+  const was = circuitOf(saved, draft);
+  const next = withCircuit(draft, saved, splitCircuit(was, split.wire, step, newId, split.at));
+  const line = shown.wires.find((r) => r.id === split.wire)?.points;
+  const joined = Object.entries(was).flatMap(([k, x]) => (['tail', 'head'] as const)
+    .flatMap((side) => (x[side].on === 'wire' && x[side].host === split.wire ? [{ k, side, at: x[side].at }] : [])));
+  if (!line || joined.length === 0) return next;
+  const drawn = new Map(applyDraft(saved, next).wires.map((r) => [r.id, r.points]));
+  let c = circuitOf(saved, next);
+  for (const j of joined) {
+    const host = (c[j.k]![j.side] as Extract<End, { on: 'wire' }>).host;
+    const half = drawn.get(host);
+    if (half) c = setEnd(c, j.k, j.side, { on: 'wire', host, at: snap(nearestOn([half], contactOn(line, j.at).p).at) });
+  }
+  return withCircuit(next, saved, c);
 }

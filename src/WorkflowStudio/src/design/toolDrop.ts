@@ -1,5 +1,5 @@
 import type { StudioDocument } from '../app/document';
-import { NEW_WIRE_PREFIX, splitWire, type Circuit, type CircuitWire, type End, type Side } from '../circuit/circuit';
+import { NEW_WIRE_PREFIX, type Circuit, type CircuitWire, type End, type Side } from '../circuit/circuit';
 import { contactOn, hubLead, routeCircuit } from '../layout/circuitRoute';
 import type { Pt } from '../layout/router';
 import { CACHE_H, CACHE_W, snap, STEP_H, STEP_W, type Point } from '../layout/geometry';
@@ -13,7 +13,7 @@ import { circuitOf, withCircuit, type Draft } from './draft';
 import { endOf, judgeDrop, pointOfTarget, targetOf, toneOf, dropLabel, type DropTarget as WireTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
 import { overlapJudge } from './overlapJudge';
-import { splitAt, splitLabel, splitTone, type SplitWhy } from './split';
+import { commitSplit, splitAt, splitLabel, splitTone, type SplitWhy } from './split';
 
 /**
  * What a Toolbox tile drags (2026-10-11): a new, empty step or cache, a new undecided wire (each a new virtual entity, as a
@@ -40,7 +40,7 @@ export type ToolVerdict =
   /** A Wire tile over a contact (2026-10-20): judged as a dragged wire end there; `points`: the wire as it would be drawn. */
   | { kind: 'wire'; target: Exclude<WireTarget, { on: 'open' }>; why: Verdict; points: Pt[] | null }
   /** An empty step over a wire's run (Visio, plan 10 §4.6): released, the wire splits through it, or the refusal. */
-  | { kind: 'split'; wire: string; why: SplitWhy }
+  | { kind: 'split'; wire: string; why: SplitWhy; at: number }
   | { kind: 'assign' | 'replace'; stepId: Id }
   | { kind: 'noStep' }
   | { kind: 'linked'; cacheId: Id };
@@ -182,8 +182,7 @@ export function dropTool(
       if (verdict.kind !== 'split') return { draft: placed, picks: [{ kind: 'node', id }] };
       // over a wire's run: the wire splits through the new step (plan 10 §4.6), in the same history step
       const withStep = applyEdits(base, edits, placed.blocks);
-      const circuit = splitWire(circuitOf(withStep, placed), verdict.wire, id, `${NEW_WIRE_PREFIX}${newId()}`);
-      return { draft: withCircuit(placed, withStep, circuit), picks: [{ kind: 'node', id }] };
+      return { draft: commitSplit(withStep, shown, placed, verdict, id, `${NEW_WIRE_PREFIX}${newId()}`), picks: [{ kind: 'node', id }] };
     }
     case 'newCache': {
       const id = newId();

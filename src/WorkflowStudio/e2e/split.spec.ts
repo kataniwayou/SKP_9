@@ -123,6 +123,39 @@ test('an empty step on the canvas dragged onto a -> b: held marked, released spl
   expect(await box(node(panel, made))).toEqual(placed);
 });
 
+test('a wire with a junction on it splits too (2026-10-22): the joined wire stays on a half, where it was', async ({ page }) => {
+  const panel = await open(page);
+  const wire = `${t.a}->${t.b}`;
+  // a Wire tile's tip on a -> b's line a fifth of the way along: a new wire joined there
+  const join = await pointOnWire(panel, wire, 0.2);
+  await holdTile(page, 'wire', { x: join.x - 46, y: join.y });
+  expect(await labelsOf(panel)).toContain('join here');
+  await page.mouse.up();
+  await expect(newWires(panel)).toHaveCount(1);
+  const branch = (await newWires(panel).first().getAttribute('data-id'))!;
+  const [, head] = await endsOnPage(panel, branch);
+  // an empty step on the line's middle, past the junction
+  await holdTile(page, 'step', await pointOnWire(panel, wire, 0.6));
+  await onEnds(panel, 'ok', wire);
+  expect(await labelsOf(panel)).toContain('insert here');
+  await page.mouse.up();
+  await frames(page);
+  await expect(newWires(panel)).toHaveCount(2);
+  await panel.screenshot({ path: 'test-results/split-junction-done.png' });
+  // the branch's head is still on a line of the two halves, near where it was joined
+  const halves = await newWires(panel).evaluateAll((els, b) => els.map((e) => e.getAttribute('data-id')!).filter((id) => id !== b), branch);
+  const [, now] = await endsOnPage(panel, branch);
+  const onLine = async (id: string) => panel.locator(`.react-flow__edge[data-id="${id}"] path.w`).first().evaluate((el, q) => {
+    const p = el as SVGPathElement, m = p.getScreenCTM()!, len = p.getTotalLength();
+    let best = Infinity;
+    for (let d = 0; d <= len; d += 1) { const s = p.getPointAtLength(d); best = Math.min(best, Math.hypot(s.x * m.a + s.y * m.c + m.e - q.x, s.x * m.b + s.y * m.d + m.f - q.y)); }
+    return best;
+  }, now);
+  const gaps = await Promise.all([wire, ...halves].map(onLine));
+  expect(Math.min(...gaps), JSON.stringify(gaps)).toBeLessThan(2);
+  expect(Math.hypot(now.x - head.x, now.y - head.y)).toBeLessThan(40);
+});
+
 test('a direction-less wire refuses a split: its ends red, the refusal said; released, nothing is dropped', async ({ page }) => {
   const panel = await open(page);
   // a free wire from the Wire tile on empty canvas

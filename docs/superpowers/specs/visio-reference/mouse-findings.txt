@@ -74,3 +74,17 @@ D's centre released 6 px off A's top -> lands 1.4 px off (not snapped)
 D's left released 6 px off B's right -> lands 4.3 px off (not snapped)
 control: D's top 6 px off A's top -> lands 0.0 px off (SNAPPED)
 done
+calibration: A box px 898,990,494,548; B box px 1188,1280,590,644; 96.7 px per inch
+settings: page PlowCode=0 PageShapeSplit=1 PlaceStyle=2; Process ShapePlowCode=0 ShapeSplittable=0 ShapeSplit=1; app AutoConnect=True
+spacing: page AvenueSizeX=15 mm AvenueSizeY=15 mm BlockSizeX=6.4 mm BlockSizeY=6.4 mm LineToNodeX=3.2 mm; Process 25x15 mm
+narrow: gap 14.3 mm, released 0.5 of the way from A's right to B's left; before: A (50.8,177.8) mm; B (90.1,177.8) mm; C (129.4,177.8) mm; F (168.7,177.8) mm; G (129.4,137.2) mm; E (109.7,157.5) mm; D (70.4,106.7) mm
+narrow: after: A (50.8,177.8) mm; B (141.1,156.4) mm; C (180.4,156.4) mm; F (168.7,177.8) mm; G (180.4,115.8) mm; E (109.7,157.5) mm; D (90.8,177.8) mm; wires [BeginX->A, EndX->D] [BeginX->B, EndX->C] [BeginX->B, EndX->G] [BeginX->D, EndX->B]
+narrow-nearB: gap 14.3 mm, released 0.85 of the way from A's right to B's left; before: A (50.8,177.8) mm; B (90.1,177.8) mm; C (129.4,177.8) mm; F (168.7,177.8) mm; G (129.4,137.2) mm; E (109.7,157.5) mm; D (70.4,106.7) mm
+narrow-nearB: after: A (50.8,177.8) mm; B (141.1,156.4) mm; C (180.4,156.4) mm; F (168.7,177.8) mm; G (180.4,115.8) mm; E (109.7,157.5) mm; D (90.8,177.8) mm; wires [BeginX->A, EndX->D] [BeginX->B, EndX->C] [BeginX->B, EndX->G] [BeginX->D, EndX->B]
+snug: gap 35.2 mm, released 0.5 of the way from A's right to B's left; before: A (50.8,177.8) mm; B (111,177.8) mm; C (171.1,177.8) mm; F (231.3,177.8) mm; G (171.1,137.2) mm; E (141,157.5) mm; D (80.9,106.7) mm
+snug: after: A (50.8,177.8) mm; B (130.8,136.1) mm; C (191,136.1) mm; F (231.3,177.8) mm; G (191,95.5) mm; E (141,157.5) mm; D (90.8,177.8) mm; wires [BeginX->A, EndX->D] [BeginX->B, EndX->C] [BeginX->B, EndX->G] [BeginX->D, EndX->B]
+wide: gap 75 mm, released 0.7 of the way from A's right to B's left; before: A (50.8,177.8) mm; B (150.8,177.8) mm; C (250.8,177.8) mm; F (350.8,177.8) mm; G (250.8,137.2) mm; E (200.8,157.5) mm; D (100.8,106.7) mm
+wide: after: A (50.8,177.8) mm; B (150.8,177.8) mm; C (250.8,177.8) mm; F (350.8,177.8) mm; G (250.8,137.2) mm; E (200.8,157.5) mm; D (90.8,177.8) mm; wires [BeginX->A, EndX->D] [BeginX->B, EndX->C] [BeginX->B, EndX->G] [BeginX->D, EndX->B]
+avenue30: gap 14.3 mm, released 0.5 of the way from A's right to B's left; before: A (50.8,177.8) mm; B (90.1,177.8) mm; C (129.4,177.8) mm; F (168.7,177.8) mm; G (129.4,137.2) mm; E (109.7,157.5) mm; D (70.4,106.7) mm
+avenue30: after: A (50.8,177.8) mm; B (200,177.8) mm; C (239.3,177.8) mm; F (168.7,177.8) mm; G (239.3,137.2) mm; E (109.7,157.5) mm; D (105.8,177.8) mm; wires [BeginX->A, EndX->D] [BeginX->B, EndX->C] [BeginX->B, EndX->G] [BeginX->D, EndX->B]
+done

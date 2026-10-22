@@ -1,18 +1,18 @@
 import { useEffect, useRef, type MutableRefObject } from 'react';
 import type { NodeChange, OnNodeDrag, OnNodesChange } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
-import { NEW_WIRE_PREFIX, splitWire, type Circuit, type End } from '../circuit/circuit';
+import { NEW_WIRE_PREFIX, type Circuit, type End } from '../circuit/circuit';
 import { SPHERE_NODE_ID } from '../layout/nodeIds';
 import { PMID, snap, STEP_H, STEP_W, type Point } from '../layout/geometry';
 import type { Selection } from '../store/selection';
 import { nodePickIds, wirePickIds, type Pick } from '../store/picks';
 import { selectionFromClick } from '../canvas/selection';
 import type { DesignProps } from './designProps';
-import { circuitOf, moveGroup, withCircuit, type Draft } from './draft';
+import { circuitOf, moveGroup, type Draft } from './draft';
 import { guideBoxes, NO_GUIDES, SNAP_REACH_PX, snapToGuides, type Guides } from './guides';
 import { nodeBox } from './hit';
 import { newId } from './ids';
-import { splitAt, splitTone, type Split } from './split';
+import { commitSplit, splitAt, splitTone, type Split } from './split';
 
 interface Drag {
   primary: string;
@@ -224,8 +224,7 @@ export function useBlockDrag(
     if (d.preview && d.split && d.splitter) {
       // refused: nothing moves, and as for Escape the picks go back as they were (review 2026-10-22)
       if (splitTone(d.split.why) === 'no') { d.unpick(); return; }
-      const c = splitWire(circuitOf(saved, d.preview), d.split.wire, d.splitter.step, `${NEW_WIRE_PREFIX}${newId()}`);
-      design.onCommit(withCircuit(d.preview, saved, c));
+      design.onCommit(commitSplit(saved, shown.current, d.preview, d.split, d.splitter.step, `${NEW_WIRE_PREFIX}${newId()}`));
     } else if (d.preview) design.onCommit(d.preview);
     if (d.selectAfter !== undefined) onSelect?.(d.selectAfter, [{ kind: 'node', id: d.primary }]);
   };
