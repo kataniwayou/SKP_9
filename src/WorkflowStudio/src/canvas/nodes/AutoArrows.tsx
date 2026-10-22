@@ -1,4 +1,4 @@
-import { useContext } from 'react';
+import { useContext, useEffect, useRef } from 'react';
 import type { Dir } from '../../design/autoConnect';
 import { DesignContext } from '../../design/DesignContext';
 
@@ -11,6 +11,18 @@ import { DesignContext } from '../../design/DesignContext';
  */
 export function AutoArrows({ id, dirs, w, h, mid }: { id: string; dirs: readonly Dir[] | undefined; w: number; h: number; mid: number }) {
   const gestures = useContext(DesignContext);
+  // the arrow under the pointer: one taken away there (a wire drawn from the block, design mode left) gets no pointer
+  // leave, so it says none itself, or the canvas keeps previewing its click (a landing box left behind, 2026-10-22)
+  const hovered = useRef<Dir | null>(null);
+  const gestureRef = useRef(gestures);
+  gestureRef.current = gestures;
+  useEffect(() => {
+    if (hovered.current !== null && !dirs?.includes(hovered.current)) {
+      hovered.current = null;
+      gestureRef.current?.arrowHover(null);
+    }
+  }, [dirs]);
+  useEffect(() => () => { if (hovered.current !== null) gestureRef.current?.arrowHover(null); }, []);
   if (!gestures || !dirs || dirs.length === 0) return null;
   const at = (d: Dir) => (d === 'right' ? { left: w, top: mid } : d === 'left' ? { left: 0, top: mid } : d === 'up' ? { left: w / 2, top: 0 } : { left: w / 2, top: h });
   return (
@@ -18,8 +30,8 @@ export function AutoArrows({ id, dirs, w, h, mid }: { id: string; dirs: readonly
       {dirs.map((d) => (
         <div key={d} className="nx-ac nodrag nopan" data-dir={d} style={at(d)}
           onPointerDown={(e) => gestures.arrowPointerDown(id, d, e)}
-          onPointerEnter={() => gestures.arrowHover({ id, dir: d })}
-          onPointerLeave={() => gestures.arrowHover(null)} />
+          onPointerEnter={() => { hovered.current = d; gestures.arrowHover({ id, dir: d }); }}
+          onPointerLeave={() => { hovered.current = null; gestures.arrowHover(null); }} />
       ))}
     </>
   );

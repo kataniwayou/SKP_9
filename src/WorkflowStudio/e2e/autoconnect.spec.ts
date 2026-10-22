@@ -113,3 +113,36 @@ test('dragged to empty canvas, an arrow draws a wire open there, as from the con
   expect((await stepIds(panel)).length).toBe(4);
   void a;
 });
+
+test("an arrow taken away under the pointer leaves no landing box behind: a wire drawn from its side (2026-10-22)", async ({ page }) => {
+  const panel = await open(page);
+  // dragged from the right arrow itself to empty canvas: c's output is wired, its right arrow goes
+  await toArrow(page, panel, t.c, 'right');
+  await expect(panel.locator('.design-tool-landing')).toHaveCount(1);
+  const to = await emptySpot(panel);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 12 });
+  await page.mouse.up();
+  await frames(page);
+  await expect(newWires(panel)).toHaveCount(1);
+  expect(await arrowsOn(panel, t.c)).not.toContain('right');
+  await expect(panel.locator('.design-tool-landing')).toHaveCount(0);
+  await page.mouse.move(to.x + 40, to.y + 40, { steps: 4 });
+  await expect(panel.locator('.design-tool-landing')).toHaveCount(0);
+
+  // a wire from c's connection point whose drag crosses c's up arrow on its way out: nothing is left behind either
+  const up = await toArrow(page, panel, t.c, 'up');
+  await expect(panel.locator('.design-tool-landing')).toHaveCount(1);
+  const port = await box(node(panel, t.c).locator('.nx-port').first());
+  await page.mouse.move(port.x + port.width / 2, port.y + port.height / 2, { steps: 6 });
+  await page.mouse.down();
+  // out over the up arrow and away to empty canvas
+  await page.mouse.move(up.x, up.y, { steps: 6 });
+  const far = await emptySpot(panel, [to]);
+  await page.mouse.move(far.x, far.y, { steps: 12 });
+  await page.mouse.up();
+  await frames(page);
+  await page.mouse.move(far.x + 40, far.y + 40, { steps: 4 });
+  await frames(page);
+  await expect(panel.locator('.design-tool-landing')).toHaveCount(0);
+});
