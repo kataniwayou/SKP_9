@@ -3,6 +3,9 @@ import type { LiveStatus } from '../../api/liveStatus';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { DesignContext } from '../../design/DesignContext';
 import { SPHERE_R } from '../../layout/geometry';
+import { SPHERE_NODE_ID } from '../../layout/nodeIds';
+import type { Dir } from '../../design/autoConnect';
+import { AutoArrows } from './AutoArrows';
 import { WORKFLOW_SOURCE } from '../../layout/ports';
 import { useLiveArt } from '../liveArt';
 import { closingDash } from './nxShapes';
@@ -10,6 +13,8 @@ import { closingDash } from './nxShapes';
 export type WorkflowNodeData = {
   /** The workflow's unique name (spec §7): the dial's tooltip. */
   tip: string;
+  /** Its AutoConnect arrow (design mode, plan 10 phase 6): the right one while it has no tail. */
+  arrows?: Dir[];
 };
 export type WorkflowNodeType = Node<WorkflowNodeData, 'workflow'>;
 
@@ -75,6 +80,7 @@ export function WorkflowNode({ data }: NodeProps<WorkflowNodeType>) {
       <Handle id="ring" type="target" position={Position.Right} isConnectable={false} style={{ top: R }} />
       {/* where entry wires are drawn from (spec §4.5): the dial's right side at its centre height; design mode only */}
       {gestures && <div className="nx-port nodrag nopan" style={{ left: 2 * R, top: R }} onPointerDown={(e) => gestures.portPointerDown(WORKFLOW_SOURCE, e)} />}
+      <AutoArrows id={SPHERE_NODE_ID} dirs={data.arrows} w={2 * R} h={2 * R} mid={R} />
     </>
   );
 }

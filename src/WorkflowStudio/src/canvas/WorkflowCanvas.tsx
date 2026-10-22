@@ -8,6 +8,7 @@ import { DesignOverlay } from '../design/DesignOverlay';
 import type { DesignProps } from '../design/designProps';
 import { circuitOf, EMPTY_DRAFT, resetShape, type Draft } from '../design/draft';
 import { NO_GUIDES, type Guides } from '../design/guides';
+import { arrowsOf, autoTarget } from '../design/autoConnect';
 import { carried, copyNodes, useBlockDrag, type Held } from '../design/useBlockDrag';
 import { isArrow, useDesignKeys } from '../design/useDesignKeys';
 import { useRubberBand } from '../design/useRubberBand';
@@ -180,13 +181,27 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     const contact = v.kind === 'wire' && !toolOver.saving ? pointOfTarget(toolOver.target.shown(), v.target) : null;
     return { box, line, path, node, halo, contact, label: label && { ...label, at: toolOver.flow } };
   }, [toolDrag, toolOver]);
+  // Visio's AutoConnect (plan 10 phase 6): the arrows each block shows, and what a click on the hovered one would do (a
+  // new step's landing box, or the step already there outlined, green or refused)
+  const autoCircuit = useMemo(() => (design ? circuitOf(doc, preview ?? design.draft) : null), [doc, design?.draft, preview]);
+  const auto = useMemo(() => {
+    const h = wiring.autoHover;
+    if (!h || !autoCircuit) return null;
+    const t = autoTarget(shownDoc, autoCircuit, h.id, h.dir);
+    return t.kind === 'new' ? { box: t.box, node: null }
+      : t.kind === 'step' ? { box: null, node: { id: t.step, tone: t.ok ? 'ok' as const : 'no' as const } } : null;
+  }, [wiring.autoHover, autoCircuit, shownDoc]);
   const shown = useMemo(() => {
     const marked = wiring.hints.filter((h) => !h.line).reduce(withHint, selected);
-    const hinted = tool?.node ? withHint(marked, tool.node) : marked;
+    const toolLit = tool?.node ? withHint(marked, tool.node) : marked;
+    const lit = auto?.node ? withHint(toolLit, auto.node) : toolLit;
+    const hinted = autoCircuit
+      ? lit.map((n) => (n.type === 'step' || n.type === 'workflow' ? { ...n, data: { ...n.data, arrows: arrowsOf(shownDoc, autoCircuit, n.id) } } : n)) as typeof lit
+      : lit;
     if (!held) return hinted;
     // Visio's held copy: the block's art, faded, in a light-blue dashed outline, where the release puts it; never pressed
     return [...hinted, ...copyNodes(flow.nodes, held, shownDoc)] as typeof hinted;
-  }, [selected, wiring.hints, tool, held, flow.nodes, shownDoc]);
+  }, [selected, wiring.hints, tool, held, flow.nodes, shownDoc, auto, autoCircuit]);
   // the picked wires the held blocks take along whole, where the release puts them
   const heldWires = useMemo(() => {
     if (!held) return [];
@@ -321,7 +336,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onMoveEnd={(_event, v) => report(v)}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} guides={toolOver?.guides ?? guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={dragged?.body ? null : wiring.ghost?.points ?? null} bodyCopy={bodyCopy} hints={wiring.hints} gone={wiring.ghost?.gone ?? null} runGuide={wiring.runGuide} shorts={wiring.ghost?.shorts} tool={tool} copies={heldWires} split={split} />}
+              {design && <DesignOverlay band={band} guides={toolOver?.guides ?? guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={dragged?.body ? null : wiring.ghost?.points ?? null} bodyCopy={bodyCopy} hints={wiring.hints} gone={wiring.ghost?.gone ?? null} runGuide={wiring.runGuide} shorts={wiring.ghost?.shorts} tool={tool ?? (auto?.box ? { box: auto.box, line: null, label: null } : null)} copies={heldWires} split={split} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize initial={savedSize} />

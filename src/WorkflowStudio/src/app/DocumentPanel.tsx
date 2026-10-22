@@ -87,6 +87,7 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
           picks: open.picks,
           onPick: (picks) => store.dispatch({ type: 'pick', workflowId, picks }),
           onCommit: (draft, o) => store.dispatch({ type: 'design', workflowId, draft, merge: o?.merge, picks: o?.picks }),
+          onAutoConnect: (id, dir) => store.dispatch({ type: 'autoConnect', workflowId, id, dir, newId }),
           onUndo: () => store.dispatch({ type: 'undo', workflowId }),
           onRedo: () => store.dispatch({ type: 'redo', workflowId }),
           // copy, paste and delete (2026-10-10): the store does them, so the clipboard is shared by every document

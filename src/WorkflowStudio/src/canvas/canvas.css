@@ -110,3 +110,23 @@ body.tool-cross, body.tool-cross *, body.tool-cross .studio-canvas .react-flow__
 /* Visio's filled squares on the ends of a wire a held step would split (plan 10 §4.6) */
 .design-split-end.ok { fill: #5BC85B; }
 .design-split-end.no { fill: #F87171; }
+/* Visio's AutoConnect arrows (plan 10 phase 6, measured: 7 x 13 px triangles, centred 24 screen px off the middle of a
+   side): an anchor at the side's middle; ::before an invisible bridge from the block to the arrow (so the hover holds on
+   the way), ::after the light-blue triangle, darker under the pointer; shown while the block is hovered, never while a
+   gesture or a block drag runs */
+.studio-canvas .nx-ac { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; cursor: pointer; z-index: 5; }
+.studio-canvas .react-flow__node:hover .nx-ac { opacity: 1; pointer-events: auto; }
+.studio-canvas.gesture .nx-ac, .studio-canvas.block-drag .nx-ac { display: none; }
+.nx-ac::before { content: ''; position: absolute; }
+.nx-ac[data-dir="right"]::before { left: 0; top: calc(-12px * var(--inv, 1)); width: calc(32px * var(--inv, 1)); height: calc(24px * var(--inv, 1)); }
+.nx-ac[data-dir="left"]::before { right: 0; top: calc(-12px * var(--inv, 1)); width: calc(32px * var(--inv, 1)); height: calc(24px * var(--inv, 1)); }
+.nx-ac[data-dir="up"]::before { bottom: 0; left: calc(-12px * var(--inv, 1)); height: calc(32px * var(--inv, 1)); width: calc(24px * var(--inv, 1)); }
+.nx-ac[data-dir="down"]::before { top: 0; left: calc(-12px * var(--inv, 1)); height: calc(32px * var(--inv, 1)); width: calc(24px * var(--inv, 1)); }
+.nx-ac::after { content: ''; position: absolute; background: #9DC3E6; }
+.nx-ac:hover::after { background: #2E75B6; }
+.nx-ac[data-dir="right"]::after, .nx-ac[data-dir="left"]::after { width: calc(7px * var(--inv, 1)); height: calc(13px * var(--inv, 1)); top: calc(-6.5px * var(--inv, 1)); }
+.nx-ac[data-dir="right"]::after { left: calc(20.5px * var(--inv, 1)); clip-path: polygon(0 0, 100% 50%, 0 100%); }
+.nx-ac[data-dir="left"]::after { right: calc(20.5px * var(--inv, 1)); clip-path: polygon(100% 0, 0 50%, 100% 100%); }
+.nx-ac[data-dir="up"]::after, .nx-ac[data-dir="down"]::after { width: calc(13px * var(--inv, 1)); height: calc(7px * var(--inv, 1)); left: calc(-6.5px * var(--inv, 1)); }
+.nx-ac[data-dir="up"]::after { bottom: calc(20.5px * var(--inv, 1)); clip-path: polygon(0 100%, 50% 0, 100% 100%); }
+.nx-ac[data-dir="down"]::after { top: calc(20.5px * var(--inv, 1)); clip-path: polygon(0 0, 100% 0, 50% 100%); }

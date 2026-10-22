@@ -5,6 +5,8 @@ import { DesignContext } from '../../design/DesignContext';
 import { CHIP, PMID, STEP_H, STEP_W } from '../../layout/geometry';
 import type { FittedText } from '../fitText';
 import { useLiveArt } from '../liveArt';
+import type { Dir } from '../../design/autoConnect';
+import { AutoArrows } from './AutoArrows';
 import { ChipView, EmptySlot, type ProcessorView } from './Chip';
 import { Label } from './Label';
 import { STEP_CAP, STEP_FRAME, STEP_FRAME_IN, STEP_GLOSS } from './nxShapes';
@@ -26,6 +28,8 @@ export type StepNodeData = {
   outs: number[];
   /** null: the step has no processor (removed in the design, 2026-10-10): the empty slot is drawn instead. */
   processor: ProcessorView | null;
+  /** Its AutoConnect arrows (design mode, plan 10 phase 6). */
+  arrows?: Dir[];
 };
 export type StepNodeType = Node<StepNodeData, 'step'>;
 
@@ -107,6 +111,7 @@ export function StepNode({ id, data }: NodeProps<StepNodeType>) {
       </svg>
       <Handle id="out" type="source" position={Position.Right} isConnectable={false} style={{ top: PMID }} />
       {gestures && <div className="nx-port nodrag nopan" style={PORT} onPointerDown={(e) => gestures.portPointerDown(id, e)} />}
+      <AutoArrows id={id} dirs={data.arrows} w={W} h={H} mid={PMID} />
     </>
   );
 }

@@ -1,3 +1,4 @@
+import { autoConnect, type Dir } from '../design/autoConnect';
 import type { StudioDocument } from '../app/document';
 import type { EntityReadDto } from '../api/entities';
 import type { LiveStatus } from '../api/liveStatus';
@@ -175,6 +176,8 @@ export type StudioAction =
    * existing cache linked, or an existing processor given to the step there. `roots`: every cache root BaseApi listed.
    */
   | { type: 'toolDrop'; workflowId: Id; item: ToolItem; at: Point; newId: () => string; roots?: readonly string[]; reach?: number }
+  /** A click on an AutoConnect arrow (plan 10 phase 6): a new step there, or a wire to the step there; one history step. */
+  | { type: 'autoConnect'; workflowId: Id; id: string; dir: Dir; newId: () => string }
   /** Delete: the picked steps, caches and wires leave the design (the hub is skipped), one history step. */
   | { type: 'deletePicks'; workflowId: Id }
   /** A Toolbox tile clicked (2026-10-11): the Inspector shows it read-only; null clears it. */
@@ -532,6 +535,12 @@ function reduceDocs(state: StudioState, action: StudioAction): StudioState {
         if (d.status.kind !== 'ready' || designLocked(d)) return d;
         const dropped = dropTool(d.status.doc, d.edits, d.design.draft, action.item, action.at, action.newId, action.reach);
         return dropped === null ? d : blocksChanged(d, dropped.draft, dropped.picks);
+      });
+    case 'autoConnect':
+      return update(state, action.workflowId, (d) => {
+        if (d.status.kind !== 'ready' || designLocked(d)) return d;
+        const made = autoConnect(d.status.doc, d.edits, d.design.draft, action.id, action.dir, action.newId);
+        return made === null ? d : blocksChanged(d, made.draft, made.picks);
       });
     case 'deletePicks':
       return update(state, action.workflowId, (d) => {

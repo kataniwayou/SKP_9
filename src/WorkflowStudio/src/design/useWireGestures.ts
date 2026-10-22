@@ -1,3 +1,6 @@
+import type { Id } from '../model/graph';
+import { SPHERE_NODE_ID } from '../layout/nodeIds';
+import type { Dir } from './autoConnect';
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
@@ -309,6 +312,8 @@ export function useWireGestures(
     step?: (p: Point) => void; own?: OwnSquares;
     /** The drop drawn as `path` would lie on a wire it may not share a line with (rule 2): "short circuit", it snaps back. */
     overlaps?: (t: DropTarget, path: Pt[]) => boolean;
+    /** Released where it was pressed (an AutoConnect arrow's click, plan 10 phase 6): this instead of a drop. */
+    click?: () => void;
   }) => {
     let target: DropTarget | null = null;
     let verdict: Verdict = 'move';
@@ -332,10 +337,11 @@ export function useWireGestures(
       const contact = target.on === 'open' ? null : pointOfTarget(shown.current, target);
       setHints([{ id: line ? line.id : over, line: line !== null, tone: toneOf(verdict), why: verdict, at: p, contact }]);
       setGhost({ wire: o.ghost, points: path });
-    }, (cancelled) => {
+    }, (cancelled, moved) => {
       setGhost(null);
       setHints([]);
       if (cancelled) return;
+      if (!moved && o.click) { o.click(); return; }
       if (square && o.own) { o.own.done(square); return; }
       if (target === null || toneOf(verdict) === 'no') return;
       o.done(target);
@@ -565,7 +571,7 @@ export function useWireGestures(
    * Draws a new wire from a step's output or the hub (spec §4.5): automatic at its tail, its head judged as any head
    * (plan 9 §6); released on nothing it is a grey wire open at its head. It becomes the pick.
    */
-  const startNew = (source: SourceId, e: ReactPointerEvent) => {
+  const startNew = (source: SourceId, e: ReactPointerEvent, click?: () => void) => {
     const d = designRef.current;
     if (!d || e.button !== 0) return;
     const base = d.draft;
@@ -580,6 +586,31 @@ export function useWireGestures(
       id, ghost: null, side: 'head', circuit,
       path: (t) => ghostPath(from, pointOfTarget(shown.current, t), 'head', boxes),
       done: (t) => d.onCommit(withCircuit(base, saved, setEnd(circuit, id, 'head', endOf(t))), { picks: [{ kind: 'wire', id }] }),
+      ...(click ? { click } : {}),
+    });
+  };
+
+  /**
+   * Draws a new wire into step `step`'s input from the pointer (an AutoConnect left arrow dragged, plan 10 phase 6): its
+   * head automatic on the input, its tail judged as any tail; released on nothing it is open there. Released where it
+   * was pressed, `click` instead.
+   */
+  const startInto = (step: Id, e: ReactPointerEvent, click: () => void) => {
+    const d = designRef.current;
+    if (!d || e.button !== 0) return;
+    const base = d.draft;
+    const { placement } = shown.current;
+    const at = placement.steps.get(step);
+    if (!at) return;
+    const into = { x: at.x, y: at.y + PMID };
+    const id = `${NEW_WIRE_PREFIX}${newId()}`;
+    const circuit = addCircuitWire(circuitOf(saved, base), id, { tail: { on: 'open', x: into.x, y: into.y }, head: { on: 'step', step, y: null } });
+    const boxes = blockBoxes(placement);
+    setResize('cross');
+    dropGesture(e, {
+      id, ghost: null, side: 'tail', circuit, click,
+      path: (t) => ghostPath(into, pointOfTarget(shown.current, t), 'tail', boxes),
+      done: (t) => d.onCommit(withCircuit(base, saved, setEnd(circuit, id, 'tail', endOf(t))), { picks: [{ kind: 'wire', id }] }),
     });
   };
 
@@ -630,8 +661,10 @@ export function useWireGestures(
     },
   }), [saved, shown, setPreview, getZoom]);
 
-  const latestRef = useRef({ startBody, startNew });
-  latestRef.current = { startBody, startNew };
+  const latestRef = useRef({ startBody, startNew, startInto });
+  latestRef.current = { startBody, startNew, startInto };
+  // the AutoConnect arrow under the pointer (plan 10 phase 6): the canvas previews what its click does
+  const [autoHover, setAutoHover] = useState<{ id: string; dir: Dir } | null>(null);
 
   // stable, so every wire does not re-render with each canvas render
   const gestures = useMemo<DesignGestures>(() => ({
@@ -643,8 +676,17 @@ export function useWireGestures(
     portPointerDown(source, e) {
       latestRef.current.startNew(source, e);
     },
+    arrowPointerDown(id, dir, e) {
+      // dragged, a wire as from a connection point; a click, Visio's AutoConnect
+      const click = () => { setAutoHover(null); designRef.current?.onAutoConnect?.(id, dir); };
+      if (dir === 'left') latestRef.current.startInto(id, e, click);
+      else latestRef.current.startNew(id === SPHERE_NODE_ID ? WORKFLOW_SOURCE : id, e, click);
+    },
+    arrowHover(at) {
+      setAutoHover(at);
+    },
   }), [shown]);
 
   // a drag's cursor only while that drag runs (a run's double arrow, an end's crosshair, a body's four-way arrow)
-  return { gestures, startSegment, startEnd, ghost, hints, runGuide, active, running, resize: active ? resize : null, keys };
+  return { gestures, startSegment, startEnd, ghost, hints, runGuide, active, running, resize: active ? resize : null, keys, autoHover };
 }
