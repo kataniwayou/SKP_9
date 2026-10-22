@@ -94,3 +94,66 @@ rows-narrow: after: A (50.8,177.8) mm; S (90.1,177.8) mm; B (90.1,148.3) mm; C (
 rows-wide: gap 50 mm; before: A (50.8,177.8) mm; S (125.8,177.8) mm; B (125.8,112.6) mm; C (200.8,112.6) mm; D (88.3,91.4) mm; wires [BeginX->A, EndX->S] [BeginX->A, EndX->B] [BeginX->B, EndX->C]
 rows-wide: A -> B path(mm) (50.8,170.3) (50.8,112.6) (113.3,112.6); dropped at (82,112.6) mm
 rows-wide: after: A (50.8,177.8) mm; S (125.8,177.8) mm; B (125.8,112.6) mm; C (200.8,112.6) mm; D (85.8,112.6) mm; wires [BeginX->A, EndX->S] [BeginX->A, EndX->D] [BeginX->B, EndX->C] [BeginX->D, EndX->B]
+calibration: A box px 898,990,494,548; B box px 1188,1278,590,644; 96.3 px per inch
+shape 25x15 mm; page AvenueSizeX=15 mm AvenueSizeY=15 mm
+alone: left arrow centre (873,521) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+alone: right arrow centre (1,015,521) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+alone: up arrow centre (944,470) px, 23.3 px (6.1 mm) outside the side, 13x8 px, 62 changed px
+alone: down arrow centre (944,571) px, 22.3 px (5.9 mm) outside the side, 13x8 px, 62 changed px
+alone-right: right arrow of A clicked: shapes 1 -> 3; A (50.8,177.8) mm; N (90.8,177.8) mm; wires [BeginX->A part 3, EndX->N part 3]; picked: N
+again: left arrow centre (873,521) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+again: right arrow: none seen
+again: up arrow centre (944,470) px, 23.3 px (6.1 mm) outside the side, 13x8 px, 62 changed px
+again: down arrow centre (944,571) px, 22.3 px (5.9 mm) outside the side, 13x8 px, 62 changed px
+again-right: right arrow of A clicked: shapes 3 -> 3; A (50.8,177.8) mm; N (90.8,177.8) mm; wires [BeginX->A part 3, EndX->N part 3]; picked: a connector
+chain: left arrow: none seen
+chain: right arrow centre (1,167,521) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+chain: up arrow centre (1,096,470) px, 23.3 px (6.1 mm) outside the side, 13x8 px, 62 changed px
+chain: down arrow centre (1,096,571) px, 22.3 px (5.9 mm) outside the side, 13x8 px, 62 changed px
+chain-right: right arrow of N clicked: shapes 3 -> 5; A (50.8,177.8) mm; N (90.8,177.8) mm; O (130.8,177.8) mm; wires [BeginX->A part 3, EndX->N part 3] [BeginX->N part 3, EndX->O part 3]; picked: O
+alone-left: left arrow centre (969,618) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+alone-left: right arrow centre (1,111,618) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+alone-left: up arrow centre (1,041,566) px, 23.3 px (6.1 mm) outside the side, 13x8 px, 62 changed px
+alone-left: down arrow centre (1,041,667) px, 22.3 px (5.9 mm) outside the side, 13x8 px, 62 changed px
+alone-left: left arrow of A clicked: shapes 1 -> 3; A (76.2,152.4) mm; N (36.2,152.4) mm; wires [BeginX->A part 3, EndX->N part 3]; picked: N
+alone-up: left arrow centre (969,618) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+alone-up: right arrow centre (1,111,618) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+alone-up: up arrow centre (1,041,566) px, 23.3 px (6.1 mm) outside the side, 13x8 px, 62 changed px
+alone-up: down arrow centre (1,041,667) px, 22.3 px (5.9 mm) outside the side, 13x8 px, 62 changed px
+alone-up: up arrow of A clicked: shapes 1 -> 3; A (76.2,152.4) mm; N (76.2,182.4) mm; wires [BeginX->A part 3, EndX->N part 3]; picked: N
+alone-down: left arrow centre (969,618) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+alone-down: right arrow centre (1,111,618) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+alone-down: up arrow centre (1,041,566) px, 23.3 px (6.1 mm) outside the side, 13x8 px, 62 changed px
+alone-down: down arrow centre (1,041,667) px, 22.3 px (5.9 mm) outside the side, 13x8 px, 62 changed px
+alone-down: down arrow of A clicked: shapes 1 -> 3; A (76.2,152.4) mm; N (76.2,122.4) mm; wires [BeginX->A part 3, EndX->N part 3]; picked: N
+near: left arrow centre (873,521) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+near: right arrow centre (1,015,521) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+near: up arrow centre (944,470) px, 23.3 px (6.1 mm) outside the side, 13x8 px, 62 changed px
+near: down arrow centre (944,571) px, 22.3 px (5.9 mm) outside the side, 13x8 px, 62 changed px
+near-right: right arrow of A clicked: shapes 2 -> 3; A (50.8,177.8) mm; B (90.8,177.8) mm; wires [BeginX->A part 3, EndX->B part 3]; picked: 
+far: left arrow centre (873,521) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+far: right arrow centre (1,015,521) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+far: up arrow centre (944,470) px, 23.3 px (6.1 mm) outside the side, 13x8 px, 62 changed px
+far: down arrow centre (944,571) px, 22.3 px (5.9 mm) outside the side, 13x8 px, 62 changed px
+far-right: right arrow of A clicked: shapes 2 -> 4; A (50.8,177.8) mm; B (160.8,177.8) mm; N (90.8,177.8) mm; wires [BeginX->A part 3, EndX->N part 3]; picked: N
+offset: left arrow centre (873,521) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+offset: right arrow centre (1,015,521) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+offset: up arrow centre (944,470) px, 23.3 px (6.1 mm) outside the side, 13x8 px, 62 changed px
+offset: down arrow centre (944,571) px, 22.3 px (5.9 mm) outside the side, 13x8 px, 62 changed px
+offset-right: right arrow of A clicked: shapes 2 -> 3; A (50.8,177.8) mm; B (90.8,170.3) mm; wires [BeginX->A part 3, EndX->B part 3]; picked: 
+wired: left arrow centre (873,521) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+wired: right arrow: none seen
+wired: up arrow centre (944,470) px, 23.3 px (6.1 mm) outside the side, 13x8 px, 62 changed px
+wired: down arrow centre (944,571) px, 22.3 px (5.9 mm) outside the side, 13x8 px, 62 changed px
+wired-right: right arrow of A clicked: shapes 3 -> 3; A (50.8,177.8) mm; B (90.8,177.8) mm; wires [BeginX->A part 3, EndX->B part 3]; picked: a connector
+drag: left arrow centre (873,521) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+drag: right arrow centre (1,015,521) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+drag: up arrow centre (944,470) px, 23.3 px (6.1 mm) outside the side, 13x8 px, 62 changed px
+drag: down arrow centre (944,571) px, 22.3 px (5.9 mm) outside the side, 13x8 px, 62 changed px
+drag-onto: right arrow of A dragged to (114.3,137.2) mm: shapes 2 -> 3; A (50.8,177.8) mm; C (114.3,137.2) mm; wires [BeginX->A part 3, EndX->C part 3]; picked: a connector
+drag2: left arrow centre (873,521) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+drag2: right arrow centre (1,015,521) px, 23.9 px (6.3 mm) outside the side, 7x13 px, 49 changed px
+drag2: up arrow centre (944,470) px, 23.3 px (6.1 mm) outside the side, 13x8 px, 62 changed px
+drag2: down arrow centre (944,571) px, 22.3 px (5.9 mm) outside the side, 13x8 px, 62 changed px
+drag-empty: right arrow of A dragged to (114.3,137.2) mm: shapes 1 -> 2; A (50.8,177.8) mm; wires [BeginX->A part 3]; picked: a connector
+done

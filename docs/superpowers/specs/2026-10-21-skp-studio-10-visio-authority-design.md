@@ -198,6 +198,26 @@ apart.
 
 *My call:* only steps split wires. A cache doesn't, because caches have no wires.
 
+### 4.8 AutoConnect arrows (phase 6, added 2026-10-22; the user: "measure Visio and copy it")
+
+Measured in Visio with the real mouse: `visio-reference/scripts/ui9.ps1`, `mouse-findings.txt`, `shots/ui9-*`.
+
+| | Visio (measured) | Studio |
+|---|---|---|
+| **The arrows** | Four light-blue triangles (7 × 13 screen px) appear on hover, their centres 24 screen px (6 mm) outside the middle of each side. | The same, at any zoom, in design mode only. A step shows right, left, up and down. The hub shows its right arrow only. A cache shows none. The right and left arrows sit level with the processor middle, where wires leave and land. |
+| **A side with a wire** | Shows no arrow (A's right arrow was gone once A → N existed; N's left arrow too). | A step's output with a wire shows no right arrow; its input with a wire, no left arrow; the hub with a tail, no arrow. Up and down always show. |
+| **Holding an arrow** | It darkens. A faded copy of the new shape and its connector show where a click puts them, with a Quick Shapes toolbar. | The faded landing box and the wire as it would be drawn. No toolbar: Studio adds only steps. |
+| **Click: an empty spot** | A copy of the shape one avenue (15 mm) away in the arrow's direction, in line with it; a connector from the shape to it; the new shape picked. | A new empty step (as the Toolbox's) one layout gap (`LAYOUT_GAP`, 128 px) away, in line with the block; a wire to it; the new step picked. One Undo step. |
+| **Click: a shape on that spot** | No new shape: the shape is wired to the one there (level, or half a shape off). A shape four avenues away is ignored. | No new step: wired to the step whose box overlaps the landing box, if the family rules allow; refused (nothing happens) otherwise, or when a cache or the hub is on the spot. Picks are cleared, as Visio's were. |
+| **Drag** | Onto a shape: a connector to it. Onto empty canvas: a connector with its end open there. | The same as a wire drawn from the connection point today (spec §4.5), judged and drawn as any dragged end. |
+| **Wire direction** | Always from the shape to the new one, on any side. | Sides are fixed (§4.3). The right, up and down arrows wire from the block's output into the new step's input. *My call:* the left arrow wires the new step's output into the block's input: "the step before". |
+
+*My calls:*
+- Up and down land the new step in the block's column, one gap above or below (Visio's). Their wire leaves the block's
+  output and turns back into the new step's input (Visio's U-turn, §4.3).
+- The hub's right arrow lands the new step one gap right of the ring, its processor middle level with the hub's centre.
+- The new step is empty (no processor), named and conditioned as a Toolbox step, not a copy of the block.
+
 ### 4.7 Cursors
 
 | Where | Visio (measured) | Studio today | Studio after |
@@ -240,7 +260,7 @@ These keep their rules and get only the new look and the new router:
    (§4.2). The largest piece.
 4. **Block drag model:** faded outlined copy, reroute on release (§4.5).
 5. **Split on drop** (§4.6).
-6. *(Possible later, not planned)* AutoConnect arrows.
+6. **AutoConnect arrows** (§4.8; started 2026-10-22 at the user's request).
 
 ## 7. Verifying against Visio
 
