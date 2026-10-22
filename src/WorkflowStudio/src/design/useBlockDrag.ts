@@ -1,6 +1,8 @@
 import { useEffect, useRef, type MutableRefObject } from 'react';
 import type { NodeChange, OnNodeDrag, OnNodesChange } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
+import type { Circuit, End } from '../circuit/circuit';
+import { SPHERE_NODE_ID } from '../layout/nodeIds';
 import { PMID, snap, type Point } from '../layout/geometry';
 import type { Selection } from '../store/selection';
 import { nodePickIds, wirePickIds, type Pick } from '../store/picks';
@@ -40,6 +42,26 @@ export interface Held {
   wires: string[];
   dx: number;
   dy: number;
+}
+
+/**
+ * The held drag's picked wires that go along whole, drawn dashed where the release puts them: every end on a held block
+ * (a step, or the hub), open, or on a wire that goes along itself. One with an end on a block that stays is rerouted on
+ * release, so nothing is drawn for it while held (review 2026-10-22).
+ */
+export function carried(circuit: Circuit, held: Held): string[] {
+  const memo = new Map<string, boolean>();
+  const goes = (id: string): boolean => {
+    if (memo.has(id)) return memo.get(id)!;
+    memo.set(id, false); // a wire hosted round a loop does not go along
+    const w = circuit[id];
+    const ends = (e: End): boolean => (e.on === 'step' ? held.ids.includes(e.step) : e.on === 'hub' ? held.ids.includes(SPHERE_NODE_ID)
+      : e.on === 'open' ? true : held.wires.includes(e.host) && goes(e.host));
+    const ok = w !== undefined && held.wires.includes(id) && ends(w.tail) && ends(w.head);
+    memo.set(id, ok);
+    return ok;
+  };
+  return held.wires.filter(goes);
 }
 
 /**

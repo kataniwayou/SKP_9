@@ -8,7 +8,7 @@ import { snap } from '../layout/geometry';
 import type { Pick } from '../store/picks';
 import type { DesignProps } from './designProps';
 import { EMPTY_DRAFT } from './draft';
-import { useBlockDrag, type Held } from './useBlockDrag';
+import { carried, useBlockDrag, type Held } from './useBlockDrag';
 
 const two = () => loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch', nextStepIds: ['s2'] }), stepDto('s2', { name: 'store' })] }));
 const designOf = (picks: Pick[]): DesignProps => ({ draft: EMPTY_DRAFT, picks, onPick: vi.fn(), onCommit: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() });
@@ -160,7 +160,7 @@ describe('dragging blocks', () => {
     t.start('s1');
     t.move('s1', s1.x + 1003, s1.y + 4005);
     const held = t.setHeld.mock.lastCall![0]!;
-    expect(held.ids.sort()).toEqual(['s1', 's2']);
+    expect([...held.ids].sort()).toEqual(['s1', 's2']);
     expect(held.wires).toEqual(['s1->s2']);
     expect(held.dx).toBe(held.draft.steps.s1!.x - s1.x);
     expect(held.dy).toBe(held.draft.steps.s1!.y - s1.y);
@@ -241,5 +241,23 @@ describe('dragging blocks', () => {
     expect(t.setHeld).toHaveBeenLastCalledWith(null);
     t.stop('s1');
     expect(t.design.onCommit).not.toHaveBeenCalled();
+  });
+});
+
+describe('the picked wires a held drag draws dashed (review 2026-10-22)', () => {
+  const held = (ids: string[], wires: string[]): Held => ({ draft: EMPTY_DRAFT, ids, wires, dx: 40, dy: 80 });
+  const step = (id: string) => ({ on: 'step' as const, step: id, y: null });
+  it('only those whose every end goes with the held blocks: on a held step or the hub, open, or on a carried wire', () => {
+    const c = {
+      inside: { tail: step('s1'), head: step('s2') },
+      half: { tail: step('s1'), head: step('s3') },
+      hub: { tail: { on: 'hub' as const, angle: null }, head: step('s1') },
+      free: { tail: step('s2'), head: { on: 'open' as const, x: 0, y: 0 } },
+      branch: { tail: { on: 'wire' as const, host: 'inside', at: 0.5 }, head: step('s2') },
+      stray: { tail: { on: 'wire' as const, host: 'half', at: 0.5 }, head: step('s2') },
+    };
+    expect(carried(c, held(['s1', 's2', 'wf'], Object.keys(c)))).toEqual(['inside', 'hub', 'free', 'branch']);
+    // the hub not held: its wire stays behind; a wire not picked is never drawn
+    expect(carried(c, held(['s1', 's2'], ['inside', 'hub']))).toEqual(['inside']);
   });
 });

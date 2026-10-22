@@ -57,10 +57,18 @@ test("held: the block and its wires stay put; a faded copy with a light-blue das
   // the copy is where the block would land, on the grid, faded and outlined dashed in light blue
   await expect(copy(panel, t.b)).toHaveCount(1);
   const c = await topLeft(copy(panel, t.b));
-  expect(c.x - b0.x).toBe(160);
-  expect(c.y - b0.y).toBe(240);
-  const look = await copy(panel, t.b).evaluate((e) => { const s = getComputedStyle(e); return { opacity: Number(s.opacity), style: s.outlineStyle, color: s.outlineColor, events: s.pointerEvents }; });
-  expect(look.opacity).toBeLessThan(1);
+  // exactly the pointer's move, on the grid, unless a guide caught the copy (then within the 12 screen px reach)
+  const guided = await panel.locator('.design-guide, .design-gap').count();
+  const reach = guided ? 12 / (await zoomOf(panel)) : 0;
+  expect(Math.abs(c.x - b0.x - 160)).toBeLessThanOrEqual(reach);
+  expect(Math.abs(c.y - b0.y - 240)).toBeLessThanOrEqual(reach);
+  // the art faded, the outline crisp (review 2026-10-22: Visio's outline is not faded with the copy)
+  const look = await copy(panel, t.b).evaluate((e) => {
+    const s = getComputedStyle(e);
+    return { opacity: Number(s.opacity), art: Number(getComputedStyle(e.firstElementChild!).opacity), style: s.outlineStyle, color: s.outlineColor, events: s.pointerEvents };
+  });
+  expect(look.opacity).toBe(1);
+  expect(look.art).toBeLessThan(1);
   expect(look.style).toBe('dashed');
   expect(look.color).toBe('rgb(102, 178, 255)');
   expect(look.events).toBe('none');

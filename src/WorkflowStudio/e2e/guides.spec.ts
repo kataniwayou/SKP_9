@@ -184,7 +184,9 @@ test('the block follows the pointer from the press, with no lag (a 12 px first s
   await page.mouse.move(from.x + 12, from.y);
   await page.mouse.move(from.x + 60, from.y + 200, { steps: 10 });
   await frames(page);
-  const held = await boxOf(panel, t.d);
+  // the block stays put while held; its faded copy follows (Visio, plan 10 phase 4)
+  expect(await boxOf(panel, t.d)).toEqual(d0);
+  const held = await boxOf(panel, `copy:${t.d}`);
   // within half a grid step (and whatever guide it may snap to: none lies in reach of this spot)
   expect(Math.abs((held.x - d0.x) - 60 / z)).toBeLessThanOrEqual(4);
   expect(Math.abs((held.y - d0.y) - 200 / z)).toBeLessThanOrEqual(4);

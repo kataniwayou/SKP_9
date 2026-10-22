@@ -8,7 +8,7 @@ import { DesignOverlay } from '../design/DesignOverlay';
 import type { DesignProps } from '../design/designProps';
 import { circuitOf, EMPTY_DRAFT, resetShape, type Draft } from '../design/draft';
 import { NO_GUIDES, type Guides } from '../design/guides';
-import { useBlockDrag, type Held } from '../design/useBlockDrag';
+import { carried, useBlockDrag, type Held } from '../design/useBlockDrag';
 import { isArrow, useDesignKeys } from '../design/useDesignKeys';
 import { useRubberBand } from '../design/useRubberBand';
 import { useWireGestures } from '../design/useWireGestures';
@@ -188,10 +188,12 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     }));
     return [...hinted, ...copies] as typeof hinted;
   }, [selected, wiring.hints, tool, held, flow.nodes]);
-  // the picked wires the held blocks take along, where the release puts them
-  const heldWires = useMemo(() => (held
-    ? shownDoc.wires.filter((w) => held.wires.includes(w.id)).map((w) => w.core.points.map(([x, y]) => [x + held.dx, y + held.dy] as [number, number]))
-    : []), [held, shownDoc]);
+  // the picked wires the held blocks take along whole, where the release puts them
+  const heldWires = useMemo(() => {
+    if (!held) return [];
+    const along = carried(circuitOf(doc, held.draft), held);
+    return shownDoc.wires.filter((w) => along.includes(w.id)).map((w) => w.core.points.map(([x, y]) => [x + held.dx, y + held.dy] as [number, number]));
+  }, [held, shownDoc, doc]);
   // a wire whose end is dragged follows the pointer: the wire, its handles and its runs (spec §4.4)
   const dragged = wiring.ghost?.wire ? { id: wiring.ghost.wire, points: wiring.ghost.points } : null;
   const edges = useMemo(() => marked.edges.map((e) => {
