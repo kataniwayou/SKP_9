@@ -216,35 +216,36 @@ describe('paste (2026-10-10)', () => {
 });
 
 describe('review fixes (2026-10-10)', () => {
-  it('a pasted cache gets a root no cache the studio knows has: -copy, then -copy-2, …', async () => {
+  it('a pasted cache keeps every field as copied, its root too, paste after paste (2026-10-22)', async () => {
     const base = await chain();
     let clip = copyClip(base, EMPTY_EDITS, EMPTY_DRAFT, [node(cacheNodeId('c1'))], 'wf1')!;
     let draft = EMPTY_DRAFT;
     const newId = ids();
-    const roots: string[] = [];
     for (let i = 0; i < 3; i++) {
-      draft = pasteClip(base, EMPTY_EDITS, draft, clip, newId, 'wf1', ['c1-copy-3'])!.draft;
+      draft = pasteClip(base, EMPTY_EDITS, draft, clip, newId, 'wf1')!.draft;
       clip = { ...clip, pasted: clip.pasted + 1 };
-      roots.push(Object.values(draft.blocks.caches).at(-1)!.root);
     }
-    // the cache's own root is c1; c1-copy-3 is another open workflow's
-    expect(roots).toEqual(['c1-copy', 'c1-copy-2', 'c1-copy-4']);
+    const made = Object.values(draft.blocks.caches);
+    expect(made.map((c) => [c.copyOf, c.name, c.version, c.description, c.root, c.items]))
+      .toEqual(Array(3).fill(['c1', 'cache-c1', '1.0.0', null, 'c1', '{}']));
+    // a root another cache uses is BaseApi's to refuse at Save: the request sends it as it is
     const body = buildDesignRequest(base, applyDesign(base, draft, EMPTY_EDITS), { draft, edits: EMPTY_EDITS });
-    expect(new Set(body.newCaches!.map((c) => c.fields.root)).size).toBe(3);
+    expect(body.newCaches!.map((c) => c.fields.root)).toEqual(['c1', 'c1', 'c1']);
   });
 
-  it('the store gives a pasted cache a root no open workflow uses', async () => {
+  it('the store pastes a cache with the root it shows, an Inspector edit included, whatever another open workflow uses', async () => {
     const a = await chain('wf1');
     const b = await loadedDocument(graphDto({
-      workflow: workflowDto({ id: 'wf2', entryStepIds: ['t1'], cacheIds: ['k'] }), steps: [stepDto('t1')], caches: [cacheDto('k', { root: 'c1-copy' })],
+      workflow: workflowDto({ id: 'wf2', entryStepIds: ['t1'], cacheIds: ['k'] }), steps: [stepDto('t1')], caches: [cacheDto('k', { root: 'edited' })],
     }));
+    const edits: EntityEdits = { ...EMPTY_EDITS, caches: { c1: { updatedAt: null, fields: { root: 'edited', items: '{"x":"1"}' } } } };
+    const clip = copyClip(a, edits, EMPTY_DRAFT, [node(cacheNodeId('c1'))], 'wf1')!;
     const state = [
       { type: 'open', workflowId: 'wf1', name: 'a', version: '1' }, { type: 'loaded', workflowId: 'wf1', doc: a },
       { type: 'open', workflowId: 'wf2', name: 'b', version: '1' }, { type: 'loaded', workflowId: 'wf2', doc: b },
-      { type: 'pick', workflowId: 'wf1', picks: [node(cacheNodeId('c1'))] }, { type: 'copy', workflowId: 'wf1' },
-      { type: 'paste', workflowId: 'wf1', newId: ids() },
-    ].reduce((s, x) => reduce(s, x as StudioAction), INITIAL_STATE);
-    expect(Object.values(state.docs[0]!.design.draft.blocks.caches)[0]!.root).toBe('c1-copy-2');
+    ].reduce((s: StudioState, x) => reduce(s, x as StudioAction), { ...INITIAL_STATE, clipboard: clip });
+    const pasted = reduce(state, { type: 'paste', workflowId: 'wf2', newId: ids() });
+    expect(Object.values(pasted.docs[1]!.design.draft.blocks.caches).map((c) => [c.root, c.items])).toEqual([['edited', '{"x":"1"}']]);
   });
 
   it('a deleted step keeps the stamp it was loaded with through a stored design and a re-read: someone else\'s change conflicts', async () => {
@@ -418,7 +419,7 @@ describe('blocks in the drawing, the request and the stored design', () => {
       { id: 'n2', copyOf: 's2', processorId: 'p1', fields: { name: 'step-s2', version: '1.0.0', description: null, entryCondition: 2 }, nextStepIds: null },
     ]);
     expect(body.assignments).toEqual([{ op: 'create', id: 'n5', stepId: 'n1', updatedAt: null, fields: { ...ASG, payload: '{"k":1}' }, copyOf: 'a1' }]);
-    expect(body.newCaches).toEqual([{ id: 'n3', copyOf: 'c1', fields: { name: 'cache-c1', version: '1.0.0', description: null, root: 'c1-copy', items: '{}' } }]);
+    expect(body.newCaches).toEqual([{ id: 'n3', copyOf: 'c1', fields: { name: 'cache-c1', version: '1.0.0', description: null, root: 'c1', items: '{}' } }]);
     expect(body.deletedSteps).toEqual([{ id: 's3', updatedAt: base.graph.steps.get('s3')!.updatedAt }]);
     // s2 led to s3: its list goes without it
     expect(body.steps).toEqual([{ id: 's2', updatedAt: base.graph.steps.get('s2')!.updatedAt, fields: {}, nextStepIds: [] }]);

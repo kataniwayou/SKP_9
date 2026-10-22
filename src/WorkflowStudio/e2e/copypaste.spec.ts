@@ -247,7 +247,7 @@ test('copied in one workflow, the clipboard survives a refresh and pastes into a
   expect((await get<{ assignmentIds: string[] }>(request, `workflows/${t.other.id}`)).assignmentIds).toEqual([asg!.id]);
 });
 
-test('a pasted cache gets a root of its own (<root>-copy) and Save creates it beside the original', async ({ page, request }) => {
+test('a pasted cache keeps its root as copied: Save is refused for it until the Inspector gives it another (2026-10-22)', async ({ page, request }) => {
   const panel = await open(page);
   await node(panel, `cache:${t.cacheId}`).click();
   await expect(node(panel, `cache:${t.cacheId}`)).toHaveClass(/studio-pick/);
@@ -260,15 +260,28 @@ test('a pasted cache gets a root of its own (<root>-copy) and Save creates it be
   const id = made.slice('cache:'.length);
   const now = await boxesById(panel);
   for (const [other, b] of now) if (other !== made) expect(overlaps(now.get(made)!, b), `on ${other}`).toBe(false);
-  // the Inspector shows the new root, editable
+  // the Inspector shows the original's root, editable
   await node(panel, made).click();
-  await expect(inspector(page).getByLabel('Root', { exact: true })).toHaveValue(`${t.root}-copy`);
+  const root = inspector(page).getByLabel('Root', { exact: true });
+  await expect(root).toHaveValue(t.root);
   await shot(page, '6-cache-pasted');
 
+  // BaseApi refuses a root another cache uses (and so the workflow's list naming it): nothing is created
+  await save(page);
+  await expect(await pane(page, 'Output')).toContainText('Saved; not applied: 2 errors');
+  await expect(await problems(page)).toContainText(`Root '${t.root}' is already used by cache`);
+  expect((await request.get(`/api/v1/caches/${id}`)).status()).toBe(404);
+
+  // the user gives it its own root: Save creates it beside the original
+  await node(panel, made).click();
+  await root.click();
+  await page.keyboard.press('Control+a');
+  await page.keyboard.type(`${t.root}-2`);
+  await page.keyboard.press('Tab');
   await save(page);
   await expect(await pane(page, 'Output')).toContainText('Saved and applied');
   const c = await get<{ name: string; root: string }>(request, `caches/${id}`);
-  expect([c.name, c.root]).toEqual([`${t.tag}-cache`, `${t.root}-copy`]);
+  expect([c.name, c.root]).toEqual([`${t.tag}-cache`, `${t.root}-2`]);
   expect([...(await get<{ cacheIds: string[] }>(request, `workflows/${t.workflow.id}`)).cacheIds].sort()).toEqual([t.cacheId, id].sort());
 });
 

@@ -170,18 +170,6 @@ function assignmentClip(stepId: Id, a: Assignment | undefined, blocks: Blocks, e
   return { copyOf: a.id, fields: { ...own, ...edited, payload: a.payload } };
 }
 
-/**
- * A cache root not in `taken` (review 2026-10-10: a cache's root is unique, it is its L2 address): `<root>-copy`, then
- * `<root>-copy-2`, `-copy-3`, …
- */
-export function uniqueRoot(root: string, taken: ReadonlySet<string>): string {
-  // no root yet (2026-10-11): a copy has none either, and is drawn and refused as its original is
-  if (root.trim() === '') return '';
-  const first = `${root}-copy`;
-  if (!taken.has(first)) return first;
-  for (let n = 2; ; n++) if (!taken.has(`${first}-${n}`)) return `${first}-${n}`;
-}
-
 // ---- where a paste lands ----
 
 interface Box { x: number; y: number; w: number; h: number }
@@ -264,14 +252,15 @@ const copy = <T>(r: Readonly<Record<string, T>>): Record<string, T> => Object.as
 /**
  * Ctrl+V (2026-10-10, the user's decisions 3-5 and the free-space rule): the clip's blocks and wires as new ones, every
  * one with a new id (a step a new step entity with the same processor, its assignment a new one with the original's
- * fields; a cache a new cache; a wire a new design wire), same names and versions, moved together by `freeOffset` from
- * where they were copied (+32 / +32 per paste so far plus this one), clear of every block of the workflow pasted into
+ * fields; a cache a new cache with every field as copied, its root too; a wire a new design wire), same names and
+ * versions, moved together by `freeOffset` from where they were copied (+32 / +32 per paste so far plus this one), clear
+ * of every block of the workflow pasted into
  * and, pasted into the workflow it was copied in (`into`), of the area its originals had. Copied wires keep their
  * shapes moved by the same offset, junctions their place along their host. The pasted items are the new picks. Null
  * when the clip holds nothing.
  */
 export function pasteClip(
-  base: StudioDocument, edits: EntityEdits, draft: Draft, clip: Clip, newId: () => string, into: Id = clip.from, knownRoots: Iterable<string> = [],
+  base: StudioDocument, edits: EntityEdits, draft: Draft, clip: Clip, newId: () => string, into: Id = clip.from,
 ): { draft: Draft; picks: Pick[] } | null {
   if (clip.steps.length + clip.caches.length + Object.keys(clip.wires).length === 0) return null;
   const { saved, shown } = views(base, edits, draft);
@@ -294,12 +283,10 @@ export function pasteClip(
     steps[stepIds.get(s.id)!] = made;
   }
   const caches = copy(draft.blocks.caches);
-  // every root the studio knows is taken: this workflow's (as designed), the clip's own, the other open workflows'
-  const roots = new Set<string>([...knownRoots, ...[...shown.graph.caches.values()].map((c) => c.root), ...clip.caches.map((c) => c.root)]);
+  // every field as copied, its root too (the user's rule, 2026-10-22): a root another cache uses is BaseApi's to refuse at
+  // Save, and the user's to change in the Inspector
   for (const c of clip.caches) {
-    const root = uniqueRoot(c.root, roots);
-    roots.add(root);
-    caches[cacheIds.get(c.id)!] = { copyOf: c.id, name: c.name, version: c.version, description: c.description, root, items: c.items, at: { x: c.at.x + dx, y: c.at.y + dy } };
+    caches[cacheIds.get(c.id)!] = { copyOf: c.id, name: c.name, version: c.version, description: c.description, root: c.root, items: c.items, at: { x: c.at.x + dx, y: c.at.y + dy } };
   }
   const processors = copy(draft.blocks.refs.processors), schemas = copy(draft.blocks.refs.schemas);
   for (const p of clip.processors) if (!saved.graph.processors.has(p.id)) processors[p.id] = p;
