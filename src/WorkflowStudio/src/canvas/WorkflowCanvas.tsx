@@ -15,6 +15,9 @@ import { useWireGestures } from '../design/useWireGestures';
 import { registerDropTarget, useToolDrag } from '../design/toolDrag';
 import { landingBox, toolLabel, wireLanding } from '../design/toolDrop';
 import { pointOfTarget } from '../design/drop';
+import { nodeBox } from '../design/hit';
+import { splitLabel, splitTone } from '../design/split';
+import { nearestOn } from '../layout/junctions';
 import { cacheNodeId, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { toneOf } from '../design/drop';
 import { Menu, anchorAt, type Anchor } from '../dock/Menu';
@@ -163,7 +166,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     if (!toolDrag || !toolOver) return null;
     const v = toolOver.verdict;
     const label = toolLabel(v, toolOver.saving);
-    const box = v.kind === 'place' && !toolOver.saving ? landingBox(toolDrag.item, toolOver.flow) : null;
+    const box = (v.kind === 'place' || v.kind === 'split') && !toolOver.saving ? landingBox(toolDrag.item, toolOver.flow) : null;
     const line = v.kind === 'place' && !toolOver.saving && toolDrag.item.kind === 'wire' ? wireLanding(toolOver.flow) : null;
     // a Wire tile over a contact (2026-10-20): the step or hub outlined, a line haloed, as for a dragged wire end
     const wire = v.kind === 'wire' ? v : null;
@@ -194,6 +197,19 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     const along = carried(circuitOf(doc, held.draft), held);
     return shownDoc.wires.filter((w) => along.includes(w.id)).map((w) => w.core.points.map(([x, y]) => [x + held.dx, y + held.dy] as [number, number]));
   }, [held, shownDoc, doc]);
+  // an empty step held over a wire's run, from the Toolbox or on the canvas: the wire's ends marked, and on the canvas
+  // the label by the point the step would be inserted at (Visio, plan 10 §4.6)
+  const split = useMemo(() => {
+    const v = toolOver && !toolOver.saving && toolOver.verdict.kind === 'split' ? toolOver.verdict : null;
+    const s = held?.split ?? v;
+    const route = s ? shownDoc.wires.find((w) => w.id === s.wire) : undefined;
+    if (!s || !route || route.points.length < 2) return null;
+    const [a, z] = [route.points[0]!, route.points[route.points.length - 1]!];
+    const ends = [{ x: a[0], y: a[1] }, { x: z[0], y: z[1] }];
+    const box = held?.split ? nodeBox(shownDoc, held.ids[0]!) : null;
+    const at = box && held ? nearestOn([route.points], [box.x + held.dx + box.w / 2, box.y + held.dy + box.h / 2]).p : null;
+    return { ends, tone: splitTone(s.why), label: at && { text: splitLabel(s.why), at: { x: at[0], y: at[1] } } };
+  }, [held, toolOver, shownDoc]);
   // a wire whose end is dragged follows the pointer: the wire, its handles and its runs (spec §4.4)
   const dragged = wiring.ghost?.wire ? { id: wiring.ghost.wire, points: wiring.ghost.points } : null;
   const edges = useMemo(() => marked.edges.map((e) => {
@@ -302,7 +318,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onMoveEnd={(_event, v) => report(v)}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} guides={toolOver?.guides ?? guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost?.points ?? null} hints={wiring.hints} gone={wiring.ghost?.gone ?? null} runGuide={wiring.runGuide} shorts={wiring.ghost?.shorts} tool={tool} copies={heldWires} />}
+              {design && <DesignOverlay band={band} guides={toolOver?.guides ?? guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={wiring.ghost?.points ?? null} hints={wiring.hints} gone={wiring.ghost?.gone ?? null} runGuide={wiring.runGuide} shorts={wiring.ghost?.shorts} tool={tool} copies={heldWires} split={split} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize initial={savedSize} />

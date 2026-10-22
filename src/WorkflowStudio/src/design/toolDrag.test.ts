@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { graphDto, processorDto, stepDto, workflowDto } from '../api/fixtures';
 import { processorFromDto } from '../api/toModel';
 import { loadedDocument } from '../app/fixtures';
+import { addCircuitWire, type Circuit } from '../circuit/circuit';
 import { circuitOf, EMPTY_DRAFT } from './draft';
 import { NO_GUIDES } from './guides';
 import { landingBox, type ToolItem } from './toolDrop';
@@ -109,5 +110,37 @@ describe("a block dragged in from the Toolbox snaps to Visio's dynamic grid (pla
   it('a cache tile snaps like a step', async () => {
     const over = await holdBlock({ kind: 'newCache' }, { x: 1080, y: 320 + 80 + 8 });
     expect(landingBox({ kind: 'newCache' }, over.flow)!.y).toBe(320);
+  });
+});
+
+describe('an empty step held over a wire (Visio, plan 10 §4.6)', () => {
+  /** A step tile held at flow `p` over `three` (zoom 1), its circuit `circuit` (the saved one by default); then released. */
+  async function holdStep(p: { x: number; y: number }, circuit?: (doc: Awaited<ReturnType<typeof three>>) => Circuit) {
+    const doc = await three();
+    const el = document.createElement('div');
+    const unregister = registerDropTarget({ workflowId: 'wf1', el, shown: () => doc, circuit: () => (circuit ? circuit(doc) : circuitOf(doc, EMPTY_DRAFT)), toFlow: (c) => c });
+    const fake = { elementFromPoint: () => el, defaultView: null } as unknown as Document;
+    Object.defineProperty(el, 'ownerDocument', { value: fake });
+    try {
+      toolDrag.start({ kind: 'step' }, { x: 0, y: 0 });
+      toolDrag.move(fake, p, () => false);
+      return { over: toolDrag.get()!.over!, drop: toolDrag.end() };
+    } finally {
+      unregister();
+    }
+  }
+  // between s1's output (576) and s2's input (704), on s1 -> s2's run
+  const between = { x: 640, y: 400 };
+
+  it('over s1 -> s2: "insert here", and the release drops the step there', async () => {
+    const { over, drop } = await holdStep(between);
+    expect(over.verdict).toEqual({ kind: 'split', wire: 's1->s2', why: 'insert' });
+    expect(drop).toMatchObject({ item: { kind: 'step' }, workflowId: 'wf1' });
+  });
+
+  it('over a wire with junctions on it: refused, and the release drops nothing', async () => {
+    const { over, drop } = await holdStep(between, (doc) => addCircuitWire(circuitOf(doc, EMPTY_DRAFT), 'w:j', { tail: { on: 'wire', host: 's1->s2', at: 8 }, head: { on: 'open', x: 0, y: 0 } }));
+    expect(over.verdict).toEqual({ kind: 'split', wire: 's1->s2', why: 'junctionWire' });
+    expect(drop).toBeNull();
   });
 });

@@ -1,25 +1,29 @@
 import { act, fireEvent, renderHook } from '@testing-library/react';
 import type { Node, NodeChange } from '@xyflow/react';
 import { describe, expect, it, vi } from 'vitest';
-import { graphDto, stepDto } from '../api/fixtures';
+import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import type { StudioDocument } from '../app/document';
 import { loadedDocument } from '../app/fixtures';
-import { snap } from '../layout/geometry';
+import { snap, STEP_H, STEP_W } from '../layout/geometry';
 import type { Pick } from '../store/picks';
 import type { DesignProps } from './designProps';
-import { EMPTY_DRAFT } from './draft';
+import { addCircuitWire } from '../circuit/circuit';
+import { applyDraft, applyEdits } from './apply';
+import { EMPTY_EDITS } from './design';
+import { dropTool } from './toolDrop';
+import { circuitOf, EMPTY_DRAFT, withCircuit, type Draft } from './draft';
 import { carried, useBlockDrag, type Held } from './useBlockDrag';
 
 const two = () => loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch', nextStepIds: ['s2'] }), stepDto('s2', { name: 'store' })] }));
-const designOf = (picks: Pick[]): DesignProps => ({ draft: EMPTY_DRAFT, picks, onPick: vi.fn(), onCommit: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() });
+const designOf = (picks: Pick[], draft: Draft = EMPTY_DRAFT): DesignProps => ({ draft, picks, onPick: vi.fn(), onCommit: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() });
 
-function setup(doc: StudioDocument, picks: Pick[], zoom = 1) {
-  const design = designOf(picks);
+function setup(doc: StudioDocument, picks: Pick[], zoom = 1, draft: Draft = EMPTY_DRAFT) {
+  const design = designOf(picks, draft);
   const setHeld = vi.fn<(h: Held | null) => void>();
   const setGuides = vi.fn();
   const onSelect = vi.fn();
   const suppress = { current: false };
-  const { result, rerender, unmount } = renderHook(({ on }: { on: boolean }) => useBlockDrag(doc, { current: doc }, on ? design : undefined, setHeld, setGuides, onSelect, suppress, () => zoom), { initialProps: { on: true } });
+  const { result, rerender, unmount } = renderHook(({ on }: { on: boolean }) => useBlockDrag(doc, { current: applyDraft(doc, draft) }, on ? design : undefined, setHeld, setGuides, onSelect, suppress, () => zoom), { initialProps: { on: true } });
   const blocks = new Map<string, HTMLElement>();
   const blockOf = (id: string) => {
     if (!blocks.has(id)) {
@@ -241,6 +245,86 @@ describe('dragging blocks', () => {
     expect(t.setHeld).toHaveBeenLastCalledWith(null);
     t.stop('s1');
     expect(t.design.onCommit).not.toHaveBeenCalled();
+  });
+});
+
+describe('an empty step dropped on a wire splits it (Visio, plan 10 §4.6)', () => {
+  /**
+   * wf -> s1 -> s2 and wf -> s4 -> s5 wired; e1 and e2 (family 2) empty steps dropped from the Toolbox far away. The
+   * canvas's document has them laid over it (`applyEdits`), as the canvas's own has.
+   */
+  async function withEmpty() {
+    const base = await loadedDocument(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's4'] }),
+      steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s4', { nextStepIds: ['s5'] }), stepDto('s5')],
+    }));
+    let n = 0;
+    const ids = () => `e${++n}`;
+    const a = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'step' }, { x: 3000, y: 3000 }, ids)!;
+    const b = dropTool(base, EMPTY_EDITS, a.draft, { kind: 'step' }, { x: 3600, y: 3000 }, ids)!;
+    const blocks = { ...b.draft.blocks, steps: { ...b.draft.blocks.steps, e2: { ...b.draft.blocks.steps.e2!, entryCondition: 2 } } };
+    return { doc: applyEdits(base, EMPTY_EDITS, blocks), draft: { ...b.draft, blocks } };
+  }
+  /** The top-left corner that centres a step on the middle of the longest run of wire `id`. */
+  const onRun = (doc: StudioDocument, id: string) => {
+    const pts = doc.wires.find((w) => w.id === id)!.points;
+    let best = { x: 0, y: 0, len: -1 };
+    for (let i = 1; i < pts.length; i++) {
+      const [ax, ay] = pts[i - 1]!, [bx, by] = pts[i]!;
+      const len = Math.hypot(bx - ax, by - ay);
+      if (len > best.len) best = { x: (ax + bx) / 2, y: (ay + by) / 2, len };
+    }
+    return { x: best.x - STEP_W / 2, y: best.y - STEP_H / 2 };
+  };
+
+  it('held over a run it is marked "insert here"; released, the wire runs into the step and on out of it, one step', async () => {
+    const { doc, draft } = await withEmpty();
+    const t = setup(doc, [], 1, draft);
+    const p = onRun(doc, 's1->s2');
+    t.start('e1');
+    t.move('e1', p.x, p.y);
+    const held = t.setHeld.mock.lastCall![0]!;
+    expect(held.split).toEqual({ wire: 's1->s2', why: 'insert' });
+    t.stop('e1');
+    expect(t.design.onCommit).toHaveBeenCalledTimes(1);
+    const after = (t.design.onCommit as ReturnType<typeof vi.fn>).mock.lastCall![0] as Draft;
+    expect(after.steps.e1).toEqual(held.draft.steps.e1);
+    const c = circuitOf(doc, after);
+    expect(c['s1->s2']!.head).toEqual({ on: 'step', step: 'e1', y: null });
+    const added = Object.entries(c).filter(([k]) => k.startsWith('w:'));
+    expect(added.map(([, w]) => w)).toEqual([{ tail: { on: 'step', step: 'e1', y: null }, head: { on: 'step', step: 's2', y: null } }]);
+    expect(after.next).toMatchObject({ s1: ['e1'], e1: ['s2'] });
+  });
+
+  it('a step with wires, or a group, never splits: it moves as before', async () => {
+    const { doc, draft } = await withEmpty();
+    const p = onRun(doc, 's1->s2');
+    const t = setup(doc, [], 1, draft);
+    t.start('s4');
+    t.move('s4', p.x, p.y);
+    expect(t.setHeld.mock.lastCall![0]!.split ?? null).toBeNull();
+    t.stop('s4');
+    const g = setup(doc, [{ kind: 'node', id: 'e1' }, { kind: 'node', id: 'e2' }], 1, draft);
+    g.start('e1');
+    g.move('e1', p.x, p.y);
+    expect(g.setHeld.mock.lastCall![0]!.split ?? null).toBeNull();
+    g.stop('e1');
+  });
+
+  it('refused (a step of another family into a net): marked in red, and the release moves nothing', async () => {
+    const { doc, draft } = await withEmpty();
+    // a branch off s1 -> s2's line into s5 (family 1): e2 (family 2) split into it would short the net
+    const wired = withCircuit(draft, doc, addCircuitWire(circuitOf(doc, draft), 'w:b', { tail: { on: 'wire', host: 's1->s2', at: 8 }, head: { on: 'step', step: 's5', y: null } }));
+    const t = setup(doc, [], 1, wired);
+    const p = onRun(applyDraft(doc, wired), 'w:b');
+    t.start('e2');
+    t.move('e2', p.x, p.y);
+    expect(t.setHeld.mock.lastCall![0]!.split).toEqual({ wire: 'w:b', why: 'short' });
+    t.stop('e2');
+    expect(t.design.onCommit).not.toHaveBeenCalled();
+    // as Escape does: the step the drag picked is unpicked again, and the Inspector does not follow it
+    expect(t.design.onPick).toHaveBeenLastCalledWith([]);
+    expect(t.onSelect).not.toHaveBeenCalled();
   });
 });
 

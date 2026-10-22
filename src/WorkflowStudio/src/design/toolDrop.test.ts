@@ -8,7 +8,8 @@ import { applyDesign } from './apply';
 import { parseBlocks } from './blocks';
 import { deletePicked } from './clipboard';
 import { EMPTY_EDITS, storedDesignOf } from './design';
-import { circuitOf, EMPTY_DRAFT } from './draft';
+import { addCircuitWire } from '../circuit/circuit';
+import { circuitOf, EMPTY_DRAFT, withCircuit } from './draft';
 import { layoutOf } from './layoutDesign';
 import { dropTool, judgeTool, toolLabel, uniqueName, type ToolItem } from './toolDrop';
 
@@ -17,6 +18,11 @@ const doc = () => loadedDocument(graphDto({
   workflow: workflowDto({ entryStepIds: ['s1'], cacheIds: ['k1'] }),
   steps: [stepDto('s1', { name: 'step' })],
   caches: [cacheDto('k1', { root: 'cache' })],
+}));
+// s1 (entry) -> s2; s3 a second entry step, its output free
+const three = () => loadedDocument(graphDto({
+  workflow: workflowDto({ entryStepIds: ['s1', 's3'] }),
+  steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3')],
 }));
 let n = 0;
 const ids = () => `n${++n}`;
@@ -139,11 +145,6 @@ describe('Toolbox drops (the user\'s rules, 2026-10-11)', () => {
 });
 
 describe("a Wire tile dropped straight on a contact (the user's request, 2026-10-20)", () => {
-  // s1 (entry) -> s2; s3 a second entry step, its output free
-  const three = () => loadedDocument(graphDto({
-    workflow: workflowDto({ entryStepIds: ['s1', 's3'] }),
-    steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2'), stepDto('s3')],
-  }));
   const judge = (base: Awaited<ReturnType<typeof three>>, p: { x: number; y: number }) => judgeTool(base, { kind: 'wire' }, p, { circuit: circuitOf(base, EMPTY_DRAFT), reach: 8 });
 
   it("on a step's input: \"connect here\"; dropped, its head is on that input and its tail open 96 px to the left", async () => {
@@ -218,5 +219,43 @@ describe("a Wire tile dropped straight on a contact (the user's request, 2026-10
     expect(v).toMatchObject({ kind: 'wire', why: 'short' });
     expect(toolLabel(v)).toEqual({ text: 'short circuit', tone: 'no' });
     expect(dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'wire' }, p, ids, 8)).toBeNull();
+  });
+});
+
+describe('an empty step dropped on a wire splits it (Visio, plan 10 §4.6)', () => {
+  it('an empty step over a wire\'s run: "insert here"; dropped, the wire splits through it, one draft (plan 10 §4.6)', async () => {
+    const base = await three();
+    const host = base.wires.find((x) => x.id === 's1->s2')!;
+    const run = host.points.findIndex((q, i) => i > 0 && q[1] === host.points[i - 1]![1] && Math.abs(q[0] - host.points[i - 1]![0]) >= 32);
+    const p = { x: (host.points[run]![0] + host.points[run - 1]![0]) / 2, y: host.points[run]![1] };
+    const v = judgeTool(base, { kind: 'step' }, p, { circuit: circuitOf(base, EMPTY_DRAFT), reach: 8 });
+    expect(v).toEqual({ kind: 'split', wire: 's1->s2', why: 'insert' });
+    expect(toolLabel(v)).toEqual({ text: 'insert here', tone: 'ok' });
+    const r = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'step' }, p, ids, 8)!;
+    const id = r.picks[0]!.id;
+    expect(r.draft.blocks.steps[id]).toBeDefined();
+    const c = circuitOf(base, r.draft);
+    expect(c['s1->s2']!.head).toEqual({ on: 'step', step: id, y: null });
+    const added = Object.entries(c).find(([k]) => k.startsWith('w:'))!;
+    expect(added[1]).toEqual({ tail: { on: 'step', step: id, y: null }, head: { on: 'step', step: 's2', y: null } });
+    const shown = applyDesign(base, r.draft, EMPTY_EDITS);
+    expect(shown.graph.steps.get('s1')!.nextStepIds).toEqual([id]);
+    expect(shown.graph.steps.get(id)!.nextStepIds).toEqual(['s2']);
+    // off any wire: placed, as before
+    expect(judgeTool(base, { kind: 'step' }, at, { circuit: circuitOf(base, EMPTY_DRAFT), reach: 8 })).toEqual({ kind: 'place' });
+  });
+
+  it('an empty step over a wire that refuses a split: red, and released there nothing is dropped', async () => {
+    const base = await three();
+    const host = base.wires.find((x) => x.id === 's1->s2')!;
+    const run = host.points.findIndex((q, i) => i > 0 && q[1] === host.points[i - 1]![1] && Math.abs(q[0] - host.points[i - 1]![0]) >= 32);
+    const p = { x: (host.points[run]![0] + host.points[run - 1]![0]) / 2, y: host.points[run]![1] };
+    // a free wire joined on s1 -> s2's line: s1 -> s2 hosts a junction
+    const draft = withCircuit(EMPTY_DRAFT, base, addCircuitWire(circuitOf(base, EMPTY_DRAFT), 'w:j', { tail: { on: 'wire', host: 's1->s2', at: 8 }, head: { on: 'open', x: 0, y: 0 } }));
+    const shown = applyDesign(base, draft, EMPTY_EDITS);
+    const v = judgeTool(shown, { kind: 'step' }, p, { circuit: circuitOf(base, draft), reach: 8 });
+    expect(v).toEqual({ kind: 'split', wire: 's1->s2', why: 'junctionWire' });
+    expect(toolLabel(v)).toEqual({ text: 'wires join this wire', tone: 'no' });
+    expect(dropTool(base, EMPTY_EDITS, draft, { kind: 'step' }, p, ids, 8)).toBeNull();
   });
 });

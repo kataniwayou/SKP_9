@@ -196,6 +196,21 @@ function opening(
 }
 
 /**
+ * Wire `id` split through step `step` (Visio's drop on a wire, plan 10 §4.6): the wire keeps its id and its tail and runs
+ * into the step's input; wire `newId` runs from the step's output to the old head. Both are routed afresh (the old bends
+ * do not fit either half), and an end held for an open other end goes back to automatic: both halves are connected.
+ */
+export function splitWire(c: Readonly<Circuit>, id: string, step: Id, newId: string): Circuit {
+  if (!has(c, id)) return c as Circuit;
+  const w = c[id]!;
+  const out = copy(c);
+  const tail = w.held === 'tail' ? automatic(w.tail) : w.tail, head = w.held === 'head' ? automatic(w.head) : w.head;
+  out[id] = { tail, head: { on: 'step', step, y: null } };
+  out[newId] = { tail: { on: 'step', step, y: null }, head };
+  return out;
+}
+
+/**
  * Wires removed (Delete, plan 9 §2.2-6): a wire joined on a removed one keeps its place, that end open where it is
  * drawn (`pointOf`), its bends kept.
  */

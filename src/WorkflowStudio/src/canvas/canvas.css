@@ -106,3 +106,6 @@ body.tool-cross, body.tool-cross *, body.tool-cross .studio-canvas .react-flow__
 .design-contact { fill: none; }
 .design-contact.ok { stroke: #5BC85B; }
 .design-contact.no { stroke: #F87171; }
+/* Visio's filled squares on the ends of a wire a held step would split (plan 10 §4.6) */
+.design-split-end.ok { fill: #5BC85B; }
+.design-split-end.no { fill: #F87171; }

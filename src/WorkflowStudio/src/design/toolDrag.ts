@@ -5,6 +5,7 @@ import type { Id } from '../model/graph';
 import type { Circuit } from '../circuit/circuit';
 import { DROP_REACH, toneOf } from './drop';
 import { guideBoxes, NO_GUIDES, SNAP_REACH_PX, snapToGuides, type Guides } from './guides';
+import { splitTone } from './split';
 import { judgeTool, landingBox, type ToolItem, type ToolVerdict } from './toolDrop';
 
 /**
@@ -107,8 +108,10 @@ export const toolDrag = {
       const perPx = Math.abs(target.toFlow({ x: hot.x + 1, y: hot.y }).x - flow.x);
       const reach = DROP_REACH * perPx;
       const wiring = target.circuit ? { circuit: target.circuit(), reach } : undefined;
-      const verdict = judgeTool(target.shown(), item, flow, wiring);
-      const snapped = verdict.kind === 'place' ? onGrid(target.shown(), item, flow, SNAP_REACH_PX * perPx) : null;
+      let verdict = judgeTool(target.shown(), item, flow, wiring);
+      // a step over a wire (plan 10 §4.6) lands on the grid too, and is judged again where it lands
+      const snapped = verdict.kind === 'place' || verdict.kind === 'split' ? onGrid(target.shown(), item, flow, SNAP_REACH_PX * perPx) : null;
+      if (snapped && item.kind === 'step') verdict = judgeTool(target.shown(), item, snapped.flow, wiring);
       const here = { target, flow: snapped?.flow ?? flow, verdict, saving: isSaving(target.workflowId), reach, guides: snapped?.guides ?? NO_GUIDES };
       // on a contact (connect, join, or refused there) this point decides; else only the first point (a wire's tip) counts
       if (here.verdict.kind === 'wire') { over = here; break; }
@@ -123,7 +126,7 @@ export const toolDrag = {
     emit();
     if (!s?.over || s.over.saving) return null;
     const v = s.over.verdict;
-    if (v.kind === 'noStep' || v.kind === 'linked' || (v.kind === 'wire' && toneOf(v.why) === 'no')) return null;
+    if (v.kind === 'noStep' || v.kind === 'linked' || (v.kind === 'wire' && toneOf(v.why) === 'no') || (v.kind === 'split' && splitTone(v.why) === 'no')) return null;
     return { item: s.item, workflowId: s.over.target.workflowId, at: s.over.flow, reach: s.over.reach };
   },
   cancel(): void {

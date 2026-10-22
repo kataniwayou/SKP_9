@@ -2,12 +2,36 @@ import { describe, expect, it } from 'vitest';
 import type { Step } from '../model/graph';
 import {
   addCircuitWire, holdEnd, isFree, legacyCircuit, moveWire, openJoinedOn, parseCircuit, plainCircuit, removeCircuitWires, reverseWire, sameEnd, setBends, setEnd, shapedByHand, snapAngle,
-  type Circuit, type CircuitWire, type Side,
+  splitWire, type Circuit, type CircuitWire, type Side,
 } from './circuit';
 
 const step = (next: string[] = []) => ({ nextStepIds: next }) as unknown as Step;
 const plain = (s: string, t: string): CircuitWire => ({ tail: { on: 'step', step: s, y: null }, head: { on: 'step', step: t, y: null } });
 const bends = { xs: [400], ys: [] };
+
+describe('splitWire (plan 10 §4.6)', () => {
+  it('the old wire runs into the new step\'s input, a new wire from its output to the old head; both automatic', () => {
+    const c: Circuit = { w: { tail: { on: 'step', step: 's1', y: 48 }, head: { on: 'step', step: 's2', y: 72 }, bends } };
+    const out = splitWire(c, 'w', 'n', 'w:new');
+    expect(out.w).toEqual({ tail: { on: 'step', step: 's1', y: 48 }, head: { on: 'step', step: 'n', y: null } });
+    expect(out['w:new']).toEqual({ tail: { on: 'step', step: 'n', y: null }, head: { on: 'step', step: 's2', y: 72 } });
+    expect(c.w!.bends).toBe(bends);
+  });
+
+  it('keeps a junction tail and a hub tail as they are; a held end goes back to automatic', () => {
+    const j: Circuit = { w: { tail: { on: 'wire', host: 'h', at: 40 }, head: { on: 'step', step: 's2', y: null } } };
+    expect(splitWire(j, 'w', 'n', 'x').w!.tail).toEqual({ on: 'wire', host: 'h', at: 40 });
+    const held: Circuit = { w: { tail: { on: 'hub', angle: null, dy: 16 }, head: { on: 'step', step: 's2', y: 96 }, held: 'head' } };
+    const out = splitWire(held, 'w', 'n', 'x');
+    expect(out.w).toEqual({ tail: { on: 'hub', angle: null, dy: 16 }, head: { on: 'step', step: 'n', y: null } });
+    expect(out.x).toEqual({ tail: { on: 'step', step: 'n', y: null }, head: { on: 'step', step: 's2', y: null } });
+  });
+
+  it('leaves the circuit alone for a wire it does not have', () => {
+    const c: Circuit = { w: plain('s1', 's2') };
+    expect(splitWire(c, 'nope', 'n', 'x')).toBe(c);
+  });
+});
 
 describe('plainCircuit', () => {
   it('makes an automatic wire per entry step and per next step whose two ends are on the canvas', () => {

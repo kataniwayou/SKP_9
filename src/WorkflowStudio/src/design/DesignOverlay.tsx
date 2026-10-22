@@ -48,6 +48,11 @@ export interface DesignOverlayProps {
   gone?: Pt[] | null;
   /** The picked wires a held block drag takes along, where the release puts them, dashed (Visio, plan 10 phase 4). */
   copies?: readonly Pt[][];
+  /**
+   * An empty step held over a wire's run (Visio, plan 10 §4.6): the wire's two ends as filled squares, green when the
+   * release splits it, red when refused; `label`: what the release does there (null: the Toolbox's own label says it).
+   */
+  split?: { ends: readonly Point[]; tone: 'ok' | 'no'; label: { text: string; at: Point } | null } | null;
 }
 
 /** On-screen sizes (px) that do not shrink with the zoom: at the fitted zoom a 2 px line would vanish. */
@@ -58,6 +63,8 @@ const OVERSHOOT = 8, GAP_OFF = 18, TICK = 10, HEAD = 6;
 const FAR = 100000;
 /** Visio's connector handles (plan 10 phase 2, measured): end 8 px across, run dot 6, bend dot 4 (radii). */
 const END_DOT = 4, RUN_DOT = 3, BEND_DOT = 2, CONTACT = 10;
+/** Visio's filled square on each end of a wire a held shape would split (measured: 8 px across). */
+const SPLIT_END = 8;
 
 /** An equal gap as Visio draws it: a line with an arrow head at each end, between two ticks, beside its pair. */
 function GapArrow({ gap, k }: { gap: GapMark; k: number }) {
@@ -82,7 +89,7 @@ function GapArrow({ gap, k }: { gap: GapMark; k: number }) {
  * wire's squares (§4.2, Visio; plan 9 rule 14): one on each end (tail and head, on whatever they are), one in the
  * middle of each run of its core (no mark on a bend); and the ghost of a new wire while it is drawn (§4.5).
  */
-export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hints = [], gone = null, tool = null, runGuide = null, shorts = [], copies = [] }: DesignOverlayProps) {
+export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hints = [], gone = null, tool = null, runGuide = null, shorts = [], copies = [], split = null }: DesignOverlayProps) {
   // one screen pixel in flow units
   const k = 1 / useStore((s) => s.transform[2]);
   return (
@@ -119,6 +126,16 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
         {tool?.box && <rect className="design-tool-landing" x={tool.box.x} y={tool.box.y} width={tool.box.w} height={tool.box.h} strokeWidth={1.5 * k} strokeDasharray={`${6 * k} ${4 * k}`} />}
         {tool?.line && <path className="design-tool-wire" d={`M${tool.line[0].x} ${tool.line[0].y}H${tool.line[1].x}`} strokeWidth={2 * k} strokeDasharray={`${5 * k} ${4 * k}`} />}
         {tool?.path && tool.path.length > 1 && <path className="design-tool-wire" d={tool.path.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x} ${y}`).join(' ')} strokeWidth={2 * k} strokeDasharray={`${5 * k} ${4 * k}`} />}
+        {split?.ends.map((p, i) => (
+          <rect key={`sp${i}`} className={`design-split-end ${split.tone}`} x={p.x - (SPLIT_END / 2) * k} y={p.y - (SPLIT_END / 2) * k}
+            width={SPLIT_END * k} height={SPLIT_END * k} />
+        ))}
+        {split?.label && (
+          <g className={`design-drop-label ${split.tone}`} transform={`translate(${split.label.at.x + 14 * k} ${split.label.at.y + 14 * k}) scale(${k})`}>
+            <rect x={0} y={0} rx={4} height={LABEL_H} width={split.label.text.length * LABEL_FONT * 0.56 + 2 * LABEL_PAD} />
+            <text x={LABEL_PAD} y={LABEL_H / 2 + LABEL_FONT * 0.36} fontSize={LABEL_FONT}>{split.label.text}</text>
+          </g>
+        )}
         {tool?.label && (
           <g className={`design-drop-label ${tool.label.tone}`} transform={`translate(${tool.label.at.x + 14 * k} ${tool.label.at.y + 14 * k}) scale(${k})`}>
             <rect x={0} y={0} rx={4} height={LABEL_H} width={tool.label.text.length * LABEL_FONT * 0.56 + 2 * LABEL_PAD} />

@@ -1,5 +1,5 @@
 import type { StudioDocument } from '../app/document';
-import { NEW_WIRE_PREFIX, type Circuit, type CircuitWire, type End, type Side } from '../circuit/circuit';
+import { NEW_WIRE_PREFIX, splitWire, type Circuit, type CircuitWire, type End, type Side } from '../circuit/circuit';
 import { contactOn, hubLead, routeCircuit } from '../layout/circuitRoute';
 import type { Pt } from '../layout/router';
 import { CACHE_H, CACHE_W, snap, STEP_H, STEP_W, type Point } from '../layout/geometry';
@@ -13,6 +13,7 @@ import { circuitOf, withCircuit, type Draft } from './draft';
 import { endOf, judgeDrop, pointOfTarget, targetOf, toneOf, dropLabel, type DropTarget as WireTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
 import { overlapJudge } from './overlapJudge';
+import { splitAt, splitLabel, splitTone, type SplitWhy } from './split';
 
 /**
  * What a Toolbox tile drags (2026-10-11): a new, empty step or cache, a new undecided wire (each a new virtual entity, as a
@@ -38,12 +39,23 @@ export type ToolVerdict =
   | { kind: 'place' }
   /** A Wire tile over a contact (2026-10-20): judged as a dragged wire end there; `points`: the wire as it would be drawn. */
   | { kind: 'wire'; target: Exclude<WireTarget, { on: 'open' }>; why: Verdict; points: Pt[] | null }
+  /** An empty step over a wire's run (Visio, plan 10 §4.6): released, the wire splits through it, or the refusal. */
+  | { kind: 'split'; wire: string; why: SplitWhy }
   | { kind: 'assign' | 'replace'; stepId: Id }
   | { kind: 'noStep' }
   | { kind: 'linked'; cacheId: Id };
 
+/** Default entry condition of a new step: PreviousCompleted (BaseApi's default). */
+const NEW_STEP_CONDITION = 1;
+/** The id an empty step is judged under while it is dragged (it gets its own when dropped). */
+const NEW_STEP = 'step:tool';
+
 export function judgeTool(shown: StudioDocument, item: ToolItem, p: Point, wiring?: { circuit: Readonly<Circuit>; reach: number }): ToolVerdict {
   if (item.kind === 'wire' && wiring) return judgeWireTool(shown, wiring.circuit, p, wiring.reach);
+  if (item.kind === 'step' && wiring) {
+    const split = splitAt(shown, wiring.circuit, landingBox(item, p)!, NEW_STEP, NEW_STEP_CONDITION);
+    if (split) return { kind: 'split', ...split };
+  }
   if (item.kind === 'processor') {
     const over = blockAt(shown, p);
     if (over === null || over === SPHERE_NODE_ID || over.startsWith(CACHE_NODE_PREFIX) || !shown.graph.steps.has(over)) return { kind: 'noStep' };
@@ -63,6 +75,7 @@ export function toolLabel(v: ToolVerdict, saving = false): { text: string; tone:
     case 'noStep': return { text: 'drop on a step', tone: 'no' };
     case 'linked': return { text: 'already in this workflow', tone: 'no' };
     case 'wire': return { text: dropLabel(v.why), tone: toneOf(v.why) === 'no' ? 'no' : 'ok' };
+    case 'split': return { text: splitLabel(v.why), tone: splitTone(v.why) };
   }
 }
 
@@ -141,9 +154,6 @@ export function uniqueName(base: string, taken: ReadonlySet<string>): string {
 
 const copy = <T>(r: Readonly<Record<string, T>> = {}): Record<string, T> => Object.assign(Object.create(null) as Record<string, T>, r);
 
-/** Default entry condition of a new step: PreviousCompleted (BaseApi's default). */
-const NEW_STEP_CONDITION = 1;
-
 /**
  * A Toolbox drop on a workflow's canvas (2026-10-11), as a paste is: one history step, the new item picked. `base` is the
  * workflow as loaded, `edits` and `draft` the design over it; a new cache has no root yet (set in the Inspector). Null
@@ -156,7 +166,8 @@ export function dropTool(
   const saved = applyEdits(base, edits, draft.blocks);
   const shown = applyDraft(saved, draft);
   const verdict = judgeTool(shown, item, p, { circuit: circuitOf(saved, draft), reach });
-  if (verdict.kind === 'noStep' || verdict.kind === 'linked' || (verdict.kind === 'wire' && toneOf(verdict.why) === 'no')) return null;
+  if (verdict.kind === 'noStep' || verdict.kind === 'linked' || (verdict.kind === 'wire' && toneOf(verdict.why) === 'no')
+    || (verdict.kind === 'split' && splitTone(verdict.why) === 'no')) return null;
   const b = draft.blocks;
   const withBlocks = (blocks: Blocks): Draft => ({ ...draft, blocks });
 
@@ -167,7 +178,12 @@ export function dropTool(
       const name = uniqueName('step', new Set([...shown.graph.steps.values()].map((s) => s.name)));
       const steps = copy(b.steps);
       steps[id] = { copyOf: null, name, version: '1.0.0', description: null, processorId: null, entryCondition: NEW_STEP_CONDITION, at: { x: box.x, y: box.y }, assignment: null };
-      return { draft: withBlocks({ ...b, steps }), picks: [{ kind: 'node', id }] };
+      const placed = withBlocks({ ...b, steps });
+      if (verdict.kind !== 'split') return { draft: placed, picks: [{ kind: 'node', id }] };
+      // over a wire's run: the wire splits through the new step (plan 10 §4.6), in the same history step
+      const withStep = applyEdits(base, edits, placed.blocks);
+      const circuit = splitWire(circuitOf(withStep, placed), verdict.wire, id, `${NEW_WIRE_PREFIX}${newId()}`);
+      return { draft: withCircuit(placed, withStep, circuit), picks: [{ kind: 'node', id }] };
     }
     case 'newCache': {
       const id = newId();

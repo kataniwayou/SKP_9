@@ -1,16 +1,18 @@
 import { useEffect, useRef, type MutableRefObject } from 'react';
 import type { NodeChange, OnNodeDrag, OnNodesChange } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
-import type { Circuit, End } from '../circuit/circuit';
+import { NEW_WIRE_PREFIX, splitWire, type Circuit, type End } from '../circuit/circuit';
 import { SPHERE_NODE_ID } from '../layout/nodeIds';
-import { PMID, snap, type Point } from '../layout/geometry';
+import { PMID, snap, STEP_H, STEP_W, type Point } from '../layout/geometry';
 import type { Selection } from '../store/selection';
 import { nodePickIds, wirePickIds, type Pick } from '../store/picks';
 import { selectionFromClick } from '../canvas/selection';
 import type { DesignProps } from './designProps';
-import { circuitOf, moveGroup, type Draft } from './draft';
+import { circuitOf, moveGroup, withCircuit, type Draft } from './draft';
 import { guideBoxes, NO_GUIDES, SNAP_REACH_PX, snapToGuides, type Guides } from './guides';
 import { nodeBox } from './hit';
+import { newId } from './ids';
+import { splitAt, splitTone, type Split } from './split';
 
 interface Drag {
   primary: string;
@@ -25,9 +27,18 @@ interface Drag {
   lag: Point;
   base: Draft;
   preview: Draft | null;
+  /**
+   * A step with no wires dragged alone (plan 10 §4.6): it splits a wire whose run it is released on. Its family judges
+   * the split, against the circuit as the drag found it (worked out once: judging reuses what it knows of it); `split`
+   * is the wire under it now and the verdict there.
+   */
+  splitter: { step: string; condition: number; circuit: Circuit } | null;
+  split: Split | null;
   cancelled: boolean;
   /** Set when the drag picked a block that was not picked: the Inspector follows after the drop. */
   selectAfter: Selection | null | undefined;
+  /** The picks back as they were before the drag (Escape, or a refused split). */
+  unpick: () => void;
   stopEscape: () => void;
 }
 
@@ -42,6 +53,8 @@ export interface Held {
   wires: string[];
   dx: number;
   dy: number;
+  /** A step with no wires held over a wire's run: the wire, marked for a split, and the verdict (plan 10 §4.6). */
+  split?: Split | null;
 }
 
 /**
@@ -144,12 +157,16 @@ export function useBlockDrag(
       setGuides(NO_GUIDES);
       setHeld(null);
       // a block the drag picked is unpicked again: everything goes back (spec §5.3)
-      if (!picked) design.onPick(before);
+      drag.current.unpick();
     };
     owner?.addEventListener('keydown', escape, true);
     // the picked wires go with the picked blocks (a block that was not picked moves alone); one gone after an undo is skipped
     const circuit = circuitOf(saved, design.draft);
     const wires = picked ? wirePickIds(design.picks).filter((id) => Object.hasOwn(circuit, id)) : [];
+    // a step with no wires, alone, splits a wire it is dropped on (Visio, plan 10 §4.6)
+    const lone = ids.length === 1 && wires.length === 0 ? doc.graph.steps.get(ids[0]!) : undefined;
+    const wired = lone && Object.values(circuit).some((w) => [w.tail, w.head].some((e) => e.on === 'step' && e.step === lone.id));
+    const splitter = lone && !wired ? { step: lone.id, condition: lone.entryCondition, circuit } : null;
     const at = pressAt.current, z = zoom();
     // a touch drag has no clientX on the event itself: its first touch has
     const p = 'touches' in event ? event.touches[0] : event;
@@ -158,8 +175,9 @@ export function useBlockDrag(
     drag.current = {
       primary: node.id, ids, wires, lag,
       start: new Map(ids.map((id) => { const b = nodeBox(doc, id)!; return [id, { x: b.x, y: b.y }] as const; })),
-      base: design.draft, preview: null, cancelled: false,
+      base: design.draft, preview: null, splitter, split: null, cancelled: false,
       selectAfter: picked ? undefined : selectionFromClick(node, target, doc.graph),
+      unpick: () => { if (!picked) design.onPick(before); },
       stopEscape: () => owner?.removeEventListener('keydown', escape, true),
     };
   };
@@ -187,7 +205,11 @@ export function useBlockDrag(
     // back where it started: nothing to show, and the drop makes no step
     const moved = new Map(d.ids.map((id) => { const s = d.start.get(id)!; return [id, { x: s.x + dx, y: s.y + dy }] as const; }));
     d.preview = dx === 0 && dy === 0 ? null : moveGroup(d.base, saved, moved, d.wires, dx, dy);
-    setHeld(d.preview && { draft: d.preview, ids: d.ids, wires: d.wires, dx, dy });
+    const s = d.splitter && d.preview ? d.start.get(d.splitter.step)! : null;
+    d.split = s && d.splitter
+      ? splitAt(shown.current, d.splitter.circuit, { x: s.x + dx, y: s.y + dy, w: STEP_W, h: STEP_H }, d.splitter.step, d.splitter.condition, d.splitter.step)
+      : null;
+    setHeld(d.preview && { draft: d.preview, ids: d.ids, wires: d.wires, dx, dy, split: d.split });
   };
 
   const onNodeDragStop: OnNodeDrag = () => {
@@ -198,7 +220,13 @@ export function useBlockDrag(
     const view = pressed.current?.ownerDocument.defaultView ?? window;
     view.setTimeout(() => { suppressNodeClick.current = false; }, 0);
     if (d.cancelled) return;
-    if (d.preview) design.onCommit(d.preview);
+    // on a wire that refuses the split, nothing moves (plan 10 §4.6); on one that takes it, the wire splits in the same step
+    if (d.preview && d.split && d.splitter) {
+      // refused: nothing moves, and as for Escape the picks go back as they were (review 2026-10-22)
+      if (splitTone(d.split.why) === 'no') { d.unpick(); return; }
+      const c = splitWire(circuitOf(saved, d.preview), d.split.wire, d.splitter.step, `${NEW_WIRE_PREFIX}${newId()}`);
+      design.onCommit(withCircuit(d.preview, saved, c));
+    } else if (d.preview) design.onCommit(d.preview);
     if (d.selectAfter !== undefined) onSelect?.(d.selectAfter, [{ kind: 'node', id: d.primary }]);
   };
 
