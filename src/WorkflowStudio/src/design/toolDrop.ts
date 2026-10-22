@@ -155,6 +155,18 @@ export function uniqueName(base: string, taken: ReadonlySet<string>): string {
 const copy = <T>(r: Readonly<Record<string, T>> = {}): Record<string, T> => Object.assign(Object.create(null) as Record<string, T>, r);
 
 /**
+ * A new, empty step (a Toolbox step's: no processor, the next free `step` name, PreviousCompleted) with its top-left at
+ * `at`, added to `draft` over the drawing `shown`.
+ */
+export function addStep(shown: StudioDocument, draft: Draft, at: Point, newId: () => string): { draft: Draft; id: string } {
+  const id = newId();
+  const name = uniqueName('step', new Set([...shown.graph.steps.values()].map((s) => s.name)));
+  const steps = copy(draft.blocks.steps);
+  steps[id] = { copyOf: null, name, version: '1.0.0', description: null, processorId: null, entryCondition: NEW_STEP_CONDITION, at: { x: at.x, y: at.y }, assignment: null };
+  return { draft: { ...draft, blocks: { ...draft.blocks, steps } }, id };
+}
+
+/**
  * A Toolbox drop on a workflow's canvas (2026-10-11), as a paste is: one history step, the new item picked. `base` is the
  * workflow as loaded, `edits` and `draft` the design over it; a new cache has no root yet (set in the Inspector). Null
  * when the drop is refused
@@ -173,12 +185,8 @@ export function dropTool(
 
   switch (item.kind) {
     case 'step': {
-      const id = newId();
       const box = landingBox(item, p)!;
-      const name = uniqueName('step', new Set([...shown.graph.steps.values()].map((s) => s.name)));
-      const steps = copy(b.steps);
-      steps[id] = { copyOf: null, name, version: '1.0.0', description: null, processorId: null, entryCondition: NEW_STEP_CONDITION, at: { x: box.x, y: box.y }, assignment: null };
-      const placed = withBlocks({ ...b, steps });
+      const { draft: placed, id } = addStep(shown, draft, { x: box.x, y: box.y }, newId);
       if (verdict.kind !== 'split') return { draft: placed, picks: [{ kind: 'node', id }] };
       // over a wire's run: the wire splits through the new step (plan 10 §4.6), in the same history step
       const withStep = applyEdits(base, edits, placed.blocks);
