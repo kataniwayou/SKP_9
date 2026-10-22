@@ -170,6 +170,25 @@ export function routeBlocks(s: Pt, t: Pt, src: Box, tgt: Box, boxes: readonly Bo
   return route(sx, sy, tx, ty, src.id, tgt.id, 0, [...boxes]);
 }
 
+/**
+ * A hub tail leaving its ring point another way than right (the user, 2026-10-22): from `s`, a stub's length out of the
+ * hub's square, heading `out` (1 down, 2 left, 3 up), to the input `t` of block `tgt`, by the search alone (no base
+ * shape: those leave rightward), the hub an ordinary block. Null when no way exists.
+ */
+export function routeOut(s: Pt, out: 1 | 2 | 3, t: Pt, tgt: Box, boxes: readonly Box[], tracks: Tracks = new Tracks()): Pt[] | null {
+  const ends: Ends = { sx: s[0], sy: s[1], tx: t[0], ty: t[1], src: '', tgt: tgt.id };
+  const bound = {
+    x1: Math.min(s[0], tgt.x) - 3 * STUB, x2: Math.max(s[0], tgt.x + tgt.w) + 3 * STUB,
+    y1: Math.min(s[1], tgt.y) - 3 * STUB, y2: Math.max(s[1], tgt.y + tgt.h) + 3 * STUB,
+  };
+  const columns: number[] = [];
+  for (let v = GRID; v < STUB; v += GRID) columns.push(t[0] - v);
+  const found = search(ends, t[0] - STUB, boxes, tracks, [], false, bound, out)
+    ?? search(ends, t[0] - STUB, boxes, tracks, columns, true, bound, out)
+    ?? search(ends, t[0] - STUB, boxes, tracks, columns, true, null, out);
+  return found ? simplify(found) : null;
+}
+
 interface Bound { x1: number; x2: number; y1: number; y2: number }
 /** The wire's two ports and the blocks they are on. */
 interface Ends { sx: number; sy: number; tx: number; ty: number; src: string; tgt: string }
@@ -187,7 +206,7 @@ const DX = [1, 0, -1, 0], DY = [0, 1, 0, -1];
  * along its port's line (the stub), and for any within a stub of either port (the column it leaves or enters by: a block
  * packed against a port leaves no other way, review 2026-10-22), where it only keeps out of it. Null when no way exists.
  */
-function search(e: Ends, hug: number, boxes: readonly Box[], tracks: Tracks, columns: readonly number[], fine: boolean, bound: Bound | null): Pt[] | null {
+function search(e: Ends, hug: number, boxes: readonly Box[], tracks: Tracks, columns: readonly number[], fine: boolean, bound: Bound | null, out = 0): Pt[] | null {
   const a: Pt = [e.sx, e.sy], b: Pt = [e.tx, e.ty];
   const within = (box: Box) => bound === null
     || (box.x - STUB < bound.x2 && box.x + box.w + STUB > bound.x1 && box.y - STUB < bound.y2 && box.y + box.h + STUB > bound.y1);
@@ -234,7 +253,9 @@ function search(e: Ends, hug: number, boxes: readonly Box[], tracks: Tracks, col
     const p: Pt = [xs[i]!, ys[j]!], q: Pt = [xs[ni]!, ys[nj]!];
     const x1 = Math.min(p[0], q[0]), x2 = Math.max(p[0], q[0]), y1 = Math.min(p[1], q[1]), y2 = Math.max(p[1], q[1]);
     const levelRun = y1 === y2;
-    const byPort = (x1 >= e.sx && x2 <= e.sx + STUB) || (x1 >= e.tx - STUB && x2 <= e.tx);
+    // the output's stub column is a port's only when the wire leaves rightward (out = 0): a hub tail's other ways out start
+    // a stub's length out of the hub already, clear of it (2026-10-22)
+    const byPort = (out === 0 && x1 >= e.sx && x2 <= e.sx + STUB) || (x1 >= e.tx - STUB && x2 <= e.tx);
     // a block's clearance counts round the blocks it passes; round its own only nearer than a track (phase 3's deferred
     // list: a hard search turned 8 px off its own block), so a wire still nests a track inside another net's as Visio's
     // fan-out does, and never along its ports' lines (its stubs)
@@ -272,9 +293,9 @@ function search(e: Ends, hug: number, boxes: readonly Box[], tracks: Tracks, col
     const bends = y === b[1] ? (d === 0 ? 0 : d === 2 ? 2 : 1) : d === 1 || d === 3 ? 1 : 2;
     return Math.abs(x - b[0]) + Math.abs(y - b[1]) + BEND * bends;
   };
-  const s0 = start * 4;
+  const s0 = start * 4 + out;
   d0[s0] = 0;
-  heap.push(togo(start, 0), 0, 0, s0);
+  heap.push(togo(start, out), 0, 0, s0);
   let best = -1;
   while (heap.size > 0) {
     const k = heap.pop(), f0 = heap.p0, c1 = heap.p1, c2 = heap.p2;
@@ -282,7 +303,7 @@ function search(e: Ends, hug: number, boxes: readonly Box[], tracks: Tracks, col
     if (c0 !== d0[k] || c1 !== d1[k] || c2 !== d2[k]) continue;
     if (n === goal && d === 0) { best = k; break; }
     for (let nd = 0; nd < 4; nd++) {
-      if (nd === (d + 2) % 4 || (n === start && nd !== 0) || n === goal) continue;
+      if (nd === (d + 2) % 4 || (n === start && nd !== out) || n === goal) continue;
       if (edge(n, nd) === 2) continue;
       const ek = 3 * (n * 4 + nd);
       const nn = n + DX[nd]! + W * DY[nd]!;

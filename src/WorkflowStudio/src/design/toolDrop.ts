@@ -1,6 +1,6 @@
 import type { StudioDocument } from '../app/document';
 import { NEW_WIRE_PREFIX, type Circuit, type CircuitWire, type End, type Side } from '../circuit/circuit';
-import { contactOn, hubLead, routeCircuit } from '../layout/circuitRoute';
+import { contactOn, hubLead, hubWay, routeCircuit } from '../layout/circuitRoute';
 import type { Pt } from '../layout/router';
 import { CACHE_H, CACHE_W, snap, STEP_H, STEP_W, type Point } from '../layout/geometry';
 import { CACHE_NODE_PREFIX, cacheNodeId, SPHERE_NODE_ID } from '../layout/nodeIds';
@@ -97,11 +97,13 @@ export function toolWire(shown: StudioDocument, t: Exclude<WireTarget, { on: 'op
   switch (t.on) {
     case 'step': return t.side === 'in' ? { tail: away(-DROPPED_WIRE, 0), head: end } : { tail: end, head: away(DROPPED_WIRE, 0) };
     case 'hub': {
-      // a hub tail's run starts right of the ring (above or below it from the left half, hubLead): the open head lies
-      // `DROPPED_WIRE` along that run, so the stub is drawn out of the ring and straight on — never back round the hub
-      // (the user's report, 2026-10-21); at the run's own height, off the grid as a ring point may be, so it stays straight
-      const start = hubLead(shown.placement.sphere.cx, shown.placement.sphere.cy, t.angle).start;
-      return { tail: end, head: { on: 'open', x: snap(start.x + DROPPED_WIRE), y: start.y } };
+      // a hub tail leaves its ring point the way it faces (hubLead, 2026-10-22): the open head lies `DROPPED_WIRE` on
+      // along that way, so the stub is drawn out of the ring and straight on — never back round the hub (the user's
+      // report, 2026-10-21); on the lead's own line, off the grid as a ring point may be, so it stays straight
+      const { start } = hubLead(shown.placement.sphere.cx, shown.placement.sphere.cy, t.angle);
+      const way = hubWay(t.angle);
+      const dx = way === 0 ? 1 : way === 2 ? -1 : 0, dy = way === 1 ? 1 : way === 3 ? -1 : 0;
+      return { tail: end, head: { on: 'open', x: dx === 0 ? start.x : snap(start.x + dx * DROPPED_WIRE), y: dy === 0 ? start.y : snap(start.y + dy * DROPPED_WIRE) } };
     }
     case 'wire': {
       const host = shown.wires.find((w) => w.id === t.host);

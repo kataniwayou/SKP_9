@@ -2,13 +2,13 @@ import { isAutomatic, isFree, plainCircuit, type Circuit, type CircuitWire, type
 import { netsOf, shortedWires } from '../circuit/families';
 import type { Id, Step } from '../model/graph';
 import { clearPath } from './detour';
-import { GRID, PMID, SPHERE_R, STEP_W, TRACK, clampLanding, offset, snap, type Point } from './geometry';
+import { GRID, PMID, SPHERE_R, STEP_W, STUB, TRACK, clampLanding, offset, snap, type Point } from './geometry';
 import { CONTACT_MARGIN, lengthOf, ownEnds, pointAt } from './junctions';
 import { LineIndex, mayShare, overlapsOf, sharesNet, type Stretch } from './overlaps';
 import type { Placement } from './placement';
 import { landingsOf, WORKFLOW_SOURCE, type Arrival, type SourceId } from './ports';
 import { hitsOf, route, simplify, type Box, type Pt, type RouteAvoid } from './router';
-import { routeBlocks, Tracks } from './search';
+import { routeBlocks, routeOut, Tracks } from './search';
 import { JOG, pointsOfShape, shapeFromPoints, type Ends } from './shape';
 import { blockBoxes, SPHERE_BOX_ID, stepBoxId, type WiringInput } from './wires';
 
@@ -65,17 +65,31 @@ export function contactDistance(points: readonly Pt[], at: number): number {
 const tenth = (v: number) => Math.round(v * 10) / 10;
 
 /**
- * A tail on the hub's ring at `angle` (decision 4): from that ring point, on the right half sideways to the right,
- * on the left half up (top) or down (bottom) out of the hub's square and then right; `start` is where its own
- * route begins, `lead` the points before it.
+ * The way a hub tail at `angle` leaves its ring (the user, 2026-10-22): its nearer quarter, 0 right, 1 down, 2 left,
+ * 3 up; halfway between two (45, 135, 225, 315) it goes sideways, as every hub tail did before.
+ */
+export function hubWay(angle: number): 0 | 1 | 2 | 3 {
+  const q = angle / 90, f = Math.floor(q);
+  const k = q - f > 0.5 || (q - f === 0.5 && f % 2 !== 0) ? f + 1 : f;
+  return (((k % 4) + 4) % 4) as 0 | 1 | 2 | 3;
+}
+
+/**
+ * A tail on the hub's ring at `angle` (decision 4; the user, 2026-10-22): from that ring point straight out the way it
+ * faces (`hubWay`). Right, sideways out of the hub's square as before; down, left or up, a stub's length (64) out of the
+ * square, clear of the hub, where the search takes it on that way (`routeOut`), never back round the hub. `start` is
+ * where its own route begins, `lead` the points before it.
  */
 export function hubLead(cx: number, cy: number, angle: number): { start: Point; lead: Pt[] } {
   const r = (angle * Math.PI) / 180;
   const ring: Pt = [tenth(cx + SPHERE_R * Math.cos(r)), tenth(cy + SPHERE_R * Math.sin(r))];
-  const right = snap(cx + SPHERE_R + JOG);
-  if (Math.cos(r) > -1e-9) return { start: { x: right, y: ring[1] }, lead: [ring] };
-  const y = snap(Math.sin(r) < 0 ? cy - SPHERE_R - JOG : cy + SPHERE_R + JOG);
-  return { start: { x: right, y }, lead: [ring, [ring[0], y]] };
+  const out = SPHERE_R + STUB;
+  switch (hubWay(angle)) {
+    case 0: return { start: { x: snap(cx + SPHERE_R + JOG), y: ring[1] }, lead: [ring] };
+    case 1: return { start: { x: ring[0], y: snap(cy + out) }, lead: [ring] };
+    case 2: return { start: { x: snap(cx - out), y: ring[1] }, lead: [ring] };
+    default: return { start: { x: ring[0], y: snap(cy - out) }, lead: [ring] };
+  }
 }
 
 /**
@@ -86,8 +100,14 @@ export function hubLead(cx: number, cy: number, angle: number): { start: Point; 
  */
 export function hubStart(cx: number, cy: number, angle: number, aim: number | null): { start: Point; lead: Pt[] } {
   const h = hubLead(cx, cy, angle);
-  if (aim === null || (Math.cos((angle * Math.PI) / 180) < -1e-9 && aim > cx)) return h;
+  if (aim === null) return h;
   const ring = h.lead[0]!;
+  const r = (angle * Math.PI) / 180;
+  if (Math.cos(r) < -1e-9 && aim > cx) {
+    // its shape heads right: up (top) or down (bottom) out of the hub's square, then right, as before 2026-10-22
+    const y = snap(Math.sin(r) < 0 ? cy - SPHERE_R - JOG : cy + SPHERE_R + JOG);
+    return { start: { x: snap(cx + SPHERE_R + JOG), y }, lead: [ring, [ring[0], y]] };
+  }
   const start = { x: snap(ring[0]), y: snap(ring[1]) };
   return { start, lead: [ring, [ring[0], start.y]] };
 }
@@ -261,6 +281,8 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
     // an end on nothing it can be drawn on (a host gone or looping back, a step off the canvas): open beside the other end
     const T: Placed = tail ?? placedAt(head ? { x: head.at.x - BESIDE, y: head.at.y } : { x: 0, y: 0 });
     const H: Placed = head ?? placedAt({ x: T.at.x + BESIDE, y: T.at.y });
+    // the way an angled hub tail leaves (0 right, 1 down, 2 left, 3 up); a shape drawn by hand keeps its own
+    const way = !(w.bends && w.bends.xs.length > 0) && w.tail.on === 'hub' && w.tail.angle !== null && tail !== null ? hubWay(w.tail.angle) : 0;
 
     // both ends on blocks and no shape of its own: Visio's router (plan 10 phase 3) draws its usual track, keeping off
     // other nets' runs itself; only when that is through a block or on another net's wire (blocks packed closer than
@@ -291,13 +313,22 @@ export function routeCircuit(circuit: Readonly<Circuit>, ctx: RouteContext): Wir
         if (flipHead && !H.vertical) ty = snap(2 * H.contact[1] - ty, GRID);
       }
       const o: RouteAvoid = avoid ? { spread, mix, avoid: (pts) => clashes(id, pts) } : { spread };
+      // a hub tail facing up, left or down leaves that way (the user, 2026-10-22): the search from its stub, the hub an
+      // ordinary block; to an open end straight on along its way, a straight line
+      const outward = (ty: number): Pt[] | null => {
+        if (way === 0) return null;
+        const t: Pt = [tx, ty];
+        if (H.box !== '' && boxById.has(H.box)) return routeOut([sx, sy], way, t, boxById.get(H.box)!, boxes, avoid ? othersOf(id) : new Tracks());
+        const along = way === 2 ? ty === sy && tx < sx : tx === sx && (way === 1 ? ty > sy : ty < sy);
+        return along ? [[sx, sy], t] : null;
+      };
       const coreTo = (ty: number) => w.bends && w.bends.xs.length > 0
         ? simplify(pointsOfShape({ sx, sy, tx, ty }, w.bends))
-        : searched && spread === 0 && !mix
+        : outward(ty) ?? (searched && spread === 0 && !mix
           ? routeBlocks([sx, sy], [tx, ty], boxById.get(T.box)!, boxById.get(H.box)!, boxes, avoid ? othersOf(id) : new Tracks())
           : T.box !== '' && H.box !== ''
             ? route(sx, sy, tx, ty, T.box, H.box, nudge.get(id) ?? 0, boxes, o)
-            : clearPath(route(sx, sy, tx, ty, T.box, H.box, 0, boxes, o), boxes);
+            : clearPath(route(sx, sy, tx, ty, T.box, H.box, 0, boxes, o), boxes));
       let core = coreTo(ty);
       // an automatic wire reaches a level junction from the side its last run comes from, as the shape it becomes when a
       // run is first dragged does (above): that drag never moves it (plan 10 phase 3)

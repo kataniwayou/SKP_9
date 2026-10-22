@@ -190,7 +190,7 @@ test('the tail ring of the Wire tile makes the contact too: on an output, on the
   await expect(edge(panel, made[0]!).locator('circle.nx-src')).toHaveCount(1);
 });
 
-test('a Wire tile dropped on the left side of the hub: out of the ring and straight on to the right, never round the hub (2026-10-21)', async ({ page }) => {
+test('a Wire tile dropped on the left side of the hub: out of the ring and straight on to the left, never round the hub (2026-10-22)', async ({ page }) => {
   const panel = await open(page);
   const hub = await box(node(panel, 'wf'));
   const z = await zoomOf(panel);
@@ -205,12 +205,13 @@ test('a Wire tile dropped on the left side of the hub: out of the ring and strai
     expect(made).toHaveLength(1);
     await expect(edge(panel, made[0]!).locator('circle.nx-src')).toHaveCount(1);
     const pts = await wirePoints(panel, made[0]!);
-    // the ring lead (along the ring's side to above or below it), then one run to the right, ending at the head
-    expect(pts.length).toBeLessThanOrEqual(3);
-    const [a, b] = [pts.at(-2)!, pts.at(-1)!];
+    // from the ring point (180, and 225 halfway: sideways) one level run to the left, ending at the head (the user,
+    // 2026-10-22: a hub tail leaves its ring point outward)
+    expect(pts).toHaveLength(2);
+    const [a, b] = [pts[0]!, pts[1]!];
     expect(b[1]).toBe(a[1]);
-    expect(b[0]).toBeGreaterThan(cx);
-    expect(Math.min(...pts.map((q) => q[0]))).toBeGreaterThanOrEqual(cx - 96);
+    expect(b[0]).toBeLessThan(a[0]);
+    expect(Math.max(...pts.map((q) => q[0]))).toBeLessThan(cx);
   }
   await shot(page, '3-tile-hub-left');
 });

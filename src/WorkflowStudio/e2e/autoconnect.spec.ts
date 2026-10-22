@@ -168,3 +168,60 @@ test("a hub tail moved round the ring meets no resistance: released on the hub i
   expect(Math.round(pts[0]![1] - centre.y)).toBe(Math.round(R));
   for (const p of pts.slice(1)) expect(Math.hypot(p[0] - centre.x, p[1] - centre.y)).toBeGreaterThanOrEqual(R - 1);
 });
+
+test("a hub tail leaves its ring point outward: up from the top, down from the bottom, left from the left, right from the right; never back round the hub (the user, 2026-10-22)", async ({ page }) => {
+  const panel = await open(page);
+  const id = `wf->${t.a}`;
+  const z = await zoomOf(panel);
+  const hubAt = () => panel.locator('.react-flow__node[data-id="wf"]').evaluate((n) => {
+    const m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec((n as HTMLElement).style.transform)!;
+    return { x: Number(m[1]) + (n as HTMLElement).offsetWidth / 2, y: Number(m[2]) + (n as HTMLElement).offsetHeight / 2, r: (n as HTMLElement).offsetWidth / 2 };
+  });
+  /** The tail dragged with the real mouse to the hub's ring point at `angle`; the wire's points after. */
+  const tailTo = async (angle: number) => {
+    await pickWire(page, panel, id);
+    const hub = await box(node(panel, 'wf'));
+    const c = { x: hub.x + hub.width / 2, y: hub.y + hub.height / 2 }, r = hub.width * 0.4;
+    const from = await centreOf(endSquare(panel, id, 'tail'));
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(c.x + r * Math.cos((angle * Math.PI) / 180), c.y + r * Math.sin((angle * Math.PI) / 180), { steps: 10 });
+    await page.mouse.up();
+    await frames(page);
+    const off = await emptySpot(panel);
+    await page.mouse.click(off.x, off.y);
+    return wirePoints(panel, id);
+  };
+  const wayOf = (p: [number, number], q: [number, number]) => q[0] > p[0] ? 'right' : q[0] < p[0] ? 'left' : q[1] > p[1] ? 'down' : 'up';
+  for (const [angle, way] of [[0, 'right'], [90, 'down'], [180, 'left'], [270, 'up']] as const) {
+    const pts = await tailTo(angle);
+    const h = await hubAt();
+    expect(wayOf(pts[0]!, pts[1]!), `${angle}: ${JSON.stringify(pts)}`).toBe(way);
+    for (const p of pts.slice(1)) expect(Math.hypot(p[0] - h.x, p[1] - h.y), `${angle}: ${JSON.stringify(pts)}`).toBeGreaterThanOrEqual(h.r - 1);
+    await panel.screenshot({ path: `test-results/hub-out-${angle}.png` });
+  }
+
+  // a moved up and left of the hub: from the left and the top the wire never goes round the hub's right side
+  const hub = await box(node(panel, 'wf')), a = await box(node(panel, t.a));
+  const grab = { x: a.x + a.width / 2, y: a.y + 12 * z };
+  await page.mouse.move(grab.x, grab.y);
+  await page.mouse.down();
+  await page.mouse.move(hub.x - 1.5 * a.width, hub.y - 1.2 * a.height, { steps: 16 });
+  await page.mouse.up();
+  await frames(page);
+  expect((await box(node(panel, t.a))).x + (await box(node(panel, t.a))).width).toBeLessThan(hub.x);
+  // the view panned right (a left drag on empty canvas), so a is in it
+  const pan = await emptySpot(panel);
+  await page.mouse.move(pan.x, pan.y);
+  await page.mouse.down();
+  await page.mouse.move(pan.x + 300, pan.y + 100, { steps: 8 });
+  await page.mouse.up();
+  await frames(page);
+  for (const angle of [180, 270]) {
+    const pts = await tailTo(angle);
+    const h = await hubAt();
+    expect(wayOf(pts[0]!, pts[1]!), `${angle}: ${JSON.stringify(pts)}`).toBe(angle === 180 ? 'left' : 'up');
+    for (const p of pts) expect(p[0], `${angle}: ${JSON.stringify(pts)}`).toBeLessThanOrEqual(h.x + h.r);
+    await panel.screenshot({ path: `test-results/hub-out-left-of-${angle}.png` });
+  }
+});

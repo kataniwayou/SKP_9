@@ -20,6 +20,7 @@ const four = () => loadedDocument(graphDto({
 }));
 const ctxOf = (doc: Awaited<ReturnType<typeof four>>) => ({ placement: doc.placement, steps: doc.graph.steps });
 const byId = (routes: ReturnType<typeof routeCircuit>) => new Map(routes.map((r) => [r.id, r]));
+const snapTo = (v: number) => Math.round(v / 32) * 32;
 
 describe('routeCircuit (plan 9 §5)', () => {
   it('draws the workflow\'s own wires exactly as plan 2 did: the same points, colours and ends', async () => {
@@ -40,10 +41,55 @@ describe('routeCircuit (plan 9 §5)', () => {
     const top = routes.get('top')!.points, left = routes.get('left')!.points;
     expect(top[0]).toEqual([cx, cy - SPHERE_R]);
     expect(left[0]).toEqual([cx - SPHERE_R, cy]);
-    expect(left[1]).toEqual([cx - SPHERE_R, cy + SPHERE_R + 16]);
+    // each leaves the way its ring point faces, a stub's length out of the hub's square (the user, 2026-10-22)
+    expect(left[1]![1]).toBe(cy);
+    expect(left[1]![0]).toBeLessThanOrEqual(cx - SPHERE_R - 64);
+    expect(top[1]![0]).toBe(cx);
+    expect(top[1]![1]).toBeLessThanOrEqual(cy - SPHERE_R - 64);
     // after the ring point, nothing inside the hub
     for (const p of [...top.slice(1), ...left.slice(1)]) expect(Math.hypot(p[0] - cx, p[1] - cy)).toBeGreaterThanOrEqual(SPHERE_R - 0.5);
     expect(routes.get('top')).toMatchObject({ source: 'wf', tailOn: 'terminal' });
+  });
+
+  describe('a hub tail leaves its ring point outward (the user, 2026-10-22)', () => {
+    /** The hub's tail at `angle` into s1, with s1 put at `s1` (the hub where the document puts it). */
+    const tailTo = async (angle: number, s1?: [number, number]) => {
+      const doc = await four();
+      if (s1) doc.placement.steps.set('s1', { x: s1[0], y: s1[1] });
+      return { doc, r: routeCircuit({ x: w({ on: 'hub', angle }, at('s1')) }, ctxOf(doc))[0]! };
+    };
+    const firstWay = (pts: readonly Pt[]) => {
+      const [p, q] = pts as [Pt, Pt];
+      return q[0] > p[0] ? 'right' : q[0] < p[0] ? 'left' : q[1] > p[1] ? 'down' : 'up';
+    };
+
+    it('its first run goes the way of its nearer quarter: right, down, left or up', async () => {
+      const ways: string[] = [];
+      for (const angle of [0, 30, 90, 120, 180, 210, 270, 300]) ways.push(firstWay((await tailTo(angle)).r.points));
+      expect(ways).toEqual(['right', 'right', 'down', 'down', 'left', 'left', 'up', 'up']);
+    });
+
+    it('halfway between two quarters it goes sideways, as before', async () => {
+      const ways: string[] = [];
+      for (const angle of [45, 135, 225, 315]) ways.push(firstWay((await tailTo(angle)).r.points));
+      expect(ways).toEqual(['right', 'left', 'left', 'right']);
+    });
+
+    it('to a step left of the hub, from the left or the top, it never goes round the hub\'s right side', async () => {
+      const doc = await four();
+      const { cx, cy } = doc.placement.sphere;
+      for (const angle of [180, 270]) {
+        const { r } = await tailTo(angle, [snapTo(cx - SPHERE_R - 600), snapTo(cy - 80)]);
+        for (const p of r.points) expect(p[0], `${angle}: ${JSON.stringify(r.points)}`).toBeLessThanOrEqual(cx + SPHERE_R);
+      }
+    });
+
+    it('to a step above the hub, from the top, it never goes below the hub', async () => {
+      const doc = await four();
+      const { cx, cy } = doc.placement.sphere;
+      const { r } = await tailTo(270, [snapTo(cx + 200), snapTo(cy - SPHERE_R - 600)]);
+      for (const p of r.points) expect(p[1], JSON.stringify(r.points)).toBeLessThanOrEqual(cy + SPHERE_R);
+    });
   });
 
   it("automatic hub tails start on the hub's ring at every height they leave at, and run out level (phase 3's deferred list)", async () => {
