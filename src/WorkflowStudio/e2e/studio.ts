@@ -155,7 +155,9 @@ export async function pointOnWire(panel: Locator, id: string, f = 0.5, clear = 0
     const tries = Array.from({ length: n - 1 }, (_, i) => (i + 1) / n).sort((x, y) => Math.abs(x - at) - Math.abs(y - at));
     for (const t of tries) {
       const pt = p.getPointAtLength(len * t);
-      const q = { x: pt.x * m.a + pt.y * m.c + m.e, y: pt.x * m.b + pt.y * m.d + m.f };
+      // the whole pixel a mouse event there is hit-tested at: a fractional point can be the wire's while that pixel is a
+      // neighbour's, where another wire's line or junction dot begins (circuit-save:117, 2026-10-22)
+      const q = { x: Math.round(pt.x * m.a + pt.y * m.c + m.e), y: Math.round(pt.x * m.b + pt.y * m.d + m.f) };
       if (away(q) && el.ownerDocument.elementFromPoint(q.x, q.y)?.closest('.react-flow__edge')?.getAttribute('data-id') === wid) return q;
     }
     return null;
