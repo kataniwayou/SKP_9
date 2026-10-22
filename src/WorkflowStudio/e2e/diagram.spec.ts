@@ -63,14 +63,18 @@ test('an applied Save publishes the drawing for the dashboard; the next Save is 
   expect(second).not.toBe(first);
 });
 
-test('Save is offered with nothing changed: its tooltip says so, and it publishes the drawing again', async ({ page }) => {
+test('Save is off with nothing changed (the user, 2026-10-22): its tip says why; a change turns it on', async ({ page }) => {
   await openWorkflow(page, t.workflow);
   const button = page.getByRole('button', { name: '⤓ Save' });
+  await expect(button).toBeDisabled();
+  await expect(button.locator('xpath=..')).toHaveAttribute('data-tip', 'Nothing changed since the last Save');
+  const panel = documentPanel(page, t.workflow);
+  await moveDown(page, panel, t.stepBId, 96);
   await expect(button).toBeEnabled();
-  await expect(button).toHaveAttribute('data-tip', /^Nothing changed since the last Save/);
   await save(page);
   const lines = await outputLines(page);
-  await expect(lines.filter({ hasText: 'Save started: sending the layout only' })).toHaveCount(1);
   await expect(lines.filter({ hasText: 'Saved and applied' })).toHaveCount(1);
   await expect(lines.filter({ hasText: 'Diagram published' })).toHaveCount(1, PUBLISHED);
+  // saved and applied: nothing left to store, so it is off again
+  await expect(button).toBeDisabled();
 });

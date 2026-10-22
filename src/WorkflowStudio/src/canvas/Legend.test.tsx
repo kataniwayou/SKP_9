@@ -13,15 +13,13 @@ describe('Legend', () => {
       expect(item.querySelector('.lg-w')!.getAttribute('stroke')).toBe(c.colour);
       expect(item.querySelector('.lg-head')).not.toBeNull();
     }
-    expect(container.querySelectorAll('.lg-item')).toHaveLength(CONDITIONS.length + 2);
+    expect(container.querySelectorAll('.lg-item')).toHaveLength(CONDITIONS.length + 1);
   });
 
-  it('shows the undecided wire (grey, dashed, a ring and an arrow head) and the short circuit; no loose wire, nothing broken or parked (plan 9 §5)', () => {
+  it('shows the short circuit and no undecided wire (the user, 2026-10-22); no loose wire, nothing broken or parked (plan 9 §5)', () => {
     const { getByText, queryByText, container } = render(<Legend />);
-    const undecided = getByText('undecided').closest('.lg-item')!;
-    expect(undecided.querySelector('.lg-undecided')).not.toBeNull();
-    expect(undecided.querySelector('.lg-ring')).not.toBeNull();
-    expect(undecided.querySelector('.lg-arrow')).not.toBeNull();
+    expect(queryByText('undecided')).toBeNull();
+    expect(container.querySelector('.lg-undecided')).toBeNull();
     const short = getByText('short circuit').closest('.lg-item')!;
     expect(short.querySelector('.lg-short')).not.toBeNull();
     // its tooltip names all three kinds: two families at a junction, a loop, an overlap with another net

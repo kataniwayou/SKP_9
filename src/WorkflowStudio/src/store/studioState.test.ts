@@ -384,8 +384,8 @@ describe('opening a design (plan 9 §8)', () => {
     expect(d.design.draft.wires).toBeNull();
     expect(circuitOf(doc4, d.design.draft)['s3->s4']!.head).toEqual({ on: 'step', step: 's4', y: null });
     expect(designDirty(d)).toBe(false);
-    // nothing new to store, yet Save is offered (2026-10-11): it publishes the drawing to the dashboard
-    expect([hasChanges(d), canSave(d)]).toEqual([false, true]);
+    // nothing new to store: Save is off (2026-10-22)
+    expect([hasChanges(d), canSave(d)]).toEqual([false, false]);
   });
 
   it('a stored version 2 design keeps a self-link the workflow has: no list changes, not dirty (final review I1)', async () => {
@@ -410,7 +410,7 @@ describe('opening a design (plan 9 §8)', () => {
     } as never));
     const d = run(open('wf1'), { type: 'loaded', workflowId: 'wf1', doc: plain }).docs[0]!;
     expect(d.design.draft.wires).toBeNull();
-    expect([designDirty(d), hasChanges(d), canSave(d)]).toEqual([false, false, true]);
+    expect([designDirty(d), hasChanges(d), canSave(d)]).toEqual([false, false, false]);
 
     // a tail moved round the hub is a visible layout change: dirty
     const angled = withCircuit(EMPTY_DRAFT, plain, setEnd(circuitOf(plain, EMPTY_DRAFT), 'wf->s1', 'tail', { on: 'hub', angle: 90 }));

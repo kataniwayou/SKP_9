@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { graphDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
 import { moveBlocks, EMPTY_DRAFT } from '../design/draft';
-import { canSave, designLocked, hasChanges, INITIAL_STATE, reduce, saveBlocked, type OpenDocument, type StudioAction } from '../store/studioState';
+import { canSave, designLocked, hasChanges, INITIAL_STATE, NOTHING_TO_SAVE, reduce, saveBlocked, type OpenDocument, type StudioAction } from '../store/studioState';
 import { AI_DRAWING, runBlocked } from '../store/run';
 import { aiBlocked } from './useAiDrawing';
 
@@ -62,11 +62,15 @@ describe('while the AI draws, its document is locked (the user’s rule, 2026-10
   });
 });
 
-describe('Save is always offered once loaded and idle; otherwise it says why (the user\'s rule, 2026-10-11)', () => {
+describe('Save is offered once loaded and idle, with something to store; otherwise it says why (the user\'s rule, 2026-10-22)', () => {
   it('names what stops it', async () => {
     const d = await opened();
-    expect(saveBlocked(d)).toBeNull();
+    // nothing changed: off (2026-10-22, replacing 2026-10-11's always-on Save)
     expect(hasChanges(d)).toBe(false);
+    expect(saveBlocked(d)).toBe(NOTHING_TO_SAVE);
+    const w = await withSteps();
+    const moved = await opened(Promise.resolve(w), { type: 'design', workflowId: 'w', draft: moveBlocks(EMPTY_DRAFT, w, new Map([['s2', { x: 2000, y: 800 }]])) });
+    expect(saveBlocked(moved)).toBeNull();
     expect(saveBlocked({ ...d, saving: true })).toBe('Saving…');
     expect(saveBlocked({ ...d, drawing: true })).toBe(AI_DRAWING);
     expect(saveBlocked({ ...d, status: { kind: 'loading' } })).toBe('The workflow is still loading');

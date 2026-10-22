@@ -690,10 +690,10 @@ test('a new wire from the hub: its head dropped back on the hub is told "only a 
   await expect.poll(() => drawn.locator('path.w').getAttribute('d')).toBe(before);
 });
 
-test('the legend shows the undecided wire and the short circuit; no loose wire, nothing broken or parked (plan 9 §5)', async ({ page }) => {
+test('the legend shows the short circuit and no undecided wire (the user, 2026-10-22); no loose wire, nothing broken or parked (plan 9 §5)', async ({ page }) => {
   const panel = await open(page);
   const items = panel.locator('.legend .lg-item');
-  await expect(items.filter({ hasText: /^undecided$/ })).toHaveCount(1);
+  await expect(items.filter({ hasText: /^undecided$/ })).toHaveCount(0);
   await expect(items.filter({ hasText: /^short circuit$/ })).toHaveCount(1);
   await expect(items.filter({ hasText: /loose|broken|parked/i })).toHaveCount(0);
 });

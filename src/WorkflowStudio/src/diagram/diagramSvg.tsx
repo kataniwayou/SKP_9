@@ -115,16 +115,15 @@ const LIGHT_CSS = `
 .nx-nd{fill:#FFFFFF}
 .nx-g,.nx-gs,.wire path.w,.wire .nx-head,.wire .nx-joint,.wire .nx-joint.short,.wire .nx-overlap,.cmark .lg-w{filter:none}
 .cachetag .nx-cn{fill:var(--ink)}
-.wire .nx-src,.cmark .lg-src,.legend .lg-ring{fill:#FFFFFF}
+.wire .nx-src,.cmark .lg-src{fill:#FFFFFF}
 .wire .nx-joint,.legend .lg-short{stroke:#FFFFFF}
-.legend .lg-ring,.legend .lg-undecided,.legend .lg-arrow{stroke:#6B7889}
 .legend .lg-line{stroke:#8394AB}
 .dg-title{fill:var(--ink)}
 `;
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-/** The canvas legend (canvas/Legend.tsx) drawn in SVG: each family's pill and wire, then undecided and short circuit. */
+/** The canvas legend (canvas/Legend.tsx) drawn in SVG: each family's pill and wire, then the short circuit. */
 function Legend({ x, y }: { x: number; y: number }) {
   const items: { w: number; el: (at: number) => ReactElement }[] = [
     ...CONDITIONS.map((c) => ({
@@ -140,17 +139,6 @@ function Legend({ x, y }: { x: number; y: number }) {
         </g>
       ),
     })),
-    {
-      w: 112,
-      el: (at: number) => (
-        <g key="undecided" className="legend" transform={`translate(${at} ${y})`}>
-          <circle className="lg-ring" cx={3} cy={0} r={2.2} />
-          <path className="lg-undecided" d="M5 0H26" />
-          <path className="lg-arrow" d="M21 -4L26 0L21 4" />
-          <text className="dg-lg" x={34} y={4.5}>undecided</text>
-        </g>
-      ),
-    },
     {
       w: 120,
       el: (at: number) => (

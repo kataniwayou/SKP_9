@@ -590,20 +590,24 @@ export const designLocked = (d: { saving: boolean; drawing?: boolean }): boolean
 export const designDirty = (d: OpenDocument): boolean =>
   d.virtual === true || (d.stored === null ? d.restored : !sameDesign(designOf(d), d.stored));
 
+/** Why Save is off on a design with nothing to store (the user's rule, 2026-10-22). */
+export const NOTHING_TO_SAVE = 'Nothing changed since the last Save';
+
 /**
- * Why Save cannot be pressed now, or null when it can (the user's rule, 2026-10-11): always, once the workflow is loaded and
- * nothing is running on it. An unchanged design may be saved too: it stores the same design and publishes its drawing to
- * the dashboard, which is how an unchanged workflow gets its diagram.
+ * Why Save cannot be pressed now, or null when it can: once the workflow is loaded and nothing is running on it, and
+ * only when it has something to store (the user's rule, 2026-10-22, replacing 2026-10-11's "always"): the design differs
+ * from the stored one, or the stored one is not applied yet.
  */
 export function saveBlocked(d: OpenDocument): string | null {
   if (d.status.kind === 'failed') return 'The workflow could not be loaded';
   if (d.status.kind !== 'ready' || d.stored === null) return 'The workflow is still loading';
   if (d.saving) return 'Saving…';
   if (d.drawing === true) return AI_DRAWING;
+  if (!hasChanges(d)) return NOTHING_TO_SAVE;
   return null;
 }
 
-/** Save is offered (spec §4.1; 2026-10-11: whether or not anything changed). */
+/** Save is offered (spec §4.1; 2026-10-22: only with something to store). */
 export const canSave = (d: OpenDocument): boolean => saveBlocked(d) === null;
 
 /** Save has something new to store: the design differs from the stored one, or the stored one is not applied yet. */

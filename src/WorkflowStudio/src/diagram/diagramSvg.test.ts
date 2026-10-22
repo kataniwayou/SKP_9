@@ -35,11 +35,11 @@ describe('the published drawing: the canvas art (2026-10-11)', () => {
     // a snapshot: no run state in the dial, nothing moves
     expect(parsed.querySelector('.nx-state')).toBeNull();
     expect(svg).toContain('animation:none!important');
-    // the title, escaped; the legend: every family, undecided, short circuit
+    // the title, escaped; the legend: every family, then the short circuit (no undecided wire, the user 2026-10-22)
     expect(parsed.querySelector('.dg-title')!.textContent).toBe('chain <&> "x"2.1.0');
     expect(svg).not.toContain('chain <&>');
     const legend = [...parsed.querySelectorAll('.dg-lg')].map((t) => t.textContent);
-    expect(legend).toEqual(['Completed', 'Failed', 'Cancelled', 'Always', 'Never', 'undecided', 'short circuit']);
+    expect(legend).toEqual(['Completed', 'Failed', 'Cancelled', 'Always', 'Never', 'short circuit']);
   });
 
   it('is light for the dashboard (2026-10-11): white ground, deeper wire strokes, bright badges, the canvas left dark', async () => {

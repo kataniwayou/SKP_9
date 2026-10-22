@@ -208,7 +208,7 @@ describe('DocumentPanel', () => {
 });
 
 describe('DocumentPanel Save', () => {
-  it('offers Save once loaded, changed or not (2026-10-11), the tooltip saying which; read-only while it runs (plan 8 §4.1)', async () => {
+  it('offers Save once loaded and changed (2026-10-22), off with nothing changed, the tooltip saying why; read-only while it runs (plan 8 §4.1)', async () => {
     const store = createStudioStore();
     store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
     store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch' })] })) });
@@ -217,9 +217,13 @@ describe('DocumentPanel Save', () => {
     render(inStores(store, live, <DocumentPanel workflowId="wf1" panel={fakePanel().panel} onSave={onSave} />));
 
     const unchanged = await screen.findByRole('button', { name: '⤓ Save' });
-    expect(unchanged).toBeEnabled();
-    expect(unchanged.getAttribute('data-tip')).toMatch(/^Nothing changed since the last Save/);
+    expect(unchanged).toBeDisabled();
+    // a disabled button shows no tip of its own: the span round it says why
+    expect(unchanged.parentElement!.getAttribute('data-tip')).toBe('Nothing changed since the last Save');
+    fireEvent.click(unchanged);
+    expect(onSave).not.toHaveBeenCalled();
     act(() => store.dispatch({ type: 'design', workflowId: 'wf1', draft: { ...EMPTY_DRAFT, sphere: { x: 400, y: 400 } } }));
+    expect(screen.getByRole('button', { name: '⤓ Save' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '⤓ Save' }).getAttribute('data-tip')).toMatch(/^Store the design/);
     fireEvent.click(screen.getByRole('button', { name: '⤓ Save' }));
     expect(onSave).toHaveBeenCalledTimes(1);
