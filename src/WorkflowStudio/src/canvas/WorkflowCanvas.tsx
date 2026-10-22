@@ -8,7 +8,7 @@ import { DesignOverlay } from '../design/DesignOverlay';
 import type { DesignProps } from '../design/designProps';
 import { circuitOf, EMPTY_DRAFT, resetShape, type Draft } from '../design/draft';
 import { NO_GUIDES, type Guides } from '../design/guides';
-import { carried, useBlockDrag, type Held } from '../design/useBlockDrag';
+import { carried, copyNodes, useBlockDrag, type Held } from '../design/useBlockDrag';
 import { isArrow, useDesignKeys } from '../design/useDesignKeys';
 import { useRubberBand } from '../design/useRubberBand';
 import { useWireGestures } from '../design/useWireGestures';
@@ -185,12 +185,8 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
     const hinted = tool?.node ? withHint(marked, tool.node) : marked;
     if (!held) return hinted;
     // Visio's held copy: the block's art, faded, in a light-blue dashed outline, where the release puts it; never pressed
-    const copies = flow.nodes.filter((n) => held.ids.includes(n.id)).map((n) => ({
-      ...n, id: `copy:${n.id}`, position: { x: n.position.x + held.dx, y: n.position.y + held.dy },
-      className: n.className ? `${n.className} nx-copy` : 'nx-copy', draggable: false, selectable: false, selected: false, zIndex: 1000,
-    }));
-    return [...hinted, ...copies] as typeof hinted;
-  }, [selected, wiring.hints, tool, held, flow.nodes]);
+    return [...hinted, ...copyNodes(flow.nodes, held, shownDoc)] as typeof hinted;
+  }, [selected, wiring.hints, tool, held, flow.nodes, shownDoc]);
   // the picked wires the held blocks take along whole, where the release puts them
   const heldWires = useMemo(() => {
     if (!held) return [];

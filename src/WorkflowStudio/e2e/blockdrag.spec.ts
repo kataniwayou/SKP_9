@@ -84,6 +84,25 @@ test("held: the block and its wires stay put; a faded copy with a light-blue das
   expect(after).not.toEqual(into);
 });
 
+test('held back at its start: the copy stays on the block with the move cursor; the release makes no step (tidy-up 2026-10-22)', async ({ page }) => {
+  const panel = await open(page);
+  const b0 = await topLeft(node(panel, t.b));
+  const at = await hold(page, panel, t.b, 160, 240);
+  await expect(copy(panel, t.b)).toHaveCount(1);
+  // straight back to where the press began
+  const z = await zoomOf(panel);
+  await page.mouse.move(at.x - 160 * z, at.y - 240 * z, { steps: 12 });
+  await frames(page);
+  await expect(copy(panel, t.b)).toHaveCount(1);
+  expect(await topLeft(copy(panel, t.b))).toEqual(b0);
+  expect(await cursorAt(page, { x: at.x - 160 * z, y: at.y - 240 * z })).toBe('move');
+  await page.mouse.up();
+  await frames(page);
+  await expect(copy(panel, t.b)).toHaveCount(0);
+  expect(await topLeft(node(panel, t.b))).toEqual(b0);
+  await expect(panel.getByRole('button', { name: /Undo/ })).toBeDisabled();
+});
+
 test('Escape while held: the copy goes, nothing moved, the release makes no step', async ({ page }) => {
   const panel = await open(page);
   const b0 = await topLeft(node(panel, t.b));

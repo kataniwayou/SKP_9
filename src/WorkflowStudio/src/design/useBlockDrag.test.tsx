@@ -12,7 +12,7 @@ import { applyDraft, applyEdits } from './apply';
 import { EMPTY_EDITS } from './design';
 import { dropTool } from './toolDrop';
 import { circuitOf, EMPTY_DRAFT, withCircuit, type Draft } from './draft';
-import { carried, useBlockDrag, type Held } from './useBlockDrag';
+import { carried, copyNodes, useBlockDrag, type Held } from './useBlockDrag';
 
 const two = () => loadedDocument(graphDto({ steps: [stepDto('s1', { name: 'fetch', nextStepIds: ['s2'] }), stepDto('s2', { name: 'store' })] }));
 const designOf = (picks: Pick[], draft: Draft = EMPTY_DRAFT): DesignProps => ({ draft, picks, onPick: vi.fn(), onCommit: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() });
@@ -233,7 +233,7 @@ describe('dragging blocks', () => {
     t.unmount();
   });
 
-  it('a drag that never moved, or came back, commits nothing', async () => {
+  it('a drag that never moved, or came back, commits nothing; come back, its copy is still held there (tidy-up 2026-10-22)', async () => {
     const doc = await two();
     const t = setup(doc, [{ kind: 'node', id: 's1' }]);
     const s1 = doc.placement.steps.get('s1')!;
@@ -242,9 +242,11 @@ describe('dragging blocks', () => {
     t.start('s1');
     t.move('s1', s1.x + 1003, s1.y + 4005);
     t.move('s1', s1.x + 2, s1.y - 3);
-    expect(t.setHeld).toHaveBeenLastCalledWith(null);
+    // Visio's copy stays under the pointer, on the block, and the cursor stays the move cursor
+    expect(t.setHeld).toHaveBeenLastCalledWith(expect.objectContaining({ ids: ['s1'], dx: 0, dy: 0 }));
     t.stop('s1');
     expect(t.design.onCommit).not.toHaveBeenCalled();
+    expect(t.setHeld).toHaveBeenLastCalledWith(null);
   });
 });
 
@@ -346,5 +348,28 @@ describe('the picked wires a held drag draws dashed (review 2026-10-22)', () => 
     expect(carried(c, held(['s1', 's2', 'wf'], Object.keys(c)))).toEqual(['inside', 'hub', 'free', 'branch']);
     // the hub not held: its wire stays behind; a wire not picked is never drawn
     expect(carried(c, held(['s1', 's2'], ['inside', 'hub']))).toEqual(['inside']);
+  });
+});
+
+describe("the held copies (Visio's faded copy, plan 10 phase 4; tidy-up 2026-10-22)", () => {
+  const nodes = [
+    { id: 'wf', position: { x: 32, y: 64 }, className: 'nx-hub' },
+    { id: 's1', position: { x: 352, y: 64 } },
+    { id: 's2', position: { x: 704, y: 64 } },
+  ];
+  const doc = { placement: { sphere: { cx: 128, cy: 160 } } } as unknown as StudioDocument;
+
+  it('one per held block, where the release lands it: the hub with its centre on the grid, as applyDraft puts it', () => {
+    const held: Held = { draft: EMPTY_DRAFT, ids: ['wf', 's1'], wires: [], dx: 4, dy: 12 };
+    const copies = copyNodes(nodes, held, doc);
+    expect(copies.map((n) => n.id)).toEqual(['copy:wf', 'copy:s1']);
+    // the hub's centre 128 + 4 = 132 goes on the grid at 136 (snap), so its box at 40; a step moves exactly
+    expect(copies[0]!.position).toEqual({ x: 136 - 96, y: 176 - 96 });
+    expect(copies[1]!.position).toEqual({ x: 356, y: 76 });
+  });
+
+  it('never pressed, faded by its class, above every block (zIndex 2000, a picked block is 1000)', () => {
+    const [hub] = copyNodes(nodes, { draft: EMPTY_DRAFT, ids: ['wf'], wires: [], dx: 0, dy: 0 }, doc);
+    expect(hub).toMatchObject({ className: 'nx-hub nx-copy', draggable: false, selectable: false, selected: false, zIndex: 2000 });
   });
 });

@@ -3,7 +3,7 @@ import type { NodeChange, OnNodeDrag, OnNodesChange } from '@xyflow/react';
 import type { StudioDocument } from '../app/document';
 import { NEW_WIRE_PREFIX, type Circuit, type End } from '../circuit/circuit';
 import { SPHERE_NODE_ID } from '../layout/nodeIds';
-import { PMID, snap, STEP_H, STEP_W, type Point } from '../layout/geometry';
+import { PMID, snap, SPHERE_R, STEP_H, STEP_W, type Point } from '../layout/geometry';
 import type { Selection } from '../store/selection';
 import { nodePickIds, wirePickIds, type Pick } from '../store/picks';
 import { selectionFromClick } from '../canvas/selection';
@@ -75,6 +75,24 @@ export function carried(circuit: Circuit, held: Held): string[] {
     return ok;
   };
   return held.wires.filter(goes);
+}
+
+/**
+ * Visio's held copies (plan 10 phase 4): one per held block of `nodes` (`shown`'s, the blocks as they stay put), at
+ * `copy:{id}`, where the release lands it: moved by (dx, dy), the hub with its centre put on the grid as `applyDraft`
+ * puts it. Faded by the `nx-copy` class, never pressed, above every block (a picked one is at 1000).
+ */
+export function copyNodes<N extends { id: string; position: Point; className?: string }>(nodes: readonly N[], held: Held, shown: StudioDocument): N[] {
+  const { cx, cy } = shown.placement.sphere;
+  return nodes.filter((n) => held.ids.includes(n.id)).map((n) => ({
+    ...n,
+    id: `copy:${n.id}`,
+    position: n.id === SPHERE_NODE_ID
+      ? { x: snap(cx + held.dx) - SPHERE_R, y: snap(cy + held.dy) - SPHERE_R }
+      : { x: n.position.x + held.dx, y: n.position.y + held.dy },
+    className: n.className ? `${n.className} nx-copy` : 'nx-copy',
+    draggable: false, selectable: false, selected: false, zIndex: 2000,
+  }));
 }
 
 /**
@@ -202,14 +220,14 @@ export function useBlockDrag(
       if (g.hit.y) dy = g.y - start.y;
       setGuides({ lines: g.lines, gaps: g.gaps });
     }
-    // back where it started: nothing to show, and the drop makes no step
+    // back where it started: the drop makes no step, but the copy stays held there (Visio's), the move cursor with it
     const moved = new Map(d.ids.map((id) => { const s = d.start.get(id)!; return [id, { x: s.x + dx, y: s.y + dy }] as const; }));
     d.preview = dx === 0 && dy === 0 ? null : moveGroup(d.base, saved, moved, d.wires, dx, dy);
     const s = d.splitter && d.preview ? d.start.get(d.splitter.step)! : null;
     d.split = s && d.splitter
       ? splitAt(shown.current, d.splitter.circuit, { x: s.x + dx, y: s.y + dy, w: STEP_W, h: STEP_H }, d.splitter.step, d.splitter.condition, d.splitter.step)
       : null;
-    setHeld(d.preview && { draft: d.preview, ids: d.ids, wires: d.wires, dx, dy, split: d.split });
+    setHeld({ draft: d.preview ?? d.base, ids: d.ids, wires: d.wires, dx, dy, split: d.split });
   };
 
   const onNodeDragStop: OnNodeDrag = () => {
