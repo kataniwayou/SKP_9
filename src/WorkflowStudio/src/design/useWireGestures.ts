@@ -577,14 +577,53 @@ export function useWireGestures(
     const toggle = e.ctrlKey;
     const others = new LineIndex();
     for (const w of shown.current.wires) if (w.id !== wire.id) others.add(w.id, w.points);
+    // Visio's guides for a wire moved whole (the user's, 2026-10-23): with no end over a contact, the wire shifts so its
+    // nearest run or end lines up, on each axis within 12 screen px, with a block edge or centre, a step's processor
+    // middle or any wire's parallel run; a shift that lays it on a wire it may not share a line with, where the plain
+    // move would not, is dropped
+    const shares = mayShare(circuit, netsOf(circuit, (st) => shown.current.graph.steps.get(st)?.entryCondition));
+    const strays = (pts: readonly Pt[]): number => others.count([...pts], (x) => !shares(wire.id, x));
+    const landings = [...shown.current.placement.steps.values()].map((st) => st.y + PMID);
+    const path = simplify([...points]);
+    // the wire's coordinates on each axis: its runs across it, and its two ends
+    const xsOf = [path[0]![0], path[path.length - 1]![0], ...path.flatMap((a, j) => (j > 0 && path[j - 1]![0] === a[0] ? [a[0]] : []))];
+    const ysOf = [path[0]![1], path[path.length - 1]![1], ...path.flatMap((a, j) => (j > 0 && path[j - 1]![1] === a[1] ? [a[1]] : []))];
+    /** The shift on one axis that lines the nearest of `vs`, moved by `raw`, up with a guide; null when none is in reach. */
+    const guided = (vs: readonly number[], raw: number, axis: 'x' | 'y'): { shift: number; at: number } | null => {
+      const reach = SNAP_REACH_PX / getZoom();
+      let best: { shift: number; at: number; d: number } | null = null;
+      for (const v of new Set(vs)) {
+        const s = snapRun(v + raw, axis, shown.current, wire.id, reach, axis === 'y' ? landings : []);
+        if (s.at === null) continue;
+        const d = Math.abs(s.at - (v + raw));
+        if (best === null || d < best.d) best = { shift: s.at - v, at: s.at, d };
+      }
+      return best && { shift: best.shift, at: best.at };
+    };
+    const open = (l: BodyLanding) => l.ends.every((x) => x.target.on === 'open');
     setResize('move');
     run(e, (p) => {
+      const rx = p.x - from.x, ry = p.y - from.y;
       // `|| 0`: a snapped -0 is no move
-      const dx = snap(p.x - from.x) || 0, dy = snap(p.y - from.y) || 0;
+      const dx = snap(rx) || 0, dy = snap(ry) || 0;
       if (dx !== 0 || dy !== 0) travelled = true;
-      if (!travelled || (landing && landing.rawX === dx && landing.rawY === dy)) return;
-      const l = landBody(shown.current, circuit, wire.id, points, drawnAt, dx, dy, landing?.first ?? null, DROP_REACH / getZoom(), judge);
-      landing = { ...l, rawX: dx, rawY: dy };
+      if (!travelled) return;
+      const gx = guided(xsOf, rx, 'x'), gy = guided(ysOf, ry, 'y');
+      const want = gx || gy ? { x: gx ? gx.shift : dx, y: gy ? gy.shift : dy } : { x: dx, y: dy };
+      if (landing && landing.rawX === want.x && landing.rawY === want.y) return;
+      const reach = DROP_REACH / getZoom();
+      let l = landBody(shown.current, circuit, wire.id, points, drawnAt, dx, dy, landing?.first ?? null, reach, judge);
+      let guides: RunGuide[] = [];
+      if ((gx || gy) && open(l)) {
+        const g = landBody(shown.current, circuit, wire.id, points, drawnAt, want.x, want.y, null, reach, judge);
+        if (open(g) && (strays(g.points) === 0 || strays(l.points) > 0)) {
+          l = g;
+          if (gx) guides.push({ axis: 'x', v: gx.at });
+          if (gy) guides.push({ axis: 'y', v: gy.at });
+        }
+      }
+      landing = { ...l, rawX: want.x, rawY: want.y };
+      setRunGuides(guides);
       setHints(l.ends.map((x) => ({ id: x.id, line: x.line, tone: toneOf(x.verdict), why: x.verdict, at: x.at })));
       // shifted back exactly where it was: drawn as it was
       if (l.dx === 0 && l.dy === 0) { setGhost(null); return; }
@@ -597,6 +636,7 @@ export function useWireGestures(
     }, (cancelled, pressMoved) => {
       setGhost(null);
       setHints([]);
+      setRunGuides([]);
       if (cancelled) return;
       const pick: Pick = { kind: 'wire', id: wire.id };
       if (landing === null || (landing.dx === 0 && landing.dy === 0)) {

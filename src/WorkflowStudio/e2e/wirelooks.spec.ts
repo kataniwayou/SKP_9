@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 import {
-  blocks, centreOf, documentPanel, dropOpen, edge, endSquare, expect, flowToPage, node, openWorkflow, pickWire, pressTo, squareOn, test, upright, zoomOf, type Pt,
+  blocks, centreOf, documentPanel, dropOpen, edge, endSquare, expect, flowToPage, node, openWorkflow, pickWire, pressTo, squareOn, test, upright, wirePoints as pointsOf, zoomOf, type Pt,
 } from './studio';
 import { createCircuitThrowaway, removeThrowaway, type CircuitThrowaway } from './throwaway';
 
@@ -182,6 +182,33 @@ test('a dragged end over a step side shows no guide: it lands on the contact (20
   await expect(panel.locator('line.design-guide.run')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await page.mouse.up();
+});
+
+test("a wire moved whole by its body (the four-way arrow) snaps to a block's bottom edge 6 flow px away and shows the guide (2026-10-23)", async ({ page }) => {
+  const p = await open(page);
+  const ad = `${t.a}->${t.d}`;
+  // a -> d runs straight from a's output to d's input; moved down and right it lands clear of everything, 6 flow px
+  // below the cache's bottom edge, and the guide lines it up there
+  const [[x0, y0], [x1]] = await pointsOf(p, ad);
+  const bottom = await node(p, `cache:${t.cacheId}`).evaluate((el) => {
+    const e = el as HTMLElement;
+    return Number(/translate\([-\d.e]+px, ?([-\d.e]+)px/.exec(e.style.transform)![1]) + e.offsetHeight;
+  });
+  const z = await zoomOf(p);
+  expect(6).toBeLessThan(12 / z);
+  const grab: [number, number] = [x0 + 24, y0];
+  const dx = 40, dy = bottom + 6 - y0;
+  await pressTo(page, await flowToPage(p, grab), await flowToPage(p, [grab[0] + dx, grab[1] + dy]));
+  const guide = p.locator('line.design-guide.run');
+  await expect(guide).toHaveCount(1);
+  expect(Number(await guide.getAttribute('y1'))).toBe(bottom);
+  expect(Number(await guide.getAttribute('y2'))).toBe(bottom);
+  await expect(p.locator('path.design-short')).toHaveCount(0);
+  await page.mouse.up();
+  await frames(page);
+  await expect(guide).toHaveCount(0);
+  // released there, the wire lies on the cache's bottom line, moved right as dragged
+  await expect.poll(() => pointsOf(p, ad)).toEqual([[x0 + dx, bottom], [x1 + dx, bottom]]);
 });
 
 test('a block shows the four-way arrow in design mode', async ({ page }) => {
