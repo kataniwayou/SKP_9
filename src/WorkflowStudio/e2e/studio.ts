@@ -435,15 +435,16 @@ export async function dragRunAcross(page: Page, panel: Locator, id: string, run:
 }
 
 /**
- * Shapes wire `id` by hand where it is free to go: its longest upright run dragged a grid step or two across (the first
- * offset that is no short circuit), so it keeps its shape from then on. Returns the run as it is then.
+ * Shapes wire `id` by hand where it is free to go: its longest upright run dragged a grid step or more across (the first
+ * offset that is no short circuit and that the run keeps: one an equal gap snaps back from, 2026-10-23, is passed by),
+ * so it keeps its shape from then on. Returns the run as it is then.
  */
 export async function shapeByHand(page: Page, panel: Locator, id: string): Promise<{ x: number; lo: number; hi: number; k: number }> {
-  for (const dx of [-8, 8, -16, 16, -24, 24]) {
+  for (const dx of [-8, 8, -16, 16, -24, 24, -32, 32]) {
     const run = await upright(panel, id);
     if ((await dragRunAcross(page, panel, id, run, dx)).length > 0) continue;
-    await expect.poll(async () => (await upright(panel, id)).x).toBe(run.x + dx);
-    return upright(panel, id);
+    const kept = await expect.poll(async () => (await upright(panel, id)).x, { timeout: 2000 }).toBe(run.x + dx).then(() => true, () => false);
+    if (kept) return upright(panel, id);
   }
   throw new Error(`${id}'s upright run has no free track a grid step or more across`);
 }

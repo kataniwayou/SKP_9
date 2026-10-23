@@ -110,7 +110,8 @@ function pairsOf(row: readonly GuideBox[], a: Axis): { p: GuideBox; q: GuideBox;
   const out: { p: GuideBox; q: GuideBox; gap: number }[] = [];
   for (const p of row) {
     const end = a.lo(p) + a.len(p);
-    const after = row.filter((r) => a.lo(r) >= end);
+    // (a run is a box of no width: never its own neighbour)
+    const after = row.filter((r) => r !== p && a.lo(r) >= end);
     if (after.length === 0) continue;
     const q = after.reduce((b, r) => (a.lo(r) < a.lo(b) ? r : b));
     const between = row.some((r) => r !== p && r !== q && a.lo(r) < a.lo(q) && a.lo(r) + a.len(r) > end);
@@ -138,6 +139,16 @@ function gapSnap(m: GuideBox, others: readonly GuideBox[], reach: number, a: Axi
   }
   return found;
 }
+
+/**
+ * Equal gaps along `axis` for any box, a wire's run among them as a box with no width (the user's, 2026-10-23): the move
+ * within `reach` that makes `m`'s gap to a neighbour equal one between two neighbours in its row (null when none does),
+ * and the marks at `m`'s place.
+ */
+export const equalGapMove = (m: GuideBox, others: readonly GuideBox[], reach: number, axis: 'x' | 'y'): number | null =>
+  gapSnap(m, others, reach, axis === 'x' ? X : Y);
+export const equalGapMarks = (m: GuideBox, others: readonly GuideBox[], axis: 'x' | 'y'): GapMark[] =>
+  gapMarks(m, others, axis === 'x' ? X : Y);
 
 /** At `m`'s final place: every pair next to each other in its row (`m` included) whose gap equals one of `m`'s own gaps. */
 function gapMarks(m: GuideBox, others: readonly GuideBox[], a: Axis): GapMark[] {

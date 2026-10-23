@@ -211,6 +211,30 @@ test("a wire moved whole by its body (the four-way arrow) snaps to a block's bot
   await expect.poll(() => pointsOf(p, ad)).toEqual([[x0 + dx, bottom], [x1 + dx, bottom]]);
 });
 
+test("a dragged run keeps equal gaps as a block does: held near the middle between a and b it snaps there, with the gap arrows (2026-10-23)", async ({ page }) => {
+  const p = await open(page);
+  // a -> b's upright run lies midway between a's right side and b's left side
+  const run = await upright(p, ab());
+  const a = (await blocks(p)).filter((b) => b.x + b.w <= run.x).reduce((x, b) => (b.x + b.w > x.x + x.w ? b : x));
+  const b = (await blocks(p)).filter((x) => x.x >= run.x).reduce((x, y) => (y.x < x.x ? y : x));
+  const mid = (a.x + a.w + b.x) / 2;
+  expect(run.x).toBe(mid);
+  const z = await zoomOf(p);
+  await pickWire(page, p, ab());
+  const from = await squareOn(p, ab(), run);
+  // held 8 flow px right of the middle (within the 12 screen px reach), by way of farther out (a drag, not a click)
+  await pressTo(page, from, { x: from.x + 8 * z, y: from.y }, { x: from.x + 40 * z, y: from.y });
+  const gaps = p.locator('g.design-gap');
+  await expect(gaps).toHaveCount(2);
+  const spans = await gaps.evaluateAll((els) => els.map((g) => { const l = g.querySelector('line')!; return [Number(l.getAttribute('x1')), Number(l.getAttribute('x2'))]; }));
+  expect(spans.sort((x, y) => x[0]! - y[0]!)).toEqual([[a.x + a.w, mid], [mid, b.x]]);
+  await expect(p.locator('line.design-guide.run')).toHaveCount(0);
+  await page.mouse.up();
+  await frames(page);
+  await expect(gaps).toHaveCount(0);
+  expect((await upright(p, ab())).x).toBe(mid);
+});
+
 test('a block shows the four-way arrow in design mode', async ({ page }) => {
   const panel = await open(page);
   const at = await centreOf(node(panel, t.b).locator('.nx-sn'));

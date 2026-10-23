@@ -341,7 +341,7 @@ function CanvasBody({ doc, fitter, width, height, selection = null, onSelect, li
               onMoveEnd={(_event, v) => report(v)}
             >
               <GridBackground />
-              {design && <DesignOverlay band={band} guides={toolOver?.guides ?? guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={dragged?.body ? null : wiring.ghost?.points ?? null} bodyCopy={bodyCopy} hints={wiring.hints} gone={wiring.ghost?.gone ?? null} runGuides={wiring.runGuides} shorts={wiring.ghost?.shorts} tool={tool ?? (auto?.box ? { box: auto.box, line: null, label: null } : null)} copies={heldWires} split={split} />}
+              {design && <DesignOverlay band={band} guides={toolOver?.guides ?? guides} wires={pickedWires} bendsOf={bendsOf} onSegment={wiring.startSegment} onEnd={wiring.startEnd} ghost={dragged?.body ? null : wiring.ghost?.points ?? null} bodyCopy={bodyCopy} hints={wiring.hints} gone={wiring.ghost?.gone ?? null} runGuides={wiring.runGuides} runGaps={wiring.runGaps} shorts={wiring.ghost?.shorts} tool={tool ?? (auto?.box ? { box: auto.box, line: null, label: null } : null)} copies={heldWires} split={split} />}
             </ReactFlow>
           </DesignContext.Provider>
           <FollowSize initial={savedSize} />
