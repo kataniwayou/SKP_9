@@ -1,6 +1,9 @@
 import type { StudioDocument } from '../app/document';
 import { blockBoxes } from '../layout/wires';
 
+/** An alignment guide a dragged run or end snapped to: the line at `v` across `axis` (x: a vertical line). */
+export interface RunGuide { axis: 'x' | 'y'; v: number }
+
 /**
  * Visio's alignment for a dragged run (plan 10 phase 2): `v` is the run's coordinate across its own axis (x for a
  * vertical run, y for a horizontal one). It snaps to the nearest within `reach` of: every block's edges and centre on

@@ -831,8 +831,11 @@ test('rule C: an end square draws its wire around corners in one drag: three tur
   const close = (a: [number, number], b: [number, number]) => expect(Math.hypot(a[0] - b[0], a[1] - b[1])).toBeLessThanOrEqual(8);
   close(p[1]!, [hx, ty]);
   close(p[2]!, [hx, hy + 128]);
-  close(p[3]!, [hx + 96, hy + 128]);
-  close(p[4]!, [hx + 96, hy + 208]);
+  // the last leg follows the end, which may sit on an alignment guide within 12 screen px (2026-10-23)
+  const reach = Math.max(8, 12 / (await zoomOf(panel)));
+  const near = (a: [number, number], b: [number, number]) => expect(Math.hypot(a[0] - b[0], a[1] - b[1])).toBeLessThanOrEqual(reach);
+  near(p[3]!, [hx + 96, hy + 128]);
+  near(p[4]!, [hx + 96, hy + 208]);
   // right angles all the way: horizontal, vertical, horizontal, vertical
   expect([p[0]![1] === p[1]![1], p[1]![0] === p[2]![0], p[2]![1] === p[3]![1], p[3]![0] === p[4]![0]]).toEqual([true, true, true, true]);
   expect(await dashOf(panel, bc)).not.toBe('none');

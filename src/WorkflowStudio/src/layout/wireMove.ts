@@ -71,10 +71,11 @@ export function startLegs(oriented: readonly Pt[], at: Point): Legs {
 /**
  * The pointer moved to `p` (flow coordinates, not snapped). Back at or past the anchor along its leg, that corner goes
  * (and the one before, and so on, down to the corners the wire had). Moving one way for `TURN` px along the anchor's axis while the
- * L's other leg is at least `TURN` long is a 90 degree turn: the corner where the pointer turned is fixed.
+ * L's other leg is at least `TURN` long is a 90 degree turn: the corner where the pointer turned is fixed. The end is
+ * at `p` on the grid, or exactly at `at` (an alignment guide's, which need not lie on the grid).
  */
-export function moveLegs(s: Legs, p: Point): Legs {
-  const end: Pt = [snap(p.x), snap(p.y)];
+export function moveLegs(s: Legs, p: Point, at?: Pt): Legs {
+  const end: Pt = at ?? [snap(p.x), snap(p.y)];
   let { path, axis, dir, ref, drawn } = s;
   while (path.length > s.floor) {
     const a = path[path.length - 1]!;

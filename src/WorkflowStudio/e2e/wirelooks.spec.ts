@@ -145,6 +145,45 @@ test("a dragged run snaps to a block edge 8 screen px away and shows Visio's gui
   await expect.poll(async () => (await upright(panel, ab())).x).toBe(target);
 });
 
+test("a dragged end snaps to a block's centre 6 screen px away over open canvas and shows the guide (2026-10-23)", async ({ page }) => {
+  const panel = await open(page);
+  const z = await zoomOf(panel);
+  const all = await blocks(panel);
+  // c's centre, as a flow x (its node's own translate and width)
+  const cx = await node(panel, t.c).evaluate((el) => {
+    const e = el as HTMLElement;
+    return Number(/translate\(([-\d.e]+)px/.exec(e.style.transform)![1]) + e.offsetWidth / 2;
+  });
+  // held 6 screen px left of it, below every block, where no other block line is in reach
+  const want = cx - 6 / z;
+  const others = all.flatMap((b) => [b.x, b.x + b.w / 2, b.x + b.w]).filter((x) => Math.abs(x - cx) > 0.5);
+  expect(others.every((x) => Math.abs(x - want) > 12 / z), JSON.stringify({ cx, z, others })).toBe(true);
+  const below = Math.max(...all.map((b) => b.y + b.h)) + 64;
+  await pickWire(page, panel, ab());
+  await pressTo(page, await centreOf(endSquare(panel, ab(), 'head')), await flowToPage(panel, [want, below]));
+  const guide = panel.locator('line.design-guide.run');
+  await expect(guide).toHaveCount(1);
+  expect(Number(await guide.getAttribute('x1'))).toBe(cx);
+  expect(Number(await guide.getAttribute('x2'))).toBe(cx);
+  await page.mouse.up();
+  await frames(page);
+  await expect(guide).toHaveCount(0);
+  // released there, the open end lies on c's centre line
+  await pickWire(page, panel, ab());
+  await expect(endSquare(panel, ab(), 'head')).toHaveClass(/open/);
+  expect(Number(await endSquare(panel, ab(), 'head').getAttribute('cx'))).toBe(cx);
+});
+
+test('a dragged end over a step side shows no guide: it lands on the contact (2026-10-23)', async ({ page }) => {
+  const panel = await open(page);
+  await pickWire(page, panel, ab());
+  await pressTo(page, await centreOf(endSquare(panel, ab(), 'head')), await besideC(panel, -4));
+  expect(await lit(panel)).toEqual([t.c]);
+  await expect(panel.locator('line.design-guide.run')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+});
+
 test('a block shows the four-way arrow in design mode', async ({ page }) => {
   const panel = await open(page);
   const at = await centreOf(node(panel, t.b).locator('.nx-sn'));
