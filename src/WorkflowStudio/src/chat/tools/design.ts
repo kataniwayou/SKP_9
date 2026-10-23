@@ -2,14 +2,14 @@ import { describeError } from '../../api/describeError';
 import { cacheFromDto, processorFromDto, schemaFromDto } from '../../api/toModel';
 import { nearestAlong } from '../../ai/drawing';
 import type { StudioDocument } from '../../app/document';
-import { addCircuitWire, NEW_WIRE_PREFIX, setEnd, type CircuitWire, type End, type Side } from '../../circuit/circuit';
+import { addCircuitWire, NEW_WIRE_PREFIX, setEnd, type Circuit, type CircuitWire, type End, type Side } from '../../circuit/circuit';
 import { applyDraft, applyEdits } from '../../design/apply';
 import { arrowsOf, autoTarget, type Dir } from '../../design/autoConnect';
 import { blockBoxes, freeOffset } from '../../design/clipboard';
 import { circuitOf, moveBlocks, resetShape, withCircuit, type Draft } from '../../design/draft';
 import { dropLabel, judgeDrop, toneOf } from '../../design/drop';
 import { shortCircuitErrors } from '../../design/shortCircuits';
-import { dropTool, type ToolItem } from '../../design/toolDrop';
+import { dropTool, judgeTool, type ToolItem } from '../../design/toolDrop';
 import { wireName } from '../../design/wireName';
 import { WORKFLOW_SOURCE } from '../../layout/ports';
 import { CACHE_H, CACHE_W, CELL, COLUMN_PITCH, GRID, LAYOUT_GAP, PMID, snap, SPHERE_R, STEP_H, STEP_W, type Point } from '../../layout/geometry';
@@ -21,34 +21,18 @@ import { pickKey, type Pick } from '../../store/picks';
 import { entityLabel, shownDesignOf } from '../../store/problems';
 import { designDirty, designLocked, reduce, type OpenDocument, type StudioAction } from '../../store/studioState';
 import type { ChatEntry } from '../chatStore';
-import { echoText, withEcho } from '../echo';
+import { withEcho } from '../echo';
 import { findCache, findProcessor, findStep, findWire, type Found } from '../resolve';
-import type { ToolContext, ToolDef, ToolOutcome } from '../toolTypes';
-import { workflowOf } from './read';
+import type { ToolContext, ToolDef } from '../toolTypes';
+import { docOf, done, fail, labelOf, openDocOf, questionDocOf, text, workflowOf, WORKFLOW_ARG, YES_NO, type DocChoice } from './common';
 
 // The design tools (2026-10-23): each is one of the canvas's own actions (a Toolbox drop, an AutoConnect click, a
 // finished wire or block drag, Ctrl+C / Ctrl+V, Delete, Undo), dispatched to the store as the gesture dispatches it, so
 // it is one Undo step and the canvas shows it at once. An action whose design would gain a short circuit is refused
 // before it is dispatched: the design stays as it was and the model hears which nets collide.
 
-export const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
-const labelOf = (d: { name: string; version: string }): string => `${d.name} ${d.version}`.trim();
-export const docOf = (ctx: ToolContext, id: Id): OpenDocument | undefined => ctx.store.getState().docs.find((d) => d.workflowId === id);
 const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
-
-/** What the model hears is `head`, then the echoed Output lines and problems; the chat shows `action` and the same lines. */
-export function done(ok: boolean, head: string, action: string, entries: ChatEntry[] = []): ToolOutcome {
-  const echo = echoText(entries);
-  return { kind: 'done', ok, result: echo === '' ? head : `${head}\n${echo}`, action, entries };
-}
-export const fail = (error: string, action: string): ToolOutcome => done(false, error, action);
-
-export const WORKFLOW_ARG = {
-  type: 'string',
-  description: 'The workflow: its id, name, or "name version". Leave out for the workflow the user has open (the active one).',
-};
-export const YES_NO = ['Yes', 'No'] as const;
 
 /** The document's design as the canvas draws it: the loaded workflow with the entity edits and the blocks (`saved`), the draft over it (`shown`). */
 export function layersOf(doc: OpenDocument): { base: StudioDocument; saved: StudioDocument; shown: StudioDocument; draft: Draft } {
@@ -59,7 +43,7 @@ export function layersOf(doc: OpenDocument): { base: StudioDocument; saved: Stud
 }
 
 /** The open, loaded workflow a design tool means (named, else the active one), its design not locked; or why not. */
-export async function designDocOf(ctx: ToolContext, ref: string | undefined, action: string): Promise<{ doc: OpenDocument } | { out: ToolOutcome }> {
+export async function designDocOf(ctx: ToolContext, ref: string | undefined, action: string): Promise<DocChoice> {
   const w = await workflowOf(ctx, ref);
   if (!w.ok) return { out: fail(w.error, action) };
   const doc = w.value.doc;
@@ -67,22 +51,22 @@ export async function designDocOf(ctx: ToolContext, ref: string | undefined, act
   return usable(doc, action);
 }
 
-function usable(doc: OpenDocument, action: string): { doc: OpenDocument } | { out: ToolOutcome } {
+function usable(doc: OpenDocument, action: string): DocChoice {
   if (doc.status.kind !== 'ready') return { out: fail(`workflow ${doc.name} is not loaded yet`, action) };
   if (designLocked(doc)) return { out: fail(`the design of ${doc.name} is read-only now: a Save or the AI drawing is under way; try again when it is over`, action) };
   return { doc };
 }
 
-/**
- * The workflow a destructive call acts on. Asking: the one named, else the active one. Answering: only the one the
- * question named (`pin`), never the active one (as the workflow tools do).
- */
-export async function askedDocOf(ctx: ToolContext, tool: string, ref: string | undefined, answer: string | undefined, pin: string | undefined): Promise<{ doc: OpenDocument } | { out: ToolOutcome }> {
-  if (answer === undefined) return designDocOf(ctx, ref, tool);
-  if (pin === undefined) return { out: fail('the question lost its workflow; nothing was done: ask again', `${tool}: question lost`) };
-  const doc = docOf(ctx, pin);
-  return doc ? usable(doc, tool) : { out: fail('the workflow is no longer open; nothing was done', `${tool}: workflow gone`) };
+/** The open, loaded workflow a tool that changes no design means (a pick, a copy): it works while the design is locked. */
+async function loadedDocOf(ctx: ToolContext, ref: string | undefined, action: string): Promise<DocChoice> {
+  const found = await openDocOf(ctx, ref, action);
+  if ('out' in found) return found;
+  return found.doc.status.kind === 'ready' ? found : { out: fail(`workflow ${found.doc.name} is not loaded yet`, action) };
 }
+
+/** The workflow a call that asks first acts on (the pin rule, `questionDocOf`), loaded and its design not locked. */
+export const askedDocOf = (ctx: ToolContext, tool: string, ref: string | undefined, answer: string | undefined, pin: string | undefined): Promise<DocChoice> =>
+  questionDocOf(ctx, tool, answer, pin, () => designDocOf(ctx, ref, tool), (doc) => usable(doc, tool));
 
 /** The design's short circuits, each as one line naming where it is and which families or wires collide. */
 function shortsOf(doc: OpenDocument): Map<string, string> {
@@ -174,17 +158,38 @@ function pointArg(args: Record<string, unknown>): Found<Point | null> {
   return { ok: true, value: { x, y } };
 }
 
+type Box = { x: number; y: number; w: number; h: number };
+
+/** Every run of every drawn wire as a thin box, for a placement to keep off. */
+const wireBoxes = (shown: StudioDocument): Box[] => shown.wires.flatMap((w) => w.points.slice(1).map((b, i) => {
+  const a = w.points[i]!;
+  return { x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), w: Math.max(1, Math.abs(a[0] - b[0])), h: Math.max(1, Math.abs(a[1] - b[1])) };
+}));
+
+/** How many spots a placement tries before it gives up keeping off the wires. */
+const SPOT_TRIES = 64;
+
 /**
  * Where a new step goes when the model names no point: one column right of the rightmost step on the hub's row (in line
- * with the hub, as AutoConnect lands one), else one gap right of the hub; moved to the nearest free spot (`freeOffset`).
+ * with the hub, as AutoConnect lands one), else one gap right of the hub; moved to the nearest spot (`freeOffset`) clear
+ * of every block and every wire's run. A placement the model did not choose never changes what is wired to what
+ * (review 2026-10-23): a spot where the Toolbox drop would split a wire (`judgeTool`) is passed over for the next.
  */
-export function freeStepSpot(shown: StudioDocument): Point {
+export function freeStepSpot(shown: StudioDocument, circuit: Readonly<Circuit>): Point {
   const { cx, cy } = shown.placement.sphere;
   const rowY = snap(cy - PMID);
   const row = [...shown.placement.steps.values()].filter((p) => Math.abs(p.y - rowY) < STEP_H / 2);
   const x = snap(row.length > 0 ? Math.max(...row.map((p) => p.x)) + COLUMN_PITCH : cx + SPHERE_R + LAYOUT_GAP);
-  const off = freeOffset([{ x, y: rowY, w: STEP_W, h: STEP_H }], blockBoxes(shown), { x: 0, y: 0 });
-  return { x: x + off.x, y: rowY + off.y };
+  const box = { x, y: rowY, w: STEP_W, h: STEP_H };
+  const obstacles = [...blockBoxes(shown), ...wireBoxes(shown)];
+  let spot: Point = { x, y: rowY };
+  for (let i = 0; i < SPOT_TRIES; i++) {
+    const off = freeOffset([box], obstacles, { x: 0, y: 0 });
+    spot = { x: x + off.x, y: rowY + off.y };
+    if (judgeTool(shown, { kind: 'step' }, centred(spot, STEP_W, STEP_H), { circuit, reach: 0 }).kind !== 'split') return spot;
+    obstacles.push({ ...spot, w: STEP_W, h: STEP_H });
+  }
+  return spot;
 }
 
 /** Where a new cache goes when the model names no point: under the hub, as a loaded workflow's caches stack, the nearest free spot. */
@@ -212,37 +217,39 @@ const addStepTool: ToolDef = {
     additionalProperties: false,
   },
   async run(ctx, args) {
-    const point = pointArg(args);
-    if (!point.ok) return fail(point.error, 'add step');
     const ref = text(args.processor);
+    const asked = `add step${ref === undefined ? '' : ` with processor ${ref}`}`;
+    const point = pointArg(args);
+    if (!point.ok) return fail(point.error, asked);
     const item = ref === undefined ? null : await processorItem(ctx, ref);
-    if (item !== null && !item.ok) return fail(item.error, 'add step');
+    if (item !== null && !item.ok) return fail(item.error, asked);
     // the state as it is now, after the lists were read
-    const found = await designDocOf(ctx, text(args.workflow), 'add step');
+    const found = await designDocOf(ctx, text(args.workflow), asked);
     if ('out' in found) return found.out;
     const { doc } = found;
     const id = doc.workflowId;
-    const { base, shown } = layersOf(doc);
-    const topLeft = point.value ?? freeStepSpot(shown);
+    const { base, saved, shown, draft } = layersOf(doc);
+    const topLeft = point.value ?? freeStepSpot(shown, circuitOf(saved, draft));
     const at = centred({ x: snap(topLeft.x), y: snap(topLeft.y) }, STEP_W, STEP_H);
     let action: StudioAction = { type: 'toolDrop', workflowId: id, item: { kind: 'step' }, at, newId: ctx.newId };
     let stepId: Id | null = null;
     if (item !== null) {
       // a step with a processor (the spec's "processor drop on empty canvas"): the step dropped, then the processor on it, one Undo step
       const placed = dropTool(base, doc.edits, doc.design.draft, { kind: 'step' }, at, ctx.newId);
-      if (placed === null) return fail('the step could not be placed there', 'add step refused');
+      if (placed === null) return fail('the step could not be placed there', `${asked} refused`);
       stepId = placed.picks[0]!.id;
       const withStep = applyDraft(applyEdits(base, doc.edits, placed.draft.blocks), placed.draft);
       const p = withStep.placement.steps.get(stepId)!;
       const given = dropTool(base, doc.edits, placed.draft, item.value, centred(p, STEP_W, STEP_H), ctx.newId);
-      if (given === null) return fail('the processor could not be given to the new step', 'add step refused');
+      if (given === null) return fail('the processor could not be given to the new step', `${asked} refused`);
       action = { type: 'design', workflowId: id, draft: given.draft, picks: [{ kind: 'node', id: stepId }] };
     }
     const r = await act(ctx, id, action, { unchanged: 'the step could not be placed there' });
-    if (!r.ok) return fail(r.error, 'add step refused');
+    if (!r.ok) return fail(r.error, `${asked} refused`);
     const { added, newSteps } = changesOf(r.before, r.after);
     const made = stepId ?? newSteps[0] ?? null;
     // the Inspector shows the new step, as after a Toolbox drop (the drop itself selects it; the composed one does here)
+    // (a select takes the Inspector back from the Toolbox, as the reducer does for a drop)
     if (made !== null && stepId !== null) ctx.store.dispatch({ type: 'select', workflowId: id, selection: { kind: 'step', stepId: made } });
     const step = made !== null ? shownDesignOf(r.after)!.graph.steps.get(made) : undefined;
     const name = step?.name ?? '?';
@@ -263,17 +270,18 @@ const setProcessorTool: ToolDef = {
     additionalProperties: false,
   },
   async run(ctx, args) {
+    const asked = `set processor ${text(args.processor) ?? '?'} on step ${text(args.step) ?? '?'}`;
     const item = await processorItem(ctx, text(args.processor) ?? '');
-    if (!item.ok) return fail(item.error, 'set processor');
-    const found = await designDocOf(ctx, text(args.workflow), 'set processor');
+    if (!item.ok) return fail(item.error, asked);
+    const found = await designDocOf(ctx, text(args.workflow), asked);
     if ('out' in found) return found.out;
     const { doc } = found;
     const step = findStep(doc, text(args.step) ?? '');
-    if (!step.ok) return fail(step.error, 'set processor');
+    if (!step.ok) return fail(step.error, asked);
     const { shown } = layersOf(doc);
     const p = shown.placement.steps.get(step.value);
     const name = shown.graph.steps.get(step.value)!.name;
-    if (!p) return fail(`step ${name} is not on the canvas`, 'set processor');
+    if (!p) return fail(`step ${name} is not on the canvas`, asked);
     const label = labelOf(item.value.processor);
     const action: StudioAction = { type: 'toolDrop', workflowId: doc.workflowId, item: item.value, at: centred(p, STEP_W, STEP_H), newId: ctx.newId };
     const r = await act(ctx, doc.workflowId, action, { unchanged: `step ${name} already has processor ${label}` });
@@ -293,19 +301,20 @@ const addCacheTool: ToolDef = {
     additionalProperties: false,
   },
   async run(ctx, args) {
-    const point = pointArg(args);
-    if (!point.ok) return fail(point.error, 'add cache');
     const ref = text(args.cache);
+    const asked = ref === undefined ? 'add new cache' : `link cache ${ref}`;
+    const point = pointArg(args);
+    if (!point.ok) return fail(point.error, asked);
     let item: ToolItem = { kind: 'newCache' };
     if (ref !== undefined) {
-      if (!ctx.api.listCaches) return fail('cannot list caches here', 'add cache');
+      if (!ctx.api.listCaches) return fail('cannot list caches here', asked);
       const list = await ctx.api.listCaches();
-      if (!list.ok) return fail(`could not list caches. ${describeError(list.error)}`, 'add cache');
+      if (!list.ok) return fail(`could not list caches. ${describeError(list.error)}`, asked);
       const c = findCache(list.value, ref);
-      if (!c.ok) return fail(c.error, 'add cache');
+      if (!c.ok) return fail(c.error, asked);
       item = { kind: 'cache', cache: cacheFromDto(c.value) };
     }
-    const found = await designDocOf(ctx, text(args.workflow), 'add cache');
+    const found = await designDocOf(ctx, text(args.workflow), asked);
     if ('out' in found) return found.out;
     const { doc } = found;
     const { shown } = layersOf(doc);
@@ -313,7 +322,7 @@ const addCacheTool: ToolDef = {
     const action: StudioAction = { type: 'toolDrop', workflowId: doc.workflowId, item, at: centred({ x: snap(topLeft.x), y: snap(topLeft.y) }, CACHE_W, CACHE_H), newId: ctx.newId };
     const linked = item.kind === 'cache' ? `cache ${labelOf(item.cache)} is already in ${doc.name}` : 'the cache could not be placed there';
     const r = await act(ctx, doc.workflowId, action, { unchanged: linked });
-    if (!r.ok) return fail(r.error, 'add cache refused');
+    if (!r.ok) return fail(r.error, `${asked} refused`);
     const { added } = changesOf(r.before, r.after);
     const what = added.join(', ');
     return item.kind === 'cache'
@@ -340,19 +349,20 @@ const connectTool: ToolDef = {
     additionalProperties: false,
   },
   async run(ctx, args) {
-    const found = await designDocOf(ctx, text(args.workflow), 'connect');
+    const from = text(args.from) ?? '', to = text(args.to) ?? '';
+    const asked = `connect ${from || '?'} → ${to || '?'}`;
+    const found = await designDocOf(ctx, text(args.workflow), asked);
     if ('out' in found) return found.out;
     const { doc } = found;
-    const from = text(args.from) ?? '', to = text(args.to) ?? '';
     let tail: End;
     if (same(from, 'workflow')) tail = { on: 'hub', angle: null };
     else {
       const s = findStep(doc, from);
-      if (!s.ok) return fail(s.error, 'connect');
+      if (!s.ok) return fail(s.error, asked);
       tail = { on: 'step', step: s.value, y: null };
     }
     const h = findStep(doc, to);
-    if (!h.ok) return fail(h.error, 'connect');
+    if (!h.ok) return fail(h.error, asked);
     const { saved, shown, draft } = layersOf(doc);
     const wire: CircuitWire = { tail, head: { on: 'step', step: h.value, y: null } };
     const wireId = `${NEW_WIRE_PREFIX}${ctx.newId()}`;
@@ -382,19 +392,20 @@ const joinTool: ToolDef = {
   },
   async run(ctx, args) {
     const side = args.side === 'head' || args.side === 'tail' ? (args.side as Side) : null;
-    if (side === null) return fail('side must be head or tail', 'join');
-    const found = await designDocOf(ctx, text(args.workflow), 'join');
+    const asked = `join ${text(args.wire) ?? '?'}'s ${side ?? String(args.side)} on ${text(args.host) ?? '?'}`;
+    if (side === null) return fail('side must be head or tail', asked);
+    const found = await designDocOf(ctx, text(args.workflow), asked);
     if ('out' in found) return found.out;
     const { doc } = found;
     const w = findWire(doc, text(args.wire) ?? '');
-    if (!w.ok) return fail(w.error, 'join');
+    if (!w.ok) return fail(w.error, asked);
     const hostId = findWire(doc, text(args.host) ?? '');
-    if (!hostId.ok) return fail(hostId.error, 'join');
+    if (!hostId.ok) return fail(hostId.error, asked);
     const { saved, shown, draft } = layersOf(doc);
     const circuit = circuitOf(saved, draft);
     const mine = circuit[w.value]!, theirs = circuit[hostId.value]!;
     const name = wireText(shown, w.value), hostName = wireText(shown, hostId.value);
-    const action = `join ${name} on ${hostName}`;
+    const action = `join ${name}'s ${side} on ${hostName}`;
     if (w.value === hostId.value) return fail('a wire cannot join itself', action);
     const end = mine[side], hostEnd = theirs[side];
     if (end.on !== 'step') return fail(`the ${side} of ${name} is not on a step${end.on === 'hub' ? ' (a wire on the workflow circle stays separate)' : ''}`, action);
@@ -429,13 +440,14 @@ const autoConnectTool: ToolDef = {
   },
   async run(ctx, args) {
     const dir = DIRS.find((d) => d === args.dir);
-    if (dir === undefined) return fail('dir must be right, left, up or down', 'auto connect');
-    const found = await designDocOf(ctx, text(args.workflow), 'auto connect');
+    const asked = `auto connect ${String(args.dir)} of ${text(args.block) ?? '?'}`;
+    if (dir === undefined) return fail('dir must be right, left, up or down', asked);
+    const found = await designDocOf(ctx, text(args.workflow), asked);
     if ('out' in found) return found.out;
     const { doc } = found;
     const { saved, shown, draft } = layersOf(doc);
     const block = blockOf(doc, shown, text(args.block) ?? '');
-    if (!block.ok) return fail(block.error, 'auto connect');
+    if (!block.ok) return fail(block.error, asked);
     const { node, label } = block.value;
     const circuit = circuitOf(saved, draft);
     let why = `${label} shows no ${dir} arrow`;
@@ -467,8 +479,9 @@ const moveBlocksTool: ToolDef = {
   },
   async run(ctx, args) {
     const moves = Array.isArray(args.moves) ? (args.moves as Record<string, unknown>[]) : [];
-    if (moves.length === 0) return fail('moves must list at least one { block, x, y }', 'move blocks');
-    const found = await designDocOf(ctx, text(args.workflow), 'move blocks');
+    const asked = `move ${moves.map((m) => text(m?.block) ?? '?').join(', ') || 'blocks'}`;
+    if (moves.length === 0) return fail('moves must list at least one { block, x, y }', asked);
+    const found = await designDocOf(ctx, text(args.workflow), asked);
     if ('out' in found) return found.out;
     const { doc } = found;
     const { saved, shown, draft } = layersOf(doc);
@@ -476,15 +489,15 @@ const moveBlocksTool: ToolDef = {
     const names: string[] = [];
     for (const m of moves) {
       const block = blockOf(doc, shown, text(m?.block) ?? '');
-      if (!block.ok) return fail(block.error, 'move blocks');
+      if (!block.ok) return fail(block.error, asked);
       const x = num(m.x), y = num(m.y);
-      if (x === undefined || y === undefined) return fail(`the move of ${block.value.label} needs x and y`, 'move blocks');
+      if (x === undefined || y === undefined) return fail(`the move of ${block.value.label} needs x and y`, asked);
       moved.set(block.value.node, { x: snap(x), y: snap(y) });
       names.push(`${block.value.label} to (${snap(x)}, ${snap(y)})`);
     }
     const next = moveBlocks(draft, saved, moved);
     const r = await act(ctx, doc.workflowId, { type: 'design', workflowId: doc.workflowId, draft: next }, { unchanged: 'nothing moved: the blocks are already there' });
-    if (!r.ok) return fail(r.error, 'move refused');
+    if (!r.ok) return fail(r.error, `${asked} refused`);
     return done(true, `moved ${names.join(', ')}`, `moved ${names.map((n) => n.replace(/ to \(.*\)$/, '')).join(', ')}`, r.entries);
   },
 };
@@ -494,11 +507,12 @@ const resetRouteTool: ToolDef = {
   description: 'Reset a wire\'s route (its bends go and its ends on steps go back to automatic heights; what it connects stays), as the wire\'s Reset route.',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG, wire: { type: 'string', description: 'The wire: its id, or "from -> to".' } }, required: ['wire'], additionalProperties: false },
   async run(ctx, args) {
-    const found = await designDocOf(ctx, text(args.workflow), 'reset route');
+    const asked = `reset route of ${text(args.wire) ?? '?'}`;
+    const found = await designDocOf(ctx, text(args.workflow), asked);
     if ('out' in found) return found.out;
     const { doc } = found;
     const w = findWire(doc, text(args.wire) ?? '');
-    if (!w.ok) return fail(w.error, 'reset route');
+    if (!w.ok) return fail(w.error, asked);
     const { saved, shown, draft } = layersOf(doc);
     const name = wireText(shown, w.value);
     const r = await act(ctx, doc.workflowId, { type: 'design', workflowId: doc.workflowId, draft: resetShape(draft, saved, w.value) }, { unchanged: `wire ${name} has no route of its own to reset` });
@@ -539,21 +553,24 @@ const pickTool: ToolDef = {
     additionalProperties: false,
   },
   async run(ctx, args) {
+    const items = (Array.isArray(args.items) ? args.items : []).map(String);
+    const asked = items.length === 0 ? 'clear the picks' : `pick ${items.join(', ')}`;
     // picking is no design change: it works while a Save runs too, as clicking does
-    const w = await workflowOf(ctx, text(args.workflow));
-    if (!w.ok) return fail(w.error, 'pick');
-    const doc = w.value.doc;
-    if (doc === null || doc.status.kind !== 'ready') return fail(`workflow ${text(args.workflow) ?? ''} is not open and loaded`, 'pick');
+    const found = await loadedDocOf(ctx, text(args.workflow), asked);
+    if ('out' in found) return found.out;
+    const { doc } = found;
     const { shown } = layersOf(doc);
     const picks: Pick[] = [];
-    for (const ref of Array.isArray(args.items) ? args.items : []) {
-      const p = pickOf(doc, shown, String(ref));
-      if (!p.ok) return fail(p.error, 'pick');
+    for (const ref of items) {
+      const p = pickOf(doc, shown, ref);
+      if (!p.ok) return fail(p.error, asked);
       if (!picks.some((x) => pickKey(x) === pickKey(p.value.pick))) picks.push(p.value.pick);
     }
-    ctx.store.dispatch({ type: 'pick', workflowId: doc.workflowId, picks });
+    const { entries } = await withEcho(ctx.store, () => [doc.workflowId], async () => { ctx.store.dispatch({ type: 'pick', workflowId: doc.workflowId, picks }); });
     const names = picksText(shown, picks);
-    return names.length === 0 ? done(true, 'nothing is picked now', 'picks cleared') : done(true, `picked ${names.join(', ')}`, `picked ${names.join(', ')}`);
+    return names.length === 0
+      ? done(true, 'nothing is picked now', `picks cleared in ${doc.name}`, entries)
+      : done(true, `picked ${names.join(', ')}`, `picked ${names.join(', ')}`, entries);
   },
 };
 
@@ -562,18 +579,17 @@ const copyTool: ToolDef = {
   description: 'Copy the picked steps, caches and wires (Ctrl+C); the workflow circle is never copied. paste puts an exact copy with new ids into the active or named workflow.',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG }, additionalProperties: false },
   async run(ctx, args) {
-    const w = await workflowOf(ctx, text(args.workflow));
-    if (!w.ok) return fail(w.error, 'copy');
-    const doc = w.value.doc;
-    if (doc === null || doc.status.kind !== 'ready') return fail(`workflow ${text(args.workflow) ?? ''} is not open and loaded`, 'copy');
+    const found = await loadedDocOf(ctx, text(args.workflow), 'copy the picks');
+    if ('out' in found) return found.out;
+    const { doc } = found;
     const before = ctx.store.getState().clipboard;
-    ctx.store.dispatch({ type: 'copy', workflowId: doc.workflowId });
+    const { entries } = await withEcho(ctx.store, () => [doc.workflowId], async () => { ctx.store.dispatch({ type: 'copy', workflowId: doc.workflowId }); });
     const clip = ctx.store.getState().clipboard;
-    if (clip === null || clip === before) return fail('nothing to copy: pick steps, caches or wires first (the workflow circle is not copied)', 'copy: nothing picked');
+    if (clip === null || clip === before) return done(false, 'nothing to copy: pick steps, caches or wires first (the workflow circle is not copied)', `copy in ${doc.name}: nothing picked`, entries);
     const what = [...clip.steps.map((s) => `step ${s.name}`), ...clip.caches.map((c) => `cache ${c.name} ${c.version}`)];
     const wires = Object.keys(clip.wires).length;
     const all = [...what, ...(wires > 0 ? [`${wires} wire${wires === 1 ? '' : 's'}`] : [])].join(', ');
-    return done(true, `copied ${all}`, `copied ${all}`);
+    return done(true, `copied ${all}`, `copied ${all}`, entries);
   },
 };
 
@@ -585,9 +601,9 @@ const pasteTool: ToolDef = {
     const found = await designDocOf(ctx, text(args.workflow), 'paste');
     if ('out' in found) return found.out;
     const { doc } = found;
-    if (ctx.store.getState().clipboard === null) return fail('the clipboard is empty: pick and copy first', 'paste: nothing copied');
+    if (ctx.store.getState().clipboard === null) return fail('the clipboard is empty: pick and copy first', `paste into ${doc.name}: nothing copied`);
     const r = await act(ctx, doc.workflowId, { type: 'paste', workflowId: doc.workflowId, newId: ctx.newId }, { unchanged: 'nothing was pasted' });
-    if (!r.ok) return fail(r.error, 'paste refused');
+    if (!r.ok) return fail(r.error, `paste into ${doc.name} refused`);
     const { added } = changesOf(r.before, r.after);
     return done(true, `pasted ${added.join(', ')}`, `pasted ${added.map((a) => a.replace(/ \(id .*\)$/, '')).join(', ')}`, r.entries);
   },
@@ -602,7 +618,7 @@ const deletePickedTool: ToolDef = {
   description: 'Delete the picked steps, caches and wires from the design (Delete); the workflow circle is never deleted this way. The user is shown what goes and asked first.',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG }, additionalProperties: false },
   async run(ctx, args, answer, pin) {
-    const found = await askedDocOf(ctx, 'delete_picked', text(args.workflow), answer, pin);
+    const found = await askedDocOf(ctx, 'delete picked items', text(args.workflow), answer, pin);
     if ('out' in found) return found.out;
     const { doc } = found;
     const id = doc.workflowId;
@@ -610,7 +626,7 @@ const deletePickedTool: ToolDef = {
     const { shown } = layersOf(doc);
     const names = picksText(shown, picks);
     if (answer === undefined) {
-      if (picks.length === 0) return fail('nothing is picked: pick steps, caches or wires first (the workflow circle is not deleted this way)', 'delete: nothing picked');
+      if (picks.length === 0) return fail('nothing is picked: pick steps, caches or wires first (the workflow circle is not deleted this way)', `delete in ${doc.name}: nothing picked`);
       // what Delete would take: the picks, and the wires of a picked step that go with it
       const state = ctx.store.getState();
       const preview = reduce(state, { type: 'deletePicks', workflowId: id }).docs.find((d) => d.workflowId === id)!;
@@ -621,10 +637,10 @@ const deletePickedTool: ToolDef = {
     const asked = pendingDeletes.get(id);
     pendingDeletes.delete(id);
     if (answer !== 'Yes') return fail('the user declined', `user declined: delete from ${doc.name}`);
-    if (asked === undefined) return fail('the question was lost (the page was refreshed?); nothing was deleted: ask again', 'delete: question lost');
-    if (asked !== picksKey(doc.picks)) return fail('the picks changed since the question; nothing was deleted: ask again', 'delete: picks changed');
+    if (asked === undefined) return fail('the question was lost (the page was refreshed?); nothing was deleted: ask again', `delete in ${doc.name}: question lost`);
+    if (asked !== picksKey(doc.picks)) return fail('the picks changed since the question; nothing was deleted: ask again', `delete in ${doc.name}: picks changed`);
     const r = await act(ctx, id, { type: 'deletePicks', workflowId: id }, { unchanged: 'nothing was deleted' });
-    if (!r.ok) return fail(r.error, 'delete refused');
+    if (!r.ok) return fail(r.error, `delete in ${doc.name} refused`);
     const { removed } = changesOf(r.before, r.after);
     const gone = removed.length > 0 ? removed.join(', ') : names.join(', ');
     return done(true, `deleted ${gone} (Undo brings them back)`, `deleted ${gone}`, r.entries);
@@ -641,13 +657,13 @@ function historyTool(op: 'undo' | 'redo'): ToolDef {
       const found = await designDocOf(ctx, text(args.workflow), op);
       if ('out' in found) return found.out;
       const { doc } = found;
-      if ((op === 'undo' ? doc.design.past : doc.design.future).length === 0) return fail(`nothing to ${op} in ${doc.name}`, `${op}: nothing to ${op}`);
+      if ((op === 'undo' ? doc.design.past : doc.design.future).length === 0) return fail(`nothing to ${op} in ${labelOf(doc)}`, `${op} in ${labelOf(doc)}: nothing to ${op}`);
       const { entries } = await withEcho(ctx.store, () => [doc.workflowId], async () => { ctx.store.dispatch({ type: op, workflowId: doc.workflowId }); });
       const after = docOf(ctx, doc.workflowId)!;
       const { added, removed } = changesOf(doc, after);
       const changes = [...added.map((a) => `back: ${a}`), ...removed.map((r) => `gone: ${r}`)].join('; ');
       const past = op === 'undo' ? 'undid' : 'redid';
-      return done(true, `${past} one design step in ${doc.name}${changes ? ` (${changes})` : ''}`, `${past} one step in ${doc.name}`, entries);
+      return done(true, `${past} one design step in ${labelOf(doc)}${changes ? ` (${changes})` : ''}`, `${past} one step in ${labelOf(doc)}`, entries);
     },
   };
 }
@@ -657,7 +673,7 @@ const discardTool: ToolDef = {
   description: 'Discard every unsaved change to the workflow (the drawing and the Inspector\'s edits), back to its last Save (Discard design). The user is asked first.',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG }, additionalProperties: false },
   async run(ctx, args, answer, pin) {
-    const found = await askedDocOf(ctx, 'discard_design', text(args.workflow), answer, pin);
+    const found = await askedDocOf(ctx, 'discard design', text(args.workflow), answer, pin);
     if ('out' in found) return found.out;
     const { doc } = found;
     const label = labelOf(doc);

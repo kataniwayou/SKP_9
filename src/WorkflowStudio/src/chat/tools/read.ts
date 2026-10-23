@@ -16,22 +16,16 @@ import { inspectorBaseOf } from '../../store/inspectorBase';
 import { editTargetOf, type InspectorTarget, type SchemaSlot } from '../../store/inspectorTarget';
 import { entityLabel, problemsFrom, shownDesignOf } from '../../store/problems';
 import { activeDocument, type OpenDocument } from '../../store/studioState';
-import { findCache, findStep, findWorkflow, type Found } from '../resolve';
+import { findCache, findStep, type Found } from '../resolve';
 import type { ToolContext, ToolDef, ToolOutcome } from '../toolTypes';
+import { done, fail, labelOf, text, workflowOf, WORKFLOW_ARG } from './common';
 
 // The model's eyes (2026-10-23): lists, the design, one entity, Output. Each answers compact JSON text and changes
 // nothing, the user's Inspector included.
 
-const done = (ok: boolean, result: string, action: string): ToolOutcome => ({ kind: 'done', ok, result, action, entries: [] });
-const fail = (error: string, action: string): ToolOutcome => done(false, error, action);
 const json = (value: unknown, action: string): ToolOutcome => done(true, JSON.stringify(value), action);
-const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
-const label = (x: { name?: string | null; version?: string | null }): string => `${x.name ?? ''} ${x.version ?? ''}`.trim();
+const label = labelOf;
 
-const WORKFLOW_ARG = {
-  type: 'string',
-  description: 'The workflow: its id, name, or "name version". Leave out for the workflow the user has open (the active one).',
-};
 const NO_ARGS = { type: 'object', properties: {}, additionalProperties: false };
 
 /** A list from the API; the Toolbox's three are optional on the API object (a test's fake may lack them). */
@@ -39,21 +33,6 @@ async function listOf<T>(call: (() => Promise<ApiResult<T[]>>) | undefined, what
   if (!call) return { ok: false, error: `cannot list ${what} here` };
   const r = await call();
   return r.ok ? { ok: true, value: r.value } : { ok: false, error: `could not list ${what}. ${describeError(r.error)}` };
-}
-
-/** The workflow a tool means: the one named, else the active one; `doc` is its open document, null when it is not open. */
-export async function workflowOf(ctx: ToolContext, ref: string | undefined): Promise<Found<{ id: string; doc: OpenDocument | null }>> {
-  const state = ctx.store.getState();
-  if (ref === undefined) {
-    const active = activeDocument(state);
-    return active ? { ok: true, value: { id: active.workflowId, doc: active } } : { ok: false, error: 'no workflow is open' };
-  }
-  const list = await ctx.api.listWorkflows();
-  // an open document is found without the list; otherwise "no workflow named X" would blame the name for a failed list
-  const found = findWorkflow(list.ok ? list.value : [], state.docs, ref);
-  if (!found.ok && !list.ok && !found.ambiguous) return { ok: false, error: `could not read the list of workflows. ${describeError(list.error)}` };
-  if (!found.ok) return found;
-  return { ok: true, value: { id: found.value, doc: state.docs.find((d) => d.workflowId === found.value) ?? null } };
 }
 
 /** A workflow's open document with its loaded workflow, or why there is none. */

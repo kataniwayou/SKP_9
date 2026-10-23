@@ -4,49 +4,16 @@ import { SAVED_APPLIED } from '../../store/saveLog';
 import { RUN_TIMEOUT_MS, runBlocked, type RunOp } from '../../store/run';
 import { designDirty, saveBlocked, type OpenDocument } from '../../store/studioState';
 import type { ChatEntry } from '../chatStore';
-import { echoText, hasErrorLine, withEcho } from '../echo';
+import { hasErrorLine, withEcho } from '../echo';
 import type { ToolContext, ToolDef, ToolOutcome } from '../toolTypes';
-import { workflowOf } from './read';
+import { docOf, done, fail, labelOf, openDocOf, questionDocOf, text, workflowOf, WORKFLOW_ARG, WORKFLOW_REQUIRED, YES_NO, type DocChoice } from './common';
 
 // The workflow tools (2026-10-23): the same paths as the menus and the toolbar, with their Output lines repeated in
 // the chat and handed to the model. The ones that cannot be undone (stop, delete, close with a draft) ask first.
 
-const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
-const labelOf = (d: { name: string; version: string }): string => `${d.name} ${d.version}`.trim();
-const docOf = (ctx: ToolContext, id: Id): OpenDocument | undefined => ctx.store.getState().docs.find((d) => d.workflowId === id);
-
-/** What the model hears is `head`, then the echoed Output lines and problems; the chat shows `action` and the same lines. */
-function done(ok: boolean, head: string, action: string, entries: ChatEntry[] = []): ToolOutcome {
-  const echo = echoText(entries);
-  return { kind: 'done', ok, result: echo === '' ? head : `${head}\n${echo}`, action, entries };
-}
-const fail = (error: string, action: string): ToolOutcome => done(false, error, action);
-
-const WORKFLOW_ARG = {
-  type: 'string',
-  description: 'The workflow: its id, name, or "name version". Leave out for the workflow the user has open (the active one).',
-};
-const WORKFLOW_REQUIRED = { ...WORKFLOW_ARG, description: 'The workflow: its id, name, or "name version".' };
-const YES_NO = ['Yes', 'No'] as const;
-
-/** An open workflow the tool means: the one named, else the active one; or why there is none. */
-async function openDocOf(ctx: ToolContext, ref: string | undefined, action: string): Promise<{ doc: OpenDocument } | { out: ToolOutcome }> {
-  const w = await workflowOf(ctx, ref);
-  if (!w.ok) return { out: fail(w.error, action) };
-  if (w.value.doc === null) return { out: fail(`workflow ${ref} is not open; open it first`, action) };
-  return { doc: w.value.doc };
-}
-
-/**
- * The workflow a call acts on. Asking: the one named, else the active one. Answering: only the one the question named
- * (`pin`, carried by the question itself and so kept over a tab switch or a refresh), never the active one.
- */
-async function targetOf(ctx: ToolContext, tool: string, ref: string | undefined, answer: string | undefined, pin: string | undefined): Promise<{ doc: OpenDocument } | { out: ToolOutcome }> {
-  if (answer === undefined) return openDocOf(ctx, ref, tool);
-  if (pin === undefined) return { out: fail('the question lost its workflow; nothing was done: ask again', `${tool}: question lost`) };
-  const doc = docOf(ctx, pin);
-  return doc ? { doc } : { out: fail('the workflow is no longer open; nothing was done', `${tool}: workflow gone`) };
-}
+/** The workflow a call that asks first acts on (the pin rule): asking, the one named or the active one; answering, the pinned one. */
+const targetOf = (ctx: ToolContext, tool: string, ref: string | undefined, answer: string | undefined, pin: string | undefined): Promise<DocChoice> =>
+  questionDocOf(ctx, tool, answer, pin, () => openDocOf(ctx, ref, tool));
 
 /** A Save, echoed; applied only when Output says "Saved and applied". */
 async function saveEchoed(ctx: ToolContext, doc: OpenDocument): Promise<{ applied: boolean; entries: ChatEntry[]; blocked: string | null }> {

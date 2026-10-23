@@ -11,8 +11,9 @@ import type { Selection } from '../../store/selection';
 import { shownTargetOf, type OpenDocument } from '../../store/studioState';
 import { findStep, type Found } from '../resolve';
 import type { ToolContext, ToolDef, ToolOutcome } from '../toolTypes';
-import { act, askedDocOf, designDocOf, docOf, done, fail, layersOf, text, WORKFLOW_ARG, YES_NO } from './design';
-import { inspectorTargetOf, TARGET_ARG, targetOf, type Target } from './read';
+import { docOf, done, fail, text, WORKFLOW_ARG, YES_NO } from './common';
+import { act, askedDocOf, designDocOf, layersOf } from './design';
+import { inspectorTargetOf, TARGET_ARG, targetOf } from './read';
 
 // The field tools (2026-10-23): the Inspector's own edits. Each first shows its entity in the Inspector, as the user's
 // clicks would (select, then the drill-downs), waits for the Inspector's read of it, and then edits what the Inspector
@@ -37,12 +38,16 @@ function entityText(doc: OpenDocument, target: InspectorTarget): string {
   }
 }
 
-/** The clicks that show `target`: the canvas selection, then the Inspector's drill-downs from it. */
-function pathOf(doc: OpenDocument, t: Target, target: InspectorTarget): { selection: Selection; trail: InspectorTarget[] } {
+/**
+ * The clicks that show `target`: the canvas selection, then the Inspector's drill-downs from it. `stepId`: the step a
+ * processor or schema target was found through (the Inspector reaches them from that step).
+ */
+function pathOf(target: InspectorTarget, stepId: Id | null): { selection: Selection; trail: InspectorTarget[] } {
   if (target.kind === 'workflow') return { selection: { kind: 'workflow' }, trail: [] };
   if (target.kind === 'cache') return { selection: { kind: 'cache', cacheId: target.id }, trail: [] };
-  const stepId = target.kind === 'step' ? target.id : target.kind === 'assignment' ? target.stepId : (findStep(doc, 'step' in t ? t.step : '') as { value: Id }).value;
-  const selection: Selection = { kind: 'step', stepId };
+  const step = target.kind === 'step' ? target.id : target.kind === 'assignment' ? target.stepId : stepId;
+  if (step === null) throw new Error(`a ${target.kind} is shown through its step`);
+  const selection: Selection = { kind: 'step', stepId: step };
   if (target.kind === 'step') return { selection, trail: [] };
   if (target.kind === 'assignment') return { selection, trail: [target] };
   const processor: InspectorTarget = { kind: 'processor', id: target.kind === 'processor' ? target.id : target.processorId };
@@ -71,13 +76,13 @@ function until(ctx: ToolContext, ready: () => boolean, ms: number): Promise<void
  * selection and the drill-downs, as the user's clicks; nothing when it is shown already. Then waits for the Inspector's
  * read of it. Answers the document then, or why the entity cannot be edited.
  */
-async function showInInspector(ctx: ToolContext, doc: OpenDocument, t: Target, target: InspectorTarget): Promise<Found<OpenDocument>> {
+async function showInInspector(ctx: ToolContext, doc: OpenDocument, target: InspectorTarget, stepId: Id | null = null): Promise<Found<OpenDocument>> {
   const id = doc.workflowId, key = targetKey(target);
   const { store } = ctx;
   store.dispatch({ type: 'activate', workflowId: id });
   if (store.getState().toolboxPick !== null) store.dispatch({ type: 'toolboxPick', pick: null });
   if (targetKey(shownTargetOf(doc)) !== key) {
-    const { selection, trail } = pathOf(doc, t, target);
+    const { selection, trail } = pathOf(target, stepId);
     store.dispatch({ type: 'select', workflowId: id, selection });
     store.dispatch({ type: 'back', workflowId: id, depth: 0 });
     for (const next of trail) store.dispatch({ type: 'drill', workflowId: id, target: next });
@@ -96,8 +101,23 @@ async function showInInspector(ctx: ToolContext, doc: OpenDocument, t: Target, t
   return { ok: true, value: d };
 }
 
+/** The entity a raw `target` argument names, in words, for an action line before it is found ("step a", "a's assignment"). */
+function targetWords(v: unknown): string {
+  const t = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  const step = text(t.step) ?? '?';
+  switch (t.kind) {
+    case 'workflow': return 'the workflow';
+    case 'step': return `step ${step}`;
+    case 'processor': return `${step}'s processor`;
+    case 'assignment': return `${step}'s assignment`;
+    case 'schema': return `${step}'s ${String(t.slot ?? '?')} schema`;
+    case 'cache': return `cache ${text(t.cache) ?? '?'}`;
+    default: return 'an entity';
+  }
+}
+
 /** The workflow (loaded, not locked), the parsed target and the Inspector's target for it; or the outcome saying why not. */
-async function targetIn(ctx: ToolContext, args: Record<string, unknown>, tool: string): Promise<{ doc: OpenDocument; t: Target; target: InspectorTarget } | { out: ToolOutcome }> {
+async function targetIn(ctx: ToolContext, args: Record<string, unknown>, tool: string): Promise<{ doc: OpenDocument; target: InspectorTarget; stepId: Id | null } | { out: ToolOutcome }> {
   const t = targetOf(args.target);
   if (!t.ok) return { out: fail(t.error, tool) };
   const found = await designDocOf(ctx, text(args.workflow), tool);
@@ -107,15 +127,19 @@ async function targetIn(ctx: ToolContext, args: Record<string, unknown>, tool: s
   const { base, saved } = layersOf(doc);
   const target = await inspectorTargetOf(ctx, doc, t.value, saved.graph, applyBlocks(base, doc.design.draft.blocks).graph);
   if (!target.ok) return { out: fail(target.error, tool) };
+  // the step a processor or schema is reached through (found already by inspectorTargetOf, so this one is found too)
+  const via = 'step' in t.value ? findStep(doc, t.value.step) : null;
+  const stepId = via?.ok ? via.value : null;
   // the lookup may have waited for BaseApi's cache list: the document as it is now
   const now = docOf(ctx, doc.workflowId);
-  return now ? { doc: now, t: t.value, target: target.value } : { out: fail('the workflow closed meanwhile', tool) };
+  return now ? { doc: now, target: target.value, stepId } : { out: fail('the workflow closed meanwhile', tool) };
 }
 
 /**
- * The text the Inspector's field would hold for `value`, or the Inspector's own message about it (2026-10-23: what its
- * field marks red is refused here, nothing typed). An entry condition by name or number; a JSON field and a cache's
- * items as text or as the value itself.
+ * The text the Inspector's field would hold for `value`, or the Inspector's own message about it (2026-10-23: JSON that
+ * does not parse and items the table could not commit are refused here, nothing typed; a cron goes through as typed,
+ * only the server rejects one). An entry condition by name or number; a JSON field and a cache's items as text or as
+ * the value itself.
  */
 function fieldText(spec: FieldSpec, value: unknown): Found<string> {
   if (value === null || value === undefined) {
@@ -133,10 +157,6 @@ function fieldText(spec: FieldSpec, value: unknown): Found<string> {
   if (spec.kind === 'dict') {
     const d = parseDict(raw);
     return d.ok ? { ok: true, value: dictText(d.entries) } : { ok: false, error: d.reason };
-  }
-  if (spec.kind === 'cron') {
-    const c = cronText(raw);
-    return 'problem' in c ? { ok: false, error: c.problem } : { ok: true, value: raw };
   }
   if (spec.required && raw.trim() === '') return { ok: false, error: `${spec.label} cannot be blank` };
   return { ok: true, value: raw };
@@ -169,16 +189,17 @@ const setField: ToolDef = {
     additionalProperties: false,
   },
   async run(ctx, args) {
-    const found = await targetIn(ctx, args, 'set field');
+    const asked = `set ${text(args.field) ?? '?'} of ${targetWords(args.target)}`;
+    const found = await targetIn(ctx, args, asked);
     if ('out' in found) return found.out;
-    const { t, target } = found;
+    const { target, stepId } = found;
     const field = text(args.field) ?? '';
     const spec = FIELDS[target.kind].find((f) => f.key === field);
-    if (!spec) return fail(`a ${target.kind} has no field ${field}; its fields are ${FIELDS[target.kind].map((f) => f.key).join(', ')}`, 'set field');
+    if (!spec) return fail(`a ${target.kind} has no field ${field}; its fields are ${FIELDS[target.kind].map((f) => f.key).join(', ')}`, asked);
     const what = `${spec.label.toLowerCase()} of ${entityText(found.doc, target)}`;
     const value = fieldText(spec, args.value);
     if (!value.ok) return fail(`not set, nothing was changed: the Inspector says "${value.error}" for the ${what}`, `${what} not set: ${value.error}`);
-    const shown = await showInInspector(ctx, found.doc, t, target);
+    const shown = await showInInspector(ctx, found.doc, target, stepId);
     if (!shown.ok) return fail(shown.error, `${what} not set`);
     const id = found.doc.workflowId;
     // judged as the Inspector's edit would land: an entry condition that makes a net disagree is refused
@@ -194,7 +215,12 @@ const setField: ToolDef = {
     // the last Save's errors on this field stay under it until the next Save
     const entityId = target.kind === 'workflow' ? id : target.id;
     const errors = (r.after.errors ?? []).filter((e) => e.id === entityId && e.field === spec.key).map((e) => e.message);
-    const note = errors.length > 0 ? `; the last Save's error on this field (until the next Save): ${errors.join('; ')}` : '';
+    const notes: string[] = [];
+    // the Inspector's note under a cron it cannot read: kept as typed, the server judges it on Save
+    const cron = spec.kind === 'cron' ? cronText(now) : null;
+    if (cron && 'problem' in cron) notes.push(`the Inspector notes: ${cron.problem} (Save will be refused unless BaseApi reads it)`);
+    if (errors.length > 0) notes.push(`the last Save's error on this field (until the next Save): ${errors.join('; ')}`);
+    const note = notes.length > 0 ? `; ${notes.join('; ')}` : '';
     const shownValue = readable(spec, now);
     const short = inLine(shownValue);
     return done(true, `${what} is ${JSON.stringify(shownValue)} now (unsaved)${note}`, `${what} set${short !== null && short !== '' ? ` to ${short}` : ''}`, r.entries);
@@ -217,14 +243,14 @@ const createAssignmentTool: ToolDef = {
   description: 'Create a step\'s assignment (the Inspector\'s ＋ Create): named {step}-assignment, version 1.0.0, payload {}; set its payload with set_field (target assignment, field payload).',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG, step: STEP_ARG }, required: ['step'], additionalProperties: false },
   async run(ctx, args) {
-    const found = await designDocOf(ctx, text(args.workflow), 'create assignment');
+    const asked = `create assignment of step ${text(args.step) ?? '?'}`;
+    const found = await designDocOf(ctx, text(args.workflow), asked);
     if ('out' in found) return found.out;
     const s = stepIn(found.doc, text(args.step) ?? '');
-    if (!s.ok) return fail(s.error, 'create assignment');
+    if (!s.ok) return fail(s.error, asked);
     const { stepId, name, assignment } = s.value;
     if (assignment) return fail(`step ${name} already has an assignment (id ${assignment.id})`, `create assignment of ${name} refused`);
-    const t: Target = { kind: 'step', step: stepId };
-    const shown = await showInInspector(ctx, found.doc, t, { kind: 'step', id: stepId });
+    const shown = await showInInspector(ctx, found.doc, { kind: 'step', id: stepId });
     if (!shown.ok) return fail(shown.error, `create assignment of ${name}`);
     const id = found.doc.workflowId;
     const r = await act(ctx, id, { type: 'createAssignment', workflowId: id, stepId, stepName: name, id: ctx.newId() }, {
@@ -244,16 +270,17 @@ const removeAssignmentTool: ToolDef = {
   description: 'Remove a step\'s assignment from the design (deleted in BaseApi on Save). The user is asked first.',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG, step: STEP_ARG }, required: ['step'], additionalProperties: false },
   async run(ctx, args, answer, pin) {
-    const found = await askedDocOf(ctx, 'remove_assignment', text(args.workflow), answer, pin);
+    const asked = `remove assignment of step ${text(args.step) ?? '?'}`;
+    const found = await askedDocOf(ctx, asked, text(args.workflow), answer, pin);
     if ('out' in found) return found.out;
     const { doc } = found;
     const s = stepIn(doc, text(args.step) ?? '');
-    if (!s.ok) return fail(s.error, 'remove assignment');
+    if (!s.ok) return fail(s.error, asked);
     const { stepId, name, assignment } = s.value;
     if (!assignment) return fail(`step ${name} has no assignment`, `remove assignment of ${name}: none`);
     if (answer === undefined) return { kind: 'ask', question: { text: `Remove the assignment of step ${name} from ${doc.name} ${doc.version}?`, choices: YES_NO, pin: doc.workflowId } };
     if (answer !== 'Yes') return fail('the user declined', `user declined: remove assignment of ${name}`);
-    const shown = await showInInspector(ctx, doc, { kind: 'step', step: stepId }, { kind: 'step', id: stepId });
+    const shown = await showInInspector(ctx, doc, { kind: 'step', id: stepId });
     if (!shown.ok) return fail(shown.error, `remove assignment of ${name}`);
     const id = doc.workflowId;
     const r = await act(ctx, id, { type: 'removeAssignment', workflowId: id, stepId }, {
@@ -271,12 +298,12 @@ const revertEntityTool: ToolDef = {
   description: 'Drop every unsaved Inspector edit of one entity (the Inspector\'s Revert), back to its saved values.',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG, target: { ...TARGET_ARG, description: `The entity. ${TARGET_ARG.description}` } }, required: ['target'], additionalProperties: false },
   async run(ctx, args) {
-    const found = await targetIn(ctx, args, 'revert');
+    const found = await targetIn(ctx, args, `revert ${targetWords(args.target)}`);
     if ('out' in found) return found.out;
-    const { doc, t, target } = found;
+    const { doc, target, stepId } = found;
     const what = entityText(doc, target);
     if (!hasEdit(doc.edits, editTargetOf(target))) return done(true, `${what} has no unsaved edits; nothing to revert`, `nothing to revert: ${what}`);
-    const shown = await showInInspector(ctx, doc, t, target);
+    const shown = await showInInspector(ctx, doc, target, stepId);
     if (!shown.ok) return fail(shown.error, `revert ${what}`);
     const id = doc.workflowId;
     const r = await act(ctx, id, { type: 'revertEntity', workflowId: id }, { unchanged: `${what} could not be reverted`, run: () => ctx.service.revert(id) });

@@ -68,6 +68,21 @@ describe('the field tools', () => {
     expect(fieldsOf(doc().edits, { kind: 'assignment', id: 'a1', stepId: 's1' }).payload).toBe('{"k":2}');
   });
 
+  it('a cron the Inspector cannot read is typed as the user would, its note in the result (only the server rejects it)', async () => {
+    const { call, doc } = await setup();
+    const r = done(await call('set_field', { target: { kind: 'workflow' }, field: 'cronExpression', value: 'every day' }));
+    expect(r.ok).toBe(true);
+    expect(r.result).toContain('the Inspector notes: A cron expression has 5 fields');
+    expect(fieldsOf(doc().edits, { kind: 'workflow' }).cronExpression).toBe('every day');
+    const good = done(await call('set_field', { target: { kind: 'workflow' }, field: 'cronExpression', value: '0 6 * * *' }));
+    expect(good.result).not.toContain('the Inspector notes');
+  });
+
+  it('a refused field names what it was for', async () => {
+    const { call } = await setup();
+    expect(done(await call('set_field', { target: { kind: 'step', step: 'zz' }, field: 'name', value: 'x' })).action).toBe('set name of step zz');
+  });
+
   it('set_field on a schema drills step → processor → schema and makes the copy, as the Inspector does', async () => {
     const { call, doc } = await setup();
     const r = done(await call('set_field', { target: { kind: 'schema', step: 'a', slot: 'config' }, field: 'definition', value: '{"type":"string"}' }));

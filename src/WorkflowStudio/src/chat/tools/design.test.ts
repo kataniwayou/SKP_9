@@ -8,6 +8,8 @@ import { setEnd } from '../../circuit/circuit';
 import { applyEdits } from '../../design/apply';
 import { circuitOf, EMPTY_DRAFT, nextOf, withCircuit } from '../../design/draft';
 import { canUndo } from '../../design/history';
+import { judgeTool } from '../../design/toolDrop';
+import { COLUMN_PITCH, PMID, snap, STEP_H, STEP_W } from '../../layout/geometry';
 import { shownDesignOf } from '../../store/problems';
 import { createStudioStore } from '../../store/studioStore';
 import { runTool } from '../runTool';
@@ -197,7 +199,7 @@ describe('the design tools', () => {
     expect(doc().design.draft).toEqual(EMPTY_DRAFT);
   });
 
-  it('join: a fan-in head becomes a junction on the trunk of the same family; across families refused', async () => {
+  it('join: a fan-in head becomes a junction on the trunk; a hub tail is refused', async () => {
     const { call, shown } = await setup(graphDto({
       workflow: workflowDto({ entryStepIds: ['s1', 's2'] }),
       steps: [stepDto('s1', { name: 'a', nextStepIds: ['s3'] }), stepDto('s2', { name: 'b', nextStepIds: ['s3'] }), stepDto('s3', { name: 'c' })],
@@ -207,6 +209,69 @@ describe('the design tools', () => {
     const w = shown().wires.find((x) => x.id === 's2->s3')!;
     expect(w.headOn).toBe('junction');
     expect(shown().graph.steps.get('s2')!.nextStepIds).toContain('s3');
-    expect(done(await call('join', { wire: 'workflow -> a', side: 'tail', host: 'workflow -> b' })).result).toContain('workflow circle');
+    const hub = done(await call('join', { wire: 'workflow -> a', side: 'tail', host: 'workflow -> b' }));
+    expect(hub.result).toContain('workflow circle');
+    expect(hub.action).toBe("join workflow → a's tail on workflow → b");
+  });
+
+  it('join: a fan-out tail becomes a junction on a trunk of its family; a tail of another family is refused', async () => {
+    // a feeds b and c (Completed) and d (Failed)
+    const { call, shown, doc } = await setup(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { name: 'a', nextStepIds: ['s2', 's3', 's4'] }), stepDto('s2', { name: 'b' }), stepDto('s3', { name: 'c' }), stepDto('s4', { name: 'd', entryCondition: 2 })],
+    }));
+    const ok = done(await call('join', { wire: 'a -> c', side: 'tail', host: 'a -> b' }));
+    expect(ok).toMatchObject({ ok: true, action: "joined a → c's tail on a → b" });
+    expect(shown().wires.find((x) => x.id === 's1->s3')!.tailOn).toBe('junction');
+    expect(shown().graph.steps.get('s1')!.nextStepIds).toEqual(['s2', 's3', 's4']);
+    const draft = doc().design.draft;
+    const other = done(await call('join', { wire: 'a -> d', side: 'tail', host: 'a -> b' }));
+    expect(other.ok).toBe(false);
+    expect(other.result).toContain('not of one family');
+    expect(other.action).toBe("join a → d's tail on a → b");
+    expect(doc().design.draft).toBe(draft);
+  });
+
+  it('connect from "workflow": a new entry step', async () => {
+    const { call, shown } = await setup(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { name: 'a', nextStepIds: ['s2'] }), stepDto('s2', { name: 'b' })],
+    }));
+    const r = done(await call('connect', { from: 'workflow', to: 'b' }));
+    expect(r).toMatchObject({ ok: true, action: 'wired workflow → b (Completed)' });
+    expect(shown().graph.workflow.entryStepIds).toEqual(['s1', 's2']);
+    // a refusal names what was asked
+    expect(done(await call('connect', { from: 'nope', to: 'b' })).action).toBe('connect nope → b');
+  });
+
+  it('add_step with no point never splits a wire: the spot right of the row that lies on a wire is passed over', async () => {
+    // a on the hub's row; d → e moved so their wire runs up through the spot right of a
+    const { call, shown, doc } = await setup(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's2'] }),
+      steps: [stepDto('s1', { name: 'a' }), stepDto('s2', { name: 'd', nextStepIds: ['s3'] }), stepDto('s3', { name: 'e' })],
+    }));
+    const { cx, cy } = shown().placement.sphere;
+    const rowY = snap(cy - PMID);
+    const a = shown().placement.steps.get('s1')!;
+    const spot = { x: a.x + COLUMN_PITCH, y: rowY };
+    done(await call('move_blocks', { moves: [{ block: 'a', x: a.x, y: rowY }, { block: 'd', x: spot.x - 192, y: rowY + 480 }, { block: 'e', x: spot.x + 320, y: rowY - 480 }] }));
+    expect(shown().placement.steps.get('s2')!.y).toBeGreaterThan(rowY + STEP_H);
+    expect(cx).toBeLessThan(spot.x);
+    // the plain spot would split d → e (the precondition of this test)
+    const d0 = doc();
+    const saved = applyEdits(d0.status.kind === 'ready' ? d0.status.doc : (undefined as never), d0.edits, d0.design.draft.blocks);
+    expect(judgeTool(shown(), { kind: 'step' }, { x: spot.x + STEP_W / 2, y: spot.y + STEP_H / 2 }, { circuit: circuitOf(saved, d0.design.draft), reach: 0 }).kind).toBe('split');
+
+    const relations = () => {
+      const g = shown().graph;
+      return { entries: g.workflow.entryStepIds, next: ['s1', 's2', 's3'].map((id) => g.steps.get(id)!.nextStepIds), at: ['s1', 's2', 's3'].map((id) => shown().placement.steps.get(id)) };
+    };
+    const before = relations();
+    const r = done(await call('add_step'));
+    expect(r.ok).toBe(true);
+    expect(relations()).toEqual(before);
+    const made = [...shown().graph.steps.values()].find((s) => !['s1', 's2', 's3'].includes(s.id))!;
+    expect(made.nextStepIds).toEqual([]);
+    expect(shown().wires.some((w) => w.source === made.id || w.target === made.id)).toBe(false);
   });
 });
