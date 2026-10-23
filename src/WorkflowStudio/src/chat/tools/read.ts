@@ -147,7 +147,8 @@ const readDesign: ToolDef = {
   },
 };
 
-type Target =
+/** An entity as the model names it (read_entity's and the field tools' `target`). */
+export type Target =
   | { kind: 'workflow' }
   | { kind: 'step'; step: string }
   | { kind: 'processor'; step: string }
@@ -155,7 +156,20 @@ type Target =
   | { kind: 'schema'; step: string; slot: SchemaSlot }
   | { kind: 'cache'; cache: string };
 
-function targetOf(v: unknown): Found<Target> {
+/** The `target` argument's schema: one entity of the workflow, as `targetOf` reads it. */
+export const TARGET_ARG = {
+  type: 'object',
+  description: `kind workflow; step, processor or assignment with "step" (a step name or id; the processor and assignment are that step's); schema with "step" and "slot" (input, output or config); cache with "cache" (name or id).`,
+  properties: {
+    kind: { type: 'string', enum: ['workflow', 'step', 'processor', 'schema', 'assignment', 'cache'] },
+    step: { type: 'string' },
+    slot: { type: 'string', enum: ['input', 'output', 'config'] },
+    cache: { type: 'string' },
+  },
+  required: ['kind'],
+};
+
+export function targetOf(v: unknown): Found<Target> {
   const t = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
   const step = text(t.step);
   switch (t.kind) {
@@ -173,7 +187,7 @@ function targetOf(v: unknown): Found<Target> {
 }
 
 /** The Inspector's target for what the model named, found in the design as shown (`shown`); a slot's schema is the base's (`base`), as the Inspector's drill reads it. */
-async function inspectorTargetOf(ctx: ToolContext, doc: OpenDocument, t: Target, shown: Graph, base: Graph): Promise<Found<InspectorTarget>> {
+export async function inspectorTargetOf(ctx: ToolContext, doc: OpenDocument, t: Target, shown: Graph, base: Graph): Promise<Found<InspectorTarget>> {
   if (t.kind === 'workflow') return { ok: true, value: { kind: 'workflow', id: doc.workflowId } };
   if (t.kind === 'cache') {
     // this workflow's caches (the design's included) first, else any cache BaseApi lists
@@ -213,17 +227,7 @@ const readEntity: ToolDef = {
     type: 'object',
     properties: {
       workflow: WORKFLOW_ARG,
-      target: {
-        type: 'object',
-        description: `What to read. kind workflow; step, processor or assignment with "step" (a step name or id; the processor and assignment are that step's); schema with "step" and "slot" (input, output or config); cache with "cache" (name or id).`,
-        properties: {
-          kind: { type: 'string', enum: ['workflow', 'step', 'processor', 'schema', 'assignment', 'cache'] },
-          step: { type: 'string' },
-          slot: { type: 'string', enum: ['input', 'output', 'config'] },
-          cache: { type: 'string' },
-        },
-        required: ['kind'],
-      },
+      target: { ...TARGET_ARG, description: `What to read. ${TARGET_ARG.description}` },
     },
     required: ['target'],
     additionalProperties: false,
