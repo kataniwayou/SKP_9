@@ -108,10 +108,12 @@ const rowOf = (m: GuideBox, others: readonly GuideBox[], a: Axis) =>
 /** Each pair of blocks next to each other along `a` (none between them) with a gap over 0, and that gap. */
 function pairsOf(row: readonly GuideBox[], a: Axis): { p: GuideBox; q: GuideBox; gap: number }[] {
   const out: { p: GuideBox; q: GuideBox; gap: number }[] = [];
-  for (const p of row) {
+  // a run is a box of no width; runs lying on one line (fan-out wires on a trunk) are one neighbour, never each other's
+  const sameLine = (r: GuideBox, p: GuideBox) => a.len(r) === 0 && a.len(p) === 0 && a.lo(r) === a.lo(p);
+  for (const [i, p] of row.entries()) {
+    if (row.slice(0, i).some((r) => sameLine(r, p))) continue;
     const end = a.lo(p) + a.len(p);
-    // (a run is a box of no width: never its own neighbour)
-    const after = row.filter((r) => r !== p && a.lo(r) >= end);
+    const after = row.filter((r) => r !== p && a.lo(r) >= end && !sameLine(r, p));
     if (after.length === 0) continue;
     const q = after.reduce((b, r) => (a.lo(r) < a.lo(b) ? r : b));
     const between = row.some((r) => r !== p && r !== q && a.lo(r) < a.lo(q) && a.lo(r) + a.len(r) > end);
@@ -126,27 +128,33 @@ function pairsOf(row: readonly GuideBox[], a: Axis): { p: GuideBox; q: GuideBox;
  * along `a` (before or after it) equal a gap between two blocks next to each other in its row; ties to the earlier side.
  */
 function gapSnap(m: GuideBox, others: readonly GuideBox[], reach: number, a: Axis): number | null {
+  // ties to the earlier found
+  return gapMoves(m, others, reach, a).reduce<number | null>((f, d) => (f === null || Math.abs(d) < Math.abs(f) ? d : f), null);
+}
+
+/** Every move within `reach` that makes `m`'s gap to its nearest neighbour along `a` equal a gap in its row (as `gapSnap`). */
+function gapMoves(m: GuideBox, others: readonly GuideBox[], reach: number, a: Axis): number[] {
   const row = rowOf(m, others, a);
   const gaps = pairsOf(row, a).map((x) => x.gap);
   const mid = a.lo(m) + a.len(m) / 2;
   const before = row.filter((o) => a.lo(o) + a.len(o) <= mid).reduce<GuideBox | null>((b, o) => (b === null || a.lo(o) + a.len(o) > a.lo(b) + a.len(b) ? o : b), null);
   const after = row.filter((o) => a.lo(o) >= mid).reduce<GuideBox | null>((b, o) => (b === null || a.lo(o) < a.lo(b) ? o : b), null);
-  let found: number | null = null;
-  const consider = (d: number) => { if (Math.abs(d) <= reach && (found === null || Math.abs(d) < Math.abs(found))) found = d; };
+  const out: number[] = [];
+  const consider = (d: number) => { if (Math.abs(d) <= reach) out.push(d); };
   for (const g of gaps) {
     if (before) consider(g - (a.lo(m) - (a.lo(before) + a.len(before))));
     if (after) consider(a.lo(after) - g - (a.lo(m) + a.len(m)));
   }
-  return found;
+  return out;
 }
 
 /**
- * Equal gaps along `axis` for any box, a wire's run among them as a box with no width (the user's, 2026-10-23): the move
- * within `reach` that makes `m`'s gap to a neighbour equal one between two neighbours in its row (null when none does),
- * and the marks at `m`'s place.
+ * Equal gaps along `axis` for any box, a wire's run among them as a box with no width (the user's, 2026-10-23): every move
+ * within `reach` that makes `m`'s gap to a neighbour equal one between two neighbours in its row, and the marks at `m`'s
+ * place.
  */
-export const equalGapMove = (m: GuideBox, others: readonly GuideBox[], reach: number, axis: 'x' | 'y'): number | null =>
-  gapSnap(m, others, reach, axis === 'x' ? X : Y);
+export const equalGapMoves = (m: GuideBox, others: readonly GuideBox[], reach: number, axis: 'x' | 'y'): number[] =>
+  gapMoves(m, others, reach, axis === 'x' ? X : Y);
 export const equalGapMarks = (m: GuideBox, others: readonly GuideBox[], axis: 'x' | 'y'): GapMark[] =>
   gapMarks(m, others, axis === 'x' ? X : Y);
 
@@ -154,8 +162,13 @@ export const equalGapMarks = (m: GuideBox, others: readonly GuideBox[], axis: 'x
 function gapMarks(m: GuideBox, others: readonly GuideBox[], a: Axis): GapMark[] {
   const pairs = pairsOf([...rowOf(m, others, a), m].sort((p, q) => a.lo(p) - a.lo(q)), a);
   const own = pairs.filter((x) => x.p === m || x.q === m);
-  const equal = own.filter((o) => pairs.some((x) => x !== o && x.gap === o.gap)).map((o) => o.gap);
-  return pairs.filter((x) => equal.includes(x.gap)).map((x) => a.mark(x.p, x.q));
+  // a gap equals another pair's, never one on the same side of `m`: two blocks stacked beside it, their sides on one
+  // line, make the same gap twice (the wire guides sweep, 2026-10-23)
+  const sameSide = (x: { p: GuideBox; q: GuideBox }, o: { p: GuideBox; q: GuideBox }) => (x.p === m && o.p === m) || (x.q === m && o.q === m);
+  const equal = own.filter((o) => pairs.some((x) => x !== o && x.gap === o.gap && !sameSide(x, o))).map((o) => o.gap);
+  // each mark once: runs lying on one line (a trunk) make the same pair more than once
+  const marks = pairs.filter((x) => equal.includes(x.gap)).map((x) => a.mark(x.p, x.q));
+  return marks.filter((g, i) => marks.findIndex((h) => h.from === g.from && h.to === g.to && h.at === g.at) === i);
 }
 
 /** One line per coordinate of `m` that some block has exactly, of the same kind, spanning `m` and the nearest such block. */

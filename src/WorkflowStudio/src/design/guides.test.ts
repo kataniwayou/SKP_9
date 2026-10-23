@@ -109,6 +109,11 @@ describe('alignment guides (Visio dynamic grid, plan 10)', () => {
       expect(sorted(g.gaps)).toEqual([{ axis: 'y', from: 160, to: 224, at: 224 }, { axis: 'y', from: 384, to: 448, at: 224 }]);
     });
 
+    it('marks nothing beside two blocks stacked in one column: the same gap seen twice is no equal spacing (2026-10-23)', () => {
+      const g = snapToGuides(step('D', 300, 100), [step('A', 0, 0), step('A2', 0, 200)], 12);
+      expect(g.gaps).toEqual([]);
+    });
+
     it("takes gaps only from pairs in the dragged block's row", () => {
       const g = snapToGuides(step('D', 586, 600), [A, B], 12);
       expect(g.dx).toBe(0);

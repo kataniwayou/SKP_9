@@ -154,11 +154,13 @@ test('rule 2: a crossing is no short circuit: an end square drawn across a live 
   await pressTo(page, tail, await flowToPage(panel, [b.x - 32, 240]), await flowToPage(panel, [928, 240]));
   expect(await labelsOf(panel)).toEqual(['move here']);
   await page.mouse.up();
-  // released at 240, or on an alignment guide within 12 screen px of it (2026-10-23)
+  // released at (b.x - 32, 240), or on alignment guides within 12 screen px of it, either way (2026-10-23)
   await expect.poll(async () => (await pointsOf(panel, bc)).length).toBe(4);
-  const y = (await pointsOf(panel, bc))[0]![1];
-  expect(Math.abs(y - 240)).toBeLessThanOrEqual(12 / (await zoomOf(panel)));
-  expect(await pointsOf(panel, bc)).toEqual([[1056, 416], [928, 416], [928, y], [b.x - 32, y]].reverse());
+  const [x, y] = (await pointsOf(panel, bc))[0]!;
+  const reach = 12 / (await zoomOf(panel));
+  expect(Math.abs(y! - 240)).toBeLessThanOrEqual(reach);
+  expect(Math.abs(x! - (b.x - 32))).toBeLessThanOrEqual(reach);
+  expect(await pointsOf(panel, bc)).toEqual([[1056, 416], [928, 416], [928, y], [x, y]].reverse());
   // it crosses a -> b, which has not moved
   expect(await pointsOf(panel, ab)).toEqual(abWas);
   expect(b.lo < y && b.hi > y, 'it crosses a -> b').toBe(true);

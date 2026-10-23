@@ -94,6 +94,39 @@ export async function createCircuitThrowaway(request: APIRequestContext): Promis
   return { workflow: { id: created.workflowId, name: tag, version: '1.0.0', label: label(tag, '1.0.0', created.workflowId) }, tag, a, b, c, d, cacheId: created.cacheId };
 }
 
+/**
+ * The wire guides throwaway (2026-10-23, `e2e-wg-…`): many parallel wires to line up and space. Entry a fans out to
+ * b, c and d (Completed) and to e (Failed: another net from the same output); b and c fan in to f; d -> g; one cache.
+ */
+export interface GuidesThrowaway { workflow: LiveWorkflow; tag: string; a: string; b: string; c: string; d: string; e: string; f: string; g: string; cacheId: string }
+
+export async function createGuidesThrowaway(request: APIRequestContext): Promise<GuidesThrowaway> {
+  const tag = `e2e-wg-${Date.now().toString(36)}-${randomBytes(2).toString('hex')}`;
+  created.tag = tag;
+  created.schemaId = await post(request, 'schemas', { name: `${tag}-config`, version: '1.0.0', description: null, definition: '{"type":"object"}' });
+  created.processorId = await post(request, 'processors', {
+    name: `${tag}-proc`, version: '1.0.0', description: null, sourceHash: randomBytes(32).toString('hex'), instanceId: null,
+    inputSchemaId: null, outputSchemaId: null, configSchemaId: created.schemaId,
+  });
+  const step = async (name: string, nextStepIds: string[], entryCondition: number): Promise<string> => {
+    const id = await post(request, 'steps', { name: `${tag}-${name}`, version: '1.0.0', description: null, processorId: created.processorId, nextStepIds, entryCondition });
+    created.extraStepIds = [...(created.extraStepIds ?? []), id];
+    return id;
+  };
+  const f = await step('f', [], 1);
+  const g = await step('g', [], 1);
+  const e = await step('e', [], 2);
+  const b = await step('b', [f], 1);
+  const c = await step('c', [f], 1);
+  const d = await step('d', [g], 1);
+  const a = await step('a', [b, c, d, e], 1);
+  created.cacheId = await post(request, 'caches', { name: `${tag}-cache`, version: '1.0.0', description: null, root: `${tag}-root`, items: '{}' });
+  created.workflowId = await post(request, 'workflows', {
+    name: tag, version: '1.0.0', description: null, entryStepIds: [a], assignmentIds: [], cacheIds: [created.cacheId], cronExpression: null,
+  });
+  return { workflow: { id: created.workflowId, name: tag, version: '1.0.0', label: label(tag, '1.0.0', created.workflowId) }, tag, a, b, c, d, e, f, g, cacheId: created.cacheId };
+}
+
 /** A chain of steps s1 -> s2 -> … (Completed), entry s1, no cache (2026-10-11). */
 export interface ChainThrowaway { workflow: LiveWorkflow; tag: string; steps: string[] }
 
