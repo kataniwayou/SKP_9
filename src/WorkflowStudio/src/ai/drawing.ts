@@ -532,7 +532,7 @@ export function changeOf(a: string, b: string): string | null {
 }
 
 /** How hard the model thinks (the analyst's convention: low | high | max). Low by default (2026-10-11): about 2 minutes a drawing, where high took about 5. */
-const AI_EFFORT = 'low';
+export const AI_EFFORT = 'low';
 /**
  * How long the model may stay silent, no byte of its stream arriving, before the round is given up (2026-10-12): a model
  * still thinking keeps streaming, so only a dead one is cut off.
@@ -574,7 +574,7 @@ export const correctionMessages = (first: readonly ChatMessage[], answer: string
 /** How much of one answer has arrived (2026-10-12): the characters of the model's thinking and of its answer. */
 export interface StreamProgress { thinking: number; writing: number }
 
-const NOT_CONFIGURED = 'AI drawing is not configured: the studio has no model (env KIMI_API_KEY, KIMI_BASE_URL, KIMI_MODEL_ID)';
+export const NOT_CONFIGURED = 'AI drawing is not configured: the studio has no model (env KIMI_API_KEY, KIMI_BASE_URL, KIMI_MODEL_ID)';
 
 /**
  * The model the studio draws with (2026-10-12): KIMI_MODEL_ID in the studio's environment (k8s/31-workflow-studio.yaml in
