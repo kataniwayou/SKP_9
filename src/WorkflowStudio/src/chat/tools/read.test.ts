@@ -6,6 +6,7 @@ import { createInspectorService } from '../../app/inspectorService';
 import { newWorkflowDocument } from '../../app/newWorkflow';
 import { createStudioStore } from '../../store/studioStore';
 import { DESTRUCTIVE, TOOL_DEFS, TOOLS } from '../tools';
+import { READ_TOOLS } from './read';
 import type { ToolContext, ToolDef } from '../toolTypes';
 
 const ok = <T,>(value: T) => ({ ok: true, value }) as const;
@@ -46,8 +47,8 @@ async function setup() {
 
 describe('the reading tools', () => {
   it('are offered to the model as functions, none destructive', () => {
-    expect(TOOLS.map((t) => t.function.name)).toEqual(['list_workflows', 'list_processors', 'list_caches', 'list_schemas', 'read_design', 'read_entity', 'read_output']);
-    expect(DESTRUCTIVE.size).toBe(0);
+    expect(TOOLS.map((t) => t.function.name).slice(0, 7)).toEqual(['list_workflows', 'list_processors', 'list_caches', 'list_schemas', 'read_design', 'read_entity', 'read_output']);
+    expect(READ_TOOLS.some((t) => DESTRUCTIVE.has(t.name))).toBe(false);
   });
 
   it('list workflows with running and open', async () => {

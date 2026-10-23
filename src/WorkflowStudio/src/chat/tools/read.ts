@@ -42,7 +42,7 @@ async function listOf<T>(call: (() => Promise<ApiResult<T[]>>) | undefined, what
 }
 
 /** The workflow a tool means: the one named, else the active one; `doc` is its open document, null when it is not open. */
-async function workflowOf(ctx: ToolContext, ref: string | undefined): Promise<Found<{ id: string; doc: OpenDocument | null }>> {
+export async function workflowOf(ctx: ToolContext, ref: string | undefined): Promise<Found<{ id: string; doc: OpenDocument | null }>> {
   const state = ctx.store.getState();
   if (ref === undefined) {
     const active = activeDocument(state);

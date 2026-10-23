@@ -3,7 +3,7 @@ import { createApi, type StudioApi } from './api/client';
 import { describeError } from './api/describeError';
 import type { WorkflowReadDto } from './api/types';
 import { ConfirmDialog } from './app/ConfirmDialog';
-import { cancelDelete, commitDelete, prepareDelete, type DeletePlan } from './app/deleteWorkflow';
+import { cancelDelete, commitDelete, deleteWarningLines, prepareDelete, type DeletePlan } from './app/deleteWorkflow';
 import { DocumentPanel } from './app/DocumentPanel';
 import { createInspectorService } from './app/inspectorService';
 import { loadDocument } from './app/loadDocument';
@@ -419,18 +419,9 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
   );
 }
 
-const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
-
 /** The warning before a workflow's deletion (2026-10-10): what BaseApi's dry run says goes, and what stays. */
 function DeleteWarning({ plan }: { plan: DeletePlan }) {
-  return (
-    <div className="delwarn">
-      <p>Deleted for good: <b>the workflow, {plural(plan.steps, 'step')} and {plural(plan.assignments, 'assignment')}</b>. Its id is gone forever: nothing can address it again.</p>
-      <p>Kept: {plural(plan.caches, 'cache')} (only unlinked from it) and {plural(plan.processors, 'processor')} (untouched).</p>
-      {plan.dropsDraft && <p>Its unsaved design draft is dropped.</p>}
-      <p>It is not running now. Continue deletes it; BaseApi checks again that it is not running.</p>
-    </div>
-  );
+  return <div className="delwarn">{deleteWarningLines(plan).map((line) => <p key={line}>{line}</p>)}</div>;
 }
 
 /** How long live updates must stay down before the mark shows: a reconnect that succeeds sooner shows nothing. */

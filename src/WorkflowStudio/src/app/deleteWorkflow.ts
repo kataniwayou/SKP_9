@@ -90,6 +90,16 @@ export async function prepareDelete(api: StudioApi, store: StudioStore, workflow
   };
 }
 
+/** The warning's lines (2026-10-23), one paragraph each: the delete dialog shows them and the chat puts the same to the user. */
+export function deleteWarningLines(plan: DeletePlan): string[] {
+  return [
+    `Deleted for good: the workflow, ${count(plan.steps, 'step')} and ${count(plan.assignments, 'assignment')}. Its id is gone forever: nothing can address it again.`,
+    `Kept: ${count(plan.caches, 'cache')} (only unlinked from it) and ${count(plan.processors, 'processor')} (untouched).`,
+    ...(plan.dropsDraft ? ['Its unsaved design draft is dropped.'] : []),
+    'It is not running now. Continue deletes it; BaseApi checks again that it is not running.',
+  ];
+}
+
 /** Cancel on the warning: nothing was sent, the document stays as it was. */
 export function cancelDelete(store: StudioStore, workflowId: Id, now: () => Date = () => new Date()): void {
   store.dispatch({ type: 'log', workflowId, lines: [{ at: now().toISOString(), text: 'Delete cancelled: nothing was sent; the workflow is as it was' }] });
