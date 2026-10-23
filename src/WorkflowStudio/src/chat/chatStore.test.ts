@@ -55,10 +55,15 @@ describe('chat store', () => {
   it('restores the question', () => {
     const tab = memoryStorage();
     const store = createChatStore(tab);
-    const question = { callId: 'c1', text: 'Delete it?', choices: ['Yes', 'No'], warnings: ['It is used'] };
+    const question = { callId: 'c1', text: 'Delete it?', choices: ['Yes', 'No'], warnings: ['It is used'], pin: 'wf1' };
     store.dispatch({ type: 'ask', question });
     store.flush();
     expect(createChatStore(tab).getState().question).toEqual(question);
+  });
+
+  it('loads a stored question that has no pin', () => {
+    const tab = memoryStorage({ [CHAT_KEY]: JSON.stringify({ entries: [], wire: [], question: { callId: 'c1', text: 'Stop?', choices: ['Yes', 'No'] }, busy: false }) });
+    expect(createChatStore(tab).getState().question).toEqual({ callId: 'c1', text: 'Stop?', choices: ['Yes', 'No'] });
   });
 
   it('newChat empties everything', () => {

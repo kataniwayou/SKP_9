@@ -17,6 +17,6 @@ export interface ToolDef {
   description: string;
   /** JSON schema of the arguments. */
   parameters: object;
-  /** `answer` is the user's choice when this call asked a question before. */
-  run(ctx: ToolContext, args: Record<string, unknown>, answer?: string): Promise<ToolOutcome>;
+  /** `answer` is the user's choice when this call asked a question before; `pin` the workflow id that question carried. */
+  run(ctx: ToolContext, args: Record<string, unknown>, answer?: string, pin?: string): Promise<ToolOutcome>;
 }

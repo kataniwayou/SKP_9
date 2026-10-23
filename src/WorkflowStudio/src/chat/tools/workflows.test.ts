@@ -46,7 +46,9 @@ async function setup(over: Record<string, unknown> = {}) {
     close: (id) => store.dispatch({ type: 'close', workflowId: id }),
   };
   const ctx: ToolContext = { store, api, service: createInspectorService(api, store), commands, newId: () => 'n' };
-  const call = (name: string, args: object = {}, answer?: string) => runTool(ctx, { id: 'c1', name, arguments: JSON.stringify(args) }, answer);
+  // the question's pin is wf1 unless a test says otherwise (null: none)
+  const call = (name: string, args: object = {}, answer?: string, pin: string | null = 'wf1') =>
+    runTool(ctx, { id: 'c1', name, arguments: JSON.stringify(args) }, answer, pin ?? undefined);
   const dirty = () => store.dispatch({ type: 'design', workflowId: 'wf1', draft: { ...EMPTY_DRAFT, sphere: { x: 400, y: 400 } } });
   return { store, api, ctx, call, dirty, commands };
 }
@@ -114,7 +116,7 @@ describe('the workflow tools', () => {
 
   it('stop asks first; No stops nothing; Yes stops', async () => {
     const { call, api, store } = await setup();
-    expect(ask(await call('stop'))).toEqual({ text: 'Stop orders 1.0.0?', choices: ['Yes', 'No'] });
+    expect(ask(await call('stop'))).toEqual({ text: 'Stop orders 1.0.0?', choices: ['Yes', 'No'], pin: 'wf1' });
     const no = done(await call('stop', {}, 'No'));
     expect(no).toMatchObject({ ok: false, result: 'the user declined', action: 'user declined: stop orders' });
     expect(api.stopWorkflow).not.toHaveBeenCalled();
@@ -195,14 +197,27 @@ describe('the workflow tools', () => {
       store.dispatch({ type: 'loaded', workflowId: 'wf2', doc: await loadedDocument(graphDto()) });
       store.dispatch({ type: 'activate', workflowId: 'wf1' });
       if (tool === 'close_workflow') store.dispatch({ type: 'design', workflowId: 'wf1', draft: { ...EMPTY_DRAFT, sphere: { x: 400, y: 400 } } });
-      ask(await call(tool));
+      const q = ask(await call(tool));
+      expect(q.pin).toBe('wf1');
       store.dispatch({ type: 'activate', workflowId: 'wf2' });
       if (tool === 'stop') setTimeout(() => store.dispatch({ type: 'liveChanged', workflowId: 'wf1', name: 'orders', at: 'x', running: false }), 20);
-      const r = done(await call(tool, {}, tool === 'close_workflow' ? 'Discard' : 'Yes'));
+      const r = done(await call(tool, {}, tool === 'close_workflow' ? 'Discard' : 'Yes', q.pin));
       if (tool === 'stop') expect(api.stopWorkflow).toHaveBeenCalledWith('wf1');
       else expect(store.getState().docs.map((d) => d.workflowId)).toEqual(['wf2']);
       expect(r.action).toContain('orders');
     }
+  });
+
+  it('an answer with no pin refuses and does nothing, whatever is active', async () => {
+    const { call, store, api } = await setup();
+    for (const [tool, answer] of [['stop', 'Yes'], ['close_workflow', 'Discard'], ['delete_workflow', 'Yes']] as const) {
+      const r = done(await call(tool, {}, answer, null));
+      expect(r.ok).toBe(false);
+      expect(r.result).toContain('the question lost its workflow; nothing was done');
+    }
+    expect(api.stopWorkflow).not.toHaveBeenCalled();
+    expect(api.deleteWorkflow).not.toHaveBeenCalled();
+    expect(store.getState().docs).toHaveLength(1);
   });
 
   it('delete: No declines and logs the cancel even when the prepared plan was lost; Yes then asks again', async () => {

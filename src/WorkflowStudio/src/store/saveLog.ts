@@ -82,10 +82,10 @@ export function saveStartText(sent: SentDesign): string {
   return parts.length === 0 ? 'Save started: sending the layout only' : `Save started: sending ${parts.join(', ')} and the layout`;
 }
 
-/** The answer's one-line verdict, as Output has always said it (plan 8 §4.1, plan 9 §7). */
 /** How an applied Save's verdict begins; the chat tells an applied Save by it. */
 export const SAVED_APPLIED = 'Saved and applied';
 
+/** The answer's one-line verdict, as Output has always said it (plan 8 §4.1, plan 9 §7). */
 export function saveVerdict(applied: boolean, errors: number, shorts: number, held: number): string {
   if (!applied) return `Saved; not applied: ${plural(errors, 'error')}`;
   if (shorts === 0) return SAVED_APPLIED;

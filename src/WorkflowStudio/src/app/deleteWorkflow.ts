@@ -90,10 +90,10 @@ export async function prepareDelete(api: StudioApi, store: StudioStore, workflow
   };
 }
 
-/** The warning's lines (2026-10-23), one paragraph each: the delete dialog shows them and the chat puts the same to the user. */
 /** What the deletion removes, the emphasis of the warning's first line. */
 export const deleteGoes = (plan: DeletePlan): string => `the workflow, ${count(plan.steps, 'step')} and ${count(plan.assignments, 'assignment')}`;
 
+/** The warning's lines (2026-10-23), one paragraph each: the delete dialog shows them and the chat puts the same to the user. */
 export function deleteWarningLines(plan: DeletePlan): string[] {
   return [
     `Deleted for good: ${deleteGoes(plan)}. Its id is gone forever: nothing can address it again.`,

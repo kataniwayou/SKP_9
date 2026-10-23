@@ -7,9 +7,9 @@ const failed = (result: string, action: string): ToolOutcome => ({ kind: 'done',
 /**
  * Runs one tool call of the model (2026-10-23). A name that is no tool, or arguments that are not a JSON object (the
  * stream may have ended truncated), come back as a failed result naming the problem, for the model to correct.
- * `answer` is the user's choice when this call asked a question before.
+ * `answer` is the user's choice when this call asked a question before, `pin` the workflow that question named.
  */
-export async function runTool(ctx: ToolContext, call: ToolCall, answer?: string): Promise<ToolOutcome> {
+export async function runTool(ctx: ToolContext, call: ToolCall, answer?: string, pin?: string): Promise<ToolOutcome> {
   const def = TOOL_DEFS.find((t) => t.name === call.name);
   if (!def) return failed(`there is no tool named ${call.name}`, `unknown tool ${call.name}`);
   let args: unknown;
@@ -20,7 +20,7 @@ export async function runTool(ctx: ToolContext, call: ToolCall, answer?: string)
   }
   if (typeof args !== 'object' || args === null || Array.isArray(args)) return failed(`the arguments of ${call.name} must be a JSON object`, `${call.name}: bad arguments`);
   try {
-    return await def.run(ctx, args as Record<string, unknown>, answer);
+    return await def.run(ctx, args as Record<string, unknown>, answer, pin);
   } catch (e) {
     return failed(`${call.name} failed: ${e instanceof Error ? e.message : String(e)}`, `${call.name} failed`);
   }

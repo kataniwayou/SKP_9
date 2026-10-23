@@ -12,8 +12,8 @@ export type ChatEntry =
   | { kind: 'problems'; lines: string[] }                          // the pinned problems after an action, when changed
   | { kind: 'note'; text: string; level: OutputLevel };            // "not configured", "cancelled", "lost at refresh"
 
-/** A question the model put to the user: one button per choice. */
-export interface Question { callId: string; text: string; choices: readonly string[]; warnings?: string[] }
+/** A question the model put to the user: one button per choice. `pin`: the workflow id it names, kept with it so an answer after a tab switch or a refresh acts on that workflow. */
+export interface Question { callId: string; text: string; choices: readonly string[]; warnings?: string[]; pin?: string }
 
 export interface ChatState { entries: ChatEntry[]; wire: ChatWire[]; question: Question | null; busy: boolean }
 
@@ -58,7 +58,8 @@ function parseQuestion(v: unknown): Question | null {
   if (!isRecord(v) || typeof v.callId !== 'string' || typeof v.text !== 'string') return null;
   if (!Array.isArray(v.choices) || !v.choices.every((c) => typeof c === 'string')) return null;
   const warnings = Array.isArray(v.warnings) && v.warnings.every((w) => typeof w === 'string') ? (v.warnings as string[]) : undefined;
-  return { callId: v.callId, text: v.text, choices: v.choices as string[], ...(warnings ? { warnings } : {}) };
+  const pin = typeof v.pin === 'string' ? v.pin : undefined;
+  return { callId: v.callId, text: v.text, choices: v.choices as string[], ...(warnings ? { warnings } : {}), ...(pin ? { pin } : {}) };
 }
 
 /** The chat as stored; anything unreadable is an empty chat, an unreadable entry is skipped. `busy` is kept as stored. */

@@ -38,23 +38,15 @@ async function openDocOf(ctx: ToolContext, ref: string | undefined, action: stri
 }
 
 /**
- * The workflow a question was about (2026-10-23): pinned when the question is asked, so that an answer given after the
- * user switched tabs acts on the workflow the question named, never on whichever is active then. Keyed by tool and the
- * workflow argument as the model wrote it.
+ * The workflow a call acts on. Asking: the one named, else the active one. Answering: only the one the question named
+ * (`pin`, carried by the question itself and so kept over a tab switch or a refresh), never the active one.
  */
-const pins = new Map<string, Id>();
-const pinKey = (tool: string, ref: string | undefined): string => `${tool}|${ref ?? ''}`;
-
-/** The open workflow of a tool call; on an answer, the one pinned when asked (or why it is gone). */
-async function targetOf(ctx: ToolContext, tool: string, ref: string | undefined, answer: string | undefined): Promise<{ doc: OpenDocument } | { out: ToolOutcome }> {
-  const key = pinKey(tool, ref);
-  const pinned = answer !== undefined ? pins.get(key) : undefined;
-  pins.delete(key);
-  if (pinned === undefined) return openDocOf(ctx, ref, tool);
-  const doc = docOf(ctx, pinned);
+async function targetOf(ctx: ToolContext, tool: string, ref: string | undefined, answer: string | undefined, pin: string | undefined): Promise<{ doc: OpenDocument } | { out: ToolOutcome }> {
+  if (answer === undefined) return openDocOf(ctx, ref, tool);
+  if (pin === undefined) return { out: fail('the question lost its workflow; nothing was done: ask again', `${tool}: question lost`) };
+  const doc = docOf(ctx, pin);
   return doc ? { doc } : { out: fail('the workflow is no longer open; nothing was done', `${tool}: workflow gone`) };
 }
-const pin = (tool: string, ref: string | undefined, doc: OpenDocument): void => { pins.set(pinKey(tool, ref), doc.workflowId); };
 
 /** A Save, echoed; applied only when Output says "Saved and applied". */
 async function saveEchoed(ctx: ToolContext, doc: OpenDocument): Promise<{ applied: boolean; entries: ChatEntry[]; blocked: string | null }> {
@@ -149,11 +141,10 @@ const stop: ToolDef = {
   name: 'stop',
   description: 'Stop the workflow in BaseApi (what the Stop button does). The user is asked first.',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG }, additionalProperties: false },
-  async run(ctx, args, answer) {
-    const found = await targetOf(ctx, 'stop', text(args.workflow), answer);
+  async run(ctx, args, answer, pin) {
+    const found = await targetOf(ctx, 'stop', text(args.workflow), answer, pin);
     if ('out' in found) return found.out;
-    if (answer === undefined) pin('stop', text(args.workflow), found.doc);
-    if (answer === undefined) return { kind: 'ask', question: { text: `Stop ${labelOf(found.doc)}?`, choices: YES_NO } };
+    if (answer === undefined) return { kind: 'ask', question: { text: `Stop ${labelOf(found.doc)}?`, choices: YES_NO, pin: found.doc.workflowId } };
     if (answer !== 'Yes') return fail('the user declined', `user declined: stop ${found.doc.name}`);
     return press(ctx, found.doc, 'stop');
   },
@@ -166,8 +157,8 @@ const deleteWorkflow: ToolDef = {
   name: 'delete_workflow',
   description: 'Delete a workflow for good (it must be open and not running). The user is shown what goes and asked first.',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_REQUIRED }, required: ['workflow'], additionalProperties: false },
-  async run(ctx, args, answer) {
-    const found = await targetOf(ctx, 'delete_workflow', text(args.workflow), answer);
+  async run(ctx, args, answer, pin) {
+    const found = await targetOf(ctx, 'delete_workflow', text(args.workflow), answer, pin);
     if ('out' in found) return found.out;
     const { doc } = found;
     const id = doc.workflowId;
@@ -185,8 +176,7 @@ const deleteWorkflow: ToolDef = {
       // no line in Output: another deletion of it (the menu's) holds it
       if (plan === null) return done(false, `not deleted ${label}${entries.some((e) => e.kind === 'output') ? '' : ': a deletion of this workflow is already in progress'}`, `delete refused: ${doc.name}`, entries);
       pendingDeletes.set(id, { plan, entries });
-      pin('delete_workflow', text(args.workflow), doc);
-      return { kind: 'ask', question: { text: `Delete workflow ${label} for good?`, choices: YES_NO, warnings: deleteWarningLines(plan) } };
+      return { kind: 'ask', question: { text: `Delete workflow ${label} for good?`, choices: YES_NO, warnings: deleteWarningLines(plan), pin: id } };
     }
     const { value: deleted, entries } = await withEcho(ctx.store, () => [id], () => ctx.commands.commitDelete(pending.plan));
     const all = [...pending.entries, ...entries];
@@ -201,8 +191,8 @@ const closeWorkflow: ToolDef = {
   name: 'close_workflow',
   description: 'Close an open workflow in the studio (it stays in BaseApi). When it has unsaved changes the user is asked whether to save them, discard them or cancel.',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG }, additionalProperties: false },
-  async run(ctx, args, answer) {
-    const found = await targetOf(ctx, 'close_workflow', text(args.workflow), answer);
+  async run(ctx, args, answer, pin) {
+    const found = await targetOf(ctx, 'close_workflow', text(args.workflow), answer, pin);
     if ('out' in found) return found.out;
     const { doc } = found;
     const id = doc.workflowId;
@@ -213,8 +203,7 @@ const closeWorkflow: ToolDef = {
       return docOf(ctx, id) ? done(false, `${label} was not closed`, `close refused: ${doc.name}`, all) : done(true, `closed ${label}`, `closed ${label}`, all);
     };
     if (!designDirty(doc)) return close([]);
-    if (answer === undefined) pin('close_workflow', text(args.workflow), doc);
-    if (answer === undefined) return { kind: 'ask', question: { text: `${label} has unsaved changes. Save them before closing?`, choices: ['Save', 'Discard', 'Cancel'] } };
+    if (answer === undefined) return { kind: 'ask', question: { text: `${label} has unsaved changes. Save them before closing?`, choices: ['Save', 'Discard', 'Cancel'], pin: id } };
     if (answer === 'Discard') return close([]);
     if (answer !== 'Save') return fail('the user cancelled', `user cancelled: close ${doc.name}`);
     const { applied, entries, blocked } = await saveEchoed(ctx, doc);
