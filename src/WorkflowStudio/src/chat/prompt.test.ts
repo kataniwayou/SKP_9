@@ -24,6 +24,15 @@ describe('systemPrompt', () => {
     expect(TOOLS.map((t) => t.function.name).filter((n) => /wand|draw/i.test(n))).toEqual([]);
   });
 
+  it('frames drawing rule 1 as governing tidying, not as a ban on building', () => {
+    expect(prompt).toMatch(/rule 1 governs tidying/i);
+    expect(prompt).toMatch(/adding the steps, wires and caches the user asked for is not tidying/i);
+  });
+
+  it('says a pasted cache keeps its root and needs a new one before Save', () => {
+    expect(prompt).toMatch(/pasted cache keeps the same root[^\n]*new root[^\n]*before Save/i);
+  });
+
   it('teaches the working method', () => {
     expect(prompt).toMatch(/read_design/);
     expect(prompt).toMatch(/move_blocks/);

@@ -11,7 +11,7 @@ import { createChatStore, type ChatState } from './chatStore';
 import type { ChatWire } from './kimi';
 import { runTool } from './runTool';
 import type { ToolContext } from './toolTypes';
-import { MAX_ROUNDS, useChat } from './useChat';
+import { CANCELLED_NOTE, MAX_ROUNDS, useChat } from './useChat';
 
 const ok = <T,>(value: T) => ({ ok: true, value }) as const;
 const ev = (o: unknown) => `data: ${JSON.stringify(o)}\n\n`;
@@ -109,6 +109,26 @@ describe('useChat', () => {
     await t.idle();
     expect(t.state().entries.at(-1)).toMatchObject({ kind: 'note', text: expect.stringMatching(/cancelled/i) });
     expect(t.hook.result.current.status).toBeNull();
+  });
+
+  it('the cancelled note promises Undo for drawing changes only: field edits are reversed by Revert entity or Discard design', () => {
+    expect(CANCELLED_NOTE).toMatch(/Undo reverses drawing changes/);
+    expect(CANCELLED_NOTE).toMatch(/Revert entity or Discard design/);
+  });
+
+  it('New chat while a request runs: a message sent at once, before the old run has unwound, starts its own request', async () => {
+    const t = await setup('hang', [delta({ content: 'fresh answer' })]);
+    act(() => t.hook.result.current.send('think hard'));
+    await waitFor(() => expect(t.hook.result.current.status?.activity).toBe('thinking'));
+    act(() => {
+      t.hook.result.current.newChat();
+      t.hook.result.current.send('start over');
+    });
+    await waitFor(() => expect(t.state().entries.at(-1)).toEqual({ kind: 'model', text: 'fresh answer' }));
+    await t.idle();
+    expect(t.state().entries).toEqual([{ kind: 'user', text: 'start over' }, { kind: 'model', text: 'fresh answer' }]);
+    expect(t.bodies).toHaveLength(2);
+    expect(t.bodies[1]!.messages.map((m) => m.role)).toEqual(['system', 'user']);
   });
 
   it('a destructive call waits for the user; Yes runs it once, then the rest and the next round', async () => {

@@ -11,7 +11,8 @@ import type { ToolContext } from './toolTypes';
 /** A user request may take this many rounds with the model; then the loop is ended with a note (spec: a runaway loop). */
 export const MAX_ROUNDS = 40;
 export const ANSWER_FIRST = 'Answer the question first';
-export const CANCELLED_NOTE = 'Cancelled: what was already done stays (Undo reverses it)';
+// what Undo reaches is the drawing only (2026-10-23): field edits and assignments are reversed by Revert entity / Discard design
+export const CANCELLED_NOTE = 'Cancelled: what was already done stays (Undo reverses drawing changes; Revert entity or Discard design reverses field edits)';
 const LOST_CALL = 'The question\'s tool call was lost; nothing was done';
 const NOT_RUN_STOPPED = 'not run: the user stopped the request';
 const NOT_RUN_LOST = 'not run: the request was lost (stopped or refreshed) before this call ran';
@@ -129,6 +130,8 @@ class ChatRunner {
   newChat(): void {
     this.generation++;
     this.ctl?.abort();
+    // the old run unwinds later; a message sent meanwhile must start a run of its own, not be taken as "busy"
+    this.ctl = null;
     this.chat.dispatch({ type: 'newChat' });
   }
 
