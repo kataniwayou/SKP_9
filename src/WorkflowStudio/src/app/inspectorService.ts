@@ -29,7 +29,7 @@ export interface InspectorService {
 }
 
 /** A base for what the database does not hold yet (spec §3.2): a created assignment, an empty slot's schema. */
-export function madeUp(doc: OpenDocument, target: InspectorTarget): EntityReadDto | null {
+function madeUp(doc: OpenDocument, target: InspectorTarget): EntityReadDto | null {
   // a new workflow (2026-10-10) BaseApi does not have yet: its own graph is all there is to read
   if (target.kind === 'workflow' && doc.virtual && doc.status.kind === 'ready') {
     const w = doc.status.doc.graph.workflow;
@@ -59,14 +59,14 @@ export function madeUp(doc: OpenDocument, target: InspectorTarget): EntityReadDt
 }
 
 /** A pasted step's own assignment (2026-10-10), when the target is one: a new row that exists only in the design. */
-export function pastedAssignment(doc: OpenDocument, target: InspectorTarget): NewAssignment | null {
+function pastedAssignment(doc: OpenDocument, target: InspectorTarget): NewAssignment | null {
   if (target.kind !== 'assignment') return null;
   const a = doc.design.draft.blocks.steps[target.stepId]?.assignment;
   return a && a.id === target.id ? a : null;
 }
 
 /** A pasted assignment's base: the fields it was copied with over its original's read (when it copies a real row). */
-export function pastedDto(a: NewAssignment, stepId: Id, original: EntityReadDto | null): EntityReadDto {
+function pastedDto(a: NewAssignment, stepId: Id, original: EntityReadDto | null): EntityReadDto {
   const f = a.fields;
   const text = (k: string, was: string) => (typeof f[k] === 'string' ? (f[k] as string) : was);
   const o = (original ?? {}) as Partial<AssignmentReadDto>;
@@ -75,6 +75,28 @@ export function pastedDto(a: NewAssignment, stepId: Id, original: EntityReadDto 
     description: Object.hasOwn(f, 'description') ? (f.description === null ? null : String(f.description)) : (o.description ?? null),
     payload: text('payload', o.payload ?? '{}'),
   } as AssignmentReadDto;
+}
+
+/** What the Inspector's read of an entity comes to: its base DTO, or the message it shows instead. */
+export type BaseDto = { ok: true; dto: EntityReadDto } | { ok: false; message: string };
+
+/**
+ * The base of one entity as the Inspector reads it: what the design made up, a pasted assignment over its original's
+ * row, else BaseApi's row (2026-10-23: one path for the Inspector and the chat's read_entity).
+ */
+export async function baseDtoOf(api: StudioApi, doc: OpenDocument, target: InspectorTarget): Promise<BaseDto> {
+  const virtual = madeUp(doc, target);
+  if (virtual !== null) return { ok: true, dto: virtual };
+  const pasted = pastedAssignment(doc, target);
+  if (pasted !== null && target.kind === 'assignment') {
+    // its name, version and description are its original's until Save: read from that row when it is a real one
+    if (pasted.copyOf === null) return { ok: true, dto: pastedDto(pasted, target.stepId, null) };
+    const r = await api.getEntity('assignment', pasted.copyOf);
+    return { ok: true, dto: pastedDto(pasted, target.stepId, r.ok ? r.value : null) };
+  }
+  const r = await api.getEntity(target.kind, target.id);
+  return r.ok ? { ok: true, dto: r.value }
+    : { ok: false, message: r.error.kind === 'notFound' ? `This ${crumbLabel(target).toLowerCase()} no longer exists.` : `Could not read it. ${describeError(r.error)}` };
 }
 
 export function createInspectorService(api: StudioApi, store: StudioStore): InspectorService {
@@ -92,33 +114,10 @@ export function createInspectorService(api: StudioApi, store: StudioStore): Insp
     const current = doc.inspector.saved?.key === key && (doc.inspector.saved.gen ?? gen) >= gen;
     const reads = `${gen}|${key}`;
     if (!again && (current || reading.get(workflowId) === reads)) return;
-    const virtual = madeUp(doc, target);
-    if (virtual !== null) {
-      store.dispatch({ type: 'read', workflowId, key, gen, result: { ok: true, dto: virtual } });
-      return;
-    }
-    const pasted = pastedAssignment(doc, target);
-    if (pasted !== null && target.kind === 'assignment') {
-      // its name, version and description are its original's until Save: read from that row when it is a real one
-      if (pasted.copyOf === null) {
-        store.dispatch({ type: 'read', workflowId, key, gen, result: { ok: true, dto: pastedDto(pasted, target.stepId, null) } });
-        return;
-      }
-      reading.set(workflowId, reads);
-      void api.getEntity('assignment', pasted.copyOf).then((r) => {
-        if (reading.get(workflowId) === reads) reading.delete(workflowId);
-        store.dispatch({ type: 'read', workflowId, key, gen, result: { ok: true, dto: pastedDto(pasted, target.stepId, r.ok ? r.value : null) } });
-      });
-      return;
-    }
     reading.set(workflowId, reads);
-    void api.getEntity(target.kind, target.id).then((r) => {
+    void baseDtoOf(api, doc, target).then((result) => {
       if (reading.get(workflowId) === reads) reading.delete(workflowId);
-      store.dispatch({
-        type: 'read', workflowId, key, gen,
-        result: r.ok ? { ok: true, dto: r.value }
-          : { ok: false, message: r.error.kind === 'notFound' ? `This ${crumbLabel(target).toLowerCase()} no longer exists.` : `Could not read it. ${describeError(r.error)}` },
-      });
+      store.dispatch({ type: 'read', workflowId, key, gen, result });
     });
   }
 

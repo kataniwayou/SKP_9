@@ -1,9 +1,9 @@
 import type { ApiResult } from '../../api/client';
 import { describeError } from '../../api/describeError';
-import type { EntityKind, EntityReadDto } from '../../api/entities';
+import type { EntityReadDto } from '../../api/entities';
 import { graphOf } from '../../ai/drawing';
 import type { StudioDocument } from '../../app/document';
-import { madeUp, pastedAssignment, pastedDto } from '../../app/inspectorService';
+import { baseDtoOf } from '../../app/inspectorService';
 import { applyEdits } from '../../design/apply';
 import { applyBlocks } from '../../design/blocks';
 import { fieldsOf, hasEdit, slotKey, valueText } from '../../design/design';
@@ -14,7 +14,7 @@ import type { Graph } from '../../model/graph';
 import { FIELDS, savedText } from '../../store/entityForms';
 import { inspectorBaseOf } from '../../store/inspectorBase';
 import { editTargetOf, type InspectorTarget, type SchemaSlot } from '../../store/inspectorTarget';
-import { entityLabel, problemsOf, shownDesignOf } from '../../store/problems';
+import { entityLabel, problemsFrom, shownDesignOf } from '../../store/problems';
 import { activeDocument, type OpenDocument } from '../../store/studioState';
 import { findCache, findStep, findWorkflow, type Found } from '../resolve';
 import type { ToolContext, ToolDef, ToolOutcome } from '../toolTypes';
@@ -49,7 +49,9 @@ async function workflowOf(ctx: ToolContext, ref: string | undefined): Promise<Fo
     return active ? { ok: true, value: { id: active.workflowId, doc: active } } : { ok: false, error: 'no workflow is open' };
   }
   const list = await ctx.api.listWorkflows();
+  // an open document is found without the list; otherwise "no workflow named X" would blame the name for a failed list
   const found = findWorkflow(list.ok ? list.value : [], state.docs, ref);
+  if (!found.ok && !list.ok && !found.ambiguous) return { ok: false, error: `could not read the list of workflows. ${describeError(list.error)}` };
   if (!found.ok) return found;
   return { ok: true, value: { id: found.value, doc: state.docs.find((d) => d.workflowId === found.value) ?? null } };
 }
@@ -140,7 +142,7 @@ const readDesign: ToolDef = {
         entryCondition: conditionInfo(s.entryCondition).name, assignmentId: graph.assignments.find((a) => a.stepId === s.id)?.id ?? null, next: s.nextStepIds,
       };
     });
-    const problems = problemsOf(doc).map((e) => ({ entity: entityLabel(e, (shown ?? edited).graph, shown, loaded.graph), kind: e.kind, field: e.field, message: e.message }));
+    const problems = problemsFrom(doc, shown).map((e) => ({ entity: entityLabel(e, (shown ?? edited).graph, shown, loaded.graph), kind: e.kind, field: e.field, message: e.message }));
     return json({ workflow: { id: doc.workflowId, name: graph.workflow.name, version: graph.workflow.version }, steps, ...graphOf(edited, draft), problems }, `read design of ${doc.name}`);
   },
 };
@@ -177,7 +179,7 @@ async function inspectorTargetOf(ctx: ToolContext, doc: OpenDocument, t: Target,
     // this workflow's caches (the design's included) first, else any cache BaseApi lists
     const here = findCache([...shown.caches.values()], t.cache);
     if (here.ok) return { ok: true, value: { kind: 'cache', id: here.value.id } };
-    if (here.error.includes(' are named ')) return here;
+    if (here.ambiguous) return here;
     const all = ctx.api.listCaches ? await ctx.api.listCaches() : null;
     const any = all?.ok ? findCache(all.value, t.cache) : here;
     return any.ok ? { ok: true, value: { kind: 'cache', id: any.value.id! } } : any;
@@ -200,19 +202,8 @@ async function inspectorTargetOf(ctx: ToolContext, doc: OpenDocument, t: Target,
 async function baseOf(ctx: ToolContext, doc: OpenDocument, base: Graph, target: InspectorTarget): Promise<Found<EntityReadDto>> {
   const fromGraph = inspectorBaseOf(base, target, null);
   if (fromGraph !== null) return { ok: true, value: fromGraph };
-  const made = madeUp(doc, target);
-  if (made !== null) return { ok: true, value: inspectorBaseOf(base, target, made) ?? made };
-  const pasted = pastedAssignment(doc, target);
-  if (pasted !== null && target.kind === 'assignment') {
-    // its name, version and description are its original's until Save, when it copies a real row
-    if (pasted.copyOf === null) return { ok: true, value: pastedDto(pasted, target.stepId, null) };
-    const original = await ctx.api.getEntity('assignment', pasted.copyOf);
-    return { ok: true, value: pastedDto(pasted, target.stepId, original.ok ? original.value : null) };
-  }
-  const kind: EntityKind = target.kind;
-  const r = await ctx.api.getEntity(kind, target.id);
-  if (!r.ok) return { ok: false, error: r.error.kind === 'notFound' ? `this ${kind} no longer exists` : `could not read it. ${describeError(r.error)}` };
-  return { ok: true, value: inspectorBaseOf(base, target, r.value) ?? r.value };
+  const r = await baseDtoOf(ctx.api, doc, target);
+  return r.ok ? { ok: true, value: inspectorBaseOf(base, target, r.dto) ?? r.dto } : { ok: false, error: r.message };
 }
 
 const readEntity: ToolDef = {

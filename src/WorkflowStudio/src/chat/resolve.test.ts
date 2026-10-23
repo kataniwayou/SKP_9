@@ -25,7 +25,7 @@ describe('findStep', () => {
 
   it('lists every step of one name with id and version, and says to ask the user', async () => {
     const { doc } = await open([stepDto('s1', { name: 'fetch' }), stepDto('s2', { name: 'fetch', version: '2.0.0' })]);
-    expect(findStep(doc(), 'fetch')).toEqual({ ok: false, error: '2 steps are named fetch: fetch (id s1, version 1.0.0), fetch (id s2, version 2.0.0); ask the user which one' });
+    expect(findStep(doc(), 'fetch')).toEqual({ ok: false, ambiguous: true, error: '2 steps are named fetch: fetch (id s1, version 1.0.0), fetch (id s2, version 2.0.0); ask the user which one' });
   });
 
   it('says which workflow lacks the step', async () => {
@@ -53,7 +53,7 @@ describe('findWorkflow', () => {
   it('takes a name, an id, and asks when a name has several versions', () => {
     expect(findWorkflow(list, [], 'solo')).toEqual({ ok: true, value: 'c' });
     expect(findWorkflow(list, [], 'b')).toEqual({ ok: true, value: 'b' });
-    expect(findWorkflow(list, [], 'feed')).toEqual({ ok: false, error: '2 workflows are named feed: feed (id a, version 1.0.0), feed (id b, version 2.0.0); ask the user which one' });
+    expect(findWorkflow(list, [], 'feed')).toEqual({ ok: false, ambiguous: true, error: '2 workflows are named feed: feed (id a, version 1.0.0), feed (id b, version 2.0.0); ask the user which one' });
   });
 
   it('finds a new workflow only the open documents know', async () => {

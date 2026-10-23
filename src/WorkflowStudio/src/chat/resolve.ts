@@ -5,7 +5,8 @@ import type { Id } from '../model/graph';
 import type { OpenDocument } from '../store/studioState';
 
 /** The answer of a name lookup: the thing, or what to tell the model (and so the user) instead. */
-export type Found<T> = { ok: true; value: T } | { ok: false; error: string };
+/** `ambiguous`: several matched the name (the error lists them); a caller that must ask the user checks it, never the message. */
+export type Found<T> = { ok: true; value: T } | { ok: false; error: string; ambiguous?: true };
 
 /** What every named entity has; the DTOs' fields are optional on the wire. */
 interface Named { id?: string; name?: string | null; version?: string | null }
@@ -27,7 +28,7 @@ function pick<T extends Named>(items: readonly T[], ref: string, noun: string, w
   if (found.length === 1) return { ok: true, value: found[0]! };
   if (found.length === 0) return { ok: false, error: `no ${noun} named ${text}${where}` };
   const each = found.map((x) => `${x.name ?? ''} (id ${x.id ?? '?'}${x.version ? `, version ${x.version}` : ''})`).join(', ');
-  return { ok: false, error: `${found.length} ${noun}s are named ${text}: ${each}; ask the user which one` };
+  return { ok: false, ambiguous: true, error: `${found.length} ${noun}s are named ${text}: ${each}; ask the user which one` };
 }
 
 /** The steps of the design as shown: the Inspector's and the canvas's, so a step deleted in the draft is gone. */
@@ -71,5 +72,5 @@ export function findWire(doc: OpenDocument, ref: string): Found<string> {
   const found = shown.wires.filter((w) => w.source !== null && w.target !== null && tails.has(w.source) && heads.has(w.target));
   if (found.length === 1) return { ok: true, value: found[0]!.id };
   if (found.length === 0) return { ok: false, error: `no wire from ${parts[0]} to ${parts[1]} in ${doc.name}` };
-  return { ok: false, error: `${found.length} wires run from ${parts[0]} to ${parts[1]}: ${found.map((w) => w.id).join(', ')}; ask the user which one` };
+  return { ok: false, ambiguous: true, error: `${found.length} wires run from ${parts[0]} to ${parts[1]}: ${found.map((w) => w.id).join(', ')}; ask the user which one` };
 }

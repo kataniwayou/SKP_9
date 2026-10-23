@@ -3,6 +3,7 @@ import type { StudioApi } from '../../api/client';
 import { assignmentDto, cacheDto, graphDto, processorDto, schemaDto, stepDto, workflowDto } from '../../api/fixtures';
 import { loadedDocument } from '../../app/fixtures';
 import { createInspectorService } from '../../app/inspectorService';
+import { newWorkflowDocument } from '../../app/newWorkflow';
 import { createStudioStore } from '../../store/studioStore';
 import { DESTRUCTIVE, TOOL_DEFS, TOOLS } from '../tools';
 import type { ToolContext, ToolDef } from '../toolTypes';
@@ -40,7 +41,7 @@ async function setup() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return { ok: out.ok, data: (out.ok ? JSON.parse(out.result) : out.result) as any };
   };
-  return { store, ctx, run };
+  return { store, ctx, run, api };
 }
 
 describe('the reading tools', () => {
@@ -108,5 +109,32 @@ describe('the reading tools', () => {
     const { run, store } = await setup();
     store.dispatch({ type: 'log', workflowId: 'wf1', lines: [1, 2, 3].map((i) => ({ at: `2026-10-23T10:0${i}:00Z`, text: `line ${i}` })) });
     expect((await run('read_output', { last: 2 })).data.map((l: { text: string }) => l.text)).toEqual(['line 2', 'line 3']);
+  });
+
+  it('read_entity reads the assignment of a pasted step over its original row, as the Inspector does', async () => {
+    const { run, store, api } = await setup();
+    store.dispatch({ type: 'pick', workflowId: 'wf1', picks: [{ kind: 'node', id: 's1' }] });
+    store.dispatch({ type: 'copy', workflowId: 'wf1' });
+    let n = 0;
+    store.dispatch({ type: 'paste', workflowId: 'wf1', newId: () => `new${++n}` });
+    const pastedId = Object.keys(store.getState().docs[0]!.design.draft.blocks.steps)[0]!;
+    const r = await run('read_entity', { target: { kind: 'assignment', step: pastedId } });
+    expect(r.ok).toBe(true);
+    expect(r.data).toMatchObject({ kind: 'assignment', fields: { payload: '{"k":1}' } });
+    expect(api.getEntity).toHaveBeenCalledWith('assignment', 'a1');
+  });
+
+  it('read_entity reads a new, unsaved workflow from its own graph, with no GET', async () => {
+    const { run, store, api } = await setup();
+    store.dispatch({ type: 'new', workflowId: 'wfN', doc: await newWorkflowDocument('wfN', 'untitled') });
+    const r = await run('read_entity', { target: { kind: 'workflow' } });
+    expect(r.data).toMatchObject({ kind: 'workflow', id: 'wfN', fields: { name: 'untitled', version: '1.0.0' } });
+    expect(api.getEntity).not.toHaveBeenCalled();
+  });
+
+  it('read_entity on a workflow name says the list could not be read when it could not', async () => {
+    const { run, ctx } = await setup();
+    ctx.api.listWorkflows = async () => ({ ok: false, error: { kind: 'network', message: 'down' } });
+    expect((await run('read_entity', { workflow: 'other', target: { kind: 'workflow' } })).data).toMatch(/^could not read the list of workflows/);
   });
 });
