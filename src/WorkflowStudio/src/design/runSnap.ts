@@ -1,7 +1,7 @@
 import type { StudioDocument } from '../app/document';
-import { PMID, STEP_W } from '../layout/geometry';
+import { PMID, STEP_H, STEP_W } from '../layout/geometry';
 import { blockBoxes } from '../layout/wires';
-import { equalGapMarks, equalGapMoves, guideBoxes, type GapMark, type GuideBox } from './guides';
+import { chainGapMarks, chainGapMoves, equalGapMarks, equalGapMoves, guideBoxes, type GapMark, type GuideBox } from './guides';
 
 /**
  * An alignment guide a dragged run or end snapped to: the line at `v` across `axis` (x: a vertical line), drawn as a
@@ -77,7 +77,12 @@ const runBox = (v: number, lo: number, hi: number, axis: 'x' | 'y'): GuideBox =>
 
 /** What a run keeps equal gaps to (the user's, 2026-10-23): every block, and every run of the other wires parallel to it. */
 function spacers(shown: StudioDocument, axis: 'x' | 'y', own: string): GuideBox[] {
-  const out = guideBoxes(shown);
+  return [...guideBoxes(shown), ...parallels(shown, axis, own)];
+}
+
+/** Every run of the other wires parallel to `axis`'s runs, as boxes of no width: what a run is spaced among along a chain. */
+function parallels(shown: StudioDocument, axis: 'x' | 'y', own: string): GuideBox[] {
+  const out: GuideBox[] = [];
   const i = axis === 'x' ? 0 : 1;
   for (const w of shown.wires) {
     if (w.id === own) continue;
@@ -106,7 +111,9 @@ export function spaceRuns(v: number, lo: number, hi: number, axis: 'x' | 'y', sh
   const before = Math.max(...row.map((b) => at(b) + len(b)).filter((e) => e <= v));
   const after = Math.min(...row.map(at).filter((s) => s >= v));
   const mid = Number.isFinite(before) && Number.isFinite(after) && after > before ? (before + after) / 2 : null;
-  const cands = [...equalGapMoves(m, all, reach, axis).map((d) => v + d), ...(mid !== null && Math.abs(mid - v) <= reach ? [mid] : [])];
+  // and along a chain of parallel wires, in a row or not (three parallel wires or more, the user's 2026-10-23)
+  const chain = chainGapMoves(m, parallels(shown, axis, own), reach, axis);
+  const cands = [...equalGapMoves(m, all, reach, axis), ...chain].map((d) => v + d).concat(mid !== null && Math.abs(mid - v) <= reach ? [mid] : []);
   return [...new Set(cands.map((c) => Math.round(c * 1e6) / 1e6))].sort((a, b) => Math.abs(a - v) - Math.abs(b - v));
 }
 
@@ -116,7 +123,9 @@ export const spaceRun = (v: number, lo: number, hi: number, axis: 'x' | 'y', sho
 
 /** The equal-gap marks for a run at `v` (as `spaceRun`): every neighbouring pair in its row whose gap equals one of the run's own. */
 export function runGapMarks(v: number, lo: number, hi: number, axis: 'x' | 'y', shown: StudioDocument, own: string): GapMark[] {
-  return equalGapMarks(runBox(v, lo, hi, axis), spacers(shown, axis, own), axis);
+  const m = runBox(v, lo, hi, axis);
+  const marks = [...equalGapMarks(m, spacers(shown, axis, own), axis), ...chainGapMarks(m, parallels(shown, axis, own), axis)];
+  return marks.filter((g, i) => marks.findIndex((h) => h.axis === g.axis && h.from === g.from && h.to === g.to) === i);
 }
 
 /** A place a dragged run or end may snap to: an alignment, or an equal gap (`spaced`). */
@@ -133,17 +142,51 @@ export function ranked(v: number, aligned: readonly number[], spaced: readonly n
 }
 
 /**
+ * The landing points of the other wires on step `step`'s `side` (the user's, 2026-10-23: an end placed on a side is
+ * spaced evenly among them): each end of theirs drawn there, once per height, as a box of no size; on the input side
+ * set out to its left, so its gap marks are drawn off the step.
+ */
+export function landingBoxes(shown: StudioDocument, own: string, step: string, side: 'in' | 'out'): GuideBox[] {
+  const at = shown.placement.steps.get(step);
+  if (!at) return [];
+  const sx = side === 'in' ? at.x : at.x + STEP_W;
+  const ys = new Set<number>();
+  for (const w of shown.wires) {
+    if (w.id === own || w.points.length === 0) continue;
+    for (const [x, y] of [w.points[0]!, w.points[w.points.length - 1]!]) if (x === sx && y! >= at.y && y! <= at.y + STEP_H) ys.add(y!);
+  }
+  return [...ys].map((y) => ({ id: '', x: side === 'in' ? sx - 48 : sx, y, w: 0, h: 0 }));
+}
+
+/** A landing point at height `v` among `boxes` (`landingBoxes`), as a box of no size beside them. */
+const pointAmong = (v: number, boxes: readonly GuideBox[]): GuideBox => ({ id: '', x: boxes[0]?.x ?? 0, y: v, w: 0, h: 0 });
+
+/** The heights within `reach` that space a landing at `v` evenly among `boxes`, along a chain or in the middle; nearest first. */
+export function spaceLanding(v: number, boxes: readonly GuideBox[], reach: number): number[] {
+  const out = [...new Set(chainGapMoves(pointAmong(v, boxes), boxes, reach, 'y').map((d) => Math.round((v + d) * 1e6) / 1e6))];
+  return out.sort((a, b) => Math.abs(a - v) - Math.abs(b - v));
+}
+
+/** The equal-gap marks of a landing at `v` among `boxes`. */
+export const landingMarks = (v: number, boxes: readonly GuideBox[]): GapMark[] => chainGapMarks(pointAmong(v, boxes), boxes, 'y');
+
+/**
  * The snap a dragged run takes (the user's, 2026-10-23): the nearest candidate whose shape (`shapeOf`) still lies on its
  * line (`holds`: a run pushed off a block side it would lie along does not) and is no short circuit (`shorts`); the next
  * when it is not, so a tie with a line it may not take never hides one it may. But a candidate the pointer is on
  * (`on`, within half a grid step of it) that does not hold is where the run goes as dragged: it is not pulled off a line
- * it was put on (a short circuit shows as one). None holds: the drag as without a snap (`raw`), with no guide.
+ * it was put on (a short circuit shows as one). None holds: the drag as without a snap (`raw`), with no guide but
+ * `near`: the nearest line it may not take only for a short circuit (another colour's wire it would lie on), whose guide
+ * still shows, regardless of colour (the user's, 2026-10-23).
  */
-export function pickSnap<T>(cands: readonly Candidate[], shapeOf: (at: number) => T, holds: (s: T, at: number) => boolean, shorts: (s: T) => boolean, raw: () => T, on: (at: number) => boolean = () => false): { shape: T; at: number | null; spaced: boolean } {
+export function pickSnap<T>(cands: readonly Candidate[], shapeOf: (at: number) => T, holds: (s: T, at: number) => boolean, shorts: (s: T) => boolean, raw: () => T, on: (at: number) => boolean = () => false): { shape: T; at: number | null; spaced: boolean; near: number | null } {
+  let near: number | null = null;
   for (const c of cands) {
     const s = shapeOf(c.at);
-    if (holds(s, c.at) && !shorts(s)) return { shape: s, at: c.at, spaced: c.spaced };
+    const held = holds(s, c.at);
+    if (held && !shorts(s)) return { shape: s, at: c.at, spaced: c.spaced, near: null };
+    if (held && !c.spaced && near === null) near = c.at;
     if (on(c.at)) break;
   }
-  return { shape: raw(), at: null, spaced: false };
+  return { shape: raw(), at: null, spaced: false, near };
 }

@@ -171,8 +171,9 @@ test('rule 5: a head on a step\'s right side and a tail on its left side are ref
   expect((await pointsOf(panel, ab)).at(-1)).toEqual([b.x, b.y + 120]);
   expect(await dragEnd(page, panel, ab, 'head', await onSide(panel, t.b, 'in', 0.15))).toBe('connect here');
   expect((await pointsOf(panel, ab)).at(-1)).toEqual([b.x, b.y + 24]);
+  // 0.45 down (72) is 8 px from b's centre: a contact lines up too (the user's, 2026-10-23), so it lands on the centre
   expect(await dragEnd(page, panel, bc, 'tail', await onSide(panel, t.b, 'out', 0.45))).toBe('connect here');
-  expect((await pointsOf(panel, bc))[0]).toEqual([b.x + b.w, b.y + 72]);
+  expect((await pointsOf(panel, bc))[0]).toEqual([b.x + b.w, b.y + 80]);
 });
 
 test('rule 6: a head over the hub is refused: "only a tail on the workflow"', async ({ page }) => {
@@ -861,15 +862,18 @@ test('rule C: the corners drawn are kept when the end connects; only the last le
   await frames(page);
   expect(await labelsOf(panel)).toEqual(['connect here']);
   await page.mouse.up();
-  await expect.poll(async () => (await pointsOf(panel, id)).at(-1)).toEqual([b.x, b.y + 128]);
+  // on b's input, at the height drawn or on a guide within 12 screen px of it (a contact lines up, the user's 2026-10-23)
+  await expect.poll(async () => (await pointsOf(panel, id)).at(-1)![0]).toBe(b.x);
   const p = await pointsOf(panel, id);
+  const landed = p.at(-1)![1]!;
+  expect(Math.abs(landed - (b.y + 128))).toBeLessThanOrEqual(12 / (await zoomOf(panel)));
   const close = (a: [number, number] | undefined, q: [number, number]) => expect(Math.hypot(a![0] - q[0], a![1] - q[1])).toBeLessThanOrEqual(8);
   expect(p[0]).toEqual(before[0]);
   close(p[1], [hx, hy]);
   close(p[2], [hx, b.y + 176]);
   // the last upright keeps its heights; the router squares it into the contact a lead of up to 16 px nearer b
   close(p[3], [p[3]![0], b.y + 176]);
-  close(p[4], [p[3]![0], b.y + 128]);
+  close(p[4], [p[3]![0], landed]);
   expect(Math.abs(p[3]![0] - (b.x - 32))).toBeLessThanOrEqual(16);
   expect(p).toHaveLength(6);
   // connected to b: in b's colour, solid

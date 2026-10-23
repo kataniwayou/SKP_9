@@ -69,16 +69,17 @@ const apart = (a0: number, a1: number, b0: number, b1: number) => Math.max(0, b0
 export function snapToGuides(moving: GuideBox, others: readonly GuideBox[], reach: number): { dx: number; dy: number; x: number; y: number; hit: { x: boolean; y: boolean } } & Guides {
   // per axis the smaller move wins between an alignment and an equal gap (plan 10 §8); y first, so x's equal gap is
   // looked for in the row the block lands in (tidy-up 2026-10-22)
-  const ay = smaller(best(ysOf, moving, others, reach), gapSnap(moving, others, reach, Y));
+  const ay = smaller(best(ysOf, moving, others, reach), smaller(gapSnap(moving, others, reach, Y), nearestOf(chainMoves(moving, others, reach, Y))));
   const level = ay === null ? moving : { ...moving, y: moving.y + ay, ...(moving.mid !== undefined ? { mid: moving.mid + ay } : {}) };
-  const ax = smaller(best(xsOf, level, others, reach), gapSnap(level, others, reach, X));
+  const ax = smaller(best(xsOf, level, others, reach), smaller(gapSnap(level, others, reach, X), nearestOf(chainMoves(level, others, reach, X))));
   const dx = ax ?? 0, dy = ay ?? 0;
   // where it lands, exactly: an offset added back to an unrounded position leaves float noise (432.00000000000006),
   // which would miss the exact matches that draw the lines and marks, and turn a drag back to the start into a step;
   // an axis no guide caught lands on the grid (the caller rounds it so), and the lines and marks are measured there
   const x = ax === null ? snap(moving.x) : exact(moving.x + dx), y = ay === null ? snap(moving.y) : exact(moving.y + dy);
   const m: GuideBox = { ...moving, x, y, ...(moving.mid !== undefined ? { mid: exact(moving.mid + (y - moving.y)) } : {}) };
-  return { dx, dy, x, y, hit: { x: ax !== null, y: ay !== null }, lines: linesOf(m, others), gaps: [...gapMarks(m, others, X), ...gapMarks(m, others, Y)] };
+  const gaps = onceEach([...gapMarks(m, others, X), ...chainMarks(m, others, X), ...gapMarks(m, others, Y), ...chainMarks(m, others, Y)]);
+  return { dx, dy, x, y, hit: { x: ax !== null, y: ay !== null }, lines: linesOf(m, others), gaps };
 }
 
 /** A coordinate rid of float noise (to a millionth of a px): guides land on whole numbers when their references do. */
@@ -129,24 +130,90 @@ function pairsOf(row: readonly GuideBox[], a: Axis): { p: GuideBox; q: GuideBox;
  */
 function gapSnap(m: GuideBox, others: readonly GuideBox[], reach: number, a: Axis): number | null {
   // ties to the earlier found
-  return gapMoves(m, others, reach, a).reduce<number | null>((f, d) => (f === null || Math.abs(d) < Math.abs(f) ? d : f), null);
+  return nearestOf(gapMoves(m, others, reach, a));
 }
 
 /** Every move within `reach` that makes `m`'s gap to its nearest neighbour along `a` equal a gap in its row (as `gapSnap`). */
 function gapMoves(m: GuideBox, others: readonly GuideBox[], reach: number, a: Axis): number[] {
   const row = rowOf(m, others, a);
-  const gaps = pairsOf(row, a).map((x) => x.gap);
+  const pairs = pairsOf(row, a);
   const mid = a.lo(m) + a.len(m) / 2;
   const before = row.filter((o) => a.lo(o) + a.len(o) <= mid).reduce<GuideBox | null>((b, o) => (b === null || a.lo(o) + a.len(o) > a.lo(b) + a.len(b) ? o : b), null);
   const after = row.filter((o) => a.lo(o) >= mid).reduce<GuideBox | null>((b, o) => (b === null || a.lo(o) < a.lo(b) ? o : b), null);
   const out: number[] = [];
   const consider = (d: number) => { if (Math.abs(d) <= reach) out.push(d); };
-  for (const g of gaps) {
-    if (before) consider(g - (a.lo(m) - (a.lo(before) + a.len(before))));
-    if (after) consider(a.lo(after) - g - (a.lo(m) + a.len(m)));
+  // never a gap from the same block: one stacked with `m` beside its neighbour makes that gap again, no equal spacing
+  for (const { p, q, gap: g } of pairs) {
+    if (before && p !== before) consider(g - (a.lo(m) - (a.lo(before) + a.len(before))));
+    if (after && q !== after) consider(a.lo(after) - g - (a.lo(m) + a.len(m)));
   }
   return out;
 }
+
+/** The move nearest 0 of `ds` (the first on a tie); null when there is none. */
+const nearestOf = (ds: readonly number[]): number | null => ds.reduce<number | null>((f, d) => (f === null || Math.abs(d) < Math.abs(f) ? d : f), null);
+
+/** Each gap marked once: two blocks stacked in one column make the same gap at two places across (the first is kept). */
+export const onceEach = (marks: readonly GapMark[]): GapMark[] => marks.filter((g, i) => marks.findIndex((h) => h.axis === g.axis && h.from === g.from && h.to === g.to) === i);
+
+/**
+ * `m`'s nearest neighbour `before` it along `a` (wholly before it, a gap over 0 between), or after it, in any row: equal
+ * spacing needs no shared column or row (the user's, 2026-10-23). Nearest as the boxes lie apart, along and across, so a
+ * block far off to one side is no neighbour of one it is merely level with (the guides sweep, 2026-10-23); on a tie
+ * the one with the smaller gap along.
+ */
+function neighbourOf(m: GuideBox, others: readonly GuideBox[], a: Axis, before: boolean): GuideBox | null {
+  const end = (b: GuideBox) => a.lo(b) + a.len(b);
+  const gap = (o: GuideBox) => (before ? a.lo(m) - end(o) : a.lo(o) - end(m));
+  const across = (o: GuideBox) => apart(a.clo(m), a.clo(m) + a.clen(m), a.clo(o), a.clo(o) + a.clen(o));
+  const dist = (o: GuideBox) => Math.hypot(gap(o), across(o));
+  return others.filter((o) => o !== m && gap(o) > 0).reduce<GuideBox | null>((n, o) => (n === null || dist(o) < dist(n) || (dist(o) === dist(n) && gap(o) < gap(n)) ? o : n), null);
+}
+
+/**
+ * Equal spacing along a chain (the user's, 2026-10-23: three blocks or more, three parallel wires or more, in a column
+ * or not): `m`'s gap to its nearest neighbour on a side equal to that neighbour's gap to its own next one on that side,
+ * or equal gaps to its nearest neighbour on each side. The pairs as they are for `m` where it is.
+ */
+function chainOf(m: GuideBox, others: readonly GuideBox[], a: Axis): { before: [GuideBox, GuideBox] | null; after: [GuideBox, GuideBox] | null; n: GuideBox | null; q: GuideBox | null } {
+  const n = neighbourOf(m, others, a, true), q = neighbourOf(m, others, a, false);
+  const rest = (x: GuideBox) => others.filter((o) => o !== x);
+  const nn = n && neighbourOf(n, rest(n), a, true), qq = q && neighbourOf(q, rest(q), a, false);
+  return { before: n && nn ? [nn, n] : null, after: q && qq ? [q, qq] : null, n, q };
+}
+
+/** Every move within `reach` that spaces `m` evenly along a chain (`chainOf`). */
+function chainMoves(m: GuideBox, others: readonly GuideBox[], reach: number, a: Axis): number[] {
+  const end = (b: GuideBox) => a.lo(b) + a.len(b);
+  const { before, after, n, q } = chainOf(m, others, a);
+  const out: number[] = [];
+  // its gap to n as n's to the one before; to q as q's to the one after; or the middle between n and q
+  if (before) out.push(end(before[1]) + (a.lo(before[1]) - end(before[0])) - a.lo(m));
+  if (after) out.push(a.lo(after[0]) - (a.lo(after[1]) - end(after[0])) - end(m));
+  if (n && q) out.push((end(n) + a.lo(q) - a.len(m)) / 2 - a.lo(m));
+  return out.filter((d) => Math.abs(d) <= reach);
+}
+
+/** At `m`'s final place: the marks of each even chain it is in (`chainOf`). */
+function chainMarks(m: GuideBox, others: readonly GuideBox[], a: Axis): GapMark[] {
+  const end = (b: GuideBox) => a.lo(b) + a.len(b);
+  const { before, after, n, q } = chainOf(m, others, a);
+  const out: GapMark[] = [];
+  const g = (p: GuideBox, r: GuideBox) => a.lo(r) - end(p);
+  if (before && g(before[1], m) === g(before[0], before[1])) out.push(a.mark(before[0], before[1]), a.mark(before[1], m));
+  if (after && g(m, after[0]) === g(after[0], after[1])) out.push(a.mark(m, after[0]), a.mark(after[0], after[1]));
+  if (n && q && g(n, m) === g(m, q)) out.push(a.mark(n, m), a.mark(m, q));
+  return out;
+}
+
+/**
+ * Equal spacing along a chain for any box, a wire's run among them as a box with no width (`others`: what it chains with,
+ * in any row): every move within `reach`, and the marks at `m`'s place.
+ */
+export const chainGapMoves = (m: GuideBox, others: readonly GuideBox[], reach: number, axis: 'x' | 'y'): number[] =>
+  chainMoves(m, others, reach, axis === 'x' ? X : Y);
+export const chainGapMarks = (m: GuideBox, others: readonly GuideBox[], axis: 'x' | 'y'): GapMark[] =>
+  onceEach(chainMarks(m, others, axis === 'x' ? X : Y));
 
 /**
  * Equal gaps along `axis` for any box, a wire's run among them as a box with no width (the user's, 2026-10-23): every move
@@ -162,13 +229,12 @@ export const equalGapMarks = (m: GuideBox, others: readonly GuideBox[], axis: 'x
 function gapMarks(m: GuideBox, others: readonly GuideBox[], a: Axis): GapMark[] {
   const pairs = pairsOf([...rowOf(m, others, a), m].sort((p, q) => a.lo(p) - a.lo(q)), a);
   const own = pairs.filter((x) => x.p === m || x.q === m);
-  // a gap equals another pair's, never one on the same side of `m`: two blocks stacked beside it, their sides on one
-  // line, make the same gap twice (the wire guides sweep, 2026-10-23)
-  const sameSide = (x: { p: GuideBox; q: GuideBox }, o: { p: GuideBox; q: GuideBox }) => (x.p === m && o.p === m) || (x.q === m && o.q === m);
-  const equal = own.filter((o) => pairs.some((x) => x !== o && x.gap === o.gap && !sameSide(x, o))).map((o) => o.gap);
+  // a gap equals another pair's, never one from or to the same block: two blocks stacked in one column beside a third
+  // make the same gap twice (the guides sweeps, 2026-10-23), whether `m` is one of the two or the third
+  const shared = (x: { p: GuideBox; q: GuideBox }, o: { p: GuideBox; q: GuideBox }) => x.p === o.p || x.q === o.q;
+  const equal = own.filter((o) => pairs.some((x) => x !== o && x.gap === o.gap && !shared(x, o))).map((o) => o.gap);
   // each mark once: runs lying on one line (a trunk) make the same pair more than once
-  const marks = pairs.filter((x) => equal.includes(x.gap)).map((x) => a.mark(x.p, x.q));
-  return marks.filter((g, i) => marks.findIndex((h) => h.from === g.from && h.to === g.to && h.at === g.at) === i);
+  return onceEach(pairs.filter((x) => equal.includes(x.gap)).map((x) => a.mark(x.p, x.q)));
 }
 
 /** One line per coordinate of `m` that some block has exactly, of the same kind, spanning `m` and the nearest such block. */

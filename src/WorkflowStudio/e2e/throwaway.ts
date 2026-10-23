@@ -97,6 +97,7 @@ export async function createCircuitThrowaway(request: APIRequestContext): Promis
 /**
  * The wire guides throwaway (2026-10-23, `e2e-wg-…`): many parallel wires to line up and space. Entry a fans out to
  * b, c and d (Completed) and to e (Failed: another net from the same output); b and c fan in to f; d -> g; one cache.
+ * Its layout is stored: a column of e, b, c, d right of a; f between b and c one column further, g beside d.
  */
 export interface GuidesThrowaway { workflow: LiveWorkflow; tag: string; a: string; b: string; c: string; d: string; e: string; f: string; g: string; cacheId: string }
 
@@ -124,6 +125,15 @@ export async function createGuidesThrowaway(request: APIRequestContext): Promise
   created.workflowId = await post(request, 'workflows', {
     name: tag, version: '1.0.0', description: null, entryStepIds: [a], assignmentIds: [], cacheIds: [created.cacheId], cronExpression: null,
   });
+  // the automatic layout orders b and c (and so f) by their random ids: one layout stored, the same canvas every run
+  const r = await request.put(`/api/v1/workflows/${created.workflowId}/layout`, {
+    data: {
+      sphere: { x: 128, y: 192 },
+      steps: { [a]: { x: 352, y: 96 }, [e]: { x: 704, y: 32 }, [b]: { x: 704, y: 320 }, [c]: { x: 704, y: 608 }, [d]: { x: 704, y: 896 }, [f]: { x: 1056, y: 352 }, [g]: { x: 1056, y: 896 } },
+      caches: { [created.cacheId]: { x: 48, y: 416 } },
+    },
+  });
+  expect(r.status(), `PUT layout: ${await r.text()}`).toBe(200);
   return { workflow: { id: created.workflowId, name: tag, version: '1.0.0', label: label(tag, '1.0.0', created.workflowId) }, tag, a, b, c, d, e, f, g, cacheId: created.cacheId };
 }
 

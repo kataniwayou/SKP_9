@@ -8,7 +8,7 @@ import { selectionForPicks } from '../canvas/selection';
 import { togglePick, type Pick } from '../store/picks';
 import type { Selection } from '../store/selection';
 import { addCircuitWire, freeWithout, NEW_WIRE_PREFIX, openJoinedOn, sameEnd, setBends, setEnd, type Circuit, type End, type Side } from '../circuit/circuit';
-import { endPointOf, hubStart, routeCircuit, type WireRoute } from '../layout/circuitRoute';
+import { contactOn, endPointOf, hubStart, routeCircuit, type WireRoute } from '../layout/circuitRoute';
 import { clearBends, clearDragged, clearRun, legPath } from '../layout/detour';
 import { clampLanding, GRID, PMID, snap, STEP_W, type Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
@@ -26,8 +26,8 @@ import { cutPaths, cutTargets, cutWire, holdDrawn, squareAt, squaresOf, type Squ
 import { applyDrop, DROP_REACH, endOf, LINE_REACH, judgeDrop, pointOfTarget, roleOf, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
 import { overlapJudge } from './overlapJudge';
-import { guideAt, pickSnap, ranked, runGapMarks, snapRun, spaceRuns, type Candidate, type RunGuide } from './runSnap';
-import { SNAP_REACH_PX, type GapMark } from './guides';
+import { guideAt, landingBoxes, landingMarks, pickSnap, ranked, runGapMarks, snapRun, spaceLanding, spaceRuns, type Candidate, type RunGuide } from './runSnap';
+import { onceEach, SNAP_REACH_PX, type GapMark, type GuideBox } from './guides';
 import { mayShare } from '../layout/overlaps';
 import { netsOf } from '../circuit/families';
 import { newId } from './ids';
@@ -248,6 +248,8 @@ export function useWireGestures(
     // the run that slides a step-glued head: its step's processor middle (where the router lands it), not every grid
     // line of the side, which the grid already gives (final review 2026-10-21)
     const landings = step && k === 2 * bends.xs.length ? [step.y + PMID] : [];
+    // the other wires' landings on that side, for the run that slides the head along it
+    const side = step && k === 2 * bends.xs.length && rec.head.on === 'step' ? landingBoxes(shown.current, wire.id, rec.head.step, 'in') : [];
     const reach = SNAP_REACH_PX / getZoom();
     // the other wires as drawn, for the red stretches of a short circuit (the user's rule 2: red where it lies on them)
     const others = new LineIndex();
@@ -280,7 +282,9 @@ export function useWireGestures(
       // the nearest that holds is taken, the run on its line and no short circuit (`pickSnap`), so a tie with a line it
       // may not take never hides one it may
       const v = axis === 'x' ? pointer.x : pointer.y;
-      const cands = ranked(v, snapRun(v, axis, shown.current, wire.id, reach, landings).all, spaceRuns(v, lo, hi, axis, shown.current, wire.id, reach));
+      // the run that slides a head on a step: spaced among the other wires' landings on that side too (the user's, 2026-10-23)
+      const cands = ranked(v, snapRun(v, axis, shown.current, wire.id, reach, landings).all,
+        [...spaceRuns(v, lo, hi, axis, shown.current, wire.id, reach), ...spaceLanding(v, side, reach)]);
       const shortOf = (x: { state: Shaped; core: Pt[] }) => judge(simplify(x.core), () => shapedCircuit(x.state));
       const kept = pickSnap(cands, (at) => shapeAt(axis === 'x' ? { x: at, y: pointer.y } : { x: pointer.x, y: at }, latest),
         (x, at) => lies(x.core, at), shortOf, () => shapeAt(pointer, latest), (at) => Math.abs(at - v) <= GRID / 2);
@@ -288,10 +292,12 @@ export function useWireGestures(
       const core = kept.shape.core;
       const now = latest;
       short = judge(simplify(core), () => shapedCircuit(now));
-      setRunGuides(kept.at === null || kept.spaced ? [] : [guideAt(kept.at, axis, shown.current, wire.id, [lo, hi])]);
+      // the guide of the line it snapped to, or of one it may not take (a short circuit), shown unsnapped
+      const lined = kept.at !== null && !kept.spaced ? kept.at : kept.at === null ? kept.near : null;
+      setRunGuides(lined === null ? [] : [guideAt(lined, axis, shown.current, wire.id, [lo, hi])]);
       // the equal-gap marks wherever the run lands evenly spaced, snapped or not (as a block's), but on a short circuit
       const landed = kept.at ?? snap(v);
-      setRunGaps(!short && lies(core, landed) ? runGapMarks(landed, lo, hi, axis, shown.current, wire.id) : []);
+      setRunGaps(!short && lies(core, landed) ? onceEach([...runGapMarks(landed, lo, hi, axis, shown.current, wire.id), ...landingMarks(landed, side)]) : []);
       setHints(short ? [{ id: null, line: false, tone: 'no', why: 'short', at: pointer }] : []);
       // Visio's: the wire stays put and its new route is drawn dashed; nothing is rerouted until release (plan 10)
       const drawn = routeCircuit(shapedCircuit(now), { placement: shown.current.placement, steps: shown.current.graph.steps }).find((x) => x.id === wire.id);
@@ -320,14 +326,56 @@ export function useWireGestures(
    * target; a refused one snaps back. With `own` (an end square's drag), one of the wire's own squares under the pointer
    * comes first: "cut here" or "delete wire", and released there `own.done` (the user's rule, 2026-10-09).
    */
+  type Aimed = { over: string | null; line: { id: string; at: number } | null; target: DropTarget };
+  /**
+   * A contact lines up and spaces along it (the user's, 2026-10-23: guides regardless of the contact area): a step side's
+   * landing height with block lines, a step's processor middle and any wire's level runs, or evenly among the other
+   * wires' landings on that side; a point a wire joins on, along that wire, with the lines across it. The nearest that
+   * stays on the same contact, lands exactly there (a landing is on the grid) and is a drop it takes (`takes`: no
+   * refusal, no short circuit) is taken; null when none is.
+   */
+  const contactSnap = (t: DropTarget, p: Point, aim: (q: Point) => Aimed, own: string, takes: (t: DropTarget) => boolean): (Aimed & { guides: RunGuide[]; gaps: GapMark[] }) | null => {
+    if (t.on !== 'step' && t.on !== 'wire') return null;
+    const doc = shown.current;
+    const c = pointOfTarget(doc, t);
+    const reach = SNAP_REACH_PX / getZoom();
+    let axis: 'x' | 'y' = 'y';
+    let side: GuideBox[] = [];
+    let landing: number[] = [];
+    if (t.on === 'step') {
+      side = landingBoxes(doc, own, t.step, t.side);
+      const st = doc.placement.steps.get(t.step);
+      landing = st ? [st.y + PMID] : [];
+    } else {
+      const host = doc.wires.find((w) => w.id === t.host);
+      axis = host && !contactOn(host.points, t.at).vertical ? 'x' : 'y';
+    }
+    const v = axis === 'x' ? c.x : c.y;
+    const along: [number, number] = axis === 'x' ? [c.y, c.y] : [c.x, c.x];
+    const same = (a: DropTarget) => a.on === t.on && (a.on === 'step' ? t.on === 'step' && a.step === t.step && a.side === t.side : a.on === 'wire' && t.on === 'wire' && a.host === t.host);
+    for (const k of ranked(v, snapRun(v, axis, doc, own, reach, landing).all, spaceLanding(v, side, reach))) {
+      const a = k.at === v ? { over: null, line: null, target: t } as Aimed : aim(axis === 'x' ? { x: p.x + (k.at - v), y: p.y } : { x: p.x, y: p.y + (k.at - v) });
+      if (!same(a.target)) continue;
+      const q = pointOfTarget(doc, a.target);
+      // exactly there, and a drop it takes: never onto another wire's landing (a short circuit) or a refusal
+      if ((axis === 'x' ? q.x : q.y) !== k.at || !takes(a.target)) continue;
+      const kept = k.at === v ? { ...aim(p), target: t } : a;
+      return { ...kept, guides: k.spaced ? [] : [guideAt(k.at, axis, doc, own, along)], gaps: side.length > 0 ? landingMarks(k.at, side) : [] };
+    }
+    // no snap: the marks where it is already evenly spaced (a drop it takes)
+    const gaps = side.length > 0 && takes(t) ? landingMarks(v, side) : [];
+    return gaps.length > 0 ? { ...aim(p), target: t, guides: [], gaps } : null;
+  };
+
   const dropGesture = (e: ReactPointerEvent, o: {
     id: string; ghost: string | null; side: Side; circuit: Circuit; path: (t: DropTarget) => Pt[]; done: (t: DropTarget) => void;
     /**
      * Sees the pointer first. It may offer snaps (an end on alignment guides and equal gaps), best first: each a point
      * `at` with its `guides` and equal-gap marks (`gaps`). The first whose end lands on open canvas is taken, only when
-     * the end at the pointer does too; `use` says which (-1: none).
+     * the end at the pointer does too; `use` says which (-1: none). None taken: the guides of `near` (lines it may not
+     * take, short circuits) show unsnapped.
      */
-    step?: (p: Point) => { options: { at: Point; guides: RunGuide[]; gaps: GapMark[] }[]; use: (taken: number) => void } | void; own?: OwnSquares;
+    step?: (p: Point) => { options: { at: Point; guides: RunGuide[]; gaps: GapMark[] }[]; near: RunGuide[]; use: (taken: number) => void } | void; own?: OwnSquares;
     /** The drop drawn as `path` would lie on a wire it may not share a line with (rule 2): "short circuit", it snaps back. */
     overlaps?: (t: DropTarget, path: Pt[]) => boolean;
     /** Released where it was pressed (an AutoConnect arrow's click, plan 10 phase 6): this instead of a drop. */
@@ -349,7 +397,7 @@ export function useWireGestures(
         return;
       }
       const reach = DROP_REACH / getZoom();
-      const aim = (q: Point) => {
+      const aim = (q: Point): Aimed => {
         const over = blockAt(shown.current, q, reach);
         const line = over === null ? wireAt(shown.current, q, LINE_REACH / getZoom(), { id: o.id, side: o.side }) : null;
         return { over, line, target: targetOf(shown.current, o.circuit, q, over, line) };
@@ -358,18 +406,21 @@ export function useWireGestures(
       // a snap only on open canvas (the user's, 2026-10-23): a contact is judged at the pointer and takes its own point;
       // the first snap whose end lands on open canvas too
       let taken = -1;
-      let chosen = plain;
+      let chosen: Aimed = plain;
       if (snapped && plain.target.on === 'open') {
         for (const [j, opt] of snapped.options.entries()) {
           const a = aim(opt.at);
           if (a.target.on === 'open') { taken = j; chosen = a; break; }
         }
       }
+      snapped?.use(taken);
+      // a contact (a step side, a wire it joins) lines up and spaces too, along it (the user's, 2026-10-23)
+      const at = chosen.target.on === 'step' || chosen.target.on === 'wire' ? contactSnap(chosen.target, p, aim, o.id, (x) => toneOf(judgeDrop(shown.current, o.circuit, o.id, o.side, x)) !== 'no' && !o.overlaps?.(x, o.path(x))) : null;
+      if (at) chosen = at;
       const { over, line } = chosen;
       target = chosen.target;
-      snapped?.use(taken);
-      setRunGuides(taken >= 0 ? snapped!.options[taken]!.guides : []);
-      setRunGaps(taken >= 0 ? snapped!.options[taken]!.gaps : []);
+      setRunGuides(at ? at.guides : taken >= 0 ? snapped!.options[taken]!.guides : chosen.target.on === 'open' ? snapped?.near ?? [] : []);
+      setRunGaps(at ? at.gaps : taken >= 0 ? snapped!.options[taken]!.gaps : []);
       verdict = judgeDrop(shown.current, o.circuit, o.id, o.side, target);
       const path = o.path(target);
       if (toneOf(verdict) !== 'no' && o.overlaps?.(target, path)) verdict = 'short';
@@ -562,9 +613,18 @@ export function useWireGestures(
         ];
         const plainStrays = strays(legsPath(plain));
         const options: { at: Point; guides: RunGuide[]; gaps: GapMark[]; legs: Legs }[] = [];
+        // the guides of the nearest snap it may not take only for a short circuit: shown unsnapped, regardless of colour
+        let near: RunGuide[] = [];
         for (const [cx, cy] of combos) {
           const held = moveLegs(legs, p, [cx?.at ?? snap(p.x), cy?.at ?? snap(p.y)]);
-          if (strays(legsPath(held)) > 0 && plainStrays === 0) continue;
+          if (strays(legsPath(held)) > 0 && plainStrays === 0) {
+            if (near.length === 0) {
+              for (const [axis, c, along] of [['x', cx, held.end[1]], ['y', cy, held.end[0]]] as const) {
+                if (c !== null && !c.spaced) near.push(guideAt(c.at, axis, shown.current, wire.id, [along, along]));
+              }
+            }
+            continue;
+          }
           const [ex, ey] = held.end;
           const guides: RunGuide[] = [];
           const gaps: GapMark[] = [];
@@ -577,8 +637,8 @@ export function useWireGestures(
           }
           options.push({ at: { x: ex, y: ey }, guides, gaps, legs: held });
         }
-        if (options.length === 0) { legs = plain; return; }
-        return { options, use: (taken) => { legs = taken < 0 ? plain : options[taken]!.legs; } };
+        if (options.length === 0 && near.length === 0) { legs = plain; return; }
+        return { options, near, use: (taken) => { legs = taken < 0 ? plain : options[taken]!.legs; } };
       },
       path: (t) => {
         if (t.on === 'open') return stored(openPath());
@@ -676,9 +736,25 @@ export function useWireGestures(
           ...gxs.map((x) => [x, null] as [Guided, null]), ...gys.map((y) => [null, y] as [null, Guided]),
         ];
         const plainStrays = strays(l.points);
+        // the guides of the nearest shift it may not take only for a short circuit: shown unsnapped, regardless of colour
+        let near: RunGuide[] | null = null;
+        let taken = false;
         for (const [gx, gy] of combos) {
           const g = landBody(shown.current, circuit, wire.id, points, drawnAt, gx ? gx.shift : dx, gy ? gy.shift : dy, null, reach, judge);
-          if (!open(g) || (strays(g.points) > 0 && plainStrays === 0)) continue;
+          if (!open(g)) continue;
+          if (strays(g.points) > 0 && plainStrays === 0) {
+            if (near === null) {
+              near = [];
+              for (const [axis, h] of [['x', gx], ['y', gy]] as const) {
+                if (h === null || h.spaced) continue;
+                const i = axis === 'x' ? 1 : 0;
+                const vs = g.points.map((q) => q[i]!);
+                near.push(guideAt(h.at, axis, shown.current, wire.id, [Math.min(...vs), Math.max(...vs)]));
+              }
+            }
+            continue;
+          }
+          taken = true;
           l = g;
           // a line for an alignment, the equal-gap marks for a spaced run (at its place once moved)
           const show = (axis: 'x' | 'y', h: Guided, across: number) => {
@@ -694,6 +770,7 @@ export function useWireGestures(
           if (gy) show('y', gy, gx ? gx.shift : dx);
           break;
         }
+        if (!taken && near) guides.push(...near);
       }
       landing = { ...l, key };
       setRunGuides(guides);

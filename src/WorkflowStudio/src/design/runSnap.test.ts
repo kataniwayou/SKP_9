@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { StudioDocument } from '../app/document';
 import type { Pt } from '../layout/router';
-import { guideAt, pickSnap, ranked, runGapMarks, snapRun, spaceRun, spaceRuns } from './runSnap';
+import { guideAt, landingBoxes, landingMarks, pickSnap, ranked, runGapMarks, snapRun, spaceLanding, spaceRun, spaceRuns } from './runSnap';
 
 /** A canvas with one step at (400, 0), the hub far off, and the given wires as drawn. */
 function doc(wires: { id: string; points: Pt[] }[]): StudioDocument {
@@ -52,24 +52,24 @@ describe('which snap a dragged run takes (final review 2026-10-21; the wire guid
   const shape = (at: number) => at;
   const holds = (s: number, at: number) => s === at;
   it('takes the nearest that holds, with its guide', () => {
-    expect(pickSnap([{ at: 40, spaced: false }], shape, holds, () => false, () => raw)).toEqual({ shape: 40, at: 40, spaced: false });
+    expect(pickSnap([{ at: 40, spaced: false }], shape, holds, () => false, () => raw)).toEqual({ shape: 40, at: 40, spaced: false, near: null });
   });
   it('drops one the run was pushed off (a block side it would lie along): the raw drag, no guide', () => {
-    expect(pickSnap([{ at: 40, spaced: false }], shape, () => false, () => false, () => raw)).toEqual({ shape: raw, at: null, spaced: false });
+    expect(pickSnap([{ at: 40, spaced: false }], shape, () => false, () => false, () => raw)).toEqual({ shape: raw, at: null, spaced: false, near: null });
   });
-  it("drops one that makes a short circuit, even when the raw drag is one too: no guide on a short circuit", () => {
-    expect(pickSnap([{ at: 40, spaced: false }], shape, holds, () => true, () => raw)).toEqual({ shape: raw, at: null, spaced: false });
+  it("drops one that makes a short circuit, even when the raw drag is one too; its guide still shows, unsnapped (`near`)", () => {
+    expect(pickSnap([{ at: 40, spaced: false }], shape, holds, () => true, () => raw)).toEqual({ shape: raw, at: null, spaced: false, near: 40 });
   });
   it('takes the next when the nearest is a short circuit: a tie never hides a place it may take', () => {
     expect(pickSnap([{ at: 416, spaced: false }, { at: 432, spaced: false }], shape, holds, (s) => s === 416, () => raw))
-      .toEqual({ shape: 432, at: 432, spaced: false });
+      .toEqual({ shape: 432, at: 432, spaced: false, near: null });
   });
   it('a line the pointer is on that it may not take keeps the run there as dragged, not pulled to the next (a short circuit shows)', () => {
     expect(pickSnap([{ at: 416, spaced: false }, { at: 432, spaced: false }], shape, holds, (s) => s === 416, () => raw, (at) => at === 416))
-      .toEqual({ shape: raw, at: null, spaced: false });
+      .toEqual({ shape: raw, at: null, spaced: false, near: 416 });
   });
   it('nothing in reach: the shape as dragged, no guide', () => {
-    expect(pickSnap([], shape, holds, () => false, () => raw)).toEqual({ shape: raw, at: null, spaced: false });
+    expect(pickSnap([], shape, holds, () => false, () => raw)).toEqual({ shape: raw, at: null, spaced: false, near: null });
   });
 });
 
@@ -82,8 +82,12 @@ describe("a dragged run's equal spacing, as blocks have it (the user's, 2026-10-
   it('marks each pair of neighbours whose gap equals one of its own', () => {
     expect(runGapMarks(300, 0, 160, 'x', doc([up('p', 100), up('q', 200)]), 'w').map((m) => [m.from, m.to])).toEqual([[100, 200], [200, 300], [300, 400]]);
   });
-  it('leaves out runs beside it but not alongside it (no overlap along it)', () => {
-    expect(spaceRun(296, 0, 160, 'x', doc([up('p', 100, 500, 600), up('q', 200, 500, 600)]), 'w', 12)).toBe(null);
+  it('spaces it along a chain of parallel wires that are not alongside it too (2026-10-23: in a row or not)', () => {
+    expect(spaceRun(296, 0, 160, 'x', doc([up('p', 100, 500, 600), up('q', 200, 500, 600)]), 'w', 12)).toBe(300);
+    expect(runGapMarks(300, 0, 160, 'x', doc([up('p', 100, 500, 600), up('q', 200, 500, 600)]), 'w').map((m) => [m.from, m.to])).toEqual(expect.arrayContaining([[100, 200], [200, 300]]));
+  });
+  it('a chain needs three parallel wires: two are no spacing', () => {
+    expect(spaceRun(296, 0, 160, 'x', doc([up('q', 200, 500, 600)]), 'w', 12)).toBe(null);
   });
   it("never counts the dragged wire's own runs", () => {
     // its own run at 100 is no neighbour: only the gaps either side of 300 (to 200 and to the step at 400) are marked
@@ -122,5 +126,24 @@ describe('spacing on a shared trunk (the wire guides sweep, 2026-10-23)', () => 
   it('two runs on one line are no pair of neighbours: the middle between the trunk and the block is found, with its marks', () => {
     expect(spaceRuns(662, 0, 160, 'x', on([trunk('p'), trunk('q', 120)]), 'w', 12)).toContain(672);
     expect(runGapMarks(672, 0, 160, 'x', on([trunk('p'), trunk('q', 120)]), 'w').map((m) => [m.from, m.to])).toEqual([[640, 672], [672, 704]]);
+  });
+});
+
+describe("landings spaced evenly on a step's side (the user's, 2026-10-23)", () => {
+  // the step at (400, 0): its input side at x 400, from y 0 to 160; wires landing at 48 and 80, one leaving its output
+  const into = (id: string, y: number) => ({ id, points: [[300, y], [400, y]] as Pt[] });
+  const wires = [into('p', 48), into('q', 80), { id: 'o', points: [[624, 96], [700, 96]] as Pt[] }];
+  it("finds the other wires' landings on that side only, once per height, the dragged wire's left out", () => {
+    expect(landingBoxes(doc([...wires, into('w', 112)]), 'w', 's', 'in').map((b) => b.y).sort()).toEqual([48, 80]);
+    expect(landingBoxes(doc(wires), 'w', 's', 'out').map((b) => b.y)).toEqual([96]);
+  });
+  it('spaces a landing along their chain (112 below 48 and 80) or in their middle (64)', () => {
+    const side = landingBoxes(doc(wires), 'w', 's', 'in');
+    expect(spaceLanding(106, side, 12)).toEqual([112]);
+    expect(spaceLanding(60, side, 12)).toEqual([64]);
+    expect(landingMarks(112, side).map((m) => [m.from, m.to])).toEqual([[80, 112], [48, 80]].reverse());
+  });
+  it('one other landing is no spacing: a chain needs three', () => {
+    expect(spaceLanding(106, landingBoxes(doc([into('p', 48)]), 'w', 's', 'in'), 12)).toEqual([]);
   });
 });

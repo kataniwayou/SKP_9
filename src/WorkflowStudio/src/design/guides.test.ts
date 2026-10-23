@@ -98,8 +98,8 @@ describe('alignment guides (Visio dynamic grid, plan 10)', () => {
     });
 
     it('snaps from the right neighbour too', () => {
-      const g = snapToGuides(step('D', 600, 0), [A, B, step('C', 900, 0)], 12);
-      expect(g.dx).toBe(12);
+      const g = snapToGuides(step('D', 610, 0), [A, B, step('C', 900, 0)], 12);
+      expect(g.dx).toBe(2);
       expect(sorted(g.gaps)).toEqual([{ axis: 'x', from: 224, to: 288, at: 160 }, { axis: 'x', from: 836, to: 900, at: 160 }]);
     });
 
@@ -114,10 +114,32 @@ describe('alignment guides (Visio dynamic grid, plan 10)', () => {
       expect(g.gaps).toEqual([]);
     });
 
-    it("takes gaps only from pairs in the dragged block's row", () => {
+    it('marks nothing for a block stacked with another in one column beside a third: the same gap from two blocks (2026-10-23)', () => {
+      // d at (0, 0) and g at (352, 0): 128 apart; the new block under d's column, overlapping it, is 128 from g too
+      const g = snapToGuides(step('new', 0, 120), [step('d', 0, 0), step('g', 352, 0)], 12);
+      expect(g.gaps.filter((x) => x.axis === 'x')).toEqual([]);
+    });
+
+    it("spaces along a chain of blocks in any row: three blocks, in a row or not (the user's, 2026-10-23)", () => {
+      // D below A and B's row: its left neighbour is B (right side 512), B's is A, 64 apart
       const g = snapToGuides(step('D', 586, 600), [A, B], 12);
-      expect(g.dx).toBe(0);
+      expect(g.dx).toBe(-10);
+      expect(sorted(g.gaps)).toEqual([{ axis: 'x', from: 224, to: 288, at: 160 }, { axis: 'x', from: 512, to: 576, at: 760 }]);
+    });
+
+    it('a block under export-outcome spaces as export-outcome is under the top row, though no two share a column (the canvas, 2026-10-23)', () => {
+      const top = step('split-exporter', 2304, 96), rec = step('record-outcome', 2592, 432), exp = step('export-outcome', 2880, 432);
+      const g = snapToGuides(step('new', 2880, 760), [top, rec, exp], 40);
+      expect(g.y).toBe(768);
+      expect(g.gaps).toEqual(expect.arrayContaining([{ axis: 'y', from: 256, to: 432, at: 3104 }, { axis: 'y', from: 592, to: 768, at: 3104 }]));
+      // and across, a chain as well: split-exporter, record-outcome and it are 64 apart left to right, in no one row
+      expect(g.gaps).toEqual(expect.arrayContaining([{ axis: 'x', from: 2528, to: 2592, at: 592 }, { axis: 'x', from: 2816, to: 2880, at: 928 }]));
+    });
+
+    it('two blocks are no spacing: a chain needs a third', () => {
+      const g = snapToGuides(step('new', 2880, 760), [step('export-outcome', 2880, 432)], 40);
       expect(g.gaps).toEqual([]);
+      expect(g.y).toBe(760);
     });
 
     it('the smaller move wins between alignment and an equal gap on one axis', () => {

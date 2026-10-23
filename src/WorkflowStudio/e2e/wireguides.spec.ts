@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
-import { documentPanel, expect, flowToPage, openWorkflow, pickWire, test, wirePoints as pointsOf } from './studio';
+import { centreOf, documentPanel, expect, flowToPage, node, openWorkflow, pickWire, test, wirePoints as pointsOf } from './studio';
 import { createGuidesThrowaway, removeThrowaway, type GuidesThrowaway } from './throwaway';
 
 // The wire guides and equal spacing (the user's, 2026-10-23), with the real mouse, on a canvas made for them (`e2e-wg-…`):
@@ -126,7 +126,7 @@ test('the upright into f held near the middle of its row snaps there, every 64 p
   await cancel(page);
 });
 
-test("a tie never hides a line it may take; put on a line it may not take, it stays there: no guide, a short circuit", async ({ page }) => {
+test("a tie never hides a line it may take; put on a line it may not take, it stays there: a short circuit, its guide shown", async ({ page }) => {
   const panel = await open(page);
   const { straight } = await intoF(panel);
   await pickWire(page, panel, straight);
@@ -136,11 +136,12 @@ test("a tie never hides a line it may take; put on a line it may not take, it st
   let o = await overlay(panel);
   expect(o.guides).toEqual(['y=432']);
   expect(o.red).toBe(0);
-  // put right on the other wire's line: it stays there as dragged (not pulled off it), with no guide: a short circuit
+  // put right on the other wire's line: it stays there as dragged (not pulled off it), a short circuit, and the line's
+  // guide still shows (regardless of colour, the user's 2026-10-23)
   await page.mouse.move(...(Object.values(await flowToPage(panel, [992, 448])) as [number, number]), { steps: 2 });
   await frames(page);
   o = await overlay(panel);
-  expect(o.guides).toEqual([]);
+  expect(o.guides).toEqual(['y=448']);
   expect(await panel.locator('.design-drop-label').allTextContents()).toEqual(['short circuit']);
   await cancel(page);
 });
@@ -181,4 +182,88 @@ test('a wire moved whole lines up on both axes; with an end over a wire it joins
   expect(await panel.locator('.design-drop-label').allTextContents()).toContain('join here');
   expect((await overlay(panel)).guides).toEqual([]);
   await cancel(page);
+});
+
+// ---- the user's four rules (2026-10-23): spacing among three blocks or three parallel wires in a row or not, guides
+// regardless of colour or the contact, and landings spaced evenly on a step's side. The layout of this canvas varies
+// from run to run (which of b and c is above, where f lands), so every place below is read off the canvas.
+
+/** A block's box on the canvas (flow px). */
+const boxOf = (panel: Locator, id: string) => node(panel, id).evaluate((el) => {
+  const e = el as HTMLElement;
+  const m = /translate\(([-\d.e]+)px, ?([-\d.e]+)px\)/.exec(e.style.transform)!;
+  return { x: Number(m[1]), y: Number(m[2]), w: e.offsetWidth, h: e.offsetHeight };
+});
+const labels = (panel: Locator) => panel.locator('.design-drop-label').allTextContents();
+
+test("a contact spaces evenly: a -> e's head on f's input side snaps a gap above the two landings there, marked; then the bent wire's head slid to the middle of the others", async ({ page }) => {
+  const panel = await open(page);
+  const ae = W('a', 'e');
+  const { straight, bent } = await intoF(panel);
+  const F = await boxOf(panel, t.f);
+  const sLand = (await pointsOf(panel, straight)).at(-1)![1]!, bLand = (await pointsOf(panel, bent)).at(-1)![1]!;
+  const [l0, l1] = [sLand, bLand].sort((p, q) => p - q) as [number, number];
+  const third = l0 - (l1 - l0);
+  await pickWire(page, panel, ae);
+  await hold(page, panel, await handle(panel, ae, { side: 'head' }), [[F.x - 56, F.y - 52], [F.x - 4, third + 3]]);
+  expect((await overlay(panel)).gaps).toEqual([[third, l0], [l0, l1]]);
+  expect(await labels(panel)).toEqual(['connect here']);
+  await page.mouse.up();
+  await expect.poll(async () => (await pointsOf(panel, ae)).at(-1)).toEqual([F.x, third]);
+  // the bent wire's head slid along f's side: the others land at `third` and the straight wire's height, and their
+  // middle is evenly spaced
+  const mid = (third + sLand) / 2;
+  await pickWire(page, panel, bent);
+  const k = Number(await panel.locator(`.design-wire[data-wire="${bent}"] .design-handle.seg`).last().getAttribute('data-k'));
+  const run = await handle(panel, bent, { k });
+  await hold(page, panel, run, [[run[0], run[1] + 8], [run[0], mid]]);
+  expect((await overlay(panel)).gaps).toEqual(expect.arrayContaining([[third, mid], [mid, sLand]].map((x) => x.sort((p, q) => p - q))));
+  await cancel(page);
+});
+
+test("regardless of colour: the straight wire's run held by the bent wire's level line (another net) shows its guide, not snapped onto it", async ({ page }) => {
+  const panel = await open(page);
+  const { straight, bent } = await intoF(panel);
+  const level = (await pointsOf(panel, bent)).at(-1)![1]!;
+  await pickWire(page, panel, straight);
+  await hold(page, panel, await handle(panel, straight, { k: 0 }), [[992, level - 18], [992, level + 6]]);
+  expect((await overlay(panel)).guides).toContain(`y=${level}`);
+  // not on it: no short circuit
+  expect(await labels(panel)).toEqual([]);
+  await cancel(page);
+});
+
+test("regardless of the contact: an end on a step side lines up with the step's centre and lands there", async ({ page }) => {
+  const panel = await open(page);
+  const ae = W('a', 'e');
+  const B = await boxOf(panel, t.b);
+  await pickWire(page, panel, ae);
+  await hold(page, panel, await handle(panel, ae, { side: 'head' }), [[B.x - 14, B.y - 60], [B.x - 4, B.y + 82]]);
+  expect((await overlay(panel)).guides).toContain(`y=${B.y + 80}`);
+  expect(await labels(panel)).toEqual(['connect here']);
+  const contact = await centreOf(panel.locator('.design-contact.ok'));
+  expect(Math.abs(contact.y - (await flowToPage(panel, [B.x, B.y + 80])).y)).toBeLessThan(2);
+  await cancel(page);
+});
+
+test('blocks in no shared row: an empty step held right of g and below it snaps 128 from it, as g is from the d column, both gaps marked', async ({ page }) => {
+  const panel = await open(page);
+  await page.getByRole('button', { name: 'Zoom out' }).first().click();
+  await frames(page);
+  const D = await boxOf(panel, t.d), G = await boxOf(panel, t.g);
+  const want = G.x + G.w + (G.x - (D.x + D.w));
+  const tile = await centreOf(page.getByText('empty step', { exact: false }).first());
+  await page.mouse.move(tile.x, tile.y);
+  await page.mouse.down();
+  // below g's bottom: in no row with g or d, so only a chain of the three spaces it
+  const cy = G.y + G.h + 40 + 80;
+  for (const q of [[want + 112 + 40, cy], [want + 112 + 6, cy]] as [number, number][]) {
+    const to = await flowToPage(panel, q);
+    await page.mouse.move(to.x, to.y, { steps: 6 });
+  }
+  await frames(page);
+  expect(Number(await panel.locator('rect.design-tool-landing').getAttribute('x'))).toBe(want);
+  expect((await overlay(panel)).gaps).toEqual(expect.arrayContaining([[D.x + D.w, G.x], [G.x + G.w, want]]));
+  await cancel(page);
+  await expect(node(panel, t.g)).toBeVisible();
 });
