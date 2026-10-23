@@ -91,9 +91,12 @@ export async function prepareDelete(api: StudioApi, store: StudioStore, workflow
 }
 
 /** The warning's lines (2026-10-23), one paragraph each: the delete dialog shows them and the chat puts the same to the user. */
+/** What the deletion removes, the emphasis of the warning's first line. */
+export const deleteGoes = (plan: DeletePlan): string => `the workflow, ${count(plan.steps, 'step')} and ${count(plan.assignments, 'assignment')}`;
+
 export function deleteWarningLines(plan: DeletePlan): string[] {
   return [
-    `Deleted for good: the workflow, ${count(plan.steps, 'step')} and ${count(plan.assignments, 'assignment')}. Its id is gone forever: nothing can address it again.`,
+    `Deleted for good: ${deleteGoes(plan)}. Its id is gone forever: nothing can address it again.`,
     `Kept: ${count(plan.caches, 'cache')} (only unlinked from it) and ${count(plan.processors, 'processor')} (untouched).`,
     ...(plan.dropsDraft ? ['Its unsaved design draft is dropped.'] : []),
     'It is not running now. Continue deletes it; BaseApi checks again that it is not running.',

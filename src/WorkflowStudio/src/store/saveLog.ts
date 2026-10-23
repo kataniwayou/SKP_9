@@ -83,10 +83,13 @@ export function saveStartText(sent: SentDesign): string {
 }
 
 /** The answer's one-line verdict, as Output has always said it (plan 8 §4.1, plan 9 §7). */
+/** How an applied Save's verdict begins; the chat tells an applied Save by it. */
+export const SAVED_APPLIED = 'Saved and applied';
+
 export function saveVerdict(applied: boolean, errors: number, shorts: number, held: number): string {
   if (!applied) return `Saved; not applied: ${plural(errors, 'error')}`;
-  if (shorts === 0) return 'Saved and applied';
-  return `Saved and applied; ${plural(shorts, 'short circuit')} not written${held === 0 ? '' : `; ${plural(held, 'link')} held back until fixed`}`;
+  if (shorts === 0) return SAVED_APPLIED;
+  return `${SAVED_APPLIED}; ${plural(shorts, 'short circuit')} not written${held === 0 ? '' : `; ${plural(held, 'link')} held back until fixed`}`;
 }
 
 /**

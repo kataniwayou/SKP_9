@@ -188,6 +188,49 @@ describe('the workflow tools', () => {
     expect(done(await call('save', { workflow: 'other' }))).toMatchObject({ ok: false, result: 'workflow other is not open; open it first' });
   });
 
+  it('an answer acts on the workflow the question named, not the one active by then', async () => {
+    for (const tool of ['stop', 'close_workflow', 'delete_workflow']) {
+      const { call, store, api } = await setup();
+      store.dispatch({ type: 'open', workflowId: 'wf2', name: 'other', version: '1.0.0' });
+      store.dispatch({ type: 'loaded', workflowId: 'wf2', doc: await loadedDocument(graphDto()) });
+      store.dispatch({ type: 'activate', workflowId: 'wf1' });
+      if (tool === 'close_workflow') store.dispatch({ type: 'design', workflowId: 'wf1', draft: { ...EMPTY_DRAFT, sphere: { x: 400, y: 400 } } });
+      ask(await call(tool));
+      store.dispatch({ type: 'activate', workflowId: 'wf2' });
+      if (tool === 'stop') setTimeout(() => store.dispatch({ type: 'liveChanged', workflowId: 'wf1', name: 'orders', at: 'x', running: false }), 20);
+      const r = done(await call(tool, {}, tool === 'close_workflow' ? 'Discard' : 'Yes'));
+      if (tool === 'stop') expect(api.stopWorkflow).toHaveBeenCalledWith('wf1');
+      else expect(store.getState().docs.map((d) => d.workflowId)).toEqual(['wf2']);
+      expect(r.action).toContain('orders');
+    }
+  });
+
+  it('delete: No declines and logs the cancel even when the prepared plan was lost; Yes then asks again', async () => {
+    const { call, store } = await setup();
+    const no = done(await call('delete_workflow', { workflow: 'orders' }, 'No'));
+    expect(no).toMatchObject({ ok: false, action: 'user declined: delete orders' });
+    expect(no.result).toContain('Delete cancelled');
+    expect(store.getState().docs).toHaveLength(1);
+    expect(ask(await call('delete_workflow', { workflow: 'orders' }, 'Yes')).warnings).toBeDefined();
+  });
+
+  it('delete while another deletion holds it names that reason', async () => {
+    const { call, commands } = await setup();
+    commands.prepareDelete = async () => null;
+    const r = done(await call('delete_workflow', { workflow: 'orders' }));
+    expect(r).toMatchObject({ ok: false, result: expect.stringContaining('a deletion of this workflow is already in progress') });
+  });
+
+  it('new_workflow echoes the lines of the new workflow', async () => {
+    const { call, commands, store } = await setup();
+    commands.newWorkflow = async () => {
+      store.dispatch({ type: 'open', workflowId: 'wfN', name: 'untitled', version: '1.0.0' });
+      store.dispatch({ type: 'log', workflowId: 'wfN', lines: [{ at: 'x', text: 'made' }] });
+      return 'wfN';
+    };
+    expect(done(await call('new_workflow')).entries).toContainEqual({ kind: 'output', text: 'made', level: 'info', name: 'untitled' });
+  });
+
   it('cancelDelete is the one Cancel line the menu writes', async () => {
     const { store } = await setup();
     cancelDelete(store, 'wf1');

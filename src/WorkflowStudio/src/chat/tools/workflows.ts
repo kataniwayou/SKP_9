@@ -1,5 +1,6 @@
 import { cancelDelete, deleteWarningLines, type DeletePlan } from '../../app/deleteWorkflow';
 import type { Id } from '../../model/graph';
+import { SAVED_APPLIED } from '../../store/saveLog';
 import { RUN_TIMEOUT_MS, runBlocked, type RunOp } from '../../store/run';
 import { designDirty, saveBlocked, type OpenDocument } from '../../store/studioState';
 import type { ChatEntry } from '../chatStore';
@@ -36,12 +37,31 @@ async function openDocOf(ctx: ToolContext, ref: string | undefined, action: stri
   return { doc: w.value.doc };
 }
 
+/**
+ * The workflow a question was about (2026-10-23): pinned when the question is asked, so that an answer given after the
+ * user switched tabs acts on the workflow the question named, never on whichever is active then. Keyed by tool and the
+ * workflow argument as the model wrote it.
+ */
+const pins = new Map<string, Id>();
+const pinKey = (tool: string, ref: string | undefined): string => `${tool}|${ref ?? ''}`;
+
+/** The open workflow of a tool call; on an answer, the one pinned when asked (or why it is gone). */
+async function targetOf(ctx: ToolContext, tool: string, ref: string | undefined, answer: string | undefined): Promise<{ doc: OpenDocument } | { out: ToolOutcome }> {
+  const key = pinKey(tool, ref);
+  const pinned = answer !== undefined ? pins.get(key) : undefined;
+  pins.delete(key);
+  if (pinned === undefined) return openDocOf(ctx, ref, tool);
+  const doc = docOf(ctx, pinned);
+  return doc ? { doc } : { out: fail('the workflow is no longer open; nothing was done', `${tool}: workflow gone`) };
+}
+const pin = (tool: string, ref: string | undefined, doc: OpenDocument): void => { pins.set(pinKey(tool, ref), doc.workflowId); };
+
 /** A Save, echoed; applied only when Output says "Saved and applied". */
 async function saveEchoed(ctx: ToolContext, doc: OpenDocument): Promise<{ applied: boolean; entries: ChatEntry[]; blocked: string | null }> {
   const blocked = saveBlocked(doc);
   if (blocked !== null) return { applied: false, entries: [], blocked };
   const { entries } = await withEcho(ctx.store, () => [doc.workflowId], () => ctx.commands.save(doc.workflowId));
-  const applied = entries.some((e) => e.kind === 'output' && e.text.startsWith('Saved and applied'));
+  const applied = entries.some((e) => e.kind === 'output' && e.text.startsWith(SAVED_APPLIED));
   return { applied, entries, blocked: null };
 }
 
@@ -65,7 +85,8 @@ const newWorkflow: ToolDef = {
   description: 'Make a new, blank workflow (named "untitled" until renamed). It exists only in the studio until it is saved.',
   parameters: { type: 'object', properties: {}, additionalProperties: false },
   async run(ctx) {
-    const { value: id, entries } = await withEcho(ctx.store, () => [], () => ctx.commands.newWorkflow());
+    let made: Id | undefined;
+    const { value: id, entries } = await withEcho(ctx.store, () => (made ? [made] : []), async () => { made = await ctx.commands.newWorkflow(); return made; });
     const doc = docOf(ctx, id);
     const label = doc ? labelOf(doc) : id;
     return done(true, `made a new workflow ${label} (id ${id}); it is the active workflow now and not saved yet`, `new workflow ${label}`, entries);
@@ -100,7 +121,8 @@ const save: ToolDef = {
 
 /**
  * Start and Stop: the press is over when the live set agreed (its line is in Output) or the timeout line is. The echo
- * waits a little longer than the press's own timeout so that the timeout line is in it.
+ * waits a little longer than the press's own timeout so that the timeout line is in it. Lines the user's own actions
+ * write on the same workflow meanwhile may be echoed too (ruled: accepted).
  */
 async function press(ctx: ToolContext, doc: OpenDocument, op: RunOp): Promise<ToolOutcome> {
   const id = doc.workflowId;
@@ -128,8 +150,9 @@ const stop: ToolDef = {
   description: 'Stop the workflow in BaseApi (what the Stop button does). The user is asked first.',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG }, additionalProperties: false },
   async run(ctx, args, answer) {
-    const found = await openDocOf(ctx, text(args.workflow), 'stop');
+    const found = await targetOf(ctx, 'stop', text(args.workflow), answer);
     if ('out' in found) return found.out;
+    if (answer === undefined) pin('stop', text(args.workflow), found.doc);
     if (answer === undefined) return { kind: 'ask', question: { text: `Stop ${labelOf(found.doc)}?`, choices: YES_NO } };
     if (answer !== 'Yes') return fail('the user declined', `user declined: stop ${found.doc.name}`);
     return press(ctx, found.doc, 'stop');
@@ -144,23 +167,26 @@ const deleteWorkflow: ToolDef = {
   description: 'Delete a workflow for good (it must be open and not running). The user is shown what goes and asked first.',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_REQUIRED }, required: ['workflow'], additionalProperties: false },
   async run(ctx, args, answer) {
-    const found = await openDocOf(ctx, text(args.workflow), 'delete workflow');
+    const found = await targetOf(ctx, 'delete_workflow', text(args.workflow), answer);
     if ('out' in found) return found.out;
     const { doc } = found;
     const id = doc.workflowId;
     const label = labelOf(doc);
-    // after the answer the plan made for the question is used; one lost meanwhile (a refresh) is made and asked again
+    // after the answer the plan made for the question is used
     const pending = answer !== undefined ? pendingDeletes.get(id) : undefined;
     pendingDeletes.delete(id);
+    // anything but Yes declines, the plan kept or lost (a refresh) meanwhile
+    if (answer !== undefined && answer !== 'Yes') {
+      const { entries } = await withEcho(ctx.store, () => [id], async () => { cancelDelete(ctx.store, id); });
+      return done(false, 'the user declined', `user declined: delete ${doc.name}`, [...(pending?.entries ?? []), ...entries]);
+    }
     if (!pending) {
       const { value: plan, entries } = await withEcho(ctx.store, () => [id], () => ctx.commands.prepareDelete(id));
-      if (plan === null) return done(false, `not deleted ${label}`, `delete refused: ${doc.name}`, entries);
+      // no line in Output: another deletion of it (the menu's) holds it
+      if (plan === null) return done(false, `not deleted ${label}${entries.some((e) => e.kind === 'output') ? '' : ': a deletion of this workflow is already in progress'}`, `delete refused: ${doc.name}`, entries);
       pendingDeletes.set(id, { plan, entries });
+      pin('delete_workflow', text(args.workflow), doc);
       return { kind: 'ask', question: { text: `Delete workflow ${label} for good?`, choices: YES_NO, warnings: deleteWarningLines(plan) } };
-    }
-    if (answer !== 'Yes') {
-      const { entries } = await withEcho(ctx.store, () => [id], async () => { cancelDelete(ctx.store, id); });
-      return done(false, 'the user declined', `user declined: delete ${doc.name}`, [...pending.entries, ...entries]);
     }
     const { value: deleted, entries } = await withEcho(ctx.store, () => [id], () => ctx.commands.commitDelete(pending.plan));
     const all = [...pending.entries, ...entries];
@@ -176,7 +202,7 @@ const closeWorkflow: ToolDef = {
   description: 'Close an open workflow in the studio (it stays in BaseApi). When it has unsaved changes the user is asked whether to save them, discard them or cancel.',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG }, additionalProperties: false },
   async run(ctx, args, answer) {
-    const found = await openDocOf(ctx, text(args.workflow), 'close workflow');
+    const found = await targetOf(ctx, 'close_workflow', text(args.workflow), answer);
     if ('out' in found) return found.out;
     const { doc } = found;
     const id = doc.workflowId;
@@ -187,6 +213,7 @@ const closeWorkflow: ToolDef = {
       return docOf(ctx, id) ? done(false, `${label} was not closed`, `close refused: ${doc.name}`, all) : done(true, `closed ${label}`, `closed ${label}`, all);
     };
     if (!designDirty(doc)) return close([]);
+    if (answer === undefined) pin('close_workflow', text(args.workflow), doc);
     if (answer === undefined) return { kind: 'ask', question: { text: `${label} has unsaved changes. Save them before closing?`, choices: ['Save', 'Discard', 'Cancel'] } };
     if (answer === 'Discard') return close([]);
     if (answer !== 'Save') return fail('the user cancelled', `user cancelled: close ${doc.name}`);

@@ -3,7 +3,7 @@ import { createApi, type StudioApi } from './api/client';
 import { describeError } from './api/describeError';
 import type { WorkflowReadDto } from './api/types';
 import { ConfirmDialog } from './app/ConfirmDialog';
-import { cancelDelete, commitDelete, deleteWarningLines, prepareDelete, type DeletePlan } from './app/deleteWorkflow';
+import { cancelDelete, commitDelete, deleteGoes, deleteWarningLines, prepareDelete, type DeletePlan } from './app/deleteWorkflow';
 import { DocumentPanel } from './app/DocumentPanel';
 import { createInspectorService } from './app/inspectorService';
 import { loadDocument } from './app/loadDocument';
@@ -421,7 +421,16 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
 
 /** The warning before a workflow's deletion (2026-10-10): what BaseApi's dry run says goes, and what stays. */
 function DeleteWarning({ plan }: { plan: DeletePlan }) {
-  return <div className="delwarn">{deleteWarningLines(plan).map((line) => <p key={line}>{line}</p>)}</div>;
+  const goes = deleteGoes(plan);
+  return (
+    <div className="delwarn">
+      {deleteWarningLines(plan).map((line) => {
+        const at = line.indexOf(goes);
+        // the first line stresses what goes
+        return <p key={line}>{at < 0 ? line : <>{line.slice(0, at)}<b>{goes}</b>{line.slice(at + goes.length)}</>}</p>;
+      })}
+    </div>
+  );
 }
 
 /** How long live updates must stay down before the mark shows: a reconnect that succeeds sooner shows nothing. */
