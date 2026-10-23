@@ -326,9 +326,10 @@ export function useWireGestures(
     id: string; ghost: string | null; side: Side; circuit: Circuit; path: (t: DropTarget) => Pt[]; done: (t: DropTarget) => void;
     /**
      * Sees the pointer first. It may offer a snap (an end on alignment guides): the point `at` and its `guides`, taken
-     * only when the end lands on open canvas there as at the pointer; `use` says whether it was taken.
+     * only when the end lands on open canvas there as at the pointer, with its equal-gap marks (`gaps`); `use` says
+     * whether it was taken.
      */
-    step?: (p: Point) => { at: Point; guides: RunGuide[]; use: (taken: boolean) => void } | void; own?: OwnSquares;
+    step?: (p: Point) => { at: Point; guides: RunGuide[]; gaps: GapMark[]; use: (taken: boolean) => void } | void; own?: OwnSquares;
     /** The drop drawn as `path` would lie on a wire it may not share a line with (rule 2): "short circuit", it snaps back. */
     overlaps?: (t: DropTarget, path: Pt[]) => boolean;
     /** Released where it was pressed (an AutoConnect arrow's click, plan 10 phase 6): this instead of a drop. */
@@ -363,6 +364,7 @@ export function useWireGestures(
       target = (taken ? snap : plain).target;
       snapped?.use(taken);
       setRunGuides(taken ? snapped!.guides : []);
+      setRunGaps(taken ? snapped!.gaps : []);
       verdict = judgeDrop(shown.current, o.circuit, o.id, o.side, target);
       const path = o.path(target);
       if (toneOf(verdict) !== 'no' && o.overlaps?.(target, path)) verdict = 'short';
@@ -533,20 +535,37 @@ export function useWireGestures(
       id: wire.id, ghost: wire.id, side, circuit, own, overlaps,
       step: (p) => {
         // Visio's guides (the user's, 2026-10-23): the end snaps on each axis to block edges and centres, a step's processor
-        // middle and any wire's parallel runs, within 12 screen px; a snap that would lay it on a wire it may not share a
-        // line with, where the plain drag would not, is dropped
+        // middle and any wire's parallel runs, within 12 screen px; the last leg it draws (upright when the leg before is
+        // level, level when it is upright) keeps equal gaps as a run does, whichever is nearer; a snap that would lay it on
+        // a wire it may not share a line with, where the plain drag would not, is dropped
         const reach = SNAP_REACH_PX / getZoom();
-        const sx = snapRun(p.x, 'x', shown.current, wire.id, reach);
-        const sy = snapRun(p.y, 'y', shown.current, wire.id, reach, landings);
         const plain = moveLegs(legs, p);
+        // the last leg: across `leg` at the end, from the corner it leaves to the end
+        const corner = plain.path[plain.path.length - 1]!;
+        const leg: 'x' | 'y' = plain.axis === 'h' ? 'x' : 'y';
+        const from = leg === 'x' ? corner[1] : corner[0], to = leg === 'x' ? p.y : p.x;
+        const on = (axis: 'x' | 'y', v: number) => {
+          const aligned = snapRun(v, axis, shown.current, wire.id, reach, axis === 'y' ? landings : []).at;
+          return axis === leg ? nearer(v, aligned, spaceRun(v, from, to, axis, shown.current, wire.id, reach)) : { at: aligned, spaced: false };
+        };
+        const sx = on('x', p.x), sy = on('y', p.y);
         if (sx.at === null && sy.at === null) { legs = plain; return; }
         const held = moveLegs(legs, p, [sx.at ?? snap(p.x), sy.at ?? snap(p.y)]);
         if (strays(legsPath(held)) > 0 && strays(legsPath(plain)) === 0) { legs = plain; return; }
         const [ex, ey] = held.end;
         const guides: RunGuide[] = [];
-        if (sx.at !== null) guides.push(guideAt(sx.at, 'x', shown.current, wire.id, [ey, ey]));
-        if (sy.at !== null) guides.push(guideAt(sy.at, 'y', shown.current, wire.id, [ex, ex]));
-        return { at: { x: ex, y: ey }, guides, use: (taken) => { legs = taken ? held : plain; } };
+        const gaps: GapMark[] = [];
+        // the leg's own stretch as it lands, for its gap marks
+        const [g0, g1] = leg === 'x' ? [corner[1], ey] : [corner[0], ex];
+        if (sx.at !== null) {
+          if (sx.spaced) gaps.push(...runGapMarks(sx.at, g0, g1, 'x', shown.current, wire.id));
+          else guides.push(guideAt(sx.at, 'x', shown.current, wire.id, [ey, ey]));
+        }
+        if (sy.at !== null) {
+          if (sy.spaced) gaps.push(...runGapMarks(sy.at, g0, g1, 'y', shown.current, wire.id));
+          else guides.push(guideAt(sy.at, 'y', shown.current, wire.id, [ex, ex]));
+        }
+        return { at: { x: ex, y: ey }, guides, gaps, use: (taken) => { legs = taken ? held : plain; } };
       },
       path: (t) => {
         if (t.on === 'open') return stored(openPath());

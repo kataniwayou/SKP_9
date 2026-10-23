@@ -235,6 +235,34 @@ test("a dragged run keeps equal gaps as a block does: held near the middle betwe
   expect((await upright(p, ab())).x).toBe(mid);
 });
 
+test("a dragged end's last leg keeps equal gaps as a run does: held near the middle between b and c it snaps there, with the gap arrows (2026-10-23)", async ({ page }) => {
+  const p = await open(page);
+  const bc = `${t.b}->${t.c}`;
+  // b -> c runs straight from b's output to c's input; its head pulled down into the open draws an upright last leg
+  // between b's right side and c's left side
+  const box = async (id: string) => node(p, id).evaluate((el) => {
+    const e = el as HTMLElement;
+    const m = /translate\(([-\d.e]+)px, ?([-\d.e]+)px/.exec(e.style.transform)!;
+    return { x: Number(m[1]), y: Number(m[2]), w: e.offsetWidth, h: e.offsetHeight };
+  });
+  const b = await box(t.b), c = await box(t.c);
+  const mid = (b.x + b.w + c.x) / 2;
+  const below = Math.max(b.y + b.h, c.y + c.h) + 120;
+  await pickWire(page, p, bc);
+  await pressTo(page, await centreOf(endSquare(p, bc, 'head')), await flowToPage(p, [mid - 6, below]));
+  const gaps = p.locator('g.design-gap');
+  await expect(gaps).toHaveCount(2);
+  const spans = await gaps.evaluateAll((els) => els.map((g) => { const l = g.querySelector('line')!; return [Number(l.getAttribute('x1')), Number(l.getAttribute('x2'))]; }));
+  expect(spans.sort((x, y) => x[0]! - y[0]!)).toEqual([[b.x + b.w, mid], [mid, c.x]]);
+  await page.mouse.up();
+  await frames(page);
+  await expect(gaps).toHaveCount(0);
+  // released there, the open end lies on the middle line
+  await pickWire(page, p, bc);
+  await expect(endSquare(p, bc, 'head')).toHaveClass(/open/);
+  expect(Number(await endSquare(p, bc, 'head').getAttribute('cx'))).toBe(mid);
+});
+
 test('a block shows the four-way arrow in design mode', async ({ page }) => {
   const panel = await open(page);
   const at = await centreOf(node(panel, t.b).locator('.nx-sn'));
