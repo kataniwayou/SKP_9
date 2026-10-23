@@ -158,7 +158,8 @@ async function canvasFollowsItsSize(page: Page, wf: LiveWorkflow): Promise<void>
   const zoom = await panel.getByLabel('Zoom level').textContent();
   const zoomed = await view();
   const height = (await box(panel.locator('.react-flow__pane'))).height;
-  await closeAll(['Output']);
+  // the bottom group holds Output and Chat (2026-10-23): it goes only with both
+  await closeAll(['Output', 'Chat']);
   await expect.poll(async () => (await box(panel.locator('.react-flow__pane'))).height).toBeGreaterThan(height + 50);
   await expect(panel.getByLabel('Zoom level')).toHaveText(zoom!);
   await expect.poll(async () => Math.abs((await view()).dy - zoomed.dy)).toBeLessThanOrEqual(4);

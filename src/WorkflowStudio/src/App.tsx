@@ -5,6 +5,7 @@ import type { WorkflowReadDto } from './api/types';
 import { ConfirmDialog } from './app/ConfirmDialog';
 import { cancelDelete, commitDelete, deleteGoes, deleteWarningLines, prepareDelete, type DeletePlan } from './app/deleteWorkflow';
 import { DocumentPanel } from './app/DocumentPanel';
+import { installE2eJudge } from './app/e2eJudge';
 import { createInspectorService } from './app/inspectorService';
 import { loadDocument } from './app/loadDocument';
 import { newWorkflowDocument, untitledName } from './app/newWorkflow';
@@ -85,6 +86,8 @@ export function App({ api: injected, storage, tabStorage, hub }: AppProps) {
   useEffect(() => { live.start(); return () => live.stop(); }, [live]);
   // the page's fonts start loading at once, so the first document opens with its fitter ready
   useEffect(() => { void fitterFor(document); }, []);
+  // the browser suite's judge of the active design (2026-10-23): development, or a page opened with ?e2e
+  useEffect(() => { installE2eJudge(store); }, [store]);
   return (
     <StudioStoreProvider value={store}>
       <ChatStoreProvider value={chat}>
