@@ -4,7 +4,17 @@ import type { StudioApi } from './api/client';
 import { graphDto, stepDto, workflowDto } from './api/fixtures';
 import { App } from './App';
 import { SESSION_KEY } from './app/session';
+import { useStudioActions } from './app/studioActions';
+import type { StudioCommands } from './app/studioCommands';
 import { memoryStorage } from './test/memoryStorage';
+
+// The page's commands for the chat (2026-10-23) are read through the Inspector, which sits in the default layout: its
+// stand-in renders the real one and hands over what useStudioActions() gives it.
+let seen: StudioCommands | undefined;
+vi.mock('./panels/Inspector', async (original) => {
+  const actual = await original<typeof import('./panels/Inspector')>();
+  return { ...actual, Inspector: () => { seen = useStudioActions().commands; return <actual.Inspector />; } };
+});
 
 const ZETA = '11111111-2222-3333-4444-555555555555';
 const ALPHA = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -372,5 +382,76 @@ describe('the design session (plan 8 §3.2)', () => {
     expect(await screen.findByText('● design draft')).toBeInTheDocument();
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(fake.putEntity).not.toHaveBeenCalled();
+  });
+});
+
+describe('the page commands (chat, 2026-10-23)', () => {
+  const commands = async () => { await waitFor(() => expect(seen).toBeDefined()); return seen!; };
+  const designSession = () => memoryStorage({ [SESSION_KEY]: JSON.stringify({
+    version: 1, activeId: ALPHA, showDetails: false, dock: null,
+    docs: [{ workflowId: ALPHA, name: 'alpha', version: '1.0.0', selection: null, view: null, design: { steps: { s1: { x: 800, y: 800 } } } }],
+  }) });
+  const tabs = () => screen.queryAllByText(/^(alpha|zeta|untitled)/, { selector: '.doctab .nm' });
+  beforeEach(() => { seen = undefined; });
+
+  it('open resolves ready once the graph has loaded, and the tab is active', async () => {
+    render(<App api={fakeApi()} storage={memoryStorage()} />);
+    const c = await commands();
+    await expect(act(() => c.open(ZETA))).resolves.toBe('ready');
+    expect(screen.getAllByText('zeta', { selector: '.doctab .nm' })).toHaveLength(1);
+  });
+
+  it('open resolves the failure message when the graph cannot be read', async () => {
+    render(<App api={fakeApi({ getGraph: vi.fn().mockResolvedValue({ ok: false, error: { kind: 'network', message: 'Failed to fetch' } }) })} storage={memoryStorage()} />);
+    const c = await commands();
+    await expect(act(() => c.open(ZETA))).resolves.toBe('Network error: Failed to fetch');
+  });
+
+  it('close drops a document with a design draft and shows no dialog', async () => {
+    render(<App api={fakeApi()} storage={memoryStorage()} tabStorage={designSession()} />);
+    expect(await screen.findByText('● design draft')).toBeInTheDocument();
+    const c = await commands();
+    act(() => c.close(ALPHA));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(tabs()).toHaveLength(0);
+  });
+
+  it('prepareDelete and commitDelete delete without a dialog, and the picker forgets the workflow', async () => {
+    const outcome = { applied: true, errors: [], steps: 1, assignments: 0, caches: 0, processors: 0 };
+    const fake = fakeApi({ deleteWorkflow: vi.fn().mockResolvedValue({ ok: true, value: outcome }) });
+    render(<App api={fake} storage={memoryStorage()} />);
+    const c = await commands();
+    await act(() => c.open(ALPHA));
+    const plan = await act(() => c.prepareDelete(ALPHA));
+    expect(plan).toMatchObject({ workflowId: ALPHA, name: 'alpha', steps: 1 });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    await expect(act(() => c.commitDelete(plan!))).resolves.toBe(true);
+    expect(tabs()).toHaveLength(0);
+    expect(fake.deleteWorkflow).toHaveBeenLastCalledWith(ALPHA, false);
+    openPicker();
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(1));
+  });
+
+  it('prepareDelete refuses a document that is not open, and a deletion BaseApi refuses leaves it open', async () => {
+    const fake = fakeApi({ deleteWorkflow: vi.fn().mockResolvedValue({ ok: true, value: { applied: false, errors: [{ message: 'in use' }] } }) });
+    render(<App api={fake} storage={memoryStorage()} />);
+    const c = await commands();
+    await expect(act(() => c.prepareDelete(ALPHA))).resolves.toBeNull();
+    await act(() => c.open(ALPHA));
+    await expect(act(() => c.prepareDelete(ALPHA))).resolves.toBeNull(); // the dry run found an error
+    expect(tabs()).toHaveLength(1);
+    // the hold ends with the preparation: a later attempt is not refused as "one at a time"
+    expect(fake.deleteWorkflow).toHaveBeenCalledTimes(1);
+    await act(() => c.prepareDelete(ALPHA));
+    expect(fake.deleteWorkflow).toHaveBeenCalledTimes(2);
+  });
+
+  it('newWorkflow resolves the id of an active, unsaved document', async () => {
+    render(<App api={fakeApi()} storage={memoryStorage()} />);
+    const c = await commands();
+    const id = await act(() => c.newWorkflow());
+    expect(id).toMatch(/[0-9a-f-]{36}/i);
+    expect(screen.getAllByText(/^untitled/, { selector: '.doctab .nm' })).toHaveLength(1);
+    expect(screen.getByText(/^untitled/, { selector: '.doctab .nm' }).closest('.dv-tab')).toHaveClass('dv-active-tab');
   });
 });

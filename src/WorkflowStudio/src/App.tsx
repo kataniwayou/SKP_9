@@ -12,6 +12,7 @@ import { runWorkflow } from './app/runWorkflow';
 import { saveDesign } from './app/saveDesign';
 import { browserTabStorage, createSaver, keepSession, readTabSession, restoredState, sessionOf, type Session } from './app/session';
 import { StudioActionsProvider, type StudioActions } from './app/studioActions';
+import { documentSettled, type StudioCommands } from './app/studioCommands';
 import { SvgDefs } from './canvas/SvgDefs';
 import type { SavedView } from './canvas/savedView';
 import { fitterFor } from './canvas/useFitter';
@@ -173,17 +174,6 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
   const asking = useRef<Prompt | null>(null);
   const setPrompt = useCallback((next: Prompt | null) => { asking.current = next; setPromptState(next); }, []);
 
-  const actions: StudioActions = useMemo(() => ({
-    service,
-    api,
-    // nothing is lost by moving away (plan 8): only an open question holds an action back
-    guard: (_workflowId, proceed) => { if (asking.current === null) proceed(); },
-    confirmDiscardDesign: (workflowId, doc = document) => {
-      if (asking.current !== null) return;
-      setPrompt({ kind: 'design', workflowId, doc });
-    },
-  }), [service, setPrompt, api]);
-
   const openWorkflow = useCallback((id: string) => {
     const known = workflows.find((w) => w.id === id);
     const alreadyOpen = store.getState().docs.some((d) => d.workflowId === id);
@@ -202,7 +192,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
     const name = untitledName([...workflows.map((w) => w.name ?? ''), ...store.getState().docs.map((d) => d.name)]);
     // the hub on the left of the canvas, at 100 %, clear of the capsule toolbar: a Fit would centre a lone hub
     views.current.set(id, { x: 0, y: 64, zoom: 1, followFit: false });
-    void newWorkflowDocument(id, name).then((doc) => store.dispatch({ type: 'new', workflowId: id, doc }));
+    return newWorkflowDocument(id, name).then((doc) => { store.dispatch({ type: 'new', workflowId: id, doc }); return id; });
   }, [store, workflows]);
 
   // Save; a new workflow it created is listed by BaseApi from now on: the picker's list is read again
@@ -216,37 +206,82 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
   // Workflow › Delete workflow… (2026-10-10): a fresh liveness reading and BaseApi's dry run first; the warning only
   // then, with Cancel as its default; nothing destructive is sent before Continue. One deletion at a time per workflow.
   const deleting = useRef(new Set<string>());
-  const deleteWorkflow = useCallback((id: string) => {
-    if (deleting.current.has(id) || asking.current !== null) return;
+  /**
+   * The delete up to its warning, shared by the menu and the chat. The menu holds the deletion until its warning is
+   * answered (`holdForAnswer`); the chat asks in its own way, so only the preparation holds it.
+   */
+  const planDelete = useCallback(async (id: string, holdForAnswer: boolean): Promise<DeletePlan | null> => {
+    if (deleting.current.has(id) || (holdForAnswer && asking.current !== null)) return null;
     const open = store.getState().docs.find((d) => d.workflowId === id);
     if (!open || open.status.kind !== 'ready' || open.saving) {
       store.dispatch({ type: 'log', workflowId: id, lines: [{ at: new Date().toISOString(), text: 'Not deleted: the workflow is still loading or saving', level: 'error' }] });
-      return;
+      return null;
     }
     if (open.drawing) {
       store.dispatch({ type: 'log', workflowId: id, lines: [{ at: new Date().toISOString(), text: `Not deleted: ${AI_DRAWING}`, level: 'error' }] });
-      return;
+      return null;
     }
     deleting.current.add(id);
-    void prepareDelete(api, store, id).then((plan) => {
-      if (plan === null || asking.current !== null || !store.getState().docs.some((d) => d.workflowId === id)) {
-        deleting.current.delete(id);
-        return;
-      }
-      setPrompt({ kind: 'deleteWorkflow', plan, doc: document });
-    });
-  }, [api, store, setPrompt]);
-  const continueDelete = useCallback((plan: DeletePlan) => {
-    void commitDelete(api, store, plan).then((deleted) => {
-      deleting.current.delete(plan.workflowId);
-      if (!deleted) return;
-      // gone from BaseApi: from the picker, the views and every per-document memory too
-      views.current.delete(plan.workflowId);
-      opens.current.delete(plan.workflowId);
-      setWorkflows((list) => list.filter((w) => w.id !== plan.workflowId));
-      saver.flush();
-    });
+    const plan = await prepareDelete(api, store, id);
+    const gone = plan === null || (holdForAnswer && asking.current !== null) || !store.getState().docs.some((d) => d.workflowId === id);
+    if (gone || !holdForAnswer) deleting.current.delete(id);
+    return gone ? null : plan;
   }, [api, store]);
+  const deleteWorkflow = useCallback((id: string) => {
+    void planDelete(id, true).then((plan) => { if (plan) setPrompt({ kind: 'deleteWorkflow', plan, doc: document }); });
+  }, [planDelete, setPrompt]);
+  /** `held`: the menu's warning already holds this deletion; the chat's commit takes the hold itself. */
+  const continueDelete = useCallback(async (plan: DeletePlan, held = true): Promise<boolean> => {
+    if (!held) {
+      if (deleting.current.has(plan.workflowId)) return false;
+      deleting.current.add(plan.workflowId);
+    }
+    const deleted = await commitDelete(api, store, plan);
+    deleting.current.delete(plan.workflowId);
+    if (!deleted) return false;
+    // gone from BaseApi: from the picker, the views and every per-document memory too
+    views.current.delete(plan.workflowId);
+    opens.current.delete(plan.workflowId);
+    setWorkflows((list) => list.filter((w) => w.id !== plan.workflowId));
+    saver.flush();
+    return true;
+  }, [api, store]);
+
+  // closing: the AI's drawing keeps a document open; the menu asks about a design draft first, the chat does not
+  const refuseClose = useCallback((id: string): boolean => {
+    if (!store.getState().docs.find((d) => d.workflowId === id)?.drawing) return false;
+    store.dispatch({ type: 'log', workflowId: id, lines: [{ at: new Date().toISOString(), text: `Not closed: ${AI_DRAWING}`, level: 'error' }] });
+    return true;
+  }, [store]);
+  const closeNow = useCallback((id: string) => {
+    views.current.delete(id); // reopened later, it fits afresh
+    store.dispatch({ type: 'close', workflowId: id });
+  }, [store]);
+
+  // what the chat may ask of the page (2026-10-23): the same paths as the menus, without their dialogs
+  const commands: StudioCommands = useMemo(() => ({
+    listWorkflows: () => api.listWorkflows(),
+    open: (id) => { openWorkflow(id); return documentSettled(store, id); },
+    newWorkflow,
+    activate: (id) => store.dispatch({ type: 'activate', workflowId: id }),
+    save: (id) => save(id),
+    run: (id, op) => runWorkflow(api, store, id, op, liveOf),
+    prepareDelete: (id) => planDelete(id, false),
+    commitDelete: (plan) => continueDelete(plan, false),
+    close: (id) => { if (!refuseClose(id)) closeNow(id); },
+  }), [api, store, openWorkflow, newWorkflow, save, liveOf, planDelete, continueDelete, refuseClose, closeNow]);
+
+  const actions: StudioActions = useMemo(() => ({
+    service,
+    api,
+    // nothing is lost by moving away (plan 8): only an open question holds an action back
+    guard: (_workflowId, proceed) => { if (asking.current === null) proceed(); },
+    confirmDiscardDesign: (workflowId, doc = document) => {
+      if (asking.current !== null) return;
+      setPrompt({ kind: 'design', workflowId, doc });
+    },
+    commands,
+  }), [service, setPrompt, api, commands]);
 
   // views and the dock change on every pan and drag, so they are kept outside React state
   const views = useRef(new Map<string, SavedView>(session?.docs.flatMap((d) => (d.view ? [[d.workflowId, d.view] as const] : [])) ?? []));
@@ -290,17 +325,11 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
         activeDocumentId={activeId}
         onActivateDocument={(id) => store.dispatch({ type: 'activate', workflowId: id })}
         onCloseDocument={(id, doc) => {
-          const close = () => {
-            views.current.delete(id); // reopened later, it fits afresh
-            store.dispatch({ type: 'close', workflowId: id });
-          };
+          const close = () => closeNow(id);
+          // the AI is drawing it (2026-10-11): it stays open until the drawing lands or is cancelled
+          if (refuseClose(id)) return;
           // a design draft is asked about first: Discard closes, dropping the draft with the document
           const open = store.getState().docs.find((d) => d.workflowId === id);
-          // the AI is drawing it (2026-10-11): it stays open until the drawing lands or is cancelled
-          if (open?.drawing) {
-            store.dispatch({ type: 'log', workflowId: id, lines: [{ at: new Date().toISOString(), text: `Not closed: ${AI_DRAWING}`, level: 'error' }] });
-            return;
-          }
           if (open && designDirty(open) && asking.current === null) setPrompt({ kind: 'closeDesign', workflowId: id, doc: doc ?? document, proceed: close });
           else close();
         }}
@@ -384,7 +413,7 @@ function Studio({ api, storage, tabStorage, session }: { api: StudioApi; storage
         <ConfirmDialog doc={prompt.doc} title={`Delete workflow '${prompt.plan.name}'?`} safe
           onCancel={() => { setPrompt(null); deleting.current.delete(prompt.plan.workflowId); cancelDelete(store, prompt.plan.workflowId); }}
           message={<DeleteWarning plan={prompt.plan} />}
-          buttons={[{ label: 'Continue', onClick: () => { setPrompt(null); continueDelete(prompt.plan); } }]} />
+          buttons={[{ label: 'Continue', onClick: () => { setPrompt(null); void continueDelete(prompt.plan); } }]} />
       )}
     </StudioActionsProvider>
   );

@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react';
 import type { Id } from '../model/graph';
 import type { StudioApi } from '../api/client';
 import type { InspectorService } from './inspectorService';
+import type { StudioCommands } from './studioCommands';
 
 /** What the panes may ask of the page (slice 3b). Dock panels are React portals, so they see it too. */
 export interface StudioActions {
@@ -15,6 +16,8 @@ export interface StudioActions {
   guard(workflowId: Id, proceed: () => void, doc?: Document): void;
   /** Asks before dropping a document's design draft (spec §5.4), then drops it. */
   confirmDiscardDesign(workflowId: Id, doc?: Document): void;
+  /** The page's workflow commands for the chat (2026-10-23), without the dialogs. Absent in a pane's own tests. */
+  commands?: StudioCommands;
 }
 
 const Context = createContext<StudioActions | null>(null);
