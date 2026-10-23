@@ -29,7 +29,7 @@ export interface InspectorService {
 }
 
 /** A base for what the database does not hold yet (spec §3.2): a created assignment, an empty slot's schema. */
-function madeUp(doc: OpenDocument, target: InspectorTarget): EntityReadDto | null {
+export function madeUp(doc: OpenDocument, target: InspectorTarget): EntityReadDto | null {
   // a new workflow (2026-10-10) BaseApi does not have yet: its own graph is all there is to read
   if (target.kind === 'workflow' && doc.virtual && doc.status.kind === 'ready') {
     const w = doc.status.doc.graph.workflow;
@@ -59,14 +59,14 @@ function madeUp(doc: OpenDocument, target: InspectorTarget): EntityReadDto | nul
 }
 
 /** A pasted step's own assignment (2026-10-10), when the target is one: a new row that exists only in the design. */
-function pastedAssignment(doc: OpenDocument, target: InspectorTarget): NewAssignment | null {
+export function pastedAssignment(doc: OpenDocument, target: InspectorTarget): NewAssignment | null {
   if (target.kind !== 'assignment') return null;
   const a = doc.design.draft.blocks.steps[target.stepId]?.assignment;
   return a && a.id === target.id ? a : null;
 }
 
 /** A pasted assignment's base: the fields it was copied with over its original's read (when it copies a real row). */
-function pastedDto(a: NewAssignment, stepId: Id, original: EntityReadDto | null): EntityReadDto {
+export function pastedDto(a: NewAssignment, stepId: Id, original: EntityReadDto | null): EntityReadDto {
   const f = a.fields;
   const text = (k: string, was: string) => (typeof f[k] === 'string' ? (f[k] as string) : was);
   const o = (original ?? {}) as Partial<AssignmentReadDto>;

@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useGuard } from '../app/studioActions';
 import type { StudioDocument } from '../app/document';
-import { applyDesign } from '../design/apply';
-import { isShortCircuitError, shortCircuitErrors } from '../design/shortCircuits';
-import { wireName } from '../design/wireName';
-import { entityName } from '../model/entityNames';
-import type { DesignError, Graph } from '../model/graph';
+import type { DesignError } from '../model/graph';
 import { errorPicks, errorTarget } from '../store/errorTarget';
+import { entityLabel, problemsFrom, shownDesignOf } from '../store/problems';
 import { selectionKey } from '../store/selection';
 import { activeDocument, type OpenDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
@@ -20,38 +17,10 @@ const KIND: Readonly<Record<string, string>> = {
   workflow: 'Workflow', step: 'Step', processor: 'Processor', cache: 'Cache', assignment: 'Assignment', schema: 'Schema', wire: 'Wire',
 };
 
-/**
- * The entity a row names, by its unique name when this canvas holds it (or the workflow as loaded does: a step or cache
- * deleted in the design, 2026-10-10), else by its id; a wire as the Inspector names it.
- */
-function entityLabel(e: DesignError, graph: Graph, shown: StudioDocument | null, loaded: Graph): string {
-  const named = (x: { name: string; version: string; id: string } | undefined) => (x ? entityName(x.name, x.version, x.id) : e.id);
-  switch (e.kind) {
-    case 'wire': return wireName(shown, e.id) ?? e.id;
-    case 'workflow': return named(graph.workflow);
-    case 'step': return named(graph.steps.get(e.id) ?? loaded.steps.get(e.id));
-    case 'processor': return named(graph.processors.get(e.id));
-    case 'cache': return named(graph.caches.get(e.id) ?? loaded.caches.get(e.id));
-    default: return e.id;
-  }
-}
-
-/**
- * The active document's current problems (plan 8 §4.1; plan 9 §2.2-7): the design's short circuits while they last,
- * then the errors of its last Save. Opening a workflow runs no dry run and errors are never stored, so only a short
- * circuit shows then.
- */
+/** The active document's problems, as `problemsFrom` lists them (store/problems.ts: the chat reads the same list). */
 function useProblems(active: OpenDocument | null): { errors: DesignError[]; shown: StudioDocument | null } {
-  const shown = useMemo(
-    () => (active?.status.kind === 'ready' ? applyDesign(active.status.doc, active.design.draft, active.edits) : null),
-    [active?.status, active?.design.draft, active?.edits],
-  );
-  // short circuits are the design's own (a wire on another net's, the user's rule 2): listed while they last
-  const live = useMemo(() => (shown && active ? shortCircuitErrors(shown, active.design.draft) : []), [shown]); // the draft is in `shown`'s inputs
-  const errors = useMemo(
-    () => (active?.status.kind === 'ready' ? [...live, ...(active.errors ?? []).filter((e) => !isShortCircuitError(e))] : []),
-    [live, active?.status.kind, active?.errors],
-  );
+  const shown = useMemo(() => shownDesignOf(active), [active?.status, active?.design.draft, active?.edits]);
+  const errors = useMemo(() => problemsFrom(active, shown), [shown, active?.status.kind, active?.errors]); // the draft is in `shown`'s inputs
   return { errors, shown };
 }
 
