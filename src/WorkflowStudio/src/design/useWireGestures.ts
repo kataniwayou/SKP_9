@@ -239,7 +239,7 @@ export function useWireGestures(
     let short = false;
     setResize(k % 2 === 0 ? 'ns' : 'ew');
     // Visio's guide (plan 10 phase 2): the run snaps to block edges and centres, the head step's processor middle (the run
-    // that slides the head) and runs of wires it may share a line with, within 12 screen px
+    // that slides the head) and any wire's parallel runs, within 12 screen px
     const axis = k % 2 === 0 ? 'y' : 'x';
     const manual = setBends(circuit, wire.id, bends);
     const share = mayShare(manual, netsOf(manual, (s) => shown.current.graph.steps.get(s)?.entryCondition));
@@ -271,7 +271,9 @@ export function useWireGestures(
     // a run lies at `v` across the axis: the snap held (the run was not pushed off a block it would lie along)
     const lies = (core: Pt[], v: number) => core.some((a, j) => j > 0 && a[i] === v && core[j - 1]![i] === v && a[1 - i] !== core[j - 1]![1 - i]);
     run(e, (pointer) => {
-      const snapped = snapRun(axis === 'x' ? pointer.x : pointer.y, axis, shown.current, wire.id, reach, (x) => share(wire.id, x), landings);
+      // any wire's parallel run is a guide (the user's, 2026-10-23): one it may not share a line with only where the run
+      // would not lie on it there, which `heldSnap` sees to (a snap making a short circuit is dropped)
+      const snapped = snapRun(axis === 'x' ? pointer.x : pointer.y, axis, shown.current, wire.id, reach, landings);
       // a snap is kept only where the run stays on its line and makes no short circuit the plain drag would not
       const shortOf = (x: { state: Shaped; core: Pt[] }) => judge(simplify(x.core), () => shapedCircuit(x.state));
       const kept = heldSnap(snapped.at, shapeAt(axis === 'x' ? { x: snapped.v, y: pointer.y } : { x: pointer.x, y: snapped.v }, latest),
@@ -517,11 +519,11 @@ export function useWireGestures(
       id: wire.id, ghost: wire.id, side, circuit, own, overlaps,
       step: (p) => {
         // Visio's guides (the user's, 2026-10-23): the end snaps on each axis to block edges and centres, a step's processor
-        // middle and runs of wires it may share a line with, within 12 screen px; a snap that would lay it on a wire it
-        // may not share a line with, where the plain drag would not, is dropped
+        // middle and any wire's parallel runs, within 12 screen px; a snap that would lay it on a wire it may not share a
+        // line with, where the plain drag would not, is dropped
         const reach = SNAP_REACH_PX / getZoom();
-        const sx = snapRun(p.x, 'x', shown.current, wire.id, reach, (x) => share(wire.id, x));
-        const sy = snapRun(p.y, 'y', shown.current, wire.id, reach, (x) => share(wire.id, x), landings);
+        const sx = snapRun(p.x, 'x', shown.current, wire.id, reach);
+        const sy = snapRun(p.y, 'y', shown.current, wire.id, reach, landings);
         const plain = moveLegs(legs, p);
         if (sx.at === null && sy.at === null) { legs = plain; return; }
         const held = moveLegs(legs, p, [sx.at ?? snap(p.x), sy.at ?? snap(p.y)]);

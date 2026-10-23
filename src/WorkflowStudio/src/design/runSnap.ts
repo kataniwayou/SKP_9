@@ -8,8 +8,9 @@ export interface RunGuide { axis: 'x' | 'y'; v: number }
  * Visio's alignment for a dragged run (plan 10 phase 2): `v` is the run's coordinate across its own axis (x for a
  * vertical run, y for a horizontal one). It snaps to the nearest within `reach` of: every block's edges and centre on
  * that axis, the `landings` the caller gives (a step side's landing heights, for the run that slides an end), and the
- * parallel runs of the other wires as `shown` draws them that `allowed` says it may share a line with (another net's is a
- * short circuit, never a target). `at` is the matched coordinate, for the guide line, or null when nothing is in reach.
+ * parallel runs of the other wires as `shown` draws them, any net's (the user's, 2026-10-23: the caller drops a snap that
+ * would lie on a wire it may not share a line with). `at` is the matched coordinate, for the guide line, or null when
+ * nothing is in reach.
  */
 export function snapRun(
   v: number,
@@ -17,7 +18,6 @@ export function snapRun(
   shown: StudioDocument,
   own: string,
   reach: number,
-  allowed: (wireId: string) => boolean,
   landings: readonly number[] = [],
 ): { v: number; at: number | null } {
   const candidates: number[] = [...landings];
@@ -27,7 +27,7 @@ export function snapRun(
   }
   const i = axis === 'x' ? 0 : 1;
   for (const w of shown.wires) {
-    if (w.id === own || !allowed(w.id)) continue;
+    if (w.id === own) continue;
     for (let j = 1; j < w.points.length; j++) {
       const a = w.points[j - 1]!, b = w.points[j]!;
       // a run parallel to the dragged one lies at one coordinate on this axis
