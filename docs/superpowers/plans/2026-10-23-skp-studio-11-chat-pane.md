@@ -253,5 +253,11 @@ export async function withEcho<T>(store: StudioStore, workflowIds: () => Id[], a
   - No lock: while a scripted turn is delayed 2 s, the user drags a block; it moves.
   - The pane docks/floats like the others; New chat empties it.
 - [ ] **Step 2:** `npm run e2e -- chat.spec.ts` PASS; full `npm run e2e` green (report any failures with output).
-- [ ] **Step 3:** Real model check, by hand in the dev server with the cluster's KIMI env: ask "add a step with processor <a real one>, wire it from the workflow, and set its assignment payload to {}" on a throwaway; confirm the canvas, the action lines, the status line. Record what it did in the handover.
+- [ ] **Step 3: Proficiency check with the real model** (the user, 2026-10-23: the chat must be proficient at Studio design). `e2e/chat-real.spec.ts`, run only when `KIMI_REAL=1` (dev server with the cluster's KIMI env), each on a fresh throwaway, Playwright typing into the chat like a user:
+  1. "add a step with processor <P> and wire it from the workflow; give it an assignment with payload {}"
+  2. "build a chain of three steps a → b → c with processor <P>; c's failure goes to a step named alarm"
+  3. "a fans out to b and c, which both feed d" (fan-out / fan-in through junctions)
+  4. "copy step b's assignment payload onto step c"
+  5. "save it" on a design with a known Save error, expecting the model to report the error and offer a fix.
+  Each passes when: the relations are exactly the ones asked (`relationsOf`), no short circuit (`shortCircuitErrors` empty), and the drawing is tidy by the wand's own judge (`remainingProblemsOf` from `src/ai/drawing.ts`: no crossings, main path on one row, Failed below), the chat's reply names what it acted on, and nothing destructive ran without a question. Where one fails, improve `systemPrompt()` (Task 8) and run again; record the scenario results in the handover.
 - [ ] **Step 4:** Commit `test(studio): chat pane browser suite`; build and deploy the studio image as for previous Studio deploys (`k8s/31-workflow-studio.yaml`); record the bundle name (`index-*.js`); write `docs/HANDOVER-2026-10-23-studio-chat-pane.md`.
