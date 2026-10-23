@@ -2,12 +2,12 @@
  * The three shared tool panes (spec §6.1). Their ids are their dockview panel ids. Problems is gone (2026-10-09):
  * Output pins the current problems at its top.
  */
-export type ToolId = 'inspector' | 'toolbox' | 'output';
+export type ToolId = 'inspector' | 'toolbox' | 'output' | 'chat';
 
-export const TOOL_IDS: readonly ToolId[] = ['inspector', 'toolbox', 'output'];
+export const TOOL_IDS: readonly ToolId[] = ['inspector', 'toolbox', 'output', 'chat'];
 
 export const TOOL_TITLES: Readonly<Record<ToolId, string>> = {
-  inspector: 'Inspector', toolbox: 'Toolbox', output: 'Output',
+  inspector: 'Inspector', toolbox: 'Toolbox', output: 'Output', chat: 'Chat',
 };
 
 export const isToolId = (id: string): id is ToolId => (TOOL_IDS as readonly string[]).includes(id);

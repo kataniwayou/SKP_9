@@ -24,6 +24,8 @@ import { LiveStoreProvider, useLive, useLiveStore } from './live/LiveContext';
 import { statusOf } from './live/liveState';
 import { signalRHub } from './live/signalrHub';
 import { Inspector } from './panels/Inspector';
+import { createChatStore } from './chat/chatStore';
+import { ChatHost, ChatStoreProvider } from './chat/ChatHost';
 import { Output } from './panels/Output';
 import { Toolbox } from './panels/Toolbox';
 import type { Pick } from './store/picks';
@@ -42,6 +44,7 @@ function renderTool(id: ToolId) {
     case 'inspector': return <Inspector />;
     case 'output': return <Output />;
     case 'toolbox': return <Toolbox />;
+    case 'chat': return <ChatHost />;
   }
 }
 
@@ -70,16 +73,25 @@ export function App({ api: injected, storage, tabStorage, hub }: AppProps) {
   // the session is read once: the store is made once, from the session the page started with
   const store = useMemo(() => createStudioStore(restoredState(session)), []);
   // one liveness store for the app, opened at start and independent of documents (2026-10-10); not kept across a refresh
+  // the chat's own store: kept per tab like the session, but separate from it (2026-10-23)
+  const chat = useMemo(() => createChatStore(tab, resolved), []);
+  useEffect(() => {
+    const flush = () => chat.flush();
+    window.addEventListener('pagehide', flush);
+    return () => { window.removeEventListener('pagehide', flush); chat.flush(); };
+  }, [chat]);
   const live = useMemo(() => createLiveStore({ api, hub: hub !== undefined ? hub : injected ? null : signalRHub() }), []);
   useEffect(() => { live.start(); return () => live.stop(); }, [live]);
   // the page's fonts start loading at once, so the first document opens with its fitter ready
   useEffect(() => { void fitterFor(document); }, []);
   return (
     <StudioStoreProvider value={store}>
-      <LiveStoreProvider value={live}>
-        <SvgDefs />
-        <Studio api={api} storage={resolved} tabStorage={tab} session={session} />
-      </LiveStoreProvider>
+      <ChatStoreProvider value={chat}>
+        <LiveStoreProvider value={live}>
+          <SvgDefs />
+          <Studio api={api} storage={resolved} tabStorage={tab} session={session} />
+        </LiveStoreProvider>
+      </ChatStoreProvider>
     </StudioStoreProvider>
   );
 }

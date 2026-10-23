@@ -12,6 +12,7 @@ import './canvas/canvas.css';
 import './canvas/art.css';
 import './dock/dock.css';
 import './panels/panels.css';
+import './chat/chat.css';
 import './app/document.css';
 import './app.css';
 import { App } from './App';

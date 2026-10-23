@@ -181,7 +181,7 @@ describe('DockShell', () => {
     openMenu('Window');
     choose(/Save window layout/);
     expect(toast()).toHaveTextContent('Window layout saved in this browser');
-    expect(JSON.parse(storage.getItem(LAYOUT_KEY)!).hidden).toEqual(['output']);
+    expect(JSON.parse(storage.getItem(LAYOUT_KEY)!).hidden).toEqual(['output', 'chat']);
 
     openMenu('Window');
     choose(/Reset window layout/);
