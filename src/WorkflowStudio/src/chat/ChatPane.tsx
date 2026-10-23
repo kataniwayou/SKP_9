@@ -10,8 +10,8 @@ export interface ChatPaneProps {
   onAnswer(choice: string): void;
   onStop(): void;
   onNewChat(): void;
-  /** What the model is doing, while the chat is busy. */
-  status: ChatStatus;
+  /** What the model is doing, while a request runs; null when none runs here. */
+  status: ChatStatus | null;
   /** Whether the model has a key on the server: null while that is not known yet. */
   configured: boolean | null;
 }
@@ -86,7 +86,7 @@ export function ChatPane({ chat, onSend, onAnswer, onStop, onNewChat, status, co
       </div>
       {chat.busy && (
         <div className="chat-busy">
-          <StatusLine seconds={status.seconds} tokens={status.tokens} activity={status.activity} />
+          {status && <StatusLine seconds={status.seconds} tokens={status.tokens} activity={status.activity} />}
           <button type="button" className="qb" aria-label="Stop" onClick={onStop}>Stop</button>
         </div>
       )}
