@@ -15,7 +15,8 @@ export const ANSWER_FIRST = 'Answer the question first';
 export const CANCELLED_NOTE = 'Cancelled: what was already done stays (Undo reverses drawing changes; Revert entity or Discard design reverses field edits)';
 const LOST_CALL = 'The question\'s tool call was lost; nothing was done';
 const NOT_RUN_STOPPED = 'not run: the user stopped the request';
-const NOT_RUN_LOST = 'not run: the request was lost (stopped or refreshed) before this call ran';
+// a call unanswered after a refresh may have run (the request died before its result was recorded), so it is not said to be "not run"
+const NOT_RUN_LOST = 'the request was lost at refresh before this call\'s result was recorded: it may have run; read the design and Output before going on';
 
 type Outcome = 'asked' | 'continue';
 
@@ -164,7 +165,10 @@ class ChatRunner {
         this.roundTokens = 0;
         // an id is what pairs a call with its answer; one missing from the stream is made up, unique in the request
         const calls = turn.calls.map((c, i) => (c.id === '' ? { ...c, id: `call-${this.rounds}-${i}` } : c));
-        run.put({ type: 'wire', add: [{ role: 'assistant', content: turn.text, ...(calls.length > 0 ? { tool_calls: calls.map(toWire) } : {}) }] });
+        // a turn with neither text nor calls adds nothing to the wire: an empty assistant message is refused by the model's API
+        if (turn.text.trim() !== '' || calls.length > 0) {
+          run.put({ type: 'wire', add: [{ role: 'assistant', content: turn.text, ...(calls.length > 0 ? { tool_calls: calls.map(toWire) } : {}) }] });
+        }
         if (turn.text.trim() !== '') run.put({ type: 'entries', add: [{ kind: 'model', text: turn.text.trim() }] });
         if (calls.length === 0) {
           if (turn.text.trim() === '') note('The model gave no answer', 'error');
@@ -175,7 +179,7 @@ class ChatRunner {
     } catch (e) {
       const text = e instanceof Error ? e.message : String(e);
       if (ctl.signal.aborted || text === 'cancelled') note(CANCELLED_NOTE, 'info');
-      else note(e instanceof ChatError || e instanceof DrawingError ? text : `the chat failed: ${text}`, 'error');
+      else note(e instanceof ChatError || e instanceof DrawingError ? text.replace(/^AI drawing is not configured/, 'The chat is not configured') : `the chat failed: ${text}`, 'error');
     } finally {
       clearInterval(tick);
       if (this.ctl === ctl) this.ctl = null;

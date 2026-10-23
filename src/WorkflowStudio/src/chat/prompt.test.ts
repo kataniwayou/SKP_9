@@ -29,6 +29,12 @@ describe('systemPrompt', () => {
     expect(prompt).toMatch(/adding the steps, wires and caches the user asked for is not tidying/i);
   });
 
+  it('limits rule 4 to renaming, rewiring and repurposing, and allows moving blocks', () => {
+    expect(prompt).toMatch(/did not name or point to/);
+    expect(prompt).toMatch(/Moving existing blocks to make room or to tidy is allowed/);
+    expect(prompt).toMatch(/separate or parallel work \(not an extension of the main path\) goes on its own row below/);
+  });
+
   it('says a pasted cache keeps its root and needs a new one before Save', () => {
     expect(prompt).toMatch(/pasted cache keeps the same root[^\n]*new root[^\n]*before Save/i);
   });

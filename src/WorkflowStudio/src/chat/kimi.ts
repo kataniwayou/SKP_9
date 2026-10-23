@@ -54,6 +54,8 @@ export async function requestTurn(
     }
     if (r.status === 503 || r.status === 404) throw new ChatError(NOT_CONFIGURED);
     if (r.status === 401 || r.status === 403) throw new ChatError(`the model refused the key (HTTP ${r.status})`);
+    // 400 is what the model answers to a conversation over its context length (2026-10-23): the way out is a New chat
+    if (r.status === 400) throw new ChatError(`The conversation is too long for the model: start a New chat (HTTP ${r.status})`);
     if (!r.ok) throw new ChatError(`the model answered HTTP ${r.status}`);
     if (!r.body) throw new ChatError('the model sent no stream');
     try {

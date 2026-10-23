@@ -533,6 +533,8 @@ describe('the document area takes the resize slack (ruling)', () => {
     addDocument(target.api, target.memory, 'a', 'orders');
     applyLayout(target.api, target.memory, old);
     expect(target.api.getPanel('chat')).toBeDefined();
+    // back-filled inactive: Output stays the active tab of the group they share
+    expect(target.api.getPanel('output')!.group.activePanel?.id).toBe('output');
 
     // a layout saved after the user closed it: closing keeps its home
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, right: 100, bottom: 100, x: 0, y: 0, width: 100, height: 100 } as DOMRect);

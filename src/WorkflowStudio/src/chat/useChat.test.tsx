@@ -96,7 +96,8 @@ describe('useChat', () => {
     const t = await setup(503, [delta({ content: 'hello' })]);
     act(() => t.hook.result.current.send('hi'));
     await t.idle();
-    expect(t.state().entries.at(-1)).toEqual({ kind: 'note', text: NOT_CONFIGURED, level: 'error' });
+    expect(t.state().entries.at(-1)).toEqual({ kind: 'note', text: NOT_CONFIGURED.replace('AI drawing', 'The chat'), level: 'error' });
+    expect(NOT_CONFIGURED.replace('AI drawing', 'The chat')).toMatch(/^The chat is not configured/);
     act(() => t.hook.result.current.send('again'));
     await waitFor(() => expect(t.state().entries.at(-1)).toEqual({ kind: 'model', text: 'hello' }));
   });
@@ -179,6 +180,34 @@ describe('useChat', () => {
     expect(t.bodies).toHaveLength(2);
     act(() => t.hook.result.current.stop());
     await t.idle();
+  });
+
+  it('a call left unanswered by a refresh is answered as possibly run', async () => {
+    const t = await setup([delta({ content: 'Looking.' })]);
+    act(() => t.chat.dispatch({ type: 'wire', add: [
+      { role: 'user', content: 'go' },
+      { role: 'assistant', content: '', tool_calls: [{ id: 'u1', type: 'function', function: { name: 'add_step', arguments: '{}' } }] },
+    ] }));
+    act(() => t.hook.result.current.send('again'));
+    await t.idle();
+    const tool = t.bodies[0]!.messages.find((m) => m.role === 'tool');
+    expect(tool).toMatchObject({ tool_call_id: 'u1', content: expect.stringMatching(/may have run; read the design and Output before going on/) });
+    expect((tool as { content: string }).content).not.toMatch(/^not run/);
+  });
+
+  it('a turn with no text and no calls adds nothing to the wire, only a note', async () => {
+    const t = await setup([ev({ choices: [], usage: { completion_tokens: 1 } })]);
+    act(() => t.hook.result.current.send('hi'));
+    await t.idle();
+    expect(t.state().wire.filter((m) => m.role === 'assistant')).toEqual([]);
+    expect(t.state().entries.at(-1)).toEqual({ kind: 'note', text: 'The model gave no answer', level: 'error' });
+  });
+
+  it('a 400 says the conversation is too long and to start a New chat', async () => {
+    const t = await setup(400);
+    act(() => t.hook.result.current.send('hi'));
+    await t.idle();
+    expect(t.state().entries.at(-1)).toMatchObject({ kind: 'note', level: 'error', text: expect.stringMatching(/The conversation is too long for the model: start a New chat.*HTTP 400/) });
   });
 
   it('a runaway loop stops after MAX_ROUNDS', async () => {

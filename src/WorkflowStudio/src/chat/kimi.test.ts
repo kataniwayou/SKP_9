@@ -63,6 +63,11 @@ describe('requestTurn', () => {
     await expect(ask(status(401))).rejects.toThrow('the model refused the key (HTTP 401)');
   });
 
+  it('a 400 is the conversation over the model\'s length: start a New chat, keeping the code', async () => {
+    const f = vi.fn(async () => new Response('{"error":{"message":"context length exceeded"}}', { status: 400 })) as unknown as typeof fetch;
+    await expect(ask(f)).rejects.toThrow('The conversation is too long for the model: start a New chat (HTTP 400)');
+  });
+
   it('a silent model is given up', async () => {
     vi.useFakeTimers();
     try {

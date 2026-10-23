@@ -440,7 +440,14 @@ export function applyLayout(api: DockviewApi, memory: DockMemory, saved: SavedLa
   // a layout saved before a tool pane existed (Chat, 2026-10-23) never knew it: it is shown at its default place. A pane
   // the user closed is not unknown: closing keeps its home.
   for (const id of TOOL_IDS) {
-    if (!api.getPanel(id) && !(id in saved.dock.panels) && !saved.homes[id] && !(id in saved.sides) && !saved.hidden.includes(id)) showTool(api, memory, id);
+    if (!api.getPanel(id) && !(id in saved.dock.panels) && !saved.homes[id] && !(id in saved.sides) && !saved.hidden.includes(id)) {
+      // the back-filled pane joins its mate's tabs inactive: the tab the user had (Output) stays the active one
+      const mate = MATE[id];
+      const keep = mate ? api.getPanel(mate)?.group.activePanel : undefined;
+      showTool(api, memory, id);
+      keep?.api.setActive();
+    }
   }
+  if (active !== null) api.getPanel(active)?.api.setActive();
   return saved.hidden.filter((id) => { const p = api.getPanel(id); return !p || !p.group.api.isVisible; });
 }
