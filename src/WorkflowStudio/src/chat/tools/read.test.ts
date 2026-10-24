@@ -24,6 +24,7 @@ async function setup() {
   const api = {
     listWorkflows: async () => ok([workflowDto({ id: 'wf1' }), workflowDto({ id: 'wf2', name: 'other' })]),
     listLive: async () => ok(['WF2']),
+    listLiveness: async () => ok([{ processorId: 'P1', live: true, healthy: 1, replicas: 2 }]),
     listProcessors: async () => ok([processorDto('p1', { name: 'fetcher', configSchemaId: 'sc1' })]),
     listCaches: async () => ok([cacheDto('c1', { name: 'store', root: 'r' })]),
     listSchemas: async () => ok([schemaDto('sc1', { name: 'cfg' })]),
@@ -61,7 +62,7 @@ describe('the reading tools', () => {
 
   it('list processors with their schema names, caches and schemas', async () => {
     const { run } = await setup();
-    expect((await run('list_processors')).data).toEqual([{ id: 'p1', name: 'fetcher', version: '1.0.0', schemas: { input: null, output: null, config: 'cfg 1.0.0' } }]);
+    expect((await run('list_processors')).data).toEqual([{ id: 'p1', name: 'fetcher', version: '1.0.0', health: 'live · 1 of 2 replicas healthy', schemas: { input: null, output: null, config: 'cfg 1.0.0' } }]);
     expect((await run('list_caches')).data).toEqual([{ id: 'c1', name: 'store', version: '1.0.0', root: 'r' }]);
     expect((await run('list_schemas')).data).toEqual([{ id: 'sc1', name: 'cfg', version: '1.0.0' }]);
   });
@@ -70,9 +71,20 @@ describe('the reading tools', () => {
     const { run } = await setup();
     const r = await run('read_design');
     expect(r.data.steps.map((s: { name: string }) => s.name)).toEqual(['fetch', 'parse']);
-    expect(r.data.steps[0]).toMatchObject({ processor: { name: 'fetcher', version: '1.0.0' }, entryCondition: 'Completed', assignmentId: 'a1', next: ['s2'] });
+    expect(r.data.workflow).toMatchObject({ id: 'wf1', running: false });
+    expect(r.data.steps[0]).toMatchObject({ processor: { name: 'fetcher', version: '1.0.0', health: 'live · 1 of 2 replicas healthy' }, entryCondition: 'Completed', assignmentId: 'a1', next: ['s2'] });
     expect(r.data.problems).toEqual([]);
     expect(r.data.blocks.length).toBeGreaterThan(2);
+  });
+
+  it('health and running are unknown when BaseApi cannot say, not reported for a processor it does not list', async () => {
+    const { ctx, run } = await setup();
+    ctx.api.listLive = async () => notFound;
+    ctx.api.listLiveness = async () => { throw new Error('down'); };
+    expect((await run('read_design')).data.workflow.running).toBeNull();
+    expect((await run('list_processors')).data[0].health).toBe('unknown: BaseApi could not say');
+    ctx.api.listLiveness = async () => ok([]);
+    expect((await run('list_processors')).data[0].health).toBe('not reported');
   });
 
   it('read_design says when the workflow is not open', async () => {

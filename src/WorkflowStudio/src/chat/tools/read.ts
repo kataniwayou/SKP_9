@@ -7,7 +7,7 @@ import { baseDtoOf } from '../../app/inspectorService';
 import { applyEdits } from '../../design/apply';
 import { applyBlocks } from '../../design/blocks';
 import { fieldsOf, hasEdit, slotKey, valueText } from '../../design/design';
-import { runningOf } from '../../live/liveState';
+import { livenessText, processorsOf, runningOf, type ProcessorLive } from '../../live/liveState';
 import { conditionInfo } from '../../model/entryConditions';
 import { entityName } from '../../model/entityNames';
 import type { Graph } from '../../model/graph';
@@ -35,6 +35,19 @@ async function listOf<T>(call: (() => Promise<ApiResult<T[]>>) | undefined, what
   return r.ok ? { ok: true, value: r.value } : { ok: false, error: `could not list ${what}. ${describeError(r.error)}` };
 }
 
+/** What BaseApi says now: the running workflows' ids and every processor's liveness; null where it could not say. */
+async function liveOf(ctx: ToolContext): Promise<{ running: Set<string> | null; processors: Map<string, ProcessorLive> | null }> {
+  const read = async <T,>(call: (() => Promise<ApiResult<unknown>>) | undefined, of: (r: ApiResult<unknown>) => T | null): Promise<T | null> => {
+    try { return call ? of(await call()) : null; } catch { return null; }
+  };
+  const [running, processors] = await Promise.all([read(ctx.api.listLive?.bind(ctx.api), runningOf), read(ctx.api.listLiveness?.bind(ctx.api), processorsOf)]);
+  return { running, processors };
+}
+
+/** A processor's health in the Inspector's words. */
+const healthOf = (processors: Map<string, ProcessorLive> | null, id: string | null | undefined): string =>
+  livenessText(processors === null ? 'unknown' : 'known', id ? processors?.get(id.toLowerCase()) ?? null : null);
+
 /** A workflow's open document with its loaded workflow, or why there is none. */
 async function readyDocOf(ctx: ToolContext, ref: string | undefined): Promise<Found<{ doc: OpenDocument; loaded: StudioDocument }>> {
   const w = await workflowOf(ctx, ref);
@@ -52,7 +65,7 @@ const listWorkflows: ToolDef = {
   async run(ctx) {
     const list = await listOf(() => ctx.api.listWorkflows(), 'workflows');
     if (!list.ok) return fail(list.error, 'list workflows');
-    const running = runningOf(await ctx.api.listLive());
+    const { running } = await liveOf(ctx);
     const open = new Set(ctx.store.getState().docs.map((d) => d.workflowId.toLowerCase()));
     return json(list.value.map((w) => ({
       id: w.id, name: w.name, version: w.version, running: running ? running.has((w.id ?? '').toLowerCase()) : null, open: open.has((w.id ?? '').toLowerCase()),
@@ -62,19 +75,19 @@ const listWorkflows: ToolDef = {
 
 const listProcessors: ToolDef = {
   name: 'list_processors',
-  description: 'List every processor: id, name, version and the schema names of its input, output and config slots (null: an empty slot).',
+  description: 'List every processor: id, name, version, health (its replicas now, as the start gate judges them: "live · n of m replicas healthy", "not live · why", "not reported" or "unknown") and the schema names of its input, output and config slots (null: an empty slot).',
   parameters: NO_ARGS,
   async run(ctx) {
     const list = await listOf(ctx.api.listProcessors?.bind(ctx.api), 'processors');
     if (!list.ok) return fail(list.error, 'list processors');
-    const schemas = await listOf(ctx.api.listSchemas?.bind(ctx.api), 'schemas');
+    const [schemas, live] = await Promise.all([listOf(ctx.api.listSchemas?.bind(ctx.api), 'schemas'), liveOf(ctx)]);
     const nameOf = (id: string | null | undefined): string | null => {
       if (!id) return null;
       const s = schemas.ok ? schemas.value.find((x) => x.id === id) : undefined;
       return s ? label(s) : id;
     };
     return json(list.value.map((p) => ({
-      id: p.id, name: p.name, version: p.version,
+      id: p.id, name: p.name, version: p.version, health: healthOf(live.processors, p.id),
       schemas: { input: nameOf(p.inputSchemaId), output: nameOf(p.outputSchemaId), config: nameOf(p.configSchemaId) },
     })), `list processors (${list.value.length})`);
   },
@@ -104,7 +117,7 @@ const listSchemas: ToolDef = {
 
 const readDesign: ToolDef = {
   name: 'read_design',
-  description: 'Read the drawing of an open workflow as it is now, unsaved edits included: every block and wire with positions, each step with its name, processor, entry condition, assignment id and next steps, and the current problems (the ones Output pins).',
+  description: 'Read the drawing of an open workflow as it is now, unsaved edits included: whether the workflow is running (null: unknown), every block and wire with positions, each step with its name, processor (with its health now), entry condition, assignment id and next steps, and the current problems (the ones Output pins).',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG }, additionalProperties: false },
   async run(ctx, args) {
     const found = await readyDocOf(ctx, text(args.workflow));
@@ -114,15 +127,16 @@ const readDesign: ToolDef = {
     const edited = applyEdits(loaded, doc.edits, draft.blocks);
     const shown = shownDesignOf(doc);
     const { graph } = edited;
+    const live = await liveOf(ctx);
     const steps = [...graph.steps.values()].map((s) => {
       const p = s.processorId ? graph.processors.get(s.processorId) : undefined;
       return {
-        id: s.id, name: s.name, version: s.version, processor: p ? { name: p.name, version: p.version } : null,
+        id: s.id, name: s.name, version: s.version, processor: p ? { name: p.name, version: p.version, health: healthOf(live.processors, p.id) } : null,
         entryCondition: conditionInfo(s.entryCondition).name, assignmentId: graph.assignments.find((a) => a.stepId === s.id)?.id ?? null, next: s.nextStepIds,
       };
     });
     const problems = problemsFrom(doc, shown).map((e) => ({ entity: entityLabel(e, (shown ?? edited).graph, shown, loaded.graph), kind: e.kind, field: e.field, message: e.message }));
-    return json({ workflow: { id: doc.workflowId, name: graph.workflow.name, version: graph.workflow.version }, steps, ...graphOf(edited, draft), problems }, `read design of ${doc.name}`);
+    return json({ workflow: { id: doc.workflowId, name: graph.workflow.name, version: graph.workflow.version, running: live.running ? live.running.has(doc.workflowId.toLowerCase()) : null }, steps, ...graphOf(edited, draft), problems }, `read design of ${doc.name}`);
   },
 };
 

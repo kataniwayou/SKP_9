@@ -14,6 +14,7 @@ import { crumbLabel, editTargetOf, rootTarget, targetKey, type InspectorTarget, 
 import { activeDocument, designLocked, shownTargetOf, type OpenDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { useProcessorLive } from '../live/LiveContext';
+import { livenessText } from '../live/liveState';
 import { FieldEditor } from './FieldEditor';
 import { editBaseOf } from '../store/inspectorBase';
 import { detailRows, inspectorBaseOf, kindLabel, uniqueNameOf, type Row } from './inspectorView';
@@ -252,14 +253,6 @@ function EntityForm({ open, doc, base, target, saved, fields, showDetails, drill
 }
 
 /** What the processor's replicas say now, as the start gate judges them (the liveness store, 2026-10-10); read-only. */
-export function livenessText(known: 'checking' | 'known' | 'unknown', p: { live: boolean; healthy: number; replicas: number; reason: string | null } | null): string {
-  if (known === 'checking') return 'checking…';
-  if (known === 'unknown') return 'unknown: BaseApi could not say';
-  if (p === null) return 'not reported';
-  if (p.live) return `live · ${p.healthy} of ${p.replicas} replica${p.replicas === 1 ? '' : 's'} healthy`;
-  return `not live · ${p.reason ?? 'no healthy replica'}`;
-}
-
 export function ProcessorLivenessSection({ processorId }: { processorId: string }) {
   const { known, processor } = useProcessorLive(processorId);
   const text = livenessText(known, processor);

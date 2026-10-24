@@ -94,6 +94,15 @@ export function processorsOf(result: ApiResult<unknown>): Map<string, ProcessorL
   return map;
 }
 
+/** One processor's liveness in words (the Inspector's Liveness and the chat's health). */
+export function livenessText(known: 'checking' | 'known' | 'unknown', p: ProcessorLive | null): string {
+  if (known === 'checking') return 'checking…';
+  if (known === 'unknown') return 'unknown: BaseApi could not say';
+  if (p === null) return 'not reported';
+  if (p.live) return `live · ${p.healthy} of ${p.replicas} replica${p.replicas === 1 ? '' : 's'} healthy`;
+  return `not live · ${p.reason ?? 'no healthy replica'}`;
+}
+
 /**
  * Pure: the state after one event, and the workflows that started or stopped with it. Sequence numbers are the
  * client's business (liveClient.ts): an event that reaches here is applied.

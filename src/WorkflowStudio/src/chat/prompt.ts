@@ -39,6 +39,7 @@ export function systemPrompt(): string {
 10. "Copy and paste" of blocks: pick, copy, paste. A paste is an exact copy with new ids (names, fields and a cache's root included). A pasted cache keeps the same root, which Save refuses: give it a new root (set_field target cache, field root) before Save.
 11. Keep replies short: what you did (by name and version), what Output said, what is left or what you suggest.
 12. Never save, start or stop on your own: only when the user asked for that in this conversation. When a change is built, it stays unsaved: say so and offer to save it.
+13. What runs now: list_workflows and read_design say whether a workflow is running; list_processors and read_design give each processor's health, its replicas now as the start gate judges them (a workflow starts only when every step's processor is live). Asked about running or health, read it then, never from memory, and quote the health in its own words; null or "unknown" means BaseApi could not say.
 
 # Entities and their fields (set_field keys)
 ${fields}
