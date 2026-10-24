@@ -43,7 +43,7 @@ const names = (j: Judgement) => new Map(j.steps.map((s) => [s.name.toLowerCase()
 const sameJson = (a: string | null | undefined, b: string) => { try { return JSON.stringify(JSON.parse(a ?? '')) === JSON.stringify(JSON.parse(b)); } catch { return false; } };
 
 interface Run { seconds: number; rounds: number; tokens: number; unread: number; reply: string; actions: string[]; failedActions: string[]; asked: string | null; destructive: string[]; called: string[] }
-const DESTRUCTIVE = ['stop', 'delete_workflow', 'close_workflow', 'delete_picked', 'discard_design', 'remove_assignment'];
+const DESTRUCTIVE = ['stop', 'delete_workflow', 'close_workflow', 'delete_picked', 'remove_assignment'];
 
 /** Types `text` into the chat with the real keyboard and waits until the model is done; what it took and did. */
 async function ask(page: Page, text: string): Promise<Run> {
@@ -83,7 +83,7 @@ function report(scenario: string, run: Run, after: Judgement, reasons: string[])
   expect(reasons, `${scenario}: ${JSON.stringify(line, null, 1)}`).toEqual([]);
 }
 
-/** The checks every scenario shares: no short circuit, the drawing tidy by the wand's judge, nothing destructive unasked. */
+/** The checks every scenario shares: no short circuit, the drawing tidy by the drawing judge, nothing destructive unasked. */
 function common(after: Judgement, run: Run, problemsBefore: string[] = [], saveAsked = false): string[] {
   const reasons: string[] = [];
   const unasked = run.called.filter((n) => ['save', 'start', 'stop'].includes(n) && !(saveAsked && n === 'save'));

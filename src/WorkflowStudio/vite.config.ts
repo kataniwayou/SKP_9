@@ -2,9 +2,9 @@ import { defineConfig } from 'vitest/config';
 import type { Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// AI drawing (2026-10-11): the model's base URL, id and key come from the dev environment, as nginx takes them from the
+// The chat's model (2026-10-11): the model's base URL, id and key come from the dev environment, as nginx takes them from the
 // pod's (KIMI_BASE_URL, KIMI_MODEL_ID, KIMI_API_KEY; never written anywhere). Without all three /ai is not proxied and
-// the studio says AI drawing is not configured.
+// the studio says the chat is not configured.
 const { KIMI_API_KEY: aiKey, KIMI_BASE_URL: aiBaseUrl, KIMI_MODEL_ID: aiModel } = process.env;
 const aiBase = aiKey && aiBaseUrl && aiModel ? new URL(aiBaseUrl) : null;
 /** /ai/config, as nginx answers it: the model the studio sends. */
@@ -14,7 +14,7 @@ const aiConfig: Plugin = {
     server.middlewares.use('/ai/config', (_req, res) => {
       res.setHeader('Content-Type', 'application/json');
       res.statusCode = aiBase ? 200 : 503;
-      res.end(JSON.stringify(aiBase ? { model: aiModel } : { error: 'AI drawing is not configured' }));
+      res.end(JSON.stringify(aiBase ? { model: aiModel } : { error: 'The chat is not configured' }));
     });
   },
 };
@@ -27,7 +27,7 @@ export default defineConfig({
   server: {
     port: 5173,
     // ws: the liveness hub (/api/hubs/liveness) is a WebSocket (2026-10-10)
-    // ai: AI drawing (above): /ai/... goes to KIMI_BASE_URL/..., with the key
+    // ai: the chat's model (above): /ai/... goes to KIMI_BASE_URL/..., with the key
     proxy: {
       '/api': { target: process.env.SKP_API ?? 'http://localhost:18080', ws: true },
       ...(aiBase ? {

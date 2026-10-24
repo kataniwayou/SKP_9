@@ -14,8 +14,6 @@ export interface StudioActions {
    * so moving away loses nothing). `doc`: the window the action came from.
    */
   guard(workflowId: Id, proceed: () => void, doc?: Document): void;
-  /** Asks before dropping a document's design draft (spec §5.4), then drops it. */
-  confirmDiscardDesign(workflowId: Id, doc?: Document): void;
   /** The page's workflow commands for the chat (2026-10-23), without the dialogs. Absent in a pane's own tests. */
   commands?: StudioCommands;
 }

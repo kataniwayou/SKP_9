@@ -7,8 +7,8 @@ import type { DeletePlan } from './deleteWorkflow';
 
 /**
  * What the chat may ask of the page (2026-10-23): App's workflow-level handlers without their pop-up dialogs, because
- * the chat asks the user itself. The guards and Output lines the UI has (still loading or saving, the AI drawing,
- * one deletion at a time) are the same ones: App shares one path between its menus and these.
+ * the chat asks the user itself. The guards and Output lines the UI has (still loading or saving, one deletion at a
+ * time) are the same ones: App shares one path between its menus and these.
  */
 export interface StudioCommands {
   listWorkflows(): Promise<ApiResult<WorkflowReadDto[]>>;
@@ -25,7 +25,7 @@ export interface StudioCommands {
   prepareDelete(workflowId: Id): Promise<DeletePlan | null>;
   /** The real deletion, after App's cleanup (views, opens, picker list); true when it was deleted. */
   commitDelete(plan: DeletePlan): Promise<boolean>;
-  /** Closes the document with no question: its design draft goes with it. Refused while the AI is drawing it. */
+  /** Closes the document with no question: its design draft goes with it. */
   close(workflowId: Id): void;
 }
 

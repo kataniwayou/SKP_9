@@ -1,8 +1,8 @@
 import type { SavedView } from '../canvas/savedView';
 import { parseDraft, type Draft } from '../design/draft';
 import { parseClip, type Clip } from '../design/clipboard';
-import { EMPTY_EDITS, parseEdits, type EntityEdits } from '../design/design';
-import { historyOf } from '../design/history';
+import { EMPTY_EDITS, parseEdits, toOp, type EntityEdits } from '../design/design';
+import { historyOf, type HistoryStep } from '../design/history';
 import { parseLayout, type SavedLayout } from '../dock/layoutPersistence';
 import { EMPTY_INSPECTOR, type InspectorDraft } from '../store/inspector';
 import { parseOutput, type OutputLine } from '../store/output';
@@ -39,7 +39,7 @@ export interface SessionDoc {
    * The design's Undo and Redo steps (the user's ruling, 2026-10-20: Undo survives a refresh), oldest first; `design`
    * is then the draft they lead to. Absent when there are none. Optional, so the version stays 1.
    */
-  history?: { past: Draft[]; future: Draft[] };
+  history?: { past: HistoryStep[]; future: HistoryStep[] };
   /** A new workflow BaseApi does not have yet (2026-10-10): built again locally, never read. Absent: an ordinary one. */
   virtual?: true;
 }
@@ -257,10 +257,21 @@ function designParts(design: unknown, edits: unknown): { design?: Draft; edits?:
   return { ...(draft !== null ? { design: draft } : {}), ...(parsed !== null ? { edits: parsed } : {}) };
 }
 
-function historyPart(value: unknown): { history?: { past: Draft[]; future: Draft[] } } {
+/** One Undo step as the session kept it: a draft, or creating or removing an assignment (2026-10-23); null when it is neither. */
+function parseStep(value: unknown): HistoryStep | null {
+  if (!isRecord(value) || !Object.hasOwn(value, 'assignment')) return parseDraft(value);
+  const a = value.assignment;
+  if (!isRecord(a) || typeof a.stepId !== 'string' || a.stepId === '') return null;
+  const side = (v: unknown) => (v === null ? null : toOp(v));
+  const before = side(a.before), after = side(a.after);
+  if ((a.before !== null && before === null) || (a.after !== null && after === null)) return null;
+  return { assignment: { stepId: a.stepId, before, after } };
+}
+
+function historyPart(value: unknown): { history?: { past: HistoryStep[]; future: HistoryStep[] } } {
   if (!isRecord(value) || !Array.isArray(value.past) || !Array.isArray(value.future)) return {};
-  const drafts = (list: unknown[]) => list.map(parseDraft).filter((x): x is Draft => x !== null);
-  const past = drafts(value.past), future = drafts(value.future);
+  const steps = (list: unknown[]) => list.map(parseStep).filter((x): x is HistoryStep => x !== null);
+  const past = steps(value.past), future = steps(value.future);
   return past.length > 0 || future.length > 0 ? { history: { past, future } } : {};
 }
 

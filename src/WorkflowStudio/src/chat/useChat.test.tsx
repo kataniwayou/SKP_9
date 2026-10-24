@@ -1,6 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { NOT_CONFIGURED } from '../ai/drawing';
 import type { StudioApi } from '../api/client';
 import { graphDto, processorDto, stepDto, workflowDto } from '../api/fixtures';
 import { loadedDocument } from '../app/fixtures';
@@ -8,7 +7,7 @@ import { createInspectorService } from '../app/inspectorService';
 import { shownDesignOf } from '../store/problems';
 import { createStudioStore } from '../store/studioStore';
 import { createChatStore, type ChatState } from './chatStore';
-import type { ChatWire } from './kimi';
+import { NOT_CONFIGURED, type ChatWire } from './kimi';
 import { runTool } from './runTool';
 import type { ToolContext } from './toolTypes';
 import { CANCELLED_NOTE, MAX_ROUNDS, useChat } from './useChat';
@@ -92,12 +91,12 @@ describe('useChat', () => {
     expect(t.hook.result.current.status).toBeNull();
   });
 
-  it('503: the wand\'s not-configured note, and the chat is usable again', async () => {
+  it('503: the not-configured note, and the chat is usable again', async () => {
     const t = await setup(503, [delta({ content: 'hello' })]);
     act(() => t.hook.result.current.send('hi'));
     await t.idle();
-    expect(t.state().entries.at(-1)).toEqual({ kind: 'note', text: NOT_CONFIGURED.replace('AI drawing', 'The chat'), level: 'error' });
-    expect(NOT_CONFIGURED.replace('AI drawing', 'The chat')).toMatch(/^The chat is not configured/);
+    expect(t.state().entries.at(-1)).toEqual({ kind: 'note', text: NOT_CONFIGURED, level: 'error' });
+    expect(NOT_CONFIGURED).toMatch(/^The chat is not configured/);
     act(() => t.hook.result.current.send('again'));
     await waitFor(() => expect(t.state().entries.at(-1)).toEqual({ kind: 'model', text: 'hello' }));
   });
@@ -112,9 +111,10 @@ describe('useChat', () => {
     expect(t.hook.result.current.status).toBeNull();
   });
 
-  it('the cancelled note promises Undo for drawing changes only: field edits are reversed by Revert entity or Discard design', () => {
-    expect(CANCELLED_NOTE).toMatch(/Undo reverses drawing changes/);
-    expect(CANCELLED_NOTE).toMatch(/Revert entity or Discard design/);
+  it('the cancelled note promises Undo for drawing changes and assignments: field edits are reversed by Revert entity', () => {
+    expect(CANCELLED_NOTE).toMatch(/Undo reverses drawing changes and created or removed assignments/);
+    expect(CANCELLED_NOTE).toMatch(/Revert entity reverses field edits/);
+    expect(CANCELLED_NOTE).not.toMatch(/Discard/);
   });
 
   it('New chat while a request runs: a message sent at once, before the old run has unwound, starts its own request', async () => {
@@ -134,10 +134,10 @@ describe('useChat', () => {
 
   it('a destructive call waits for the user; Yes runs it once, then the rest and the next round', async () => {
     const t = await setup(
-      [call(0, 'c1', 'add_step', {}), call(1, 'c2', 'discard_design', {}), call(2, 'c3', 'read_output', {})],
-      [delta({ content: 'Discarded.' })],
+      [call(0, 'c1', 'add_step', {}), call(1, 'c2', 'delete_picked', {}), call(2, 'c3', 'read_output', {})],
+      [delta({ content: 'Deleted.' })],
     );
-    act(() => t.hook.result.current.send('add a step, then throw it all away'));
+    act(() => t.hook.result.current.send('add a step, then delete it'));
     await waitFor(() => expect(t.state().question).not.toBeNull());
     await t.idle();
     expect(t.state().question).toMatchObject({ callId: 'c2', choices: ['Yes', 'No'], pin: 'wf1' });
@@ -148,7 +148,7 @@ describe('useChat', () => {
     expect(t.state().entries.at(-1)).toEqual({ kind: 'note', text: 'Answer the question first', level: 'info' });
     // typed "yes" answers it
     act(() => t.hook.result.current.send(' yes '));
-    await waitFor(() => expect(t.state().entries.at(-1)).toEqual({ kind: 'model', text: 'Discarded.' }));
+    await waitFor(() => expect(t.state().entries.at(-1)).toEqual({ kind: 'model', text: 'Deleted.' }));
     await t.idle();
     expect(t.state().question).toBeNull();
     expect(t.steps()).toEqual(['a']);
@@ -158,13 +158,13 @@ describe('useChat', () => {
 
   it('a question restored after a refresh is answered with no loop in memory', async () => {
     const t = await setup([delta({ content: 'Kept as it is.' })]);
-    // the design has a change to discard
+    // the design has a step to delete, picked
     expect(await runTool(t.ctx, { id: 'x', name: 'add_step', arguments: '{}' })).toMatchObject({ kind: 'done', ok: true });
     act(() => t.chat.dispatch({ type: 'wire', add: [
-      { role: 'user', content: 'discard' },
-      { role: 'assistant', content: '', tool_calls: [{ id: 'q1', type: 'function', function: { name: 'discard_design', arguments: '{}' } }] },
+      { role: 'user', content: 'delete it' },
+      { role: 'assistant', content: '', tool_calls: [{ id: 'q1', type: 'function', function: { name: 'delete_picked', arguments: '{}' } }] },
     ] }));
-    act(() => t.chat.dispatch({ type: 'ask', question: { callId: 'q1', text: 'Discard?', choices: ['Yes', 'No'], pin: 'wf1' } }));
+    act(() => t.chat.dispatch({ type: 'ask', question: { callId: 'q1', text: 'Delete?', choices: ['Yes', 'No'], pin: 'wf1' } }));
     act(() => t.hook.result.current.answer('No'));
     await waitFor(() => expect(t.state().entries.at(-1)).toEqual({ kind: 'model', text: 'Kept as it is.' }));
     const tool = t.bodies[0]!.messages.find((m) => m.role === 'tool');

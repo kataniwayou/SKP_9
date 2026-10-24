@@ -11,4 +11,4 @@ export const TOOL_DEFS: ToolDef[] = [...READ_TOOLS, ...WORKFLOW_TOOLS, ...DESIGN
 export const TOOLS = TOOL_DEFS.map((t) => ({ type: 'function' as const, function: { name: t.name, description: t.description, parameters: t.parameters } }));
 
 /** The tools that ask the user before they act (close_workflow only when its workflow has unsaved changes). */
-export const DESTRUCTIVE: ReadonlySet<string> = new Set<string>(['stop', 'delete_workflow', 'close_workflow', 'delete_picked', 'discard_design', 'remove_assignment']);
+export const DESTRUCTIVE: ReadonlySet<string> = new Set<string>(['stop', 'delete_workflow', 'close_workflow', 'delete_picked', 'remove_assignment']);

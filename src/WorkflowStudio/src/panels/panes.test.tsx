@@ -485,7 +485,7 @@ describe('Output', () => {
 describe('the Inspector shows the design graph\'s entity (2026-10-10: it kept the values from before a Save)', () => {
   const graphWith = (description: string | null) => graphDto({ ...inspectorGraph, steps: [stepDto('s1', { name: 'fetch', nextStepIds: ['s2'], processorId: 'p1', description }), stepDto('s2', { name: 'store', processorId: 'p1' })] } as never);
 
-  it('an unsaved edit shows at once; after an applied Save the same value comes from BaseApi with no re-pick; Discard shows the base', async () => {
+  it('an unsaved edit shows at once; after an applied Save the same value comes from BaseApi with no re-pick; Revert shows the base', async () => {
     // the entity's own read lags behind on purpose: the form must not depend on it
     const getEntity = vi.fn(async () => ok(stepDto('s1', { name: 'fetch', description: 'stale read' })));
     const { store } = await renderInspector({ getEntity }, { selection: { kind: 'step', stepId: 's1' }, graph: graphWith(null) });
@@ -504,7 +504,7 @@ describe('the Inspector shows the design graph\'s entity (2026-10-10: it kept th
     expect(screen.getByLabelText('Description')).toHaveValue('e2e log');
 
     act(() => store.dispatch({ type: 'editField', workflowId: 'wf1', key: 'description', value: 'typed', copyId: 'x' }));
-    act(() => store.dispatch({ type: 'discardDesign', workflowId: 'wf1' }));
+    act(() => store.dispatch({ type: 'revertEntity', workflowId: 'wf1' }));
     expect(screen.getByLabelText('Description')).toHaveValue('e2e log');
   });
 

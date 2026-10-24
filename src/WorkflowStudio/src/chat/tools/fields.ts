@@ -17,7 +17,8 @@ import { inspectorTargetOf, TARGET_ARG, targetOf } from './read';
 
 // The field tools (2026-10-23): the Inspector's own edits. Each first shows its entity in the Inspector, as the user's
 // clicks would (select, then the drill-downs), waits for the Inspector's read of it, and then edits what the Inspector
-// shows, so the user sees the field change. Field edits have no Undo, as in the Inspector: Revert entity undoes them.
+// shows, so the user sees the field change. Field edits have no Undo, as in the Inspector: Revert entity undoes them;
+// creating or removing an assignment is an Undo step (2026-10-23).
 
 /** How long a field tool waits for the Inspector's read of the entity it shows. */
 export const INSPECTOR_READ_MS = 10_000;
@@ -289,7 +290,7 @@ const removeAssignmentTool: ToolDef = {
     if (!r.ok) return fail(r.error, `remove assignment of ${name} refused`);
     const left = stepIn(r.after, stepId);
     if (left.ok && left.value.assignment) return done(false, `the assignment of step ${name} is still there`, `remove assignment of ${name} failed`, r.entries);
-    return done(true, `removed the assignment of step ${name} (unsaved; Save deletes it in BaseApi, Discard design brings it back)`, `- assignment of ${name}`, r.entries);
+    return done(true, `removed the assignment of step ${name} (unsaved; Save deletes it in BaseApi, Undo brings it back)`, `- assignment of ${name}`, r.entries);
   },
 };
 

@@ -23,7 +23,7 @@ COPY src/WorkflowStudio/ ./
 RUN npm run build
 
 FROM ${NGINX_IMAGE}
-# nginx.conf is a template (AI drawing, 2026-10-11): at start the image writes it to conf.d/default.conf with only these
+# nginx.conf is a template (the chat's model, 2026-10-11): at start the image writes it to conf.d/default.conf with only these
 # variables filled in, so nginx's own $variables stay: the model's base URL, id and key (env KIMI_BASE_URL,
 # KIMI_MODEL_ID, KIMI_API_KEY, set by k8s/31-workflow-studio.yaml; any empty: /ai answers 503) and the pod's DNS
 # resolvers (the /ai upstream is resolved per request).

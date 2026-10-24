@@ -218,6 +218,26 @@ describe('the design draft (plan 4)', () => {
     expect(again.history?.future).toEqual([one, two]);
   });
 
+  it('an assignment Undo step (2026-10-23) survives a refresh: the restored document brings the removed assignment back', async () => {
+    const doc = await loadedDocument();
+    let state = reduce(reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' }), { type: 'loaded', workflowId: 'wf1', doc });
+    state = reduce(state, { type: 'createAssignment', workflowId: 'wf1', stepId: 's1', stepName: 'fetch', id: 'n1' });
+    state = reduce(state, { type: 'removeAssignment', workflowId: 'wf1', stepId: 's1' });
+    const storage = memoryStorage();
+    writeSession(storage, sessionOf(state, new Map(), null));
+    let back = reduce(restoredState(readSession(storage)), { type: 'loaded', workflowId: 'wf1', doc });
+    expect(back.docs[0]!.design.past).toEqual(state.docs[0]!.design.past);
+    back = reduce(back, { type: 'undo', workflowId: 'wf1' });
+    expect(back.docs[0]!.edits.assignments['s1']).toMatchObject({ op: 'create', id: 'n1' });
+  });
+
+  it('drops a malformed assignment Undo step and keeps the rest', () => {
+    const storage = storageWith({ version: 1, activeId: 'wf1', showDetails: false, dock: null, docs: [{ workflowId: 'wf1', name: 'a', version: '1', selection: null, view: null,
+      design: EMPTY_DRAFT, history: { past: [EMPTY_DRAFT, { assignment: { stepId: 's1', before: 'junk', after: null } }, { assignment: { stepId: 's1', before: null, after: { op: 'delete', id: 'a1' } } }], future: [] } }] });
+    const past = restoredState(readSession(storage)).docs[0]!.design.past;
+    expect(past).toEqual([EMPTY_DRAFT, { assignment: { stepId: 's1', before: null, after: { op: 'delete', id: 'a1', updatedAt: null } } }]);
+  });
+
   it('drops a malformed design draft (review focus 2)', () => {
     const storage = memoryStorage();
     storage.setItem(SESSION_KEY, JSON.stringify({ version: 1, docs: [{ workflowId: 'wf1', name: 'a', version: '1', selection: null, view: null, design: 'junk' }], activeId: 'wf1', showDetails: false, dock: null }));

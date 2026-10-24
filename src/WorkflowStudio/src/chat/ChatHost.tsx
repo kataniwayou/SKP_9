@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
-import { DrawingError, modelOf, NOT_CONFIGURED } from '../ai/drawing';
 import { useStudioActionsOrNull } from '../app/studioActions';
 import { newId } from '../design/ids';
 import { useStudioStore } from '../store/studioStore';
 import { ChatPane } from './ChatPane';
+import { ChatError, modelOf, NOT_CONFIGURED } from './kimi';
 import type { ChatStore } from './chatStore';
 import type { ToolContext } from './toolTypes';
 import { useChat } from './useChat';
@@ -15,14 +15,14 @@ export const ChatStoreProvider = ChatStoreContext.Provider;
 
 export const UNAVAILABLE_NOTE = 'The chat is not available here: the studio\'s commands are missing';
 
-/** Whether the server holds a key for the model (/ai/config, as the wand asks): null while unknown or unreadable. */
+/** Whether the server holds a key for the model (/ai/config): null while unknown or unreadable. */
 function useConfigured(): boolean | null {
   const [configured, setConfigured] = useState<boolean | null>(null);
   useEffect(() => {
     const c = new AbortController();
     modelOf(c.signal).then(
       () => setConfigured(true),
-      (e: unknown) => { if (!c.signal.aborted && e instanceof DrawingError && e.message === NOT_CONFIGURED) setConfigured(false); },
+      (e: unknown) => { if (!c.signal.aborted && e instanceof ChatError && e.message === NOT_CONFIGURED) setConfigured(false); },
     );
     return () => c.abort();
   }, []);

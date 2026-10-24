@@ -12,7 +12,6 @@ import { useStudio, useStudioStore } from '../store/studioStore';
 import { applyDraft, applyEdits } from '../design/apply';
 import { canRedo, canUndo } from '../design/history';
 import { newId } from '../design/ids';
-import { aiBlocked, useAiDrawing } from '../ai/useAiDrawing';
 import { CapsuleToolbar } from './CapsuleToolbar';
 import { useStudioActionsOrNull } from './studioActions';
 import { useHealthOf, useWorkflowStatus } from '../live/LiveContext';
@@ -49,7 +48,6 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
   const store = useStudioStore();
   const actions = useStudioActionsOrNull();
   const ownerDocument = useOwnerDocument(panel);
-  const aiDrawing = useAiDrawing(workflowId);
   const fitter = useFitter(ownerDocument);
   const status = useWorkflowStatus(workflowId);
   const health = useHealthOf();
@@ -64,7 +62,7 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
   const blocks = open?.design.draft.blocks;
   const edited = useMemo(() => (base && edits ? applyEdits(base, edits, blocks) : null), [base, edits, blocks]);
 
-  // while a Save runs or the AI draws (2026-10-11) the design is read-only (spec §4.1): the canvas draws it whole, with no
+  // while a Save runs the design is read-only (spec §4.1): the canvas draws it whole, with no
   // design mode; clicking still selects and the Inspector shows it, read-only
   const locked = open !== null && designLocked(open);
   const frozen = useMemo(() => (edited && locked ? applyDraft(edited, open!.design.draft) : null), [edited, locked, open?.design.draft]);
@@ -120,9 +118,7 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
             dirty: designDirty(open), locked, canUndo: canUndo(open.design), canRedo: canRedo(open.design),
             onUndo: () => store.dispatch({ type: 'undo', workflowId }),
             onRedo: () => store.dispatch({ type: 'redo', workflowId }),
-            onDiscard: () => actions.confirmDiscardDesign(workflowId, ownerDocument),
-          } : undefined}
-          ai={actions ? { running: aiDrawing.running, seconds: aiDrawing.seconds, activity: aiDrawing.activity, blocked: aiBlocked(open), onDraw: () => { void aiDrawing.draw(); }, onCancel: aiDrawing.cancel } : undefined} />
+          } : undefined} />
       </WorkflowCanvas>
     </div>
   );

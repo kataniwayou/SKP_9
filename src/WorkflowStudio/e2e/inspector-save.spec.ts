@@ -58,7 +58,7 @@ test('a step: the edit shows at once; after Save the Inspector shows what BaseAp
   await expect(field(page, 'Description')).toHaveValue('saved step text');
 });
 
-test('the workflow and a processor: saved values shown at once; Discard shows the base again', async ({ page, request }) => {
+test('the workflow and a processor: saved values shown at once; Revert shows the base again', async ({ page, request }) => {
   const panel = await open(page);
   await panel.locator('.react-flow__node-workflow').click();
   await expect(pill(page)).toHaveText('WORKFLOW');
@@ -79,11 +79,10 @@ test('the workflow and a processor: saved values shown at once; Discard shows th
   await expect(field(page, 'Description')).toHaveValue('saved proc text');
   await expect(unsaved(page)).toHaveCount(0);
 
-  // an unsaved edit, then Discard design: the base (what BaseApi holds) again
+  // an unsaved edit, then the Inspector's Revert: the base (what BaseApi holds) again
   await typeInto(page, 'Description', 'not kept');
   await expect(field(page, 'Description')).toHaveValue('not kept');
-  await page.getByRole('button', { name: 'Discard design' }).click();
-  await page.getByRole('alertdialog', { name: 'Discard design' }).getByRole('button', { name: 'Discard' }).click();
+  await inspector(page).getByRole('button', { name: 'Revert' }).click();
   await expect(field(page, 'Description')).toHaveValue('saved proc text');
   await expect(unsaved(page)).toHaveCount(0);
 });
@@ -115,4 +114,35 @@ test('rename a step, Save, rename it straight back and Save again: both applied,
   await expect(output.getByRole('log').locator('.outl').filter({ hasText: /^.*Saved and applied$/ })).toHaveCount(2);
   await expect(output.getByRole('log')).not.toContainText('changed by someone else');
   await expect(output.getByRole('list', { name: 'Problems' })).toHaveCount(0);
+});
+
+test('removing a step\'s assignment is an Undo step (2026-10-23): Undo brings it back, Redo removes it again, a refresh keeps both', async ({ page, request }) => {
+  const panel = await open(page);
+  await pickStep(page, panel);
+  const assignment = inspector(page).locator('.field').filter({ hasText: 'Assignment' });
+  const undo = page.getByRole('button', { name: '↶ Undo' }), redo = page.getByRole('button', { name: '↷ Redo' });
+  await expect(assignment.getByRole('button', { name: '✕ Remove' })).toBeVisible();
+  await expect(undo).toBeDisabled();
+
+  await assignment.getByRole('button', { name: '✕ Remove' }).click();
+  await expect(assignment.getByRole('button', { name: '＋ Create' })).toBeVisible();
+  await expect(page.getByText('● design draft')).toBeVisible();
+
+  await undo.click();
+  await expect(assignment.getByRole('button', { name: '✕ Remove' })).toBeVisible();
+  await expect(page.getByText('● design draft')).toHaveCount(0);
+  await redo.click();
+  await expect(assignment.getByRole('button', { name: '＋ Create' })).toBeVisible();
+
+  // the refresh keeps the removal and its Undo step
+  await page.reload();
+  const again = documentPanel(page, t.workflow);
+  await expect(again.locator('.react-flow__node').first()).toBeVisible();
+  await pickStep(page, again);
+  await expect(assignment.getByRole('button', { name: '＋ Create' })).toBeVisible();
+  await undo.click();
+  await expect(assignment.getByRole('button', { name: '✕ Remove' })).toBeVisible();
+  await expect(page.getByText('● design draft')).toHaveCount(0);
+  // nothing was saved: BaseApi still has the assignment
+  expect((await get<{ assignmentIds: string[] }>(request, `workflows/${t.workflow.id}`)).assignmentIds).toContain(t.assignmentId);
 });

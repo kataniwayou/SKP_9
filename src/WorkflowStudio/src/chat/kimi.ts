@@ -1,5 +1,3 @@
-import { AI_EFFORT, AI_SILENCE_MS, NOT_CONFIGURED } from '../ai/drawing';
-
 /** One tool call the model made: its id, the tool's name and the arguments as the JSON text the model wrote. */
 export interface ToolCall { id: string; name: string; arguments: string }
 /** One answer of the model: what it said, what it thought, the tools it called, and the tokens it spent. */
@@ -16,13 +14,40 @@ export interface Progress { phase: 'waiting' | 'thinking' | 'writing'; tokens: n
 
 export class ChatError extends Error {}
 
+/** How hard the model thinks (the analyst's convention: low | high | max). Low (2026-10-11): a turn takes seconds, not minutes. */
+export const AI_EFFORT = 'low';
+/**
+ * How long the model may stay silent, no byte of its stream arriving, before the round is given up (2026-10-12): a model
+ * still thinking keeps streaming, so only a dead one is cut off.
+ */
+export const AI_SILENCE_MS = 60_000;
+
+export const NOT_CONFIGURED = 'The chat is not configured: the studio has no model (env KIMI_API_KEY, KIMI_BASE_URL, KIMI_MODEL_ID)';
+
+/**
+ * The model the chat talks to (2026-10-12): KIMI_MODEL_ID in the studio's environment (k8s/31-workflow-studio.yaml in
+ * the cluster, the dev server's environment in dev), which /ai/config reports; the key and the base URL never leave nginx.
+ */
+export async function modelOf(signal: AbortSignal, fetchFn: typeof fetch = fetch): Promise<string> {
+  let r: Response;
+  try {
+    r = await fetchFn('/ai/config', { signal });
+  } catch (e) {
+    if (signal.aborted) throw new ChatError('cancelled');
+    throw new ChatError(`the studio's model settings could not be read (${e instanceof Error ? e.message : 'network error'})`);
+  }
+  const model: unknown = r.ok ? ((await r.json().catch(() => null)) as { model?: unknown } | null)?.model : null;
+  if (typeof model !== 'string' || model.trim() === '') throw new ChatError(NOT_CONFIGURED);
+  return model;
+}
+
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /**
  * Asks the model for its next turn (2026-10-23), streamed, with the tools it may call. Tool calls arrive in pieces joined
  * by `index` (the first piece has id and name, the rest only argument fragments); `usage` arrives as a last chunk of its
  * own, and its completion_tokens already include the thinking. Without usage the tokens are estimated at 4 characters each.
- * The round is given up after AI_SILENCE_MS without a byte, as the wand's is.
+ * The round is given up after AI_SILENCE_MS without a byte.
  */
 export async function requestTurn(
   model: string, messages: readonly ChatWire[], tools: readonly object[], signal: AbortSignal,

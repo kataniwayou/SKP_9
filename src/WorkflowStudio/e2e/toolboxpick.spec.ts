@@ -91,9 +91,9 @@ test('a click on a processor or cache tile shows it read-only in the Inspector, 
   await expect(fresh.locator('.cache-empty-line')).toHaveCount(0);
   await expect(fresh.locator('.cache-empty-mark')).toHaveCount(0);
   await expect(fresh.locator('.nx-hex')).toHaveCount(1);
-  // the dropped cache is not saved: dropped from the design
-  await page.getByRole('button', { name: 'Discard design' }).click();
-  await page.getByRole('alertdialog').getByRole('button', { name: 'Discard' }).click();
+  // the dropped cache is not saved: Undo takes the drop back
+  await page.getByRole('button', { name: '↶ Undo' }).click();
+  await expect(fresh).toHaveCount(0);
 });
 
 test('a cache renamed in the Inspector on the canvas: its Toolbox tile shows the design\'s name, marked unsaved; after Save, BaseApi\'s', async ({ page, request }) => {

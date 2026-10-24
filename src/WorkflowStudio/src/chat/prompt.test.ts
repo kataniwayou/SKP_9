@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DRAWING_RULES } from '../ai/drawing';
+import { DRAWING_RULES } from './drawingRules';
 import { CONDITIONS } from '../model/entryConditions';
 import { FIELDS } from '../store/entityForms';
 import { systemPrompt } from './prompt';
@@ -18,9 +18,9 @@ describe('systemPrompt', () => {
     for (const name of DESTRUCTIVE) expect(prompt).toContain(name);
   });
 
-  it('says the wand is not available, and no tool is the wand', () => {
-    expect(prompt).toMatch(/wand[^.\n]*not available to you/i);
-    expect(prompt).not.toMatch(/you may (use|press|run) the wand/i);
+  it('says no tool lays the drawing out, and no tool draws for the model', () => {
+    expect(prompt).toMatch(/No tool lays the drawing out for you: you place everything you add yourself with move_blocks/);
+    expect(prompt).not.toMatch(/wand/i);
     expect(TOOLS.map((t) => t.function.name).filter((n) => /wand|draw/i.test(n))).toEqual([]);
   });
 

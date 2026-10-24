@@ -26,7 +26,7 @@ const fitter = createTextFitter((t) => t.length * 7);
 /** The Toolbox and the Inspector side by side, as the dock shows them; `inspector: false` is the pane hidden (not rendered). */
 function setup(inspector = true) {
   const store = createStudioStore();
-  const actions = { service: { read: () => undefined } as never, guard: (_: string, go: () => void) => go(), confirmDiscardDesign: () => undefined, api: lists as unknown as StudioApi } as StudioActions;
+  const actions = { service: { read: () => undefined } as never, guard: (_: string, go: () => void) => go(), api: lists as unknown as StudioApi } as StudioActions;
   const view = render(
     <StudioStoreProvider value={store}><StudioActionsProvider value={actions}>
       <div data-testid="toolbox"><Toolbox /></div>
@@ -73,7 +73,7 @@ describe('the Toolbox picks one processor or cache for the Inspector, read-only 
     expect(screen.queryByTestId('inspector')).toBeNull();
     expect(store.getState().toolboxPick).toMatchObject({ kind: 'processor', processor: { id: 'p2' } });
     view.rerender(
-      <StudioStoreProvider value={store}><StudioActionsProvider value={{ service: { read: () => undefined } as never, guard: (_: string, go: () => void) => go(), confirmDiscardDesign: () => undefined, api: lists as unknown as StudioApi } as StudioActions}>
+      <StudioStoreProvider value={store}><StudioActionsProvider value={{ service: { read: () => undefined } as never, guard: (_: string, go: () => void) => go(), api: lists as unknown as StudioApi } as StudioActions}>
         <div data-testid="inspector"><Inspector /></div>
       </StudioActionsProvider></StudioStoreProvider>,
     );

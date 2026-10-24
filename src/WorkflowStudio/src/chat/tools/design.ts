@@ -1,12 +1,13 @@
 import { describeError } from '../../api/describeError';
 import { cacheFromDto, processorFromDto, schemaFromDto } from '../../api/toModel';
-import { nearestAlong } from '../../ai/drawing';
+import { nearestAlong } from '../drawingRules';
 import type { StudioDocument } from '../../app/document';
 import { addCircuitWire, NEW_WIRE_PREFIX, setEnd, type Circuit, type CircuitWire, type End, type Side } from '../../circuit/circuit';
 import { applyDraft, applyEdits } from '../../design/apply';
 import { arrowsOf, autoTarget, type Dir } from '../../design/autoConnect';
 import { blockBoxes, freeOffset } from '../../design/clipboard';
 import { circuitOf, moveBlocks, resetShape, withCircuit, type Draft } from '../../design/draft';
+import { isAssignmentStep, redoStepOf, undoStepOf, type AssignmentStep } from '../../design/history';
 import { dropLabel, judgeDrop, toneOf } from '../../design/drop';
 import { shortCircuitErrors } from '../../design/shortCircuits';
 import { dropTool, judgeTool, type ToolItem } from '../../design/toolDrop';
@@ -19,7 +20,7 @@ import { conditionInfo } from '../../model/entryConditions';
 import type { Id } from '../../model/graph';
 import { pickKey, type Pick } from '../../store/picks';
 import { entityLabel, shownDesignOf } from '../../store/problems';
-import { designDirty, designLocked, reduce, type OpenDocument, type StudioAction } from '../../store/studioState';
+import { designLocked, reduce, type OpenDocument, type StudioAction } from '../../store/studioState';
 import type { ChatEntry } from '../chatStore';
 import { withEcho } from '../echo';
 import { findCache, findProcessor, findStep, findWire, type Found } from '../resolve';
@@ -53,7 +54,7 @@ export async function designDocOf(ctx: ToolContext, ref: string | undefined, act
 
 function usable(doc: OpenDocument, action: string): DocChoice {
   if (doc.status.kind !== 'ready') return { out: fail(`workflow ${doc.name} is not loaded yet`, action) };
-  if (designLocked(doc)) return { out: fail(`the design of ${doc.name} is read-only now: a Save or the AI drawing is under way; try again when it is over`, action) };
+  if (designLocked(doc)) return { out: fail(`the design of ${doc.name} is read-only now: a Save is under way; try again when it is over`, action) };
   return { doc };
 }
 
@@ -648,44 +649,38 @@ const deletePickedTool: ToolDef = {
 };
 
 /** Undo or Redo: one step of the design history; it is never refused for a short circuit (it brings back a design that was). */
+/** What Undo or Redo of creating or removing an assignment did, in words: "back: …" or "gone: …". */
+function assignmentChange(after: OpenDocument, step: AssignmentStep, op: 'undo' | 'redo'): string {
+  const { stepId, after: made } = step.assignment;
+  const removal = made === null || made.op === 'delete';
+  const name = shownDesignOf(after)?.graph.steps.get(stepId)?.name ?? stepId;
+  return `${removal === (op === 'undo') ? 'back' : 'gone'}: the assignment of step ${name}`;
+}
+
 function historyTool(op: 'undo' | 'redo'): ToolDef {
   return {
     name: op,
-    description: op === 'undo' ? 'Undo the last design step (Ctrl+Z), the user\'s or yours: one history for both. Field edits have no Undo (revert_entity).' : 'Redo the design step undone last (Ctrl+Y).',
+    description: op === 'undo' ? 'Undo the last design step (Ctrl+Z), the user\'s or yours: one history for both. Drawing steps and creating or removing an assignment are steps; field edits have no Undo (revert_entity).' : 'Redo the design step undone last (Ctrl+Y).',
     parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG }, additionalProperties: false },
     async run(ctx, args) {
       const found = await designDocOf(ctx, text(args.workflow), op);
       if ('out' in found) return found.out;
       const { doc } = found;
       if ((op === 'undo' ? doc.design.past : doc.design.future).length === 0) return fail(`nothing to ${op} in ${labelOf(doc)}`, `${op} in ${labelOf(doc)}: nothing to ${op}`);
+      const step = op === 'undo' ? undoStepOf(doc.design) : redoStepOf(doc.design);
       const { entries } = await withEcho(ctx.store, () => [doc.workflowId], async () => { ctx.store.dispatch({ type: op, workflowId: doc.workflowId }); });
       const after = docOf(ctx, doc.workflowId)!;
       const { added, removed } = changesOf(doc, after);
-      const changes = [...added.map((a) => `back: ${a}`), ...removed.map((r) => `gone: ${r}`)].join('; ');
+      // an assignment step (2026-10-23): the step's assignment comes back or goes
+      const assignment = step !== null && isAssignmentStep(step) ? assignmentChange(after, step, op) : null;
+      const changes = [...added.map((a) => `back: ${a}`), ...removed.map((r) => `gone: ${r}`), ...(assignment ? [assignment] : [])].join('; ');
       const past = op === 'undo' ? 'undid' : 'redid';
       return done(true, `${past} one design step in ${labelOf(doc)}${changes ? ` (${changes})` : ''}`, `${past} one step in ${labelOf(doc)}`, entries);
     },
   };
 }
 
-const discardTool: ToolDef = {
-  name: 'discard_design',
-  description: 'Discard every unsaved change to the workflow (the drawing and the Inspector\'s edits), back to its last Save (Discard design). The user is asked first.',
-  parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG }, additionalProperties: false },
-  async run(ctx, args, answer, pin) {
-    const found = await askedDocOf(ctx, 'discard design', text(args.workflow), answer, pin);
-    if ('out' in found) return found.out;
-    const { doc } = found;
-    const label = labelOf(doc);
-    if (!designDirty(doc)) return done(true, `${label} has no unsaved changes; nothing to discard`, `nothing to discard in ${doc.name}`);
-    if (answer === undefined) return { kind: 'ask', question: { text: `Discard every unsaved change to ${label} (the drawing and the Inspector's edits)?`, choices: YES_NO, pin: doc.workflowId } };
-    if (answer !== 'Yes') return fail('the user declined', `user declined: discard ${doc.name}`);
-    const { entries } = await withEcho(ctx.store, () => [doc.workflowId], async () => { ctx.store.dispatch({ type: 'discardDesign', workflowId: doc.workflowId }); });
-    return done(true, `discarded the unsaved changes to ${label}; it is as last saved`, `discarded the design of ${label}`, entries);
-  },
-};
-
 export const DESIGN_TOOLS: ToolDef[] = [
   addStepTool, setProcessorTool, addCacheTool, connectTool, joinTool, autoConnectTool, moveBlocksTool, resetRouteTool,
-  pickTool, copyTool, pasteTool, deletePickedTool, historyTool('undo'), historyTool('redo'), discardTool,
+  pickTool, copyTool, pasteTool, deletePickedTool, historyTool('undo'), historyTool('redo'),
 ];

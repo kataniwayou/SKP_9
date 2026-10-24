@@ -44,3 +44,15 @@ entity text reaches the model (prompt guard only); `design.ts` ~690 lines; old e
 
 Never commit `k8s/31-workflow-studio.yaml` / `k8s/43-processor-analyst.yaml` (hold the Kimi key).
 Deploy: as in the phase 4 handover (docker build → kind load → rollout restart → forward `svc/workflow-studio 18081:8080`).
+
+## Later the same day: the wand and Discard design removed; assignment Undo (the user, 2026-10-23)
+- **The wand is gone**: its toolbar button, `src/ai/` (useAiDrawing, the plan parsing / applying / judging), the "AI drawing"
+  lock on Save, Start/Stop, Delete, Close and Toolbox drops, and `e2e/aidrawing.spec.ts`. What the chat still uses moved:
+  the drawing rules, `graphOf`, `nearestAlong`, `relationsOf`, `remainingProblemsOf` → `src/chat/drawingRules.ts`;
+  `modelOf`, `NOT_CONFIGURED` ("The chat is not configured…"), `AI_EFFORT`, `AI_SILENCE_MS` → `src/chat/kimi.ts`.
+  The `/ai/` nginx route and the Kimi key stay (the chat's).
+- **Discard design is gone**: the toolbar button, its dialog, the store's `discardDesign` and the chat's `discard_design`
+  (no longer in the destructive list). Closing with unsaved changes still offers Save / Discard / Cancel.
+- **Creating or removing an assignment is an Undo step** (`design/history.ts` `AssignmentStep`, in the same history as
+  drawing steps, kept across a refresh by `app/session.ts`). Undo puts back the step's assignment operation as it was
+  (its fields too), Redo the one after. Field edits still have no Undo (Revert entity). A Save clears the history as before.

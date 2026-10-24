@@ -59,7 +59,7 @@ describe('the workflow tools', () => {
   it('are offered, the irreversible ones destructive, and none draws', () => {
     const names = TOOLS.map((t) => t.function.name);
     expect(names).toEqual(expect.arrayContaining(['open_workflow', 'new_workflow', 'activate', 'save', 'start', 'stop', 'delete_workflow', 'close_workflow']));
-    expect([...DESTRUCTIVE].sort()).toEqual(['close_workflow', 'delete_picked', 'delete_workflow', 'discard_design', 'remove_assignment', 'stop']);
+    expect([...DESTRUCTIVE].sort()).toEqual(['close_workflow', 'delete_picked', 'delete_workflow', 'remove_assignment', 'stop']);
     expect(names.some((n) => /draw|wand/.test(n))).toBe(false);
   });
 

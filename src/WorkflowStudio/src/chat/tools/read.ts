@@ -1,7 +1,7 @@
 import type { ApiResult } from '../../api/client';
 import { describeError } from '../../api/describeError';
 import type { EntityReadDto } from '../../api/entities';
-import { graphOf } from '../../ai/drawing';
+import { graphOf } from '../drawingRules';
 import type { StudioDocument } from '../../app/document';
 import { baseDtoOf } from '../../app/inspectorService';
 import { applyEdits } from '../../design/apply';

@@ -1,4 +1,4 @@
-import { DRAWING_RULES } from '../ai/drawing';
+import { DRAWING_RULES } from './drawingRules';
 import { CACHE_H, CACHE_W, COLUMN_PITCH, GRID, LAYOUT_GAP, PMID, PORT_GAP, STEP_H, STEP_W } from '../layout/geometry';
 import { CONDITIONS } from '../model/entryConditions';
 import { FIELDS } from '../store/entityForms';
@@ -34,7 +34,7 @@ export function systemPrompt(): string {
 5. Never guess between same-named things (several versions, pasted steps of one name). A tool answers that the name is ambiguous: ask the user which one, then use its id.
 6. The user never watches Output. Tool results carry Output's lines ([error] marks an error) and the problems Output pins ("Problems now: ..."). Tell the user what Output said, in the same words; errors stay errors.
 7. Destructive operations: ${destructive} (close_workflow only when it has unsaved changes). The studio asks the user itself, with buttons, when you call the tool. Call it once, only when the user asked for that; never ask in your own words first and never call it again after the user declined.
-8. The wand (the AI drawing button) is not available to you, and there is no tool for it: you place everything you add yourself with move_blocks, by the drawing rules below.
+8. No tool lays the drawing out for you: you place everything you add yourself with move_blocks, by the drawing rules below.
 9. To copy a field from one entity to another: read_entity the source, then set_field on the target with that exact value.
 10. "Copy and paste" of blocks: pick, copy, paste. A paste is an exact copy with new ids (names, fields and a cache's root included). A pasted cache keeps the same root, which Save refuses: give it a new root (set_field target cache, field root) before Save.
 11. Keep replies short: what you did (by name and version), what Output said, what is left or what you suggest.

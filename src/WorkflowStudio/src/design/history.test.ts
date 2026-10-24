@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EMPTY_DRAFT, type Draft } from './draft';
-import { canRedo, canUndo, commit, HISTORY_DEPTH, historyOf, redo, undo } from './history';
+import { canRedo, canUndo, commit, commitAssignment, HISTORY_DEPTH, historyOf, redo, redoStepOf, undo, undoStepOf, type AssignmentStep } from './history';
 
 const d = (n: number): Draft => ({ ...EMPTY_DRAFT, steps: { s: { x: n, y: 0 } } });
 
@@ -33,5 +33,23 @@ describe('design history', () => {
     const h = historyOf(d(7));
     expect(canUndo(h)).toBe(false);
     expect(undo(h)).toBe(h);
+  });
+
+  it('an assignment step (2026-10-23) is undone and redone in turn with drawing steps, the draft as it is', () => {
+    const step: AssignmentStep = { assignment: { stepId: 's1', before: null, after: { op: 'delete', id: 'a1', updatedAt: null } } };
+    let h = commit(commitAssignment(commit(historyOf(), d(1)), step), d(2));
+    expect(h.past).toEqual([EMPTY_DRAFT, step, d(1)]);
+    h = undo(h);
+    expect([h.draft, undoStepOf(h)]).toEqual([d(1), step]);
+    h = undo(h);
+    expect([h.draft, redoStepOf(h)]).toEqual([d(1), step]);
+    h = undo(h);
+    expect(h.draft).toEqual(EMPTY_DRAFT);
+    h = redo(redo(h));
+    expect([h.draft, undoStepOf(h), h.future]).toEqual([d(1), step, [d(2)]]);
+    // a new step of either kind clears Redo; an assignment step ends a run of nudges
+    expect(canRedo(commitAssignment(h, step))).toBe(false);
+    const nudged = commitAssignment(commit(historyOf(), d(3), 'nudge'), step);
+    expect(undo(commit(nudged, d(4), 'nudge')).draft).toEqual(d(3));
   });
 });

@@ -70,7 +70,7 @@ const posOf = (panel: Locator, id: string) => node(panel, id).evaluate((e) => {
   return [Number(m[1]), Number(m[2])] as [number, number];
 });
 
-test('build: a step with the throwaway\'s processor, wired from the workflow, its payload set; the canvas grows while the status counts tokens; Ctrl+Z takes the wire', async ({ page }) => {
+test('build: a step with the throwaway\'s processor, wired from the workflow, its payload set; the canvas grows while the status counts tokens; Ctrl+Z takes the assignment, then the wire', async ({ page }) => {
   await openWorkflow(page, t.workflow);
   const panel = documentPanel(page, t.workflow);
   await expect(steps(panel)).toHaveCount(2);
@@ -102,27 +102,35 @@ test('build: a step with the throwaway\'s processor, wired from the workflow, it
   expect(sent).toHaveLength(2);
   expect(sent[1]!.messages.filter((m) => m.role === 'tool').map((m) => m.tool_call_id)).toEqual(['call-1-0', 'call-1-1', 'call-1-2', 'call-1-3']);
   await expect(draftMark(page)).toBeVisible();
-  // the wire is the last drawing step: Ctrl+Z on the canvas takes it, the step stays
+  // creating the assignment is the last Undo step (2026-10-23), the wire the one before: Ctrl+Z on the canvas takes them
+  // in turn, the step stays
   const spot = await emptySpot(panel);
   await page.mouse.click(spot.x, spot.y);
+  await expect(sent[1]!.messages.filter((m) => m.role === 'tool').at(-2)!.content).toContain('assignment');
+  await page.keyboard.press('Control+z');
+  await expect(newWires(panel)).toHaveCount(1);
   await page.keyboard.press('Control+z');
   await expect(newWires(panel)).toHaveCount(0);
   await expect(steps(panel)).toHaveCount(3);
+  await page.keyboard.press('Control+y');
+  await page.keyboard.press('Control+y');
+  await expect(newWires(panel)).toHaveCount(1);
 });
 
-test('a destructive call asks in the chat, with no pop-up: No keeps the draft; asked again, Yes discards it', async ({ page }) => {
+test('a destructive call asks in the chat, with no pop-up: No keeps the step; asked again, Yes deletes it', async ({ page }) => {
   await openWorkflow(page, t.workflow);
   const panel = documentPanel(page, t.workflow);
+  // add_step leaves the new step picked: delete_picked asks to delete it
   script = [
-    { calls: [{ name: 'add_step', args: {} }, { name: 'discard_design', args: {} }] },
+    { calls: [{ name: 'add_step', args: {} }, { name: 'delete_picked', args: {} }] },
     { text: 'Kept your changes.' },
-    { calls: [{ name: 'discard_design', args: {} }] },
-    { text: 'Discarded the design.' },
+    { calls: [{ name: 'delete_picked', args: {} }] },
+    { text: 'Deleted the step.' },
   ];
-  await say(page, 'add a step, then throw everything away');
+  await say(page, 'add a step, then delete it');
   const c = page.locator('[data-pane="chat"]');
   const question = c.getByRole('group', { name: 'Question' });
-  await expect(question).toContainText(`Discard every unsaved change to ${t.workflow.name} ${t.workflow.version}`);
+  await expect(question).toContainText(`Delete step step from ${t.workflow.name} ${t.workflow.version}?`);
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
   await expect(steps(panel)).toHaveCount(3);
   expect(sent).toHaveLength(1);
@@ -132,22 +140,21 @@ test('a destructive call asks in the chat, with no pop-up: No keeps the draft; a
   await expect(draftMark(page)).toBeVisible();
   await expect(steps(panel)).toHaveCount(3);
   expect(sent[1]!.messages.filter((m) => m.role === 'tool').at(-1)!.content).toContain('declined');
-  await say(page, 'now discard it');
+  await say(page, 'now delete it');
   await expect(question).toBeVisible();
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
   await question.getByRole('button', { name: 'Yes' }).click();
-  await expect(lastModel(c)).toHaveText('Discarded the design.');
-  await expect(draftMark(page)).toHaveCount(0);
+  await expect(lastModel(c)).toHaveText('Deleted the step.');
   await expect(steps(panel)).toHaveCount(2);
 });
 
 test('an open question survives a refresh: Yes after the reload carries out the call and the loop\'s next turn arrives', async ({ page }) => {
   await openWorkflow(page, t.workflow);
   script = [
-    { calls: [{ name: 'add_step', args: {} }, { name: 'discard_design', args: {} }] },
-    { text: 'Discarded after your refresh.' },
+    { calls: [{ name: 'add_step', args: {} }, { name: 'remove_assignment', args: { step: t.stepName } }] },
+    { text: 'Removed after your refresh.' },
   ];
-  await say(page, 'add a step, then discard the design');
+  await say(page, 'add a step, then remove the first step\'s assignment');
   const question = page.locator('[data-pane="chat"]').getByRole('group', { name: 'Question' });
   await expect(question).toBeVisible();
   await page.reload();
@@ -155,12 +162,12 @@ test('an open question survives a refresh: Yes after the reload carries out the 
   await expect(steps(panel)).toHaveCount(3);
   await expect(draftMark(page)).toBeVisible();
   const c = await chat(page);
-  await expect(c.getByRole('group', { name: 'Question' })).toContainText(`Discard every unsaved change to ${t.workflow.name} ${t.workflow.version}`);
-  await expect(c.locator('.chat-user').first()).toHaveText('add a step, then discard the design');
+  await expect(c.getByRole('group', { name: 'Question' })).toContainText(`Remove the assignment of step ${t.stepName} from ${t.workflow.name} ${t.workflow.version}?`);
+  await expect(c.locator('.chat-user').first()).toHaveText('add a step, then remove the first step\'s assignment');
   await c.getByRole('group', { name: 'Question' }).getByRole('button', { name: 'Yes' }).click();
-  await expect(lastModel(c)).toHaveText('Discarded after your refresh.');
-  await expect(draftMark(page)).toHaveCount(0);
-  await expect(steps(panel)).toHaveCount(2);
+  await expect(lastModel(c)).toHaveText('Removed after your refresh.');
+  await expect(c.locator('.chat-action').last()).toContainText(`- assignment of ${t.stepName}`);
+  await expect(steps(panel)).toHaveCount(3);
   expect(sent).toHaveLength(2);
   expect(sent[1]!.messages.filter((m) => m.role === 'tool').map((m) => m.tool_call_id)).toEqual(['call-1-0', 'call-1-1']);
 });

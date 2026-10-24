@@ -1,8 +1,7 @@
 import { useMemo, useSyncExternalStore } from 'react';
-import { DrawingError, modelOf } from '../ai/drawing';
 import type { ChatAction, ChatStore, ChatState } from './chatStore';
 import type { ChatStatus } from './ChatPane';
-import { ChatError, requestTurn, type ChatWire, type ToolCall } from './kimi';
+import { ChatError, modelOf, requestTurn, type ChatWire, type ToolCall } from './kimi';
 import { systemPrompt } from './prompt';
 import { runTool } from './runTool';
 import { TOOLS } from './tools';
@@ -11,8 +10,8 @@ import type { ToolContext } from './toolTypes';
 /** A user request may take this many rounds with the model; then the loop is ended with a note (spec: a runaway loop). */
 export const MAX_ROUNDS = 40;
 export const ANSWER_FIRST = 'Answer the question first';
-// what Undo reaches is the drawing only (2026-10-23): field edits and assignments are reversed by Revert entity / Discard design
-export const CANCELLED_NOTE = 'Cancelled: what was already done stays (Undo reverses drawing changes; Revert entity or Discard design reverses field edits)';
+// what Undo reaches (2026-10-23): the drawing and creating or removing an assignment; field edits are reversed by Revert entity
+export const CANCELLED_NOTE = 'Cancelled: what was already done stays (Undo reverses drawing changes and created or removed assignments; Revert entity reverses field edits)';
 const LOST_CALL = 'The question\'s tool call was lost; nothing was done';
 const NOT_RUN_STOPPED = 'not run: the user stopped the request';
 // a call unanswered after a refresh may have run (the request died before its result was recorded), so it is not said to be "not run"
@@ -179,7 +178,7 @@ class ChatRunner {
     } catch (e) {
       const text = e instanceof Error ? e.message : String(e);
       if (ctl.signal.aborted || text === 'cancelled') note(CANCELLED_NOTE, 'info');
-      else note(e instanceof ChatError || e instanceof DrawingError ? text.replace(/^AI drawing is not configured/, 'The chat is not configured') : `the chat failed: ${text}`, 'error');
+      else note(e instanceof ChatError ? text : `the chat failed: ${text}`, 'error');
     } finally {
       clearInterval(tick);
       if (this.ctl === ctl) this.ctl = null;

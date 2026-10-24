@@ -4,15 +4,15 @@ import type { EntityReadDto } from '../api/entities';
 import type { LiveStatus } from '../api/liveStatus';
 import type { Cache, DesignError, Id, Processor, Schema } from '../model/graph';
 import {
-  createAssignment, EMPTY_DESIGN, EMPTY_EDITS, hasGraphChanges, removeAssignment, revertEntity, sameDesign, setField, storedDesignOf,
+  createAssignment, EMPTY_DESIGN, EMPTY_EDITS, hasGraphChanges, removeAssignment, revertEntity, sameDesign, setField, storedDesignOf, withAssignmentOp,
   type Design, type EntityEdits, type FieldValue,
 } from '../design/design';
-import { circuitOf, EMPTY_DRAFT, type Draft } from '../design/draft';
+import { circuitOf, type Draft } from '../design/draft';
 import { applyBlocks } from '../design/blocks';
 import { copyClip, deletePicked, pasteClip, type Clip } from '../design/clipboard';
 import { dropTool, type ToolItem } from '../design/toolDrop';
 import type { Point } from '../layout/geometry';
-import { commit, historyOf, redo, undo, type DesignHistory } from '../design/history';
+import { commit, commitAssignment, historyOf, isAssignmentStep, redo, redoStepOf, undo, undoStepOf, type DesignHistory, type HistoryStep } from '../design/history';
 import { settleDesign } from '../design/settle';
 import { applyEdits } from '../design/apply';
 import { keepJunctions } from '../design/keepJunctions';
@@ -24,7 +24,7 @@ import { currentTarget, editTargetOf, rootTarget, targetKey, type InspectorTarge
 import { picksOf, samePicks, type Pick } from './picks';
 import { selectionKey, type Selection } from './selection';
 import { appendOutput, capLine, type LineDraft, type OutputLine } from './output';
-import { AI_DRAWING, RUN_TIMEOUT_MS, RUN_WORD, type RunOp, type RunState } from './run';
+import { RUN_TIMEOUT_MS, RUN_WORD, type RunOp, type RunState } from './run';
 import { saveAnswerLines, settleReport, type DesignLogLine } from './saveLog';
 
 export type { OutputLine } from './output';
@@ -49,7 +49,7 @@ export interface OpenDocument {
   picks: Pick[];
   /** The design draft and its history (plan 4). The draft is kept in the session; the history is not. */
   design: DesignHistory;
-  /** The Inspector's part of the design (plan 8): entity edits, assignment operations, schema copies. Not in the undo history. */
+  /** The Inspector's part of the design (plan 8): entity edits, assignment operations, schema copies. Only creating or removing an assignment is in the undo history (2026-10-23). */
   edits: EntityEdits;
   /** The last Save's errors (plan 8 §4.1); null: no Save answered with errors since it was opened, saved or discarded. */
   errors: DesignError[] | null;
@@ -59,8 +59,6 @@ export interface OpenDocument {
   restored: boolean;
   /** A Save is in flight: the design is read-only (spec §4.1). */
   saving: boolean;
-  /** The AI is drawing this document (2026-10-11): its design is read-only until the drawing lands or is cancelled; never kept across a refresh. */
-  drawing?: boolean;
   /** A Start or Stop being sent or waiting for the live set (2026-10-09); not kept across a refresh. */
   run: RunState | null;
   /**
@@ -124,7 +122,6 @@ export type StudioAction =
   | { type: 'design'; workflowId: Id; draft: Draft; merge?: string; picks?: Pick[] }
   | { type: 'undo'; workflowId: Id }
   | { type: 'redo'; workflowId: Id }
-  | { type: 'discardDesign'; workflowId: Id }
   | { type: 'toggleDetails' }
   | { type: 'drill'; workflowId: Id; target: InspectorTarget }
   /** Keeps the first `depth` drill-downs (0: back to the selection). */
@@ -140,8 +137,6 @@ export type StudioAction =
   /** Removes a step's assignment in the design. */
   | { type: 'removeAssignment'; workflowId: Id; stepId: Id }
   | { type: 'saving'; workflowId: Id }
-  /** The AI drawing of a document started or ended (2026-10-11): its design is locked meanwhile. */
-  | { type: 'drawing'; workflowId: Id; on: boolean }
   /** Empties Output's log for every workflow (2026-10-10); the pinned problems are live state and stay. */
   | { type: 'clearOutput' }
   /** Lines for Output, about this workflow (e.g. "Save started"). */
@@ -212,7 +207,7 @@ const withPicks = (d: OpenDocument, picks: Pick[]): OpenDocument =>
   ({ ...d, picks, design: d.design.merge === null ? d.design : { ...d.design, merge: null } });
 
 /**
- * After undo, redo or Discard design: the picks naming what the saved workflow with `draft` over it has.
+ * After undo or redo: the picks naming what the saved workflow with `draft` over it has.
  * A wire pick stays while the circuit has the wire. A document not ready keeps its picks.
  */
 function prunedPicks(d: OpenDocument, draft: Draft): Pick[] {
@@ -271,6 +266,31 @@ function blocksChanged(d: OpenDocument, draft: Draft, picks: Pick[]): OpenDocume
         : graph.steps.has(only) ? { kind: 'step', stepId: only } : null;
   const moved: OpenDocument = { ...d, design: commit(d.design, keptDraft(d, draft)), picks };
   return selectionKey(selection) === selectionKey(d.selection) ? moved : { ...moved, selection, inspector: EMPTY_INSPECTOR };
+}
+
+/** The history with one more step: a step's assignment as `edits` leave it, after what `d` has (2026-10-23). */
+const assignmentStepped = (d: OpenDocument, edits: EntityEdits, stepId: Id): DesignHistory =>
+  commitAssignment(d.design, { assignment: { stepId, before: d.edits.assignments[stepId] ?? null, after: edits.assignments[stepId] ?? null } });
+
+/** Whether the workflow, with this design, has no assignment for the step (removed, or never created). */
+function noAssignment(d: OpenDocument, stepId: Id): boolean {
+  const op = d.edits.assignments[stepId];
+  if (op !== undefined) return op.op === 'delete';
+  return d.status.kind !== 'ready' || !applyBlocks(d.status.doc, d.design.draft.blocks).graph.assignments.some((a) => a.stepId === stepId);
+}
+
+/** An Inspector showing a step's assignment the design no longer has goes back to the step. */
+function leftAssignment(d: OpenDocument, stepId: Id): OpenDocument {
+  const shown = shownTargetOf(d);
+  const leave = shown?.kind === 'assignment' && shown.stepId === stepId && noAssignment(d, stepId);
+  return leave ? { ...d, inspector: { ...EMPTY_INSPECTOR, trail: d.inspector.trail.slice(0, -1) } } : d;
+}
+
+/** After Undo (`before`) or Redo (`after`) of `step`: an assignment step puts that side's operation back. */
+function stepped(d: OpenDocument, step: HistoryStep | null, side: 'before' | 'after'): OpenDocument {
+  if (step === null || !isAssignmentStep(step)) return d;
+  const { stepId } = step.assignment;
+  return leftAssignment({ ...d, edits: withAssignmentOp(d.edits, stepId, step.assignment[side]) }, stepId);
 }
 
 /** Pure: every change to the studio's state goes through here. Unknown ids leave the state as it was. */
@@ -350,17 +370,9 @@ function reduceDocs(state: StudioState, action: StudioAction): StudioState {
         ...d, design: commit(d.design, keptDraft(d, action.draft), action.merge ?? null), picks: action.picks ?? d.picks,
       }));
     case 'undo':
-      return update(state, action.workflowId, (d) => (designLocked(d) ? d : redesign(d, undo(d.design))));
+      return update(state, action.workflowId, (d) => (designLocked(d) ? d : stepped(redesign(d, undo(d.design)), undoStepOf(d.design), 'before')));
     case 'redo':
-      return update(state, action.workflowId, (d) => (designLocked(d) ? d : redesign(d, redo(d.design))));
-    case 'drawing':
-      return update(state, action.workflowId, (d) => ((d.drawing === true) === action.on ? d : { ...d, drawing: action.on }));
-    case 'discardDesign':
-      return update(state, action.workflowId, (d) => {
-        if (designLocked(d)) return d;
-        const back = redesign(d, historyOf(d.stored?.draft ?? EMPTY_DRAFT));
-        return { ...back, edits: d.stored?.edits ?? EMPTY_EDITS, errors: null };
-      });
+      return update(state, action.workflowId, (d) => (designLocked(d) ? d : stepped(redesign(d, redo(d.design)), redoStepOf(d.design), 'after')));
     case 'toggleDetails':
       return { ...state, showDetails: !state.showDetails };
     case 'drill':
@@ -397,16 +409,15 @@ function reduceDocs(state: StudioState, action: StudioAction): StudioState {
         if (designLocked(d)) return d;
         const edits = createAssignment(d.edits, action.stepId, action.stepName, action.id);
         const shown = edits.assignments[action.stepId]!;
-        return { ...d, edits, inspector: { ...EMPTY_INSPECTOR, trail: [...d.inspector.trail, { kind: 'assignment', id: shown.id, stepId: action.stepId }] } };
+        return { ...d, edits, design: assignmentStepped(d, edits, action.stepId), inspector: { ...EMPTY_INSPECTOR, trail: [...d.inspector.trail, { kind: 'assignment', id: shown.id, stepId: action.stepId }] } };
       });
     case 'removeAssignment':
       return update(state, action.workflowId, (d) => {
         if (designLocked(d)) return d;
         const base = d.status.kind === 'ready' ? applyBlocks(d.status.doc, d.design.draft.blocks).graph.assignments.find((a) => a.stepId === action.stepId) : undefined;
         const edits = removeAssignment(d.edits, action.stepId, base && { id: base.id, updatedAt: base.updatedAt });
-        const shown = shownTargetOf(d);
-        const leave = shown?.kind === 'assignment' && shown.stepId === action.stepId;
-        return { ...d, edits, inspector: leave ? { ...EMPTY_INSPECTOR, trail: d.inspector.trail.slice(0, -1) } : d.inspector };
+        if (edits === d.edits) return d;
+        return leftAssignment({ ...d, edits, design: assignmentStepped(d, edits, action.stepId) }, action.stepId);
       });
     case 'saving':
       return update(state, action.workflowId, (d) => (d.saving ? d : { ...d, saving: true }));
@@ -572,8 +583,8 @@ export function startNote(d: OpenDocument): string | null {
 /** The design as it stands: the canvas draft and the entity edits. */
 export const designOf = (d: OpenDocument): Design => ({ draft: d.design.draft, edits: d.edits });
 
-/** The design is read-only (2026-10-11): a Save is in flight, or the AI is drawing it. Selecting and viewing still work. */
-export const designLocked = (d: { saving: boolean; drawing?: boolean }): boolean => d.saving || d.drawing === true;
+/** The design is read-only while a Save is in flight (2026-10-11). Selecting and viewing still work. */
+export const designLocked = (d: { saving: boolean }): boolean => d.saving;
 
 /** The design differs from the last saved one (spec §3.2): the tab is marked, closing asks, the session keeps it. */
 /** A new workflow (2026-10-10) is unsaved until its first Save creates it, whatever its design holds. */
@@ -592,7 +603,6 @@ export function saveBlocked(d: OpenDocument): string | null {
   if (d.status.kind === 'failed') return 'The workflow could not be loaded';
   if (d.status.kind !== 'ready' || d.stored === null) return 'The workflow is still loading';
   if (d.saving) return 'Saving…';
-  if (d.drawing === true) return AI_DRAWING;
   if (!hasChanges(d)) return NOTHING_TO_SAVE;
   return null;
 }

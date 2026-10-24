@@ -323,12 +323,11 @@ describe('the design draft (plan 4)', () => {
     expect(screen.getByRole('button', { name: '↶ Undo' })).toBeDisabled();
   });
 
-  it('Discard design asks, then drops the draft', async () => {
+  it('offers no Discard design and no AI drawing (both removed, 2026-10-23)', async () => {
     render(<App api={api()} storage={memoryStorage()} tabStorage={designSession()} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Discard design' }));
-    const box = await screen.findByRole('alertdialog', { name: 'Discard design' });
-    fireEvent.click(within(box).getByRole('button', { name: 'Discard' }));
-    await waitFor(() => expect(screen.queryByText('● design draft')).toBeNull());
+    expect(await screen.findByText('● design draft')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Discard design' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /AI drawing/ })).toBeNull();
   });
 
   it('closing a document with a design draft asks; Cancel keeps it open', async () => {

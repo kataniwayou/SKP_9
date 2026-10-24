@@ -1,4 +1,4 @@
-import { relationsOf, remainingProblemsOf } from '../ai/drawing';
+import { relationsOf, remainingProblemsOf } from '../chat/drawingRules';
 import { applyDraft, applyEdits } from '../design/apply';
 import { circuitOf } from '../design/draft';
 import { shortCircuitErrors, writtenLists } from '../design/shortCircuits';
@@ -7,7 +7,7 @@ import type { OpenDocument } from '../store/studioState';
 import type { StudioStore } from '../store/studioStore';
 
 // The browser suite's judge of a design (2026-10-23, the chat's proficiency check): what a drawing means, by step
-// names, with the wand's own judges (relationsOf, remainingProblemsOf) and the short circuits, so a spec can tell
+// names, with the drawing judges (relationsOf, remainingProblemsOf) and the short circuits, so a spec can tell
 // whether the model built what it was asked and built it tidy. Test-only: installed in development, or on ?e2e.
 
 export interface Judgement {

@@ -284,11 +284,11 @@ describe('saveDesign (plan 8 §4.1)', () => {
     expect(store.getState().output).toEqual([]);
   });
 
-  it('sends nothing while a Save runs or the AI draws', async () => {
+  it('sends nothing while a Save runs', async () => {
     const store = createStudioStore();
     store.dispatch({ type: 'open', workflowId: 'wf1', name: 'orders', version: '1.0.0' });
     store.dispatch({ type: 'loaded', workflowId: 'wf1', doc: await loadedDocument(graphDto()) });
-    store.dispatch({ type: 'drawing', workflowId: 'wf1', on: true });
+    store.dispatch({ type: 'saving', workflowId: 'wf1' });
     const api = apiWith({ ok: true, value: { applied: true, errors: [] } });
 
     await saveDesign(api, store, 'wf1', NOW);

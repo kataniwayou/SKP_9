@@ -163,7 +163,7 @@ export function Toolbox() {
     if (e.button !== 0) return;
     e.preventDefault();
     const win = e.currentTarget.ownerDocument.defaultView ?? window;
-    // a Save or the AI drawing (2026-10-11) locks that document: nothing lands on it
+    // a Save locks that document: nothing lands on it
     const isSaving = (id: Id) => { const d = store.getState().docs.find((x) => x.workflowId === id); return d ? designLocked(d) : false; };
     const from = { x: e.clientX, y: e.clientY };
     let dragging = false;

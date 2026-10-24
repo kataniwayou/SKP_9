@@ -77,7 +77,7 @@ async function open(page: Page): Promise<Locator> {
   return documentPanel(page, chain!.workflow);
 }
 
-test('a moved step takes its wires with it; the draft is marked; a refresh keeps it; Discard drops it', async ({ page }) => {
+test('a moved step takes its wires with it; the draft is marked; a refresh keeps it; Undo takes it back', async ({ page }) => {
   const panel = await open(page);
   const { a, b } = chain!;
   const before = await pathOf(panel, `${a}->${b}`);
@@ -92,8 +92,8 @@ test('a moved step takes its wires with it; the draft is marked; a refresh keeps
   await expect(page.getByText('● design draft')).toBeVisible();
   await expect.poll(() => pathOf(again, `${a}->${b}`)).not.toBe(before);
 
-  await page.getByRole('button', { name: 'Discard design' }).click();
-  await page.getByRole('alertdialog', { name: 'Discard design' }).getByRole('button', { name: 'Discard' }).click();
+  // Undo survives the refresh (2026-10-20); Discard design is gone (2026-10-23)
+  await page.getByRole('button', { name: '↶ Undo' }).click();
   await expect(page.getByText('● design draft')).toHaveCount(0);
   await expect.poll(() => pathOf(again, `${a}->${b}`)).toBe(before);
 });

@@ -12,7 +12,7 @@ const ok = <T,>(value: T) => Promise.resolve({ ok: true as const, value });
 
 function setup(api: Partial<StudioApi>) {
   const store = createStudioStore();
-  const actions = { service: {} as never, guard: (_: string, go: () => void) => go(), confirmDiscardDesign: () => undefined, api: api as StudioApi } as StudioActions;
+  const actions = { service: {} as never, guard: (_: string, go: () => void) => go(), api: api as StudioApi } as StudioActions;
   render(<StudioStoreProvider value={store}><StudioActionsProvider value={actions}><Toolbox /></StudioActionsProvider></StudioStoreProvider>);
   return store;
 }

@@ -122,7 +122,14 @@ describe('the field tools', () => {
     expect(doc().edits.assignments.s1).toBeUndefined();
     expect(done(await call('remove_assignment', { step: 'a' }, 'No')).ok).toBe(false);
     expect(doc().edits.assignments.s1).toBeUndefined();
-    expect(done(await call('remove_assignment', { step: 'a' }, 'Yes'))).toMatchObject({ ok: true, action: '- assignment of a' });
+    const removed = done(await call('remove_assignment', { step: 'a' }, 'Yes'));
+    expect(removed).toMatchObject({ ok: true, action: '- assignment of a' });
+    expect(removed.result).toContain('Undo brings it back');
+    expect(doc().edits.assignments.s1).toMatchObject({ op: 'delete', id: 'a1' });
+    // removing an assignment is an Undo step (2026-10-23): undo brings it back and says so, redo removes it again
+    expect(done(await call('undo')).result).toContain('back: the assignment of step a');
+    expect(doc().edits.assignments.s1).toBeUndefined();
+    expect(done(await call('redo')).result).toContain('gone: the assignment of step a');
     expect(doc().edits.assignments.s1).toMatchObject({ op: 'delete', id: 'a1' });
 
     done(await call('set_field', { target: { kind: 'workflow' }, field: 'description', value: 'feeds' }));

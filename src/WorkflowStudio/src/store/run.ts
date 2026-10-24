@@ -24,14 +24,10 @@ export const RUN_WORD: Readonly<Record<RunOp, string>> = { start: 'Start', stop:
  * effect without a Stop). Only a loaded workflow BaseApi has (a new one waits for its first Save, 2026-10-10), no Save
  * under way, one press at a time.
  */
-/** Why the drawn document waits (2026-10-11): its design is locked while the AI draws it. */
-export const AI_DRAWING = 'The AI is drawing this workflow; Cancel it first';
-
-export function runBlocked(doc: { status: { kind: string }; run: RunState | null; saving: boolean; drawing?: boolean; virtual?: boolean }): string | null {
+export function runBlocked(doc: { status: { kind: string }; run: RunState | null; saving: boolean; virtual?: boolean }): string | null {
   if (doc.virtual) return NOT_SAVED_YET;
   if (doc.status.kind !== 'ready') return 'The workflow is not loaded';
   if (doc.saving) return 'Saving…';
-  if (doc.drawing) return AI_DRAWING;
   if (doc.run !== null) return doc.run.op === 'start' ? 'Starting…' : 'Stopping…';
   return null;
 }

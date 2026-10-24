@@ -54,8 +54,9 @@ describe('the design tools', () => {
   it('are offered, the ones that destroy asking first', () => {
     const names = TOOLS.map((t) => t.function.name);
     expect(names).toEqual(expect.arrayContaining(['add_step', 'set_processor', 'add_cache', 'connect', 'join', 'auto_connect', 'move_blocks',
-      'reset_route', 'pick', 'copy', 'paste', 'delete_picked', 'undo', 'redo', 'discard_design']));
-    expect(DESTRUCTIVE.has('delete_picked') && DESTRUCTIVE.has('discard_design')).toBe(true);
+      'reset_route', 'pick', 'copy', 'paste', 'delete_picked', 'undo', 'redo']));
+    expect(names).not.toContain('discard_design');
+    expect(DESTRUCTIVE.has('delete_picked')).toBe(true);
   });
 
   it('add_step with processor FileFetcher: a new step with that processor, one Undo step, the Inspector on it', async () => {
@@ -188,15 +189,6 @@ describe('the design tools', () => {
     expect(shown().placement.steps.get('s1')).toEqual({ x: 400, y: 600 });
     expect(doc().design.past).toHaveLength(2);
     expect(done(await call('reset_route', { wire: 'b -> step' })).result).toContain('no route of its own');
-  });
-
-  it('discard_design asks, then drops the draft', async () => {
-    const { call, doc } = await setup();
-    expect(done(await call('discard_design')).result).toContain('nothing to discard');
-    done(await call('add_step'));
-    expect(ask(await call('discard_design')).text).toContain('Discard every unsaved change to orders 1.0.0');
-    done(await call('discard_design', {}, 'Yes'));
-    expect(doc().design.draft).toEqual(EMPTY_DRAFT);
   });
 
   it('join: a fan-in head becomes a junction on the trunk; a hub tail is refused', async () => {

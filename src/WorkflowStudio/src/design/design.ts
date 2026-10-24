@@ -200,6 +200,10 @@ export function removeAssignment(edits: EntityEdits, stepId: Id, base: { id: Id;
   return { ...edits, assignments: put<AssignmentOp>(edits.assignments, stepId, { op: 'delete', id: base.id, updatedAt }) };
 }
 
+/** A step's assignment operation set as it was (an Undo or Redo of creating or removing one, 2026-10-23); null: none. */
+export const withAssignmentOp = (edits: EntityEdits, stepId: Id, op: AssignmentOp | null): EntityEdits =>
+  ({ ...edits, assignments: put<AssignmentOp>(edits.assignments, stepId, op) });
+
 const anyFields = (r: Readonly<Record<string, EntityEdit>>) => Object.values(r).some((e) => Object.keys(e.fields).length > 0);
 
 /** Whether the design changes the real entities (Save has something to apply): wiring or entity edits, not shapes or stamps. */
@@ -297,7 +301,8 @@ function toFields(v: unknown): Record<string, FieldValue> {
 
 const toIds = (v: unknown): Id[] | null => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x !== '') : null);
 
-function toOp(v: unknown): AssignmentOp | null {
+/** An assignment operation read back from storage (the session's Undo steps too); null when it is not one. */
+export function toOp(v: unknown): AssignmentOp | null {
   if (!isRecord(v)) return null;
   const id = str(v.id);
   if (id === null) return null;

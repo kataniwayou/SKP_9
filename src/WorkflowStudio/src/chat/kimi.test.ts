@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { NOT_CONFIGURED } from '../ai/drawing';
-import { ChatError, requestTurn, type Progress } from './kimi';
+import { ChatError, NOT_CONFIGURED, requestTurn, type Progress } from './kimi';
 
 const ev = (o: unknown) => `data: ${JSON.stringify(o)}\n\n`;
 const delta = (d: object) => ev({ choices: [{ delta: d }] });
@@ -57,7 +56,7 @@ describe('requestTurn', () => {
     expect(sent).toMatchObject({ model: 'kimi-k3', stream: true, stream_options: { include_usage: true }, tools: [{ type: 'function' }], reasoning_effort: 'low' });
   });
 
-  it('503 and 401 are ChatErrors in the wand\'s words', async () => {
+  it('503 and 401 are ChatErrors: not configured, the key refused', async () => {
     const status = (s: number) => vi.fn(async () => new Response('', { status: s })) as unknown as typeof fetch;
     await expect(ask(status(503))).rejects.toThrow(new ChatError(NOT_CONFIGURED));
     await expect(ask(status(401))).rejects.toThrow('the model refused the key (HTTP 401)');

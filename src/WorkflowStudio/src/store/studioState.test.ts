@@ -152,7 +152,7 @@ describe('designing (plan 4)', () => {
     expect(s.docs[0]!.selection).toEqual({ kind: 'step', stepId: 's1' });
   });
 
-  it('a design step is undone, redone and discarded; the document is marked while it has a draft', async () => {
+  it('a design step is undone and redone; the document is marked while it has a draft', async () => {
     let s = reduce(await opened(), { type: 'design', workflowId: 'wf1', draft, picks: [{ kind: 'node', id: 's1' }] });
     expect(designDirty(s.docs[0]!)).toBe(true);
     expect(s.docs[0]!.picks).toEqual([{ kind: 'node', id: 's1' }]);
@@ -160,9 +160,6 @@ describe('designing (plan 4)', () => {
     expect(designDirty(s.docs[0]!)).toBe(false);
     s = reduce(s, { type: 'redo', workflowId: 'wf1' });
     expect(s.docs[0]!.design.draft).toEqual(draft);
-    s = reduce(s, { type: 'discardDesign', workflowId: 'wf1' });
-    expect(designDirty(s.docs[0]!)).toBe(false);
-    expect(s.docs[0]!.design.past).toEqual([]);
   });
 
   it('a pick between nudges ends the run: the next nudge is a step of its own (spec §5.3)', async () => {
@@ -186,7 +183,7 @@ describe('designing (plan 4)', () => {
   });
 });
 
-describe('undo, redo and Discard design drop picks the document no longer has', () => {
+describe('undo and redo drop picks the document no longer has', () => {
   const ready = async () => {
     const graph = graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2', 's3'] }), stepDto('s2'), stepDto('s3')] });
     return reduce(reduce(INITIAL_STATE, { type: 'open', workflowId: 'wf1', name: 'a', version: '1' }),
@@ -215,14 +212,6 @@ describe('undo, redo and Discard design drop picks the document no longer has', 
     s = reduce(s, { type: 'design', workflowId: 'wf1', draft, picks: [{ kind: 'wire', id: 's1->s3' }] });
     s = reduce(s, { type: 'undo', workflowId: 'wf1' });
     expect(s.docs[0]!.picks).toEqual([{ kind: 'wire', id: 's1->s3' }]);
-  });
-
-  it('Discard design keeps picks that still exist (saved wires, blocks, the hub)', async () => {
-    let s = await ready();
-    const picks = [{ kind: 'wire', id: 'wf->s1' }, { kind: 'wire', id: 's1->s2' }, { kind: 'node', id: 'wf' }, { kind: 'node', id: 's3' }] as const;
-    s = reduce(s, { type: 'design', workflowId: 'wf1', draft: withNew(s), picks: [...picks, { kind: 'wire', id: 'w:n1' }] });
-    s = reduce(s, { type: 'discardDesign', workflowId: 'wf1' });
-    expect(s.docs[0]!.picks).toEqual(picks);
   });
 
   it('a document that is not ready keeps its picks', () => {
@@ -271,15 +260,6 @@ describe('the design (plan 8)', () => {
     expect(designDirty(d0(s))).toBe(true);
   });
 
-  it('Discard design returns to the stored design, not to nothing (Review Focus 4)', async () => {
-    let s = await loaded();
-    s = reduce(s, { type: 'design', workflowId: 'wf1', draft: { ...EMPTY_DRAFT, next: { s1: [] } } });
-    s = reduce(s, { type: 'discardDesign', workflowId: 'wf1' });
-    expect(d0(s).design.draft.next).toEqual({});
-    expect(d0(s).edits.steps['s1']!.fields).toEqual({ description: 'stored' });
-    expect(designDirty(d0(s))).toBe(false);
-  });
-
   it('a typed field changes the shown entity in the design, judged against the graph entity (read or not); never while saving', async () => {
     let s = reduce(await loaded(), { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's2' } });
     const edit: StudioAction = { type: 'editField', workflowId: 'wf1', key: 'name', value: 'renamed', copyId: 'c' };
@@ -304,6 +284,45 @@ describe('the design (plan 8)', () => {
     // the base's assignment is deleted on Save, with its loaded stamp
     s = reduce(s, { type: 'removeAssignment', workflowId: 'wf1', stepId: 's2' });
     expect(d0(s).edits.assignments['s2']).toEqual({ op: 'delete', id: 'a2', updatedAt: '2026-10-07T10:00:00Z' });
+  });
+
+  it('creating and removing an assignment are Undo steps (2026-10-23): Undo brings a removed one back with its edits', async () => {
+    let s = reduce(await loaded(), { type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's1' } });
+    // created, then removed: Undo brings back the very operation, the fields it holds with it
+    s = reduce(s, { type: 'createAssignment', workflowId: 'wf1', stepId: 's1', stepName: 'fetch', id: 'n1' });
+    const named = d0(s).edits.assignments['s1'];
+    expect(named).toMatchObject({ op: 'create', id: 'n1', fields: expect.any(Object) });
+    s = reduce(s, { type: 'removeAssignment', workflowId: 'wf1', stepId: 's1' });
+    expect(d0(s).edits.assignments['s1']).toBeUndefined();
+    s = reduce(s, { type: 'undo', workflowId: 'wf1' });
+    expect(d0(s).edits.assignments['s1']).toEqual(named);
+    // Undo of the create: gone, and an Inspector showing it goes back to the step
+    s = reduce(s, { type: 'drill', workflowId: 'wf1', target: { kind: 'assignment', id: 'n1', stepId: 's1' } });
+    expect(shownTargetOf(d0(s))).toEqual({ kind: 'assignment', id: 'n1', stepId: 's1' });
+    s = reduce(s, { type: 'undo', workflowId: 'wf1' });
+    expect(d0(s).edits.assignments['s1']).toBeUndefined();
+    expect(shownTargetOf(d0(s))).toEqual({ kind: 'step', id: 's1' });
+    expect(d0(s).design.past).toEqual([]);
+    // Redo twice: created again, then removed again
+    s = reduce(s, { type: 'redo', workflowId: 'wf1' });
+    expect(d0(s).edits.assignments['s1']).toMatchObject({ op: 'create', id: 'n1' });
+    s = reduce(s, { type: 'redo', workflowId: 'wf1' });
+    expect(d0(s).edits.assignments['s1']).toBeUndefined();
+    // a saved assignment removed after a drawing step: the first Undo brings the assignment back, the draft stays
+    const draft = { ...EMPTY_DRAFT, next: { s1: [] } };
+    s = reduce(s, { type: 'design', workflowId: 'wf1', draft });
+    s = reduce(s, { type: 'removeAssignment', workflowId: 'wf1', stepId: 's2' });
+    expect(d0(s).edits.assignments['s2']).toMatchObject({ op: 'delete', id: 'a2' });
+    s = reduce(s, { type: 'undo', workflowId: 'wf1' });
+    expect(d0(s).edits.assignments['s2']).toBeUndefined();
+    expect(d0(s).design.draft).toEqual(draft);
+    s = reduce(s, { type: 'undo', workflowId: 'wf1' });
+    expect(d0(s).design.draft).toEqual(EMPTY_DRAFT);
+    // removing what is not there is no step; nor is anything undone while a Save runs
+    const before = d0(s).design;
+    expect(d0(reduce(s, { type: 'removeAssignment', workflowId: 'wf1', stepId: 's1' })).design).toBe(before);
+    const saving = reduce(reduce(s, { type: 'redo', workflowId: 'wf1' }), { type: 'saving', workflowId: 'wf1' });
+    expect(reduce(saving, { type: 'undo', workflowId: 'wf1' })).toBe(saving);
   });
 
   it('a Save answer: the design read back is the stored one, the session edits go, errors and Output follow the answer', async () => {
