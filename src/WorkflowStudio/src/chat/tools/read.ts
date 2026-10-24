@@ -1,7 +1,9 @@
 import type { ApiResult } from '../../api/client';
 import { describeError } from '../../api/describeError';
 import type { EntityReadDto } from '../../api/entities';
-import { graphOf } from '../drawingRules';
+import { circuitOf } from '../../design/draft';
+import { graphOf, remainingProblemsOf } from '../drawingRules';
+import { wireText } from './design';
 import type { StudioDocument } from '../../app/document';
 import { baseDtoOf } from '../../app/inspectorService';
 import { applyEdits } from '../../design/apply';
@@ -117,7 +119,7 @@ const listSchemas: ToolDef = {
 
 const readDesign: ToolDef = {
   name: 'read_design',
-  description: 'Read the drawing of an open workflow as it is now, unsaved edits included: whether the workflow is running (null: unknown), every block and wire with positions (each wire shape too: the place of its ends and its bends, as shape_wire takes them), each step with its name, processor (with its health now), entry condition, assignment id and next steps, and the current problems (the ones Output pins).',
+  description: 'Read the drawing of an open workflow as it is now, unsaved edits included: whether the workflow is running (null: unknown), every block and wire with positions (each wire shape too: the place of its ends and its bends, as shape_wire takes them), the drawing issues by the studio drawing rules (drawing: crossings, steps off their row or column, bent main-path wires, short segments), each step with its name, processor (with its health now), entry condition, assignment id and next steps, and the current problems (the ones Output pins).',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG }, additionalProperties: false },
   async run(ctx, args) {
     const found = await readyDocOf(ctx, text(args.workflow));
@@ -136,7 +138,12 @@ const readDesign: ToolDef = {
       };
     });
     const problems = problemsFrom(doc, shown).map((e) => ({ entity: entityLabel(e, (shown ?? edited).graph, shown, loaded.graph), kind: e.kind, field: e.field, message: e.message }));
-    return json({ workflow: { id: doc.workflowId, name: graph.workflow.name, version: graph.workflow.version, running: live.running ? live.running.has(doc.workflowId.toLowerCase()) : null }, steps, ...graphOf(edited, draft), problems }, `read design of ${doc.name}`);
+    // the drawing rules the studio judges a drawing by (crossings, rows and columns, bent main-path wires, short
+    // segments): what the prompt says to fix before saying a drawing is done, each wire named as the chat names it
+    const ids = new Set(shown?.wires.map((w) => w.id) ?? []), circuit = circuitOf(edited, draft);
+    const named = (line: string) => line.split(' ').map((word) => (shown !== null && ids.has(word) ? `${wireText(shown, word, circuit)} (id ${word})` : word)).join(' ');
+    const drawing = remainingProblemsOf(edited, draft).map(named);
+    return json({ workflow: { id: doc.workflowId, name: graph.workflow.name, version: graph.workflow.version, running: live.running ? live.running.has(doc.workflowId.toLowerCase()) : null }, steps, ...graphOf(edited, draft), problems, drawing }, `read design of ${doc.name}`);
   },
 };
 

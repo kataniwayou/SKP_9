@@ -214,7 +214,8 @@ export function remainingProblemsOf(edited: StudioDocument, draft: Draft): strin
   const lists = writtenLists(edited, shown, draft);
   const path = mainPathOf(shown, lists.nextOf, lists.entries);
   for (let i = 0; i + 1 < path.length; i++) {
-    const w = shown.wires.find((x) => x.id === `${path[i]}->${path[i + 1]}`);
+    // by what it connects, not its id: a wire drawn in the designer (w:…) is judged too (2026-10-25)
+    const w = shown.wires.find((x) => x.source === path[i] && x.target === path[i + 1] && x.tailOn === 'terminal' && x.headOn === 'terminal');
     if (w && w.points.some((p) => p[1] !== w.points[0]![1])) out.push(`the main-path wire ${w.id} is bent: it should run straight along the row (rules 8 and 16)`);
   }
   for (const w of shown.wires) {

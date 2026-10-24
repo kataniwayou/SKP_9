@@ -11,7 +11,7 @@ import { INITIAL_STATE, reduce, type StudioAction, type StudioState } from '../s
 import { memoryStorage } from '../test/memoryStorage';
 import { applyDesign, applyEdits } from './apply';
 import { applyBlocks, EMPTY_BLOCKS } from './blocks';
-import { blockBoxes, copyClip, deletePicked, freeOffset, pasteClip, PASTE_MARGIN, PASTE_STEP, type Clip } from './clipboard';
+import { blockBoxes, clipOrigin, copyClip, deletePicked, freeOffset, pasteClip, PASTE_MARGIN, PASTE_STEP, type Clip } from './clipboard';
 import { EMPTY_EDITS, storedDesignOf, type EntityEdits } from './design';
 import { circuitOf, EMPTY_DRAFT, moveGroup, parseDraft, withCircuit, type Draft } from './draft';
 import { commit, historyOf, redo, undo } from './history';
@@ -173,13 +173,20 @@ describe('paste (2026-10-10)', () => {
     const target = await other();
     // the other workflow's own step sits away from the copied ones
     const away = { ...EMPTY_DRAFT, steps: { t1: { x: 4000, y: 4000 } } };
-    const r = pasteClip(target, EMPTY_EDITS, away, clip, ids(), 'wf2', true)!;
+    const r = pasteClip(target, EMPTY_EDITS, away, clip, ids(), 'wf2', clipOrigin(clip))!;
     expect(r.draft.blocks.steps.n1!.at).toEqual(clip.steps[0]!.at);
     expect(r.draft.blocks.steps.n2!.at).toEqual(clip.steps[1]!.at);
     const pasted = Object.values(circuitOf(applyEdits(target, EMPTY_EDITS, r.draft.blocks), r.draft)).find((w) => w.tail.on === 'step' && w.tail.step === 'n1')!;
     expect(pasted).toEqual({ tail: { on: 'step', step: 'n1', y: null }, head: { on: 'step', step: 'n2', y: 48 }, bends: { xs: [600], ys: [] } });
     // into the workflow it was copied in, its originals are in the way
-    expect(pasteClip(base, EMPTY_EDITS, shaped, clip, ids(), 'wf1', true)).toBeNull();
+    expect(pasteClip(base, EMPTY_EDITS, shaped, clip, ids(), 'wf1', clipOrigin(clip))).toBeNull();
+    // at a free spot below: the group's top-left there, every block and the wire's bends moved by the same offset
+    const o = clipOrigin(clip);
+    const below = pasteClip(base, EMPTY_EDITS, shaped, clip, ids(), 'wf1', { x: o.x, y: o.y + 1000 })!;
+    expect(below.draft.blocks.steps.n1!.at).toEqual({ x: clip.steps[0]!.at.x, y: clip.steps[0]!.at.y + 1000 });
+    expect(below.draft.blocks.steps.n2!.at).toEqual({ x: clip.steps[1]!.at.x, y: clip.steps[1]!.at.y + 1000 });
+    const moved = Object.values(circuitOf(applyEdits(base, EMPTY_EDITS, below.draft.blocks), below.draft)).find((w) => w.tail.on === 'step' && w.tail.step === 'n1')!;
+    expect(moved.bends).toEqual({ xs: [600], ys: [] });
   });
 
   it('is deterministic: the same clip on the same canvas lands at the same place', async () => {

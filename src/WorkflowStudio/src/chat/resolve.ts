@@ -1,5 +1,7 @@
 import type { CacheReadDto, ProcessorReadDto, WorkflowReadDto } from '../api/types';
-import { applyDesign } from '../design/apply';
+import type { Circuit, Side } from '../circuit/circuit';
+import { applyDesign, applyEdits } from '../design/apply';
+import { circuitOf } from '../design/draft';
 import { WORKFLOW_SOURCE } from '../layout/ports';
 import type { Id } from '../model/graph';
 import type { OpenDocument } from '../store/studioState';
@@ -54,6 +56,29 @@ export function findWorkflow(list: readonly WorkflowReadDto[], open: readonly Op
 export const findProcessor = <T extends ProcessorReadDto>(list: readonly T[], ref: string): Found<T> => pick(list, ref, 'processor', '');
 export const findCache = <T extends CacheReadDto>(list: readonly T[], ref: string): Found<T> => pick(list, ref, 'cache', '');
 
+/**
+ * What a wire's end reaches (2026-10-25): its step, or the hub (`WORKFLOW_SOURCE`), or, for an end joined on a trunk, what
+ * that trunk's same end reaches, through any junctions; null for an open end (or a loop of junctions). A fan-out branch
+ * is so "a -> e" as much as a fan-in branch is "b -> d".
+ */
+export function reachedEnd(c: Readonly<Circuit>, id: string, side: Side): string | null {
+  const seen = new Set<string>();
+  for (let at = id; Object.hasOwn(c, at) && !seen.has(at);) {
+    seen.add(at);
+    const e = c[at]![side];
+    if (e.on === 'step') return e.step;
+    if (e.on === 'hub') return WORKFLOW_SOURCE;
+    if (e.on !== 'wire') return null;
+    at = e.host;
+  }
+  return null;
+}
+
+/** The circuit of the design as shown. */
+export function shownCircuitOf(doc: OpenDocument): Circuit | null {
+  return doc.status.kind === 'ready' ? circuitOf(applyEdits(doc.status.doc, doc.edits, doc.design.draft.blocks), doc.design.draft) : null;
+}
+
 /** A wire of the design as shown, by its id or "from -> to" (steps by name or id; `workflow` is the hub). */
 export function findWire(doc: OpenDocument, ref: string): Found<string> {
   const shown = shownOf(doc);
@@ -69,7 +94,9 @@ export function findWire(doc: OpenDocument, ref: string): Found<string> {
     return new Set(hub ? [WORKFLOW_SOURCE, ...steps] : steps);
   };
   const tails = ends(parts[0]!), heads = ends(parts[1]!);
-  const found = shown.wires.filter((w) => w.source !== null && w.target !== null && tails.has(w.source) && heads.has(w.target));
+  // what each end reaches, through junctions: a joined branch is named by the steps it relates
+  const c = shownCircuitOf(doc) ?? {};
+  const found = shown.wires.filter((w) => { const s = reachedEnd(c, w.id, 'tail'), t = reachedEnd(c, w.id, 'head'); return s !== null && t !== null && tails.has(s) && heads.has(t); });
   if (found.length === 1) return { ok: true, value: found[0]!.id };
   if (found.length === 0) return { ok: false, error: `no wire from ${parts[0]} to ${parts[1]} in ${doc.name}` };
   return { ok: false, ambiguous: true, error: `${found.length} wires run from ${parts[0]} to ${parts[1]}: ${found.map((w) => w.id).join(', ')}; ask the user which one` };

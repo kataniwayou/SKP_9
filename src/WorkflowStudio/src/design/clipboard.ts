@@ -247,6 +247,14 @@ const clipBoxes = (clip: Clip): Box[] => [
   ...clip.caches.map((c) => ({ x: c.at.x, y: c.at.y, w: CACHE_W, h: CACHE_H })),
 ];
 
+/** The top-left of a clip's blocks where they were copied (its free wires' ends when it holds no block). */
+export function clipOrigin(clip: Clip): Point {
+  const boxes = clipBoxes(clip);
+  const ends = Object.values(clip.wires).flatMap((w) => [w.tail, w.head]).flatMap((e) => (e.on === 'open' ? [{ x: e.x, y: e.y }] : []));
+  const xs = boxes.length > 0 ? boxes.map((b) => b.x) : ends.map((p) => p.x), ys = boxes.length > 0 ? boxes.map((b) => b.y) : ends.map((p) => p.y);
+  return xs.length === 0 ? { x: 0, y: 0 } : { x: Math.min(...xs), y: Math.min(...ys) };
+}
+
 const copy = <T>(r: Readonly<Record<string, T>>): Record<string, T> => Object.assign(Object.create(null) as Record<string, T>, r);
 
 /**
@@ -257,11 +265,12 @@ const copy = <T>(r: Readonly<Record<string, T>>): Record<string, T> => Object.as
  * of every block of the workflow pasted into
  * and, pasted into the workflow it was copied in (`into`), of the area its originals had. Copied wires keep their
  * shapes moved by the same offset, junctions their place along their host. The pasted items are the new picks. Null
- * when the clip holds nothing. `inPlace` (the chat's exact copy into another workflow, 2026-10-24): no offset at all,
- * every block and wire exactly where it was copied; null when a pasted block would overlap a block already there.
+ * when the clip holds nothing. `at` (the chat's paste, 2026-10-25): the group's top-left goes exactly there (`clipOrigin`
+ * for the very place it was copied, an exact copy into another workflow), every block and wire moved with it; null when
+ * a pasted block would overlap a block already there, its originals included.
  */
 export function pasteClip(
-  base: StudioDocument, edits: EntityEdits, draft: Draft, clip: Clip, newId: () => string, into: Id = clip.from, inPlace = false,
+  base: StudioDocument, edits: EntityEdits, draft: Draft, clip: Clip, newId: () => string, into: Id = clip.from, at: Point | null = null,
 ): { draft: Draft; picks: Pick[] } | null {
   if (clip.steps.length + clip.caches.length + Object.keys(clip.wires).length === 0) return null;
   const { saved, shown } = views(base, edits, draft);
@@ -269,9 +278,14 @@ export function pasteClip(
   const start = { x: k * PASTE_STEP, y: k * PASTE_STEP };
   const group = clipBoxes(clip);
   const obstacles = [...blockBoxes(shown), ...(into === clip.from ? group : [])];
-  const stays = (o: Point) => o.x === 0 && o.y === 0;
-  if (inPlace && !stays(freeOffset(group, obstacles, { x: 0, y: 0 }, 0))) return null;
-  const { x: dx, y: dy } = inPlace ? { x: 0, y: 0 } : freeOffset(group, obstacles, start);
+  let dx: number, dy: number;
+  if (at !== null) {
+    const o = clipOrigin(clip);
+    dx = at.x - o.x;
+    dy = at.y - o.y;
+    const free = freeOffset(group, obstacles, { x: dx, y: dy }, 0);
+    if (free.x !== dx || free.y !== dy) return null;
+  } else ({ x: dx, y: dy } = freeOffset(group, obstacles, start));
 
   const stepIds = new Map(clip.steps.map((s) => [s.id, newId()]));
   const cacheIds = new Map(clip.caches.map((c) => [c.id, newId()]));

@@ -276,6 +276,52 @@ describe('the design tools', () => {
     expect(done(await call('shape_wire', { wires: [{ wire: 'workflow -> a', head: { host: 'a -> c', at: 40 } }] })).result).toContain('same step');
   });
 
+  it('move_blocks takes along a wire whose ends all move by one offset, its bends kept; a wire to a block that stays keeps its shape', async () => {
+    const { call, doc } = await setup(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { name: 'a', nextStepIds: ['s2'] }), stepDto('s2', { name: 'b', nextStepIds: ['s3'] }), stepDto('s3', { name: 'c' })],
+    }));
+    const base = () => applyEdits((doc().status as { doc: Parameters<typeof applyEdits>[0] }).doc, doc().edits, doc().design.draft.blocks);
+    done(await call('shape_wire', { wires: [{ wire: 'a -> b', bends: { xs: [600, 896], ys: [40] } }, { wire: 'b -> c', bends: { xs: [1200, 1400], ys: [40] } }] }));
+    const p = (id: string) => shownDesignOf(doc())!.placement.steps.get(id)!;
+    const [a, b] = [p('s1'), p('s2')];
+    expect(done(await call('move_blocks', { moves: [{ block: 'a', x: a.x, y: a.y + 400 }, { block: 'b', x: b.x, y: b.y + 400 }] })).ok).toBe(true);
+    const c = circuitOf(base(), doc().design.draft);
+    expect(c['s1->s2']!.bends).toEqual({ xs: [600, 896], ys: [440] });
+    expect(c['s2->s3']!.bends).toEqual({ xs: [1200, 1400], ys: [40] });
+    expect(doc().design.past).toHaveLength(2);
+  });
+
+  it('connect refuses a relation already wired, so "from -> to" stays one wire', async () => {
+    const { call, shown } = await setup();
+    expect(done(await call('connect', { from: 'a', to: 'b' })).ok).toBe(true);
+    const again = done(await call('connect', { from: 'a', to: 'b' }));
+    expect(again.ok).toBe(false);
+    expect(again.result).toContain('wired already');
+    expect(shown().wires.filter((w) => w.source === 's1' && w.target === 's2')).toHaveLength(1);
+    expect(done(await call('connect', { from: 'workflow', to: 'a' })).result).toContain('wired already');
+  });
+
+  it('read_design lists the drawing issues, a bent main-path wire drawn by the chat (w:) among them, named in words', async () => {
+    const { call, shown } = await setup();
+    expect(done(await call('connect', { from: 'a', to: 'b' })).ok).toBe(true);
+    const a = shown().placement.steps.get('s1')!, b = shown().placement.steps.get('s2')!;
+    const x0 = snap(a.x + STEP_W + 32), x1 = snap(b.x - 32);
+    expect(done(await call('shape_wire', { wires: [{ wire: 'a -> b', bends: { xs: [x0, x1], ys: [a.y - 200] } }] })).ok).toBe(true);
+    const read = JSON.parse(done(await call('read_design')).result) as { drawing: string[] };
+    expect(read.drawing.some((l) => /main-path wire a → b \(id w:.*\) is bent/.test(l))).toBe(true);
+  });
+
+  it('a joined fan-out branch is still "a -> c": found by name, named so, and not wired a second time', async () => {
+    const { call } = await setup(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { name: 'a', nextStepIds: ['s2', 's3'] }), stepDto('s2', { name: 'b' }), stepDto('s3', { name: 'c' })],
+    }));
+    expect(done(await call('join', { wire: 'a -> c', side: 'tail', host: 'a -> b' })).ok).toBe(true);
+    expect(done(await call('pick', { items: ['a -> c'] })).result).toBe('picked wire a → c');
+    expect(done(await call('connect', { from: 'a', to: 'c' })).result).toContain('wired already');
+  });
+
   it('connect with points: a wire open at both ends where given; paste in_place onto its originals is refused', async () => {
     const { call, shown } = await setup();
     const r = done(await call('connect', { from_point: { x: 3736, y: -96 }, to_point: { x: 3830, y: -97 } }));
@@ -285,6 +331,29 @@ describe('the design tools', () => {
     done(await call('pick', { items: ['a'] }));
     done(await call('copy'));
     expect(done(await call('paste', { in_place: true })).result).toContain('would overlap');
+  });
+
+  it('paste at x, y: a duplicate on its own row; its steps share names, so the result says to name them by id; the circle wires it', async () => {
+    const { call, shown } = await setup(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { name: 'a', nextStepIds: ['s2'] }), stepDto('s2', { name: 'b' })],
+    }));
+    const a = shown().placement.steps.get('s1')!, b = shown().placement.steps.get('s2')!;
+    done(await call('pick', { items: ['a', 'b', 'a -> b'] }));
+    done(await call('copy'));
+    const onTop = done(await call('paste', { x: a.x, y: a.y }));
+    expect(onTop.ok).toBe(false);
+    expect(onTop.result).toContain('would overlap');
+    const r = done(await call('paste', { x: a.x, y: a.y + 480 }));
+    expect(r.ok).toBe(true);
+    expect(r.result).toContain('2 pasted steps share their names');
+    const copyA = [...shown().graph.steps.values()].find((s) => s.name === 'a' && s.id !== 's1')!;
+    expect(shown().placement.steps.get(copyA.id)).toEqual({ x: a.x, y: a.y + 480 });
+    const copyB = [...shown().graph.steps.values()].find((s) => s.name === 'b' && s.id !== 's2')!;
+    expect(shown().placement.steps.get(copyB.id)).toEqual({ x: b.x, y: b.y + 480 });
+    expect(done(await call('connect', { from: 'workflow', to: 'a' })).result).toContain('ask the user which one');
+    expect(done(await call('connect', { from: 'workflow', to: copyA.id })).ok).toBe(true);
+    expect(shown().graph.workflow.entryStepIds).toEqual(expect.arrayContaining(['s1', copyA.id]));
   });
 
   it('connect from "workflow": a new entry step', async () => {

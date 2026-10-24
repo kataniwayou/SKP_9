@@ -1,13 +1,14 @@
 import { describeError } from '../../api/describeError';
 import { cacheFromDto, processorFromDto, schemaFromDto } from '../../api/toModel';
 import type { StudioDocument } from '../../app/document';
-import { addCircuitWire, NEW_WIRE_PREFIX, setBends, setEnd, snapAngle, type Circuit, type CircuitWire, type End, type Side } from '../../circuit/circuit';
+import { addCircuitWire, NEW_WIRE_PREFIX, setBends, setEnd, shiftWires, snapAngle, type Circuit, type CircuitWire, type End, type Side } from '../../circuit/circuit';
 import { applyDraft, applyEdits } from '../../design/apply';
 import { arrowsOf, autoTarget, type Dir } from '../../design/autoConnect';
-import { blockBoxes, freeOffset } from '../../design/clipboard';
+import { blockBoxes, clipOrigin, freeOffset } from '../../design/clipboard';
 import { circuitOf, moveBlocks, resetShape, withCircuit, type Draft } from '../../design/draft';
 import { isAssignmentStep, redoStepOf, undoStepOf, type AssignmentStep } from '../../design/history';
 import { dropLabel, judgeDrop, toneOf } from '../../design/drop';
+import { nodeBox } from '../../design/hit';
 import { shortCircuitErrors } from '../../design/shortCircuits';
 import { dropTool, judgeTool, type ToolItem } from '../../design/toolDrop';
 import { wireName } from '../../design/wireName';
@@ -15,7 +16,7 @@ import { WORKFLOW_SOURCE } from '../../layout/ports';
 import { CACHE_H, CACHE_W, CELL, COLUMN_PITCH, GRID, LANDING_MAX, LANDING_MIN, LAYOUT_GAP, PMID, snap, SPHERE_R, STEP_H, STEP_W, type Point } from '../../layout/geometry';
 import { CONTACT_MARGIN, lengthOf, nearestOn } from '../../layout/junctions';
 import type { Pt } from '../../layout/router';
-import type { Bends } from '../../layout/shape';
+import { JOG, type Bends } from '../../layout/shape';
 import { cacheNodeId, CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../../layout/nodeIds';
 import { conditionInfo } from '../../model/entryConditions';
 import type { Id } from '../../model/graph';
@@ -24,7 +25,7 @@ import { entityLabel, shownDesignOf } from '../../store/problems';
 import { designLocked, reduce, type OpenDocument, type StudioAction } from '../../store/studioState';
 import type { ChatEntry } from '../chatStore';
 import { withEcho } from '../echo';
-import { findCache, findProcessor, findStep, findWire, type Found } from '../resolve';
+import { findCache, findProcessor, findStep, findWire, reachedEnd, shownCircuitOf, type Found } from '../resolve';
 import type { ToolContext, ToolDef } from '../toolTypes';
 import { docOf, done, fail, labelOf, openDocOf, questionDocOf, text, workflowOf, WORKFLOW_ARG, YES_NO, type DocChoice } from './common';
 
@@ -103,25 +104,38 @@ export async function act(ctx: ToolContext, id: Id, action: StudioAction, opts: 
   return { ok: true, entries, before, after };
 }
 
-/** A wire in the chat's words: "from → to", a step by its name, the hub as workflow, else a junction or an open end. */
-export function wireText(shown: StudioDocument, id: string): string {
+/**
+ * A wire in the chat's words: "from → to", a step by its name, the hub as workflow, else a junction or an open end;
+ * given the circuit, an end on a junction by what it reaches through it (a fan-out branch is "a → e" too).
+ */
+export function wireText(shown: StudioDocument, id: string, circuit?: Readonly<Circuit>): string {
   const w = shown.wires.find((x) => x.id === id);
   if (!w) return wireName(shown, id) ?? id;
   const name = (s: string | null, on: string) => (s === null ? (on === 'junction' ? 'a junction' : 'an open end') : s === WORKFLOW_SOURCE ? 'workflow' : shown.graph.steps.get(s)?.name ?? s);
-  return `${name(w.source, w.tailOn)} → ${name(w.target, w.headOn)}`;
+  const tail = circuit ? reachedEnd(circuit, id, 'tail') ?? w.source : w.source, head = circuit ? reachedEnd(circuit, id, 'head') ?? w.target : w.target;
+  return `${name(tail, w.tailOn)} → ${name(head, w.headOn)}`;
 }
 
 /** What an action added to and removed from the drawing: steps, caches and wires, each named as the canvas names it. */
 function changesOf(before: OpenDocument, after: OpenDocument): { added: string[]; removed: string[]; newSteps: Id[] } {
   const b = shownDesignOf(before)!, a = shownDesignOf(after)!;
+  const cb = shownCircuitOf(before) ?? undefined, ca = shownCircuitOf(after) ?? undefined;
   const added: string[] = [], removed: string[] = [], newSteps: Id[] = [];
   for (const s of a.graph.steps.values()) if (!b.graph.steps.has(s.id)) { added.push(`step ${s.name} (id ${s.id})`); newSteps.push(s.id); }
   for (const c of a.graph.caches.values()) if (!b.graph.caches.has(c.id)) added.push(`cache ${labelOf(c)} (id ${c.id})`);
-  for (const w of a.wires) if (!b.wires.some((x) => x.id === w.id)) added.push(`wire ${wireText(a, w.id)} (id ${w.id})`);
+  for (const w of a.wires) if (!b.wires.some((x) => x.id === w.id)) added.push(`wire ${wireText(a, w.id, ca)} (id ${w.id})`);
   for (const s of b.graph.steps.values()) if (!a.graph.steps.has(s.id)) removed.push(`step ${s.name}`);
   for (const c of b.graph.caches.values()) if (!a.graph.caches.has(c.id)) removed.push(`cache ${labelOf(c)}`);
-  for (const w of b.wires) if (!a.wires.some((x) => x.id === w.id)) removed.push(`wire ${wireText(b, w.id)}`);
+  for (const w of b.wires) if (!a.wires.some((x) => x.id === w.id)) removed.push(`wire ${wireText(b, w.id, cb)}`);
   return { added, removed, newSteps };
+}
+
+/** The wires drawn both before and after an action whose family changed, in the chat's words. */
+function recoloured(before: OpenDocument, after: OpenDocument): { wire: string; from: string; to: string }[] {
+  const b = shownDesignOf(before)!, a = shownDesignOf(after)!;
+  const was = new Map(b.wires.map((w) => [w.id, w.condition]));
+  const name = (c: number | null | undefined) => (c == null ? 'undecided' : conditionInfo(c).name);
+  return a.wires.filter((w) => was.has(w.id) && was.get(w.id) !== w.condition).map((w) => ({ wire: wireText(a, w.id, shownCircuitOf(after) ?? undefined), from: name(was.get(w.id)), to: name(w.condition) }));
 }
 
 /** A block of the drawing by what the model wrote: "workflow" (the hub), a step, or a cache, by name or id; its React Flow node id. */
@@ -258,7 +272,11 @@ const addStepTool: ToolDef = {
     const pos = made !== null ? shownDesignOf(r.after)!.placement.steps.get(made) : undefined;
     const withP = item?.ok ? ` with processor ${labelOf(item.value.processor)}` : '';
     const extra = added.filter((x) => !x.startsWith('step ')).join(', ');
-    return done(true, `added step ${name} (id ${made})${withP} at x ${pos?.x}, y ${pos?.y}${extra ? `; also ${extra} (the wire under it was split through it)` : ''}`, `+ step ${name}${withP}`, r.entries);
+    // a split hands the wires into the new step its entry condition: say which changed family, so a meaning change is never silent (2026-10-25)
+    const changed = recoloured(r.before, r.after);
+    const was = [...new Set(changed.map((c) => c.from))];
+    const recolour = changed.length === 0 ? '' : `. ${changed.length} wire${changed.length === 1 ? '' : 's'} changed family with the split (${changed.map((c) => `${c.wire}: ${c.from} → ${c.to}`).join('; ')}): the relations they carry now run on ${changed[0]!.to}, the entry condition of ${name}${was.length === 1 ? `; to keep them on ${was[0]}, set its entryCondition to ${was[0]}` : ''}`;
+    return done(true, `added step ${name} (id ${made})${withP} at x ${pos?.x}, y ${pos?.y}${extra ? `; also ${extra} (the wire under it was split through it)` : ''}${recolour}`, `+ step ${name}${withP}`, r.entries);
   },
 };
 
@@ -380,6 +398,11 @@ const connectTool: ToolDef = {
       head = { on: 'step', step: h.value, y: null };
     }
     const { saved, shown, draft } = layersOf(doc);
+    // a relation already drawn is not drawn twice (2026-10-25): a second wire would only make "from -> to" ambiguous
+    const source = tail.on === 'hub' ? WORKFLOW_SOURCE : tail.on === 'step' ? tail.step : null;
+    const all = circuitOf(saved, draft);
+    const twin = source !== null && head.on === 'step' ? shown.wires.find((w) => reachedEnd(all, w.id, 'tail') === source && reachedEnd(all, w.id, 'head') === head.step) : undefined;
+    if (twin) return fail(`${endName(shown, tail)} → ${endName(shown, head)} is wired already (wire ${twin.id}); a second wire would carry the same relation`, `${asked} refused`);
     const wire: CircuitWire = { tail, head };
     const wireId = `${NEW_WIRE_PREFIX}${ctx.newId()}`;
     const next = withCircuit(draft, saved, addCircuitWire(circuitOf(saved, draft), wireId, wire));
@@ -404,9 +427,48 @@ function meetingOf(route: readonly Pt[], side: Side, host: readonly Pt[], length
   return (near.find((n) => n.gap <= closest + GRID) ?? near.at(-1)!).at;
 }
 
+/**
+ * The step a wire's end reaches (2026-10-25): its own step, or, for an end joined on a trunk, the step that trunk's same
+ * end reaches, through any junctions; `via` the wires passed on the way. Null for the hub, an open end or a cycle.
+ */
+function reachedStep(circuit: Readonly<Circuit>, id: string, side: Side): { step: Id; via: Set<string> } | null {
+  const via = new Set<string>();
+  for (let at = id; Object.hasOwn(circuit, at) && !via.has(at);) {
+    via.add(at);
+    const e = circuit[at]![side];
+    if (e.on === 'step') return { step: e.step, via };
+    if (e.on !== 'wire') return null;
+    at = e.host;
+  }
+  return null;
+}
+
+/** How far from its step a branch turns to drop onto its trunk (2 jogs, as the hand-drawn trunks have it). */
+const DROP = 2 * JOG;
+
+/**
+ * Where a branch drops straight onto its trunk (2026-10-25): DROP out from its own step (right of the output for a
+ * fan-in, left of the input for a fan-out), down or up to the trunk's nearest level run under that x. The junction's
+ * place along the trunk and the branch's one vertical run; null when no level run of the trunk lies under that x.
+ */
+function straightDrop(route: readonly Pt[], side: Side, host: readonly Pt[], length: number): { at: number; x: number } | null {
+  const own = side === 'head' ? route[0]! : route.at(-1)!;
+  const x = snap(side === 'head' ? own[0] + DROP : own[0] - DROP);
+  let best: { y: number; gap: number } | null = null;
+  for (let i = 0; i < host.length - 1; i++) {
+    const [ax, ay] = host[i]!, [bx, by] = host[i + 1]!;
+    if (ay !== by || x < Math.min(ax, bx) || x > Math.max(ax, bx)) continue;
+    const gap = Math.abs(ay - own[1]);
+    if (gap > 0 && (best === null || gap < best.gap)) best = { y: ay, gap };
+  }
+  if (best === null) return null;
+  const near = nearestOn([host], [x, best.y], CONTACT_MARGIN, length - CONTACT_MARGIN);
+  return near.gap === 0 ? { at: near.at, x } : null;
+}
+
 const joinTool: ToolDef = {
   name: 'join',
-  description: 'Merge a wire into a trunk: its head (fan-in) or its tail (fan-out) on a step becomes a junction on another wire of the same family that ends (head) or starts (tail) on that same step, at the given point along the trunk, else where its own route first comes up against that trunk (each branch drops straight onto it). Refused across families, steps, or for a wire on the workflow circle.',
+  description: 'Merge a wire into a trunk: its head (fan-in) or its tail (fan-out) on a step becomes a junction on another wire of the same family that ends (head) or starts (tail) on that same step, at the given point along the trunk, else where the branch drops straight onto it a little out from its own step (else where its route first comes up against that trunk) (each branch drops straight onto it). Refused across families, steps, or for a wire on the workflow circle.',
   parameters: {
     type: 'object',
     properties: {
@@ -432,23 +494,28 @@ const joinTool: ToolDef = {
     if (!hostId.ok) return fail(hostId.error, asked);
     const { saved, shown, draft } = layersOf(doc);
     const circuit = circuitOf(saved, draft);
-    const mine = circuit[w.value]!, theirs = circuit[hostId.value]!;
-    const name = wireText(shown, w.value), hostName = wireText(shown, hostId.value);
+    const mine = circuit[w.value]!;
+    const name = wireText(shown, w.value, circuit), hostName = wireText(shown, hostId.value, circuit);
     const action = `join ${name}'s ${side} on ${hostName}`;
     if (w.value === hostId.value) return fail('a wire cannot join itself', action);
-    const end = mine[side], hostEnd = theirs[side];
+    const end = mine[side];
     if (end.on !== 'step') return fail(`the ${side} of ${name} is not on a step${end.on === 'hub' ? ' (a wire on the workflow circle stays separate)' : ''}`, action);
-    if (hostEnd.on !== 'step' || hostEnd.step !== end.step) return fail(`${hostName} does not ${side === 'head' ? 'end' : 'start'} on the same step as ${name}: a junction merges wires of one step`, action);
+    // the trunk may itself be a branch joined on another: what counts is the step it reaches (2026-10-25)
+    const reached = reachedStep(circuit, hostId.value, side);
+    if (reached === null || reached.step !== end.step) return fail(`${hostName} does not ${side === 'head' ? 'end' : 'start'} on the same step as ${name}: a junction merges wires of one step`, action);
     const route = shown.wires.find((x) => x.id === w.value), host = shown.wires.find((x) => x.id === hostId.value);
     if (!route || !host) return fail('one of the wires is not drawn', action);
     if (route.condition === null || route.condition !== host.condition) return fail(`${name} and ${hostName} are not of one family: wires of different families are never joined`, action);
     const length = lengthOf([host.points]);
-    const raw = num(args.at) ?? meetingOf(route.points, side, host.points, length);
+    // no point given: the branch drops straight onto the trunk where it can, else meets it where its route comes up to it
+    const drop = num(args.at) === undefined ? straightDrop(route.points, side, host.points, length) : null;
+    const raw = num(args.at) ?? drop?.at ?? meetingOf(route.points, side, host.points, length);
     const at = Math.min(Math.max(snap(raw, GRID), CONTACT_MARGIN), Math.max(CONTACT_MARGIN, length - CONTACT_MARGIN));
     const target = { on: 'wire' as const, host: hostId.value, at };
     const why = judgeDrop(shown, circuit, w.value, side, target);
     if (toneOf(why) !== 'ok') return fail(`refused: ${dropLabel(why)}`, action);
-    const next = withCircuit(draft, saved, setEnd(circuit, w.value, side, { on: 'wire', host: hostId.value, at }));
+    const joined = setEnd(circuit, w.value, side, { on: 'wire', host: hostId.value, at });
+    const next = withCircuit(draft, saved, drop !== null && drop.at === at ? setBends(joined, w.value, { xs: [drop.x], ys: [] }) : joined);
     const r = await act(ctx, doc.workflowId, { type: 'design', workflowId: doc.workflowId, draft: next, picks: [{ kind: 'wire', id: w.value }] }, { unchanged: `${name} could not join ${hostName}` });
     if (!r.ok) return fail(r.error, `${action} refused`);
     return done(true, `the ${side} of ${name} is a junction on ${hostName} now, ${at} px along it`, `joined ${name}'s ${side} on ${hostName}`, r.entries);
@@ -490,9 +557,40 @@ const autoConnectTool: ToolDef = {
   },
 };
 
+/**
+ * The wires a move takes along (2026-10-25), as a rubber band picks them with the blocks on the canvas: a wire whose
+ * ends, followed through the junctions it hangs on, are all on blocks that move by one same offset; by that offset.
+ * A wire with an open end, or an end on a block that stays or moves by another offset, keeps its shape.
+ */
+function wiresAlong(circuit: Readonly<Circuit>, offsetOf: (node: string) => Point | undefined): Map<string, { ids: string[]; dx: number; dy: number }> {
+  const blocks = (id: string, seen: Set<string>): string[] | null => {
+    if (seen.has(id) || !Object.hasOwn(circuit, id)) return null;
+    seen.add(id);
+    const out: string[] = [];
+    for (const e of [circuit[id]!.tail, circuit[id]!.head]) {
+      if (e.on === 'open') return null;
+      if (e.on === 'step') out.push(e.step);
+      else if (e.on === 'hub') out.push(SPHERE_NODE_ID);
+      else { const host = blocks(e.host, seen); if (host === null) return null; out.push(...host); }
+    }
+    return out;
+  };
+  const groups = new Map<string, { ids: string[]; dx: number; dy: number }>();
+  for (const id of Object.keys(circuit)) {
+    const nodes = blocks(id, new Set());
+    const offsets = nodes?.map(offsetOf);
+    if (!offsets || offsets.length === 0 || offsets.some((o) => o === undefined)) continue;
+    const { x: dx, y: dy } = offsets[0]!;
+    if (offsets.some((o) => o!.x !== dx || o!.y !== dy) || (dx === 0 && dy === 0)) continue;
+    const key = `${dx},${dy}`;
+    (groups.get(key) ?? groups.set(key, { ids: [], dx, dy }).get(key)!).ids.push(id);
+  }
+  return groups;
+}
+
 const moveBlocksTool: ToolDef = {
   name: 'move_blocks',
-  description: 'Move blocks (steps, caches, the workflow circle) to new top-left corners, snapped to the 8 px grid, as one drag: one Undo step. Wires follow (the router draws them).',
+  description: 'Move blocks (steps, caches, the workflow circle) to new top-left corners, snapped to the 8 px grid, as one drag: one Undo step. A wire whose ends are all on blocks moved by one same offset moves with them, its shape kept (as a rubber-band pick dragged on the canvas); every other wire follows its ends.',
   parameters: {
     type: 'object',
     properties: {
@@ -523,7 +621,18 @@ const moveBlocksTool: ToolDef = {
       moved.set(block.value.node, { x: snap(x), y: snap(y) });
       names.push(`${block.value.label} to (${snap(x)}, ${snap(y)})`);
     }
-    const next = moveBlocks(draft, saved, moved);
+    // each moved block's offset from where it is drawn now
+    const offsets = new Map<string, Point>();
+    for (const [node, to] of moved) {
+      const from = nodeBox(shown, node);
+      if (from) offsets.set(node, { x: to.x - from.x, y: to.y - from.y });
+    }
+    let next = moveBlocks(draft, saved, moved);
+    for (const { ids, dx, dy } of wiresAlong(circuitOf(saved, draft), (node) => offsets.get(node)).values()) {
+      const c = circuitOf(saved, next);
+      const shifted = shiftWires(c, ids, dx, dy, (block) => moved.has(block === 'hub' ? SPHERE_NODE_ID : block));
+      if (shifted !== c) next = withCircuit(next, saved, shifted);
+    }
     const r = await act(ctx, doc.workflowId, { type: 'design', workflowId: doc.workflowId, draft: next }, { unchanged: 'nothing moved: the blocks are already there' });
     if (!r.ok) return fail(r.error, `${asked} refused`);
     return done(true, `moved ${names.join(', ')}`, `moved ${names.map((n) => n.replace(/ to \(.*\)$/, '')).join(', ')}`, r.entries);
@@ -542,7 +651,7 @@ const resetRouteTool: ToolDef = {
     const w = findWire(doc, text(args.wire) ?? '');
     if (!w.ok) return fail(w.error, asked);
     const { saved, shown, draft } = layersOf(doc);
-    const name = wireText(shown, w.value);
+    const name = wireText(shown, w.value, circuitOf(saved, draft));
     const r = await act(ctx, doc.workflowId, { type: 'design', workflowId: doc.workflowId, draft: resetShape(draft, saved, w.value) }, { unchanged: `wire ${name} has no route of its own to reset` });
     if (!r.ok) return fail(r.error, `reset route of ${name} refused`);
     return done(true, `the route of wire ${name} is automatic again`, `reset route of ${name}`, r.entries);
@@ -559,11 +668,13 @@ function junctionArg(doc: OpenDocument, shown: StudioDocument, circuit: Readonly
   const hostId = findWire(doc, text(a.host) ?? '');
   if (!hostId.ok) return hostId;
   if (hostId.value === id) return { ok: false, error: 'a wire cannot join itself' };
-  const cur = circuit[id]![side], theirs = circuit[hostId.value]![side];
-  const hostName = wireText(shown, hostId.value);
-  const step = cur.on === 'step' ? cur.step : cur.on === 'wire' && cur.host === hostId.value && theirs.on === 'step' ? theirs.step : null;
-  if (step === null) return { ok: false, error: `the ${side} is not on a step nor on ${hostName}: a junction merges wires of one step` };
-  if (theirs.on !== 'step' || theirs.step !== step) return { ok: false, error: `${hostName} does not ${side === 'head' ? 'end' : 'start'} on the same step: a junction merges wires of one step` };
+  const hostName = wireText(shown, hostId.value, circuit);
+  // what counts is the step each end reaches, through any junctions (a trunk may be a branch joined on another)
+  const step = reachedStep(circuit, id, side)?.step ?? null;
+  if (step === null) return { ok: false, error: `the ${side} reaches no step: a junction merges wires of one step` };
+  const reached = reachedStep(circuit, hostId.value, side);
+  if (reached?.via.has(id)) return { ok: false, error: `${hostName} is joined on this wire: joining back on it would make a loop of junctions` };
+  if (reached === null || reached.step !== step) return { ok: false, error: `${hostName} does not ${side === 'head' ? 'end' : 'start'} on the same step: a junction merges wires of one step` };
   const mine = shown.wires.find((x) => x.id === id), host = shown.wires.find((x) => x.id === hostId.value);
   if (!mine || !host) return { ok: false, error: 'one of the wires is not drawn' };
   if (mine.condition === null || mine.condition !== host.condition) return { ok: false, error: `not of one family with ${hostName}: wires of different families are never joined` };
@@ -664,7 +775,7 @@ const shapeWireTool: ToolDef = {
       const w = findWire(doc, text(item.wire) ?? '');
       if (!w.ok) return fail(w.error, asked);
       const cur = circuit[w.value]!;
-      const name = wireText(shown, w.value);
+      const name = wireText(shown, w.value, circuit);
       const action = `shape ${name}`;
       const tail = junctionArg(doc, shown, circuit, w.value, 'tail', item.tail) ?? endArg(cur.tail, item.tail, 'tail', hostOf(cur.tail));
       if (!tail.ok) return fail(tail.error, action);
@@ -699,16 +810,16 @@ function pickOf(doc: OpenDocument, shown: StudioDocument, ref: string): Found<{ 
   const t = ref.trim();
   if (/->|→/.test(t) || t.startsWith(NEW_WIRE_PREFIX)) {
     const w = findWire(doc, t);
-    return w.ok ? { ok: true, value: { pick: { kind: 'wire', id: w.value }, label: `wire ${wireText(shown, w.value)}` } } : w;
+    return w.ok ? { ok: true, value: { pick: { kind: 'wire', id: w.value }, label: `wire ${wireText(shown, w.value, shownCircuitOf(doc) ?? undefined)}` } } : w;
   }
   const b = blockOf(doc, shown, t);
   return b.ok ? { ok: true, value: { pick: { kind: 'node', id: b.value.node }, label: b.value.label } } : b;
 }
 
 /** What the picks are, in words: each block and wire as the canvas names it. */
-function picksText(shown: StudioDocument, picks: readonly Pick[]): string[] {
+function picksText(shown: StudioDocument, picks: readonly Pick[], circuit?: Readonly<Circuit>): string[] {
   return picks.map((p) => {
-    if (p.kind === 'wire') return `wire ${wireText(shown, p.id)}`;
+    if (p.kind === 'wire') return `wire ${wireText(shown, p.id, circuit)}`;
     if (p.kind === 'processor') return `the processor of step ${shown.graph.steps.get(p.id)?.name ?? p.id}`;
     if (p.id === SPHERE_NODE_ID) return 'the workflow';
     if (p.id.startsWith(CACHE_NODE_PREFIX)) { const c = shown.graph.caches.get(p.id.slice(CACHE_NODE_PREFIX.length)); return `cache ${c ? labelOf(c) : p.id}`; }
@@ -740,7 +851,7 @@ const pickTool: ToolDef = {
       if (!picks.some((x) => pickKey(x) === pickKey(p.value.pick))) picks.push(p.value.pick);
     }
     const { entries } = await withEcho(ctx.store, () => [doc.workflowId], async () => { ctx.store.dispatch({ type: 'pick', workflowId: doc.workflowId, picks }); });
-    const names = picksText(shown, picks);
+    const names = picksText(shown, picks, shownCircuitOf(doc) ?? undefined);
     return names.length === 0
       ? done(true, 'nothing is picked now', `picks cleared in ${doc.name}`, entries)
       : done(true, `picked ${names.join(', ')}`, `picked ${names.join(', ')}`, entries);
@@ -768,22 +879,36 @@ const copyTool: ToolDef = {
 
 const pasteTool: ToolDef = {
   name: 'paste',
-  description: 'Paste what copy copied (Ctrl+V): an exact copy with new ids (names, fields and a cache\'s root included), placed clear of every block; the pasted items are picked. in_place: true pastes every block and wire exactly where it was copied (to copy a drawing into another workflow; refused when a pasted block would overlap one there). BaseApi refuses a cache root another cache has, so give a pasted cache a new root before Save.',
+  description: 'Paste what copy copied (Ctrl+V): an exact copy with new ids (names, fields and a cache\'s root included), the blocks and wires keeping their places and shapes relative to each other; the pasted items are picked. Where it lands: x, y put the top-left of the pasted blocks there (a duplicate on its own row below everything, its columns in line); in_place: true where it was copied (to copy a drawing into another workflow); neither: the nearest spot clear of every block, as Ctrl+V. Refused when a pasted block would overlap a block. Pasted steps keep their names: name them by the ids the result gives. The workflow circle is never copied: wire it to a pasted entry step with connect. BaseApi refuses a cache root another cache has, so give a pasted cache a new root before Save.',
   parameters: {
     type: 'object',
-    properties: { workflow: WORKFLOW_ARG, in_place: { type: 'boolean', description: 'true: at the very positions copied, wires shaped exactly as copied; else clear of every block, as Ctrl+V.' } },
+    properties: {
+      workflow: WORKFLOW_ARG,
+      x: { type: 'number', description: 'Top-left x of the pasted blocks (flow px).' },
+      y: { type: 'number', description: 'Top-left y of the pasted blocks (flow px).' },
+      in_place: { type: 'boolean', description: 'true: at the very positions copied, wires shaped exactly as copied.' },
+    },
     additionalProperties: false,
   },
   async run(ctx, args) {
     const found = await designDocOf(ctx, text(args.workflow), 'paste');
     if ('out' in found) return found.out;
     const { doc } = found;
-    if (ctx.store.getState().clipboard === null) return fail('the clipboard is empty: pick and copy first', `paste into ${doc.name}: nothing copied`);
-    const inPlace = args.in_place === true;
-    const r = await act(ctx, doc.workflowId, { type: 'paste', workflowId: doc.workflowId, newId: ctx.newId, inPlace }, { unchanged: inPlace ? 'nothing was pasted: a pasted block would overlap a block already there (move it, or paste without in_place)' : 'nothing was pasted' });
-    if (!r.ok) return fail(r.error, `paste into ${doc.name} refused`);
-    const { added } = changesOf(r.before, r.after);
-    return done(true, `pasted ${added.join(', ')}`, `pasted ${added.map((a) => a.replace(/ \(id .*\)$/, '')).join(', ')}`, r.entries);
+    const clip = ctx.store.getState().clipboard;
+    if (clip === null) return fail('the clipboard is empty: pick and copy first', `paste into ${doc.name}: nothing copied`);
+    const point = pointArg(args);
+    if (!point.ok) return fail(point.error, `paste into ${doc.name}`);
+    const at = point.value !== null ? { x: snap(point.value.x), y: snap(point.value.y) } : args.in_place === true ? clipOrigin(clip) : undefined;
+    const where = at === undefined ? '' : ` at (${at.x}, ${at.y})`;
+    const r = await act(ctx, doc.workflowId, { type: 'paste', workflowId: doc.workflowId, newId: ctx.newId, ...(at ? { at } : {}) },
+      { unchanged: at ? `nothing was pasted: a pasted block would overlap a block${where} (pick a free spot: read_design gives every block)` : 'nothing was pasted' });
+    if (!r.ok) return fail(r.error, `paste into ${doc.name}${where} refused`);
+    const { added, newSteps } = changesOf(r.before, r.after);
+    // a pasted step shares its name with a step already there: the model names it by id from now on (2026-10-25)
+    const shown = shownDesignOf(r.after)!;
+    const twins = newSteps.filter((id) => [...shown.graph.steps.values()].filter((s) => s.name === shown.graph.steps.get(id)?.name).length > 1);
+    const note = twins.length > 0 ? `. ${twins.length} pasted step${twins.length === 1 ? ' shares its name' : 's share their names'} with steps already there: name them by id from now on (or rename them with set_field)` : '';
+    return done(true, `pasted${where} ${added.join(', ')}${note}`, `pasted ${added.map((a) => a.replace(/ \(id .*\)$/, '')).join(', ')}`, r.entries);
   },
 };
 
@@ -802,7 +927,7 @@ const deletePickedTool: ToolDef = {
     const id = doc.workflowId;
     const picks = doc.picks.filter((p) => !(p.kind === 'node' && p.id === SPHERE_NODE_ID));
     const { shown } = layersOf(doc);
-    const names = picksText(shown, picks);
+    const names = picksText(shown, picks, shownCircuitOf(doc) ?? undefined);
     if (answer === undefined) {
       if (picks.length === 0) return fail('nothing is picked: pick steps, caches or wires first (the workflow circle is not deleted this way)', `delete in ${doc.name}: nothing picked`);
       // what Delete would take: the picks, and the wires of a picked step that go with it
