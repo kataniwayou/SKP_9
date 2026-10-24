@@ -214,6 +214,36 @@ test('the Chat pane floats and docks back like the others; New chat empties it',
   await expect(c.getByText('Ask for a change to the open workflow')).toBeVisible();
 });
 
+test('↑ / ↓ in the message box walk what was sent, as in Claude Code, after a refresh and New chat too', async ({ page }) => {
+  await openWorkflow(page, t.workflow);
+  script = [{ text: 'One.' }, { text: 'Two.' }];
+  const c = page.locator('[data-pane="chat"]');
+  await say(page, 'first message');
+  await expect(lastModel(c)).toHaveText('One.');
+  await say(page, 'second message');
+  await expect(lastModel(c)).toHaveText('Two.');
+  await page.reload();
+  await chat(page);
+  await c.getByRole('button', { name: 'New chat' }).click();
+  const box = c.getByRole('textbox', { name: 'Message' });
+  await box.click();
+  await page.keyboard.type('not sent yet');
+  await page.keyboard.press('ArrowUp');
+  await expect(box).toHaveValue('second message');
+  await page.keyboard.press('ArrowUp');
+  await expect(box).toHaveValue('first message');
+  await page.keyboard.press('ArrowDown');
+  await expect(box).toHaveValue('second message');
+  await page.keyboard.press('ArrowDown');
+  await expect(box).toHaveValue('not sent yet');
+  // a recalled message is sent as it is
+  await page.keyboard.press('ArrowUp');
+  script = [{ text: 'Again.' }];
+  await page.keyboard.press('Enter');
+  await expect(c.locator('.chat-user').last()).toHaveText('second message');
+  await expect(lastModel(c)).toHaveText('Again.');
+});
+
 // last: its Save stores a refused design on the throwaway, which the other tests would open
 test('echo: a Save BaseApi refuses shows in the chat with the very red lines Output shows', async ({ page }) => {
   await openWorkflow(page, t.workflow);

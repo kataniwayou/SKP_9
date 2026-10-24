@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { ChatEntry, ChatState } from './chatStore';
+import { readHistory, stepHistory, withSent, writeHistory } from './history';
 import { StatusLine } from './StatusLine';
 
 export interface ChatStatus { seconds: number; prompt: number; tokens: number; activity: string }
@@ -37,6 +38,8 @@ const NEAR_END = 24;
 /**
  * The Chat pane (2026-10-23): the conversation, the model's question as one button per choice, what it is doing and a
  * Stop while it works, a box to write in and New chat. It shows the store and calls back; the agent loop is not here.
+ * In the box ↑ on the first line and ↓ on the last walk what was sent before (2026-10-24, as in Claude Code), ↓ past the
+ * newest giving back what was being written.
  */
 export function ChatPane({ chat, onSend, onAnswer, onStop, onNewChat, status, configured }: ChatPaneProps) {
   const [text, setText] = useState('');
@@ -47,16 +50,47 @@ export function ChatPane({ chat, onSend, onAnswer, onStop, onNewChat, status, co
     if (log && following.current) log.scrollTop = log.scrollHeight;
   }, [log, chat.entries, chat.question, chat.busy]);
   const blocked = configured === false;
+  // the sent messages, the one the box shows (null: the user's own draft, kept aside while they walk back)
+  const [history, setHistory] = useState(readHistory);
+  const [at, setAt] = useState<number | null>(null);
+  const draft = useRef('');
+  const input = useRef<HTMLTextAreaElement>(null);
+  const [recalled, setRecalled] = useState(0);
+  // a recalled message is shown with the caret at its end
+  useLayoutEffect(() => {
+    const el = input.current;
+    if (recalled > 0 && el) el.setSelectionRange(el.value.length, el.value.length);
+  }, [recalled]);
 
   const send = () => {
     const t = text.trim();
     if (t === '' || chat.busy || blocked) return;
+    const next = withSent(history, t);
+    setHistory(next);
+    writeHistory(next);
+    setAt(null);
+    draft.current = '';
     setText('');
     following.current = true;
     onSend(t);
   };
+  const recall = (e: KeyboardEvent<HTMLTextAreaElement>, by: -1 | 1): void => {
+    const el = e.currentTarget;
+    if (el.selectionStart !== el.selectionEnd) return;
+    // only from the first line up, or the last line down: elsewhere the arrow moves the caret between lines
+    if (by === -1 ? text.slice(0, el.selectionStart).includes('\n') : text.slice(el.selectionEnd).includes('\n')) return;
+    const step = stepHistory(history.length, at, by);
+    if (!step) return;
+    e.preventDefault();
+    if (at === null) draft.current = text;
+    setAt(step.at);
+    setText(step.at === null ? draft.current : history[step.at]!);
+    setRecalled((n) => n + 1);
+  };
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); }
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); return; }
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) recall(e, e.key === 'ArrowUp' ? -1 : 1);
   };
 
   return (
@@ -91,6 +125,7 @@ export function ChatPane({ chat, onSend, onAnswer, onStop, onNewChat, status, co
         </div>
       )}
       <textarea
+        ref={input}
         className="chat-input"
         aria-label="Message"
         rows={2}
