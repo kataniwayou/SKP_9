@@ -1,7 +1,10 @@
 /** One tool call the model made: its id, the tool's name and the arguments as the JSON text the model wrote. */
 export interface ToolCall { id: string; name: string; arguments: string }
-/** One answer of the model: what it said, what it thought, the tools it called, and the tokens it spent. */
-export interface AssistantTurn { text: string; reasoning: string; calls: ToolCall[]; tokens: number }
+/**
+ * One answer of the model: what it said, what it thought, the tools it called, the tokens it spent (`tokens`, ↓) and the
+ * tokens of the request it answered (`prompt`, ↑).
+ */
+export interface AssistantTurn { text: string; reasoning: string; calls: ToolCall[]; tokens: number; prompt: number }
 
 /** A message as the model's API takes it (OpenAI style). */
 export type ChatWire =
@@ -9,8 +12,11 @@ export type ChatWire =
   | { role: 'assistant'; content: string; reasoning_content?: string; tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[] }
   | { role: 'tool'; tool_call_id: string; content: string };
 
-/** How far one answer has come: waiting for the first word, thinking, or writing (text or tool calls). */
-export interface Progress { phase: 'waiting' | 'thinking' | 'writing'; tokens: number }
+/**
+ * How far one answer has come: waiting for the first word, thinking, or writing (text or tool calls); `tokens` written so
+ * far (↓) and `prompt`, the request's tokens (↑).
+ */
+export interface Progress { phase: 'waiting' | 'thinking' | 'writing'; tokens: number; prompt: number }
 
 export class ChatError extends Error {}
 
@@ -47,6 +53,7 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object
  * Asks the model for its next turn (2026-10-23), streamed, with the tools it may call. Tool calls arrive in pieces joined
  * by `index` (the first piece has id and name, the rest only argument fragments); `usage` arrives as a last chunk of its
  * own, and its completion_tokens already include the thinking. Without usage the tokens are estimated at 4 characters each.
+ * The request's tokens (↑, 2026-10-24) are estimated so from the body as it is sent, then taken from usage.prompt_tokens.
  * The round is given up after AI_SILENCE_MS without a byte.
  */
 export async function requestTurn(
@@ -66,13 +73,14 @@ export async function requestTurn(
   const failed = (what: string): ChatError => (signal.aborted ? new ChatError('cancelled')
     : silent ? new ChatError(`no word from the model for ${AI_SILENCE_MS / 1000} s`) : new ChatError(what));
   try {
-    onProgress({ phase: 'waiting', tokens: 0 });
+    const body = JSON.stringify({ model, stream: true, stream_options: { include_usage: true }, messages, tools, reasoning_effort: AI_EFFORT });
+    const sent = Math.round(body.length / 4);
+    onProgress({ phase: 'waiting', tokens: 0, prompt: sent });
     quiet();
     let r: Response;
     try {
       r = await fetchFn('/ai/chat/completions', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: round.signal,
-        body: JSON.stringify({ model, stream: true, stream_options: { include_usage: true }, messages, tools, reasoning_effort: AI_EFFORT }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: round.signal, body,
       });
     } catch (e) {
       throw failed(`the model could not be reached (${e instanceof Error ? e.message : 'network error'})`);
@@ -84,7 +92,7 @@ export async function requestTurn(
     if (!r.ok) throw new ChatError(`the model answered HTTP ${r.status}`);
     if (!r.body) throw new ChatError('the model sent no stream');
     try {
-      return await readTurn(r.body, onProgress, quiet);
+      return await readTurn(r.body, sent, onProgress, quiet);
     } catch (e) {
       if (e instanceof ChatError && !signal.aborted && !silent) throw e;
       throw failed('the model\'s reply could not be read');
@@ -95,10 +103,13 @@ export async function requestTurn(
   }
 }
 
-/** The turn from an OpenAI-style event stream, until [DONE]; `heard` is called at every read, however empty. */
-async function readTurn(body: ReadableStream<Uint8Array>, onProgress: (p: Progress) => void, heard: () => void): Promise<AssistantTurn> {
+/**
+ * The turn from an OpenAI-style event stream, until [DONE]; `sent` the request's estimated tokens until usage says;
+ * `heard` is called at every read, however empty.
+ */
+async function readTurn(body: ReadableStream<Uint8Array>, sent: number, onProgress: (p: Progress) => void, heard: () => void): Promise<AssistantTurn> {
   const reader = body.getReader(), decoder = new TextDecoder();
-  let buffer = '', text = '', reasoning = '', usage: number | null = null;
+  let buffer = '', text = '', reasoning = '', usage: number | null = null, prompt = sent;
   const pieces = new Map<number, ToolCall>();
   let phase: Progress['phase'] = 'waiting';
   const tokens = () => usage ?? Math.round((text.length + reasoning.length + [...pieces.values()].reduce((n, c) => n + c.arguments.length, 0)) / 4);
@@ -112,6 +123,7 @@ async function readTurn(body: ReadableStream<Uint8Array>, onProgress: (p: Progre
     if (!isObj(v)) return false;
     if (isObj(v.error)) throw new ChatError(`the model failed: ${String(v.error.message ?? 'error').slice(0, 200)}`);
     if (isObj(v.usage) && typeof v.usage.completion_tokens === 'number') usage = v.usage.completion_tokens;
+    if (isObj(v.usage) && typeof v.usage.prompt_tokens === 'number') prompt = v.usage.prompt_tokens;
     const choice = Array.isArray(v.choices) && isObj(v.choices[0]) ? v.choices[0] : undefined;
     const delta = choice && isObj(choice.delta) ? choice.delta : undefined;
     if (delta) {
@@ -130,10 +142,10 @@ async function readTurn(body: ReadableStream<Uint8Array>, onProgress: (p: Progre
         }
       }
     }
-    onProgress({ phase, tokens: tokens() });
+    onProgress({ phase, tokens: tokens(), prompt });
     return false;
   };
-  const turn = (): AssistantTurn => ({ text, reasoning, calls: [...pieces].sort((a, b) => a[0] - b[0]).map(([, c]) => c), tokens: tokens() });
+  const turn = (): AssistantTurn => ({ text, reasoning, calls: [...pieces].sort((a, b) => a[0] - b[0]).map(([, c]) => c), tokens: tokens(), prompt });
   for (;;) {
     const { done, value } = await reader.read();
     heard();

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { ChatEntry, ChatState } from './chatStore';
 import { StatusLine } from './StatusLine';
 
-export interface ChatStatus { seconds: number; tokens: number; activity: string }
+export interface ChatStatus { seconds: number; prompt: number; tokens: number; activity: string }
 
 export interface ChatPaneProps {
   chat: ChatState;
@@ -86,7 +86,7 @@ export function ChatPane({ chat, onSend, onAnswer, onStop, onNewChat, status, co
       </div>
       {chat.busy && (
         <div className="chat-busy">
-          {status && <StatusLine seconds={status.seconds} tokens={status.tokens} activity={status.activity} />}
+          {status && <StatusLine seconds={status.seconds} prompt={status.prompt} tokens={status.tokens} activity={status.activity} />}
           <button type="button" className="qb" aria-label="Stop" onClick={onStop}>Stop</button>
         </div>
       )}

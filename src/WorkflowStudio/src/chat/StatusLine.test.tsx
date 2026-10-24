@@ -8,19 +8,19 @@ describe('StatusLine', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-  it('says seconds, tokens and what the model is doing', () => {
-    render(<StatusLine seconds={12} tokens={3200} activity="thinking" />);
-    expect(screen.getByText('(12s · ↓ 3.2k tokens · thinking)')).toBeInTheDocument();
+  it('says seconds, the request\'s tokens, the tokens written and what the model is doing', () => {
+    render(<StatusLine seconds={12} prompt={9300} tokens={3200} activity="thinking" />);
+    expect(screen.getByText('(12s · ↑ 9.3k · ↓ 3.2k tokens · thinking)')).toBeInTheDocument();
   });
 
   it('writes tokens under a thousand whole', () => {
-    render(<StatusLine seconds={1} tokens={950} activity="writing" />);
-    expect(screen.getByText('(1s · ↓ 950 tokens · writing)')).toBeInTheDocument();
+    render(<StatusLine seconds={1} prompt={800} tokens={950} activity="writing" />);
+    expect(screen.getByText('(1s · ↑ 800 · ↓ 950 tokens · writing)')).toBeInTheDocument();
   });
 
   it('cycles its glyph one step per 120 ms', () => {
     expect(GLYPHS.join(' ')).toBe('· ✢ ✳ ✶ ✻ ✽');
-    const { container } = render(<StatusLine seconds={0} tokens={0} activity="waiting" />);
+    const { container } = render(<StatusLine seconds={0} prompt={0} tokens={0} activity="waiting" />);
     expect(glyph(container)).toBe('·');
     act(() => { vi.advanceTimersByTime(120); });
     expect(glyph(container)).toBe('✢');
@@ -32,7 +32,7 @@ describe('StatusLine', () => {
 
   it('holds its glyph still under prefers-reduced-motion', () => {
     vi.stubGlobal('matchMedia', (q: string) => ({ matches: q.includes('reduce'), media: q }));
-    const { container } = render(<StatusLine seconds={0} tokens={0} activity="waiting" />);
+    const { container } = render(<StatusLine seconds={0} prompt={0} tokens={0} activity="waiting" />);
     const first = glyph(container);
     act(() => { vi.advanceTimersByTime(1000); });
     expect(glyph(container)).toBe(first);

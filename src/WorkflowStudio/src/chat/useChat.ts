@@ -54,10 +54,12 @@ class ChatRunner {
   fetchFn: typeof fetch = (...a) => fetch(...a);
   private ctl: AbortController | null = null;
   private generation = 0;
-  // the current user request: its rounds and the tokens of its finished rounds; `roundTokens` the round in flight
+  // the current user request: its rounds and the tokens of its finished rounds; `roundTokens` the round in flight;
+  // `prompt` the tokens of the latest request sent (↑, 2026-10-24): how full the model's context is
   private rounds = 0;
   private tokens = 0;
   private roundTokens = 0;
+  private prompt = 0;
   private activity = 'thinking';
   private started = 0;
   private status: ChatStatus | null = null;
@@ -73,7 +75,7 @@ class ChatRunner {
 
   private show(): void {
     this.status = this.ctl
-      ? { seconds: Math.floor((Date.now() - this.started) / 1000), tokens: this.tokens + this.roundTokens, activity: this.activity }
+      ? { seconds: Math.floor((Date.now() - this.started) / 1000), prompt: this.prompt, tokens: this.tokens + this.roundTokens, activity: this.activity }
       : null;
     for (const l of [...this.listeners]) l();
   }
@@ -97,6 +99,7 @@ class ChatRunner {
     }
     this.rounds = 0;
     this.tokens = 0;
+    this.prompt = 0;
     // a call left without its answer (a stop, a refresh) is answered now: the model's API takes no call unanswered
     const fillers: ChatWire[] = unanswered(state.wire).map((id) => ({ role: 'tool', tool_call_id: id, content: NOT_RUN_LOST }));
     this.chat.dispatch({ type: 'entries', add: [{ kind: 'user', text: t }] });
@@ -158,10 +161,13 @@ class ChatRunner {
         const messages: ChatWire[] = [{ role: 'system', content: systemPrompt() }, ...this.chat.getState().wire];
         const turn = await requestTurn(model, messages, TOOLS, run.signal, (p) => {
           this.roundTokens = p.tokens;
+          // a new request's size is shown at once, not at the next tick
+          if (p.prompt !== this.prompt) { this.prompt = p.prompt; this.show(); }
           this.setActivity(p.phase === 'writing' ? 'writing' : 'thinking');
         }, this.fetchFn);
         this.tokens += turn.tokens;
         this.roundTokens = 0;
+        this.prompt = turn.prompt;
         // an id is what pairs a call with its answer; one missing from the stream is made up, unique in the request
         const calls = turn.calls.map((c, i) => (c.id === '' ? { ...c, id: `call-${this.rounds}-${i}` } : c));
         // a turn with neither text nor calls adds nothing to the wire: an empty assistant message is refused by the model's API

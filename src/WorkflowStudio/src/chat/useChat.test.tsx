@@ -174,9 +174,13 @@ describe('useChat', () => {
   });
 
   it('the status counts the tokens of the whole request, across rounds', async () => {
-    const t = await setup([call(0, 'c1', 'read_output', {}), ev({ choices: [], usage: { completion_tokens: 1000 } })], 'hang');
+    const t = await setup([call(0, 'c1', 'read_output', {}), ev({ choices: [], usage: { prompt_tokens: 50_000, completion_tokens: 1000 } })], 'hang');
     act(() => t.hook.result.current.send('read'));
     await waitFor(() => expect(t.hook.result.current.status).toMatchObject({ tokens: 1000, activity: 'thinking' }));
+    // ↑ is the latest request, the second round's, estimated from its body: not the first round's 50k, nor a sum
+    const prompt = t.hook.result.current.status!.prompt;
+    expect(prompt).toBeGreaterThan(0);
+    expect(prompt).toBeLessThan(50_000);
     expect(t.bodies).toHaveLength(2);
     act(() => t.hook.result.current.stop());
     await t.idle();

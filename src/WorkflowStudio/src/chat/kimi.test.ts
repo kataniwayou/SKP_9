@@ -36,6 +36,19 @@ describe('requestTurn', () => {
     expect(seen.at(-1)!.tokens).toBe(3200);
   });
 
+  it('the request\'s tokens: estimated from the body when sent, then from usage', async () => {
+    const sentOf = (f: typeof fetch) => ((f as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit).body as string;
+    const seen: Progress[] = [];
+    const f = fetchOf(delta({ content: 'x' }), ev({ choices: [], usage: { prompt_tokens: 9300, completion_tokens: 40 } }));
+    const t = await ask(f, (p) => seen.push(p));
+    expect(seen[0]).toEqual({ phase: 'waiting', tokens: 0, prompt: Math.round(sentOf(f).length / 4) });
+    expect(seen.at(-1)!.prompt).toBe(9300);
+    expect(t.prompt).toBe(9300);
+    // no usage: the estimate stays
+    const plain = fetchOf(delta({ content: 'x' }));
+    expect((await ask(plain)).prompt).toBe(Math.round(sentOf(plain).length / 4));
+  });
+
   it('tokens estimated without usage', async () => {
     const t = await ask(fetchOf(delta({ reasoning_content: 'r'.repeat(300) }), delta({ content: 'c'.repeat(100) })));
     expect(t.tokens).toBe(100);

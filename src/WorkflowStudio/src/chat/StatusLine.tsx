@@ -17,9 +17,10 @@ export const tokensText = (n: number): string => (n < 1000 ? String(n) : `${(n /
 
 /**
  * What the model is doing while the chat is busy (2026-10-23), as Claude Code shows it: an animated glyph, then
- * `(12s · ↓ 3.2k tokens · thinking)`. The glyph holds still under prefers-reduced-motion.
+ * `(12s · ↑ 9.3k · ↓ 3.2k tokens · thinking)`: ↑ the latest request (2026-10-24), ↓ what the model wrote for this message.
+ * The glyph holds still under prefers-reduced-motion.
  */
-export function StatusLine({ seconds, tokens, activity }: { seconds: number; tokens: number; activity: string }) {
+export function StatusLine({ seconds, prompt, tokens, activity }: { seconds: number; prompt: number; tokens: number; activity: string }) {
   const [step, setStep] = useState(0);
   const [still] = useState(reducedMotion);
   useEffect(() => {
@@ -30,7 +31,7 @@ export function StatusLine({ seconds, tokens, activity }: { seconds: number; tok
   return (
     <div className="chat-status" role="status">
       <span className="chat-glyph" aria-hidden="true">{still ? GLYPHS[GLYPHS.length - 2] : GLYPHS[step]}</span>
-      <span className="chat-status-text">{`(${seconds}s · ↓ ${tokensText(tokens)} tokens · ${activity})`}</span>
+      <span className="chat-status-text">{`(${seconds}s · ↑ ${tokensText(prompt)} · ↓ ${tokensText(tokens)} tokens · ${activity})`}</span>
     </div>
   );
 }

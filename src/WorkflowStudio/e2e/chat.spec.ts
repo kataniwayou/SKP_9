@@ -27,7 +27,7 @@ function streamOf(turn: Turn, round: number): string {
     const args = JSON.stringify(c.args);
     for (const piece of [args.slice(0, args.length >> 1), args.slice(args.length >> 1)]) body += delta({ tool_calls: [{ index, function: { arguments: piece } }] });
   });
-  body += ev({ choices: [], usage: { completion_tokens: turn.tokens ?? 40 } });
+  body += ev({ choices: [], usage: { prompt_tokens: 5000 + round, completion_tokens: turn.tokens ?? 40 } });
   return `${body}data: [DONE]\n\n`;
 }
 
@@ -88,7 +88,8 @@ test('build: a step with the throwaway\'s processor, wired from the workflow, it
   // while the second round is on its way: the new step and its wire are on the canvas, the status line counts the first round
   await expect(steps(panel)).toHaveCount(3);
   await expect(newWires(panel)).toHaveCount(1);
-  await expect(c.getByRole('status')).toContainText('↓ 1.2k tokens');
+  // ↑ the request on its way (estimated until its reply's usage says), ↓ the tokens of the first round
+  await expect(c.getByRole('status')).toContainText(/↑ [\d.]+k? · ↓ 1\.2k tokens/);
   await expect(c.getByRole('button', { name: 'Stop' })).toBeVisible();
   await expect(c.getByRole('textbox', { name: 'Message' })).toBeDisabled();
   await expect(lastModel(c)).toHaveText(/Added step step 1\.0\.0/, { timeout: 15_000 });
