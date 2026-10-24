@@ -54,7 +54,7 @@ describe('the design tools', () => {
   it('are offered, the ones that destroy asking first', () => {
     const names = TOOLS.map((t) => t.function.name);
     expect(names).toEqual(expect.arrayContaining(['add_step', 'set_processor', 'add_cache', 'connect', 'join', 'auto_connect', 'move_blocks',
-      'reset_route', 'pick', 'copy', 'paste', 'delete_picked', 'undo', 'redo']));
+      'reset_route', 'shape_wire', 'pick', 'copy', 'paste', 'delete_picked', 'undo', 'redo']));
     expect(names).not.toContain('discard_design');
     expect(DESTRUCTIVE.has('delete_picked')).toBe(true);
   });
@@ -222,6 +222,69 @@ describe('the design tools', () => {
     expect(other.result).toContain('not of one family');
     expect(other.action).toBe("join a → d's tail on a → b");
     expect(doc().design.draft).toBe(draft);
+  });
+
+  it('join at a point: the junction lands that far along the trunk', async () => {
+    const { call, doc, store } = await setup(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's2'] }),
+      steps: [stepDto('s1', { name: 'a', nextStepIds: ['s3'] }), stepDto('s2', { name: 'b', nextStepIds: ['s3'] }), stepDto('s3', { name: 'c' })],
+    }));
+    expect(done(await call('join', { wire: 'b -> c', side: 'head', host: 'a -> c', at: 37 })).result).toContain('40 px along it');
+    const base = applyEdits((doc().status as { doc: Parameters<typeof applyEdits>[0] }).doc, doc().edits, doc().design.draft.blocks);
+    expect(circuitOf(base, store.getState().docs[0]!.design.draft)['s2->s3']!.head).toEqual({ on: 'wire', host: 's1->s3', at: 40 });
+  });
+
+  it('shape_wire: the heights of the ends on their steps and the bends, as dragging them; read_design gives them back', async () => {
+    const { call, shown, doc } = await setup(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1'] }),
+      steps: [stepDto('s1', { name: 'a', nextStepIds: ['s2'] }), stepDto('s2', { name: 'b' })],
+    }));
+    const a = shown().placement.steps.get('s1')!, b = shown().placement.steps.get('s2')!;
+    const mid = snap((a.x + STEP_W + b.x) / 2);
+    const r = done(await call('shape_wire', { wire: 'a -> b', tail: { y: 112 }, head: { y: 48 }, bends: { xs: [mid], ys: [] } }));
+    expect(r).toMatchObject({ ok: true, action: 'shaped a → b' });
+    const w = shown().wires.find((x) => x.id === 's1->s2')!;
+    expect(w.points[0]).toEqual([a.x + STEP_W, a.y + 112]);
+    expect(w.points.at(-1)).toEqual([b.x, b.y + 48]);
+    expect(w.points.some(([x]) => x === mid)).toBe(true);
+    expect(doc().design.past).toHaveLength(1);
+    const read = JSON.parse(done(await call('read_design')).result) as { wires: { id: string; shape: unknown }[] };
+    expect(read.wires.find((x) => x.id === 's1->s2')!.shape).toEqual({ tail: { y: 112 }, head: { y: 48 }, bends: { xs: [mid], ys: [] } });
+    // what it is on stays: an end of the wrong kind and broken bends are refused, the draft unchanged
+    const draft = doc().design.draft;
+    expect(done(await call('shape_wire', { wire: 'a -> b', tail: { at: 40 } })).result).toContain('give { y }');
+    expect(done(await call('shape_wire', { wire: 'a -> b', bends: { xs: [mid, mid + 64], ys: [] } })).result).toContain('one ys fewer than xs');
+    expect(done(await call('shape_wire', { wire: 'a -> b', head: { y: 400 } })).result).toContain('16 to 144');
+    expect(doc().design.draft).toBe(draft);
+    // null: automatic again
+    expect(done(await call('shape_wire', { wire: 'a -> b', tail: { y: null }, head: { y: null }, bends: null })).ok).toBe(true);
+    expect(doc().design.draft.wires).toBeNull();
+  });
+
+  it('shape_wire: several wires at once, a head merged into its trunk as { host, at } with its bends; read_design names it back', async () => {
+    const { call, shown, doc } = await setup(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's2'] }),
+      steps: [stepDto('s1', { name: 'a', nextStepIds: ['s3'] }), stepDto('s2', { name: 'b', nextStepIds: ['s3'] }), stepDto('s3', { name: 'c' })],
+    }));
+    const r = done(await call('shape_wire', { wires: [{ wire: 'b -> c', head: { host: 'a -> c', at: 37 } }, { wire: 'a -> c', tail: { y: 96 } }] }));
+    expect(r).toMatchObject({ ok: true, action: 'shaped b → c, a → c' });
+    expect(shown().wires.find((x) => x.id === 's2->s3')!.headOn).toBe('junction');
+    expect(doc().design.past).toHaveLength(1);
+    const read = JSON.parse(done(await call('read_design')).result) as { wires: { id: string; shape: { head: unknown } }[] };
+    expect(read.wires.find((x) => x.id === 's2->s3')!.shape.head).toEqual({ host: 's1->s3', at: 40 });
+    // a trunk into another step is no junction of this wire: refused
+    expect(done(await call('shape_wire', { wires: [{ wire: 'workflow -> a', head: { host: 'a -> c', at: 40 } }] })).result).toContain('same step');
+  });
+
+  it('connect with points: a wire open at both ends where given; paste in_place onto its originals is refused', async () => {
+    const { call, shown } = await setup();
+    const r = done(await call('connect', { from_point: { x: 3736, y: -96 }, to_point: { x: 3830, y: -97 } }));
+    expect(r.ok).toBe(true);
+    const w = shown().wires.find((x) => x.tailOn === 'open' && x.headOn === 'open')!;
+    expect([w.points[0], w.points.at(-1)]).toEqual([[3736, -96], [3832, -96]]);
+    done(await call('pick', { items: ['a'] }));
+    done(await call('copy'));
+    expect(done(await call('paste', { in_place: true })).result).toContain('would overlap');
   });
 
   it('connect from "workflow": a new entry step', async () => {

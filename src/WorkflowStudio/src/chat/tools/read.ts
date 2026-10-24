@@ -117,7 +117,7 @@ const listSchemas: ToolDef = {
 
 const readDesign: ToolDef = {
   name: 'read_design',
-  description: 'Read the drawing of an open workflow as it is now, unsaved edits included: whether the workflow is running (null: unknown), every block and wire with positions, each step with its name, processor (with its health now), entry condition, assignment id and next steps, and the current problems (the ones Output pins).',
+  description: 'Read the drawing of an open workflow as it is now, unsaved edits included: whether the workflow is running (null: unknown), every block and wire with positions (each wire shape too: the place of its ends and its bends, as shape_wire takes them), each step with its name, processor (with its health now), entry condition, assignment id and next steps, and the current problems (the ones Output pins).',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG }, additionalProperties: false },
   async run(ctx, args) {
     const found = await readyDocOf(ctx, text(args.workflow));

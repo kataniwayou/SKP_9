@@ -166,6 +166,22 @@ describe('paste (2026-10-10)', () => {
     expect(Object.keys(draft.blocks.caches)).toHaveLength(6);
   });
 
+  it('in place: into another workflow every block and wire lands exactly where copied; onto a block it is refused', async () => {
+    const base = await chain();
+    const shaped = withCircuit(EMPTY_DRAFT, base, setBends(setEnd(circuitOf(base, EMPTY_DRAFT), 's1->s2', 'head', { on: 'step', step: 's2', y: 48 }), 's1->s2', { xs: [600], ys: [] }));
+    const clip = copyClip(base, EMPTY_EDITS, shaped, [node('s1'), node('s2')], 'wf1')!;
+    const target = await other();
+    // the other workflow's own step sits away from the copied ones
+    const away = { ...EMPTY_DRAFT, steps: { t1: { x: 4000, y: 4000 } } };
+    const r = pasteClip(target, EMPTY_EDITS, away, clip, ids(), 'wf2', true)!;
+    expect(r.draft.blocks.steps.n1!.at).toEqual(clip.steps[0]!.at);
+    expect(r.draft.blocks.steps.n2!.at).toEqual(clip.steps[1]!.at);
+    const pasted = Object.values(circuitOf(applyEdits(target, EMPTY_EDITS, r.draft.blocks), r.draft)).find((w) => w.tail.on === 'step' && w.tail.step === 'n1')!;
+    expect(pasted).toEqual({ tail: { on: 'step', step: 'n1', y: null }, head: { on: 'step', step: 'n2', y: 48 }, bends: { xs: [600], ys: [] } });
+    // into the workflow it was copied in, its originals are in the way
+    expect(pasteClip(base, EMPTY_EDITS, shaped, clip, ids(), 'wf1', true)).toBeNull();
+  });
+
   it('is deterministic: the same clip on the same canvas lands at the same place', async () => {
     const base = await chain();
     const clip = copyClip(base, EMPTY_EDITS, EMPTY_DRAFT, [node('s1'), node('s2')], 'wf1')!;

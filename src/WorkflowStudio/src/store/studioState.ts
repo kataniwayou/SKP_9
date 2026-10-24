@@ -165,7 +165,7 @@ export type StudioAction =
   /** Ctrl+C on a document's canvas (2026-10-10): its picks become the clipboard (the hub is skipped). */
   | { type: 'copy'; workflowId: Id }
   /** Ctrl+V: the clipboard pasted into this document with new ids (`newId`), one history step; the pasted items are picked. */
-  | { type: 'paste'; workflowId: Id; newId: () => string }
+  | { type: 'paste'; workflowId: Id; newId: () => string; inPlace?: boolean }
   /**
    * A Toolbox tile dropped on this document's canvas at `at` (flow coordinates, 2026-10-11): a new step, cache or wire, an
    * existing cache linked, or an existing processor given to the step there. `roots`: every cache root BaseApi listed.
@@ -534,7 +534,7 @@ function reduceDocs(state: StudioState, action: StudioAction): StudioState {
       const clip = state.clipboard;
       const d = state.docs.find((x) => x.workflowId === action.workflowId);
       if (!clip || !d || d.status.kind !== 'ready' || designLocked(d)) return state;
-      const pasted = pasteClip(d.status.doc, d.edits, d.design.draft, clip, action.newId, d.workflowId);
+      const pasted = pasteClip(d.status.doc, d.edits, d.design.draft, clip, action.newId, d.workflowId, action.inPlace === true);
       if (pasted === null) return state;
       // each further paste of the same clip starts one more 32 px step away (the cascade)
       const next = update(state, action.workflowId, (x) => blocksChanged(x, pasted.draft, pasted.picks));

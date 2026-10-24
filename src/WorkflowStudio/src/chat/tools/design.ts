@@ -1,8 +1,7 @@
 import { describeError } from '../../api/describeError';
 import { cacheFromDto, processorFromDto, schemaFromDto } from '../../api/toModel';
-import { nearestAlong } from '../drawingRules';
 import type { StudioDocument } from '../../app/document';
-import { addCircuitWire, NEW_WIRE_PREFIX, setEnd, type Circuit, type CircuitWire, type End, type Side } from '../../circuit/circuit';
+import { addCircuitWire, NEW_WIRE_PREFIX, setBends, setEnd, snapAngle, type Circuit, type CircuitWire, type End, type Side } from '../../circuit/circuit';
 import { applyDraft, applyEdits } from '../../design/apply';
 import { arrowsOf, autoTarget, type Dir } from '../../design/autoConnect';
 import { blockBoxes, freeOffset } from '../../design/clipboard';
@@ -13,8 +12,10 @@ import { shortCircuitErrors } from '../../design/shortCircuits';
 import { dropTool, judgeTool, type ToolItem } from '../../design/toolDrop';
 import { wireName } from '../../design/wireName';
 import { WORKFLOW_SOURCE } from '../../layout/ports';
-import { CACHE_H, CACHE_W, CELL, COLUMN_PITCH, GRID, LAYOUT_GAP, PMID, snap, SPHERE_R, STEP_H, STEP_W, type Point } from '../../layout/geometry';
-import { CONTACT_MARGIN, lengthOf } from '../../layout/junctions';
+import { CACHE_H, CACHE_W, CELL, COLUMN_PITCH, GRID, LANDING_MAX, LANDING_MIN, LAYOUT_GAP, PMID, snap, SPHERE_R, STEP_H, STEP_W, type Point } from '../../layout/geometry';
+import { CONTACT_MARGIN, lengthOf, nearestOn } from '../../layout/junctions';
+import type { Pt } from '../../layout/router';
+import type { Bends } from '../../layout/shape';
 import { cacheNodeId, CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../../layout/nodeIds';
 import { conditionInfo } from '../../model/entryConditions';
 import type { Id } from '../../model/graph';
@@ -332,40 +333,54 @@ const addCacheTool: ToolDef = {
   },
 };
 
+/** An open end at the point the model gave ({ x, y }, snapped), else null. */
+function openArg(v: unknown): End | null {
+  const p = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  const x = num(p.x), y = num(p.y);
+  return x === undefined || y === undefined ? null : { on: 'open', x: snap(x), y: snap(y) };
+}
+
 /** A step's or the hub's name for an action line. */
 const endName = (shown: StudioDocument, e: End): string =>
   e.on === 'hub' ? 'workflow' : e.on === 'step' ? shown.graph.steps.get(e.step)?.name ?? e.step : e.on === 'wire' ? 'a junction' : 'an open end';
 
 const connectTool: ToolDef = {
   name: 'connect',
-  description: 'Draw a wire from a step\'s output (or the workflow circle, for an entry step) into a step\'s input, as a wire dragged from contact to contact. Its colour (family) is the head step\'s entry condition. Refused when it would make a short circuit.',
+  description: 'Draw a wire from a step\'s output (or the workflow circle, for an entry step) into a step\'s input, as a wire dragged from contact to contact. Its colour (family) is the head step\'s entry condition. An end given as a point (from_point, to_point) is open there, connected to nothing, as a wire dropped on empty canvas. Refused when it would make a short circuit.',
   parameters: {
     type: 'object',
     properties: {
       workflow: WORKFLOW_ARG,
       from: { type: 'string', description: 'The tail: a step (name or id), or "workflow" for the workflow circle.' },
       to: { type: 'string', description: 'The head: a step (name or id).' },
+      from_point: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, description: 'An open tail at this flow point, in place of from.' },
+      to_point: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, description: 'An open head at this flow point, in place of to.' },
     },
-    required: ['from', 'to'],
     additionalProperties: false,
   },
   async run(ctx, args) {
     const from = text(args.from) ?? '', to = text(args.to) ?? '';
-    const asked = `connect ${from || '?'} → ${to || '?'}`;
+    const fromPoint = openArg(args.from_point), toPoint = openArg(args.to_point);
+    const asked = `connect ${from || (fromPoint ? 'an open end' : '?')} → ${to || (toPoint ? 'an open end' : '?')}`;
     const found = await designDocOf(ctx, text(args.workflow), asked);
     if ('out' in found) return found.out;
     const { doc } = found;
-    let tail: End;
-    if (same(from, 'workflow')) tail = { on: 'hub', angle: null };
+    let tail: End, head: End;
+    if (fromPoint !== null) tail = fromPoint;
+    else if (same(from, 'workflow')) tail = { on: 'hub', angle: null };
     else {
       const s = findStep(doc, from);
       if (!s.ok) return fail(s.error, asked);
       tail = { on: 'step', step: s.value, y: null };
     }
-    const h = findStep(doc, to);
-    if (!h.ok) return fail(h.error, asked);
+    if (toPoint !== null) head = toPoint;
+    else {
+      const h = findStep(doc, to);
+      if (!h.ok) return fail(h.error, asked);
+      head = { on: 'step', step: h.value, y: null };
+    }
     const { saved, shown, draft } = layersOf(doc);
-    const wire: CircuitWire = { tail, head: { on: 'step', step: h.value, y: null } };
+    const wire: CircuitWire = { tail, head };
     const wireId = `${NEW_WIRE_PREFIX}${ctx.newId()}`;
     const next = withCircuit(draft, saved, addCircuitWire(circuitOf(saved, draft), wireId, wire));
     const line = `${endName(shown, tail)} → ${endName(shown, wire.head)}`;
@@ -377,9 +392,21 @@ const connectTool: ToolDef = {
   },
 };
 
+/**
+ * Where a wire meets the trunk it joins, as a drag of its end would land: walking its route from the far end (the tail
+ * of a fan-in, the head of a fan-out), the first corner that comes up against the trunk, so each branch drops straight
+ * onto it; the trunk point nearest that corner, as a distance along the trunk.
+ */
+function meetingOf(route: readonly Pt[], side: Side, host: readonly Pt[], length: number): number {
+  const corners = side === 'head' ? route : [...route].reverse();
+  const near = corners.map((c) => nearestOn([host], c, CONTACT_MARGIN, length - CONTACT_MARGIN));
+  const closest = Math.min(...near.map((n) => n.gap));
+  return (near.find((n) => n.gap <= closest + GRID) ?? near.at(-1)!).at;
+}
+
 const joinTool: ToolDef = {
   name: 'join',
-  description: 'Merge a wire into a trunk: its head (fan-in) or its tail (fan-out) on a step becomes a junction on another wire of the same family that ends (head) or starts (tail) on that same step, where that wire passes nearest it. Refused across families, steps, or for a wire on the workflow circle.',
+  description: 'Merge a wire into a trunk: its head (fan-in) or its tail (fan-out) on a step becomes a junction on another wire of the same family that ends (head) or starts (tail) on that same step, at the given point along the trunk, else where its own route first comes up against that trunk (each branch drops straight onto it). Refused across families, steps, or for a wire on the workflow circle.',
   parameters: {
     type: 'object',
     properties: {
@@ -387,6 +414,7 @@ const joinTool: ToolDef = {
       wire: { type: 'string', description: 'The wire to merge: its id, or "from -> to".' },
       side: { type: 'string', enum: ['head', 'tail'], description: 'head for a fan-in, tail for a fan-out.' },
       host: { type: 'string', description: 'The trunk it joins: its id, or "from -> to".' },
+      at: { type: 'number', description: 'Where on the trunk the junction goes, in px along the trunk from its tail (read_design gives a junction end its at). Leave out to let the studio choose.' },
     },
     required: ['wire', 'side', 'host'],
     additionalProperties: false,
@@ -414,9 +442,8 @@ const joinTool: ToolDef = {
     const route = shown.wires.find((x) => x.id === w.value), host = shown.wires.find((x) => x.id === hostId.value);
     if (!route || !host) return fail('one of the wires is not drawn', action);
     if (route.condition === null || route.condition !== host.condition) return fail(`${name} and ${hostName} are not of one family: wires of different families are never joined`, action);
-    const point = side === 'tail' ? route.points[0]! : route.points.at(-1)!;
     const length = lengthOf([host.points]);
-    const raw = nearestAlong(host.points, point) ?? 0;
+    const raw = num(args.at) ?? meetingOf(route.points, side, host.points, length);
     const at = Math.min(Math.max(snap(raw, GRID), CONTACT_MARGIN), Math.max(CONTACT_MARGIN, length - CONTACT_MARGIN));
     const target = { on: 'wire' as const, host: hostId.value, at };
     const why = judgeDrop(shown, circuit, w.value, side, target);
@@ -522,6 +549,151 @@ const resetRouteTool: ToolDef = {
   },
 };
 
+/**
+ * A step end merged into a trunk as shape_wire's { host, at } asks, the trunk ending (head) or starting (tail) on that
+ * same step and of the same family, so what the wire connects stays (as join); null when the model gave no host.
+ */
+function junctionArg(doc: OpenDocument, shown: StudioDocument, circuit: Readonly<Circuit>, id: string, side: Side, v: unknown): Found<End> | null {
+  const a = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  if (!Object.hasOwn(a, 'host')) return null;
+  const hostId = findWire(doc, text(a.host) ?? '');
+  if (!hostId.ok) return hostId;
+  if (hostId.value === id) return { ok: false, error: 'a wire cannot join itself' };
+  const cur = circuit[id]![side], theirs = circuit[hostId.value]![side];
+  const hostName = wireText(shown, hostId.value);
+  const step = cur.on === 'step' ? cur.step : cur.on === 'wire' && cur.host === hostId.value && theirs.on === 'step' ? theirs.step : null;
+  if (step === null) return { ok: false, error: `the ${side} is not on a step nor on ${hostName}: a junction merges wires of one step` };
+  if (theirs.on !== 'step' || theirs.step !== step) return { ok: false, error: `${hostName} does not ${side === 'head' ? 'end' : 'start'} on the same step: a junction merges wires of one step` };
+  const mine = shown.wires.find((x) => x.id === id), host = shown.wires.find((x) => x.id === hostId.value);
+  if (!mine || !host) return { ok: false, error: 'one of the wires is not drawn' };
+  if (mine.condition === null || mine.condition !== host.condition) return { ok: false, error: `not of one family with ${hostName}: wires of different families are never joined` };
+  const at = num(a.at);
+  if (at === undefined) return { ok: false, error: `give { host, at }: at is px along ${hostName} from its tail` };
+  const length = lengthOf([host.points]);
+  return { ok: true, value: { on: 'wire', host: hostId.value, at: Math.min(Math.max(snap(at, GRID), CONTACT_MARGIN), Math.max(CONTACT_MARGIN, length - CONTACT_MARGIN)) } };
+}
+
+/** A wire end as the model asked it changed (shape_wire's tail or head), on what it is on now: the same footing only. */
+function endArg(cur: End, v: unknown, side: Side, host: { length: number } | null): Found<End | undefined> {
+  if (v === undefined) return { ok: true, value: undefined };
+  const a = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  const has = (k: string) => Object.hasOwn(a, k);
+  switch (cur.on) {
+    case 'step': {
+      if (!has('y')) return { ok: false, error: `the ${side} is on a step: give { y } (its height down the step's side, ${LANDING_MIN} to ${LANDING_MAX}, or null for automatic)` };
+      if (a.y === null) return { ok: true, value: { on: 'step', step: cur.step, y: null } };
+      const y = num(a.y);
+      if (y === undefined || y < LANDING_MIN || y > LANDING_MAX) return { ok: false, error: `the ${side}'s y must be ${LANDING_MIN} to ${LANDING_MAX} (px down the step's side) or null` };
+      return { ok: true, value: { on: 'step', step: cur.step, y: snap(y) } };
+    }
+    case 'hub': {
+      if (!has('angle') && !has('dy')) return { ok: false, error: `the ${side} is on the workflow circle: give { angle } (degrees round it, 0 right, 90 down; null for automatic) or { dy } (an automatic tail held that far below its centre)` };
+      const angle = a.angle === null || a.angle === undefined ? null : num(a.angle);
+      if (angle === undefined) return { ok: false, error: 'angle must be a number or null' };
+      const dy = a.dy === null || a.dy === undefined ? null : num(a.dy);
+      if (dy === undefined) return { ok: false, error: 'dy must be a number' };
+      return { ok: true, value: angle !== null ? { on: 'hub', angle: snapAngle(angle) } : dy !== null ? { on: 'hub', angle: null, dy: snap(dy) } : { on: 'hub', angle: null } };
+    }
+    case 'wire': {
+      const at = num(a.at);
+      if (at === undefined || host === null) return { ok: false, error: `the ${side} is a junction: give { at } (px along its trunk from the trunk's tail)` };
+      return { ok: true, value: { on: 'wire', host: cur.host, at: Math.min(Math.max(snap(at, GRID), CONTACT_MARGIN), Math.max(CONTACT_MARGIN, host.length - CONTACT_MARGIN)) } };
+    }
+    case 'open': {
+      const x = num(a.x), y = num(a.y);
+      if (x === undefined || y === undefined) return { ok: false, error: `the ${side} is open: give { x, y } (a flow point)` };
+      return { ok: true, value: { on: 'open', x: snap(x), y: snap(y) } };
+    }
+  }
+}
+
+/** The bends the model gave: absent (keep), null or no xs (automatic), else { xs, ys } with one ys fewer than xs. */
+function bendsArg(v: unknown, given: boolean): Found<Bends | null | undefined> {
+  if (!given) return { ok: true, value: undefined };
+  if (v === null) return { ok: true, value: null };
+  const b = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  const xs = Array.isArray(b.xs) ? b.xs.map(num) : null, ys = Array.isArray(b.ys) ? b.ys.map(num) : null;
+  if (xs === null || ys === null || xs.some((x) => x === undefined) || ys.some((y) => y === undefined)) return { ok: false, error: 'bends must be { xs: [numbers], ys: [numbers] } or null' };
+  if (xs.length === 0) return { ok: true, value: null };
+  if (ys.length !== xs.length - 1) return { ok: false, error: `bends need one ys fewer than xs (xs: the x of each vertical run, ys: the y of each level run between two of them); got ${xs.length} xs and ${ys.length} ys` };
+  return { ok: true, value: { xs: xs.map((x) => snap(x!)), ys: ys.map((y) => snap(y!)) } };
+}
+
+const END_ARG = {
+  type: 'object',
+  description: 'On a step: { y } (px down the step\'s side, null: automatic). On the workflow circle: { angle } or { dy } (null: automatic). A junction: { host, at } (the trunk, its id or "from -> to", ending or starting on the same step; at: px along it; host may be left out for a junction that stays on its trunk). Open: { x, y }. Leave out to keep it.',
+  properties: { y: { type: ['number', 'null'] }, angle: { type: ['number', 'null'] }, dy: { type: ['number', 'null'] }, host: { type: 'string' }, at: { type: 'number' }, x: { type: 'number' } },
+};
+
+const SHAPE_ITEM = {
+  type: 'object',
+  properties: {
+    wire: { type: 'string', description: 'The wire: its id, or "from -> to".' },
+    tail: END_ARG,
+    head: END_ARG,
+    bends: { type: ['object', 'null'], properties: { xs: { type: 'array', items: { type: 'number' } }, ys: { type: 'array', items: { type: 'number' } } }, description: 'Its own route, or null: automatic. Leave out to keep it.' },
+  },
+  required: ['wire'],
+};
+
+const shapeWireTool: ToolDef = {
+  name: 'shape_wire',
+  description: 'Shape wires as dragging their ends and runs does, what they connect staying: the place of each tail and head on what it is on (read_design gives each end its y on a step, angle or dy on the workflow circle, at on a trunk) and the route of each wire (bends: xs, the x of each vertical run; ys, the y of each level run between two of them; null: automatic). All the wires listed change at once, one Undo step, judged as a whole: shape neighbouring wires in one call. Copy a drawing exactly by giving every wire the shape read_design shows for the original. Refused when the result would make a short circuit.',
+  parameters: {
+    type: 'object',
+    properties: { workflow: WORKFLOW_ARG, wires: { type: 'array', items: SHAPE_ITEM, description: 'Each wire and its new shape.' } },
+    required: ['wires'],
+    additionalProperties: false,
+  },
+  async run(ctx, args) {
+    // one wire given flat ({ wire, tail, head, bends }) is a list of one
+    const items = (Array.isArray(args.wires) ? args.wires : [args]).map((x) => (typeof x === 'object' && x !== null ? x : {}) as Record<string, unknown>);
+    const asked = `shape ${items.map((x) => text(x.wire) ?? '?').join(', ')}`;
+    if (items.length === 0) return fail('wires must list at least one { wire, tail, head, bends }', asked);
+    const found = await designDocOf(ctx, text(args.workflow), asked);
+    if ('out' in found) return found.out;
+    const { doc } = found;
+    const { saved, shown, draft } = layersOf(doc);
+    let circuit = circuitOf(saved, draft);
+    const hostOf = (e: End) => {
+      const h = e.on === 'wire' ? shown.wires.find((x) => x.id === e.host) : undefined;
+      return h ? { length: lengthOf([h.points]) } : null;
+    };
+    const ids: string[] = [], names: string[] = [];
+    for (const item of items) {
+      const w = findWire(doc, text(item.wire) ?? '');
+      if (!w.ok) return fail(w.error, asked);
+      const cur = circuit[w.value]!;
+      const name = wireText(shown, w.value);
+      const action = `shape ${name}`;
+      const tail = junctionArg(doc, shown, circuit, w.value, 'tail', item.tail) ?? endArg(cur.tail, item.tail, 'tail', hostOf(cur.tail));
+      if (!tail.ok) return fail(tail.error, action);
+      const head = junctionArg(doc, shown, circuit, w.value, 'head', item.head) ?? endArg(cur.head, item.head, 'head', hostOf(cur.head));
+      if (!head.ok) return fail(head.error, action);
+      const bends = bendsArg(item.bends, Object.hasOwn(item, 'bends'));
+      if (!bends.ok) return fail(bends.error, action);
+      for (const [side, end] of [['tail', tail.value], ['head', head.value]] as const) {
+        if (end === undefined) continue;
+        // a junction slid along its trunk lands as an end drag would: refused where the drag is
+        if (end.on === 'wire') {
+          const why = judgeDrop(shown, circuit, w.value, side, end);
+          if (toneOf(why) !== 'ok') return fail(`refused: ${dropLabel(why)}`, action);
+        }
+        circuit = setEnd(circuit, w.value, side, end);
+      }
+      if (bends.value !== undefined) circuit = setBends(circuit, w.value, bends.value);
+      ids.push(w.value);
+      names.push(name);
+    }
+    const all = names.join(', ');
+    const r = await act(ctx, doc.workflowId, { type: 'design', workflowId: doc.workflowId, draft: withCircuit(draft, saved, circuit), picks: ids.map((id) => ({ kind: 'wire' as const, id })) }, { unchanged: `${names.length === 1 ? `wire ${all} is` : `wires ${all} are`} already shaped so` });
+    if (!r.ok) return fail(r.error, `shape ${all} refused`);
+    const drawn = shownDesignOf(r.after)!.wires;
+    const through = ids.map((id, i) => `${names[i]} through ${JSON.stringify(drawn.find((x) => x.id === id)?.points ?? [])}`).join('; ');
+    return done(true, `shaped ${through}`, `shaped ${all}`, r.entries);
+  },
+};
+
 /** A pick by what the model wrote: a wire ("from -> to" or its id), "workflow", a step or a cache. */
 function pickOf(doc: OpenDocument, shown: StudioDocument, ref: string): Found<{ pick: Pick; label: string }> {
   const t = ref.trim();
@@ -596,14 +768,19 @@ const copyTool: ToolDef = {
 
 const pasteTool: ToolDef = {
   name: 'paste',
-  description: 'Paste what copy copied (Ctrl+V): an exact copy with new ids (names, fields and a cache\'s root included), placed clear of every block; the pasted items are picked. BaseApi refuses a cache root another cache has, so give a pasted cache a new root before Save.',
-  parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG }, additionalProperties: false },
+  description: 'Paste what copy copied (Ctrl+V): an exact copy with new ids (names, fields and a cache\'s root included), placed clear of every block; the pasted items are picked. in_place: true pastes every block and wire exactly where it was copied (to copy a drawing into another workflow; refused when a pasted block would overlap one there). BaseApi refuses a cache root another cache has, so give a pasted cache a new root before Save.',
+  parameters: {
+    type: 'object',
+    properties: { workflow: WORKFLOW_ARG, in_place: { type: 'boolean', description: 'true: at the very positions copied, wires shaped exactly as copied; else clear of every block, as Ctrl+V.' } },
+    additionalProperties: false,
+  },
   async run(ctx, args) {
     const found = await designDocOf(ctx, text(args.workflow), 'paste');
     if ('out' in found) return found.out;
     const { doc } = found;
     if (ctx.store.getState().clipboard === null) return fail('the clipboard is empty: pick and copy first', `paste into ${doc.name}: nothing copied`);
-    const r = await act(ctx, doc.workflowId, { type: 'paste', workflowId: doc.workflowId, newId: ctx.newId }, { unchanged: 'nothing was pasted' });
+    const inPlace = args.in_place === true;
+    const r = await act(ctx, doc.workflowId, { type: 'paste', workflowId: doc.workflowId, newId: ctx.newId, inPlace }, { unchanged: inPlace ? 'nothing was pasted: a pasted block would overlap a block already there (move it, or paste without in_place)' : 'nothing was pasted' });
     if (!r.ok) return fail(r.error, `paste into ${doc.name} refused`);
     const { added } = changesOf(r.before, r.after);
     return done(true, `pasted ${added.join(', ')}`, `pasted ${added.map((a) => a.replace(/ \(id .*\)$/, '')).join(', ')}`, r.entries);
@@ -681,6 +858,6 @@ function historyTool(op: 'undo' | 'redo'): ToolDef {
 }
 
 export const DESIGN_TOOLS: ToolDef[] = [
-  addStepTool, setProcessorTool, addCacheTool, connectTool, joinTool, autoConnectTool, moveBlocksTool, resetRouteTool,
+  addStepTool, setProcessorTool, addCacheTool, connectTool, joinTool, autoConnectTool, moveBlocksTool, resetRouteTool, shapeWireTool,
   pickTool, copyTool, pasteTool, deletePickedTool, historyTool('undo'), historyTool('redo'),
 ];

@@ -257,17 +257,21 @@ const copy = <T>(r: Readonly<Record<string, T>>): Record<string, T> => Object.as
  * of every block of the workflow pasted into
  * and, pasted into the workflow it was copied in (`into`), of the area its originals had. Copied wires keep their
  * shapes moved by the same offset, junctions their place along their host. The pasted items are the new picks. Null
- * when the clip holds nothing.
+ * when the clip holds nothing. `inPlace` (the chat's exact copy into another workflow, 2026-10-24): no offset at all,
+ * every block and wire exactly where it was copied; null when a pasted block would overlap a block already there.
  */
 export function pasteClip(
-  base: StudioDocument, edits: EntityEdits, draft: Draft, clip: Clip, newId: () => string, into: Id = clip.from,
+  base: StudioDocument, edits: EntityEdits, draft: Draft, clip: Clip, newId: () => string, into: Id = clip.from, inPlace = false,
 ): { draft: Draft; picks: Pick[] } | null {
   if (clip.steps.length + clip.caches.length + Object.keys(clip.wires).length === 0) return null;
   const { saved, shown } = views(base, edits, draft);
   const k = clip.pasted + 1;
   const start = { x: k * PASTE_STEP, y: k * PASTE_STEP };
   const group = clipBoxes(clip);
-  const { x: dx, y: dy } = freeOffset(group, [...blockBoxes(shown), ...(into === clip.from ? group : [])], start);
+  const obstacles = [...blockBoxes(shown), ...(into === clip.from ? group : [])];
+  const stays = (o: Point) => o.x === 0 && o.y === 0;
+  if (inPlace && !stays(freeOffset(group, obstacles, { x: 0, y: 0 }, 0))) return null;
+  const { x: dx, y: dy } = inPlace ? { x: 0, y: 0 } : freeOffset(group, obstacles, start);
 
   const stepIds = new Map(clip.steps.map((s) => [s.id, newId()]));
   const cacheIds = new Map(clip.caches.map((c) => [c.id, newId()]));

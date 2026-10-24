@@ -79,11 +79,13 @@ export function graphOf(edited: StudioDocument, draft: Draft): object {
       case 'open': return { on: 'open', x: e.x, y: e.y };
     }
   };
+  // what shape_wire takes for each end: its place on what it is on, as stored (null: automatic)
+  const shapeEnd = (e: End) => (e.on === 'step' ? { y: e.y } : e.on === 'hub' ? { angle: e.angle, dy: e.dy ?? null } : e.on === 'wire' ? { host: e.host, at: e.at } : { x: e.x, y: e.y });
   const wires = shown.wires.map((w) => {
     const c = circuit[w.id]!;
     return {
       id: w.id, family: conditionName(w.condition ?? undefined), tail: endOf(c.tail, w.points[0], 'tail'), head: endOf(c.head, w.points.at(-1), 'head'),
-      points: w.points,
+      points: w.points, shape: { tail: shapeEnd(c.tail), head: shapeEnd(c.head), bends: c.bends ?? null },
     };
   });
   return { grid: GRID, portGap: TRACK, blocks, wires };
@@ -102,21 +104,6 @@ export function relationsOf(edited: StudioDocument, draft: Draft): string {
     .map((n) => ({ wires: [...n.wires].sort(), families: [...n.families].sort() }))
     .sort((a, b) => (a.wires[0]! < b.wires[0]! ? -1 : 1));
   return JSON.stringify({ next, entries: [...lists.entries].sort(), caches: [...(shown.graph.workflow.cacheIds ?? [])].sort(), nets });
-}
-
-/** How far along a drawn line its point nearest to `p` lies; null for a line with no segment. */
-export function nearestAlong(points: readonly Pt[], p: Pt): number | null {
-  let best: { gap: number; at: number } | null = null, d = 0;
-  for (let i = 0; i + 1 < points.length; i++) {
-    const [a, b] = [points[i]!, points[i + 1]!];
-    const len = Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
-    const t = len === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1])) / (len * len)));
-    const q: Pt = [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
-    const gap = Math.hypot(p[0] - q[0], p[1] - q[1]);
-    if (!best || gap < best.gap) best = { gap, at: d + t * len };
-    d += len;
-  }
-  return best && Math.round(best.at);
 }
 
 /** The pairs of drawn wires that cross, and how often each pair does (2026-10-12: named in the refinement round). */
