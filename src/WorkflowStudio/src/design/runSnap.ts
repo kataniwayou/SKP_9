@@ -1,7 +1,7 @@
 import type { StudioDocument } from '../app/document';
 import { PMID, STEP_H, STEP_W } from '../layout/geometry';
 import { blockBoxes } from '../layout/wires';
-import { chainGapMarks, chainGapMoves, equalGapMarks, equalGapMoves, guideBoxes, type GapMark, type GuideBox } from './guides';
+import { chainGapMarks, chainGapMoves, equalGapMarks, equalGapMoves, guideBoxes, wireRunBoxes, type GapMark, type GuideBox } from './guides';
 
 /**
  * An alignment guide a dragged run or end snapped to: the line at `v` across `axis` (x: a vertical line), drawn as a
@@ -81,18 +81,7 @@ function spacers(shown: StudioDocument, axis: 'x' | 'y', own: string): GuideBox[
 }
 
 /** Every run of the other wires parallel to `axis`'s runs, as boxes of no width: what a run is spaced among along a chain. */
-function parallels(shown: StudioDocument, axis: 'x' | 'y', own: string): GuideBox[] {
-  const out: GuideBox[] = [];
-  const i = axis === 'x' ? 0 : 1;
-  for (const w of shown.wires) {
-    if (w.id === own) continue;
-    for (let j = 1; j < w.points.length; j++) {
-      const a = w.points[j - 1]!, b = w.points[j]!;
-      if (a[i] === b[i] && a[1 - i] !== b[1 - i]) out.push(runBox(a[i]!, a[1 - i]!, b[1 - i]!, axis));
-    }
-  }
-  return out;
-}
+const parallels = (shown: StudioDocument, axis: 'x' | 'y', own: string): GuideBox[] => wireRunBoxes(shown, axis, (w) => w.id !== own);
 
 /**
  * Visio's equal spacing for a dragged run (the user's, 2026-10-23, as blocks have it): `v`, the run's coordinate across

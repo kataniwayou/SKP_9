@@ -30,6 +30,11 @@ describe('shape', () => {
     expect(dragSegment({ xs: [144], ys: [] }, 2, { x: 200, y: 131 }, e)).toEqual({ landingY: 128 });
   });
 
+  it('a tail glued to a step: the first run slides it instead of a jog (2026-10-25); a straight wire still jogs', () => {
+    expect(dragSegment({ xs: [144], ys: [] }, 0, { x: 50, y: 61 }, e, true)).toEqual({ tailY: 64 });
+    expect(dragSegment({ xs: [], ys: [] }, 0, { x: 100, y: 40 }, { sx: 0, sy: 96, tx: 288, ty: 96 }, true)).toEqual({ bends: { xs: [16, 272], ys: [40] } });
+  });
+
   it('dragging a straight wire puts a jog at both ends', () => {
     const flat = { sx: 0, sy: 96, tx: 288, ty: 96 };
     expect(dragSegment({ xs: [], ys: [] }, 0, { x: 100, y: 40 }, flat)).toEqual({ bends: { xs: [16, 272], ys: [40] } });

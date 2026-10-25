@@ -77,13 +77,15 @@ export function normalize(e: Ends, b: Bends): Bends | null {
 
 /**
  * Run k dragged to p (spec §4.2): a vertical run moves sideways, an inner horizontal one up or down. The
- * first run leaves a fixed port, so it gets a jog first (on a straight wire, at both ends). The last run
- * slides the landing instead: its new height comes back as `landingY` (absolute, snapped).
+ * first run leaves a fixed port, so it gets a jog first (on a straight wire, at both ends); with `slidesTail` (a tail
+ * glued to a step side, the user's 2026-10-25) it slides the tail along that side instead, as the last run slides the
+ * landing: their new heights come back as `tailY` and `landingY` (absolute, snapped).
  */
-export function dragSegment(b: Bends, k: number, p: { x: number; y: number }, e: Ends): { bends: Bends } | { landingY: number } {
+export function dragSegment(b: Bends, k: number, p: { x: number; y: number }, e: Ends, slidesTail = false): { bends: Bends } | { landingY: number } | { tailY: number } {
   const n = b.xs.length;
   const y = snap(p.y, GRID), x = snap(p.x, GRID);
   if (n === 0) return { bends: { xs: [snap(e.sx + JOG), snap(e.tx - JOG)], ys: [y] } };
+  if (k === 0 && slidesTail) return { tailY: y };
   if (k === 0) return { bends: { xs: [snap(e.sx + JOG), ...b.xs], ys: [y, ...b.ys] } };
   if (k === 2 * n) return { landingY: y };
   if (k % 2 === 1) return { bends: { xs: b.xs.map((v, i) => (i === (k - 1) / 2 ? x : v)), ys: [...b.ys] } };

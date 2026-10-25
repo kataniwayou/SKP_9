@@ -148,6 +148,17 @@ describe('alignment guides (Visio dynamic grid, plan 10)', () => {
       expect(g.gaps).toEqual([]);
     });
 
+    it('keeps equal gaps to the wires\' runs it is given as spacers, and never lines up with them (2026-10-25)', () => {
+      // uprights at 100 and 644: a block 10 px right of their middle (260, 160 to each) snaps there, both gaps marked
+      const runs = [{ id: '', x: 100, y: 0, w: 0, h: 400 }, { id: '', x: 644, y: 0, w: 0, h: 400 }];
+      const g = snapToGuides(step('m', 270, 100), [], 12, { x: runs, y: [] });
+      expect(g.x).toBe(260);
+      expect(sorted(g.gaps)).toEqual([{ axis: 'x', from: 100, to: 260, at: 400 }, { axis: 'x', from: 484, to: 644, at: 400 }]);
+      expect(g.lines).toEqual([]);
+      // a left edge 4 px off an upright does not line up with it
+      expect(snapToGuides(step('m', 104, 600), [], 12, { x: runs, y: [] }).hit.x).toBe(false);
+    });
+
     it('ignores touching or overlapping blocks as gaps', () => {
       const g = snapToGuides(step('D', 470, 0), [step('A', 0, 0), step('B', 224, 0)], 12);
       expect(g.dx).toBe(0);

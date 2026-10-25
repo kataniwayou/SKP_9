@@ -9,7 +9,8 @@ import { nodePickIds, wirePickIds, type Pick } from '../store/picks';
 import { selectionFromClick } from '../canvas/selection';
 import type { DesignProps } from './designProps';
 import { circuitOf, moveGroup, type Draft } from './draft';
-import { guideBoxes, NO_GUIDES, SNAP_REACH_PX, snapToGuides, type Guides } from './guides';
+import type { WireRoute } from '../layout/circuitRoute';
+import { guideBoxes, NO_GUIDES, SNAP_REACH_PX, snapToGuides, wireRunBoxes, type Guides } from './guides';
 import { nodeBox } from './hit';
 import { newId } from './ids';
 import { commitSplit, splitAt, splitTone, type Split } from './split';
@@ -214,8 +215,13 @@ export function useBlockDrag(
       // Visio's dynamic grid (plan 10): matched at the unrounded position within 12 screen px; an axis no guide caught
       // is rounded to the grid
       const others = guideBoxes(shown.current).filter((b) => !d.ids.includes(b.id));
-      const mid = shown.current.placement.steps.has(d.primary) ? { mid: raw.y + PMID } : {};
-      const g = snapToGuides({ id: d.primary, x: raw.x, y: raw.y, w: box.w, h: box.h, ...mid }, others, SNAP_REACH_PX / zoom());
+      // a step's processor middle, the hub's centre: what a wire leaves or lands at, as guideBoxes gives a block standing still
+      const mid = shown.current.placement.steps.has(d.primary) ? { mid: raw.y + PMID } : d.primary === SPHERE_NODE_ID ? { mid: raw.y + box.h / 2 } : {};
+      // equal gaps to the wires too (the user's, 2026-10-25), but those that move with the drag: a wire on a moved block,
+      // or a picked one going with them
+      const still = (w: WireRoute) => !d.wires.includes(w.id) && !(w.source !== null && d.ids.includes(w.source)) && !(w.target !== null && d.ids.includes(w.target));
+      const spacers = { x: [...others, ...wireRunBoxes(shown.current, 'x', still)], y: [...others, ...wireRunBoxes(shown.current, 'y', still)] };
+      const g = snapToGuides({ id: d.primary, x: raw.x, y: raw.y, w: box.w, h: box.h, ...mid }, others, SNAP_REACH_PX / zoom(), spacers);
       if (g.hit.x) dx = g.x - start.x;
       if (g.hit.y) dy = g.y - start.y;
       setGuides({ lines: g.lines, gaps: g.gaps });

@@ -212,8 +212,10 @@ export function useWireGestures(
   /**
    * Drags run k of a wire (spec §4.2): the first drag makes the wire manual. The last run slides its head: along its
    * step's input side (clamped, spec §4.2), or an open head up and down; a head on a junction has no last run to drag.
-   * A shape that lies on a wire it may not share a line with (the user's rule 2, 2026-10-09) is a short circuit: the
-   * label says so and, released there, the run snaps back.
+   * The first run of a wire with bends slides its tail along its step's output side the same way (the user's,
+   * 2026-10-25), spaced among that side's other tails; a tail anywhere else gets a jog instead. A shape that lies on a
+   * wire it may not share a line with (the user's rule 2, 2026-10-09) is a short circuit: the label says so and,
+   * released there, the run snaps back.
    */
   const startSegment = (wire: WireRoute, k: number, e: ReactPointerEvent) => {
     const d = designRef.current;
@@ -227,14 +229,26 @@ export function useWireGestures(
     if (rec.head.on === 'wire' && k === 2 * bends.xs.length) return;
     const step = rec.head.on === 'step' ? shown.current.placement.steps.get(rec.head.step) : undefined;
     const headAt = (y: number): End => (rec.head.on === 'step' ? { on: 'step', step: rec.head.step, y } : rec.head.on === 'open' ? { on: 'open', x: rec.head.x, y } : rec.head);
+    // the run that slides a step-glued tail: the first of a wire with bends
+    const source = rec.tail.on === 'step' ? shown.current.placement.steps.get(rec.tail.step) : undefined;
+    const tailStep = rec.tail.on === 'step' ? rec.tail.step : null;
+    const slidesTail = source !== undefined && k === 0 && bends.xs.length > 0;
     // a dragged wire goes around the blocks, never through one (spec §4.2)
     const boxes = blockBoxes(shown.current.placement);
-    let latest: { bends: Bends | null; headY: number | null } = { bends: rec.bends ?? null, headY: null };
-    const shapedCircuit = (s: { bends: Bends | null; headY: number | null }): Circuit => {
-      const moved = s.headY === null ? circuit : setEnd(circuit, wire.id, 'head', headAt(s.headY));
+    type Shaped = { bends: Bends | null; headY: number | null; tailY: number | null };
+    let latest: Shaped = { bends: rec.bends ?? null, headY: null, tailY: null };
+    const shapedCircuit = (s: Shaped): Circuit => {
+      let moved = s.headY === null ? circuit : setEnd(circuit, wire.id, 'head', headAt(s.headY));
+      if (s.tailY !== null && tailStep !== null) moved = setEnd(moved, wire.id, 'tail', { on: 'step', step: tailStep, y: s.tailY });
       return setBends(moved, wire.id, s.bends);
     };
-    const shaped = (s: { bends: Bends | null; headY: number | null }): Draft => withCircuit(base, saved, shapedCircuit(s));
+    const shaped = (s: Shaped): Draft => withCircuit(base, saved, shapedCircuit(s));
+    // where the shape's ends are: the tail and the head as slid
+    const slid = (s: Shaped) => ({
+      ...ends,
+      sy: s.tailY === null || !source ? ends.sy : source.y + s.tailY,
+      ty: s.headY === null ? ends.ty : step ? step.y + s.headY : s.headY,
+    });
     // each move judges the core as it would be drawn (a lead from the hub or a junction does not move); the nets do not change
     // a run dragged by hand: lying on another net's wire is a short circuit, automatic or not (the user's ruling, 2026-10-20)
     const judge = overlapJudge(shown.current, wire.id, circuit, 'strict');
@@ -245,31 +259,35 @@ export function useWireGestures(
     const axis = k % 2 === 0 ? 'y' : 'x';
     const manual = setBends(circuit, wire.id, bends);
     const share = mayShare(manual, netsOf(manual, (s) => shown.current.graph.steps.get(s)?.entryCondition));
-    // the run that slides a step-glued head: its step's processor middle (where the router lands it), not every grid
+    // the run that slides a step-glued end: its step's processor middle (where the router lands it), not every grid
     // line of the side, which the grid already gives (final review 2026-10-21)
-    const landings = step && k === 2 * bends.xs.length ? [step.y + PMID] : [];
-    // the other wires' landings on that side, for the run that slides the head along it
-    const side = step && k === 2 * bends.xs.length && rec.head.on === 'step' ? landingBoxes(shown.current, wire.id, rec.head.step, 'in') : [];
+    const slidesHead = step !== undefined && k === 2 * bends.xs.length;
+    const landings = slidesHead ? [step.y + PMID] : slidesTail ? [source.y + PMID] : [];
+    // the other wires' ends on that side, for the run that slides an end along it
+    const side = slidesHead && rec.head.on === 'step' ? landingBoxes(shown.current, wire.id, rec.head.step, 'in')
+      : slidesTail && tailStep !== null ? landingBoxes(shown.current, wire.id, tailStep, 'out') : [];
     const reach = SNAP_REACH_PX / getZoom();
     // the other wires as drawn, for the red stretches of a short circuit (the user's rule 2: red where it lies on them)
     const others = new LineIndex();
     for (const w of shown.current.wires) if (w.id !== wire.id) others.add(w.id, w.points);
-    type Shaped = { bends: Bends | null; headY: number | null };
     // the shape a pointer at `p` gives, from the shape before (`was`): the run under it moved, the rest around the blocks
     const shapeAt = (p: Point, was: Shaped): { state: Shaped; core: Pt[] } => {
-      const r = dragSegment(bends, k, p, ends);
+      const r = dragSegment(bends, k, p, ends, slidesTail);
       let state: Shaped;
       if ('landingY' in r) {
         const headY = step ? clampLanding(r.landingY - step.y) : r.landingY;
         const ty = step ? step.y + headY : headY;
-        state = { bends: bends.xs.length > 0 ? clearBends({ ...ends, ty }, bends, boxes) : null, headY };
+        state = { bends: bends.xs.length > 0 ? clearBends({ ...ends, ty }, bends, boxes) : null, headY, tailY: was.tailY };
+      } else if ('tailY' in r) {
+        const tailY = clampLanding(r.tailY - source!.y);
+        state = { bends: clearBends({ ...ends, sy: source!.y + tailY }, bends, boxes), headY: was.headY, tailY };
       } else {
         // the run under the pointer is pushed off any block it would lie on; the rest detours around blocks
         const moved = clearRun(r.bends, ends, draggedRun(bends.xs.length, k), boxes);
-        state = { bends: clearBends(ends, moved, boxes), headY: was.headY };
+        state = { bends: clearBends(ends, moved, boxes), headY: was.headY, tailY: was.tailY };
       }
-      const ty = state.headY === null ? ends.ty : step ? step.y + state.headY : state.headY;
-      return { state, core: state.bends ? pointsOfShape({ ...ends, ty }, state.bends) : [[ends.sx, ends.sy], [ends.tx, ty]] as Pt[] };
+      const at = slid(state);
+      return { state, core: state.bends ? pointsOfShape(at, state.bends) : [[at.sx, at.sy], [at.tx, at.ty]] as Pt[] };
     };
     const i = axis === 'x' ? 0 : 1;
     // a run lies at `v` across the axis: the snap held (the run was not pushed off a block it would lie along)
@@ -309,9 +327,8 @@ export function useWireGestures(
       setRunGuides([]);
       setRunGaps([]);
       if (cancelled || !moved || short) return;
-      const ty = latest.headY === null ? ends.ty : step ? step.y + latest.headY : latest.headY;
-      const tidy = latest.bends ? normalize({ ...ends, ty }, latest.bends) : null;
-      const next = shaped({ bends: tidy, headY: latest.headY });
+      const tidy = latest.bends ? normalize(slid(latest), latest.bends) : null;
+      const next = shaped({ ...latest, bends: tidy });
       // dragged back where it was: no step
       if (JSON.stringify(next.wires?.[wire.id]) === JSON.stringify(rec)) return;
       d.onCommit(next);
@@ -627,14 +644,13 @@ export function useWireGestures(
           }
           const [ex, ey] = held.end;
           const guides: RunGuide[] = [];
-          const gaps: GapMark[] = [];
-          // the leg's own stretch as it lands, for its gap marks
-          const [g0, g1] = leg === 'x' ? [corner[1], ey] : [corner[0], ex];
           for (const [axis, c, along] of [['x', cx, ey], ['y', cy, ex]] as const) {
-            if (c === null) continue;
-            if (c.spaced) gaps.push(...runGapMarks(c.at, g0, g1, axis, shown.current, wire.id));
-            else guides.push(guideAt(c.at, axis, shown.current, wire.id, [along, along]));
+            if (c !== null && !c.spaced) guides.push(guideAt(c.at, axis, shown.current, wire.id, [along, along]));
           }
+          // the last leg's equal-gap marks wherever it lands evenly spaced, whichever snap took it there (the user's,
+          // 2026-10-25: an alignment at the same place hid them), as a dragged run's are; its own stretch as it lands
+          const [g0, g1] = leg === 'x' ? [corner[1], ey] : [corner[0], ex];
+          const gaps = runGapMarks(leg === 'x' ? ex : ey, g0, g1, leg, shown.current, wire.id);
           options.push({ at: { x: ex, y: ey }, guides, gaps, legs: held });
         }
         if (options.length === 0 && near.length === 0) { legs = plain; return; }
@@ -715,6 +731,24 @@ export function useWireGestures(
       return found.sort((a, b) => a.d - b.d).slice(0, 2);
     };
     const open = (l: BodyLanding) => l.ends.every((x) => x.target.on === 'open');
+    /**
+     * The equal-gap marks where the moved wire lands, whichever snap took it there (the user's, 2026-10-25: a shift that
+     * both lines up and spaces showed only its line, and one onto a contact nothing): each of its runs evenly spaced among
+     * its neighbours, and each end on a step side among that side's other landings.
+     */
+    const bodyGaps = (l: BodyLanding): GapMark[] => {
+      const pts = simplify([...l.points]);
+      const marks: GapMark[] = [];
+      for (let j = 1; j < pts.length; j++) {
+        const a = pts[j - 1]!, b = pts[j]!;
+        if (a[0] === b[0] && a[1] !== b[1]) marks.push(...runGapMarks(a[0], a[1], b[1], 'x', shown.current, wire.id));
+        else if (a[1] === b[1] && a[0] !== b[0]) marks.push(...runGapMarks(a[1], a[0], b[0], 'y', shown.current, wire.id));
+      }
+      for (const e of l.ends) {
+        if (e.target.on === 'step' && toneOf(e.verdict) === 'ok') marks.push(...landingMarks(e.at.y, landingBoxes(shown.current, wire.id, e.target.step, e.target.side)));
+      }
+      return onceEach(marks);
+    };
     setResize('move');
     run(e, (p) => {
       const rx = p.x - from.x, ry = p.y - from.y;
@@ -727,8 +761,24 @@ export function useWireGestures(
       if (landing?.key === key) return;
       const reach = DROP_REACH / getZoom();
       let l = landBody(shown.current, circuit, wire.id, points, drawnAt, dx, dy, landing?.first ?? null, reach, judge);
+      if (!open(l)) {
+        // an end over a step side: the wire shifted up or down so that end lands evenly spaced among the side's other
+        // landings (the user's, 2026-10-25: as an end square's), the nearest that keeps every end it connects
+        const snapReach = SNAP_REACH_PX / getZoom();
+        const on = (x: BodyLanding) => x.ends.filter((e) => toneOf(e.verdict) === 'ok').map((e) => JSON.stringify(e.target.on === 'step' ? [e.target.step, e.target.side] : e.target.on));
+        const was = on(l);
+        const shifts = l.ends.flatMap((e) => {
+          if (e.target.on !== 'step' || toneOf(e.verdict) !== 'ok') return [];
+          const y0 = (e.side === 'tail' ? points[0]! : points[points.length - 1]!)[1]!;
+          return spaceLanding(y0 + ry, landingBoxes(shown.current, wire.id, e.target.step, e.target.side), snapReach).map((at) => at - y0);
+        }).sort((a, b) => Math.abs(a - ry) - Math.abs(b - ry));
+        for (const sy of shifts) {
+          if (sy === l.dy) break;
+          const g = landBody(shown.current, circuit, wire.id, points, drawnAt, l.dx, sy, landing?.first ?? null, reach, judge);
+          if (g.dy === sy && JSON.stringify(on(g)) === JSON.stringify(was)) { l = g; break; }
+        }
+      }
       const guides: RunGuide[] = [];
-      const gaps: GapMark[] = [];
       if ((gxs.length > 0 || gys.length > 0) && open(l)) {
         // both axes first, then one alone: a shift on one axis that fails (an end on a contact, a short circuit) keeps the other's
         const combos: [Guided | null, Guided | null][] = [
@@ -756,25 +806,23 @@ export function useWireGestures(
           }
           taken = true;
           l = g;
-          // a line for an alignment, the equal-gap marks for a spaced run (at its place once moved)
-          const show = (axis: 'x' | 'y', h: Guided, across: number) => {
-            if (h.spaced) gaps.push(...runGapMarks(h.at, h.spaced.lo + across, h.spaced.hi + across, axis, shown.current, wire.id));
-            else {
-              // over the moved wire's whole stretch the other way
-              const i = axis === 'x' ? 1 : 0;
-              const vs = g.points.map((q) => q[i]!);
-              guides.push(guideAt(h.at, axis, shown.current, wire.id, [Math.min(...vs), Math.max(...vs)]));
-            }
+          // a line for an alignment (a spaced run's marks are measured below, where it lands)
+          const show = (axis: 'x' | 'y', h: Guided) => {
+            if (h.spaced) return;
+            // over the moved wire's whole stretch the other way
+            const i = axis === 'x' ? 1 : 0;
+            const vs = g.points.map((q) => q[i]!);
+            guides.push(guideAt(h.at, axis, shown.current, wire.id, [Math.min(...vs), Math.max(...vs)]));
           };
-          if (gx) show('x', gx, gy ? gy.shift : dy);
-          if (gy) show('y', gy, gx ? gx.shift : dx);
+          if (gx) show('x', gx);
+          if (gy) show('y', gy);
           break;
         }
         if (!taken && near) guides.push(...near);
       }
       landing = { ...l, key };
       setRunGuides(guides);
-      setRunGaps(gaps);
+      setRunGaps(bodyGaps(l));
       setHints(l.ends.map((x) => ({ id: x.id, line: x.line, tone: toneOf(x.verdict), why: x.verdict, at: x.at })));
       // shifted back exactly where it was: drawn as it was
       if (l.dx === 0 && l.dy === 0) { setGhost(null); return; }

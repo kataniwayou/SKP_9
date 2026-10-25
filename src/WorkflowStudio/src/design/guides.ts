@@ -1,4 +1,5 @@
 import type { StudioDocument } from '../app/document';
+import type { WireRoute } from '../layout/circuitRoute';
 import { PMID, snap } from '../layout/geometry';
 import { cacheNodeId, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { nodeBox } from './hit';
@@ -9,6 +10,25 @@ import { nodeBox } from './hit';
  */
 export interface GuideBox { id: string; x: number; y: number; w: number; h: number; mid?: number }
 export interface GuideLine { x1: number; y1: number; x2: number; y2: number }
+
+/**
+ * Every run of the wires `keep` accepts that lies across `axis` (x: the uprights, y: the level runs), as a box of no width
+ * (x) or no height (y): what spacing reaches besides blocks (the user's, 2026-10-23 for a run; 2026-10-25 for a block).
+ */
+export function wireRunBoxes(doc: StudioDocument, axis: 'x' | 'y', keep: (wire: WireRoute) => boolean): GuideBox[] {
+  const out: GuideBox[] = [];
+  const i = axis === 'x' ? 0 : 1;
+  for (const w of doc.wires) {
+    if (!keep(w)) continue;
+    for (let j = 1; j < w.points.length; j++) {
+      const a = w.points[j - 1]!, b = w.points[j]!;
+      if (a[i] !== b[i] || a[1 - i] === b[1 - i]) continue;
+      const lo = Math.min(a[1 - i]!, b[1 - i]!), len = Math.abs(b[1 - i]! - a[1 - i]!);
+      out.push(axis === 'x' ? { id: '', x: a[0]!, y: lo, w: 0, h: len } : { id: '', x: lo, y: a[1]!, w: len, h: 0 });
+    }
+  }
+  return out;
+}
 
 export function guideBoxes(doc: StudioDocument): GuideBox[] {
   const ids = [SPHERE_NODE_ID, ...doc.placement.steps.keys(), ...[...doc.placement.caches.keys()].map(cacheNodeId)];
@@ -64,21 +84,31 @@ const apart = (a0: number, a1: number, b0: number, b1: number) => Math.max(0, b0
  * Plan 10 (Visio's dynamic grid, the authority): the dragged block, at its unrounded position, snaps when an edge, its
  * centre or its processor middle is within `reach` (flow px) of another block's; `hit` says which axes a guide caught,
  * and `x`, `y` where it lands on them, exactly (the caller rounds the others to the grid). Each matching coordinate draws one line, to the nearest block it matches
- * (Visio's). A guide on blocks that are on the 8 px grid keeps the block on it.
+ * (Visio's). A guide on blocks that are on the 8 px grid keeps the block on it. `spacers`: more it keeps equal gaps to
+ * along each axis, besides the blocks: the caller gives the blocks with the wires' runs (the user's, 2026-10-25: blocks
+ * space to wires), which a block never lines up with. Spaced among the blocks alone too, and first on a tie, so a run
+ * lying between two blocks never hides their equal gap.
  */
-export function snapToGuides(moving: GuideBox, others: readonly GuideBox[], reach: number): { dx: number; dy: number; x: number; y: number; hit: { x: boolean; y: boolean } } & Guides {
+export function snapToGuides(
+  moving: GuideBox, others: readonly GuideBox[], reach: number, spacers: { x: readonly GuideBox[]; y: readonly GuideBox[] } = { x: others, y: others },
+): { dx: number; dy: number; x: number; y: number; hit: { x: boolean; y: boolean } } & Guides {
+  const spaced = (m: GuideBox, a: Axis, more: readonly GuideBox[]) => {
+    const among = (list: readonly GuideBox[]) => smaller(gapSnap(m, list, reach, a), nearestOf(chainMoves(m, list, reach, a)));
+    return more === others ? among(others) : smaller(among(others), among(more));
+  };
   // per axis the smaller move wins between an alignment and an equal gap (plan 10 §8); y first, so x's equal gap is
   // looked for in the row the block lands in (tidy-up 2026-10-22)
-  const ay = smaller(best(ysOf, moving, others, reach), smaller(gapSnap(moving, others, reach, Y), nearestOf(chainMoves(moving, others, reach, Y))));
+  const ay = smaller(best(ysOf, moving, others, reach), spaced(moving, Y, spacers.y));
   const level = ay === null ? moving : { ...moving, y: moving.y + ay, ...(moving.mid !== undefined ? { mid: moving.mid + ay } : {}) };
-  const ax = smaller(best(xsOf, level, others, reach), smaller(gapSnap(level, others, reach, X), nearestOf(chainMoves(level, others, reach, X))));
+  const ax = smaller(best(xsOf, level, others, reach), spaced(level, X, spacers.x));
   const dx = ax ?? 0, dy = ay ?? 0;
   // where it lands, exactly: an offset added back to an unrounded position leaves float noise (432.00000000000006),
   // which would miss the exact matches that draw the lines and marks, and turn a drag back to the start into a step;
   // an axis no guide caught lands on the grid (the caller rounds it so), and the lines and marks are measured there
   const x = ax === null ? snap(moving.x) : exact(moving.x + dx), y = ay === null ? snap(moving.y) : exact(moving.y + dy);
   const m: GuideBox = { ...moving, x, y, ...(moving.mid !== undefined ? { mid: exact(moving.mid + (y - moving.y)) } : {}) };
-  const gaps = onceEach([...gapMarks(m, others, X), ...chainMarks(m, others, X), ...gapMarks(m, others, Y), ...chainMarks(m, others, Y)]);
+  const marks = (a: Axis, list: readonly GuideBox[]) => [...gapMarks(m, list, a), ...chainMarks(m, list, a)];
+  const gaps = onceEach([...marks(X, others), ...marks(X, spacers.x), ...marks(Y, others), ...marks(Y, spacers.y)]);
   return { dx, dy, x, y, hit: { x: ax !== null, y: ay !== null }, lines: linesOf(m, others), gaps };
 }
 

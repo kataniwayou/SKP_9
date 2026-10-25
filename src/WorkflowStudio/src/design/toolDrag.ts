@@ -4,7 +4,7 @@ import type { Point } from '../layout/geometry';
 import type { Id } from '../model/graph';
 import type { Circuit } from '../circuit/circuit';
 import { DROP_REACH, toneOf } from './drop';
-import { guideBoxes, NO_GUIDES, SNAP_REACH_PX, snapToGuides, type Guides } from './guides';
+import { guideBoxes, NO_GUIDES, SNAP_REACH_PX, snapToGuides, wireRunBoxes, type Guides } from './guides';
 import { splitTone } from './split';
 import { judgeTool, landingBox, type ToolItem, type ToolVerdict } from './toolDrop';
 
@@ -58,7 +58,10 @@ const hotSpots = (item: ToolItem, client: Point): Point[] =>
 function onGrid(shown: StudioDocument, item: ToolItem, p: Point, reach: number): { flow: Point; guides: Guides } | null {
   const box = landingBox(item, p);
   if (!box) return null;
-  const g = snapToGuides({ id: '', x: p.x - box.w / 2, y: p.y - box.h / 2, w: box.w, h: box.h }, guideBoxes(shown), reach);
+  const others = guideBoxes(shown);
+  // equal gaps to the wires too, as a block dragged on the canvas keeps them (the user's, 2026-10-25)
+  const spacers = { x: [...others, ...wireRunBoxes(shown, 'x', () => true)], y: [...others, ...wireRunBoxes(shown, 'y', () => true)] };
+  const g = snapToGuides({ id: '', x: p.x - box.w / 2, y: p.y - box.h / 2, w: box.w, h: box.h }, others, reach, spacers);
   return { flow: { x: g.hit.x ? g.x + box.w / 2 : p.x, y: g.hit.y ? g.y + box.h / 2 : p.y }, guides: { lines: g.lines, gaps: g.gaps } };
 }
 
