@@ -37,7 +37,9 @@ export function diagramSvg(doc: StudioDocument, fitter: TextFitter): string {
     ys.push(n.position.y - pad, n.position.y + (n.height ?? 0) + pad);
   }
   for (const e of edges) for (const [x, y] of e.data?.points ?? []) { xs.push(x); ys.push(y); }
-  const M = 32, HEAD = 48, FOOT = 56;
+  // the minimum padding (the user's rule, 2026-10-25): the dashboard panel fits the image to its height, so every unit of
+  // margin here is drawing it cannot show. M is the edge; HEAD holds the title's line, FOOT the legend's row and its gap.
+  const M = 8, HEAD = 28, FOOT = 30;
   const left = Math.floor(Math.min(...xs)) - M, top = Math.floor(Math.min(...ys)) - M - HEAD;
   const width = Math.ceil(Math.max(...xs)) + M - left, height = Math.ceil(Math.max(...ys)) + M + FOOT - top;
 
@@ -53,8 +55,9 @@ export function diagramSvg(doc: StudioDocument, fitter: TextFitter): string {
           {n.type === 'cache' && <CacheView {...n.data} />}
         </g>
       ))}
-      <text className="dg-title" x={left + M} y={top + 30}>{wf.name}<tspan className="dg-version" dx="10">{wf.version}</tspan></text>
-      <Legend x={left + M} y={top + height - FOOT / 2 - 4} />
+      <text className="dg-title" x={left + M} y={top + M + 14}>{wf.name}<tspan className="dg-version" dx="10">{wf.version}</tspan></text>
+      {/* the row's pills run 9 either side of its line, so the line sits 9 above the bottom edge */}
+      <Legend x={left + M} y={top + height - M - 9} />
     </g>
   );
 
