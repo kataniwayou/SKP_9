@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cacheDto, processorDto, schemaDto } from '../api/fixtures';
+import { cacheDto, processorDto, schemaDto, workflowDto } from '../api/fixtures';
 import type { StudioApi } from '../api/client';
 import { loadedDocument } from '../app/fixtures';
 import { StudioActionsProvider, type StudioActions } from '../app/studioActions';
 import { registerDropTarget, toolDrag } from '../design/toolDrag';
 import { createStudioStore, StudioStoreProvider } from '../store/studioStore';
-import { Toolbox } from './Toolbox';
+import { cacheDeleteBlocked, Toolbox } from './Toolbox';
 
 const ok = <T,>(value: T) => Promise.resolve({ ok: true as const, value });
 
@@ -115,5 +115,62 @@ describe('Toolbox (2026-10-11)', () => {
       unregister();
       el.remove();
     }
+  });
+});
+
+describe("a cache tile's Delete (2026-10-25)", () => {
+  const two = () => ok([cacheDto('k1', { name: 'rates', root: 'rates' }), cacheDto('k2', { name: 'spare', root: 'spare' })]);
+  const workflows = () => ok([workflowDto({ id: 'wf1', name: 'orders', cacheIds: ['k1'] })]);
+
+  it('is offered for an unused cache, asks first, then deletes it and reads the lists again', async () => {
+    const deleteCache = vi.fn(() => ok(null));
+    const listCaches = vi.fn(two);
+    setup({ ...lists, listCaches, listWorkflows: workflows, deleteCache });
+    const del = await screen.findByRole('button', { name: 'Delete cache spare 1.0.0' });
+    expect(del).toBeEnabled();
+    fireEvent.click(del);
+    expect(screen.getByText('Delete for good?')).toBeInTheDocument();
+    expect(deleteCache).not.toHaveBeenCalled();
+    listCaches.mockImplementation(() => ok([cacheDto('k1', { name: 'rates', root: 'rates' })]));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Drag cache spare 1.0.0' })).toBeNull());
+    expect(deleteCache).toHaveBeenCalledWith('k2');
+    expect(screen.getByRole('button', { name: 'Drag cache rates 1.0.0' })).toBeInTheDocument();
+  });
+
+  it('is shown disabled for a used cache, the workflows that use it as the reason', async () => {
+    setup({ ...lists, listCaches: two, listWorkflows: workflows, deleteCache: vi.fn() });
+    const del = await screen.findByRole('button', { name: 'Delete cache rates 1.0.0' });
+    expect(del).toBeDisabled();
+    expect(del.parentElement).toHaveAttribute('title', 'Used by orders: remove it from that workflow first');
+  });
+
+  it('Cancel sends nothing; a refusal is shown on the tile, which stays', async () => {
+    const deleteCache = vi.fn(() => Promise.resolve({ ok: false as const, error: { kind: 'conflict' as const, status: 409 as const, detail: 'still referenced', entity: null } }));
+    setup({ ...lists, listCaches: two, listWorkflows: workflows, deleteCache });
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete cache spare 1.0.0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(deleteCache).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete cache spare 1.0.0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/^Not deleted: /);
+    expect(screen.getByRole('button', { name: 'Drag cache spare 1.0.0' })).toBeInTheDocument();
+  });
+
+  it('pressing it neither picks the tile nor starts a drag', async () => {
+    const store = setup({ ...lists, listCaches: two, listWorkflows: workflows, deleteCache: vi.fn(() => ok(null)) });
+    const del = await screen.findByRole('button', { name: 'Delete cache spare 1.0.0' });
+    fireEvent.pointerDown(del, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerUp(window, { clientX: 10, clientY: 10 });
+    expect(store.getState().toolboxPick).toBeNull();
+    expect(toolDrag.get()).toBeNull();
+  });
+
+  it('blocked: a workflow lists it, an open design links it unsaved, or the workflows could not be read', () => {
+    const none = new Map<string, string[]>();
+    expect(cacheDeleteBlocked('k', none, none)).toBeNull();
+    expect(cacheDeleteBlocked('k', new Map([['k', ['a', 'b', 'c']]]), none)).toBe('Used by a, b and c: remove it from those workflows first');
+    expect(cacheDeleteBlocked('k', none, new Map([['k', ['orders']]]))).toBe('Linked in the unsaved design of orders');
+    expect(cacheDeleteBlocked('k', null, none)).toMatch(/could not be read/);
   });
 });

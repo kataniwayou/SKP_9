@@ -159,6 +159,14 @@ fieldset.plain { border: 0; margin: 0; padding: 0; min-width: 0; }
 .tb-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tb-root { font-family: var(--mono); font-size: 10px; color: var(--faint); }
 .tb-error { color: var(--error); }
+/* a cache tile's Delete (2026-10-25): offered for an unused cache, disabled with the reason as its tooltip for a used one */
+.tb-del { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 3px; cursor: default; }
+.tb-del button { font: 11px var(--sans); padding: 1px 7px; border-radius: 4px; border: 1px solid var(--line-2); background: none; color: var(--muted); cursor: pointer; }
+.tb-del button:hover:not(:disabled) { border-color: var(--error); color: var(--error); }
+.tb-del button:disabled { opacity: .45; cursor: not-allowed; pointer-events: none; }
+.tb-del .tb-del-go { border-color: var(--error); color: var(--error); }
+.tb-del-ask { color: var(--ink); }
+.tb-text .tb-del-error { color: var(--error); white-space: normal; }
 .tb-wire .lg-ring { fill: #060c17; stroke: #8A97A8; stroke-width: 1.6; }
 .tb-wire .lg-undecided { fill: none; stroke: #8A97A8; stroke-width: 2; stroke-dasharray: 6 4; }
 .tb-wire .lg-arrow { fill: none; stroke: #8A97A8; stroke-width: 2; stroke-linejoin: miter; }

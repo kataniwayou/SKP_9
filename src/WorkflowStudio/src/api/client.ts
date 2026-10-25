@@ -25,6 +25,8 @@ export interface StudioApi {
   listProcessors?(): Promise<ApiResult<ProcessorReadDto[]>>;
   listCaches?(): Promise<ApiResult<CacheReadDto[]>>;
   listSchemas?(): Promise<ApiResult<SchemaReadDto[]>>;
+  /** `DELETE /caches/{id}` (2026-10-25, a Toolbox tile's Delete): 204. BaseApi refuses while any workflow still lists it. */
+  deleteCache?(id: string): Promise<ApiResult<null>>;
   /** `GET /{entity}/{id}`: the entity's read DTO, the Inspector's baseline (spec §7.1). */
   getEntity<K extends EntityKind>(kind: K, id: string): Promise<ApiResult<ReadDtoOf[K]>>;
   /** `PUT /{entity}/{id}` with the full update DTO; BaseApi answers 200 with the entity read back. */
@@ -150,6 +152,7 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
     listProcessors: () => get<ProcessorReadDto[]>('/processors'),
     listCaches: () => get<CacheReadDto[]>('/caches'),
     listSchemas: () => get<SchemaReadDto[]>('/schemas'),
+    deleteCache: (cacheId) => request<null>('DELETE', `/caches/${id(cacheId)}`),
     getEntity<K extends EntityKind>(kind: K, entityId: string) {
       return get<ReadDtoOf[K]>(`/${ENTITY_PATH[kind]}/${id(entityId)}`);
     },

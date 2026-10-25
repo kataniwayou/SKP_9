@@ -20,8 +20,27 @@ import { designLocked, type ToolboxPick } from '../store/studioState';
 import { overlayCache, overlayProcessor, useActiveDesignGraph } from './toolboxView';
 import { useStudio, useStudioStore } from '../store/studioStore';
 
-/** What the Toolbox lists (2026-10-11): every processor, cache and schema BaseApi holds, read when it opens and after each Save. */
-interface Lists { processors: Processor[]; caches: Cache[]; schemas: Map<Id, Schema> }
+/**
+ * What the Toolbox lists (2026-10-11): every processor, cache and schema BaseApi holds, read when it opens and after each Save.
+ * `usedBy` (2026-10-25): each cache's workflows by name, as BaseApi lists them; null when the workflows could not be read.
+ */
+interface Lists { processors: Processor[]; caches: Cache[]; schemas: Map<Id, Schema>; usedBy: Map<Id, string[]> | null }
+
+/** The names, as a sentence lists them. */
+const named = (names: string[]) => names.length <= 2 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+
+/**
+ * Why a cache's Delete is disabled, or null when it is offered (2026-10-25, the user's rule: offered for an unused cache,
+ * shown disabled for a used one). Used is listed by a workflow BaseApi holds, or linked by an open workflow's unsaved
+ * design, whose Save would then fail. BaseApi refuses a used one again, whatever the Toolbox read.
+ */
+export function cacheDeleteBlocked(id: Id, usedBy: Map<Id, string[]> | null, linkedBy: Map<Id, string[]>): string | null {
+  if (usedBy === null) return 'Cannot tell which workflows use it: the workflows could not be read';
+  const saved = usedBy.get(id) ?? [], unsaved = linkedBy.get(id) ?? [];
+  if (saved.length > 0) return `Used by ${named(saved)}: remove it from ${saved.length === 1 ? 'that workflow' : 'those workflows'} first`;
+  if (unsaved.length > 0) return `Linked in the unsaved design of ${named(unsaved)}`;
+  return null;
+}
 
 const NO_AUDIT = { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null };
 /** The empty step tile's step: a new one has this name and no processor (the amber ⚠ slot). */
@@ -114,25 +133,58 @@ export function Toolbox() {
   const fitter = useFitter(doc);
   const healthOf = useHealthOf();
   const drag = useToolDrag();
+  // read again after a cache is deleted (2026-10-25)
+  const [reads, setReads] = useState(0);
 
   useEffect(() => {
     if (!api?.listProcessors || !api.listCaches || !api.listSchemas) return undefined;
     let live = true;
-    void Promise.all([api.listProcessors(), api.listCaches(), api.listSchemas()]).then(([p, c, s]) => {
+    // a test's fake may lack it: then which workflows use a cache is not known
+    const workflows = typeof api.listWorkflows === 'function' ? api.listWorkflows() : Promise.resolve(null);
+    void Promise.all([api.listProcessors(), api.listCaches(), api.listSchemas(), workflows]).then(([p, c, s, w]) => {
       if (!live) return;
       if (!p.ok || !c.ok || !s.ok) {
         setError(describeError((!p.ok ? p.error : !c.ok ? c.error : (s as { ok: false; error: Parameters<typeof describeError>[0] }).error)));
         return;
       }
       setError(null);
+      let usedBy: Map<Id, string[]> | null = null;
+      if (w?.ok) {
+        usedBy = new Map();
+        for (const wf of w.value) for (const id of wf.cacheIds ?? []) usedBy.set(id, [...(usedBy.get(id) ?? []), wf.name ?? wf.id ?? 'a workflow']);
+      }
       setLists({
         processors: p.value.map(processorFromDto).sort((a, b) => a.name.localeCompare(b.name)),
         caches: c.value.map(cacheFromDto).sort((a, b) => a.name.localeCompare(b.name)),
         schemas: new Map(s.value.map(schemaFromDto).map((x) => [x.id, x])),
+        usedBy,
       });
     });
     return () => { live = false; };
-  }, [api, generations]);
+  }, [api, generations, reads]);
+
+  // the caches an open document's design links and has not saved: a Save would link them, so they are in use too
+  const docs = useStudio((s) => s.docs);
+  const linkedBy = useMemo(() => {
+    const m = new Map<Id, string[]>();
+    for (const d of docs) for (const id of Object.keys(d.design.draft.blocks.linked)) m.set(id, [...(m.get(id) ?? []), d.name]);
+    return m;
+  }, [docs]);
+
+  // a cache's Delete (2026-10-25): asked on the tile, then sent; BaseApi's refusal is shown on it
+  const [asking, setAsking] = useState<Id | null>(null);
+  const [deleting, setDeleting] = useState<Id | null>(null);
+  const [refused, setRefused] = useState<{ id: Id; text: string } | null>(null);
+  const deleteCache = async (id: Id) => {
+    if (!api?.deleteCache) return;
+    setDeleting(id);
+    const r = await api.deleteCache(id);
+    setDeleting(null);
+    setAsking(null);
+    // gone already is what was asked
+    if (r.ok || r.error.kind === 'notFound') { setRefused(null); setReads((n) => n + 1); return; }
+    setRefused({ id, text: `Not deleted: ${describeError(r.error)}` });
+  };
 
   const toolboxPick = useStudio((s) => s.toolboxPick);
   const picked = toolboxPick === null ? null : toolboxPick.kind === 'processor' ? `processor:${toolboxPick.processor.id}` : `cache:${toolboxPick.cache.id}`;
@@ -216,6 +268,33 @@ export function Toolbox() {
     </div>
   );
 
+  /**
+   * A cache tile's Delete (2026-10-25): offered when no workflow uses the cache, shown disabled with the reason when one
+   * does; pressed, the tile asks first. A press here is not the tile's: it neither picks nor drags.
+   */
+  const deleteControls = (c: Cache, v: Cache) => {
+    const blocked = !lists ? 'Reading which workflows use it…' : !api?.deleteCache ? 'Deleting is not available' : cacheDeleteBlocked(c.id, lists.usedBy, linkedBy);
+    const busy = deleting === c.id;
+    return (
+      <div className="tb-del" onPointerDown={(e) => e.stopPropagation()}>
+        {asking === c.id ? (
+          <>
+            <span className="tb-del-ask">Delete for good?</span>
+            <button type="button" className="tb-del-go" disabled={busy} onClick={() => void deleteCache(c.id)}>{busy ? 'Deleting…' : 'Delete'}</button>
+            <button type="button" disabled={busy} onClick={() => setAsking(null)}>Cancel</button>
+          </>
+        ) : (
+          // the reason on a wrapper: a disabled button shows no tooltip of its own in every browser
+          <span title={blocked ?? 'No workflow uses it'}>
+            <button type="button" aria-label={`Delete cache ${v.name} ${v.version}`} disabled={blocked !== null}
+              onClick={() => { setRefused(null); setAsking(c.id); }}>Delete</button>
+          </span>
+        )}
+        {refused?.id === c.id && <span className="tb-del-error" role="alert">{refused.text}</span>}
+      </div>
+    );
+  };
+
   const schemasOf = (p: Processor): Schema[] => schemasOfList(p, lists?.schemas ?? new Map());
   const ghost = drag && fitter ? ghostArt(drag.item, fitter, lists?.schemas ?? new Map(), healthOf) : null;
 
@@ -239,7 +318,7 @@ export function Toolbox() {
             <div className="tb-h">Caches <span className="tb-count">{lists ? caches.length : '…'}</span></div>
             {tile('newCache', { kind: 'newCache' }, 'an empty cache', <CacheArt c={EMPTY_CACHE} fitter={fitter} />, <><b>Empty cache</b><span>a new cache, no root yet</span></>)}
             {caches.map(({ c, shown: { value: v, unsaved } }) => tile(`c:${c.id}`, { kind: 'cache', cache: c }, `cache ${v.name} ${v.version}`, <CacheArt c={v} fitter={fitter} />,
-              <><b>{v.name}</b><span>{v.version}</span><span className="tb-root">root {v.root}</span></>, unsaved))}
+              <><b>{v.name}</b><span>{v.version}</span><span className="tb-root">root {v.root}</span>{deleteControls(c, v)}</>, unsaved))}
           </>
         )}
       </div>
