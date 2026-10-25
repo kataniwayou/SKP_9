@@ -137,6 +137,102 @@ export async function createGuidesThrowaway(request: APIRequestContext): Promise
   return { workflow: { id: created.workflowId, name: tag, version: '1.0.0', label: label(tag, '1.0.0', created.workflowId) }, tag, a, b, c, d, e, f, g, cacheId: created.cacheId };
 }
 
+/**
+ * The drawing throwaway (2026-10-25, `e2e-dg-…`, the user's: four blocks in a row and four in a column, not in one
+ * column): h1 h2 h3 h4 left to right, then v1 v2 v3 v4 down the right, each set off sideways from the one above. Every
+ * block feeds the next three in that order (h1 -> h2, h3, h4; … v3 -> v4), and the hub feeds h1, h2 and h3, so every
+ * middle block has three wires in and three out but at the ends of the order (h2: two in; v2: two out, v3: one; a
+ * forward-only workflow cannot do better). The targets' entry conditions run Completed, Failed, Cancelled round the
+ * order, so a block's three outputs leave from three points of its side, not one fan-out trunk. Its layout is stored.
+ */
+export interface DrawingThrowaway { workflow: LiveWorkflow; tag: string; h1: string; h2: string; h3: string; h4: string; v1: string; v2: string; v3: string; v4: string }
+
+/** Where the drawing throwaway's blocks are stored (flow px, top left): what its tests measure from. */
+export const DRAWING = {
+  sphere: { x: 128, y: 336 },
+  h1: { x: 352, y: 256 }, h2: { x: 736, y: 256 }, h3: { x: 1120, y: 256 }, h4: { x: 1504, y: 256 },
+  v1: { x: 1600, y: 576 }, v2: { x: 1696, y: 896 }, v3: { x: 1536, y: 1216 }, v4: { x: 1648, y: 1536 },
+} as const;
+
+type DrawingBlock = Exclude<keyof typeof DRAWING, 'sphere'>;
+/**
+ * Every wire's route, stored with the layout as the wire's own shape: left to the router, which wire takes which track
+ * follows the random step ids, and the tests measure from these. Each is the router's own route for one such canvas
+ * (2026-10-25): from the tail to the head, its corners in order.
+ */
+const DRAWING_ROUTES: [DrawingBlock | 'wf', DrawingBlock, [number, number][]][] = [
+  ['wf', 'h1', [[224, 320], [352, 320]]],
+  ['wf', 'h2', [[224, 320], [288, 320], [288, 160], [704, 160], [704, 352], [736, 352]]],
+  ['wf', 'h3', [[224, 352], [288, 352], [288, 512], [1056, 512], [1056, 384], [1120, 384]]],
+  ['h1', 'h2', [[576, 320], [736, 320]]],
+  ['h1', 'h3', [[576, 352], [672, 352], [672, 192], [1056, 192], [1056, 352], [1120, 352]]],
+  ['h1', 'h4', [[576, 384], [672, 384], [672, 480], [1440, 480], [1440, 384], [1504, 384]]],
+  ['h2', 'h3', [[960, 320], [1120, 320]]],
+  ['h2', 'h4', [[960, 352], [1024, 352], [1024, 160], [1440, 160], [1440, 352], [1504, 352]]],
+  ['h2', 'v1', [[960, 384], [1024, 384], [1024, 704], [1600, 704]]],
+  ['h3', 'h4', [[1344, 320], [1504, 320]]],
+  ['h3', 'v1', [[1344, 352], [1408, 352], [1408, 640], [1600, 640]]],
+  ['h3', 'v2', [[1344, 384], [1376, 384], [1376, 960], [1696, 960]]],
+  ['h4', 'v1', [[1728, 320], [1792, 320], [1792, 512], [1536, 512], [1536, 672], [1600, 672]]],
+  ['h4', 'v2', [[1728, 352], [1888, 352], [1888, 800], [1664, 800], [1664, 992], [1696, 992]]],
+  ['h4', 'v3', [[1728, 384], [1760, 384], [1760, 448], [1472, 448], [1472, 1312], [1536, 1312]]],
+  ['v1', 'v2', [[1824, 640], [1952, 640], [1952, 864], [1632, 864], [1632, 1024], [1696, 1024]]],
+  ['v1', 'v3', [[1824, 672], [1920, 672], [1920, 832], [1408, 832], [1408, 1280], [1536, 1280]]],
+  ['v1', 'v4', [[1824, 704], [1856, 704], [1856, 768], [1440, 768], [1440, 1632], [1648, 1632]]],
+  ['v2', 'v3', [[1920, 976], [1952, 976], [1952, 1088], [1504, 1088], [1504, 1344], [1536, 1344]]],
+  ['v2', 'v4', [[1920, 1008], [1984, 1008], [1984, 1472], [1584, 1472], [1584, 1600], [1648, 1600]]],
+  ['v3', 'v4', [[1760, 1312], [1792, 1312], [1792, 1408], [1616, 1408], [1616, 1664], [1648, 1664]]],
+];
+
+/** A route as a stored circuit wire: its ends on the steps (heights from each step's top) or the hub, and its bends. */
+function storedWire(ids: Record<string, string>, from: DrawingBlock | 'wf', to: DrawingBlock, pts: [number, number][]) {
+  const first = pts[0]!, last = pts[pts.length - 1]!;
+  // a route from a level tail: its uprights at the odd corners, its level runs between them at the even ones
+  const xs = pts.filter((_, i) => i % 2 === 1 && i < pts.length - 1).map((p) => p[0]);
+  const ys = pts.filter((_, i) => i % 2 === 0 && i > 0 && i < pts.length - 2).map((p) => p[1]);
+  return {
+    tail: from === 'wf' ? { on: 'hub', angle: null } : { on: 'step', step: ids[from], y: first[1] - DRAWING[from].y },
+    head: { on: 'step', step: ids[to], y: last[1] - DRAWING[to].y },
+    ...(xs.length > 0 ? { bends: { xs, ys } } : {}),
+  };
+}
+
+export async function createDrawingThrowaway(request: APIRequestContext): Promise<DrawingThrowaway> {
+  const tag = `e2e-dg-${Date.now().toString(36)}-${randomBytes(2).toString('hex')}`;
+  created.tag = tag;
+  created.schemaId = await post(request, 'schemas', { name: `${tag}-config`, version: '1.0.0', description: null, definition: '{"type":"object"}' });
+  created.processorId = await post(request, 'processors', {
+    name: `${tag}-proc`, version: '1.0.0', description: null, sourceHash: randomBytes(32).toString('hex'), instanceId: null,
+    inputSchemaId: null, outputSchemaId: null, configSchemaId: created.schemaId,
+  });
+  const order = ['h1', 'h2', 'h3', 'h4', 'v1', 'v2', 'v3', 'v4'] as const;
+  // Completed, Failed, Cancelled round the order: any three in a row differ
+  const condition = [1, 1, 2, 3, 1, 2, 3, 1];
+  const ids: Record<string, string> = {};
+  // the last first: a step's next steps exist before it
+  for (let i = order.length - 1; i >= 0; i--) {
+    const next = order.slice(i + 1, i + 4).map((n) => ids[n]!);
+    const id = await post(request, 'steps', { name: `${tag}-${order[i]}`, version: '1.0.0', description: null, processorId: created.processorId, nextStepIds: next, entryCondition: condition[i] });
+    created.extraStepIds = [...(created.extraStepIds ?? []), id];
+    ids[order[i]!] = id;
+  }
+  created.workflowId = await post(request, 'workflows', {
+    name: tag, version: '1.0.0', description: null, entryStepIds: [ids.h1!, ids.h2!, ids.h3!], assignmentIds: [], cacheIds: [], cronExpression: null,
+  });
+  const r = await request.put(`/api/v1/workflows/${created.workflowId}/layout`, {
+    data: {
+      v: 2, sphere: DRAWING.sphere, steps: Object.fromEntries(order.map((n) => [ids[n]!, DRAWING[n]])), caches: {},
+      parked: order.map((n) => ids[n]!),
+      wires: Object.fromEntries(DRAWING_ROUTES.map(([from, to, pts]) => [`${from === 'wf' ? 'wf' : ids[from]!}->${ids[to]!}`, storedWire(ids, from, to, pts)])),
+    },
+  });
+  expect(r.status(), `PUT layout: ${await r.text()}`).toBe(200);
+  return {
+    workflow: { id: created.workflowId, name: tag, version: '1.0.0', label: label(tag, '1.0.0', created.workflowId) }, tag,
+    h1: ids.h1!, h2: ids.h2!, h3: ids.h3!, h4: ids.h4!, v1: ids.v1!, v2: ids.v2!, v3: ids.v3!, v4: ids.v4!,
+  };
+}
+
 /** A chain of steps s1 -> s2 -> … (Completed), entry s1, no cache (2026-10-11). */
 export interface ChainThrowaway { workflow: LiveWorkflow; tag: string; steps: string[] }
 
