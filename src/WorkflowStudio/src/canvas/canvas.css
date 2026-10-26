@@ -67,6 +67,13 @@
    an end square moves its end any way (plan 9 rule 14); a body drag keeps the closed hand (.gesture alone) */
 .design-handle.seg.h { cursor: ns-resize; }
 .design-handle.seg.v { cursor: ew-resize; }
+/* the user's, 2026-10-26: a corner's circle moves both its runs, diagonally; an end on a step side slides along it */
+.design-handle.corner { fill: var(--accent); stroke: none; }
+.design-handle.corner.nwse { cursor: nwse-resize; }
+.design-handle.corner.nesw { cursor: nesw-resize; }
+.design-handle.end.slides { cursor: ns-resize; }
+.studio-canvas.gesture.gesture-nwse, .studio-canvas.gesture.gesture-nwse * { cursor: nwse-resize !important; }
+.studio-canvas.gesture.gesture-nesw, .studio-canvas.gesture.gesture-nesw * { cursor: nesw-resize !important; }
 .studio-canvas.gesture.gesture-ns, .studio-canvas.gesture.gesture-ns * { cursor: ns-resize !important; }
 .studio-canvas.gesture.gesture-ew, .studio-canvas.gesture.gesture-ew * { cursor: ew-resize !important; }
 .studio-canvas.gesture.gesture-move, .studio-canvas.gesture.gesture-move * { cursor: move !important; }

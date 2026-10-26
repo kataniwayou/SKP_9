@@ -290,7 +290,7 @@ test('rule 13: a wire with one end open is dashed in its family\'s colour; with 
   expect(await dashOf(panel, ad)).not.toBe('none');
 });
 
-test('rule 14: a picked wire shows its squares; its end squares show the four-way cursor, the crosshair while dragged (plan 10)', async ({ page }) => {
+test('rule 14: a picked wire shows its squares; an end square on a step side shows the double arrow along it (the user, 2026-10-26), the crosshair while dragged (plan 10)', async ({ page }) => {
   const panel = await open(page);
   const ab = `${t.a}->${t.b}`;
   await expect(panel.locator(`.design-wire[data-wire="${ab}"] .design-handle`)).toHaveCount(0);
@@ -300,7 +300,7 @@ test('rule 14: a picked wire shows its squares; its end squares show the four-wa
   for (const side of ['tail', 'head'] as const) {
     const at = await centreOf(endSquare(panel, ab, side));
     await page.mouse.move(at.x, at.y);
-    expect(await cursorAt(page, at)).toBe('move');
+    expect(await cursorAt(page, at)).toBe('ns-resize');
   }
   const at = await centreOf(endSquare(panel, ab, 'head'));
   await page.mouse.move(at.x, at.y);
@@ -487,7 +487,7 @@ function shiftOf(before: [number, number][], after: [number, number][]): { dx: n
   return { dx, dy };
 }
 
-test('drag rules: Visio\'s four-way arrow on a wire\'s body, also while it is dragged; two-headed arrows on run squares, the four-headed one on end squares (plan 10)', async ({ page }) => {
+test('drag rules: Visio\'s four-way arrow on a wire\'s body, also while it is dragged; two-headed arrows on run squares and on end squares on a step side (plan 10; the user, 2026-10-26)', async ({ page }) => {
   const panel = await open(page);
   const ab = `${t.a}->${t.b}`;
   const before = await pointsOf(panel, ab);
@@ -506,7 +506,8 @@ test('drag rules: Visio\'s four-way arrow on a wire\'s body, also while it is dr
   for (const side of ['tail', 'head'] as const) {
     const c = await centreOf(endSquare(panel, ab, side));
     await page.mouse.move(c.x, c.y);
-    expect(await cursorAt(page, c)).toBe('move');
+    // on a step side: the double arrow along it (the user's, 2026-10-26)
+    expect(await cursorAt(page, c)).toBe('ns-resize');
   }
   // picked: still the four-way arrow off the squares; pressed and dragged, the four-way arrow on the canvas the whole way
   body = await pointOnWire(panel, ab, 0.3);
@@ -653,7 +654,7 @@ async function freeWire(page: Page, panel: Locator, from: string, avoid: Pt[] = 
   return id;
 }
 
-test('cursors (rule A, Visio\'s since plan 10): four-way on a wire\'s body and on end squares, two-way on run squares; four-way while the body is dragged', async ({ page }) => {
+test('cursors (rule A, Visio\'s since plan 10): four-way on a wire\'s body, two-way on run, corner and step-side end squares; four-way while the body is dragged', async ({ page }) => {
   const panel = await open(page);
   const ab = `${t.a}->${t.b}`;
   await pickWire(page, panel, ab);
@@ -663,7 +664,10 @@ test('cursors (rule A, Visio\'s since plan 10): four-way on a wire\'s body and o
     const c = await centreOf(sq);
     await page.mouse.move(c.x, c.y);
     const cls = (await sq.getAttribute('class')) ?? '';
-    expect(await cursorAt(page, c)).toBe(/\bend\b/.test(cls) ? 'move' : /\bh\b/.test(cls) ? 'ns-resize' : 'ew-resize');
+    // the user's, 2026-10-26: an end on a step side slides along it, a corner moves both its runs diagonally
+    const want = /\bend\b/.test(cls) ? (/\bslides\b/.test(cls) ? 'ns-resize' : 'move')
+      : /\bcorner\b/.test(cls) ? (/\bnwse\b/.test(cls) ? 'nwse-resize' : 'nesw-resize') : /\bh\b/.test(cls) ? 'ns-resize' : 'ew-resize';
+    expect(await cursorAt(page, c)).toBe(want);
   }
   const body = await pointOnWire(panel, ab, 0.3);
   await page.mouse.move(body.x, body.y);

@@ -48,13 +48,16 @@ const jogged = (doc: StudioDocument): Draft => {
 };
 
 describe('wire gestures', () => {
-  it('a picked wire shows its end dots and a run handle on each run between two bends, none on a run at an end (the user, 2026-10-26)', async () => {
+  it('a picked wire shows its end dots, a circle on each run and one on each corner, diagonal (the user, 2026-10-26)', async () => {
     const doc = await two();
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={designOf({ draft: jogged(doc), picks: [{ kind: 'wire', id: 's1->s2' }] })} onSelect={vi.fn()} />);
     expect(container.querySelectorAll('.design-handle.end')).toHaveLength(2);
     expect([...container.querySelectorAll('.design-handle.seg')].map((e) => e.getAttribute('data-k'))).toEqual(['1', '2', '3']);
-    // only the end squares and the run squares: no mark on a bend
-    expect(container.querySelectorAll('.design-handle:not(.end):not(.seg)')).toHaveLength(0);
+    // its 16 px end runs are too short on screen for a circle clear of their corners' (the user's rule 3)
+    expect([...container.querySelectorAll('.design-handle.corner')].map((e) => `${e.getAttribute('data-c')}:${e.getAttribute('class')!.split(' ').pop()}`))
+      .toEqual(['1:nesw', '2:nesw', '3:nwse', '4:nwse']);
+    // both ends on a step side: each slides along it
+    expect(container.querySelectorAll('.design-handle.end.slides')).toHaveLength(2);
   });
 
   it('a straight wire has no run handle: its one run is at both ends, and pressing it moves the wire whole', async () => {
@@ -86,6 +89,40 @@ describe('wire gestures', () => {
     expect(container.querySelector('.studio-canvas')!.classList.contains('gesture')).toBe(false);
     // a press on a handle is not a rectangle on empty canvas: the picks stay
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('a corner circle drags both its runs at once, with its diagonal arrow (the user, 2026-10-26)', async () => {
+    const doc = await two();
+    const design = designOf({ draft: jogged(doc), picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    const was = jogged(doc).wires!['s1->s2']!.bends!;
+    const corner = container.querySelector('.design-handle.corner[data-c="2"]')!;
+    const to = { x: was.xs[0]! + 32, y: was.ys[0]! + 16 };
+    fireEvent.pointerDown(corner, { button: 0, ...screenOf(container, { x: was.xs[0]!, y: was.ys[0]! }), pointerId: 1 });
+    fireEvent.pointerMove(corner.ownerDocument, { ...screenOf(container, to), pointerId: 1 });
+    expect(container.querySelector('.studio-canvas')!.classList.contains('gesture-nesw')).toBe(true);
+    fireEvent.pointerUp(corner.ownerDocument, { ...screenOf(container, to), pointerId: 1 });
+    expect(design.onCommit).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(design.onCommit).mock.calls[0]![0].wires!['s1->s2']!.bends).toEqual({ xs: [to.x, was.xs[1]], ys: [to.y] });
+  });
+
+  it('the circle of a run at an end slides that end along its step side (the user, 2026-10-26)', async () => {
+    const doc = await two();
+    const s1 = doc.placement.steps.get('s1')!, s2 = doc.placement.steps.get('s2')!;
+    const draft = setShape(EMPTY_DRAFT, doc, 's1->s2', { bends: { xs: [s1.x + STEP_W + 48, s2.x - 48], ys: [s1.y + STEP_H + 48] }, landing: null });
+    const design = designOf({ draft, picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
+    expect([...container.querySelectorAll('.design-handle.seg')].map((e) => e.getAttribute('data-k'))).toEqual(['0', '1', '2', '3', '4']);
+    const tailRun = container.querySelector('.design-handle.seg[data-k="0"]')!;
+    fireEvent.pointerDown(tailRun, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(tailRun.ownerDocument, { clientX: 100, clientY: 116, pointerId: 1 });
+    expect(container.querySelector('.studio-canvas')!.classList.contains('gesture-ns')).toBe(true);
+    fireEvent.pointerUp(tailRun.ownerDocument, { clientX: 100, clientY: 116, pointerId: 1 });
+    expect(design.onCommit).toHaveBeenCalledTimes(1);
+    const rec = vi.mocked(design.onCommit).mock.calls[0]![0].wires!['s1->s2']!;
+    expect(rec.tail.on).toBe('step');
+    expect(rec.tail.on === 'step' && rec.tail.y).not.toBeNull();
+    expect(rec.bends!.xs).toEqual([s1.x + STEP_W + 48, s2.x - 48]);
   });
 
   it('a run dragged onto a step is pushed off it: the wire goes around the step, never through it', async () => {
@@ -593,14 +630,16 @@ describe('wire gestures', () => {
     expect(g.querySelector(`.design-handle.seg[data-k="${last}"]`)).toBeNull();
   });
 
-  it('a run drag on a wire whose head is on a junction keeps its head on the host; neither run at an end drags', async () => {
+  it('a run drag on a wire whose head is on a junction keeps its head on the host; its last run has no circle', async () => {
     const doc = await four();
     const draft = joinedHead(doc);
     const design = designOf({ draft, picks: [{ kind: 'wire', id: 's3->s4' }] });
     const { container } = canvasOf(doc, design);
     const squares = [...container.querySelectorAll('.design-wire[data-wire="s3->s4"] .design-handle.seg')];
-    expect(squares.map((q) => q.getAttribute('data-k'))).not.toContain('0');
-    fireEvent.pointerDown(squares[0]!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    const ks = squares.map((q) => Number(q.getAttribute('data-k')));
+    expect(ks).toContain(0);
+    expect(ks).not.toContain(Math.max(...ks) + 1);
+    fireEvent.pointerDown(squares.find((q) => q.getAttribute('data-k') === '1')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     const s3 = doc.placement.steps.get('s3')!;
     const to = { x: s3.x + STEP_W + 24, y: s3.y + STEP_H + 64 };
     fireEvent.pointerMove(document, { ...screenOf(container, to), pointerId: 1 });

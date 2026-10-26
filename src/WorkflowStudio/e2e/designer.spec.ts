@@ -327,8 +327,8 @@ test('a run dragged onto a block goes around it, while dragged and after the dro
     await page.mouse.click(p.x, p.y);
     const n = await runs.count();
     expect(n, 'the picked wire shows run squares').toBeGreaterThan(0);
-    // a picked wire shows its end squares and run squares only, never a mark on a bend
-    await expect(panel.locator(`.design-wire[data-wire="${id}"] .design-handle:not(.end):not(.seg)`)).toHaveCount(0);
+    // a picked wire shows its end, run and corner circles only (the user's, 2026-10-26)
+    await expect(panel.locator(`.design-wire[data-wire="${id}"] .design-handle:not(.end):not(.seg):not(.corner)`)).toHaveCount(0);
     await expect(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.end`)).toHaveCount(2);
     for (let i = 0; i < n; i++) {
       const p2 = await pointOnWire(panel, id);
@@ -535,20 +535,22 @@ test('a wire\'s head over a line of another colour joins it too: its tail on a s
   await expect(page.getByText('● design draft')).toBeVisible();
 });
 
-test('every end square has the four-way move cursor, a junction\'s too; a junction head dropped on its own step\'s input makes the wire plain (plan 9 rule 14)', async ({ page, request }) => {
+test('an end square on a step side has the double arrow, elsewhere the four-way move, a junction\'s too; a junction head dropped on its own step\'s input makes the wire plain (plan 9 rule 14)', async ({ page, request }) => {
   const j = await findJoin(request);
   test.skip(j === null, 'no two same-colour wires into different steps');
   await openWorkflow(page, j!.workflow);
   const panel = documentPanel(page, j!.workflow);
   const { a, b, between } = (await nearestPair(panel, j!.wires, mayJoin))!;
   await zoomInOn(page, panel, between);
-  // a plain wire's end squares: the four-way move cursor under the real pointer
+  // a plain wire's end squares under the real pointer: on a step side the double arrow along it (the user's,
+  // 2026-10-26), on the hub the four-way move
   const p = await pointOnWire(panel, b);
   await page.mouse.click(p.x, p.y);
   for (const side of ['tail', 'head'] as const) {
     const q = await centreOf(endSquare(panel, b, side));
     await page.mouse.move(q.x, q.y);
-    expect(await cursorAt(page, q)).toEqual({ cursor: 'move', cls: expect.stringMatching(/design-handle end/) });
+    const onStep = side === 'head' || b.split('->')[0] !== 'wf';
+    expect(await cursorAt(page, q)).toEqual({ cursor: onStep ? 'ns-resize' : 'move', cls: expect.stringMatching(/design-handle end/) });
   }
   // join a onto b; a stays picked: its head square (on the junction) is the four-way move too
   await dragArrowOnto(page, panel, a, b);

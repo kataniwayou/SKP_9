@@ -23,6 +23,8 @@ export interface DesignOverlayProps {
   /** A wire's shape as bends (its own manual bends, else the router's): its run squares follow it. */
   bendsOf: (wire: WireRoute) => Bends;
   onSegment: (wire: WireRoute, k: number, e: ReactPointerEvent) => void;
+  /** A corner's circle pressed (core point `c`): both its runs dragged (the user's, 2026-10-26). */
+  onCorner: (wire: WireRoute, c: number, e: ReactPointerEvent) => void;
   /** An end square pressed: the wire's tail or head, whatever it is on (plan 9 §6). */
   onEnd: (wire: WireRoute, side: Side, e: ReactPointerEvent) => void;
   /** A new wire's path, right-angled from its source to the pointer (spec §4.5); a dragged end moves its own wire. */
@@ -93,7 +95,7 @@ function GapArrow({ gap, k }: { gap: GapMark; k: number }) {
  * wire's squares (§4.2, Visio; plan 9 rule 14): one on each end (tail and head, on whatever they are), one in the
  * middle of each run of its core (no mark on a bend); and the ghost of a new wire while it is drawn (§4.5).
  */
-export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, ghost, hints = [], gone = null, tool = null, runGuides = [], runGaps = [], shorts = [], copies = [], split = null, bodyCopy = null }: DesignOverlayProps) {
+export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onCorner, onEnd, ghost, hints = [], gone = null, tool = null, runGuides = [], runGaps = [], shorts = [], copies = [], split = null, bodyCopy = null }: DesignOverlayProps) {
   // one screen pixel in flow units
   const k = 1 / useStore((s) => s.transform[2]);
   return (
@@ -122,8 +124,11 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onEnd, 
               {squaresOf(w, bendsOf(w), k).map((s) => (s.kind === 'run'
                 ? <circle key={`s${s.k}`} className={s.vertical ? 'design-handle seg v' : 'design-handle seg h'} data-k={s.k} cx={s.x} cy={s.y} r={RUN_DOT * k}
                   onPointerDown={(e) => onSegment(w, s.k, e)} />
-                : <circle key={s.side} className={`design-handle end ${s.glued ? 'glued' : 'open'}`} data-end={s.side} cx={s.x} cy={s.y} r={END_DOT * k}
-                  strokeWidth={LINE * k} onPointerDown={(e) => onEnd(w, s.side, e)} />))}
+                : s.kind === 'corner'
+                  ? <circle key={`c${s.c}`} className={`design-handle corner ${s.diag}`} data-c={s.c} cx={s.x} cy={s.y} r={RUN_DOT * k}
+                    onPointerDown={(e) => onCorner(w, s.c, e)} />
+                  : <circle key={s.side} className={`design-handle end ${s.glued ? 'glued' : 'open'}${s.slides ? ' slides' : ''}`} data-end={s.side} cx={s.x} cy={s.y} r={END_DOT * k}
+                    strokeWidth={LINE * k} onPointerDown={(e) => onEnd(w, s.side, e)} />))}
             </g>
           );
         })}

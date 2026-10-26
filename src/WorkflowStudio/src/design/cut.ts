@@ -4,6 +4,7 @@ import { snap, type Point } from '../layout/geometry';
 import { lengthOf, nearestOn, slice } from '../layout/junctions';
 import type { Placement } from '../layout/placement';
 import { simplify, type Pt } from '../layout/router';
+import { WORKFLOW_SOURCE } from '../layout/ports';
 import { endsOf, pointsOfShape, segmentHandles, shapeFromPoints, type Bends, type Ends } from '../layout/shape';
 
 /** On-screen size (px) of a picked wire's square, at any zoom. */
@@ -16,8 +17,13 @@ export const SQUARE = 9;
  */
 export type Square =
   | { kind: 'run'; k: number; x: number; y: number; vertical: boolean; cuts: boolean }
-  /** `glued`: on a step side, the hub or a wire (drawn as Visio's green dot); else open (a hollow circle), plan 10. */
-  | { kind: 'end'; side: Side; x: number; y: number; glued: boolean };
+  /** A corner, core point `c` (between runs c - 1 and c), moved diagonally `diag` (the user's, 2026-10-26). */
+  | { kind: 'corner'; c: number; x: number; y: number; diag: 'nwse' | 'nesw' }
+  /**
+   * `glued`: on a step side, the hub or a wire (drawn as Visio's green dot); else open (a hollow circle), plan 10.
+   * `slides`: on a step side, along which it slides (the double arrow, the user's 2026-10-26).
+   */
+  | { kind: 'end'; side: Side; x: number; y: number; glued: boolean; slides: boolean };
 
 /**
  * A run square is drawn only where an end square does not cover it: on a run too short on screen, the end
@@ -28,21 +34,30 @@ function clearOfEnds(h: { x: number; y: number }, ends: Ends, k: number): boolea
   return Math.hypot(h.x - ends.sx, h.y - ends.sy) >= room && Math.hypot(h.x - ends.tx, h.y - ends.ty) >= room;
 }
 
+/** The way a corner (core point `c`) moves, Visio's diagonal arrow: along the line that halves its angle. */
+export function cornerDiag(core: readonly Pt[], c: number): 'nwse' | 'nesw' {
+  const [px, py] = core[c]!, a = core[c - 1]!, b = core[c + 1]!;
+  const dx = a[0] - px + b[0] - px, dy = a[1] - py + b[1] - py;
+  return Math.sign(dx) === Math.sign(dy) ? 'nwse' : 'nesw';
+}
+
 /**
- * The squares a picked wire shows (`k`: flow units per screen pixel): one in the middle of each run of its core between
- * two bends that an end square does not cover, one on each end. A run at an end has none (the user's, 2026-10-26: with
- * an end fixed there, a run drag there makes no sense; pressed, it moves the wire whole as its body does). With
- * `endRuns`, those runs' squares too, never drawn: what an end square's drag may cut on (a straight wire is still cut),
- * but the last run of a head on a junction (it ends on its host).
+ * The circles a picked wire shows (`k`: flow units per screen pixel; the user's rules, 2026-10-26): one in the middle of
+ * each run of its core and one on each of its corners, each its double arrow, where an end's does not cover it, and one
+ * on each end. A straight wire has none but its ends (pressed, it moves whole), nor has the last run of a head on a
+ * junction (it ends on its host), nor a run too short on screen for its circle to clear its corners'. With `straight`,
+ * a straight wire's run's too, never drawn: what an end's drag may cut on (a straight wire is still cut).
  */
-export function squaresOf(w: WireRoute, bends: Bends, k: number, endRuns = false): Square[] {
+export function squaresOf(w: WireRoute, bends: Bends, k: number, straight = false): Square[] {
   const ends = endsOf(w.points);
   const last = 2 * bends.xs.length;
   const core = pointsOfShape(w.core.ends, bends);
+  const flat = simplify(core).length <= 2;
+  const room = 2 * (SQUARE + 1) * k;
   const runs: Square[] = [];
   for (const h of segmentHandles(w.core.ends, bends)) {
     if (w.headOn === 'junction' && h.k === last) continue;
-    if (!endRuns && (h.k === 0 || h.k === last)) continue;
+    if (flat ? !straight : Math.hypot(core[h.k + 1]![0] - core[h.k]![0], core[h.k + 1]![1] - core[h.k]![1]) < room) continue;
     if (!clearOfEnds(h, ends, k)) continue;
     // drawn where it cuts (on the grid, inside its run); a run with no grid point inside it keeps its square at its
     // middle, for run drags only: never on a corner or an end
@@ -51,9 +66,18 @@ export function squaresOf(w: WireRoute, bends: Bends, k: number, endRuns = false
     const cuts = !((x === a[0] && y === a[1]) || (x === b[0] && y === b[1]));
     runs.push(cuts ? { kind: 'run', k: h.k, x, y, vertical: h.vertical, cuts } : { kind: 'run', k: h.k, x: h.x, y: h.y, vertical: h.vertical, cuts });
   }
-  return [...runs,
-    { kind: 'end', side: 'tail', x: ends.sx, y: ends.sy, glued: w.tailOn !== 'open' },
-    { kind: 'end', side: 'head', x: ends.tx, y: ends.ty, glued: w.headOn !== 'open' }];
+  // a corner where two runs meet at a right angle, its circle clear of the ends' (none at a junction head's last run)
+  const corners: Square[] = [];
+  for (let c = 1; !flat && c < core.length - 1; c++) {
+    const a = core[c - 1]!, [x, y] = core[c]!, b = core[c + 1]!;
+    if ((a[0] === x && a[1] === y) || (b[0] === x && b[1] === y) || (a[0] === b[0]) || (a[1] === b[1])) continue;
+    if (w.headOn === 'junction' && c === last) continue;
+    if (!clearOfEnds({ x, y }, ends, k)) continue;
+    corners.push({ kind: 'corner', c, x, y, diag: cornerDiag(core, c) });
+  }
+  return [...corners, ...runs,
+    { kind: 'end', side: 'tail', x: ends.sx, y: ends.sy, glued: w.tailOn !== 'open', slides: w.source !== null && w.source !== WORKFLOW_SOURCE },
+    { kind: 'end', side: 'head', x: ends.tx, y: ends.ty, glued: w.headOn !== 'open', slides: w.target !== null }];
 }
 
 /** The corners of a picked wire's core, where Visio draws a small dot (plan 10): never pressed, a run drag moves them. */
@@ -63,7 +87,7 @@ export function bendsOf(w: WireRoute, bends: Bends): { x: number; y: number }[] 
 
 /** What an end square being dragged (`side`) may be released on: the run squares that cut, and the other end's square. */
 export const cutTargets = (squares: readonly Square[], side: Side): Square[] =>
-  squares.filter((s) => (s.kind === 'run' ? s.cuts : s.side !== side));
+  squares.filter((s) => (s.kind === 'run' ? s.cuts : s.kind === 'end' && s.side !== side));
 
 /** The square under `p` (flow coordinates), within the square's own size on screen (`k` flow units per pixel). */
 export function squareAt(squares: readonly Square[], p: Point, k: number): Square | null {

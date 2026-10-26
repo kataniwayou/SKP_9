@@ -19,10 +19,19 @@ describe('shape', () => {
     expect(pointsOfShape({ sx: 32, sy: 40, tx: 400, ty: 200 }, { xs: [144], ys: [] })).toEqual([[32, 40], [144, 40], [144, 200], [400, 200]]);
   });
 
-  it('drags an inner vertical run sideways and an inner horizontal run up or down, snapped to 8', () => {
+  it('drags a vertical run sideways and an inner horizontal run up or down, snapped to 8', () => {
     const u = { xs: [24, 264], ys: [300] };
-    expect(dragSegment(u, 1, { x: 51, y: 0 })).toEqual({ bends: { xs: [48, 264], ys: [300] } });
-    expect(dragSegment(u, 2, { x: 0, y: 333 })).toEqual({ bends: { xs: [24, 264], ys: [336] } });
+    expect(dragSegment(u, 1, { x: 51, y: 0 }, e)).toEqual({ bends: { xs: [48, 264], ys: [300] } });
+    expect(dragSegment(u, 2, { x: 0, y: 333 }, e)).toEqual({ bends: { xs: [24, 264], ys: [336] } });
+  });
+
+  it('dragging the first run inserts a jog; the last run slides the landing', () => {
+    expect(dragSegment({ xs: [144], ys: [] }, 0, { x: 50, y: 50 }, e)).toEqual({ bends: { xs: [16, 144], ys: [48] } });
+    expect(dragSegment({ xs: [144], ys: [] }, 2, { x: 200, y: 131 }, e)).toEqual({ landingY: 128 });
+  });
+
+  it('a tail glued to a step: the first run slides it instead of a jog (2026-10-25)', () => {
+    expect(dragSegment({ xs: [144], ys: [] }, 0, { x: 50, y: 61 }, e, true)).toEqual({ tailY: 64 });
   });
 
   it('normalising removes a bend lined up with its neighbour, and returns null when none is left', () => {

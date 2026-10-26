@@ -76,11 +76,19 @@ export function normalize(e: Ends, b: Bends): Bends | null {
 }
 
 /**
- * Inner run k (0 < k < 2n, between two bends) dragged to p (spec ยง4.2): a vertical run moves sideways, a horizontal one
- * up or down. A run at an end is never dragged (the user's, 2026-10-26: it moves the wire whole).
+ * Run k dragged to p (spec ง4.2): a vertical run moves sideways, a horizontal one up or down. The first run leaves a
+ * fixed port, so it gets a jog first (on a straight wire, at both ends); with `slidesTail` (a tail glued to a step
+ * side, the user's 2026-10-25) it slides the tail along that side instead, as the last run slides the landing: their
+ * new heights come back as `tailY` and `landingY` (absolute, snapped). The user's, 2026-10-26: every run's circle and
+ * every corner's drags this way, the contact sliding along with its run.
  */
-export function dragSegment(b: Bends, k: number, p: { x: number; y: number }): { bends: Bends } {
+export function dragSegment(b: Bends, k: number, p: { x: number; y: number }, e: Ends, slidesTail = false): { bends: Bends } | { landingY: number } | { tailY: number } {
+  const n = b.xs.length;
   const y = snap(p.y, GRID), x = snap(p.x, GRID);
+  if (n === 0) return { bends: { xs: [snap(e.sx + JOG), snap(e.tx - JOG)], ys: [y] } };
+  if (k === 0 && slidesTail) return { tailY: y };
+  if (k === 0) return { bends: { xs: [snap(e.sx + JOG), ...b.xs], ys: [y, ...b.ys] } };
+  if (k === 2 * n) return { landingY: y };
   if (k % 2 === 1) return { bends: { xs: b.xs.map((v, i) => (i === (k - 1) / 2 ? x : v)), ys: [...b.ys] } };
   return { bends: { xs: [...b.xs], ys: b.ys.map((v, i) => (i === k / 2 - 1 ? y : v)) } };
 }

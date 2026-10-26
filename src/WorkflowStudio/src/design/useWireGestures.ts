@@ -10,7 +10,7 @@ import type { Selection } from '../store/selection';
 import { addCircuitWire, freeWithout, NEW_WIRE_PREFIX, openJoinedOn, sameEnd, setBends, setEnd, type Circuit, type End, type Side } from '../circuit/circuit';
 import { contactOn, endPointOf, hubStart, routeCircuit, type WireRoute } from '../layout/circuitRoute';
 import { clearBends, clearDragged, clearRun, legPath } from '../layout/detour';
-import { GRID, PMID, snap, STEP_W, type Point } from '../layout/geometry';
+import { clampLanding, GRID, PMID, snap, STEP_W, type Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import { simplify, type Box, type Pt } from '../layout/router';
 import { dragSegment, normalize, pointsOfShape, shapeFromPoints, type Bends } from '../layout/shape';
@@ -22,7 +22,7 @@ import type { DesignProps } from './designProps';
 import { circuitOf, removeWires, withCircuit, type Draft } from './draft';
 import { landBody, type BodyLanding } from './bodyDrop';
 import { landWires, type RunLanding, type WireRun } from './keyBody';
-import { cutPaths, cutTargets, cutWire, holdDrawn, squareAt, squaresOf, type Square } from './cut';
+import { cornerDiag, cutPaths, cutTargets, cutWire, holdDrawn, squareAt, squaresOf, type Square } from './cut';
 import { applyDrop, DROP_REACH, endOf, LINE_REACH, judgeDrop, pointOfTarget, roleOf, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
 import { overlapJudge } from './overlapJudge';
@@ -32,7 +32,7 @@ import { mayShare } from '../layout/overlaps';
 import { netsOf } from '../circuit/families';
 import { newId } from './ids';
 
-/** What a dragged wire end is over (plan 9 §6): the block outlined or the line haloed (tone), the verdict, and where the pointer is, for the label. */
+/** What a dragged wire end is over (plan 9 Â§6): the block outlined or the line haloed (tone), the verdict, and where the pointer is, for the label. */
 export interface DropHint {
   /** The block (node id) or, when `line`, the wire under the pointer; null over empty canvas. */
   id: string | null;
@@ -73,8 +73,9 @@ interface OwnSquares {
   done: (s: Square) => void;
 }
 
-/** Which run of the dragged shape is the one under the pointer (`dragSegment`'s inner run k). */
-function draggedRun(k: number): { vertical: boolean; index: number } {
+/** Which run of the dragged shape is the one under the pointer (`dragSegment`'s run k of a shape with n verticals). */
+function draggedRun(n: number, k: number): { vertical: boolean; index: number } {
+  if (n === 0 || k === 0) return { vertical: false, index: 0 };
   return k % 2 === 1 ? { vertical: true, index: (k - 1) / 2 } : { vertical: false, index: k / 2 - 1 };
 }
 
@@ -96,7 +97,7 @@ export interface Gesture {
 }
 
 /**
- * Runs one pointer gesture on the press's own document (a pop-out's included, spec §6.3): moves until
+ * Runs one pointer gesture on the press's own document (a pop-out's included, spec Â§6.3): moves until
  * the button is released; Escape or a pointer cancel cancels. `onMove` gets flow coordinates (not
  * snapped: the shape snaps); `onEnd(cancelled, moved)` always runs, except when the canvas unmounts or
  * design mode ends mid-gesture: then the listeners are removed and nothing is committed.
@@ -134,7 +135,7 @@ export function useGesture(setActive: (on: boolean) => void): Gesture {
       if (moved || buttonDown) {
         // the click that ends a drag lands on whatever is under the pointer (the pane clears the picks, a
         // wire re-picks): swallowed once, and dropped once this input's events are done. After an Escape
-        // the button is still down: the swallow waits for its release, so the picks stay (spec §5.3)
+        // the button is still down: the swallow waits for its release, so the picks stay (spec Â§5.3)
         const swallow = (ev: MouseEvent) => { ev.stopPropagation(); doc.removeEventListener('click', swallow, true); };
         doc.addEventListener('click', swallow, true);
         const drop = () => view.setTimeout(() => doc.removeEventListener('click', swallow, true), 0);
@@ -171,11 +172,11 @@ export function useGesture(setActive: (on: boolean) => void): Gesture {
 }
 
 /**
- * Editing wires (spec §4.2-§4.5; plan 9 §6; the user's drag rules, 2026-10-08): dragging a picked wire's run square
+ * Editing wires (spec Â§4.2-Â§4.5; plan 9 Â§6; the user's drag rules, 2026-10-08): dragging a picked wire's run square
  * moves that run (the first drag makes the wire manual, the last run slides its head); dragging any wire's body moves
  * the whole wire, detached from everything; dragging either end square moves that end with one corner, onto a step
  * side, the hub, another wire or nothing, as the circuit allows; dragging from a block's connection point draws a new
- * wire. Each finished drag is one history step; Escape cancels it (spec §5.3).
+ * wire. Each finished drag is one history step; Escape cancels it (spec Â§5.3).
  */
 export function useWireGestures(
   saved: StudioDocument,
@@ -193,7 +194,7 @@ export function useWireGestures(
   const [hints, setHints] = useState<DropHint[]>([]);
   // the drag's cursor (Visio's, plan 10 phase 2): a horizontal run (even k) moves up and down, a vertical one sideways; an
   // end being placed (a dragged end, a new wire) the crosshair; a whole wire moved the four-way arrow
-  const [resize, setResize] = useState<'ns' | 'ew' | 'move' | 'cross' | null>(null);
+  const [resize, setResize] = useState<'ns' | 'ew' | 'nwse' | 'nesw' | 'move' | 'cross' | null>(null);
   // a dragged run's alignment guide (plan 10 phase 2, Visio's): the line it snapped to, across the run's own axis; a
   // dragged end's: one per axis it snapped on
   const [runGuides, setRunGuides] = useState<RunGuide[]>([]);
@@ -209,12 +210,15 @@ export function useWireGestures(
   }, [designOff]); // abort and setPreview read refs and React state setters: no need to re-run for them
 
   /**
-   * Drags inner run k of a wire, between two bends (spec §4.2): the first drag makes the wire manual. A run at an end is
-   * not dragged (the user's, 2026-10-26: it has no square; pressed, the wire moves whole). A shape that lies on a wire it
-   * may not share a line with (the user's rule 2, 2026-10-09) is a short circuit: the label says so and, released there,
-   * the run snaps back.
+   * Drags runs of a wire by a circle (spec §4.2; the user's rules, 2026-10-26): a run's circle moves its run across, a
+   * corner's both runs that meet there (`runs`, the corner diagonally); the first drag makes the wire manual. The last
+   * run slides its head: along its step's input side (clamped, spec §4.2), or an open head up and down; a head on a
+   * junction has no last run to drag. The first run slides its tail along its step's output side the same way (the
+   * user's, 2026-10-25); a tail anywhere else gets a jog instead. A straight wire has no circle (it moves whole). A shape
+   * that lies on a wire it may not share a line with (the user's rule 2, 2026-10-09) is a short circuit: the label says
+   * so and, released there, the run snaps back.
    */
-  const startSegment = (wire: WireRoute, k: number, e: ReactPointerEvent) => {
+  const startRuns = (wire: WireRoute, runs: readonly number[], e: ReactPointerEvent) => {
     const d = designRef.current;
     if (!d || e.button !== 0) return;
     const base = d.draft;
@@ -223,31 +227,66 @@ export function useWireGestures(
     const rec = circuit[wire.id]!;
     const ends = wire.core.ends;
     const bends = rec.bends ?? shapeFromPoints(wire.core.points);
-    if (k <= 0 || k >= 2 * bends.xs.length) return;
+    const n = bends.xs.length;
+    if (n === 0 || simplify(pointsOfShape(ends, bends)).length <= 2) return;
+    if (runs.some((r) => r < 0 || r > 2 * n || (rec.head.on === 'wire' && r === 2 * n))) return;
+    const step = rec.head.on === 'step' ? shown.current.placement.steps.get(rec.head.step) : undefined;
+    const headAt = (y: number): End => (rec.head.on === 'step' ? { on: 'step', step: rec.head.step, y } : rec.head.on === 'open' ? { on: 'open', x: rec.head.x, y } : rec.head);
+    // the run that slides a step-glued tail: the first
+    const source = rec.tail.on === 'step' ? shown.current.placement.steps.get(rec.tail.step) : undefined;
+    const tailStep = rec.tail.on === 'step' ? rec.tail.step : null;
+    const slidesTail = source !== undefined;
     // a dragged wire goes around the blocks, never through one (spec §4.2)
     const boxes = blockBoxes(shown.current.placement);
-    let latest: Bends | null = rec.bends ?? null;
-    const shapedCircuit = (b: Bends | null): Circuit => setBends(circuit, wire.id, b);
-    const shaped = (b: Bends | null): Draft => withCircuit(base, saved, shapedCircuit(b));
+    type Shaped = { bends: Bends | null; headY: number | null; tailY: number | null };
+    let latest: Shaped = { bends: rec.bends ?? null, headY: null, tailY: null };
+    const shapedCircuit = (s: Shaped): Circuit => {
+      let moved = s.headY === null ? circuit : setEnd(circuit, wire.id, 'head', headAt(s.headY));
+      if (s.tailY !== null && tailStep !== null) moved = setEnd(moved, wire.id, 'tail', { on: 'step', step: tailStep, y: s.tailY });
+      return setBends(moved, wire.id, s.bends);
+    };
+    const shaped = (s: Shaped): Draft => withCircuit(base, saved, shapedCircuit(s));
+    // where the shape's ends are: the tail and the head as slid
+    const slid = (s: Shaped) => ({
+      ...ends,
+      sy: s.tailY === null || !source ? ends.sy : source.y + s.tailY,
+      ty: s.headY === null ? ends.ty : step ? step.y + s.headY : s.headY,
+    });
     // each move judges the core as it would be drawn (a lead from the hub or a junction does not move); the nets do not change
     // a run dragged by hand: lying on another net's wire is a short circuit, automatic or not (the user's ruling, 2026-10-20)
     const judge = overlapJudge(shown.current, wire.id, circuit, 'strict');
     let short = false;
-    setResize(k % 2 === 0 ? 'ns' : 'ew');
-    // Visio's guide (plan 10 phase 2): the run snaps to block edges and centres and any wire's parallel runs, within 12
-    // screen px
+    const corner = runs.length > 1;
+    const k = runs[0]!;
+    setResize(corner ? cornerDiag(pointsOfShape(ends, bends), Math.max(...runs)) : k % 2 === 0 ? 'ns' : 'ew');
     const axis = k % 2 === 0 ? 'y' : 'x';
     const manual = setBends(circuit, wire.id, bends);
     const share = mayShare(manual, netsOf(manual, (s) => shown.current.graph.steps.get(s)?.entryCondition));
+    // the run that slides a step-glued end: its step's processor middle (where the router lands it), not every grid
+    // line of the side, which the grid already gives (final review 2026-10-21)
+    const slidesHead = !corner && step !== undefined && k === 2 * n;
+    const slidesOwnTail = !corner && slidesTail && k === 0;
+    const landings = slidesHead ? [step.y + PMID] : slidesOwnTail ? [source.y + PMID] : [];
+    // the other wires' ends on that side, for the run that slides an end along it
+    const side = slidesHead && rec.head.on === 'step' ? landingBoxes(shown.current, wire.id, rec.head.step, 'in')
+      : slidesOwnTail && tailStep !== null ? landingBoxes(shown.current, wire.id, tailStep, 'out') : [];
     const reach = SNAP_REACH_PX / getZoom();
     // the other wires as drawn, for the red stretches of a short circuit (the user's rule 2: red where it lies on them)
     const others = new LineIndex();
     for (const w of shown.current.wires) if (w.id !== wire.id) others.add(w.id, w.points);
-    // the shape a pointer at `p` gives: the run under it moved, pushed off any block it would lie on, the rest detouring around blocks
-    const shapeAt = (p: Point): { state: Bends; core: Pt[] } => {
-      const moved = clearRun(dragSegment(bends, k, p).bends, ends, draggedRun(k), boxes);
-      const state = clearBends(ends, moved, boxes);
-      return { state, core: pointsOfShape(ends, state) };
+    // the shape a pointer at `p` gives: each run under it moved (the last first, so the first's jog leaves the others'
+    // places), pushed off any block it would lie on, the rest detouring around blocks
+    const shapeAt = (p: Point): { state: Shaped; core: Pt[] } => {
+      let b = bends, headY: number | null = null, tailY: number | null = null;
+      for (const r of [...runs].sort((x, y) => y - x)) {
+        const out = dragSegment(b, r, p, ends, slidesTail);
+        if ('landingY' in out) headY = step ? clampLanding(out.landingY - step.y) : out.landingY;
+        else if ('tailY' in out) tailY = clampLanding(out.tailY - source!.y);
+        else b = clearRun(out.bends, ends, draggedRun(n, r), boxes);
+      }
+      const at = slid({ bends: null, headY, tailY });
+      const state: Shaped = { bends: clearBends(at, b, boxes), headY, tailY };
+      return { state, core: state.bends ? pointsOfShape(at, state.bends) : [[at.sx, at.sy], [at.tx, at.ty]] as Pt[] };
     };
     const i = axis === 'x' ? 0 : 1;
     // a run lies at `v` across the axis: the snap held (the run was not pushed off a block it would lie along)
@@ -256,24 +295,33 @@ export function useWireGestures(
     const runPts = pointsOfShape(ends, bends);
     const lo = runPts[k]![1 - i], hi = runPts[k + 1]![1 - i];
     run(e, (pointer) => {
-      // any wire's parallel run is a guide (the user's, 2026-10-23), and an equal gap to its neighbours (as blocks have):
-      // the nearest that holds is taken, the run on its line and no short circuit (`pickSnap`), so a tie with a line it
-      // may not take never hides one it may
-      const v = axis === 'x' ? pointer.x : pointer.y;
-      const cands = ranked(v, snapRun(v, axis, shown.current, wire.id, reach).all, spaceRuns(v, lo, hi, axis, shown.current, wire.id, reach));
-      const shortOf = (x: { state: Bends; core: Pt[] }) => judge(simplify(x.core), () => shapedCircuit(x.state));
-      const kept = pickSnap(cands, (at) => shapeAt(axis === 'x' ? { x: at, y: pointer.y } : { x: pointer.x, y: at }),
-        (x, at) => lies(x.core, at), shortOf, () => shapeAt(pointer), (at) => Math.abs(at - v) <= GRID / 2);
-      latest = kept.shape.state;
-      const core = kept.shape.core;
+      let shape: { state: Shaped; core: Pt[] };
+      if (corner) {
+        // a corner moves both ways on the grid, with no guide
+        shape = shapeAt(pointer);
+      } else {
+        // Visio's guide (plan 10 phase 2): the run snaps to block edges and centres, the end step's processor middle (the
+        // run that slides an end) and any wire's parallel runs, within 12 screen px (the user's, 2026-10-23), and an equal
+        // gap to its neighbours (as blocks have): the nearest that holds is taken, the run on its line and no short
+        // circuit (`pickSnap`), so a tie with a line it may not take never hides one it may
+        const v = axis === 'x' ? pointer.x : pointer.y;
+        // the run that slides an end on a step: spaced among the other wires' ends on that side too (the user's, 2026-10-23)
+        const cands = ranked(v, snapRun(v, axis, shown.current, wire.id, reach, landings).all,
+          [...spaceRuns(v, lo, hi, axis, shown.current, wire.id, reach), ...spaceLanding(v, side, reach)]);
+        const shortOf = (x: { state: Shaped; core: Pt[] }) => judge(simplify(x.core), () => shapedCircuit(x.state));
+        const kept = pickSnap(cands, (at) => shapeAt(axis === 'x' ? { x: at, y: pointer.y } : { x: pointer.x, y: at }),
+          (x, at) => lies(x.core, at), shortOf, () => shapeAt(pointer), (at) => Math.abs(at - v) <= GRID / 2);
+        shape = kept.shape;
+        // the guide of the line it snapped to, or of one it may not take (a short circuit), shown unsnapped
+        const lined = kept.at !== null && !kept.spaced ? kept.at : kept.at === null ? kept.near : null;
+        setRunGuides(lined === null ? [] : [guideAt(lined, axis, shown.current, wire.id, [lo, hi])]);
+        // the equal-gap marks wherever the run lands evenly spaced, snapped or not (as a block's), but on a short circuit
+        const landed = kept.at ?? snap(v);
+        setRunGaps(!shortOf(shape) && lies(shape.core, landed) ? onceEach([...runGapMarks(landed, lo, hi, axis, shown.current, wire.id), ...landingMarks(landed, side)]) : []);
+      }
+      latest = shape.state;
       const now = latest;
-      short = judge(simplify(core), () => shapedCircuit(now));
-      // the guide of the line it snapped to, or of one it may not take (a short circuit), shown unsnapped
-      const lined = kept.at !== null && !kept.spaced ? kept.at : kept.at === null ? kept.near : null;
-      setRunGuides(lined === null ? [] : [guideAt(lined, axis, shown.current, wire.id, [lo, hi])]);
-      // the equal-gap marks wherever the run lands evenly spaced, snapped or not (as a block's), but on a short circuit
-      const landed = kept.at ?? snap(v);
-      setRunGaps(!short && lies(core, landed) ? onceEach(runGapMarks(landed, lo, hi, axis, shown.current, wire.id)) : []);
+      short = judge(simplify(shape.core), () => shapedCircuit(now));
       setHints(short ? [{ id: null, line: false, tone: 'no', why: 'short', at: pointer }] : []);
       // Visio's: the wire stays put and its new route is drawn dashed; nothing is rerouted until release (plan 10)
       const drawn = routeCircuit(shapedCircuit(now), { placement: shown.current.placement, steps: shown.current.graph.steps }).find((x) => x.id === wire.id);
@@ -285,15 +333,20 @@ export function useWireGestures(
       setRunGuides([]);
       setRunGaps([]);
       if (cancelled || !moved || short) return;
-      const next = shaped(latest ? normalize(ends, latest) : null);
+      const tidy = latest.bends ? normalize(slid(latest), latest.bends) : null;
+      const next = shaped({ ...latest, bends: tidy });
       // dragged back where it was: no step
       if (JSON.stringify(next.wires?.[wire.id]) === JSON.stringify(rec)) return;
       d.onCommit(next);
     });
   };
+  /** A run's circle: that run (the user's rule 1, 2026-10-26). */
+  const startSegment = (wire: WireRoute, k: number, e: ReactPointerEvent) => startRuns(wire, [k], e);
+  /** A corner's circle (core point `c`): the two runs that meet there, diagonally (the user's, 2026-10-26). */
+  const startCorner = (wire: WireRoute, c: number, e: ReactPointerEvent) => startRuns(wire, [c - 1, c], e);
 
   /**
-   * Drags one end of wire `id` (plan 9 §6). Each move finds what the pointer is over (a block within the drop reach
+   * Drags one end of wire `id` (plan 9 Â§6). Each move finds what the pointer is over (a block within the drop reach
    * wins over a line; the dragged wire's own line counts except its run at the dragged end), judges the drop on
    * `circuit` (and, with `overlaps`, the path drawn: lying on a wire it may not share a line with is a short circuit,
    * the user's rule 2), and draws the wire there (`path`; `step` sees the pointer first). Released: `done` with an allowed
@@ -415,7 +468,7 @@ export function useWireGestures(
   };
 
   /**
-   * Drags a picked wire's end square (plan 9 §6; the user's rule C, 2026-10-09), with the four-way cursor: its tail or
+   * Drags a picked wire's end square (plan 9 Â§6; the user's rule C, 2026-10-09), with the four-way cursor: its tail or
    * its head, connected or open. The end draws its wire like a pen around corners (`Legs`): it follows the pointer with
    * one corner (an L), each 90 degree turn of the pointer fixes the corner where it turned and starts a new leg, and
    * back past a corner takes it away. Released over nothing (or a cache) the end is open there and the wire keeps the
@@ -423,7 +476,7 @@ export function useWireGestures(
    * the role the side gives it, rule D): allowed, the end is there, the corners drawn kept and only the last leg routed
    * in (a wire that was automatic, with no corner fixed in this drag, stays automatic); refused, it snaps back. A drop
    * where the end already is changes nothing. An end dropped open detaches the wire: the ends joined on it open where
-   * they are drawn (spec §2.2-6). The wire keeps its id and stays picked. Released on one of the wire's own squares, as
+   * they are drawn (spec Â§2.2-6). The wire keeps its id and stays picked. Released on one of the wire's own squares, as
    * they were when the drag began (the user's rule, 2026-10-09): on a run square the wire is cut there, everything
    * from it to this end gone, the wire open there; on its other end square the whole wire is deleted.
    */
@@ -444,7 +497,7 @@ export function useWireGestures(
     const stored = (pts: readonly Pt[]): Pt[] => (side === 'head' ? [...pts] : [...pts].reverse());
     let legs: Legs = startLegs(stored(wire.points), flowPointOf(e));
     const boxes = blockBoxes(shown.current.placement);
-    // released open, the leg drawn goes around the blocks (spec §4.2): out of the end that stays the way the wire left it
+    // released open, the leg drawn goes around the blocks (spec Â§4.2): out of the end that stays the way the wire left it
     const out = legs.axis === 'h' ? (legs.dir > 0 ? 0 : 2) : (legs.dir > 0 ? 1 : 3);
     // the leg the router draws into a contact keeps off the other wires (rule 2), as the router does
     const others = new LineIndex();
@@ -511,13 +564,13 @@ export function useWireGestures(
       at: (p) => squareAt(squares, p, zoomK),
       preview: (q) => {
         // over its other end square the whole wire goes: faded, with no new route to preview
-        if (q.kind === 'end') return { wire: wire.id, points: [], gone: wire.points, faded: true };
+        if (q.kind !== 'run') return { wire: wire.id, points: [], gone: wire.points, faded: true };
         const { kept, gone } = cutPaths(wire, shape, side, q.k);
         return { wire: wire.id, points: kept, gone };
       },
       done: (q) => {
         const pointOf = endPointOf(shown.current.wires);
-        if (q.kind === 'end') { d.onCommit(removeWires(base, saved, [wire.id], pointOf), { picks: [] }); return; }
+        if (q.kind !== 'run') { d.onCommit(removeWires(base, saved, [wire.id], pointOf), { picks: [] }); return; }
         const cut = cutWire(circuit, wire.id, side, wire, shape, q.k, pointOf, shown.current.placement);
         d.onCommit(withCircuit(base, saved, cut), { picks: [{ kind: 'wire', id: wire.id }] });
       },
@@ -541,7 +594,7 @@ export function useWireGestures(
         const place = { routes: shown.current.wires, ctx: { placement: shown.current.placement, steps: shown.current.graph.steps } };
         next = applyDrop(circuit, wire.id, side, t, place, keep === undefined || keep === null ? keep : keep.xs.length > 0 ? keep : null).circuit;
       }
-      // a host detached (an end dropped open): the ends joined on it open where they are drawn (spec §2.2-6)
+      // a host detached (an end dropped open): the ends joined on it open where they are drawn (spec Â§2.2-6)
       if (was.on !== 'open' && end.on === 'open') next = openJoinedOn(next, [wire.id], endPointOf(shown.current.wires));
       return next;
     };
@@ -810,8 +863,8 @@ export function useWireGestures(
   };
 
   /**
-   * Draws a new wire from a step's output or the hub (spec §4.5): automatic at its tail, its head judged as any head
-   * (plan 9 §6); released on nothing it is a grey wire open at its head. It becomes the pick.
+   * Draws a new wire from a step's output or the hub (spec Â§4.5): automatic at its tail, its head judged as any head
+   * (plan 9 Â§6); released on nothing it is a grey wire open at its head. It becomes the pick.
    */
   const startNew = (source: SourceId, e: ReactPointerEvent, click?: () => void) => {
     const d = designRef.current;
@@ -930,5 +983,5 @@ export function useWireGestures(
   }), [shown]);
 
   // a drag's cursor only while that drag runs (a run's double arrow, an end's crosshair, a body's four-way arrow)
-  return { gestures, startSegment, startEnd, ghost, hints, runGuides, runGaps, active, running, resize: active ? resize : null, keys, autoHover };
+  return { gestures, startSegment, startCorner, startEnd, ghost, hints, runGuides, runGaps, active, running, resize: active ? resize : null, keys, autoHover };
 }

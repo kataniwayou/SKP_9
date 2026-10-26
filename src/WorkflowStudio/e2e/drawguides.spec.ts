@@ -434,29 +434,59 @@ test.describe('wires: spacing', () => {
 // Wires: which runs drag (the user's, 2026-10-26). A run square, with its double arrow, only on a run between two
 // bends; a run at an end, whose end is fixed there, has none: pressed, the wire moves whole with the four-way arrow.
 
-test.describe('wires: run squares', () => {
-  test('a square on each run between two bends, none on a run at an end (h1 -> h3: down, across, up between its ends)', async ({ page }) => {
+test.describe('wires: circles (the user rules, 2026-10-26)', () => {
+  /** The picked wire's circles: `k:cursor` for a run's, `c<i>:cursor` for a corner's, `side:cursor` for an end's. */
+  const circles = (panel: Locator, id: string) => panel.locator(`.design-wire[data-wire="${id}"] .design-handle`).evaluateAll((els) => els.map((e) =>
+    `${e.getAttribute('data-k') ?? (e.getAttribute('data-c') !== null ? `c${e.getAttribute('data-c')}` : e.getAttribute('data-end'))}:${getComputedStyle(e).cursor}`));
+
+  test('a circle on each run, each corner and each end, each its double arrow (h1 -> h3: down, across, up between its ends)', async ({ page }) => {
     const panel = await open(page);
     const id = W(t.h1, t.h3);
     await pick(page, panel, id, [672, 300]);
-    const squares = panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg`);
-    expect(await squares.evaluateAll((els) => els.map((e) => `${e.getAttribute('data-k')}:${getComputedStyle(e).cursor}`))).toEqual(['1:ew-resize', '2:ns-resize', '3:ew-resize']);
+    // it runs up above the row: right then up (c1, c2), then down and right (c3, c4)
+    expect(await circles(panel, id)).toEqual(['c1:nwse-resize', 'c2:nwse-resize', 'c3:nesw-resize', 'c4:nesw-resize',
+      '0:ns-resize', '1:ew-resize', '2:ns-resize', '3:ew-resize', '4:ns-resize', 'tail:ns-resize', 'head:ns-resize']);
   });
 
-  test('a run at an end has no square: its line shows the four-way arrow and a press there moves the wire whole (h3 -> v1)', async ({ page }) => {
+  test('off its circles the line is the four-way arrow and moves the wire whole; a run at an end slides its contact; a corner moves both runs (h3 -> v1)', async ({ page }) => {
     const panel = await open(page);
     const id = W(t.h3, t.v1);
     await pick(page, panel, id, [1408, 560]);
-    expect(await panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg`).evaluateAll((els) => els.map((e) => e.getAttribute('data-k')))).toEqual(['1']);
-    // its first run, from h3's right side at 352 to the upright at 1408
-    const on = await flowToPage(panel, [1376, 352]);
+    // one corner, so two runs: a circle on each, on the corner and on each end
+    expect(await circles(panel, id)).toEqual(['c1:nesw-resize', 'c2:nesw-resize', '0:ns-resize', '1:ew-resize', '2:ns-resize', 'tail:ns-resize', 'head:ns-resize']);
+    // its first run, from h3's right side at 352 to the upright at 1408: between its circle and the corner, off both
+    const cx = Number(await panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg[data-k="0"]`).getAttribute('cx'));
+    const off = [Math.round((cx + 1408) / 2), 352] as const;
+    const on = await flowToPage(panel, off);
     expect(await page.evaluate(([x, y]) => { const e = document.elementFromPoint(x!, y!)!; return `${e.getAttribute('class')} ${getComputedStyle(e).cursor}`; }, [on.x, on.y])).toBe('nx-hit grab move');
-    await hold(page, panel, [1376, 352], [[1376, 380], [1376, 400]]);
-    const canvas = (await panel.locator('.studio-canvas').getAttribute('class')) ?? '';
+    await hold(page, panel, off, [[off[0], 380], [off[0], 400]]);
+    let canvas = (await panel.locator('.studio-canvas').getAttribute('class')) ?? '';
     expect(canvas).toContain('gesture');
-    expect(canvas).not.toMatch(/gesture-(ns|ew)/);
+    expect(canvas).not.toMatch(/gesture-(ns|ew|nwse|nesw)/);
     // Visio's faded copy of the whole wire where the release puts it
     expect(await panel.locator('g.design-wire-copy').count()).toBeGreaterThan(0);
+    await cancel(page);
+    // the first run's circle: up and down, its tail sliding along h3's side with it
+    const run0 = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg[data-k="0"]`));
+    await page.mouse.move(run0.x, run0.y);
+    await page.mouse.down();
+    await page.mouse.move(run0.x, run0.y + 12, { steps: 4 });
+    await page.mouse.move(run0.x, run0.y + 24, { steps: 4 });
+    canvas = (await panel.locator('.studio-canvas').getAttribute('class')) ?? '';
+    expect(canvas).toContain('gesture-ns');
+    // the dashed new route starts lower on h3's side: the tail slid down with its run
+    const ghost = (await panel.locator('.design-ghost').first().getAttribute('d')) ?? '';
+    const startY = Number(/^M\s*[-\d.]+[ ,]([-\d.]+)/.exec(ghost)?.[1]);
+    expect(startY, ghost).toBeGreaterThan(352);
+    await cancel(page);
+    // its corner: the diagonal arrow
+    const c1 = await centreOf(panel.locator(`.design-wire[data-wire="${id}"] .design-handle.corner`).first());
+    await page.mouse.move(c1.x, c1.y);
+    await page.mouse.down();
+    await page.mouse.move(c1.x + 12, c1.y + 12, { steps: 4 });
+    await page.mouse.move(c1.x + 24, c1.y + 24, { steps: 4 });
+    canvas = (await panel.locator('.studio-canvas').getAttribute('class')) ?? '';
+    expect(canvas).toMatch(/gesture-(nwse|nesw)/);
     await cancel(page);
   });
 });

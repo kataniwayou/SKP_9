@@ -15,7 +15,7 @@ function overlay(guides: Guides, wires: WireRoute[] = []) {
     <ReactFlowProvider>
       <div style={{ width: 800, height: 600 }}>
         <ReactFlow nodes={[]} edges={[]} defaultViewport={{ x: 0, y: 0, zoom: 1 }}>
-          <DesignOverlay band={null} guides={guides} wires={wires} bendsOf={(w) => shapeFromPoints(w.core.points)} onSegment={() => {}} onEnd={() => {}} ghost={null} />
+          <DesignOverlay band={null} guides={guides} wires={wires} bendsOf={(w) => shapeFromPoints(w.core.points)} onSegment={() => {}} onCorner={() => {}} onEnd={() => {}} ghost={null} />
         </ReactFlow>
       </div>
     </ReactFlowProvider>,
@@ -94,7 +94,7 @@ describe("Visio's landing square (plan 10 phase 2)", () => {
       <ReactFlowProvider>
         <div style={{ width: 800, height: 600 }}>
           <ReactFlow nodes={[]} edges={[]} defaultViewport={{ x: 0, y: 0, zoom: 1 }}>
-            <DesignOverlay band={null} guides={{ lines: [], gaps: [] }} wires={[]} bendsOf={() => ({ xs: [], ys: [] })} onSegment={() => {}} onEnd={() => {}} ghost={null}
+            <DesignOverlay band={null} guides={{ lines: [], gaps: [] }} wires={[]} bendsOf={() => ({ xs: [], ys: [] })} onSegment={() => {}} onCorner={() => {}} onEnd={() => {}} ghost={null}
               hints={[{ id: 's1', line: false, tone, why: tone === 'ok' ? 'connect' : 'wrongSide', at: { x: 120, y: 60 }, contact: { x: 100, y: 50 } }]} />
           </ReactFlow>
         </div>
