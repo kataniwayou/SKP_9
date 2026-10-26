@@ -406,7 +406,7 @@ machine (2026-10-26); they run in the `mcr.microsoft.com/dotnet/sdk:8.0-bookworm
 section first proposed are replaced by one run of the whole object chain:
 `tools/copy-object-chain.py --start` copies `filefetcher-archiveexpander-chain` 1.0.0 into
 `objectfetcher-archiveexpander-chain` 1.0.0 (object processors at the two ends, its own topics and
-consumer group), and `tools/simulate-object-feed.py` drives it with `simulate-endless-feed.py`'s
+consumer group), and `tools/simulate-endless-object-feed.py` (then named `simulate-object-feed.py`) drives it with `simulate-endless-feed.py`'s
 five roles, objects in `skp-in` instead of files on the node. Verified 2026-10-26, four cycles:
 
 | role | observed |

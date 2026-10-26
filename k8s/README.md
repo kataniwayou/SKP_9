@@ -563,7 +563,7 @@ Design: `docs/superpowers/specs/2026-10-26-object-fetcher-persister-design.md`.
 tools/minio-dev.ps1 -Up                          # container, buckets skp-in / skp-out, one user per processor
 python tools/copy-object-chain.py --dry-run      # the ten copied steps, their processors and payloads
 python tools/copy-object-chain.py --start        # objectfetcher-archiveexpander-chain 1.0.0, started
-python tools/simulate-object-feed.py             # five roles per cycle into skp-in, records on skp-object-paths
+python tools/simulate-endless-object-feed.py     # five roles per cycle into skp-in, each one confirmed
 docker exec skp-minio mc ls --recursive local/skp-out
 ```
 
