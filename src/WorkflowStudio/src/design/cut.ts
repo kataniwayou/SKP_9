@@ -4,7 +4,6 @@ import { snap, type Point } from '../layout/geometry';
 import { lengthOf, nearestOn, slice } from '../layout/junctions';
 import type { Placement } from '../layout/placement';
 import { simplify, type Pt } from '../layout/router';
-import { WORKFLOW_SOURCE } from '../layout/ports';
 import { endsOf, pointsOfShape, segmentHandles, shapeFromPoints, type Bends, type Ends } from '../layout/shape';
 
 /** On-screen size (px) of a picked wire's square, at any zoom. */
@@ -21,9 +20,10 @@ export type Square =
   | { kind: 'corner'; c: number; x: number; y: number; diag: 'nwse' | 'nesw' }
   /**
    * `glued`: on a step side, the hub or a wire (drawn as Visio's green dot); else open (a hollow circle), plan 10.
-   * `slides`: on a step side, along which it slides (the double arrow, the user's 2026-10-26).
+   * `slides`: the way it slides along what it sits on, its double arrow (rule 1, the user's 2026-10-26): up and down a
+   * step side or the hub's, along its host's run for a junction; null for an open end (it moves any way).
    */
-  | { kind: 'end'; side: Side; x: number; y: number; glued: boolean; slides: boolean };
+  | { kind: 'end'; side: Side; x: number; y: number; glued: boolean; slides: 'ns' | 'ew' | null };
 
 /**
  * A run square is drawn only where an end square does not cover it: on a run too short on screen, the end
@@ -79,9 +79,12 @@ export function squaresOf(w: WireRoute, bends: Bends, k: number, straight = fals
     if (!clearOfEnds({ x, y }, ends, k)) continue;
     corners.push({ kind: 'corner', c, x, y, diag: cornerDiag(core, c) });
   }
+  // a junction's way along its host: a lead between the core and the contact meets a level host, none an upright one
+  const [tx0, ty0] = w.points[0]!;
+  const along = (on: string, lead: boolean): 'ns' | 'ew' | null => (on === 'open' ? null : on === 'junction' && lead ? 'ew' : 'ns');
   return [...corners, ...runs,
-    { kind: 'end', side: 'tail', x: ends.sx, y: ends.sy, glued: w.tailOn !== 'open', slides: w.source !== null && w.source !== WORKFLOW_SOURCE },
-    { kind: 'end', side: 'head', x: ends.tx, y: ends.ty, glued: w.headOn !== 'open', slides: w.target !== null }];
+    { kind: 'end', side: 'tail', x: ends.sx, y: ends.sy, glued: w.tailOn !== 'open', slides: along(w.tailOn, w.core.ends.sx !== tx0 || w.core.ends.sy !== ty0) },
+    { kind: 'end', side: 'head', x: ends.tx, y: ends.ty, glued: w.headOn !== 'open', slides: along(w.headOn, lead) }];
 }
 
 /** The corners of a picked wire's core, where Visio draws a small dot (plan 10): never pressed, a run drag moves them. */

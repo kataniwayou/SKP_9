@@ -213,3 +213,20 @@ describe('a wire moved whole onto another wire (the user\'s rule 2, 2026-10-09)'
     expect(l.ends.map((e) => e.verdict)).toEqual(['connect', 'connect']);
   });
 });
+
+describe('rule 2: every contact point of a wire moved whole (the user, 2026-10-26)', () => {
+  it('its line moved onto an open end joins that end there, as that end dropped on the line would; off it, nothing joins', async () => {
+    const d = await doc();
+    const line = drawn(d, plain(d), 's1->s2');
+    const [ax, ay] = line[0]!, [bx] = line.at(-1)!;
+    const mx = Math.round((ax + bx) / 2 / GRID) * GRID;
+    // an open wire whose head lies 48 below s1 -> s2's line
+    const c = free(plain(d), 'w:f', [[mx, ay - 160], [mx, ay + 48]]);
+    const on = land(d, c, 's1->s2', line, 0, 48);
+    expect(on.joins.map((j) => [j.wire, j.side, j.verdict])).toEqual([['w:f', 'head', 'join']]);
+    expect(on.result['w:f']!.head).toMatchObject({ on: 'wire', host: 's1->s2' });
+    const off = land(d, c, 's1->s2', line, 0, 96);
+    expect(off.joins).toEqual([]);
+    expect(off.result['w:f']!.head).toEqual(c['w:f']!.head);
+  });
+});

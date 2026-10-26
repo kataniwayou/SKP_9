@@ -94,7 +94,7 @@ describe('editing a circuit', () => {
     expect(openJoinedOn(chain, ['gone'], drawn)).toBe(chain);
   });
 
-  it('a wire moved whole is open at both ends where its moved path starts and ends, its shape kept as its bends; its junction ends break; the ends joined on it stay joined (rule 3, 2026-10-26)', () => {
+  it('a wire moved whole is open at both ends where its moved path starts and ends, its shape kept as its bends; its junction ends break and the ends joined on it open where they are drawn (rule 2, 2026-10-26)', () => {
     const chain: Circuit = {
       h: { tail: { on: 'wire', host: 'g', at: 32 }, head: { on: 'step', step: 's2', y: null } },
       g: plain('s0', 's9'),
@@ -105,7 +105,7 @@ describe('editing a circuit', () => {
     const out = moveWire(chain, 'h', [[64, 96], [64, 136], [200, 136], [200, 216], [288, 216]], drawn);
     expect(out.h).toEqual({ tail: { on: 'open', x: 64, y: 96 }, head: { on: 'open', x: 288, y: 216 }, bends: { xs: [64, 200], ys: [136] } });
     expect(out.g).toBe(chain.g);
-    expect(out.x).toBe(chain.x);
+    expect(out.x).toEqual({ tail: chain.x!.tail, head: { on: 'open', x: 160, y: 80 }, bends });
     expect(out.y).toBe(chain.y);
     // a straight wire keeps a one-run shape (a vertical run of no length at its tail), so it is never re-routed
     expect(moveWire(chain, 'g', [[0, 40], [96, 40]], drawn).g).toEqual({ tail: { on: 'open', x: 0, y: 40 }, head: { on: 'open', x: 96, y: 40 }, bends: { xs: [0], ys: [] } });

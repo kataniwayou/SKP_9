@@ -232,12 +232,13 @@ export function openJoinedOn(c: Readonly<Circuit>, hostIds: readonly string[], p
 }
 
 /**
- * A wire moved whole (the user's body drag, 2026-10-08): `points` is its drawn path already moved. It detaches from
- * everything: its tail and head open where that path starts and ends (a junction end of its own too), its shape kept
- * as its bends. The ends joined on it stay joined (the user's rule 3, 2026-10-26: an end follows what it sits on; the
- * commit carries them, `carryJoined`). `c` itself when it is gone.
+ * A wire moved whole (the user's body drag, 2026-10-08; rule 2, 2026-10-26): `points` is its drawn path already moved.
+ * It detaches from everything: its tail and head open where that path starts and ends (a junction end of its own too),
+ * its shape kept as its bends; the ends joined on it open where they are drawn (`pointOf`, spec §2.2-6). Each contact
+ * point is then judged where it lands and connects where it can (`landBody`), so a wire put back joins them again.
+ * `c` itself when it is gone.
  */
-export function moveWire(c: Readonly<Circuit>, id: string, points: readonly Pt[], _pointOf?: (id: string, side: Side) => Point | null): Circuit {
+export function moveWire(c: Readonly<Circuit>, id: string, points: readonly Pt[], pointOf: (id: string, side: Side) => Point | null): Circuit {
   if (!has(c, id) || points.length < 2) return c as Circuit;
   const [x0, y0] = points[0]!, [x1, y1] = points[points.length - 1]!;
   const out = copy(c);
@@ -245,7 +246,7 @@ export function moveWire(c: Readonly<Circuit>, id: string, points: readonly Pt[]
   // put instead of being routed around a block
   const shape = shapeFromPoints(points);
   out[id] = withBends({ on: 'open', x: x0, y: y0 }, { on: 'open', x: x1, y: y1 }, shape.xs.length > 0 ? shape : { xs: [x0], ys: [] });
-  return out;
+  return openJoinedOn(out, [id], pointOf);
 }
 
 /** On a step or the hub: an end that gives its wire a direction (the user's rule D, 2026-10-09). */

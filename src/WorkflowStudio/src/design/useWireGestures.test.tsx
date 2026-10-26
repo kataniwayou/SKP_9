@@ -719,7 +719,7 @@ describe('wire gestures', () => {
     expect(wirePath(container, 's1->s2')).toEqual(doc.wires.find((w) => w.id === 's1->s2')!.points);
   });
 
-  it('a host dragged by its body keeps the end joined on it (rule 3, 2026-10-26: the commit carries it); a wire whose head is on a junction breaks it', async () => {
+  it('a host dragged by its body detaches (rule 2): the end joined on it opens where it was drawn; a wire whose head is on a junction breaks it', async () => {
     const doc = await four();
     const draft = joinedHead(doc);
     const shown = applyDraft(doc, draft);
@@ -728,15 +728,14 @@ describe('wire gestures', () => {
     const one = canvasOf(doc, host);
     const from = onLine(shown, 's1->s2', 0.3);
     // 48 up: its ends are still on s1's output and s2's input (rule B, 2026-10-09): it connects there again, moved
-    // whole; the end joined on it stays joined (the user's rule 3)
+    // whole; the end joined on it is opened all the same (rule 2: it lies off the moved line)
     pressBody(one.container, 's1->s2', from);
     fireEvent.pointerMove(document, { ...screenOf(one.container, { x: from.x, y: from.y - 48 }), pointerId: 1 });
     fireEvent.pointerUp(document, { ...screenOf(one.container, { x: from.x, y: from.y - 48 }), pointerId: 1 });
     const [next] = commits(host)[0]!;
     expect(next.wires!['s1->s2']!.tail).toEqual({ on: 'step', step: 's1', y: PMID - 48 });
     expect(next.wires!['s1->s2']!.head).toMatchObject({ on: 'step', step: 's2' });
-    expect(next.wires!['s3->s4']!.head).toEqual({ on: 'wire', host: 's1->s2', at: 40 });
-    void contact;
+    expect(next.wires!['s3->s4']!.head).toEqual({ on: 'open', x: contact[0], y: contact[1] });
     one.unmount();
 
     const joined = designOf({ draft });

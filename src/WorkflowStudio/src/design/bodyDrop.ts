@@ -4,6 +4,7 @@ import { hubStart } from '../layout/circuitRoute';
 import { GRID, snap, SPHERE_R, type Point } from '../layout/geometry';
 import type { Pt } from '../layout/router';
 import { shapeFromPoints } from '../layout/shape';
+import { nearestOn } from '../layout/junctions';
 import { translatePoints } from '../layout/wireMove';
 import { applyDrop, judgeDrop, lineReachOf, pointOfTarget, targetOf, toneOf, type DropTarget, type Verdict } from './drop';
 import { blockAt, wireAt } from './hit';
@@ -35,6 +36,11 @@ export interface BodyLanding {
   ends: BodyEnd[];
   /** The end that reached a contact first and decides the shift; null: neither is on one. */
   first: Side | null;
+  /**
+   * The open ends of other wires its moved line lies on (rule 2, the user's 2026-10-26): each judged as that end dropped
+   * on the line there (`side` and `id`: that end and its wire), joined in `result` where it may join.
+   */
+  joins: (BodyEnd & { wire: string })[];
 }
 
 const other = (s: Side): Side => (s === 'tail' ? 'head' : 'tail');
@@ -75,6 +81,40 @@ export function landBody(
   shown: StudioDocument, circuit: Readonly<Circuit>, id: string, points: readonly Pt[], drawnAt: (id: string, side: Side) => Point | null,
   dx: number, dy: number, first: Side | null, reach: number, overlap?: OverlapJudge,
 ): BodyLanding {
+  return rejoined(shown, id, landEnds(shown, circuit, id, points, drawnAt, dx, dy, first, reach, overlap));
+}
+
+/**
+ * Rule 2's other contact points (the user's, 2026-10-26): every open end of another wire the moved line lies on (within
+ * a grid step: a move of the line off it disconnects it, at any zoom) is judged as that end dropped on the line there,
+ * and joined where it may join; so a wire put back where it was joins the ends its move opened again (even landed a grid
+ * step off, as onto the hub's ring), and one dropped across an open end joins it.
+ */
+function rejoined(shown: StudioDocument, id: string, l: Omit<BodyLanding, 'joins'>): BodyLanding {
+  const line = [...l.points];
+  const placing = { routes: shown.wires, ctx: { placement: shown.placement, steps: shown.graph.steps } };
+  const joins: BodyLanding['joins'] = [];
+  let result = l.result;
+  for (const j of Object.keys(l.result)) {
+    if (j === id) continue;
+    for (const side of ['tail', 'head'] as const) {
+      const e = result[j]?.[side];
+      if (!e || e.on !== 'open') continue;
+      const near = nearestOn([line], [e.x, e.y]);
+      if (near.gap > GRID) continue;
+      const target: DropTarget = { on: 'wire', host: id, at: near.at };
+      const verdict = judgeDrop(shown, result, j, side, target);
+      joins.push({ wire: j, side, target, verdict, id, line: true, at: { x: e.x, y: e.y } });
+      if (toneOf(verdict) === 'ok') result = applyDrop(result, j, side, target, placing, result[j]!.bends ?? null).circuit;
+    }
+  }
+  return { ...l, result, joins };
+}
+
+function landEnds(
+  shown: StudioDocument, circuit: Readonly<Circuit>, id: string, points: readonly Pt[], drawnAt: (id: string, side: Side) => Point | null,
+  dx: number, dy: number, first: Side | null, reach: number, overlap?: OverlapJudge,
+): Omit<BodyLanding, 'joins'> {
   const placed = (sx: number, sy: number) => {
     const pts = translatePoints(points, sx, sy);
     return { pts, c: moveWire(circuit, id, pts, drawnAt) };

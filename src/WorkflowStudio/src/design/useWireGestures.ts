@@ -10,11 +10,12 @@ import type { Selection } from '../store/selection';
 import { addCircuitWire, freeWithout, NEW_WIRE_PREFIX, openJoinedOn, sameEnd, setBends, setEnd, type Circuit, type End, type Side } from '../circuit/circuit';
 import { contactOn, endPointOf, hubStart, routeCircuit, type WireRoute } from '../layout/circuitRoute';
 import { clearBends, clearDragged, clearRun, legPath } from '../layout/detour';
-import { clampLanding, GRID, PMID, snap, STEP_W, type Point } from '../layout/geometry';
+import { clampLanding, GRID, PMID, snap, SPHERE_R, STEP_W, type Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import { simplify, type Box, type Pt } from '../layout/router';
 import { nearestOn } from '../layout/junctions';
-import { dragSegment, normalize, pointsOfShape, shapeFromPoints, type Bends } from '../layout/shape';
+import { carriedShort, carryJoined, hostsJoined } from './carry';
+import { dragSegment, JOG, normalize, pointsOfShape, shapeFromPoints, type Bends } from '../layout/shape';
 import { coreFrom, legsPath, moveLegs, startLegs, type Legs } from '../layout/wireMove';
 import { LineIndex } from '../layout/overlaps';
 import { blockBoxes, portOf } from '../layout/wires';
@@ -253,7 +254,11 @@ export function useWireGestures(
     // the run that slides a step-glued tail: the first
     const source = rec.tail.on === 'step' ? shown.current.placement.steps.get(rec.tail.step) : undefined;
     const tailStep = rec.tail.on === 'step' ? rec.tail.step : null;
-    const slidesTail = source !== undefined || joints.some((j) => j.side === 'tail' && j.run === 0);
+    // a tail on the hub's right side (automatic or held at a height) slides up and down it as a step's does (rule 1, the
+    // user's 2026-10-26: a contact slides along what it sits on), kept a jog inside the ring
+    const hub = rec.tail.on === 'hub' && rec.tail.angle === null ? shown.current.placement.sphere : undefined;
+    const onHub = (y: number) => Math.min(Math.max(y, snap(hub!.cy - SPHERE_R + JOG)), snap(hub!.cy + SPHERE_R - JOG));
+    const slidesTail = source !== undefined || hub !== undefined || joints.some((j) => j.side === 'tail' && j.run === 0);
     // a dragged wire goes around the blocks, never through one (spec §4.2)
     const boxes = blockBoxes(shown.current.placement);
     // a junction end slid: how far along its host it is now (`at`), and where (`p`)
@@ -263,6 +268,7 @@ export function useWireGestures(
     const shapedCircuit = (s: Shaped): Circuit => {
       let moved = s.headY === null ? circuit : setEnd(circuit, wire.id, 'head', headAt(s.headY));
       if (s.tailY !== null && tailStep !== null) moved = setEnd(moved, wire.id, 'tail', { on: 'step', step: tailStep, y: s.tailY });
+      if (s.tailY !== null && hub) moved = setEnd(moved, wire.id, 'tail', { on: 'hub', angle: null, dy: s.tailY - hub.cy });
       for (const j of joints) {
         const at = j.side === 'head' ? s.headJ : s.tailJ;
         if (at) moved = setEnd(moved, wire.id, j.side, { on: 'wire', host: j.host, at: at.at });
@@ -286,6 +292,7 @@ export function useWireGestures(
     let short = false;
     const corner = runs.length > 1;
     const k = runs[0]!;
+    const carries = hostsJoined(circuit, wire.id);
     setResize(corner ? cornerDiag(pointsOfShape(ends, bends), Math.max(...runs)) : k % 2 === 0 ? 'ns' : 'ew');
     const axis = k % 2 === 0 ? 'y' : 'x';
     const manual = setBends(circuit, wire.id, bends);
@@ -309,7 +316,7 @@ export function useWireGestures(
       for (const r of [...runs].sort((x, y) => y - x)) {
         const out = dragSegment(b, r, p, ends, slidesTail);
         if ('landingY' in out) headY = step ? clampLanding(out.landingY - step.y) : out.landingY;
-        else if ('tailY' in out) tailY = source ? clampLanding(out.tailY - source.y) : out.tailY;
+        else if ('tailY' in out) tailY = source ? clampLanding(out.tailY - source.y) : hub ? onHub(out.tailY) : out.tailY;
         else b = clearRun(out.bends, ends, draggedRun(n, r), boxes);
       }
       // a junction end carried by its run: where that run now crosses its host, the nearest point on the host's line
@@ -359,6 +366,8 @@ export function useWireGestures(
       latest = shape.state;
       const now = latest;
       short = judge(simplify(shape.core), () => shapedCircuit(now));
+      // judged whole (the user's, 2026-10-26): the wires joined on it, carried with it (rule 3), may not short either
+      if (!short && carries) { const plain = shaped(now); short = carriedShort(saved, base, plain, carryJoined(saved, base, plain)); }
       setHints(short ? [{ id: null, line: false, tone: 'no', why: 'short', at: pointer }] : []);
       // Visio's: the wire stays put and its new route is drawn dashed; nothing is rerouted until release (plan 10)
       const drawn = routeCircuit(shapedCircuit(now), { placement: shown.current.placement, steps: shown.current.graph.steps }).find((x) => x.id === wire.id);
@@ -870,7 +879,8 @@ export function useWireGestures(
       landing = { ...l, key };
       setRunGuides(guides);
       setRunGaps(bodyGaps(l));
-      setHints(l.ends.map((x) => ({ id: x.id, line: x.line, tone: toneOf(x.verdict), why: x.verdict, at: x.at })));
+      // every contact point, its own ends and the open ends its line lies on, with the same feedback (rule 2)
+      setHints([...l.ends, ...l.joins].map((x) => ({ id: x.id, line: x.line, tone: toneOf(x.verdict), why: x.verdict, at: x.at })));
       // shifted back exactly where it was: drawn as it was
       if (l.dx === 0 && l.dy === 0) { setGhost(null); return; }
       // Visio's: the wire stays as it is, and a faded copy of it lies where it lands; nothing is rerouted until release

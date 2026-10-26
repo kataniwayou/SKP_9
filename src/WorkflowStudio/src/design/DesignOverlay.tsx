@@ -127,7 +127,7 @@ export function DesignOverlay({ band, guides, wires, bendsOf, onSegment, onCorne
                 : s.kind === 'corner'
                   ? <circle key={`c${s.c}`} className={`design-handle corner ${s.diag}`} data-c={s.c} cx={s.x} cy={s.y} r={RUN_DOT * k}
                     onPointerDown={(e) => onCorner(w, s.c, e)} />
-                  : <circle key={s.side} className={`design-handle end ${s.glued ? 'glued' : 'open'}${s.slides ? ' slides' : ''}`} data-end={s.side} cx={s.x} cy={s.y} r={END_DOT * k}
+                  : <circle key={s.side} className={`design-handle end ${s.glued ? 'glued' : 'open'}${s.slides ? ` slides ${s.slides}` : ''}`} data-end={s.side} cx={s.x} cy={s.y} r={END_DOT * k}
                     strokeWidth={LINE * k} onPointerDown={(e) => onEnd(w, s.side, e)} />))}
             </g>
           );

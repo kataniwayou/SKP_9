@@ -3,7 +3,7 @@ import type { Circuit, CircuitWire, End, Side } from '../circuit/circuit';
 import { contactDistance, routeCircuit } from '../layout/circuitRoute';
 import { lengthOf, nearestOn, pointAt } from '../layout/junctions';
 import type { Pt } from '../layout/router';
-import { placementOf } from './apply';
+import { applyDraft, placementOf } from './apply';
 import { circuitOf, withCircuit, type Draft } from './draft';
 
 /** How many wires deep a junction on a junction is carried (a wire joined on a wire joined on a wire …). */
@@ -14,8 +14,10 @@ const runs = (pts: readonly Pt[]): number[] => pts.slice(1).map((b, i) => Math.a
 
 /**
  * Where a junction `at` px along its host drawn as `was` lies on the host drawn as `now` (the user's rule 3, 2026-10-26):
- * on the same run of the host, as far along that run, so it moves with that run whatever moved it. A host whose runs
- * changed in number or way (a run added or gone) keeps it at the point of its new line nearest where it was.
+ * on the same run of the host. A run moved across takes it with it; a run stretched or shortened at an end (its run
+ * beside it moved) leaves it where it is, along the run, kept on the run; a run moved along itself whole (the host
+ * moved whole) takes it as far. A host whose runs changed in number or way (a run added or gone) keeps it at the point
+ * of its new line nearest where it was.
  */
 export function carriedAt(was: readonly Pt[], now: readonly Pt[], at: number): number {
   const d = contactDistance(was, at);
@@ -27,8 +29,14 @@ export function carriedAt(was: readonly Pt[], now: readonly Pt[], at: number): n
   for (let j = 0, from = 0; j < a.length; from += a[j]!, j++) {
     if (a[j]! > 0 && d <= from + a[j]!) { i = j; start = from; break; }
   }
+  // along the run's own axis (x on a level run, y on an upright one): where it was, or moved as far as both its ends
+  const k = upright(was, i) ? 1 : 0;
+  const p0 = was[i]![k]!, p1 = was[i + 1]![k]!, q0 = now[i]![k]!, q1 = now[i + 1]![k]!;
+  const dir = Math.sign(p1 - p0) || 1;
+  const was0 = p0 + dir * (d - start);
+  const along = q0 - p0 === q1 - p1 ? was0 + (q0 - p0) : Math.min(Math.max(was0, Math.min(q0, q1)), Math.max(q0, q1));
   const startNow = b.slice(0, i).reduce((s, v) => s + v, 0);
-  return Math.min(Math.max(startNow + Math.min(d - start, b[i]!), 0), lengthOf([now]));
+  return Math.min(Math.max(startNow + Math.abs(along - q0), 0), lengthOf([now]));
 }
 
 /**
@@ -68,3 +76,21 @@ export function carryJoined(saved: StudioDocument, before: Draft, after: Draft):
   }
   return c === c1 ? after : withCircuit(after, saved, c);
 }
+
+/**
+ * Whether carrying shorted a wire (the user's, 2026-10-26: a change is judged whole, what rule 3 carried with it too): a
+ * wire the carry moved (`plain`: the change as made, `carried`: with its joined ends carried) that lies on a wire of
+ * another net after the change and did not `before` it.
+ */
+export function carriedShort(saved: StudioDocument, before: Draft, plain: Draft, carried: Draft): boolean {
+  if (carried === plain) return false;
+  const p = circuitOf(saved, plain), c = circuitOf(saved, carried);
+  const moved = new Set(Object.keys(c).filter((id) => JSON.stringify(c[id]) !== JSON.stringify(p[id])));
+  if (moved.size === 0) return false;
+  const was = new Set(applyDraft(saved, before).wires.filter((w) => w.short).map((w) => w.id));
+  return applyDraft(saved, carried).wires.some((w) => moved.has(w.id) && w.short && !was.has(w.id));
+}
+
+/** Whether any wire is joined on wire `id` (what a change to it may carry). */
+export const hostsJoined = (c: Readonly<Circuit>, id: string): boolean =>
+  Object.values(c).some((w) => (w.tail.on === 'wire' && w.tail.host === id) || (w.head.on === 'wire' && w.head.host === id));

@@ -70,7 +70,7 @@ export function landWires(
     moved = true;
     const l = landBody(from, result, id, points, drawnAt, dx, dy, run.first[id] ?? null, reach, overlapJudge(from, id, result));
     first[id] = l.first;
-    ends.push(...l.ends);
+    ends.push(...l.ends, ...l.joins);
     // shifted back exactly where it was: as it was (a drag back to its start)
     if (l.dx === 0 && l.dy === 0) continue;
     still = false;
@@ -78,6 +78,21 @@ export function landWires(
     preview = landBody(from, preview, id, points, drawnAt, dx, dy, run.first[id] ?? null, reach).preview;
   }
   if (!moved) return null;
+  // moved together, the links between them stay (rule 2, the user's 2026-10-26): an end joined on another of them is
+  // joined there again, as far along it (both moved alike)
+  if (!still) {
+    const before = circuitOf(saved, run.base), inGroup = new Set(ids);
+    for (const id of ids) {
+      const w = result[id], was = before[id];
+      if (!w || !was) continue;
+      const keep = (side: Side) => {
+        const e = was[side];
+        return e.on === 'wire' && inGroup.has(e.host) && Object.hasOwn(result, e.host) ? e : w[side];
+      };
+      const tail = keep('tail'), head = keep('head');
+      if (tail !== w.tail || head !== w.head) result = { ...result, [id]: { ...w, tail, head } };
+    }
+  }
   const next = still ? run.base : withCircuit(run.base, saved, result);
   return { run: { ...run, dx, dy, first, after: wiresKey(circuitOf(saved, next), ids) }, preview, result, ends, still, next };
 }

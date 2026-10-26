@@ -526,7 +526,7 @@ test('drag rules: Visio\'s four-way arrow on a wire\'s body, also while it is dr
   await expect.poll(() => pointsOf(panel, ab)).toEqual(before);
 });
 
-test('drag rules: a wire dragged by its body moves whole (every point shifted by one grid-snapped amount), opens at both ends (grey, dashed); the end joined on it goes with it, still joined (rule 3, 2026-10-26); one Undo step; a refresh keeps it', async ({ page }) => {
+test('drag rules: a wire dragged by its body moves whole (every point shifted by one grid-snapped amount), opens at both ends (grey, dashed) and opens the end joined on it; one Undo step; a refresh keeps it', async ({ page }) => {
   const panel = await open(page);
   const ab = `${t.a}->${t.b}`, bc = `${t.b}->${t.c}`;
   expect(await dragEnd(page, panel, bc, 'tail', await pointOnWire(panel, ab, 0.5, 12))).toBe('join here');
@@ -556,12 +556,11 @@ test('drag rules: a wire dragged by its body moves whole (every point shifted by
   expect(await dashOf(panel, ab)).not.toBe('none');
   await expect(edge(panel, ab).locator('circle.nx-src')).toHaveCount(0);
   await expect(edge(panel, ab).locator('path.nx-head')).toHaveCount(0);
-  // the tail joined on it goes with it, still joined, as far as the wire moved (the user's rule 3: an end follows what
-  // it sits on)
-  await expect(edge(panel, bc).locator('circle.nx-joint')).toHaveCount(1);
-  const carried = (await pointsOf(panel, bc))[0]!;
-  expect(Math.abs(carried[0] - (joinedAt[0] + dx))).toBeLessThanOrEqual(8);
-  expect(Math.abs(carried[1] - (joinedAt[1] + dy))).toBeLessThanOrEqual(8);
+  // the tail joined on it is open where it was drawn
+  await expect(edge(panel, bc).locator('circle.nx-joint')).toHaveCount(0);
+  await expect(edge(panel, bc).locator('circle.nx-src')).toHaveCount(1);
+  expect((await pointsOf(panel, bc))[0]).toEqual(joinedAt);
+  expect(await dashOf(panel, bc)).not.toBe('none');
   // it is the pick: its squares show
   await expect(endSquare(panel, ab, 'head')).toBeVisible();
 
@@ -573,7 +572,7 @@ test('drag rules: a wire dragged by its body moves whole (every point shifted by
   expect(await dashOf(panel, ab)).toBe('none');
   await page.keyboard.press('Control+y');
   await expect.poll(() => pointsOf(panel, ab)).toEqual(after);
-  await expect(edge(panel, bc).locator('circle.nx-joint')).toHaveCount(1);
+  await expect(edge(panel, bc).locator('circle.nx-joint')).toHaveCount(0);
 
   // a refresh keeps it (the draft is in the session; the history is not)
   await page.reload();
@@ -581,8 +580,8 @@ test('drag rules: a wire dragged by its body moves whole (every point shifted by
   await expect(edge(again, ab)).toHaveCount(1);
   await expect.poll(() => pointsOf(again, ab)).toEqual(after);
   expect(await dashOf(again, ab)).not.toBe('none');
-  await expect(edge(again, bc).locator('circle.nx-joint')).toHaveCount(1);
-  expect((await pointsOf(again, bc))[0]).toEqual(carried);
+  await expect(edge(again, bc).locator('circle.nx-joint')).toHaveCount(0);
+  expect((await pointsOf(again, bc))[0]).toEqual(joinedAt);
   await expect(page.getByText('● design draft')).toBeVisible();
 });
 

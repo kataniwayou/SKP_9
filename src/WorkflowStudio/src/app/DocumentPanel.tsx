@@ -10,7 +10,7 @@ import type { Selection } from '../store/selection';
 import { designDirty, designLocked, saveBlocked } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { applyDraft, applyEdits } from '../design/apply';
-import { carryJoined } from '../design/carry';
+import { carriedShort, carryJoined } from '../design/carry';
 import { canRedo, canUndo } from '../design/history';
 import { newId } from '../design/ids';
 import { CapsuleToolbar } from './CapsuleToolbar';
@@ -87,8 +87,16 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
           draft: open.design.draft,
           picks: open.picks,
           onPick: (picks) => store.dispatch({ type: 'pick', workflowId, picks }),
-          // rule 3 (the user's, 2026-10-26): whatever a change moves, the ends joined on it follow
-          onCommit: (draft, o) => store.dispatch({ type: 'design', workflowId, draft: carryJoined(shownBase, open.design.draft, draft), merge: o?.merge, picks: o?.picks }),
+          // rule 3 (the user's, 2026-10-26): whatever a change moves, the ends joined on it follow; judged whole, a change
+          // whose carried wires would make a short circuit snaps back
+          onCommit: (draft, o) => {
+            const carried = carryJoined(shownBase, open.design.draft, draft);
+            if (carriedShort(shownBase, open.design.draft, draft, carried)) {
+              store.dispatch({ type: 'log', workflowId, lines: [{ at: new Date().toISOString(), text: 'Not applied: a wire joined on what moved would lie on a wire of another net (short circuit)', level: 'error' }] });
+              return;
+            }
+            store.dispatch({ type: 'design', workflowId, draft: carried, merge: o?.merge, picks: o?.picks });
+          },
           onAutoConnect: (id, dir) => store.dispatch({ type: 'autoConnect', workflowId, id, dir, newId }),
           onUndo: () => store.dispatch({ type: 'undo', workflowId }),
           onRedo: () => store.dispatch({ type: 'redo', workflowId }),

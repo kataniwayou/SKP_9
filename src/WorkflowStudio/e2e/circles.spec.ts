@@ -145,21 +145,23 @@ test('case 3, an inner run (h1 -> h4 under the row): its circle moves it alone, 
   await undo(page, panel, id, was);
 });
 
-test('a tail on the workflow circle cannot slide: its run\'s circle moves the run and a jog keeps the tail where it is (wf -> h2)', async ({ page }) => {
+test('rule 1: a tail on the workflow circle slides up and down its side with its run, as a step does (wf -> h2)', async ({ page }) => {
   const panel = await open(page);
   const id = W('wf', t.h2);
   const was = await wirePoints(panel, id);
   await pick(page, panel, id, [500, 160]);
-  expect(await circles(panel, id)).toContain('0:ns-resize');
+  expect(await circles(panel, id)).toEqual(expect.arrayContaining(['0:ns-resize', 'tail:ns-resize']));
   expect(await drag(page, panel, await centreOf(run(panel, id, 0)), [256, 288])).toBe('ns');
   const now = await wirePoints(panel, id);
-  expect(now[0]).toEqual(was[0]);
-  expect(now.length).toBeGreaterThan(was.length);
-  expect(now[now.length - 1]).toEqual(was[was.length - 1]);
+  // its tail moved up the hub's side with the run: no jog, the rest as it was
+  expect(now[0]![1]).toBeLessThan(was[0]![1]);
+  expect(now[1]![1]).toBe(now[0]![1]);
+  expect(now.length).toBe(was.length);
+  expect(now.slice(2)).toEqual(was.slice(2));
   await undo(page, panel, id, was);
 });
 
-test('rule 3: a run too short on screen has no circle (h4 -> v3 leaves h4 by a 32 px run)', async ({ page }) => {
+test('rule 1: a run too short on screen has no circle (h4 -> v3 leaves h4 by a 32 px run)', async ({ page }) => {
   const panel = await open(page);
   const id = W(t.h4, t.v3);
   await pick(page, panel, id, [1472, 900]);
@@ -226,31 +228,78 @@ async function onItsHost(panel: Locator, id: string, host: string): Promise<bool
   return on && (await edge(panel, id).locator('circle.nx-joint').count()) === 1;
 }
 
-test('rule 3: the host moved whole by its line (four-way) carries the junction; moved back, it is still joined', async ({ page }) => {
+test('rule 2: the host moved whole by its line (four-way) opens the junction; put back, it joins again, shown while held', async ({ page }) => {
   const panel = await open(page);
   const { id, host } = await joinOnHost(page, panel);
-  const [jx, jy] = (await wirePoints(panel, id)).at(-1)!;
+  const joined = (await wirePoints(panel, id)).at(-1)!;
   await pick(page, panel, host, [700, 512]);
   const from = await flowToPage(panel, [700, 512]);
   expect(await under(page, from)).toBe('nx-hit grab move');
   expect(await drag(page, panel, from, [700, 576])).toBe('move');
-  // the host moved down; its level run with it (its first upright, x 288, ends on it)
-  const hostNow = await wirePoints(panel, host);
-  const dy = hostNow.find((p, i) => i > 0 && p[0] === 288 && hostNow[i - 1]![0] === 288 && p[1] > hostNow[i - 1]![1])![1] - 512;
-  expect(dy).toBeGreaterThan(0);
+  // disconnected: the joined end open where it was, no junction
+  await expect(edge(panel, id).locator('circle.nx-joint')).toHaveCount(0);
+  expect((await wirePoints(panel, id)).at(-1)).toEqual(joined);
+  // dragged back: while held, "join here" over that open end; released, joined again where it was
+  const level = (await wirePoints(panel, host)).find((p, i, a) => i > 0 && p[0] === 288 && a[i - 1]![0] === 288)![1];
+  await pick(page, panel, host, [700, level]);
+  const back = await flowToPage(panel, [700, level]), to = await flowToPage(panel, [700, 512]);
+  await page.mouse.move(back.x, back.y);
+  await page.mouse.down();
+  await page.mouse.move(back.x, (back.y + to.y) / 2, { steps: 4 });
+  await page.mouse.move(to.x, to.y, { steps: 4 });
+  await expect(panel.locator('.design-drop-label').filter({ hasText: 'join here' })).not.toHaveCount(0);
+  await page.mouse.up();
+  await frames(page);
   expect(await onItsHost(panel, id, host)).toBe(true);
-  const [mx, my] = (await wirePoints(panel, id)).at(-1)!;
-  expect(my).toBe(jy + dy);
-  expect(Math.abs(mx - jx)).toBeLessThanOrEqual(8);
-  // and back up by as much: still joined, where it was
-  await pick(page, panel, host, [700, 512 + dy]);
-  await drag(page, panel, await flowToPage(panel, [700, 512 + dy]), [700, 512]);
+  // the host lands where the hub's ring and h3's side take it, a grid step off; the end joins it there, its point along
+  // the line on the grid: within two grid steps of where it was
+  const [bx, by] = (await wirePoints(panel, id)).at(-1)!;
+  expect(Math.abs(bx - joined[0]!) + Math.abs(by - joined[1]!)).toBeLessThanOrEqual(16);
+});
+
+test('rule 1: a contact dot shows the double arrow along what it sits on: a junction on a level line sideways, a step side up and down', async ({ page }) => {
+  const panel = await open(page);
+  const { id } = await joinOnHost(page, panel);
+  await pick(page, panel, id, [1376, 700]);
+  expect(await circles(panel, id)).toEqual(expect.arrayContaining(['tail:ns-resize', 'head:ew-resize']));
+});
+
+test('rule 2, moved together: the arrow keys move a host and the wire joined on it as one; the junction between them stays', async ({ page }) => {
+  const panel = await open(page);
+  const { id, host } = await joinOnHost(page, panel);
+  await pick(page, panel, host, [700, 512]);
+  const p = await flowToPage(panel, [1376, 600]);
+  await page.keyboard.down('Control');
+  await page.mouse.click(p.x, p.y);
+  await page.keyboard.up('Control');
+  await expect(edge(panel, id).locator('.wire')).toHaveClass(/picked/);
+  await expect(edge(panel, host).locator('.wire')).toHaveClass(/picked/);
+  for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowDown');
+  await frames(page);
+  await expect.poll(async () => (await wirePoints(panel, host))[0]![1]).toBeGreaterThan(352);
   expect(await onItsHost(panel, id, host)).toBe(true);
-  // where the host's level run now is (the release snaps it to the grid: within one step of 512)
-  const back = await wirePoints(panel, host);
-  const level = back.find((p, i) => i > 0 && p[0] === 288 && back[i - 1]![0] === 288)![1];
-  expect(Math.abs(level - 512)).toBeLessThanOrEqual(8);
-  expect((await wirePoints(panel, id)).at(-1)![1]).toBe(level);
+});
+
+test('a change is judged whole: the host run moved where the wire joined on it would lie on a run of another net is a short circuit, and snaps back', async ({ page }) => {
+  const panel = await open(page);
+  const { id, host } = await joinOnHost(page, panel);
+  const was = await wirePoints(panel, host), joinedWas = await wirePoints(panel, id);
+  await pick(page, panel, host, [700, 512]);
+  // to 496: the joined wire's level stub, a jog above its junction, would lie on h1 -> h4's run at y 480 (another net)
+  const c = await centreOf(run(panel, host, 2));
+  const to = await flowToPage(panel, [700, 496]);
+  await page.mouse.move(c.x, c.y);
+  await page.mouse.down();
+  await page.mouse.move(c.x, (c.y + to.y) / 2, { steps: 4 });
+  await page.mouse.move(c.x, to.y, { steps: 4 });
+  await frames(page);
+  const label = await panel.locator('.design-drop-label text').allTextContents();
+  await page.mouse.up();
+  await frames(page);
+  const now = await wirePoints(panel, host);
+  expect(label.join(' ')).toMatch(/short/i);
+  expect(now).toEqual(was);
+  expect(await wirePoints(panel, id)).toEqual(joinedWas);
 });
 
 test('rule 3: the host\'s level run moved by its circle (double arrow) takes the junction straight with it; the joined wire only stretches', async ({ page }) => {
@@ -273,4 +322,16 @@ test('rule 3: the host\'s level run moved by its circle (double arrow) takes the
   await drag(page, panel, await centreOf(run(panel, host, 2)), [700, 512]);
   expect(await onItsHost(panel, id, host)).toBe(true);
   expect((await wirePoints(panel, id)).at(-1)).toEqual([jx, 512]);
+});
+
+test('rule 3: the upright before the host\'s level run moved sideways only stretches that run: the junction stays where it is, no jog', async ({ page }) => {
+  const panel = await open(page);
+  const { id, host } = await joinOnHost(page, panel);
+  const before = await wirePoints(panel, id);
+  await pick(page, panel, host, [700, 512]);
+  // wf -> h3's first upright, x 288, moved right: its level run now starts later, the junction (x ~1000) on it unmoved
+  expect(await drag(page, panel, await centreOf(run(panel, host, 1)), [352, 432])).toBe('ew');
+  expect((await wirePoints(panel, host))[1]![0]).toBeGreaterThan(288);
+  expect(await onItsHost(panel, id, host)).toBe(true);
+  expect(await wirePoints(panel, id)).toEqual(before);
 });

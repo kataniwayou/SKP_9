@@ -29,6 +29,14 @@ describe('rule 3: an end follows whatever it sits on (the user, 2026-10-26)', ()
     expect(contactOn(across, carriedAt(host, across, 120)).p).toEqual([128, 56]);
   });
 
+  it('the upright before its run moved sideways stretches the run: the junction stays where it is (the user, 2026-10-26)', () => {
+    const later: Pt[] = [[0, 0], [104, 0], [104, 184], [600, 184]];
+    expect(contactOn(later, carriedAt(host, later, 300)).p).toEqual([120, 184]);
+    // so far the run no longer reaches it: kept on the run, at its start
+    const past: Pt[] = [[0, 0], [160, 0], [160, 184], [600, 184]];
+    expect(contactOn(past, carriedAt(host, past, 300)).p).toEqual([160, 184]);
+  });
+
   it('a host whose runs changed in number keeps it at the nearest point of its new line', () => {
     const jogged: Pt[] = [[0, 0], [64, 0], [64, 96], [200, 96], [200, 184], [600, 184]];
     expect(contactOn(jogged, carriedAt(host, jogged, 300)).p).toEqual([200, 184]);
