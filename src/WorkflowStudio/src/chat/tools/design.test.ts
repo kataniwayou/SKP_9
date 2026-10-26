@@ -5,8 +5,9 @@ import type { WorkflowGraphDto } from '../../api/types';
 import { loadedDocument } from '../../app/fixtures';
 import { createInspectorService } from '../../app/inspectorService';
 import { setEnd } from '../../circuit/circuit';
-import { applyEdits } from '../../design/apply';
-import { circuitOf, EMPTY_DRAFT, nextOf, withCircuit } from '../../design/draft';
+import { applyDraft, applyEdits } from '../../design/apply';
+import { committed } from '../../design/carry';
+import { circuitOf, EMPTY_DRAFT, moveBlocks, nextOf, withCircuit } from '../../design/draft';
 import { canUndo } from '../../design/history';
 import { judgeTool } from '../../design/toolDrop';
 import { COLUMN_PITCH, PMID, snap, STEP_H, STEP_W } from '../../layout/geometry';
@@ -221,6 +222,62 @@ describe('the design tools', () => {
     expect(other.ok).toBe(false);
     expect(other.result).toContain('not of one family');
     expect(other.action).toBe("join a → d's tail on a → b");
+    expect(doc().design.draft).toBe(draft);
+  });
+
+  it('rule 3 holds for the chat as on the canvas: a trunk the chat reshapes carries the head joined on it', async () => {
+    // a -> c dips below the steps; b -> c's head joined halfway along that level run, which then drops 64 px
+    const { call, shown } = await setup(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's2'] }),
+      steps: [stepDto('s1', { name: 'a', nextStepIds: ['s3'] }), stepDto('s2', { name: 'b', nextStepIds: ['s3'] }), stepDto('s3', { name: 'c' })],
+    }));
+    const a = shown().placement.steps.get('s1')!, b = shown().placement.steps.get('s2')!, c = shown().placement.steps.get('s3')!;
+    const xs = [a.x + STEP_W + 64, c.x - 32], low = Math.max(a.y, b.y) + STEP_H + 160;
+    expect(done(await call('shape_wire', { wires: [{ wire: 'a -> c', bends: { xs, ys: [low] } }] })).ok).toBe(true);
+    const line = shown().wires.find((w) => w.id === 's1->s3')!.points;
+    const along = (n: number) => line.slice(1, n + 1).reduce((d, q, i) => d + Math.abs(q[0] - line[i]![0]) + Math.abs(q[1] - line[i]![1]), 0);
+    const at = Math.round((along(2) + along(3)) / 2 / 8) * 8;
+    expect(done(await call('join', { wire: 'b -> c', side: 'head', host: 'a -> c', at }))).toMatchObject({ ok: true });
+    const was = shown().wires.find((w) => w.id === 's2->s3')!.points.at(-1)!;
+    expect(was[1]).toBe(low);
+    expect(done(await call('shape_wire', { wires: [{ wire: 'a -> c', bends: { xs, ys: [low + 64] } }] })).ok).toBe(true);
+    expect(shown().wires.find((w) => w.id === 's2->s3')!.points.at(-1)).toEqual([was[0], low + 64]);
+  });
+
+  // parity, not a discriminator: here the store's keepJunctions lands the head on the same point the carry does
+  it('rule 3 holds for move_blocks: the chat moving a trunk\'s step lands the joined head exactly where the canvas would', async () => {
+    const { call, shown, doc } = await setup(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's2'] }),
+      steps: [stepDto('s1', { name: 'a', nextStepIds: ['s3'] }), stepDto('s2', { name: 'b', nextStepIds: ['s3'] }), stepDto('s3', { name: 'c' })],
+    }));
+    // the trunk a -> c routed automatically; b -> c's head joined on its upright; a moved down moves the run that reaches it
+    expect(done(await call('join', { wire: 'b -> c', side: 'head', host: 'a -> c', at: 128 }))).toMatchObject({ ok: true });
+    const a = shown().placement.steps.get('s1')!;
+    const base = applyEdits((doc().status as { doc: Parameters<typeof applyEdits>[0] }).doc, doc().edits, doc().design.draft.blocks);
+    const before = doc().design.draft;
+    const plain = moveBlocks(before, base, new Map([['s1', { x: a.x, y: a.y + 80 }]]));
+    const canvas = committed(base, before, plain)!;
+    expect(canvas).not.toBe(plain);
+    expect(done(await call('move_blocks', { moves: [{ block: 'a', x: a.x, y: a.y + 80 }] })).ok).toBe(true);
+    expect(circuitOf(base, doc().design.draft)['s2->s3']).toEqual(circuitOf(base, canvas)['s2->s3']);
+    expect(shown().wires.find((w) => w.id === 's2->s3')!.points).toEqual(applyDraft(base, canvas).wires.find((w) => w.id === 's2->s3')!.points);
+  });
+
+  it('rule 3, judged whole: a reshape whose carried wire would lie on a wire of another net is refused, the design unchanged', async () => {
+    // b -> c dips to a level run a -> c's head joins at x 640; d -> e (another net) climbs at x 640 from its row to y 480
+    const { call, shown, doc } = await setup(graphDto({
+      workflow: workflowDto({ entryStepIds: ['s1', 's2', 's4'] }),
+      steps: [stepDto('s1', { name: 'a', nextStepIds: ['s3'] }), stepDto('s2', { name: 'b', nextStepIds: ['s3'] }), stepDto('s3', { name: 'c' }), stepDto('s4', { name: 'd', nextStepIds: ['s5'] }), stepDto('s5', { name: 'e' })],
+    }));
+    expect(done(await call('shape_wire', { wires: [{ wire: 'b -> c', bends: { xs: [592, 688], ys: [200] } }] })).ok).toBe(true);
+    expect(done(await call('join', { wire: 'a -> c', side: 'head', host: 'b -> c', at: 136 }))).toMatchObject({ ok: true });
+    expect(shown().wires.find((w) => w.id === 's1->s3')!.points.at(-1)).toEqual([640, 200]);
+    expect(done(await call('shape_wire', { wires: [{ wire: 'd -> e', bends: { xs: [640, 672], ys: [480] } }] })).ok).toBe(true);
+    const draft = doc().design.draft;
+    // the trunk's run down to y 560 would carry a -> c's head with it, down d -> e's climb
+    const r = done(await call('shape_wire', { wires: [{ wire: 'b -> c', bends: { xs: [592, 688], ys: [560] } }] }));
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('a wire joined on what moved would lie on a wire of another net');
     expect(doc().design.draft).toBe(draft);
   });
 

@@ -4,6 +4,7 @@ import type { StudioDocument } from '../../app/document';
 import { addCircuitWire, NEW_WIRE_PREFIX, setBends, setEnd, shiftWires, snapAngle, type Circuit, type CircuitWire, type End, type Side } from '../../circuit/circuit';
 import { applyDraft, applyEdits } from '../../design/apply';
 import { arrowsOf, autoTarget, type Dir } from '../../design/autoConnect';
+import { CARRIED_SHORT, committed } from '../../design/carry';
 import { blockBoxes, clipOrigin, freeOffset } from '../../design/clipboard';
 import { circuitOf, moveBlocks, resetShape, withCircuit, type Draft } from '../../design/draft';
 import { isAssignmentStep, redoStepOf, undoStepOf, type AssignmentStep } from '../../design/history';
@@ -87,10 +88,18 @@ export type Acted = { ok: true; entries: ChatEntry[]; before: OpenDocument; afte
  * `unchanged`, when it would change neither the design nor the edits (the gesture was refused: `unchanged` says why).
  * The Output lines and problems it causes are echoed.
  */
-export async function act(ctx: ToolContext, id: Id, action: StudioAction, opts: { unchanged?: string; run?: () => void } = {}): Promise<Acted> {
+export async function act(ctx: ToolContext, id: Id, given: StudioAction, opts: { unchanged?: string; run?: () => void } = {}): Promise<Acted> {
   const state = ctx.store.getState();
   const before = state.docs.find((d) => d.workflowId === id);
   if (!before) return { ok: false, error: 'the workflow is no longer open' };
+  // a design change commits as the canvas commits it (rule 3, the user's 2026-10-26): the ends joined on what it moved
+  // follow, and a change whose carried wires would short is refused whole
+  let action = given;
+  if (given.type === 'design' && before.status.kind === 'ready') {
+    const carried = committed(layersOf(before).saved, before.design.draft, given.draft);
+    if (carried === null) return { ok: false, error: `refused, the design is unchanged: ${CARRIED_SHORT.replace(/^Not applied: /, '')}` };
+    action = { ...given, draft: carried };
+  }
   const preview = reduce(state, action).docs.find((d) => d.workflowId === id)!;
   const changed = (d: OpenDocument) => d.design.draft !== before.design.draft || d.edits !== before.edits;
   if (opts.unchanged !== undefined && !changed(preview)) return { ok: false, error: opts.unchanged };
@@ -590,7 +599,7 @@ function wiresAlong(circuit: Readonly<Circuit>, offsetOf: (node: string) => Poin
 
 const moveBlocksTool: ToolDef = {
   name: 'move_blocks',
-  description: 'Move blocks (steps, caches, the workflow circle) to new top-left corners, snapped to the 8 px grid, as one drag: one Undo step. A wire whose ends are all on blocks moved by one same offset moves with them, its shape kept (as a rubber-band pick dragged on the canvas); every other wire follows its ends.',
+  description: 'Move blocks (steps, caches, the workflow circle) to new top-left corners, snapped to the 8 px grid, as one drag: one Undo step. A wire whose ends are all on blocks moved by one same offset moves with them, its shape kept (as a rubber-band pick dragged on the canvas); every other wire follows its ends, and a junction joined on a wire that moved follows that wire. Refused when a wire so carried would make a short circuit.',
   parameters: {
     type: 'object',
     properties: {
@@ -749,7 +758,7 @@ const SHAPE_ITEM = {
 
 const shapeWireTool: ToolDef = {
   name: 'shape_wire',
-  description: 'Shape wires as dragging their ends and runs does, what they connect staying: the place of each tail and head on what it is on (read_design gives each end its y on a step, angle or dy on the workflow circle, at on a trunk) and the route of each wire (bends: xs, the x of each vertical run; ys, the y of each level run between two of them; null: automatic). All the wires listed change at once, one Undo step, judged as a whole: shape neighbouring wires in one call. Copy a drawing exactly by giving every wire the shape read_design shows for the original. Refused when the result would make a short circuit.',
+  description: 'Shape wires as dragging their ends and runs does, what they connect staying: the place of each tail and head on what it is on (read_design gives each end its y on a step, angle or dy on the workflow circle, at on a trunk) and the route of each wire (bends: xs, the x of each vertical run; ys, the y of each level run between two of them; null: automatic). All the wires listed change at once, one Undo step, judged as a whole: shape neighbouring wires in one call. Copy a drawing exactly by giving every wire the shape read_design shows for the original. A junction joined on a wire you reshape follows it by itself (it stays on its run, moved only when that run moves across or whole): do not shape the joined wire for it. Refused when the result, or a wire so carried, would make a short circuit.',
   parameters: {
     type: 'object',
     properties: { workflow: WORKFLOW_ARG, wires: { type: 'array', items: SHAPE_ITEM, description: 'Each wire and its new shape.' } },

@@ -91,6 +91,19 @@ export function carriedShort(saved: StudioDocument, before: Draft, plain: Draft,
   return applyDraft(saved, carried).wires.some((w) => moved.has(w.id) && w.short && !was.has(w.id));
 }
 
+/** Why a change whose carried wires would short is not applied, in the Output's words. */
+export const CARRIED_SHORT = 'Not applied: a wire joined on what moved would lie on a wire of another net (short circuit)';
+
+/**
+ * A change as committed (rule 3, the user's 2026-10-26): `after` with the ends joined on what it moved carried along, or
+ * null when a wire so carried would short, the change refused whole. The canvas and the chat commit through this one
+ * judgement, so a change means the same drawing whichever of them makes it.
+ */
+export function committed(saved: StudioDocument, before: Draft, after: Draft): Draft | null {
+  const carried = carryJoined(saved, before, after);
+  return carriedShort(saved, before, after, carried) ? null : carried;
+}
+
 /** Whether any wire is joined on wire `id` (what a change to it may carry). */
 export const hostsJoined = (c: Readonly<Circuit>, id: string): boolean =>
   Object.values(c).some((w) => (w.tail.on === 'wire' && w.tail.host === id) || (w.head.on === 'wire' && w.head.host === id));

@@ -10,7 +10,7 @@ import type { Selection } from '../store/selection';
 import { designDirty, designLocked, saveBlocked } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { applyDraft, applyEdits } from '../design/apply';
-import { carriedShort, carryJoined } from '../design/carry';
+import { CARRIED_SHORT, committed } from '../design/carry';
 import { canRedo, canUndo } from '../design/history';
 import { newId } from '../design/ids';
 import { CapsuleToolbar } from './CapsuleToolbar';
@@ -90,9 +90,9 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
           // rule 3 (the user's, 2026-10-26): whatever a change moves, the ends joined on it follow; judged whole, a change
           // whose carried wires would make a short circuit snaps back
           onCommit: (draft, o) => {
-            const carried = carryJoined(shownBase, open.design.draft, draft);
-            if (carriedShort(shownBase, open.design.draft, draft, carried)) {
-              store.dispatch({ type: 'log', workflowId, lines: [{ at: new Date().toISOString(), text: 'Not applied: a wire joined on what moved would lie on a wire of another net (short circuit)', level: 'error' }] });
+            const carried = committed(shownBase, open.design.draft, draft);
+            if (carried === null) {
+              store.dispatch({ type: 'log', workflowId, lines: [{ at: new Date().toISOString(), text: CARRIED_SHORT, level: 'error' }] });
               return;
             }
             store.dispatch({ type: 'design', workflowId, draft: carried, merge: o?.merge, picks: o?.picks });
