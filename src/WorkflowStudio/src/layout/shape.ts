@@ -76,7 +76,7 @@ export function normalize(e: Ends, b: Bends): Bends | null {
 }
 
 /**
- * Run k dragged to p (spec ง4.2): a vertical run moves sideways, a horizontal one up or down. The first run leaves a
+ * Run k dragged to p (spec ยง4.2): a vertical run moves sideways, a horizontal one up or down. The first run leaves a
  * fixed port, so it gets a jog first (on a straight wire, at both ends); with `slidesTail` (a tail glued to a step
  * side, the user's 2026-10-25) it slides the tail along that side instead, as the last run slides the landing: their
  * new heights come back as `tailY` and `landingY` (absolute, snapped). The user's, 2026-10-26: every run's circle and
