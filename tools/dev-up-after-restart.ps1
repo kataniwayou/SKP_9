@@ -1,6 +1,6 @@
 <#
 Brings the dev stack back after a host restart, in order:
-  1. Docker containers: the kind node, its helpers and skp-kafka (never `kafka-dev-broker.ps1 -Up`,
+  1. Docker containers: the kind node, its helpers, skp-kafka and skp-minio (never `kafka-dev-broker.ps1 -Up`,
      which recreates the broker and destroys topics and offsets).
   2. Waits for the skp pods to be Ready.
   3. The nine supervised port-forwards (tools/skp-forward-loop.ps1), skipping any port already bound.
@@ -42,7 +42,7 @@ while (-not (docker info 2>$null)) {
     if ((Get-Date) -gt $deadline) { throw 'Docker Desktop is not running; start it and re-run' }
     Write-Host 'waiting for Docker Desktop...'; Start-Sleep -Seconds 5
 }
-foreach ($name in 'desktop-control-plane', 'kind-cloud-provider', 'kind-registry-mirror', 'skp-kafka') {
+foreach ($name in 'desktop-control-plane', 'kind-cloud-provider', 'kind-registry-mirror', 'skp-kafka', 'skp-minio') {
     $state = docker inspect $name --format '{{.State.Status}}' 2>$null
     if (-not $state) { Write-Warning "$name does not exist"; continue }
     if ($state -ne 'running') { docker start $name | Out-Null; Write-Host "started $name (was $state)" }
