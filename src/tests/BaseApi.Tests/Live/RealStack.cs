@@ -43,6 +43,21 @@ public static class RealStack
     /// <summary>The container name, so a test that needs the broker to go away can take it away.</summary>
     public static string KafkaContainer => Get("SKP_KAFKA_CONTAINER", "skp-kafka");
 
+    // The dev MinIO from tools (container skp-minio), the S3 the object pair talks to. Like Kafka it is
+    // a plain container on the kind docker network rather than a port-forward; this is its host-side
+    // listener, path-style, and a pod reaches it by container name instead. The root account is for
+    // seeding and reading back only -- the two processors run as their own least-privilege users, and
+    // the tests that prove those policies build clients for those users explicitly.
+    public static string S3ServiceUrl => Get("SKP_S3_URL", "http://localhost:19000");
+    public static string S3RootUser => Get("SKP_S3_ROOT_USER", "skp-minio-root");
+    public static string S3RootPassword => Get("SKP_S3_ROOT_PASSWORD", "skp-minio-root-dev");
+
+    /// <summary>The topic the object chain's importer reads: locators, <c>s3://</c> this time.</summary>
+    public static string ObjectTopic => Get("SKP_OBJECT_TOPIC", "skp-object-paths");
+
+    /// <summary>The topic the object chain's exporter writes: the persisted <c>s3://</c> locators.</summary>
+    public static string ObjectOutTopic => Get("SKP_OBJECT_OUT_TOPIC", "skp-object-documents");
+
     // Read by RedisReconnectLiveTests as the far side of its own forwarder, never connected to
     // directly: the point of that test is a client whose endpoint is absent and then present, which
     // an always-open forward cannot express.
