@@ -569,5 +569,6 @@ docker exec skp-minio mc ls --recursive local/skp-out
 
 The copy has its own topics (`skp-object-paths`, `skp-object-documents`, `skp-object-failures`) and
 consumer group (`skp-objectchain`), so it runs beside the original chain without either stealing the
-other's records. Both pods read `skp-minio` over IPv4 without a `hostAliases` patch: .NET's resolver
-tries the A record first, unlike librdkafka (rebuild guide, Appendix C6).
+other's records. Both pods read `skp-minio` over IPv4 without a `hostAliases` patch: the .NET client
+follows getaddrinfo's order (IPv4 first here) and falls back across addresses, unlike librdkafka
+(rebuild guide, Appendix C6).

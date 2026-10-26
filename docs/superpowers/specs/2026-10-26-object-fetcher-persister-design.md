@@ -49,7 +49,8 @@ alone:
 **No credential is ever read by our code.** `AmazonS3Client` is constructed with an
 `AmazonS3Config` and **no credentials argument**, so the SDK's default credential chain resolves
 them: environment variables on kind, the web-identity token (IRSA) or Pod Identity on EKS. The same
-binary, the same code path; only the manifest differs.
+binary, the same code path; only the manifest differs. IRSA needs `AWSSDK.SecurityToken`, which the
+SDK loads by reflection and nothing else pulls in, so both processors reference it explicitly.
 
 **No Kubernetes Secret, by decision.** The MinIO dev credentials are plain `env` values in the
 manifests, as they are in `tools/minio-dev.ps1`. They protect a throwaway container on a laptop and
@@ -278,7 +279,7 @@ in particular not `AWSSDK.Extensions.NETCore.Setup`; the client is built by hand
 **Checksums.** SDK 4 sends CRC32 request checksums by default. They are left at the default, not
 turned off for MinIO, because turning them off would make the test path differ from the production
 path. The dev MinIO is the final upstream release (`RELEASE.2025-10-15T17-29-55Z`), which supports
-them; the live suite is what proves that.
+them; the end-to-end run (§13) is what proves that.
 
 ## 9. Memory
 
@@ -337,7 +338,8 @@ From Windows, the live tests seed through the SDK against `http://localhost:1900
 ### For AWS (DevOps)
 
 Remove the `S3__ServiceUrl` / `S3__ForcePathStyle` / static-key env lines, set `S3__Region`, and give
-each Deployment a ServiceAccount bound to its IAM role. No image change.
+each Deployment a ServiceAccount bound to its IAM role. No image change: `AWSSDK.SecurityToken`, which
+IRSA's web-identity credentials load by reflection, is already referenced by both processors.
 
 ## 11. What DevOps owns before production
 
@@ -350,6 +352,8 @@ These are outside what a MinIO run proves (§2):
    `S3__ServerSideEncryption` option, which this design does not include.
 3. Network path from the pods to S3 (VPC endpoint or egress) and the region.
 4. Lifecycle rules: an object transitioned to Glacier fails ObjectFetcher's `GET` (`InvalidObjectState`).
+5. The persister's single `PUT` is bounded by the client's 30 s timeout, so a 32 MiB object needs about
+   9 Mbit/s to the bucket; that is comfortable in-region and not across a slow link.
 
 ## 12. Rejected shapes
 
