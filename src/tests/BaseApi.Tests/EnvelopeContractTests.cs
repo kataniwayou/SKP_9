@@ -766,4 +766,105 @@ public sealed class EnvelopeContractTests : IDisposable
         var collapsed = await Collapse(normalized);
         Assert.Equal("bundle.zip", JsonDocument.Parse(collapsed).RootElement.GetProperty("fileName").GetString());
     }
+
+    // ---- the object pair ----------------------------------------------------------------------
+    //
+    // The same contract across the S3 pair's split. ObjectFetcher and ObjectPersister are separate
+    // assemblies with their own copies of the envelope and locator records, and the registered
+    // rows are what pin them together. Fully qualified throughout: the file pair's namespaces are
+    // imported above and declare types of the same names.
+
+    [Fact]
+    public async Task WhatTheObjectFetcherSendsSatisfiesTheEnvelopeSchemaAndTheObjectPersisterReadsIt()
+    {
+        var content = Encoding.UTF8.GetBytes("id,name");
+        var s3 = Substitute.For<global::Amazon.S3.IAmazonS3>();
+        s3.GetObjectMetadataAsync(
+                Arg.Any<global::Amazon.S3.Model.GetObjectMetadataRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new global::Amazon.S3.Model.GetObjectMetadataResponse
+            {
+                ContentLength = content.Length,
+                ETag = "\"abc\"",
+                LastModified = new DateTime(2026, 6, 7, 8, 9, 10, DateTimeKind.Utc),
+            });
+        s3.GetObjectAsync(
+                Arg.Any<global::Amazon.S3.Model.GetObjectRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => new global::Amazon.S3.Model.GetObjectResponse
+            {
+                ResponseStream = new MemoryStream(content),
+            });
+
+        var sender = Substitute.For<IQueueSender>();
+        var sends = new List<ProcessedData>();
+        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
+                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        var fetcher = new global::Processor.ObjectFetcher.ObjectFetcherProcessor(
+            new RecordingLogger<global::Processor.ObjectFetcher.ObjectFetcherProcessor>(),
+            Options.Create(new global::Processor.ObjectFetcher.ObjectFetcherOptions()),
+            s3);
+        fetcher.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
+
+        await fetcher.ExecuteAsync(
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { location = "s3://skp-in/feeds/orders.csv" })),
+            """{"AllowedExtensions":[".csv"],"MinimumSizeBytes":0,"MaximumSizeBytes":4096}""",
+            E, CancellationToken.None);
+
+        var envelope = Assert.Single(sends).Data;
+
+        Assert.True(
+            ProcessorJsonSchemaValidator.TryValidate(EnvelopeSchema(), envelope, out var errors),
+            string.Join("; ", errors));
+
+        var file = JsonSerializer.Deserialize<global::Processor.ObjectPersister.PersistableFile>(
+            envelope, global::BaseProcessor.Core.Configuration.ProcessorConfig.SerializerOptions)!;
+        Assert.Equal("orders.csv", file.FileName);
+        Assert.Equal(".csv", file.Extension);
+        Assert.Equal(content.Length, file.SizeBytes);
+        Assert.Equal(new DateTime(2026, 6, 7, 8, 9, 10, DateTimeKind.Utc), file.ModifiedUtc);
+        Assert.Equal(content, file.Content);
+    }
+
+    [Fact]
+    public async Task WhatTheObjectPersisterSendsSatisfiesTheLocatorSchemaAndTheObjectFetcherReadsIt()
+    {
+        var s3 = Substitute.For<global::Amazon.S3.IAmazonS3>();
+        s3.PutObjectAsync(
+                Arg.Any<global::Amazon.S3.Model.PutObjectRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new global::Amazon.S3.Model.PutObjectResponse());
+
+        var sender = Substitute.For<IQueueSender>();
+        var sends = new List<ProcessedData>();
+        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
+                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        var persister = new global::Processor.ObjectPersister.ObjectPersisterProcessor(
+            new RecordingLogger<global::Processor.ObjectPersister.ObjectPersisterProcessor>(), s3);
+        persister.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
+
+        await persister.ExecuteAsync(
+            JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                fileName = "orders.csv",
+                extension = ".csv",
+                sizeBytes = 3,
+                createdUtc = (DateTime?)null,
+                modifiedUtc = (DateTime?)null,
+                content = new byte[] { 1, 2, 3 },
+            }),
+            """{"DestinationUri":"s3://skp-out/acme"}""",
+            E, CancellationToken.None);
+
+        var locator = Assert.Single(sends).Data;
+
+        Assert.True(
+            ProcessorJsonSchemaValidator.TryValidate(
+                File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Schemas", "locator.json")),
+                locator, out var errors),
+            string.Join("; ", errors));
+
+        var read = JsonSerializer.Deserialize<global::Processor.ObjectFetcher.Locator>(
+            locator, global::BaseProcessor.Core.Configuration.ProcessorConfig.SerializerOptions)!;
+        Assert.Equal("s3://skp-out/acme/orders.csv", read.Location);
+    }
 }

@@ -1,5 +1,6 @@
 using Xunit;
 using Fetcher = Processor.ObjectFetcher;
+using Persister = Processor.ObjectPersister;
 
 namespace BaseApi.Tests.ObjectStorage;
 
@@ -86,6 +87,15 @@ public sealed class ObjectUriTests : ObjectUriContract
     protected override (bool Ok, string? Bucket, string? Key, string? Reason) Parse(string text, bool prefix)
     {
         var ok = Fetcher.ObjectUri.TryParse(text, prefix, out var uri, out var reason);
+        return (ok, uri?.Bucket, uri?.Key, reason);
+    }
+}
+
+public sealed class ObjectPersisterUriTests : ObjectUriContract
+{
+    protected override (bool Ok, string? Bucket, string? Key, string? Reason) Parse(string text, bool prefix)
+    {
+        var ok = Persister.ObjectUri.TryParse(text, prefix, out var uri, out var reason);
         return (ok, uri?.Bucket, uri?.Key, reason);
     }
 }

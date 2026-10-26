@@ -45,6 +45,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Processor.Analyst", "src\Pr
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Processor.ObjectFetcher", "src\Processor.ObjectFetcher\Processor.ObjectFetcher.csproj", "{B65E631D-B14E-4DA1-B32D-32A98BEFBAE4}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Processor.ObjectPersister", "src\Processor.ObjectPersister\Processor.ObjectPersister.csproj", "{E1464205-AE32-4125-AF4D-468D53DB5107}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -130,6 +132,10 @@ Global
 		{B65E631D-B14E-4DA1-B32D-32A98BEFBAE4}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B65E631D-B14E-4DA1-B32D-32A98BEFBAE4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B65E631D-B14E-4DA1-B32D-32A98BEFBAE4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E1464205-AE32-4125-AF4D-468D53DB5107}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E1464205-AE32-4125-AF4D-468D53DB5107}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E1464205-AE32-4125-AF4D-468D53DB5107}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E1464205-AE32-4125-AF4D-468D53DB5107}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{6D576C78-9705-429A-B8CB-EE480922EF0C} = {1173193E-E2C7-4F2C-B933-043568A019E4}
@@ -152,5 +158,6 @@ Global
 		{66CEB79C-8D46-4E98-BF43-641D89CD8C05} = {1173193E-E2C7-4F2C-B933-043568A019E4}
 		{48848AB8-425A-4799-86AD-172955D8DE62} = {1173193E-E2C7-4F2C-B933-043568A019E4}
 		{B65E631D-B14E-4DA1-B32D-32A98BEFBAE4} = {1173193E-E2C7-4F2C-B933-043568A019E4}
+		{E1464205-AE32-4125-AF4D-468D53DB5107} = {1173193E-E2C7-4F2C-B933-043568A019E4}
 	EndGlobalSection
 EndGlobal

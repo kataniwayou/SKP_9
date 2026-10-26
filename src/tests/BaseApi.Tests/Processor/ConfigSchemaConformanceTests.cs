@@ -60,6 +60,17 @@ public sealed class ConfigSchemaConformanceTests
     }
 
     [Fact]
+    public void TheRegisteredObjectPersisterRowDescribesItsRecord()
+    {
+        // destinationUri is REQUIRED though DestinationUri is declared string?, for the reason the
+        // file persister's row gives: the signal for optional is the DEFAULT, and this parameter has
+        // none.
+        Assert.Empty(ConfigSchemaConformance.Check(
+            typeof(global::Processor.ObjectPersister.ObjectPersisterConfig),
+            File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Schemas", "object-persister-config.json"))));
+    }
+
+    [Fact]
     public void APropertyMissingFromTheRowIsAMismatch()
     {
         // THE HOLE THIS CLOSES. A schema cannot reject a key it does not describe, so a record

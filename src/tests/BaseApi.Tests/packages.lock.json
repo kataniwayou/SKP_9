@@ -723,6 +723,13 @@
           "BaseProcessor.Core": "[1.0.0, 1.0.0]"
         }
       },
+      "processor.objectpersister": {
+        "type": "Project",
+        "dependencies": {
+          "AWSSDK.S3": "[4.0.104.2, )",
+          "BaseProcessor.Core": "[1.0.0, 1.0.0]"
+        }
+      },
       "processor.outcomerecorder": {
         "type": "Project",
         "dependencies": {

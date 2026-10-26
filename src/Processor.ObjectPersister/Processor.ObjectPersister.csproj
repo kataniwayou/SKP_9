@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A concrete processor: the S3 twin of FilePersister. That one turns bytes back into a file and
+    reports the path it wrote; this one turns them into an object and reports the s3:// location.
+    Like every other processor here it carries no identity, liveness, broker or Redis code —
+    AddBaseProcessor folds all of it in.
+
+    Common properties (net8.0, Nullable, ImplicitUsings, TreatWarningsAsErrors) come from
+    Directory.Build.props, and package versions from Directory.Packages.props — never declare
+    either here. AWSSDK.S3 is vendored into nugets/ with its closure: restore is offline.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Processor.ObjectPersister</RootNamespace>
+    <AssemblyName>Processor.ObjectPersister</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- PersistableFile, Locator, ObjectUri and S3Client are internal: they are this processor's
+         construction, not its surface. The tests construct them directly, so the test assembly is
+         named here. -->
+    <InternalsVisibleTo Include="BaseApi.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The worker SDK does not copy appsettings.json on its own. -->
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The package, not a ProjectReference: SourceHash.targets ships in the package's build/
+         folder and NuGet imports it automatically, stamping the hash on THIS assembly — the entry
+         assembly, where the runtime reader looks. A ProjectReference could not flow build targets. -->
+    <PackageReference Include="BaseProcessor.Core" VersionOverride="[1.0.0]" />
+    <PackageReference Include="AWSSDK.S3" />
+  </ItemGroup>
+
+</Project>
