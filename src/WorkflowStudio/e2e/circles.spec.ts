@@ -203,3 +203,74 @@ test('the user\'s case: a wire joined on a level line, its upright dragged sidew
   expect(back[back.length - 1]![1]).toBe(512);
   expect(back[back.length - 1]![0]).toBeGreaterThan(nx + 32);
 });
+
+// ---- rule 3 (the user's, 2026-10-26): an end follows whatever it sits on ----
+
+/** h3 -> v2's head joined on wf -> h3's level run at y 512 (both Failed); its junction's point. */
+async function joinOnHost(page: Page, panel: Locator): Promise<{ id: string; host: string }> {
+  const id = W(t.h3, t.v2), host = W('wf', t.h3);
+  expect(await dragEnd(page, panel, id, 'head', await flowToPage(panel, [1000, 512]))).toBe('join here');
+  await expect(edge(panel, id).locator('circle.nx-joint')).toHaveCount(1);
+  return { id, host };
+}
+
+/**
+ * Whether the joined wire's end lies on its host's drawn line, still joined (its junction drawn). Not whether it is solid:
+ * a host moved whole is detached at its own ends, and a joined wire takes its host's colour and state.
+ */
+async function onItsHost(panel: Locator, id: string, host: string): Promise<boolean> {
+  const [x, y] = (await wirePoints(panel, id)).at(-1)!;
+  const line = await wirePoints(panel, host);
+  const on = line.some((p, i) => i > 0 && ((p[0] === x && line[i - 1]![0] === x && Math.min(p[1], line[i - 1]![1]) <= y && y <= Math.max(p[1], line[i - 1]![1]))
+    || (p[1] === y && line[i - 1]![1] === y && Math.min(p[0], line[i - 1]![0]) <= x && x <= Math.max(p[0], line[i - 1]![0]))));
+  return on && (await edge(panel, id).locator('circle.nx-joint').count()) === 1;
+}
+
+test('rule 3: the host moved whole by its line (four-way) carries the junction; moved back, it is still joined', async ({ page }) => {
+  const panel = await open(page);
+  const { id, host } = await joinOnHost(page, panel);
+  const [jx, jy] = (await wirePoints(panel, id)).at(-1)!;
+  await pick(page, panel, host, [700, 512]);
+  const from = await flowToPage(panel, [700, 512]);
+  expect(await under(page, from)).toBe('nx-hit grab move');
+  expect(await drag(page, panel, from, [700, 576])).toBe('move');
+  // the host moved down; its level run with it (its first upright, x 288, ends on it)
+  const hostNow = await wirePoints(panel, host);
+  const dy = hostNow.find((p, i) => i > 0 && p[0] === 288 && hostNow[i - 1]![0] === 288 && p[1] > hostNow[i - 1]![1])![1] - 512;
+  expect(dy).toBeGreaterThan(0);
+  expect(await onItsHost(panel, id, host)).toBe(true);
+  const [mx, my] = (await wirePoints(panel, id)).at(-1)!;
+  expect(my).toBe(jy + dy);
+  expect(Math.abs(mx - jx)).toBeLessThanOrEqual(8);
+  // and back up by as much: still joined, where it was
+  await pick(page, panel, host, [700, 512 + dy]);
+  await drag(page, panel, await flowToPage(panel, [700, 512 + dy]), [700, 512]);
+  expect(await onItsHost(panel, id, host)).toBe(true);
+  // where the host's level run now is (the release snaps it to the grid: within one step of 512)
+  const back = await wirePoints(panel, host);
+  const level = back.find((p, i) => i > 0 && p[0] === 288 && back[i - 1]![0] === 288)![1];
+  expect(Math.abs(level - 512)).toBeLessThanOrEqual(8);
+  expect((await wirePoints(panel, id)).at(-1)![1]).toBe(level);
+});
+
+test('rule 3: the host\'s level run moved by its circle (double arrow) takes the junction straight with it; the joined wire only stretches', async ({ page }) => {
+  const panel = await open(page);
+  const { id, host } = await joinOnHost(page, panel);
+  const before = await wirePoints(panel, id);
+  const [jx] = before.at(-1)!;
+  await pick(page, panel, host, [700, 512]);
+  expect(await drag(page, panel, await centreOf(run(panel, host, 2)), [700, 576])).toBe('ns');
+  const hy = (await wirePoints(panel, id)).at(-1)![1];
+  expect(hy).toBeGreaterThan(512);
+  expect(await onItsHost(panel, id, host)).toBe(true);
+  const after = await wirePoints(panel, id);
+  // the same x on the moved run, no jog: as many points as before; only its upright that reaches the junction stretches
+  expect(after.at(-1)).toEqual([jx, hy]);
+  expect(after.length).toBe(before.length);
+  expect(after.slice(0, -3)).toEqual(before.slice(0, -3));
+  // and back up: still joined, at the same x
+  await pick(page, panel, host, [700, hy]);
+  await drag(page, panel, await centreOf(run(panel, host, 2)), [700, 512]);
+  expect(await onItsHost(panel, id, host)).toBe(true);
+  expect((await wirePoints(panel, id)).at(-1)).toEqual([jx, 512]);
+});

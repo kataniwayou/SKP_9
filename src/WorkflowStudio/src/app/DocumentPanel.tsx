@@ -10,6 +10,7 @@ import type { Selection } from '../store/selection';
 import { designDirty, designLocked, saveBlocked } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
 import { applyDraft, applyEdits } from '../design/apply';
+import { carryJoined } from '../design/carry';
 import { canRedo, canUndo } from '../design/history';
 import { newId } from '../design/ids';
 import { CapsuleToolbar } from './CapsuleToolbar';
@@ -71,6 +72,8 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
   if (open.status.kind === 'failed') return <div className={cls}><div className="doc-msg error" role="alert">{open.status.message}{onRetry && <button type="button" className="btn" onClick={onRetry}>Retry</button>}</div></div>;
   if (open.status.kind === 'loading' || fitter === null) return <div className={cls}><div className="doc-msg">Loading…</div></div>;
 
+  // the design as the canvas draws it, the base each commit's joined ends are carried on (rule 3)
+  const shownBase = edited ?? open.status.doc;
   return (
     <div className={cls}>
       <WorkflowCanvas
@@ -84,7 +87,8 @@ export function DocumentPanel({ workflowId, panel, initialView, onViewChange, on
           draft: open.design.draft,
           picks: open.picks,
           onPick: (picks) => store.dispatch({ type: 'pick', workflowId, picks }),
-          onCommit: (draft, o) => store.dispatch({ type: 'design', workflowId, draft, merge: o?.merge, picks: o?.picks }),
+          // rule 3 (the user's, 2026-10-26): whatever a change moves, the ends joined on it follow
+          onCommit: (draft, o) => store.dispatch({ type: 'design', workflowId, draft: carryJoined(shownBase, open.design.draft, draft), merge: o?.merge, picks: o?.picks }),
           onAutoConnect: (id, dir) => store.dispatch({ type: 'autoConnect', workflowId, id, dir, newId }),
           onUndo: () => store.dispatch({ type: 'undo', workflowId }),
           onRedo: () => store.dispatch({ type: 'redo', workflowId }),
