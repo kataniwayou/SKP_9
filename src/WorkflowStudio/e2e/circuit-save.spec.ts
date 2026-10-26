@@ -1,5 +1,5 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { box, centreOf, documentPanel, dragEnd, dragReading, edge, emptySpot, endSquare, get, newWire, newWires, node, openWorkflow, pane, problems, pickWire, pointOnWire, save, setEntryCondition, type Pt } from './studio';
+import { box, centreOf, documentPanel, dragEnd, dragReading, edge, emptySpot, endSquare, flowToPage, get, newWire, newWires, node, openWorkflow, pane, problems, pickWire, pointOnWire, save, setEntryCondition, wirePoints, type Pt } from './studio';
 import { createCircuitThrowaway, expect, removeThrowaway, test, type CircuitThrowaway } from './throwaway';
 
 // Plan 9 §7: Save derives nextStepIds and entryStepIds by tracing the current. These tests save only their own throwaway
@@ -177,7 +177,9 @@ test('a wire cut by its head square released on its own run square: Save writes 
   const before = await edge(panel, ad).locator('path.w').first().getAttribute('d');
   await pickWire(page, panel, ad);
   const head = await centreOf(endSquare(panel, ad, 'head'));
-  const run = await centreOf(panel.locator(`.design-wire[data-wire="${ad}"] .design-handle.seg`).first());
+  // its first run's middle on the grid, where an end square cuts it: no square is drawn on a run at an end (2026-10-26)
+  const [p0, p1] = await wirePoints(panel, ad);
+  const run = await flowToPage(panel, p0![1] === p1![1] ? [Math.round((p0![0] + p1![0]) / 16) * 8, p0![1]] : [p0![0], Math.round((p0![1] + p1![1]) / 16) * 8]);
   expect(await dragReading(page, panel, head, run)).toBe('cut here');
   await expect.poll(() => edge(panel, ad).locator('path.w').first().getAttribute('d')).not.toBe(before);
   await save(page);

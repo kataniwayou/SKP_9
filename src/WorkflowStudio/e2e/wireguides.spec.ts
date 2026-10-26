@@ -92,18 +92,6 @@ test('wire to wire, upright: on the shared trunk line the siblings are one neigh
   await cancel(page);
 });
 
-test('wire to wire, level: d -> g pulled up lands evenly spaced under the other wire into f (its level runs at 448 and 704)', async ({ page }) => {
-  const panel = await open(page);
-  const dg = W('d', 'g');
-  await pickWire(page, panel, dg);
-  await hold(page, panel, await handle(panel, dg, { k: 0 }), [[992, 940], [992, 965]]);
-  const o = await overlay(panel);
-  expect(o.guides).toEqual([]);
-  expect(o.gaps).toEqual([[448, 704], [704, 960]]);
-  await page.mouse.up();
-  await expect.poll(() => pointsOf(panel, dg)).toEqual([[928, 992], [944, 992], [944, 960], [1040, 960], [1040, 992], [1056, 992]]);
-});
-
 test('no false spacing: the upright into f held beside the b and c column (both right sides at 928) marks no gaps', async ({ page }) => {
   const panel = await open(page);
   const { bent } = await intoF(panel);
@@ -123,26 +111,6 @@ test('the upright into f held near the middle of its row snaps there, every 64 p
   // the trunk to the b/c column, the column to the run, the run to f
   expect(o.gaps).toEqual(expect.arrayContaining([[640, 704], [928, 992], [992, 1056]]));
   expect(o.guides).toEqual([]);
-  await cancel(page);
-});
-
-test("a tie never hides a line it may take; put on a line it may not take, it stays there: a short circuit, its guide shown", async ({ page }) => {
-  const panel = await open(page);
-  const { straight } = await intoF(panel);
-  await pickWire(page, panel, straight);
-  // the straight wire's middle run pulled down to 440: 8 px from f's middle (432) and 8 px from the other wire into f
-  // (448, another net: a short circuit there); f's middle is taken
-  await hold(page, panel, await handle(panel, straight, { k: 0 }), [[992, 436], [992, 440]]);
-  let o = await overlay(panel);
-  expect(o.guides).toEqual(['y=432']);
-  expect(o.red).toBe(0);
-  // put right on the other wire's line: it stays there as dragged (not pulled off it), a short circuit, and the line's
-  // guide still shows (regardless of colour, the user's 2026-10-23)
-  await page.mouse.move(...(Object.values(await flowToPage(panel, [992, 448])) as [number, number]), { steps: 2 });
-  await frames(page);
-  o = await overlay(panel);
-  expect(o.guides).toEqual(['y=448']);
-  expect(await panel.locator('.design-drop-label').allTextContents()).toEqual(['short circuit']);
   await cancel(page);
 });
 
@@ -196,7 +164,7 @@ const boxOf = (panel: Locator, id: string) => node(panel, id).evaluate((el) => {
 });
 const labels = (panel: Locator) => panel.locator('.design-drop-label').allTextContents();
 
-test("a contact spaces evenly: a -> e's head on f's input side snaps a gap above the two landings there, marked; then the bent wire's head slid to the middle of the others", async ({ page }) => {
+test("a contact spaces evenly: a -> e's head on f's input side snaps a gap above the two landings there, marked; then the bent wire's head square slid to the middle of the others", async ({ page }) => {
   const panel = await open(page);
   const ae = W('a', 'e');
   const { straight, bent } = await intoF(panel);
@@ -210,26 +178,12 @@ test("a contact spaces evenly: a -> e's head on f's input side snaps a gap above
   expect(await labels(panel)).toEqual(['connect here']);
   await page.mouse.up();
   await expect.poll(async () => (await pointsOf(panel, ae)).at(-1)).toEqual([F.x, third]);
-  // the bent wire's head slid along f's side: the others land at `third` and the straight wire's height, and their
-  // middle is evenly spaced
+  // the bent wire's head square slid along f's side (its last run has no square, the user's 2026-10-26): the others land
+  // at `third` and the straight wire's height, and their middle is evenly spaced
   const mid = (third + sLand) / 2;
   await pickWire(page, panel, bent);
-  const k = Number(await panel.locator(`.design-wire[data-wire="${bent}"] .design-handle.seg`).last().getAttribute('data-k'));
-  const run = await handle(panel, bent, { k });
-  await hold(page, panel, run, [[run[0], run[1] + 8], [run[0], mid]]);
+  await hold(page, panel, await handle(panel, bent, { side: 'head' }), [[F.x - 4, bLand + 8], [F.x - 4, mid]]);
   expect((await overlay(panel)).gaps).toEqual(expect.arrayContaining([[third, mid], [mid, sLand]].map((x) => x.sort((p, q) => p - q))));
-  await cancel(page);
-});
-
-test("regardless of colour: the straight wire's run held by the bent wire's level line (another net) shows its guide, not snapped onto it", async ({ page }) => {
-  const panel = await open(page);
-  const { straight, bent } = await intoF(panel);
-  const level = (await pointsOf(panel, bent)).at(-1)![1]!;
-  await pickWire(page, panel, straight);
-  await hold(page, panel, await handle(panel, straight, { k: 0 }), [[992, level - 18], [992, level + 6]]);
-  expect((await overlay(panel)).guides).toContain(`y=${level}`);
-  // not on it: no short circuit
-  expect(await labels(panel)).toEqual([]);
   await cancel(page);
 });
 

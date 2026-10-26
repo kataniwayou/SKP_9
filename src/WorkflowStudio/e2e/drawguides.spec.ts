@@ -1,12 +1,12 @@
 import type { Locator, Page } from '@playwright/test';
-import { centreOf, documentPanel, expect, flowToPage, node, openWorkflow, test, wirePoints, zoomOf, type Pt } from './studio';
+import { centreOf, documentPanel, expect, flowToPage, node, openWorkflow, test, zoomOf, type Pt } from './studio';
 import { createDrawingThrowaway, DRAWING, removeThrowaway, type DrawingThrowaway } from './throwaway';
 
 // Every alignment guide and equal-spacing mark, for blocks and for wires, with the real mouse (the user's, 2026-10-25),
 // on the drawing throwaway (`e2e-dg-…`): h1 h2 h3 h4 in a row, v1 v2 v3 v4 down the right, each set off sideways, every
 // block feeding the next three. Blocks are all one size but the hub, so the hub is what tells one kind of edge from
-// another. Each test asserts what Visio shows (the authority, plan 10), and the user's rulings of 2026-10-25: a tail
-// slides along its step as a head does, and blocks keep equal gaps to wires. Nothing is saved but where a drop is the
+// another. Each test asserts what Visio shows (the authority, plan 10), and the user's rulings: blocks keep equal gaps to
+// wires (2026-10-25); only a run between two bends has a square (2026-10-26). Nothing is saved but where a drop is the
 // point: each test starts from a fresh page, so the tests are independent and every one runs when another fails (a
 // failure restarts the worker: a fresh throwaway for the rest).
 test.describe.configure({ mode: 'default', retries: 0 });
@@ -346,8 +346,7 @@ test.describe('wires: alignment', () => {
 
 // ---------------------------------------------------------------------------------------------------------------
 // Wires: spacing. A run in the middle of its neighbours (blocks or parallel runs), along a chain of parallel runs, a
-// landing among a side's other landings (the run that slides a head, an end square on either side), an end's last
-// leg, and a wire moved whole.
+// landing among a side's other landings (an end square on either side), an end's last leg, and a wire moved whole.
 
 test.describe('wires: spacing', () => {
   test('a vertical run held off the middle of its neighbours snaps back, both gaps marked (h3 -> v1 at 1408)', async ({ page }) => {
@@ -374,16 +373,6 @@ test.describe('wires: spacing', () => {
     await pick(page, panel, id, [1440, 1150]);
     await hold(page, panel, await handle(panel, id, { k: 3 }), [[1460, 1200], [1450, 1200]]);
     expect((await overlay(panel)).gaps).toEqual(expect.arrayContaining(['x:1408-1440', 'x:1440-1472']));
-    await cancel(page);
-  });
-
-  test('the run that slides a head is spaced among the landings on that side (h3 -> h4 on h4\'s left)', async ({ page }) => {
-    const panel = await open(page);
-    const id = W(t.h3, t.h4);
-    await pick(page, panel, id, [1420, 320]);
-    // 5 below 320, where the landings run evenly; h4's centre (336) is farther
-    await hold(page, panel, await handle(panel, id, { k: 0 }), [[1424, 340], [1424, 325]]);
-    expect((await overlay(panel)).gaps).toEqual(expect.arrayContaining(['y:320-352', 'y:352-384']));
     await cancel(page);
   });
 
@@ -439,41 +428,35 @@ test.describe('wires: spacing', () => {
     expect((await overlay(panel)).gaps).toEqual(expect.arrayContaining(['x:1376-1408', 'x:1408-1440']));
     await cancel(page);
   });
+});
 
-  test('the first run slides its tail along the step\'s output side, no jog, spaced there, and keeps it (h3 -> v1)', async ({ page }) => {
+// ---------------------------------------------------------------------------------------------------------------
+// Wires: which runs drag (the user's, 2026-10-26). A run square, with its double arrow, only on a run between two
+// bends; a run at an end, whose end is fixed there, has none: pressed, the wire moves whole with the four-way arrow.
+
+test.describe('wires: run squares', () => {
+  test('a square on each run between two bends, none on a run at an end (h1 -> h3: down, across, up between its ends)', async ({ page }) => {
+    const panel = await open(page);
+    const id = W(t.h1, t.h3);
+    await pick(page, panel, id, [672, 300]);
+    const squares = panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg`);
+    expect(await squares.evaluateAll((els) => els.map((e) => `${e.getAttribute('data-k')}:${getComputedStyle(e).cursor}`))).toEqual(['1:ew-resize', '2:ns-resize', '3:ew-resize']);
+  });
+
+  test('a run at an end has no square: its line shows the four-way arrow and a press there moves the wire whole (h3 -> v1)', async ({ page }) => {
     const panel = await open(page);
     const id = W(t.h3, t.v1);
     await pick(page, panel, id, [1408, 560]);
-    // its tail at 352 on h3's right side, pulled up to 292: 288 continues the chain of level runs at 320 (h3 -> h4) and
-    // 352 (h2 -> h4); the side has no free height out of reach of every snap, so the slide is shown snapped
-    await hold(page, panel, await handle(panel, id, { k: 0 }), [[1376, 330], [1376, 292]]);
-    const o = await overlay(panel);
-    expect(o.ghost).toMatch(/^M1344 288 L1408 288 /);
-    expect(o.gaps).toEqual(expect.arrayContaining(['y:288-320', 'y:320-352']));
-    await release(page);
-    await expect.poll(async () => (await wirePoints(panel, id)).slice(0, 2)).toEqual([[1344, 288], [1408, 288]]);
-  });
-
-  test('a tail slid by its first run is spaced among the side\'s other tails: held 4 off their middle it goes there (h3 -> v1)', async ({ page }) => {
-    const panel = await open(page);
-    const id = W(t.h3, t.v1);
-    await pick(page, panel, id, [1408, 560]);
-    // the other tails at 320 and 384: their middle is 352
-    await hold(page, panel, await handle(panel, id, { k: 0 }), [[1376, 330], [1376, 356]]);
-    const o = await overlay(panel);
-    expect(o.ghost).toMatch(/^M1344 352 L1408 352 /);
-    expect(o.gaps).toEqual(expect.arrayContaining(['y:320-352', 'y:352-384']));
-    await cancel(page);
-  });
-
-  test('the first run of a wire whose tail is not on a step still jogs (a hub wire\'s)', async ({ page }) => {
-    const panel = await open(page);
-    const id = W('wf', t.h3);
-    await pick(page, panel, id, [600, 512]);
-    const [x0, y0] = (await wirePoints(panel, id))[0]!;
-    await hold(page, panel, await handle(panel, id, { k: 0 }), [[260, 370], [260, 376]]);
-    // the wire still leaves the hub where it did
-    expect((await overlay(panel)).ghost).toMatch(new RegExp(`^M${x0} ${y0} `));
+    expect(await panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg`).evaluateAll((els) => els.map((e) => e.getAttribute('data-k')))).toEqual(['1']);
+    // its first run, from h3's right side at 352 to the upright at 1408
+    const on = await flowToPage(panel, [1376, 352]);
+    expect(await page.evaluate(([x, y]) => { const e = document.elementFromPoint(x!, y!)!; return `${e.getAttribute('class')} ${getComputedStyle(e).cursor}`; }, [on.x, on.y])).toBe('nx-hit grab move');
+    await hold(page, panel, [1376, 352], [[1376, 380], [1376, 400]]);
+    const canvas = (await panel.locator('.studio-canvas').getAttribute('class')) ?? '';
+    expect(canvas).toContain('gesture');
+    expect(canvas).not.toMatch(/gesture-(ns|ew)/);
+    // Visio's faded copy of the whole wire where the release puts it
+    expect(await panel.locator('g.design-wire-copy').count()).toBeGreaterThan(0);
     await cancel(page);
   });
 });

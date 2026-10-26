@@ -38,15 +38,31 @@ const wirePath = (container: HTMLElement, id: string) => pointsOfD(container.que
 const ghostPath = (container: HTMLElement) => pointsOfD(container.querySelector('path.design-ghost')!.getAttribute('d')!);
 /** 100 % zoom: jsdom's fit is so small that a short run's square would hide under its end dots (as it does on screen). */
 const AT_100 = { x: 0, y: 0, zoom: 1, followFit: false };
+/**
+ * s1 -> s2 dropped below both steps and back up: runs 1 (up), 2 (across) and 3 (up) lie between two bends, so they have
+ * squares; runs 0 and 4 end on the steps and have none (the user's, 2026-10-26).
+ */
+const jogged = (doc: StudioDocument): Draft => {
+  const s1 = doc.placement.steps.get('s1')!, s2 = doc.placement.steps.get('s2')!;
+  return setShape(EMPTY_DRAFT, doc, 's1->s2', { bends: { xs: [s1.x + STEP_W + 16, s2.x - 16], ys: [s1.y + STEP_H + 48] }, landing: null });
+};
 
 describe('wire gestures', () => {
-  it('a picked wire shows its end dots and run handles', async () => {
+  it('a picked wire shows its end dots and a run handle on each run between two bends, none on a run at an end (the user, 2026-10-26)', async () => {
+    const doc = await two();
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={designOf({ draft: jogged(doc), picks: [{ kind: 'wire', id: 's1->s2' }] })} onSelect={vi.fn()} />);
+    expect(container.querySelectorAll('.design-handle.end')).toHaveLength(2);
+    expect([...container.querySelectorAll('.design-handle.seg')].map((e) => e.getAttribute('data-k'))).toEqual(['1', '2', '3']);
+    // only the end squares and the run squares: no mark on a bend
+    expect(container.querySelectorAll('.design-handle:not(.end):not(.seg)')).toHaveLength(0);
+  });
+
+  it('a straight wire has no run handle: its one run is at both ends, and pressing it moves the wire whole', async () => {
     const doc = await two();
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] })} onSelect={vi.fn()} />);
     expect(container.querySelectorAll('.design-handle.end')).toHaveLength(2);
-    expect(container.querySelectorAll('.design-handle.seg').length).toBeGreaterThan(0);
-    // only the end squares and the run squares: no mark on a bend
-    expect(container.querySelectorAll('.design-handle:not(.end):not(.seg)')).toHaveLength(0);
+    expect(container.querySelectorAll('.design-handle.seg')).toHaveLength(0);
+    expect(container.querySelector('.react-flow__edge[data-id="s1->s2"] .nx-hit')!.getAttribute('class')).toContain('grab');
   });
 
   it('a wire that is not picked, or a pick naming a wire that is gone, shows no handles', async () => {
@@ -58,9 +74,9 @@ describe('wire gestures', () => {
   it('dragging a run makes the wire manual: one step, with its bends', async () => {
     const doc = await two();
     const onSelect = vi.fn();
-    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const design = designOf({ draft: jogged(doc), picks: [{ kind: 'wire', id: 's1->s2' }] });
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={onSelect} />);
-    const handle = container.querySelector('.design-handle.seg[data-k="0"]')!;
+    const handle = container.querySelector('.design-handle.seg[data-k="2"]')!;
     fireEvent.pointerDown(handle, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
     expect(container.querySelector('.studio-canvas')!.classList.contains('gesture')).toBe(true);
     fireEvent.pointerMove(handle.ownerDocument, { clientX: 100, clientY: 184, pointerId: 1 });
@@ -135,22 +151,6 @@ describe('wire gestures', () => {
     expect(vi.mocked(design.onCommit).mock.calls[0]![0].wires!['s1->s2']!.bends!.xs).toEqual([s1.x + STEP_W + 16, s2.x - 8]);
   });
 
-  it("a head's run slid along its step's side snaps to the processor middle only: no guide elsewhere on the side (final review 2026-10-21)", async () => {
-    const doc = await two();
-    const s2 = doc.placement.steps.get('s2')!;
-    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
-    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
-    const handle = container.querySelector('.design-handle.seg[data-k="0"]')!;
-    const x = s2.x - 40;
-    fireEvent.pointerDown(handle, { button: 0, ...screenOf(container, { x, y: s2.y + PMID }), pointerId: 1 });
-    fireEvent.pointerMove(document, { ...screenOf(container, { x, y: s2.y + 40 }), pointerId: 1 });
-    expect(container.querySelector('line.design-guide.run')).toBeNull();
-    fireEvent.pointerMove(document, { ...screenOf(container, { x, y: s2.y + PMID + 6 }), pointerId: 1 });
-    expect(Number(container.querySelector('line.design-guide.run')!.getAttribute('y1'))).toBe(s2.y + PMID);
-    fireEvent.keyDown(document, { key: 'Escape' });
-    fireEvent.pointerUp(document, { pointerId: 1 });
-  });
-
   it("an end square held over the wire's other end square previews the whole wire going: no dashed new route (final review 2026-10-21)", async () => {
     const doc = await two();
     const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
@@ -176,13 +176,10 @@ describe('wire gestures', () => {
 
   it('a run square shows the way its run moves, and keeps that double arrow while it is dragged', async () => {
     const doc = await two();
-    const s1 = doc.placement.steps.get('s1')!, s2 = doc.placement.steps.get('s2')!;
-    // a manual wire with one vertical run, landing below the processor middle so the run has length
-    const draft = setShape(EMPTY_DRAFT, doc, 's1->s2', { bends: { xs: [(s1.x + STEP_W + s2.x) / 2], ys: [] }, landing: 128 });
-    const design = designOf({ draft, picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const design = designOf({ draft: jogged(doc), picks: [{ kind: 'wire', id: 's1->s2' }] });
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
     const canvas = container.querySelector('.studio-canvas')!;
-    const across = container.querySelector('.design-handle.seg[data-k="0"]')!;
+    const across = container.querySelector('.design-handle.seg[data-k="2"]')!;
     const upright = container.querySelector('.design-handle.seg[data-k="1"]')!;
     expect(across.getAttribute('class')).toContain('seg h');
     expect(upright.getAttribute('class')).toContain('seg v');
@@ -206,7 +203,7 @@ describe('wire gestures', () => {
 
   it('handles, outline and ghost keep their size on screen whatever the zoom', async () => {
     const doc = await two();
-    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] })} onSelect={vi.fn()} />);
+    const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={designOf({ draft: jogged(doc), picks: [{ kind: 'wire', id: 's1->s2' }] })} onSelect={vi.fn()} />);
     const zoom = Number(/scale\(([-\d.e]+)\)/.exec((container.querySelector('.react-flow__viewport') as HTMLElement).style.transform)![1]);
     const end = container.querySelector('.design-handle.end')!;
     // Visio's handles (plan 10 phase 2): an 8 px end circle and a 6 px run dot on screen
@@ -230,9 +227,9 @@ describe('wire gestures', () => {
 
   it('a press on a handle that does not move makes no step', async () => {
     const doc = await two();
-    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const design = designOf({ draft: jogged(doc), picks: [{ kind: 'wire', id: 's1->s2' }] });
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
-    const handle = container.querySelector('.design-handle.seg[data-k="0"]')!;
+    const handle = container.querySelector('.design-handle.seg[data-k="2"]')!;
     fireEvent.pointerDown(handle, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
     fireEvent.pointerUp(handle.ownerDocument, { clientX: 101, clientY: 100, pointerId: 1 });
     expect(design.onCommit).not.toHaveBeenCalled();
@@ -240,9 +237,9 @@ describe('wire gestures', () => {
 
   it('Escape during a run drag cancels it: no step, and the Escape goes no further', async () => {
     const doc = await two();
-    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const design = designOf({ draft: jogged(doc), picks: [{ kind: 'wire', id: 's1->s2' }] });
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
-    const handle = container.querySelector('.design-handle.seg[data-k="0"]')!;
+    const handle = container.querySelector('.design-handle.seg[data-k="2"]')!;
     fireEvent.pointerDown(handle, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
     fireEvent.pointerMove(handle.ownerDocument, { clientX: 100, clientY: 164, pointerId: 1 });
     const outside = vi.fn();
@@ -257,9 +254,9 @@ describe('wire gestures', () => {
 
   it('a pointer cancel ends the drag with no step', async () => {
     const doc = await two();
-    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const design = designOf({ draft: jogged(doc), picks: [{ kind: 'wire', id: 's1->s2' }] });
     const { container } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
-    const handle = container.querySelector('.design-handle.seg[data-k="0"]')!;
+    const handle = container.querySelector('.design-handle.seg[data-k="2"]')!;
     fireEvent.pointerDown(handle, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
     fireEvent.pointerMove(handle.ownerDocument, { clientX: 100, clientY: 164, pointerId: 1 });
     fireEvent.pointerCancel(handle.ownerDocument, { pointerId: 1 });
@@ -269,9 +266,9 @@ describe('wire gestures', () => {
 
   it('a canvas unmounted mid-drag leaves no listeners behind', async () => {
     const doc = await two();
-    const design = designOf({ picks: [{ kind: 'wire', id: 's1->s2' }] });
+    const design = designOf({ draft: jogged(doc), picks: [{ kind: 'wire', id: 's1->s2' }] });
     const { container, unmount } = render(<WorkflowCanvas doc={doc} fitter={fitter} width={1200} height={800} initialView={AT_100} design={design} onSelect={vi.fn()} />);
-    const handle = container.querySelector('.design-handle.seg[data-k="0"]')!;
+    const handle = container.querySelector('.design-handle.seg[data-k="2"]')!;
     fireEvent.pointerDown(handle, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
     fireEvent.pointerMove(document, { clientX: 100, clientY: 164, pointerId: 1 });
     unmount();
@@ -518,7 +515,8 @@ describe('wire gestures', () => {
     // three quarters along its first run: its own line, clear of s1 and off the run's square
     const quarter: Point = { x: pts[0]![0] + ((pts[1]![0] - pts[0]![0]) * 3) / 4, y: pts[0]![1] };
     expect(dragEnd(container, 's1->s2', 'head', quarter).text).toBe('same wire');
-    // on that run's square: released there it would cut the wire (the user's rule, 2026-10-09)
+    // at that run's middle: released there it would cut the wire (the user's rule, 2026-10-09), though a run at an end
+    // shows no square (2026-10-26)
     expect(dragEnd(container, 's1->s2', 'head', mid(0)).text).toBe('cut here');
   });
 
@@ -595,12 +593,14 @@ describe('wire gestures', () => {
     expect(g.querySelector(`.design-handle.seg[data-k="${last}"]`)).toBeNull();
   });
 
-  it('a run drag on a wire whose head is on a junction keeps its head on the host; its last run does not drag', async () => {
+  it('a run drag on a wire whose head is on a junction keeps its head on the host; neither run at an end drags', async () => {
     const doc = await four();
     const draft = joinedHead(doc);
     const design = designOf({ draft, picks: [{ kind: 'wire', id: 's3->s4' }] });
     const { container } = canvasOf(doc, design);
-    fireEvent.pointerDown(container.querySelector('.design-wire[data-wire="s3->s4"] .design-handle.seg[data-k="0"]')!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
+    const squares = [...container.querySelectorAll('.design-wire[data-wire="s3->s4"] .design-handle.seg')];
+    expect(squares.map((q) => q.getAttribute('data-k'))).not.toContain('0');
+    fireEvent.pointerDown(squares[0]!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
     const s3 = doc.placement.steps.get('s3')!;
     const to = { x: s3.x + STEP_W + 24, y: s3.y + STEP_H + 64 };
     fireEvent.pointerMove(document, { ...screenOf(container, to), pointerId: 1 });
@@ -609,20 +609,6 @@ describe('wire gestures', () => {
     expect(next.wires!['s3->s4']!.head).toEqual({ on: 'wire', host: 's1->s2', at: 40 });
     expect(next.wires!['s3->s4']!.bends!.xs.length).toBeGreaterThan(0);
     expect(next.next['s3']).toEqual(['s2']);
-  });
-
-  it('the last run of a wire open at its head slides the open head up and down, its x kept', async () => {
-    const doc = await two();
-    const draft = withCircuit(EMPTY_DRAFT, doc, setEnd(circuitOf(doc, EMPTY_DRAFT), 's1->s2', 'head', { on: 'open', x: 1104, y: 400 }));
-    const design = designOf({ draft, picks: [{ kind: 'wire', id: 's1->s2' }] });
-    const { container } = canvasOf(doc, design);
-    const runs = container.querySelectorAll('.design-wire[data-wire="s1->s2"] .design-handle.seg');
-    fireEvent.pointerDown(runs[runs.length - 1]!, { button: 0, clientX: -500, clientY: -500, pointerId: 1 });
-    fireEvent.pointerMove(document, { ...screenOf(container, { x: 1080, y: 464 }), pointerId: 1 });
-    fireEvent.pointerUp(document, { ...screenOf(container, { x: 1080, y: 464 }), pointerId: 1 });
-    const head = commits(design)[0]![0].wires!['s1->s2']!.head;
-    expect(head).toMatchObject({ on: 'open', x: 1104 });
-    expect((head as { y: number }).y).not.toBe(400);
   });
 
   // ---- the user's drag rules (2026-10-08): the body moves the whole wire; an end square adds one corner ----

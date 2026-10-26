@@ -1,5 +1,5 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { blocks, box, centreOf, documentPanel, edge, get, inspector, newWires, node, openWorkflow, outputLines, pane, pointOnWire, pressTo, problems, save, upright, zoomOf, type LiveWorkflow, type Pt } from './studio';
+import { bendWire, blocks, box, centreOf, documentPanel, edge, get, inspector, newWires, node, openWorkflow, outputLines, pane, pickWire, pointOnWire, pressTo, problems, save, upright, zoomOf, type LiveWorkflow, type Pt } from './studio';
 import { createCopyThrowaway, expect, removeThrowaway, test, type CopyThrowaway } from './throwaway';
 
 // Copy, paste and delete (the user's decisions, 2026-10-10), with the real mouse and keyboard. Only this run's own
@@ -172,12 +172,12 @@ test('keys typed in an Inspector field never copy, paste or delete', async ({ pa
 test('a group drag moves a picked hand-shaped wire\'s bends with the picked blocks; not picked, they stay', async ({ page }) => {
   const panel = await open(page);
   const id = `${t.a}->${t.b}`;
-  // give a -> b a shape of its own: its run dragged down 48 px makes a U
-  const p = await pointOnWire(panel, id);
-  await page.mouse.click(p.x, p.y);
-  const run = panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg`).first();
+  // give a -> b a shape of its own: bent (its head slid along b's side), then its upright dragged 48 px right
+  await bendWire(page, panel, id);
+  await pickWire(page, panel, id);
+  const run = panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg.v`).first();
   const at = await centreOf(run);
-  await drag(page, at, { x: at.x, y: at.y + 48 });
+  await drag(page, at, { x: at.x + 48, y: at.y });
   const shaped = await upright(panel, id);
 
   // pick a, b and the wire; drag a two grid steps right and one down

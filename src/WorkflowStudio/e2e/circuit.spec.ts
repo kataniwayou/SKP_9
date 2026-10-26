@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 import {
-  box, centreOf, clearMove, documentPanel, dropOpen, flowToPage, dragEnd, dragReading, edge, emptySpot, endSquare, expect, newWire, node, openWorkflow,
+  bendWire, box, centreOf, clearMove, documentPanel, dropOpen, flowToPage, dragEnd, dragReading, edge, emptySpot, endSquare, expect, newWire, node, openWorkflow,
   pickWire, pointOnWire, problems, setEntryCondition, test, type Pt,
 } from './studio';
 import { createCircuitThrowaway, removeThrowaway, type CircuitThrowaway } from './throwaway';
@@ -138,16 +138,9 @@ test('rule 4: a head and a tail each join another wire at a chosen point, a fill
   expect(await dragEnd(page, panel, bc, 'head', await pointOnWire(panel, ab, 0.85, 12))).toBe('same wire');
   await expect(edge(panel, bc).locator('path.nx-head')).toHaveCount(1);
   expect(await pointsOf(panel, bc)).toEqual(before);
-  // on itself: a -> d bent by a run drag first, then its head dropped on a run of its own other than the one at its head
-  await pickWire(page, panel, ad);
-  const run = panel.locator(`.design-wire[data-wire="${ad}"] .design-handle.seg`).first();
-  const r = await centreOf(run);
-  const across = /\bh\b/.test((await run.getAttribute('class')) ?? '');
-  await page.mouse.move(r.x, r.y);
-  await page.mouse.down();
-  await page.mouse.move(across ? r.x : r.x + 48, across ? r.y + 48 : r.y, { steps: 6 });
-  await page.mouse.up();
-  await expect.poll(async () => (await pointsOf(panel, ad)).length).toBeGreaterThanOrEqual(4);
+  // on itself: a -> d bent first (its head slid along d's side), then its head dropped on a run of its own other than
+  // the one at its head
+  await bendWire(page, panel, ad);
   const own = await pointsOf(panel, ad);
   expect(await dragEnd(page, panel, ad, 'head', await pointOnWire(panel, ad, 0.2, 12))).toBe('same wire');
   expect(await pointsOf(panel, ad)).toEqual(own);
@@ -1162,16 +1155,9 @@ test('cut is the end square\'s alone: a run square or the body dragged onto the 
   const panel = await open(page);
   const ab = `${t.a}->${t.b}`;
   await pickWire(page, panel, ab);
-  // run 0 (horizontal) dragged down onto run 1's square: the run moves, the wire is whole, its head still on b
-  const run1 = await centreOf(runSquare(panel, ab, 1));
-  await pressTo(page, await centreOf(runSquare(panel, ab, 0)), run1);
-  await expect(panel.locator('.design-drop-label')).toHaveCount(0);
-  await expect(panel.locator('.design-gone')).toHaveCount(0);
-  await page.mouse.up();
-  await expect(edge(panel, ab)).toHaveCount(1);
+  // its runs at its ends have no square (the user's, 2026-10-26); bent first where it is straight
+  await bendWire(page, panel, ab);
   const b = await flowBox(panel, t.b);
-  expect((await pointsOf(panel, ab)).at(-1)![0]).toBe(b.x);
-  expect(await dashOf(panel, ab)).toBe('none');
   // run 1 (vertical) dragged sideways onto the tail square
   await pickWire(page, panel, ab);
   await pressTo(page, await centreOf(runSquare(panel, ab, 1)), await centreOf(endSquare(panel, ab, 'tail')));
@@ -1206,8 +1192,9 @@ test('cut: an entry wire cut while the hub fans out its tails stays exactly wher
   const hub = await flowBox(panel, 'wf');
   expect(before[0]![1]).not.toBe(hub.y + hub.h / 2);
   await pickWire(page, panel, id);
-  const run = runSquare(panel, id, 0);
-  await pressTo(page, await centreOf(endSquare(panel, id, 'head')), await centreOf(run));
+  // its one run's middle on the grid, where an end square cuts it: no square is drawn on a run at an end (2026-10-26)
+  const cut = await flowToPage(panel, [Math.round((before[0]![0] + before[1]![0]) / 16) * 8, before[0]![1]]);
+  await pressTo(page, await centreOf(endSquare(panel, id, 'head')), cut);
   expect(await labelsOf(panel)).toEqual(['cut here']);
   await page.mouse.up();
   await expect.poll(() => pointsOf(panel, id)).not.toEqual(before);

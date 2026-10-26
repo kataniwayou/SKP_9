@@ -29,16 +29,20 @@ function clearOfEnds(h: { x: number; y: number }, ends: Ends, k: number): boolea
 }
 
 /**
- * The squares a picked wire shows (`k`: flow units per screen pixel): one in the middle of each run of its core that
- * an end square does not cover (none on the last run of a head on a junction: it ends on its host), one on each end.
+ * The squares a picked wire shows (`k`: flow units per screen pixel): one in the middle of each run of its core between
+ * two bends that an end square does not cover, one on each end. A run at an end has none (the user's, 2026-10-26: with
+ * an end fixed there, a run drag there makes no sense; pressed, it moves the wire whole as its body does). With
+ * `endRuns`, those runs' squares too, never drawn: what an end square's drag may cut on (a straight wire is still cut),
+ * but the last run of a head on a junction (it ends on its host).
  */
-export function squaresOf(w: WireRoute, bends: Bends, k: number): Square[] {
+export function squaresOf(w: WireRoute, bends: Bends, k: number, endRuns = false): Square[] {
   const ends = endsOf(w.points);
   const last = 2 * bends.xs.length;
   const core = pointsOfShape(w.core.ends, bends);
   const runs: Square[] = [];
   for (const h of segmentHandles(w.core.ends, bends)) {
     if (w.headOn === 'junction' && h.k === last) continue;
+    if (!endRuns && (h.k === 0 || h.k === last)) continue;
     if (!clearOfEnds(h, ends, k)) continue;
     // drawn where it cuts (on the grid, inside its run); a run with no grid point inside it keeps its square at its
     // middle, for run drags only: never on a corner or an end

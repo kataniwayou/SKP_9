@@ -476,3 +476,28 @@ export async function layOn(page: Page, panel: Locator, free: string, live: stri
   await expect.poll(async () => (await upright(panel, free)).x).toBe(l.x);
   return { x: l.x, lo: Math.max(l.lo, f.lo + dy), hi: Math.min(l.hi, f.hi + dy) };
 }
+
+/**
+ * Bends a straight wire `id` so it has a run between two bends (the only runs with a square, the user's 2026-10-26): its
+ * head square slid along its step's input side, away from the tail's height, so the router gives it an upright; where the
+ * router lines an automatic tail up with it, the tail slid to the other end of its own step's side too. A wire that
+ * already has one is left as it is.
+ */
+export async function bendWire(page: Page, panel: Locator, id: string): Promise<void> {
+  const slide = async (side: 'tail' | 'head', to: 'high' | 'low') => {
+    const pts = await wirePoints(panel, id);
+    const [x, y] = side === 'head' ? pts.at(-1)! : pts[0]!;
+    const step = (await blocks(panel)).find((b) => (b.x === x || b.x + b.w === x) && y >= b.y && y <= b.y + b.h);
+    if (!step) throw new Error(`${id}'s ${side} is on no step side`);
+    await dragEnd(page, panel, id, side, await flowToPage(panel, [x + (side === 'head' ? -4 : 4), to === 'high' ? step.y + 24 : step.y + step.h - 24]));
+  };
+  const pts = await wirePoints(panel, id);
+  if (pts.length >= 4) return;
+  const [, hy] = pts.at(-1)!;
+  const head = (await blocks(panel)).find((b) => b.x === pts.at(-1)![0] && hy >= b.y && hy <= b.y + b.h);
+  const high = head !== undefined && hy - head.y > head.h / 2;
+  await slide('head', high ? 'high' : 'low');
+  const bent = () => expect.poll(async () => (await wirePoints(panel, id)).length, { timeout: 1500 }).toBeGreaterThanOrEqual(4);
+  if (!(await bent().then(() => true, () => false))) await slide('tail', high ? 'low' : 'high');
+  await expect.poll(async () => (await wirePoints(panel, id)).length).toBeGreaterThanOrEqual(4);
+}

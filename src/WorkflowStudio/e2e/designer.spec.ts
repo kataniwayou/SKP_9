@@ -1,6 +1,6 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import {
-  centreOf, documentPanel, dragReading, dropOpen, edge as wire, emptySpot, endSquare, expect, inspector, node, openWorkflow, pickWire, pointOnWire, pressTo,
+  bendWire, centreOf, documentPanel, dragReading, dropOpen, edge as wire, emptySpot, endSquare, expect, inspector, node, openWorkflow, pickWire, pointOnWire, pressTo,
   labelsOf, settledView, tab, test,
   workflowsWithSteps, type LiveWorkflow,
 } from './studio';
@@ -120,6 +120,9 @@ test('a run drags and Reset route restores the automatic shape', async ({ page }
   const id = `${chain!.a}->${chain!.b}`;
   const before = await pathOf(panel, id);
   await zoomInOn(page, panel, id);
+  // bent first where it is straight: only a run between two bends has a square (the user's, 2026-10-26); Reset route
+  // takes its head's height back too
+  await bendWire(page, panel, id);
   const p = await pointOnWire(panel, id);
   await page.mouse.click(p.x, p.y);
   const handle = panel.locator('.design-handle.seg').first();
@@ -265,31 +268,6 @@ test('arrow keys with only a wire picked drag it as the closed hand does: its hi
   await expect(page.getByText('● design draft')).toHaveCount(0);
 });
 
-test('dragging the last run of a picked wire up and down slides where its arrow lands', async ({ page, request }) => {
-  // a throwaway (2026-10-11) whose a fans out to b and d: one of the two wires is bent, its last run the one into its
-  // arrow (a straight wire has one run, and dragging that one jogs it, both ends staying)
-  const t = await createCircuitThrowaway(request);
-  try {
-    await openWorkflow(page, t.workflow);
-    const panel = documentPanel(page, t.workflow);
-    const bent = async (w: string) => ((await pathOf(panel, w)) ?? '').split('L').length > 2;
-    const id = (await bent(`${t.a}->${t.b}`)) ? `${t.a}->${t.b}` : `${t.a}->${t.d}`;
-    expect(await bent(id), 'neither a -> b nor a -> d is bent').toBe(true);
-    // zoomed in on the last run (short: 24 px into the step), so its square is on screen and clear of the end dots
-    await zoomInOn(page, panel, await pointOnWire(panel, id, 0.95));
-    const p = await pointOnWire(panel, id, 0.95);
-    await page.mouse.click(p.x, p.y);
-    const before = await arrowEndOf(panel, id);
-    const last = panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg`).last();
-    const at = await centreOf(last);
-    await drag(page, at, { x: at.x, y: at.y - 24 });
-    await expect.poll(() => arrowEndOf(panel, id)).not.toBe(before);
-    await expect(page.getByText('● design draft')).toBeVisible();
-  } finally {
-    await removeThrowaway(request);
-  }
-});
-
 test('the arrow head of a picked wire dropped on another step connects it there; the wire keeps its id (plan 9)', async ({ page }) => {
   const panel = await open(page);
   const { a, b, c } = chain!;
@@ -342,6 +320,8 @@ test('a run dragged onto a block goes around it, while dragged and after the dro
   const { a, b, c } = chain!;
   const id = `${a}->${b}`;
   const runs = panel.locator(`.design-wire[data-wire="${id}"] .design-handle.seg`);
+  // bent first where it is straight: only a run between two bends has a square (the user's, 2026-10-26)
+  await bendWire(page, panel, id);
   for (const target of [a, b, c, 'wf']) {
     const p = await pointOnWire(panel, id);
     await page.mouse.click(p.x, p.y);

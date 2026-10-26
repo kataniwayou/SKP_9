@@ -192,13 +192,17 @@ describe('short runs and Reset route after a cut (re-review 2026-10-09)', () => 
         expect([s.x, s.y]).not.toEqual(a);
         expect([s.x, s.y]).not.toEqual(b);
       }
-      // the 8 px first run: its square is drawn (zoomed in) for run drags, but an end square cannot cut there
-      const first = squares.find((s) => s.kind === 'run' && s.k === 0);
-      if (first && first.kind === 'run') expect(first.cuts).toBe(false);
-      expect(cutTargets(squares, 'head').some((s) => s.kind === 'run' && s.k === 0)).toBe(false);
+      // the 8 px drop (run 1, between two bends): its square is drawn (zoomed in) for run drags, but an end square cannot
+      // cut there; the run at the tail has no square at all (the user's, 2026-10-26)
+      expect(squares.some((s) => s.kind === 'run' && s.k === 0)).toBe(false);
+      const drop = squares.find((s) => s.kind === 'run' && s.k === 1);
+      if (drop && drop.kind === 'run') expect(drop.cuts).toBe(false);
+      expect(cutTargets(squares, 'head').some((s) => s.kind === 'run' && s.k === 1)).toBe(false);
       expect(cutTargets(squares, 'head').filter((s) => s.kind === 'end').map((s) => s.kind === 'end' && s.side)).toEqual(['tail']);
     }
-    expect(squaresOf(w, c['w:s']!.bends!, 0.25).some((s) => s.kind === 'run' && s.k === 0)).toBe(true);
+    expect(squaresOf(w, c['w:s']!.bends!, 0.25).some((s) => s.kind === 'run' && s.k === 1)).toBe(true);
+    // an end square's drag still finds the runs at the ends, never drawn: a cut there (2026-10-26)
+    expect(squaresOf(w, c['w:s']!.bends!, 0.25, true).some((s) => s.kind === 'run' && s.k === 4)).toBe(true);
   });
 
   it('a cut never leaves a wire of no length: cut on such a run, nothing changes', async () => {
