@@ -28,10 +28,10 @@ internal static class S3Client
         {
             config.ServiceURL = options.ServiceUrl;
 
-            if (!string.IsNullOrWhiteSpace(options.Region))
-            {
-                config.AuthenticationRegion = options.Region;
-            }
+            // MinIO ignores the region, but SigV4 must sign with one.
+            config.AuthenticationRegion = string.IsNullOrWhiteSpace(options.Region)
+                ? "us-east-1"
+                : options.Region;
         }
         else if (!string.IsNullOrWhiteSpace(options.Region))
         {

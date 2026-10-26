@@ -32,6 +32,7 @@
          assembly, where the runtime reader looks. A ProjectReference could not flow build targets. -->
     <PackageReference Include="BaseProcessor.Core" VersionOverride="[1.0.0]" />
     <PackageReference Include="AWSSDK.S3" />
+    <PackageReference Include="AWSSDK.SecurityToken" />
   </ItemGroup>
 
 </Project>

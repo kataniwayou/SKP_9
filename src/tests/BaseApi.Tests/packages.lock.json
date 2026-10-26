@@ -720,6 +720,7 @@
         "type": "Project",
         "dependencies": {
           "AWSSDK.S3": "[4.0.104.2, )",
+          "AWSSDK.SecurityToken": "[4.0.101.2, )",
           "BaseProcessor.Core": "[1.0.0, 1.0.0]"
         }
       },
@@ -727,6 +728,7 @@
         "type": "Project",
         "dependencies": {
           "AWSSDK.S3": "[4.0.104.2, )",
+          "AWSSDK.SecurityToken": "[4.0.101.2, )",
           "BaseProcessor.Core": "[1.0.0, 1.0.0]"
         }
       },
@@ -805,6 +807,15 @@
         "requested": "[4.0.104.2, )",
         "resolved": "4.0.104.2",
         "contentHash": "ImZ1pO9SWh+RAN8hmN5OnonyTvq+/q4dXLxTxjtsZ60c06dnCCy+MX3sc4F3Q8c9J1bg8WoU+VkrrVIpXLviww==",
+        "dependencies": {
+          "AWSSDK.Core": "[4.0.102.9, 5.0.0)"
+        }
+      },
+      "AWSSDK.SecurityToken": {
+        "type": "CentralTransitive",
+        "requested": "[4.0.101.2, )",
+        "resolved": "4.0.101.2",
+        "contentHash": "+GVf4PCKeGa9QxaMwjKjR80+zzJpunlBx2Nomcnksx3Y6ZyGUjGtxN82wPPyM9HdDNDwbkFPbfnTxuatzcAvGg==",
         "dependencies": {
           "AWSSDK.Core": "[4.0.102.9, 5.0.0)"
         }

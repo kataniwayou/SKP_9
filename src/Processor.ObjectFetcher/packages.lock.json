@@ -11,6 +11,15 @@
           "AWSSDK.Core": "[4.0.102.9, 5.0.0)"
         }
       },
+      "AWSSDK.SecurityToken": {
+        "type": "Direct",
+        "requested": "[4.0.101.2, )",
+        "resolved": "4.0.101.2",
+        "contentHash": "+GVf4PCKeGa9QxaMwjKjR80+zzJpunlBx2Nomcnksx3Y6ZyGUjGtxN82wPPyM9HdDNDwbkFPbfnTxuatzcAvGg==",
+        "dependencies": {
+          "AWSSDK.Core": "[4.0.102.9, 5.0.0)"
+        }
+      },
       "BaseProcessor.Core": {
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",

@@ -134,9 +134,13 @@
 
     <!-- S3 for Processor.ObjectFetcher and Processor.ObjectPersister, against MinIO on kind and
          AWS S3 alike. AWSSDK.S3's only dependency is AWSSDK.Core, and Core's net8.0 group is
-         EMPTY, so the offline feed carries exactly these two files. Core is transitive-only and
-         pinned for the NU1004 reason spelled out on Quartz above. -->
+         EMPTY, so the offline feed carries exactly three files. AWSSDK.SecurityToken is loaded by
+         reflection from Core for IRSA (web-identity) and assume-role credentials, so nothing in
+         the graph pulls it in: both processors reference it explicitly. Core is transitive-only
+         and pinned for the NU1004 reason spelled out on Quartz above. SecurityToken is the newest
+         4.0.x whose lower bound on Core (4.0.102.9) this pin satisfies. -->
     <PackageVersion Include="AWSSDK.S3" Version="4.0.104.2" />
+    <PackageVersion Include="AWSSDK.SecurityToken" Version="4.0.101.2" />
     <PackageVersion Include="AWSSDK.Core" Version="4.0.102.9" />
 
     <!-- This repo's own libraries, consumed as packages rather than project references. Each is

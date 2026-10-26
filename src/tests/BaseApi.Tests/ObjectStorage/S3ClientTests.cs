@@ -33,6 +33,9 @@ public abstract class S3ClientContract
         var config = Build("http://localhost:19000", null, false);
 
         Assert.StartsWith("http://localhost:19000", config.ServiceURL);
+        // SigV4 must sign with some region; MinIO ignores which.
+        Assert.Equal("us-east-1", config.AuthenticationRegion);
+        Assert.Null(config.RegionEndpoint);
         Assert.Equal(TimeSpan.FromSeconds(30), config.Timeout);
     }
 
