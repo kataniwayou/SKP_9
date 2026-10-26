@@ -32,3 +32,5 @@ resources:
   - 41-processor-sknormalizer.yaml
   - 42-processor-outcomerecorder.yaml
   - 43-processor-analyst.yaml
+  - 44-processor-objectfetcher.yaml
+  - 45-processor-objectpersister.yaml
