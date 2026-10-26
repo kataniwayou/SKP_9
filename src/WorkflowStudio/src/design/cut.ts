@@ -45,7 +45,7 @@ export function cornerDiag(core: readonly Pt[], c: number): 'nwse' | 'nesw' {
  * The circles a picked wire shows (`k`: flow units per screen pixel; the user's rules, 2026-10-26): one in the middle of
  * each run of its core and one on each of its corners, each its double arrow, where an end's does not cover it, and one
  * on each end. A straight wire has none but its ends (pressed, it moves whole), nor has the last run of a head on a
- * junction (it ends on its host), nor a run too short on screen for its circle to clear its corners'. With `straight`,
+ * junction on a level host (its lead), nor a run too short on screen for its circle to clear its corners'. With `straight`,
  * a straight wire's run's too, never drawn: what an end's drag may cut on (a straight wire is still cut).
  */
 export function squaresOf(w: WireRoute, bends: Bends, k: number, straight = false): Square[] {
@@ -53,10 +53,14 @@ export function squaresOf(w: WireRoute, bends: Bends, k: number, straight = fals
   const last = 2 * bends.xs.length;
   const core = pointsOfShape(w.core.ends, bends);
   const flat = simplify(core).length <= 2;
+  // a head on a junction on a level host: its last run is its lead's, never dragged (on an upright host it meets the
+  // contact and carries it, the user's 2026-10-26)
+  const [hx, hy] = w.points[w.points.length - 1]!;
+  const lead = w.headOn === 'junction' && (w.core.ends.tx !== hx || w.core.ends.ty !== hy);
   const room = 2 * (SQUARE + 1) * k;
   const runs: Square[] = [];
   for (const h of segmentHandles(w.core.ends, bends)) {
-    if (w.headOn === 'junction' && h.k === last) continue;
+    if (lead && h.k === last) continue;
     if (flat ? !straight : Math.hypot(core[h.k + 1]![0] - core[h.k]![0], core[h.k + 1]![1] - core[h.k]![1]) < room) continue;
     if (!clearOfEnds(h, ends, k)) continue;
     // drawn where it cuts (on the grid, inside its run); a run with no grid point inside it keeps its square at its
@@ -71,7 +75,7 @@ export function squaresOf(w: WireRoute, bends: Bends, k: number, straight = fals
   for (let c = 1; !flat && c < core.length - 1; c++) {
     const a = core[c - 1]!, [x, y] = core[c]!, b = core[c + 1]!;
     if ((a[0] === x && a[1] === y) || (b[0] === x && b[1] === y) || (a[0] === b[0]) || (a[1] === b[1])) continue;
-    if (w.headOn === 'junction' && c === last) continue;
+    if (lead && c === last) continue;
     if (!clearOfEnds({ x, y }, ends, k)) continue;
     corners.push({ kind: 'corner', c, x, y, diag: cornerDiag(core, c) });
   }

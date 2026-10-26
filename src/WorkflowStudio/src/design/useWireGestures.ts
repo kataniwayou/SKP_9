@@ -13,6 +13,7 @@ import { clearBends, clearDragged, clearRun, legPath } from '../layout/detour';
 import { clampLanding, GRID, PMID, snap, STEP_W, type Point } from '../layout/geometry';
 import { WORKFLOW_SOURCE, type SourceId } from '../layout/ports';
 import { simplify, type Box, type Pt } from '../layout/router';
+import { nearestOn } from '../layout/junctions';
 import { dragSegment, normalize, pointsOfShape, shapeFromPoints, type Bends } from '../layout/shape';
 import { coreFrom, legsPath, moveLegs, startLegs, type Legs } from '../layout/wireMove';
 import { LineIndex } from '../layout/overlaps';
@@ -212,9 +213,10 @@ export function useWireGestures(
   /**
    * Drags runs of a wire by a circle (spec §4.2; the user's rules, 2026-10-26): a run's circle moves its run across, a
    * corner's both runs that meet there (`runs`, the corner diagonally); the first drag makes the wire manual. The last
-   * run slides its head: along its step's input side (clamped, spec §4.2), or an open head up and down; a head on a
-   * junction has no last run to drag. The first run slides its tail along its step's output side the same way (the
-   * user's, 2026-10-25); a tail anywhere else gets a jog instead. A straight wire has no circle (it moves whole). A shape
+   * run slides its head: along its step's input side (clamped, spec §4.2), or an open head up and down. The first run
+   * slides its tail along its step's output side the same way (the user's, 2026-10-25); a tail on the hub gets a jog
+   * instead. An end on a junction slides along its host with the run that reaches it (`joint`; the user's, 2026-10-26).
+   * A straight wire has no circle (it moves whole). A shape
    * that lies on a wire it may not share a line with (the user's rule 2, 2026-10-09) is a short circuit: the label says
    * so and, released there, the run snaps back.
    */
@@ -229,29 +231,55 @@ export function useWireGestures(
     const bends = rec.bends ?? shapeFromPoints(wire.core.points);
     const n = bends.xs.length;
     if (n === 0 || simplify(pointsOfShape(ends, bends)).length <= 2) return;
-    if (runs.some((r) => r < 0 || r > 2 * n || (rec.head.on === 'wire' && r === 2 * n))) return;
+    // an end on a junction (the user's, 2026-10-26: it slides, never anchored): onto a level host the wire drops one jog
+    // off the line (a lead between its core and the contact), so its upright nearest the contact carries it along the
+    // host as far as it moves; onto an upright host the level run that meets it carries it up and down
+    type Joint = { side: Side; host: string; line: Pt[]; level: boolean; run: number; contact: Pt };
+    const joint = (side: Side): Joint | null => {
+      const o = rec[side];
+      const host = o.on === 'wire' ? shown.current.wires.find((x) => x.id === o.host) : undefined;
+      if (o.on !== 'wire' || !host) return null;
+      const contact = side === 'head' ? wire.points[wire.points.length - 1]! : wire.points[0]!;
+      const [ex, ey] = side === 'head' ? [ends.tx, ends.ty] : [ends.sx, ends.sy];
+      const level = ex !== contact[0] || ey !== contact[1];
+      const run = side === 'head' ? (level ? 2 * n - 1 : 2 * n) : level ? 1 : 0;
+      return { side, host: o.host, line: [...host.points], level, run, contact };
+    };
+    const joints = [joint('head'), joint('tail')].filter((j): j is Joint => j !== null);
+    // a head on a level host's last run is its lead's: never dragged
+    if (runs.some((r) => r < 0 || r > 2 * n || (rec.head.on === 'wire' && r === 2 * n && !joints.some((j) => j.side === 'head' && j.run === r)))) return;
     const step = rec.head.on === 'step' ? shown.current.placement.steps.get(rec.head.step) : undefined;
     const headAt = (y: number): End => (rec.head.on === 'step' ? { on: 'step', step: rec.head.step, y } : rec.head.on === 'open' ? { on: 'open', x: rec.head.x, y } : rec.head);
     // the run that slides a step-glued tail: the first
     const source = rec.tail.on === 'step' ? shown.current.placement.steps.get(rec.tail.step) : undefined;
     const tailStep = rec.tail.on === 'step' ? rec.tail.step : null;
-    const slidesTail = source !== undefined;
+    const slidesTail = source !== undefined || joints.some((j) => j.side === 'tail' && j.run === 0);
     // a dragged wire goes around the blocks, never through one (spec §4.2)
     const boxes = blockBoxes(shown.current.placement);
-    type Shaped = { bends: Bends | null; headY: number | null; tailY: number | null };
-    let latest: Shaped = { bends: rec.bends ?? null, headY: null, tailY: null };
+    // a junction end slid: how far along its host it is now (`at`), and where (`p`)
+    type Slid = { at: number; p: Pt } | null;
+    type Shaped = { bends: Bends | null; headY: number | null; tailY: number | null; headJ: Slid; tailJ: Slid };
+    let latest: Shaped = { bends: rec.bends ?? null, headY: null, tailY: null, headJ: null, tailJ: null };
     const shapedCircuit = (s: Shaped): Circuit => {
       let moved = s.headY === null ? circuit : setEnd(circuit, wire.id, 'head', headAt(s.headY));
       if (s.tailY !== null && tailStep !== null) moved = setEnd(moved, wire.id, 'tail', { on: 'step', step: tailStep, y: s.tailY });
+      for (const j of joints) {
+        const at = j.side === 'head' ? s.headJ : s.tailJ;
+        if (at) moved = setEnd(moved, wire.id, j.side, { on: 'wire', host: j.host, at: at.at });
+      }
       return setBends(moved, wire.id, s.bends);
     };
     const shaped = (s: Shaped): Draft => withCircuit(base, saved, shapedCircuit(s));
-    // where the shape's ends are: the tail and the head as slid
-    const slid = (s: Shaped) => ({
-      ...ends,
-      sy: s.tailY === null || !source ? ends.sy : source.y + s.tailY,
-      ty: s.headY === null ? ends.ty : step ? step.y + s.headY : s.headY,
-    });
+    // where the shape's ends are: the tail and the head as slid (a junction end along its host)
+    const slid = (s: Shaped) => {
+      const h = joints.find((j) => j.side === 'head'), t = joints.find((j) => j.side === 'tail');
+      return {
+        sx: s.tailJ && t?.level ? s.tailJ.p[0] : ends.sx,
+        sy: s.tailJ && !t?.level ? s.tailJ.p[1] : s.tailY === null ? ends.sy : source ? source.y + s.tailY : s.tailY,
+        tx: s.headJ && h?.level ? s.headJ.p[0] : ends.tx,
+        ty: s.headJ && !h?.level ? s.headJ.p[1] : s.headY === null ? ends.ty : step ? step.y + s.headY : s.headY,
+      };
+    };
     // each move judges the core as it would be drawn (a lead from the hub or a junction does not move); the nets do not change
     // a run dragged by hand: lying on another net's wire is a short circuit, automatic or not (the user's ruling, 2026-10-20)
     const judge = overlapJudge(shown.current, wire.id, circuit, 'strict');
@@ -265,7 +293,7 @@ export function useWireGestures(
     // the run that slides a step-glued end: its step's processor middle (where the router lands it), not every grid
     // line of the side, which the grid already gives (final review 2026-10-21)
     const slidesHead = !corner && step !== undefined && k === 2 * n;
-    const slidesOwnTail = !corner && slidesTail && k === 0;
+    const slidesOwnTail = !corner && source !== undefined && k === 0;
     const landings = slidesHead ? [step.y + PMID] : slidesOwnTail ? [source.y + PMID] : [];
     // the other wires' ends on that side, for the run that slides an end along it
     const side = slidesHead && rec.head.on === 'step' ? landingBoxes(shown.current, wire.id, rec.head.step, 'in')
@@ -281,11 +309,20 @@ export function useWireGestures(
       for (const r of [...runs].sort((x, y) => y - x)) {
         const out = dragSegment(b, r, p, ends, slidesTail);
         if ('landingY' in out) headY = step ? clampLanding(out.landingY - step.y) : out.landingY;
-        else if ('tailY' in out) tailY = clampLanding(out.tailY - source!.y);
+        else if ('tailY' in out) tailY = source ? clampLanding(out.tailY - source.y) : out.tailY;
         else b = clearRun(out.bends, ends, draggedRun(n, r), boxes);
       }
-      const at = slid({ bends: null, headY, tailY });
-      const state: Shaped = { bends: clearBends(at, b, boxes), headY, tailY };
+      // a junction end carried by its run: where that run now crosses its host, the nearest point on the host's line
+      let headJ: Slid = null, tailJ: Slid = null;
+      for (const j of joints) {
+        if (!runs.includes(j.run)) continue;
+        const i = j.side === 'head' ? b.xs.length - 1 : b.xs.length - n;
+        const v = j.level ? j.contact[0] + b.xs[i]! - bends.xs[j.side === 'head' ? n - 1 : 0]! : j.side === 'head' ? headY! : tailY!;
+        const near = nearestOn([j.line], j.level ? [v, j.contact[1]] : [j.contact[0], v]);
+        if (j.side === 'head') headJ = { at: near.at, p: near.p }; else tailJ = { at: near.at, p: near.p };
+      }
+      const at = slid({ bends: null, headY, tailY, headJ, tailJ });
+      const state: Shaped = { bends: clearBends(at, b, boxes), headY, tailY, headJ, tailJ };
       return { state, core: state.bends ? pointsOfShape(at, state.bends) : [[at.sx, at.sy], [at.tx, at.ty]] as Pt[] };
     };
     const i = axis === 'x' ? 0 : 1;
