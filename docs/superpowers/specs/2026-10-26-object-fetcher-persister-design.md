@@ -160,8 +160,9 @@ FileFetcher's shape: `fetched {FileName} ({Extension}), {SizeBytes} bytes, modif
    - 403 → `writing <uri> failed: access denied`.
    - anything else → `writing <uri> failed: <SDK message>`.
 6. **Report** `{"location": "s3://bucket/key"}` and `SendToPostAsync` once. The log line:
-   `persisted {FileName} ({Extension}), {SizeBytes} bytes, to {FilePath}` — FilePersister's exact
-   template, field name included, so one dashboard query covers both persisters.
+   `persisted {FileName} ({Extension}), {SizeBytes} bytes, to {ObjectPath}` — FilePersister's
+   template with the destination field renamed: `{FilePath}` is a path on a volume, `{ObjectPath}`
+   an s3:// location, so a query tells the two persisters' destinations apart by field name.
 
 ### What is deliberately absent
 

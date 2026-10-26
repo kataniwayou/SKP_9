@@ -52,14 +52,15 @@ internal sealed class ObjectPersisterProcessor(
         await Write(target, file.Content!, ct).ConfigureAwait(false);
 
         // The SHAPE and the destination, never the content. The bytes are upstream data and stay out
-        // of every template in this system. Same template as FilePersister, field names included, so
-        // one query finds both persisters' writes.
+        // of every template in this system. Same shape as FilePersister's, but the destination is
+        // {ObjectPath}, not {FilePath}: an s3:// location is not a path on any volume, and the field
+        // name is how a query tells the two persisters' destinations apart.
         //
         // THIS IS THE ONLY PLACE THE DESTINATION IS RECORDED, which mirrors the fetcher being the
         // only place the source is. They share the dispatch's ExecutionId and CorrelationId, so one
         // query spans both.
         logger.LogInformation(
-            "persisted {FileName} ({Extension}), {SizeBytes} bytes, to {FilePath}",
+            "persisted {FileName} ({Extension}), {SizeBytes} bytes, to {ObjectPath}",
             name, file.Extension, file.Content!.Length, target);
 
         var locator = JsonSerializer.SerializeToUtf8Bytes(new Locator(target.ToString()), LocatorJson.Options);
