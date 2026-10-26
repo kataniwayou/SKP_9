@@ -10,9 +10,9 @@ public sealed class ProcessorJsonSchemaValidatorTests
         {"type":"object","properties":{"number":{"type":"integer"}},"required":["number"]}
         """;
 
-    /// <summary>The registered file-locator shape: one required key, nothing else allowed.</summary>
+    /// <summary>The registered locator shape: one required key, nothing else allowed.</summary>
     private const string Locator = """
-        {"type":"object","required":["filePath"],"properties":{"filePath":{"type":"string","minLength":1}},"additionalProperties":false}
+        {"type":"object","required":["location"],"properties":{"location":{"type":"string","minLength":1}},"additionalProperties":false}
         """;
 
     private static byte[] Utf8(string s) => Encoding.UTF8.GetBytes(s);
@@ -132,7 +132,7 @@ public sealed class ProcessorJsonSchemaValidatorTests
         // the EMPTY keyword, so this used to flatten to "/providerName: " -- a pointer, a colon, and
         // nothing. A live run on 2026-09-12 logged a rejected Kafka record exactly that way.
         Assert.False(ProcessorJsonSchemaValidator.TryValidate(
-            Locator, Utf8("""{"filePath":"/x.zip","providerName":"acme"}"""), out var errors));
+            Locator, Utf8("""{"location":"/x.zip","providerName":"acme"}"""), out var errors));
 
         Assert.Equal(["/providerName: additionalProperties"], errors);
     }
@@ -150,7 +150,7 @@ public sealed class ProcessorJsonSchemaValidatorTests
         // The missing property's name is NOT here, and that is deliberate: it lives only in the
         // library's message text, which is discarded wholesale because other keywords embed instance
         // values in theirs. See Flatten's remarks.
-        Assert.DoesNotContain(errors, e => e.Contains("filePath", StringComparison.Ordinal));
+        Assert.DoesNotContain(errors, e => e.Contains("location", StringComparison.Ordinal));
     }
 
     [Fact]

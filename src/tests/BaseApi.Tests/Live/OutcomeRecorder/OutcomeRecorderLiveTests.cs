@@ -281,7 +281,7 @@ public sealed class OutcomeRecorderLiveTests
 
     /// <summary>
     /// Puts the seeded path onto <c>skp-paths</c>, the way FileFetcher's own trigger does. The
-    /// filePath key ALONE -- file-locator declares additionalProperties: false, so a second key
+    /// location key ALONE -- locator declares additionalProperties: false, so a second key
     /// would be refused by KafkaImporter's own output validation before the lineage even opens.
     /// </summary>
     private static async Task ProduceAsync(string path)
@@ -292,7 +292,7 @@ public sealed class OutcomeRecorderLiveTests
         var result = await producer.ProduceAsync(RealStack.KafkaTopic, new Message<Null, string>
         {
             Headers = LiveKafka.ExecutionHeaders(),
-            Value = JsonSerializer.Serialize(new { filePath = path }),
+            Value = JsonSerializer.Serialize(new { location = path }),
         });
 
         Assert.True(result.Status == PersistenceStatus.Persisted,
@@ -328,7 +328,7 @@ public sealed class OutcomeRecorderLiveTests
         // WHY THE PATH IS RECOVERABLE AT ALL, given that OutcomeRecordJson deliberately carries no
         // path field:
         //
-        // - skp-paths carries {"filePath": "..."} -- the ONLY place on the wire, anywhere in this
+        // - skp-paths carries {"location": "..."} -- the ONLY place on the wire, anywhere in this
         //   chain, where the literal absolute path ever appears.
         // - KafkaImporterProcessor.Describe renders that record value VERBATIM into the entry-step
         //   log line ("imported record {Record} as execution {ExecutionId} from {Origin}", written

@@ -21,7 +21,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- PersistableFile and FileLocator are internal: this processor's construction, not its
+    <!-- PersistableFile and Locator are internal: this processor's construction, not its
          surface. The tests construct them directly, so the test assembly is named here — matching
          what FileFetcher and ArchiveExpander do for the same reason. -->
     <InternalsVisibleTo Include="BaseApi.Tests" />

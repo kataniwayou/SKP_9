@@ -26,49 +26,49 @@ public sealed class FileFetcherLocatorSchemaTests
     [Fact]
     public void AnOrdinaryLocatorValidates()
     {
-        // Goes red if "filePath" stopped being the recognized property name (e.g. a typo in
+        // Goes red if "location" stopped being the recognized property name (e.g. a typo in
         // locator.json's "required" or "properties" keys), since then this exact payload would
         // fail both the required check and additionalProperties: false.
         var ok = ProcessorJsonSchemaValidator.TryValidate(
             Definition(),
-            Utf8("""{"filePath":"C:\\data\\orders.csv"}"""),
+            Utf8("""{"location":"C:\\data\\orders.csv"}"""),
             out var errors);
 
         Assert.True(ok, string.Join("; ", errors));
     }
 
     [Fact]
-    public void ARelativeFilePathStillValidates()
+    public void ARelativeLocationStillValidates()
     {
         // The schema does not, and must not, encode Path.IsPathFullyQualified — see the README's
         // "What it deliberately does not assert". Goes red if a pattern approximating "absolute"
         // were ever added to locator.json, since a relative path like this one would then fail.
         var ok = ProcessorJsonSchemaValidator.TryValidate(
             Definition(),
-            Utf8("""{"filePath":"orders.csv"}"""),
+            Utf8("""{"location":"orders.csv"}"""),
             out var errors);
 
         Assert.True(ok, string.Join("; ", errors));
     }
 
     [Fact]
-    public void AnEmptyFilePathIsRejected()
+    public void AnEmptyLocationIsRejected()
     {
-        // ReadPath's pattern match, `locator?.FilePath is { Length: > 0 } filePath`, treats an
-        // empty string as "the branch carries no filePath". Goes red if minLength: 1 were removed
-        // from locator.json's filePath property.
+        // ReadPath's pattern match, `locator?.Location is { Length: > 0 } location`, treats an
+        // empty string as "the branch carries no location". Goes red if minLength: 1 were removed
+        // from locator.json's location property.
         var ok = ProcessorJsonSchemaValidator.TryValidate(
             Definition(),
-            Utf8("""{"filePath":""}"""),
+            Utf8("""{"location":""}"""),
             out _);
 
         Assert.False(ok);
     }
 
     [Fact]
-    public void AMissingFilePathIsRejected()
+    public void AMissingLocationIsRejected()
     {
-        // Goes red if "filePath" were dropped from locator.json's "required" array.
+        // Goes red if "location" were dropped from locator.json's "required" array.
         var ok = ProcessorJsonSchemaValidator.TryValidate(
             Definition(),
             Utf8("{}"),
@@ -78,13 +78,13 @@ public sealed class FileFetcherLocatorSchemaTests
     }
 
     [Fact]
-    public void ANullFilePathIsRejected()
+    public void ANullLocationIsRejected()
     {
-        // ReadPath treats a null FilePath identically to a missing or empty one. Goes red if
-        // locator.json's filePath type were widened to ["string", "null"].
+        // ReadPath treats a null Location identically to a missing or empty one. Goes red if
+        // locator.json's location type were widened to ["string", "null"].
         var ok = ProcessorJsonSchemaValidator.TryValidate(
             Definition(),
-            Utf8("""{"filePath":null}"""),
+            Utf8("""{"location":null}"""),
             out _);
 
         Assert.False(ok);
@@ -94,11 +94,11 @@ public sealed class FileFetcherLocatorSchemaTests
     public void ALocatorWithAnExtraKeyIsRejected()
     {
         // additionalProperties: false. providerName in particular must not travel silently — see
-        // FileLocator's own doc comment on why it is absent from the record. Goes red if
+        // Locator's own doc comment on why it is absent from the record. Goes red if
         // additionalProperties: false were removed (or set true) in locator.json.
         var ok = ProcessorJsonSchemaValidator.TryValidate(
             Definition(),
-            Utf8("""{"filePath":"C:\\data\\orders.csv","providerName":"acme"}"""),
+            Utf8("""{"location":"C:\\data\\orders.csv","providerName":"acme"}"""),
             out _);
 
         Assert.False(ok);

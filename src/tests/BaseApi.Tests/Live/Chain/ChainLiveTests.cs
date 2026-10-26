@@ -222,10 +222,10 @@ public sealed class ChainLiveTests
                 var root = JsonDocument.Parse(value).RootElement;
 
                 // The terminal shape is a LOCATOR, not a document. A sink is the only way onto a
-                // topic and its single inputSchemaId is file-locator, so no workflow can put a
+                // topic and its single inputSchemaId is locator, so no workflow can put a
                 // mid-chain shape on a topic and this is the only shape a test can wait for.
-                if (root.TryGetProperty("filePath", out var filePath)
-                    && filePath.GetString() is { Length: > 0 } written
+                if (root.TryGetProperty("location", out var location)
+                    && location.GetString() is { Length: > 0 } written
                     && Path.GetFileName(written) == name)
                 {
                     return new ChainOutcome(written, null);
@@ -392,12 +392,12 @@ public sealed class ChainLiveTests
         using var producer = new ProducerBuilder<Null, string>(
             new ProducerConfig { BootstrapServers = RealStack.KafkaBrokers }).Build();
 
-        // filePath ALONE: file-locator declares additionalProperties: false, so a second key is
+        // location ALONE: locator declares additionalProperties: false, so a second key is
         // refused by KafkaImporter's own output validation and the lineage ends at the first hop.
         var result = await producer.ProduceAsync(RealStack.KafkaTopic, new Message<Null, string>
         {
             Headers = LiveKafka.ExecutionHeaders(),
-            Value = JsonSerializer.Serialize(new { filePath = path }),
+            Value = JsonSerializer.Serialize(new { location = path }),
         });
 
         Assert.True(result.Status == PersistenceStatus.Persisted,

@@ -101,21 +101,24 @@ Before the first request, confirm all five. Do not start without them.
 
 `POST /api/v1/schemas` once per row, in any order — schemas reference nothing. Record the returned `id` against the slug in the left column; every later body needs it.
 
-### 2.1 `file-locator`
+### 2.1 `locator`
+
+Named `file-locator` with the key `filePath` until 2026-10-26. It is `locator` / `location` because
+the same shape now also carries an `s3://` URI for the object pair (ObjectFetcher, ObjectPersister).
 
 ```http
 POST /api/v1/schemas
 Content-Type: application/json
 
 {
-  "name": "file-locator",
+  "name": "locator",
   "version": "1.0.0",
-  "description": "KafkaImporter output = FileFetcher input: the absolute path of one file. Does NOT assert absoluteness -- Path.IsPathFullyQualified is platform-dependent and no regex approximates it.",
-  "definition": "{\"type\": \"object\", \"$schema\": \"https://json-schema.org/draft/2020-12/schema\", \"required\": [\"filePath\"], \"properties\": {\"filePath\": {\"type\": \"string\", \"minLength\": 1}}, \"additionalProperties\": false}"
+  "description": "KafkaImporter output = FileFetcher input = FilePersister output (and the object pair's): one location -- an absolute filesystem path for the file pair, an s3:// URI for the object pair. Does NOT assert which, nor absoluteness -- the processor reading it decides, and Path.IsPathFullyQualified is platform-dependent.",
+  "definition": "{\"type\": \"object\", \"$schema\": \"https://json-schema.org/draft/2020-12/schema\", \"required\": [\"location\"], \"properties\": {\"location\": {\"type\": \"string\", \"minLength\": 1}}, \"additionalProperties\": false}"
 }
 ```
 
-Record the returned id as `<file-locator>`.
+Record the returned id as `<locator>`.
 
 ### 2.2 `kafka-importer-config`
 
@@ -300,7 +303,7 @@ Content-Type: application/json
   "sourceHash": "f635203b158ba92dd25689aa84b071b27cd9a644a39e0646a746bba174b1e680",
   "instanceId": null,
   "inputSchemaId": null,
-  "outputSchemaId": "<file-locator>",
+  "outputSchemaId": "<locator>",
   "configSchemaId": "<kafka-importer-config>"
 }
 ```
@@ -319,7 +322,7 @@ Content-Type: application/json
   "description": "path in, file bytes plus identity out",
   "sourceHash": "023a4e2836621088ba2ac69e64a5ba972b24b8228d5b3e0d95afd0df19a4b1eb",
   "instanceId": null,
-  "inputSchemaId": "<file-locator>",
+  "inputSchemaId": "<locator>",
   "outputSchemaId": "<file-envelope>",
   "configSchemaId": "<file-fetcher-config>"
 }
@@ -440,7 +443,7 @@ Content-Type: application/json
   "sourceHash": "8795b78d99a1b7bfc5a13f00af4304d368d9d6aeb46f192c015c9cf14927d140",
   "instanceId": null,
   "inputSchemaId": "<file-envelope>",
-  "outputSchemaId": "<file-locator>",
+  "outputSchemaId": "<locator>",
   "configSchemaId": "<file-persister-config>"
 }
 ```
@@ -1348,14 +1351,14 @@ make this appendix false on your machine while it stays true on ours.
 field sitting three lines below it. It says "Input is file-locator, the mirror of what KafkaImporter
 emits", while the row's `inputSchemaId` is `null`. Send the `null`.
 
-**The trap here is that "correcting" it appears to work.** Put `<file-locator>` on that row and this
+**The trap here is that "correcting" it appears to work.** Put `<locator>` on that row and this
 graph still starts: both of the exporter's parent edges pass the schema-edge gate — the one from
-`split-filepersister` because its output is `file-locator` and the ids then match, and the one from
+`split-filepersister` because its output is `locator` and the ids then match, and the one from
 `record-outcome` because its processor's output is `null` and a null on either side passes. Nothing
 refuses the edit, so nothing tells you it was an edit. What it actually does is narrow the input of a
 processor row that other workflows share: `kafka-exporter` carries two steps in this chain alone, and
 any other workflow that hands it a branch from a processor with a non-null output must now match
-`file-locator` exactly or fail its own start. The description is a sentence about what the topic
+`locator` exactly or fail its own start. The description is a sentence about what the topic
 contains, not an unfilled slot — the `null` is the contract.
 
 The workflow's own `description` field is likewise stale in the same way: it lists a six-hop

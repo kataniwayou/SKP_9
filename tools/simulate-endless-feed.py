@@ -405,7 +405,7 @@ def produce(producer, topic, paths):
             failures.append(str(err))
 
     for path in paths:
-        value = json.dumps({"filePath": path}, separators=(",", ":")).encode("utf-8")
+        value = json.dumps({"location": path}, separators=(",", ":")).encode("utf-8")
         producer.produce(
             topic,
             value=value,

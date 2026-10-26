@@ -53,7 +53,7 @@ public sealed class FileFetcherGuardTests : IDisposable
 
     private static Task Run(FileFetcherProcessor processor, string path, string payload)
         => processor.ExecuteAsync(
-            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { location = path })),
             payload, E, CancellationToken.None);
 
     [Fact]

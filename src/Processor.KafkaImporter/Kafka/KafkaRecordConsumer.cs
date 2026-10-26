@@ -121,7 +121,7 @@ public sealed class KafkaRecordConsumer : IRecordConsumer
 
         _lastConsumed = result;
         // The lineage rides a header, never the value: the value is forwarded byte for byte and its
-        // schema refuses any key but filePath.
+        // schema refuses any key but location.
         var executionId = result.Message.Headers is { } headers
                           && headers.TryGetLastBytes(KafkaRecord.ExecutionIdHeader, out var header)
             ? Encoding.UTF8.GetString(header)

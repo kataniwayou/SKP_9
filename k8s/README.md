@@ -279,7 +279,7 @@ Put a file where the pod can read it:
 
 Then the Kafka record the importer consumes names it:
 
-    {"filePath": "/mnt/skp-files/in/orders.zip"}
+    {"location": "/mnt/skp-files/in/orders.zip"}
 
 It survives pod restarts and the `kind load` + SourceHash-repoint deploy loop. Only recreating the
 cluster loses it.

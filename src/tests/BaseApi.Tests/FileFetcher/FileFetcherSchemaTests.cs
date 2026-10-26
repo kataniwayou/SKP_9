@@ -83,7 +83,7 @@ public sealed class FileFetcherSchemaTests
         var ok = ProcessorJsonSchemaValidator.TryValidate(
             Definition(),
             Encoding.UTF8.GetBytes(
-                """{"fileName":"a.csv","extension":".csv","sizeBytes":1,"createdUtc":null,"modifiedUtc":null,"content":"AQ==","filePath":"/mnt/a.csv"}"""),
+                """{"fileName":"a.csv","extension":".csv","sizeBytes":1,"createdUtc":null,"modifiedUtc":null,"content":"AQ==","location":"/mnt/a.csv"}"""),
             out _);
 
         Assert.False(ok);

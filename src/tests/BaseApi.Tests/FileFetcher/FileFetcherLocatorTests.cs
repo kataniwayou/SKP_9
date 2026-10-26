@@ -47,18 +47,29 @@ public sealed class FileFetcherLocatorTests
     {
         var message = await FailureFor(Encoding.UTF8.GetBytes("not json at all"));
 
-        Assert.StartsWith("input branch did not name a file path: ", message, StringComparison.Ordinal);
+        Assert.StartsWith("input branch did not name a location: ", message, StringComparison.Ordinal);
         Assert.Contains("the branch is not JSON", message, StringComparison.Ordinal);
         Assert.DoesNotContain("not json at all", message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task ABranchWithNoFilePathFails()
+    public async Task ABranchWithNoLocationFails()
     {
         var message = await FailureFor(
             Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { providerName = "acme" })));
 
-        Assert.Contains("the branch carries no filePath", message, StringComparison.Ordinal);
+        Assert.Contains("the branch carries no location", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnS3LocationFailsByNamingTheProcessorThatReadsIt()
+    {
+        // One locator shape serves both pairs; a location this processor cannot open must say whose it
+        // is rather than fall through to "relative", which would send an operator looking for a file.
+        var message = await FailureFor(
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { location = "s3://skp-in/orders.csv" })));
+
+        Assert.Contains("an s3:// location is ObjectFetcher's", message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -68,7 +79,7 @@ public sealed class FileFetcherLocatorTests
         // "\orders.csv" is rooted but not absolute — it resolves against whatever drive is current,
         // which is not a location any workflow author chose.
         var message = await FailureFor(
-            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = "orders.csv" })));
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { location = "orders.csv" })));
 
         Assert.Contains("the path is relative", message, StringComparison.Ordinal);
     }
@@ -81,7 +92,7 @@ public sealed class FileFetcherLocatorTests
         // workflow author chose. Production runs on Linux, where rooted and fully-qualified agree, so
         // this distinction is only visible here, on the platform the tests run on.
         var message = await FailureFor(
-            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = "\\orders.csv" })));
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { location = "\\orders.csv" })));
 
         Assert.Contains("the path is relative", message, StringComparison.Ordinal);
     }

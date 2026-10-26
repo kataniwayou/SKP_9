@@ -91,10 +91,10 @@ public sealed class ArchiveExpanderLiveTests
         var result = await producer.ProduceAsync(RealStack.KafkaTopic, new Message<Null, string>
         {
             Headers = LiveKafka.ExecutionHeaders(),
-            // filePath ALONE. This carried providerName = "acme-feed" until 2026-09-11, on the
+            // location ALONE. This carried providerName = "acme-feed" until 2026-09-11, on the
             // grounds that the org's records carry it and the reader must ignore it -- true of
-            // FileLocator, which binds case-insensitively and drops unknowns, and false of the
-            // registered schema. file-locator declares additionalProperties: false, so a second key
+            // Locator, which binds case-insensitively and drops unknowns, and false of the
+            // registered schema. locator declares additionalProperties: false, so a second key
             // never reaches the reader: KafkaImporter's OWN output validation refuses the record and
             // the lineage ends at the first hop, with every test here timing out on a chain that
             // never ran. Observed as
@@ -102,7 +102,7 @@ public sealed class ArchiveExpanderLiveTests
             //
             // The guarantee the old field tested has not been lost, it moved and got stronger: an
             // unexpected key used to be dropped downstream, and is now refused at the edge.
-            Value = JsonSerializer.Serialize(new { filePath = path }),
+            Value = JsonSerializer.Serialize(new { location = path }),
         });
 
         Assert.True(result.Status == PersistenceStatus.Persisted,
@@ -139,12 +139,12 @@ public sealed class ArchiveExpanderLiveTests
             // metadata.name until 2026-09-11 -- an ArchiveExpander document -- and had not been
             // able to match anything since the chain stopped ending at the expander. The out topic
             // carried envelopes once ArchiveCollapser was appended (2026-09-10) and carries
-            // {"filePath"} locators now that FilePersister precedes the exporter. A sink is the only
-            // way onto a topic, its single inputSchemaId is file-locator, and SourceHash is unique
+            // {"location"} locators now that FilePersister precedes the exporter. A sink is the only
+            // way onto a topic, its single inputSchemaId is locator, and SourceHash is unique
             // per processor row -- so no workflow can ever put a mid-chain shape on a topic, and
             // this is the only shape a test can wait for.
-            if (root.TryGetProperty("filePath", out var filePath)
-                && filePath.GetString() is { Length: > 0 } written
+            if (root.TryGetProperty("location", out var location)
+                && location.GetString() is { Length: > 0 } written
                 && Path.GetFileName(written) == name)
             {
                 return written;

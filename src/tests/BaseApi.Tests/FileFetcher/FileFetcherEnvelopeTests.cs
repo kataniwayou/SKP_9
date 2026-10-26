@@ -45,7 +45,7 @@ public sealed class FileFetcherEnvelopeTests : IDisposable
         processor.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await processor.ExecuteAsync(
-            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { location = path })),
             CsvPayload, executionId, CancellationToken.None);
 
         return sends;
@@ -102,7 +102,7 @@ public sealed class FileFetcherEnvelopeTests : IDisposable
 
         var json = Encoding.UTF8.GetString(Assert.Single(sends).Data);
         Assert.DoesNotContain(_dir.Replace('\\', '/'), json.Replace('\\', '/'), StringComparison.Ordinal);
-        Assert.False(JsonDocument.Parse(json).RootElement.TryGetProperty("filePath", out _));
+        Assert.False(JsonDocument.Parse(json).RootElement.TryGetProperty("location", out _));
     }
 
     [Fact]

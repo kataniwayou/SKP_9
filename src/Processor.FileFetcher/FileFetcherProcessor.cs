@@ -197,14 +197,16 @@ internal sealed class FileFetcherProcessor(
     /// failure with a diagnosis, not a framework exception with a sanitized message.
     /// </para>
     /// </summary>
+    private const string S3Scheme = "s3://";
+
     private static string ReadPath(byte[] data)
     {
-        FileLocator? locator;
+        Locator? locator;
         var reason = "the branch is not JSON";
 
         try
         {
-            locator = JsonSerializer.Deserialize<FileLocator>(data, ProcessorConfig.SerializerOptions);
+            locator = JsonSerializer.Deserialize<Locator>(data, ProcessorConfig.SerializerOptions);
         }
         catch (JsonException)
         {
@@ -214,24 +216,34 @@ internal sealed class FileFetcherProcessor(
             locator = null;
         }
 
-        if (locator?.FilePath is { Length: > 0 } filePath)
+        if (locator?.Location is { Length: > 0 } location)
         {
+            // Before the path test, and by name: an s3:// location is not a relative path, it is a
+            // location this processor cannot open, and "relative" would send an operator looking for
+            // a file. The scheme is quoted, never the URI — the bucket and key are upstream content.
+            if (location.StartsWith(S3Scheme, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new FailedException(
+                    "input branch did not name a location this processor reads: an s3:// location is "
+                    + "ObjectFetcher's; this processor reads an absolute filesystem path");
+            }
+
             // IsPathFullyQualified, not IsPathRooted: on Windows a drive-relative path such as
             // "\orders.csv" is rooted but not absolute — it still resolves against whatever drive is
             // current, which is not a location any workflow author chose. Production runs on Linux,
             // where the two agree, but the tests here run on Windows, where they do not.
-            if (Path.IsPathFullyQualified(filePath))
+            if (Path.IsPathFullyQualified(location))
             {
-                return filePath;
+                return location;
             }
 
             reason = "the path is relative, and only an absolute path names one location";
         }
         else if (locator is not null)
         {
-            reason = "the branch carries no filePath";
+            reason = "the branch carries no location";
         }
 
-        throw new FailedException($"input branch did not name a file path: {reason}");
+        throw new FailedException($"input branch did not name a location: {reason}");
     }
 }

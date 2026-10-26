@@ -59,7 +59,7 @@ public sealed class ArchiveCollapserLiveTests
     /// <para>
     /// <b>No default, on purpose — unset means no such workflow exists.</b> A NEW topic, not
     /// <see cref="RealStack.KafkaTopic"/>: that one feeds the existing FileFetcher/ArchiveExpander
-    /// workflow, whose first step expects <c>{"filePath": ...}</c>, not a FileNode document.
+    /// workflow, whose first step expects <c>{"location": ...}</c>, not a FileNode document.
     /// Nothing in this repo provisions a topic for ArchiveCollapser's own workflow — an operator
     /// must wire <c>KafkaImporter → ArchiveCollapser → KafkaExporter</c> and name its topics here,
     /// the same way <c>SKP_FILEREADER_DEEP_TOPIC</c> names a second FileFetcher/ArchiveExpander

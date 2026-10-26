@@ -91,7 +91,7 @@ public sealed class FilePersisterTests : IDisposable
     }
 
     private static string PathOf(ProcessedData branch)
-        => JsonDocument.Parse(branch.Data).RootElement.GetProperty("filePath").GetString()!;
+        => JsonDocument.Parse(branch.Data).RootElement.GetProperty("location").GetString()!;
 
     // ---- the write ----------------------------------------------------------------------------
 
@@ -158,7 +158,7 @@ public sealed class FilePersisterTests : IDisposable
 
         using var doc = JsonDocument.Parse(branch.Data);
         var prop = Assert.Single(doc.RootElement.EnumerateObject().Select(p => p.Name));
-        Assert.Equal("filePath", prop);
+        Assert.Equal("location", prop);
         Assert.Equal(Path.Combine(_out, "orders.csv"), PathOf(branch));
     }
 
@@ -326,7 +326,7 @@ public sealed class FilePersisterTests : IDisposable
         fetcher.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await fetcher.ExecuteAsync(
-            JsonSerializer.SerializeToUtf8Bytes(new { filePath = source }),
+            JsonSerializer.SerializeToUtf8Bytes(new { location = source }),
             """{"AllowedExtensions":[".zip"],"MinimumSizeBytes":0,"MaximumSizeBytes":4096}""",
             E, CancellationToken.None);
 

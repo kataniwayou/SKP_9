@@ -2,17 +2,20 @@
 """
 Seeds the dev Kafka topic that Processor.KafkaImporter reads.
 
-Each record is a JSON object naming one file path, and nothing else:
+Each record is a JSON object naming one location, and nothing else:
 
-    {"filePath": "/mnt/skp-files/in/file-001.zip"}
+    {"location": "/mnt/skp-files/in/file-001.zip"}
+
+The key was `filePath` until 2026-10-26; it is `location` because the same shape now carries an
+`s3://` URI for the object pair as well as a filesystem path for the file pair.
 
 WHATEVER THIS WRITES IS WHAT EVERY DOWNSTREAM STEP RECEIVES, byte for byte. The importer does not
 interpret the record value: it opens a lineage per record and sends the value on as the branch's
 data, with no envelope added and no re-encoding. So the shape here IS the importer's output shape,
 and a registered output schema is the thing that decides whether it is acceptable.
 
-ONE KEY, AND IT IS NOT NEGOTIABLE FROM HERE. The registered file-locator schema declares
-`required: ["filePath"]` with `additionalProperties: false`, so a second key is refused by
+ONE KEY, AND IT IS NOT NEGOTIABLE FROM HERE. The registered locator schema declares
+`required: ["location"]` with `additionalProperties: false`, so a second key is refused by
 KafkaImporter's OWN output validation and the lineage ends at the first hop, logged as
 
     warn BranchFinisher: output failed its schema -- reported failed: /providerName:
@@ -24,7 +27,7 @@ docstring here used to argue that a provider name was invisible to the processor
 another field tomorrow would need no change -- true of the reader, which binds case-insensitively
 and drops unknowns, and false of the edge, which now refuses the record before the reader sees it.
 
-THE LINEAGE RIDES A HEADER. Each record carries `execution-id: uuid5(NS_FEED, filePath)`. The
+THE LINEAGE RIDES A HEADER. Each record carries `execution-id: uuid5(NS_FEED, location)`. The
 importer refuses a record without one -- commits it, imports nothing, fails the dispatch -- so a
 record produced by anything other than this script must carry it too.
 
@@ -124,7 +127,7 @@ def record(path):
 
     One key. See the module docstring: the registered schema sets additionalProperties: false, so a
     second one is refused at the edge rather than ignored downstream."""
-    return json.dumps({"filePath": path}, separators=(",", ":")).encode("utf-8")
+    return json.dumps({"location": path}, separators=(",", ":")).encode("utf-8")
 
 
 def main():
@@ -132,7 +135,7 @@ def main():
     parser.add_argument("--brokers", default=DEFAULT_BROKERS)
     parser.add_argument("--topic", default=DEFAULT_TOPIC)
     # --provider is GONE, not defaulted. It stamped a providerName on every record, which the
-    # registered file-locator schema now refuses outright; keeping the flag as a no-op would leave a
+    # registered locator schema now refuses outright; keeping the flag as a no-op would leave a
     # caller believing a field reaches the topic that does not.
     parser.add_argument("--count", type=int, default=10)
     parser.add_argument("--prefix", default=DEFAULT_PREFIX)

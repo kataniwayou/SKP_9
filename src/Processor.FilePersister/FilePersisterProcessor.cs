@@ -53,7 +53,7 @@ internal sealed class FilePersisterProcessor(
             "persisted {FileName} ({Extension}), {SizeBytes} bytes, to {FilePath}",
             name, file.Extension, file.Content!.Length, path);
 
-        var locator = JsonSerializer.SerializeToUtf8Bytes(new FileLocator(path), FileLocatorJson.Options);
+        var locator = JsonSerializer.SerializeToUtf8Bytes(new Locator(path), LocatorJson.Options);
 
         // ONE branch, on the execution id this dispatch arrived with. Not NewExecutionId(): this is
         // a transform, not a source, so the lineage it was handed is the lineage it continues.

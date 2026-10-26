@@ -101,7 +101,7 @@ public sealed class EnvelopeContractTests : IDisposable
         fetcher.BeginDispatch(TestDispatch.State(sender, C, W, S, P));
 
         await fetcher.ExecuteAsync(
-            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { filePath = path })),
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { location = path })),
             payload, E, CancellationToken.None);
 
         return Assert.Single(sends).Data;

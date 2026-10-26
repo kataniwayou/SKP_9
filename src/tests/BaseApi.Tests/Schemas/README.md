@@ -5,7 +5,7 @@ them:
 
 | shape | file | is the contract for |
 |---|---|---|
-| locator | `locator.json` | KafkaImporter output = FileFetcher input |
+| locator | `locator.json` | KafkaImporter output = FileFetcher input = FilePersister output (and the object pair's, since 2026-10-26) |
 | envelope | `envelope.json` | FileFetcher output = ArchiveExpander input = ArchiveCollapser output |
 | tree | `tree.json` | ArchiveExpander output = ArchiveCollapser input |
 
@@ -19,23 +19,29 @@ any of these files directly any more; see [Registration](#registration).
 first hop in the pipeline, before there is any file content to carry. `FileFetcherProcessor.ReadPath`
 is the code that consumes this shape; see its comments for the full accept/reject logic.
 
+**`location`, not `filePath` (renamed 2026-10-26).** One shape serves both pairs: the file pair's
+location is an absolute filesystem path, the object pair's an `s3://` URI. The schema cannot tell them
+apart and does not try; the processor reading it does, and FileFetcher refuses an `s3://` location by
+naming ObjectFetcher as the processor that reads it. Registered as the row `locator`, which replaced
+`file-locator`.
+
 What it asserts:
 
-- One key, `filePath`, REQUIRED, `additionalProperties: false`. A branch that carries no `filePath`
-  key at all is exactly the case `ReadPath` reports as "the branch carries no filePath".
-- `filePath` is `{ "type": "string", "minLength": 1 }` — a string and non-empty, with no `"null"` in
-  its `type`. The C# record behind it, `FileLocator(string? FilePath)`, declares the property
+- One key, `location`, REQUIRED, `additionalProperties: false`. A branch that carries no `location`
+  key at all is exactly the case `ReadPath` reports as "the branch carries no location".
+- `location` is `{ "type": "string", "minLength": 1 }` — a string and non-empty, with no `"null"` in
+  its `type`. The C# record behind it, `Locator(string? Location)`, declares the property
   nullable, but that nullability is a DESERIALIZATION concern, not a contract one: `string?` exists so
   a malformed branch can be caught and turned into a diagnosed `FailedException` instead of an
   unhandled throw. A valid branch — the thing this schema is a contract for — always carries a
-  present, non-empty `filePath`. `ReadPath`'s own pattern match, `locator?.FilePath is { Length: > 0 }
-  filePath`, treats a null `filePath` and an empty-string `filePath` identically to a missing one —
-  all three fall through to "the branch carries no filePath" — so the schema mirrors that by
+  present, non-empty `location`. `ReadPath`'s own pattern match, `locator?.Location is { Length: > 0 }
+  location`, treats a null `location` and an empty-string `location` identically to a missing one —
+  all three fall through to "the branch carries no location" — so the schema mirrors that by
   disallowing all three at once via `required` + non-nullable `type` + `minLength: 1`.
 
 ### What it deliberately does not assert
 
-**That `filePath` is absolute.** `ReadPath` additionally requires `Path.IsPathFullyQualified(filePath)`
+**That `location` is absolute.** `ReadPath` additionally requires `Path.IsPathFullyQualified(location)`
 and rejects a relative path with a separate reason ("the path is relative, and only an absolute path
 names one location") — but that check is NOT encoded here as a `pattern`. "Absolute" is
 platform-dependent: `C:\orders\a.csv` is fully qualified on Windows and `/orders/a.csv` is fully
@@ -54,7 +60,7 @@ the shape ArchiveCollapser writes to reassemble a tree into a single file again.
 What it asserts:
 
 - Six keys, `additionalProperties: false`. A key nobody agreed on must not travel silently — in
-  particular `filePath`, which is deliberately absent from the envelope.
+  particular `location`, which is deliberately absent from the envelope.
 - Every key is REQUIRED and present, including the two timestamps that are frequently null.
   FileFetcher's own serializer is configured `DefaultIgnoreCondition.Never` for exactly this reason.
 - `content` is a base64 string. An empty file is `""`, which is why there is no `minLength` on it.
