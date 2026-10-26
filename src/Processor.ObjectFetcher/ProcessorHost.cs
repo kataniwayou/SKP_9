@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using OpenTelemetry.Metrics;
 
 namespace Processor.ObjectFetcher;
@@ -110,9 +111,20 @@ public static class ProcessorHost
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
 
-        // The S3 endpoint settings, from the "S3" section. The processor itself, and the pod's size
-        // ceiling, are registered with the processor.
+        // The pod's ceiling, from ObjectFetcher__MaxObjectSizeBytes in the manifest. Infrastructure
+        // limits come from configuration, business expectations come from the step payload.
+        builder.Services.Configure<ObjectFetcherOptions>(builder.Configuration.GetSection("ObjectFetcher"));
+
+        // The S3 endpoint settings, from the "S3" section, and the one client built from them. The
+        // client is thread-safe and holds the connection pool, so it is shared; the container
+        // disposes it with the host.
         builder.Services.Configure<S3Options>(builder.Configuration.GetSection("S3"));
+        builder.Services.AddSingleton(sp => S3Client.Create(sp.GetRequiredService<IOptions<S3Options>>().Value));
+
+        // The concrete processor the pre/post handlers resolve as BaseProcessor. Singleton, matching
+        // the seam's design: per-dispatch state lives in a plain field on this one instance, which is
+        // safe only because prefetch is 1.
+        builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, ObjectFetcherProcessor>();
 
         return builder.Build();
     }

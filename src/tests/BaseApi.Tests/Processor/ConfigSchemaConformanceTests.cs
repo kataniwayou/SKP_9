@@ -50,6 +50,16 @@ public sealed class ConfigSchemaConformanceTests
     }
 
     [Fact]
+    public void TheRegisteredObjectFetcherRowDescribesItsRecord()
+    {
+        // Identical to FileFetcher's row: allowedExtensions is optional because the record defaults
+        // it, and the two size bounds are required.
+        Assert.Empty(ConfigSchemaConformance.Check(
+            typeof(global::Processor.ObjectFetcher.ObjectFetcherConfig),
+            File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Schemas", "object-fetcher-config.json"))));
+    }
+
+    [Fact]
     public void APropertyMissingFromTheRowIsAMismatch()
     {
         // THE HOLE THIS CLOSES. A schema cannot reject a key it does not describe, so a record
