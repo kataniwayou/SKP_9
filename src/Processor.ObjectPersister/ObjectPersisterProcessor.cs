@@ -242,9 +242,17 @@ internal sealed class ObjectPersisterProcessor(
                 throw BadPayload($"bucket '{target.Bucket}' does not exist; this processor does not create it");
             }
 
-            if (ex is AmazonS3Exception { StatusCode: HttpStatusCode.Forbidden })
+            // A policy refusal, or a 403 with no code to say otherwise. Any other 403
+            // (InvalidAccessKeyId, a clock skew, ...) is not a policy refusal, and "access denied"
+            // would send the operator to the wrong place; it falls to its own code below.
+            if (ex is AmazonS3Exception { StatusCode: HttpStatusCode.Forbidden, ErrorCode: null or "" or "AccessDenied" })
             {
                 throw Unwritable(target, "access denied");
+            }
+
+            if (ex is AmazonS3Exception { StatusCode: HttpStatusCode.Forbidden, ErrorCode: { Length: > 0 } code })
+            {
+                throw Unwritable(target, $"{code}: {ex.Message}");
             }
 
             throw Unwritable(target, ex is OperationCanceledException ? TimedOut : ex.Message);

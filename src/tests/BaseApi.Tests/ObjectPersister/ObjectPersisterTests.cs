@@ -112,6 +112,10 @@ public sealed class ObjectPersisterTests
     private void NothingWasPut()
         => Assert.DoesNotContain(_s3.ReceivedCalls(), c => c.GetMethodInfo().Name == "PutObjectAsync");
 
+    /// <summary>So a cancellation test proves the PUT threw, not that nothing ever ran.</summary>
+    private void PutWasReached()
+        => Assert.Contains(_s3.ReceivedCalls(), c => c.GetMethodInfo().Name == "PutObjectAsync");
+
     // ---- the write ----------------------------------------------------------------------------
 
     [Fact]
@@ -155,14 +159,16 @@ public sealed class ObjectPersisterTests
         Assert.Empty(body);
     }
 
-    [Fact]
-    public async Task ANameWithSpacesAndUnicodeIsWrittenAndReportedVerbatim()
+    [Theory]
+    [InlineData("a b+ü.csv")]
+    [InlineData("a%20b.csv")] // a literal %20 is not decoded to a space, on the wire or in the report
+    public async Task ANameWithSpacesAndUnicodeIsWrittenAndReportedVerbatim(string name)
     {
-        await Run(Envelope("a b+ü.csv", [1]));
+        await Run(Envelope(name, [1]));
 
-        Assert.Equal("acme/a b+ü.csv", Assert.Single(_puts).Request.Key);
+        Assert.Equal($"acme/{name}", Assert.Single(_puts).Request.Key);
         using var doc = JsonDocument.Parse(Assert.Single(_sends).Data);
-        Assert.Equal("s3://skp-out/acme/a b+ü.csv", doc.RootElement.GetProperty("location").GetString());
+        Assert.Equal($"s3://skp-out/acme/{name}", doc.RootElement.GetProperty("location").GetString());
     }
 
     [Fact]
@@ -361,6 +367,33 @@ public sealed class ObjectPersisterTests
     }
 
     [Fact]
+    public async Task ACodedForbiddenWriteCarriesItsCode()
+    {
+        var message = await FailureOf(new AmazonS3Exception("The request signature we calculated does not match.")
+        {
+            StatusCode = HttpStatusCode.Forbidden,
+            ErrorCode = "SignatureDoesNotMatch",
+        });
+
+        Assert.Equal(
+            "writing s3://skp-out/acme/orders.csv failed: SignatureDoesNotMatch: "
+            + "The request signature we calculated does not match.",
+            message);
+    }
+
+    [Fact]
+    public async Task AnAccessDeniedCodeReadsAsAccessDenied()
+    {
+        var message = await FailureOf(new AmazonS3Exception("Access Denied")
+        {
+            StatusCode = HttpStatusCode.Forbidden,
+            ErrorCode = "AccessDenied",
+        });
+
+        Assert.Equal("writing s3://skp-out/acme/orders.csv failed: access denied", message);
+    }
+
+    [Fact]
     public async Task AnyOtherFaultCarriesTheSdksMessage()
     {
         var message = await FailureOf(new AmazonS3Exception("Please reduce your request rate.")
@@ -381,6 +414,7 @@ public sealed class ObjectPersisterTests
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => processor.ExecuteAsync(Envelope("orders.csv", [1]), Destination, E, cts.Token));
+        PutWasReached();
     }
 
     [Fact]
@@ -396,6 +430,7 @@ public sealed class ObjectPersisterTests
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => processor.ExecuteAsync(Envelope("orders.csv", [1]), Destination, E, cts.Token));
+        PutWasReached();
     }
 
     [Fact]

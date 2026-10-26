@@ -31,6 +31,14 @@ internal sealed class ObjectFetcherProcessor(
 
     private readonly long _podCeiling = options.Value.MaxObjectSizeBytes;
 
+    /// <summary>
+    /// How long one read of the body may stall. <c>AmazonS3Config.Timeout</c> bounds the request up
+    /// to its headers and not the body, and a dispatch token is not cancelled in production, so
+    /// without this a stalled body would hold the dispatch forever. Settable for tests only; there
+    /// is no pod configuration for it.
+    /// </summary>
+    internal TimeSpan BodyReadTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
     protected override async Task ProcessAsync(
         byte[] data, ObjectFetcherConfig? config, Guid executionId, CancellationToken ct)
     {
@@ -173,6 +181,12 @@ internal sealed class ObjectFetcherProcessor(
     /// </summary>
     private async Task<byte[]> Read(ObjectUri uri, Head head, CancellationToken ct)
     {
+        if (string.IsNullOrEmpty(head.ETag))
+        {
+            // Nothing to condition on, and an unconditional GET would read bytes the checks never saw.
+            throw Unreadable(uri, "the server reported no ETag");
+        }
+
         if (head.Length > Array.MaxLength)
         {
             throw Unreadable(uri, "it is larger than this processor can hold in memory");
@@ -195,9 +209,14 @@ internal sealed class ObjectFetcherProcessor(
             {
                 var body = response.ResponseStream;
 
+                // A deadline per read, not per body: a slow body that keeps moving is fine, a stalled
+                // one is not. Expiry cancels `reads` and not `ct`, so Call reads it as a timeout.
+                using var reads = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
                 while (filled < buffer.Length)
                 {
-                    var read = await body.ReadAsync(buffer.AsMemory(filled), ct).ConfigureAwait(false);
+                    reads.CancelAfter(BodyReadTimeout);
+                    var read = await body.ReadAsync(buffer.AsMemory(filled), reads.Token).ConfigureAwait(false);
                     if (read == 0)
                     {
                         break;
@@ -210,7 +229,8 @@ internal sealed class ObjectFetcherProcessor(
                 // longer than the HEAD said.
                 if (filled == buffer.Length)
                 {
-                    overrun = await body.ReadAsync(new byte[1], ct).ConfigureAwait(false) > 0;
+                    reads.CancelAfter(BodyReadTimeout);
+                    overrun = await body.ReadAsync(new byte[1], reads.Token).ConfigureAwait(false) > 0;
                 }
 
                 return 0;
@@ -247,21 +267,34 @@ internal sealed class ObjectFetcherProcessor(
         {
             return await call().ConfigureAwait(false);
         }
-        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        catch (Exception ex)
         {
-            // A HEAD has no body, so a missing bucket and a missing key are indistinguishable.
-            throw Unreadable(uri, "it does not exist (bucket or key)");
-        }
-        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.Forbidden)
-        {
-            throw Unreadable(uri, "access denied");
-        }
-        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.PreconditionFailed)
-        {
-            throw Unreadable(uri, "it changed between inspection and read");
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
+            // Before any mapping: a shutdown can reach here as a socket error as easily as an
+            // OperationCanceledException, and none of them is a failed step.
+            ct.ThrowIfCancellationRequested();
+
+            if (ex is AmazonS3Exception s3)
+            {
+                switch (s3.StatusCode)
+                {
+                    case HttpStatusCode.NotFound:
+                        // A HEAD has no body, so a missing bucket and a missing key are indistinguishable.
+                        throw Unreadable(uri, "it does not exist (bucket or key)");
+
+                    case HttpStatusCode.Forbidden when s3.ErrorCode is null or "" or "AccessDenied":
+                        // A HEAD has no body either, so its 403 carries no code.
+                        throw Unreadable(uri, "access denied");
+
+                    case HttpStatusCode.Forbidden when !string.IsNullOrEmpty(s3.ErrorCode):
+                        // Any other 403 (InvalidObjectState, a clock skew, a bad key) is not a policy
+                        // refusal, and "access denied" would send the operator to the wrong place.
+                        throw Unreadable(uri, $"{s3.ErrorCode}: {s3.Message}");
+
+                    case HttpStatusCode.PreconditionFailed:
+                        throw Unreadable(uri, "it changed between inspection and read");
+                }
+            }
+
             throw Unreadable(uri, ex is OperationCanceledException ? TimedOut : ex.Message);
         }
     }

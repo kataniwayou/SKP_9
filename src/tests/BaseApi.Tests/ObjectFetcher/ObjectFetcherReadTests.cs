@@ -41,13 +41,18 @@ public sealed class ObjectFetcherReadTests
     private readonly List<ProcessedData> _sends = [];
     private readonly RecordingLogger<ObjectFetcherProcessor> _logger = new();
 
+    private TimeSpan? _bodyTimeout;
+
     private ObjectFetcherProcessor Build()
     {
         _sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(_sends.Add),
                           Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
         var processor = new ObjectFetcherProcessor(
-            _logger, Options.Create(new ObjectFetcherOptions()), _s3);
+            _logger, Options.Create(new ObjectFetcherOptions()), _s3)
+        {
+            BodyReadTimeout = _bodyTimeout ?? TimeSpan.FromSeconds(30),
+        };
         processor.BeginDispatch(TestDispatch.State(_sender, C, W, S, P));
         return processor;
     }
@@ -239,6 +244,96 @@ public sealed class ObjectFetcherReadTests
         var message = await Failure();
 
         Assert.Equal($"reading {Location} failed: access denied", message);
+    }
+
+    [Fact]
+    public async Task ACodedForbiddenFailsWithItsCode()
+    {
+        HeadThrows(new AmazonS3Exception("The object is archived.")
+        {
+            StatusCode = HttpStatusCode.Forbidden,
+            ErrorCode = "InvalidObjectState",
+        });
+
+        var message = await Failure();
+
+        Assert.Equal($"reading {Location} failed: InvalidObjectState: The object is archived.", message);
+    }
+
+    [Fact]
+    public async Task AnAccessDeniedCodeReadsAsAccessDenied()
+    {
+        HeadThrows(new AmazonS3Exception("Access Denied")
+        {
+            StatusCode = HttpStatusCode.Forbidden,
+            ErrorCode = "AccessDenied",
+        });
+
+        var message = await Failure();
+
+        Assert.Equal($"reading {Location} failed: access denied", message);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task AHeadWithNoETagFailsClosed(string? etag)
+    {
+        Head(7, etag!);
+        Body(Encoding.UTF8.GetBytes("id,name"));
+
+        var message = await Failure();
+
+        Assert.Equal($"reading {Location} failed: the server reported no ETag", message);
+        NeverDownloaded();
+    }
+
+    [Fact]
+    public async Task AStalledBodyTimesOut()
+    {
+        Head(7);
+        _bodyTimeout = TimeSpan.FromMilliseconds(50);
+        _s3.GetObjectAsync(Arg.Any<GetObjectRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => new GetObjectResponse { ResponseStream = new StalledStream() });
+
+        var started = DateTime.UtcNow;
+        var message = await Failure();
+
+        Assert.Equal($"reading {Location} failed: timed out", message);
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(10));
+        Assert.Empty(_sends);
+    }
+
+    [Fact]
+    public async Task AFaultOnACancelledDispatchIsNotAFailedStep()
+    {
+        // A shutdown can reach the SDK as something other than an OperationCanceledException.
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        HeadThrows(Fault(HttpStatusCode.ServiceUnavailable, "connection closed"));
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => Run(ct: cts.Token));
+    }
+
+    /// <summary>A body that never yields a byte until the read is cancelled.</summary>
+    private sealed class StalledStream : Stream
+    {
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
+            return 0;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     [Fact]
