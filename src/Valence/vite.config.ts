@@ -2,9 +2,9 @@ import { defineConfig } from 'vitest/config';
 import type { Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// AI drawing (2026-10-17, as SKP Studio's): the model's base URL, id and key come from the dev environment, as nginx takes
-// them from the pod's (KIMI_BASE_URL, KIMI_MODEL_ID, KIMI_API_KEY; never written anywhere). Without all three /ai is not
-// proxied and Valence says AI drawing is not configured.
+// The chat's model (2026-10-26, as SKP Studio's): the model's base URL, id and key come from the dev environment, as nginx
+// takes them from the pod's (KIMI_BASE_URL, KIMI_MODEL_ID, KIMI_API_KEY; never written anywhere). Without all three /ai is
+// not proxied and Valence says the chat is not configured.
 const { KIMI_API_KEY: aiKey, KIMI_BASE_URL: aiBaseUrl, KIMI_MODEL_ID: aiModel } = process.env;
 const aiBase = aiKey && aiBaseUrl && aiModel ? new URL(aiBaseUrl) : null;
 /** /ai/config, as nginx answers it: the model Valence sends. */
@@ -14,7 +14,7 @@ const aiConfig: Plugin = {
     server.middlewares.use('/ai/config', (_req, res) => {
       res.setHeader('Content-Type', 'application/json');
       res.statusCode = aiBase ? 200 : 503;
-      res.end(JSON.stringify(aiBase ? { model: aiModel } : { error: 'AI drawing is not configured' }));
+      res.end(JSON.stringify(aiBase ? { model: aiModel } : { error: 'The chat is not configured' }));
     });
   },
 };

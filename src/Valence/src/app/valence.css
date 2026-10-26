@@ -133,10 +133,3 @@ select.input { font-family: var(--sans); font-size: 12.5px; }
 .ap-btn.go { border-color: #4ade80; background: rgba(74, 222, 128, .15); color: #4ade80; font-weight: 600; }
 .ap-btn:disabled { opacity: .6; cursor: default; }
 @media (max-width: 700px) { .ap-row { grid-template-columns: 1fr; gap: 3px; } }
-
-/* The AI drawing's wand, beside the Workflows filter (2026-10-17, as SKP Studio's) */
-.wd-b { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 12px; border: 1px solid var(--line-2); background: none; color: var(--ink); font: 12px var(--sans); cursor: pointer; white-space: nowrap; }
-.wd-b:hover { background: rgba(108, 140, 255, .14); border-color: #6c8cff; }
-.wd-b.off { color: var(--faint); cursor: default; }
-.wd-b.off:hover { background: none; border-color: var(--line-2); }
-.wd-b.busy { color: var(--muted); }

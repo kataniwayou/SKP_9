@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { canvasBridge, type CanvasApi } from '../molecule/bridge';
-import type { Vec } from '../molecule/layout';
+import { canvasBridge } from '../molecule/bridge';
 import type { ProjectData } from '../api/project';
 import { arrowKey, atomKey, buildMolecule } from '../molecule/model';
 import { readSession, SESSION_KEY, SESSION_VERSION, writeSession } from './session';
@@ -104,42 +103,6 @@ describe('the shared history of edits and deletions (the user, 2026-10-16)', () 
     storage.setItem(SESSION_KEY, JSON.stringify({ version: 1, dock: null, highlighted: [], removed: { atoms: [S2, 7], arrows: 'no' },
       history: { past: [{ label: 'ok', atoms: [S2] }, { nolabel: true }, 'x'], future: [] } }));
     expect(readSession(storage)).toMatchObject({ removed: { atoms: [S2], arrows: [] }, history: { past: [{ label: 'ok', atoms: [S2] }], future: [] } });
-  });
-
-  it('steps an AI drawing back and forth like any change, by key, and keeps it on refresh (the user, 2026-10-18)', () => {
-    const placed: Map<string, Vec>[] = [];
-    canvasBridge.set({ place: (p: ReadonlyMap<string, Vec>) => { placed.push(new Map(p)); } } as unknown as CanvasApi);
-    const ws = loaded();
-    ws.drawn('AI drawing of W1', [{ key: S2, before: [1, 2, 3], after: [4, 5, 6] }, { key: P1, before: [0, 0, 0], after: [0, 9, 0] }]);
-    expect(placed.at(-1)).toEqual(new Map([[S2, [4, 5, 6]], [P1, [0, 9, 0]]]));
-    ws.edit(C1, 'name', 'x', 'c1');
-    ws.undo(); // the edit first, the drawing stays
-    expect(placed).toHaveLength(1);
-    ws.undo();
-    expect(placed.at(-1)).toEqual(new Map([[S2, [1, 2, 3]], [P1, [0, 0, 0]]]));
-    expect(ws.get().messages.at(-1)!.text).toBe('Undid: AI drawing of W1.');
-    ws.redo();
-    expect(placed.at(-1)).toEqual(new Map([[S2, [4, 5, 6]], [P1, [0, 9, 0]]]));
-    expect(ws.get().messages.at(-1)!.text).toBe('Redid: AI drawing of W1.');
-
-    const storage = memoryStorage();
-    writeSession(storage, { version: SESSION_VERSION, dock: null, highlighted: [], history: ws.get().history });
-    const back = readSession(storage)!;
-    expect(back.history).toEqual(ws.get().history);
-    const again = createWorkspace({ history: back.history });
-    again.loaded(data, buildMolecule(data));
-    again.undo(); again.undo();
-    expect(placed.at(-1)).toEqual(new Map([[S2, [1, 2, 3]], [P1, [0, 0, 0]]]));
-
-    storage.setItem(SESSION_KEY, JSON.stringify({ version: 1, dock: null, highlighted: [],
-      history: { past: [{ label: 'AI drawing', moves: [{ key: S2, before: [1, 2, 3], after: [4, 5, 6] }, { key: P1, before: [1, 2], after: [0, 0, 0] }, 'x'] }], future: [] } }));
-    expect(readSession(storage)!.history!.past[0]!.moves).toEqual([{ key: S2, before: [1, 2, 3], after: [4, 5, 6] }]);
-  });
-
-  it('records no step for a drawing that moved nothing', () => {
-    const ws = loaded();
-    ws.drawn('AI drawing of W1', []);
-    expect(ws.get().history.past).toHaveLength(0);
   });
 
   it('drops a restored deletion of a row the project no longer has', () => {

@@ -56,8 +56,8 @@ spec:
             # pod does not start (nginx: invalid number of arguments in "proxy_pass").
             - name: BASEAPI_URL
               value: "http://baseapi-service:8080"
-            # AI drawing (2026-10-17, as SKP Studio's k8s/31): the model behind Valence's own /ai route (nginx adds the key;
-            # it never reaches the browser). Any of the three empty: /ai answers 503 ("AI drawing is not configured"). Env
+            # The chat (2026-10-26, as SKP Studio's k8s/31): the model behind Valence's own /ai route (nginx adds the key;
+            # it never reaches the browser). Any of the three empty: /ai answers 503 ("The chat is not configured"). Env
             # is read at start: editing one here rolls the pod. The key is committed empty and filled in the working copy only.
             - name: KIMI_BASE_URL
               value: "https://api.moonshot.ai/v1"

@@ -836,7 +836,7 @@ function buildScene(el: HTMLDivElement, molecule: Molecule, positions: ReadonlyM
   }
   // the page closing mid-turn (still coasting) or mid-drag: the view as it stands is kept
   listen(win, 'pagehide', () => { if (unreported || signature() !== lastSig) reportView(true); });
-  // the AI drawing's glide to the new places (0.9 s, eased); kept afterwards as a move by hand is
+  // the chat's relocation glides to the new places (0.9 s, eased); kept afterwards as a move by hand is
   let gliding: { t0: number; atoms: { a: AtomView; from: THREE.Vector3; to: THREE.Vector3 }[] } | null = null;
   function glide(now: number) {
     if (!gliding) return;

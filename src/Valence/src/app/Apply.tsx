@@ -22,8 +22,8 @@ const MODE: Readonly<Record<ChangeRow['mode'], { title: string; cls: string }>> 
   deleted: { title: 'Deleted — red ghost · removed, with its arrows', cls: 'd' },
 };
 
-/** Whether the changes may be applied now, and if not, why (the button's tooltip). */
-function readiness(workspace: Workspace, summary: ApplySummary | null): { ready: boolean; tip: string } {
+/** Whether the changes may be applied now, and if not, why (the button's tooltip; the chat's refusal). */
+export function readiness(workspace: Workspace, summary: ApplySummary | null): { ready: boolean; tip: string } {
   const s = workspace.get();
   const n = summary?.rows.length ?? 0;
   if (!summary || n === 0) return { ready: false, tip: 'Nothing to apply.' };
@@ -72,6 +72,43 @@ export function ApplyButton({ workspace }: { workspace: Workspace }) {
 }
 
 /**
+ * Sends every change to BaseApi (all or nothing) and says what came of it in the Output pane: applied (the project read
+ * again, the made atoms under their real ids), refused (BaseApi's reasons on the atoms), or not available. The dialog's
+ * Apply and the chat's apply_changes both end here. Returns whether it was applied, and the Output line.
+ */
+export async function applySummary(workspace: Workspace, summary: ApplySummary): Promise<{ applied: boolean; line: string }> {
+  const { rows, planned } = summary;
+  const s = workspace.get();
+  const answer: Applied = await applyChanges(planned);
+  const nameOf = (atom: string) => s.edits[atom]?.name || s.molecule?.atoms.get(atom)?.name || atom;
+  if (answer.kind === 'applied') {
+    // the made atoms' client keys → the keys BaseApi's ids give them
+    const rename = new Map<string, string>();
+    for (const [client, real] of Object.entries(answer.made)) {
+      const c = s.created.find((x) => x.id === client);
+      if (c) rename.set(c.key, `${c.type}:${real}`);
+    }
+    canvasBridge.get()?.rekey(rename);
+    const line = appliedLine(rows);
+    if (applyBridge.reload) await applyBridge.reload(rename, line);
+    else workspace.applied(null, null, rename, line);
+    return { applied: true, line };
+  }
+  if (answer.kind === 'refused') {
+    const state = verdictOf(planned, { kind: 'done', ok: false, results: answer.results }, s.rules.fields);
+    const stale = answer.results.filter(isStale).map((r) => nameOf(atomOfChange(r.table, r.id) ?? r.id));
+    const line = stale.length
+      ? `Nothing applied: ${stale.join(', ')} changed in BaseApi since you loaded ${stale.length === 1 ? 'it' : 'them'}. Refresh (your changes are kept), then apply again.`
+      : `Apply refused, nothing applied: ${(dryRunLine(state, planned, nameOf) ?? '').replace(/^Dry run by BaseApi: /, '')}`;
+    workspace.judged(state, line);
+    return { applied: false, line };
+  }
+  const line = `Apply: not available (${answer.reason}); nothing applied.`;
+  workspace.note(line, 'refused');
+  return { applied: false, line };
+}
+
+/**
  * The confirmation: every change, grouped as the canvas shows it (green new, amber updated, red deleted), what changes
  * and the workflows it affects. Apply sends them all; BaseApi keeps all of them or none. Escape or Cancel closes it.
  */
@@ -84,40 +121,12 @@ function ApplyDialog({ workspace, summary, onClose }: { workspace: Workspace; su
     window.addEventListener('keydown', key, true);
     return () => window.removeEventListener('keydown', key, true);
   }, [busy, onClose]);
-  const { rows, affects, planned } = summary;
+  const { rows, affects } = summary;
   const count = (m: ChangeRow['mode']) => rows.filter((r) => r.mode === m).length;
 
   const go = async () => {
     setBusy(true);
-    const s = workspace.get();
-    let answer: Applied;
-    try { answer = await applyChanges(planned); } finally { setBusy(false); }
-    const nameOf = (atom: string) => s.edits[atom]?.name || s.molecule?.atoms.get(atom)?.name || atom;
-    if (answer.kind === 'applied') {
-      // the made atoms' client keys → the keys BaseApi's ids give them
-      const rename = new Map<string, string>();
-      for (const [client, real] of Object.entries(answer.made)) {
-        const c = s.created.find((x) => x.id === client);
-        if (c) rename.set(c.key, `${c.type}:${real}`);
-      }
-      canvasBridge.get()?.rekey(rename);
-      const line = appliedLine(rows);
-      if (applyBridge.reload) await applyBridge.reload(rename, line);
-      else workspace.applied(null, null, rename, line);
-      onClose();
-      return;
-    }
-    if (answer.kind === 'refused') {
-      const state = verdictOf(planned, { kind: 'done', ok: false, results: answer.results }, s.rules.fields);
-      const stale = answer.results.filter(isStale).map((r) => nameOf(atomOfChange(r.table, r.id) ?? r.id));
-      const line = stale.length
-        ? `Nothing applied: ${stale.join(', ')} changed in BaseApi since you loaded ${stale.length === 1 ? 'it' : 'them'}. Refresh (your changes are kept), then apply again.`
-        : `Apply refused, nothing applied: ${(dryRunLine(state, planned, nameOf) ?? '').replace(/^Dry run by BaseApi: /, '')}`;
-      workspace.judged(state, line);
-      onClose();
-      return;
-    }
-    workspace.note(`Apply: not available (${answer.reason}); nothing applied.`, 'refused');
+    try { await applySummary(workspace, summary); } finally { setBusy(false); }
     onClose();
   };
 

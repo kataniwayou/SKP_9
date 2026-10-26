@@ -1,7 +1,7 @@
 import { parseLayout, type SavedLayout } from '../dock/layoutPersistence';
 import type { CreatedAtom } from './virtual';
 import type { Removed } from '../molecule/deletion';
-import type { Change, EditChange, History, Move } from './workspace';
+import type { Change, EditChange, History } from './workspace';
 import { parseView, type CanvasView } from '../molecule/view';
 
 /**
@@ -95,17 +95,8 @@ function changes(v: unknown): Change[] {
       ...(Array.isArray(c.added) ? { added: strings(c.added) } : {}),
       ...(Array.isArray(c.unadded) ? { unadded: strings(c.unadded) } : {}),
       ...(Array.isArray(c.restored) ? { restored: strings(c.restored) } : {}),
-      ...(movesOf(c.moves).length ? { moves: movesOf(c.moves) } : {}),
     }];
   });
-}
-
-const vec = (v: unknown): v is [number, number, number] => Array.isArray(v) && v.length === 3 && v.every((n) => typeof n === 'number' && Number.isFinite(n));
-/** An AI drawing's moves that are whole; a malformed one is dropped. */
-function movesOf(v: unknown): Move[] {
-  if (!Array.isArray(v)) return [];
-  return v.flatMap((m): Move[] => (isRecord(m) && typeof m.key === 'string' && vec(m.before) && vec(m.after)
-    ? [{ key: m.key, before: [m.before[0], m.before[1], m.before[2]], after: [m.after[0], m.after[1], m.after[2]] }] : []));
 }
 
 const TYPES_MADE = new Set(['wf', 'step', 'proc', 'schema', 'asg', 'cache']);

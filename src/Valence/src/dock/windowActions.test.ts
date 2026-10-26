@@ -63,6 +63,14 @@ describe('window actions on a real dockview', () => {
     expect(showTool(api, memory, 'inspector')).toBe(api.getPanel('inspector'));
   });
 
+  it('shows Chat as a tab beside Output (2026-10-26, as SKP Studio)', () => {
+    const { api, memory } = dock();
+    addDocument(api, memory, 'a', 'orders');
+    showTool(api, memory, 'output');
+    showTool(api, memory, 'chat');
+    expect(where(api, 'chat')!.group).toBe(where(api, 'output')!.group);
+  });
+
   it('docks a floated pane back to the exact neighbour and side it remembered', () => {
     const { api, memory } = dock();
     addDocument(api, memory, 'a', 'orders');
@@ -206,7 +214,7 @@ describe('window actions on a real dockview', () => {
 
     expect(api.getPanel('doc:a')).toBe(docA);
     expect(where(api, 'doc:a')!.location).toBe('grid');
-    expect(api.panels.map((p) => p.id).sort()).toEqual(['doc:a', 'inspector', 'output', 'toolbox']);
+    expect(api.panels.map((p) => p.id).sort()).toEqual(['chat', 'doc:a', 'inspector', 'output', 'toolbox']);
     expect(memory.homes).toEqual({});
   });
 
@@ -218,13 +226,13 @@ describe('window actions on a real dockview', () => {
     const hidden = autoHide(api, memory, api.getPanel('output')!, NO_RECT);
     const saved = captureLayout(api, memory, hidden);
     expect(JSON.stringify(saved.dock)).not.toContain('doc:a');
-    expect(saved.hidden).toEqual(['output']);
+    expect(saved.hidden).toEqual(['output', 'chat']);
 
     resetLayout(api, memory, 1200);
     addDocument(api, memory, 'b', 'billing');
     const docA = api.getPanel('doc:a'), docB = api.getPanel('doc:b');
 
-    expect(applyLayout(api, memory, saved)).toEqual(['output']);
+    expect(applyLayout(api, memory, saved)).toEqual(['output', 'chat']);
 
     expect(where(api, 'toolbox')!.location).toBe('floating');
     expect(api.getPanel('output')!.group.api.isVisible).toBe(false);
@@ -548,6 +556,8 @@ describe('the document area takes the resize slack (ruling)', () => {
     expect(api.getPanel('toolbox')!.group.api.width).toBe(before.toolbox);
     expect(api.getPanel('doc:a')!.group.api.width).toBe(before.area);
 
+    // Chat is a tab beside Output (2026-10-26): the group goes when both are closed
+    closeTool(api, memory, api.getPanel('chat')!, NO_RECT);
     closeTool(api, memory, api.getPanel('output')!, NO_RECT);
     expect(api.getPanel('doc:a')!.group.api.height).toBe(700);
     showTool(api, memory, 'output');
@@ -670,7 +680,7 @@ describe('a session or saved layout from before Problems moved into Output (2026
     expect(() => applyLayout(fresh, freshMemory, layout)).not.toThrow();
 
     expect(fresh.getPanel('problems')).toBeUndefined();
-    expect(fresh.panels.map((p) => p.id).sort()).toEqual(['doc:a', 'inspector', 'output', 'toolbox']);
+    expect(fresh.panels.map((p) => p.id).sort()).toEqual(['chat', 'doc:a', 'inspector', 'output', 'toolbox']);
     expect(fresh.getPanel('doc:a')).toBe(docA);
     expect(fresh.groups.filter((g) => g.panels.length === 0)).toEqual([]);
     expect(fresh.getPanel('output')!.group.activePanel?.id).toBe('output');

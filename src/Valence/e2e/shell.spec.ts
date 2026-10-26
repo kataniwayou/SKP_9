@@ -26,11 +26,11 @@ test('the rules come from BaseApi, and the legend names every kind and the healt
   await expect(v.page.locator('.mol-legend-health')).toHaveText(/Processor health:\s*healthy\s*unhealthy\s*not known/);
 });
 
-test('the menu strip is View, Window and Shortcuts, with the filter, the wand and Apply at its right', async ({ v }) => {
+test('the menu strip is View, Window and Shortcuts, with the filter and Apply at its right', async ({ v }) => {
   const strip = v.page.locator('.menubar');
   await expect(strip.locator('.menus [role="menuitem"]')).toHaveText(['View', 'Window', 'Shortcuts']);
   await expect(strip.locator('.wfsel-b')).toContainText('Workflows');
-  await expect(strip.locator('.wd-b')).toHaveCount(1);
+  await expect(strip.locator('.wd-b')).toHaveCount(0);
   await expect(strip.locator('.ap-b')).toHaveCount(1);
   // nothing changed yet: Apply is greyed and says why
   await expect(strip.locator('.ap-b')).toHaveAttribute('aria-disabled', 'true');
@@ -42,8 +42,8 @@ test('View shows and hides a pane; Window resets the layout', async ({ v }) => {
   const entry = (label: string) => v.page.locator('.dropdown[role="menu"] [role="menuitem"]', { hasText: label });
 
   await menu('View').click();
-  await expect(v.page.locator('.dropdown[role="menu"] [role="menuitem"]')).toHaveCount(3);
-  for (const pane of ['Inspector', 'Toolbox', 'Output']) await expect(entry(pane)).toContainText('✓');
+  await expect(v.page.locator('.dropdown[role="menu"] [role="menuitem"]')).toHaveCount(4);
+  for (const pane of ['Inspector', 'Toolbox', 'Output', 'Chat']) await expect(entry(pane)).toContainText('✓');
   await entry('Output').click();
   await expect(v.page.locator('[data-pane="output"]')).toHaveCount(0);
   await menu('View').click();
@@ -56,15 +56,15 @@ test('View shows and hides a pane; Window resets the layout', async ({ v }) => {
   await expect(v.page.locator('.mol')).toHaveCount(1);
 });
 
-test('the Shortcuts sheet: nine groups, closed at first, Expand all shows every row, Escape closes, the open groups are kept', async ({ v }) => {
+test('the Shortcuts sheet: ten groups, closed at first, Expand all shows every row, Escape closes, the open groups are kept', async ({ v }) => {
   const sheet = v.page.locator('.sc-sheet[role="dialog"]');
   await v.page.locator('.menubar .menus [role="menuitem"]', { hasText: 'Shortcuts' }).click();
   await expect(sheet).toBeVisible();
-  await expect(sheet.locator('.sc-t')).toHaveCount(9);
+  await expect(sheet.locator('.sc-t')).toHaveCount(10);
   await expect(sheet.locator('.sc-row')).toHaveCount(0);
 
   await sheet.getByRole('button', { name: 'Expand all' }).click();
-  await expect(sheet.locator('.sc-row')).toHaveCount(39);
+  await expect(sheet.locator('.sc-row')).toHaveCount(42);
   await sheet.getByRole('button', { name: 'Collapse all' }).click();
   await expect(sheet.locator('.sc-row')).toHaveCount(0);
 

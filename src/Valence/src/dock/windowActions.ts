@@ -17,11 +17,11 @@ export interface DockMemory {
 export const newMemory = (): DockMemory => ({ sides: {}, homes: {}, documentGroupId: null });
 
 // the Toolbox on the left (2026-10-11): it is dragged from onto the documents, the Inspector reads them on the right
-export const DEFAULT_SIDES: Readonly<Record<ToolId, Side>> = { inspector: 'right', toolbox: 'left', output: 'bottom' };
+export const DEFAULT_SIDES: Readonly<Record<ToolId, Side>> = { inspector: 'right', toolbox: 'left', output: 'bottom', chat: 'bottom' };
 /** The default sizes (mockup v49 TOOLS): Inspector 340 wide, Toolbox 290 wide, Output 150 high. */
-const TOOL_SIZE: Readonly<Record<ToolId, number>> = { inspector: 340, toolbox: 290, output: 150 };
-/** Panes that share a group when they share a side (none since Problems went, 2026-10-09). */
-const MATE: Readonly<Partial<Record<ToolId, ToolId>>> = {};
+const TOOL_SIZE: Readonly<Record<ToolId, number>> = { inspector: 340, toolbox: 290, output: 150, chat: 150 };
+/** Panes that share a group when they share a side: Chat is a tab beside Output (2026-10-26, as SKP Studio's). */
+const MATE: Readonly<Partial<Record<ToolId, ToolId>>> = { chat: 'output' };
 
 /** The edge a pane belongs to; a document only has one once it was auto-hidden (bottom until then). */
 export const toolSide = (memory: DockMemory, id: PaneId): Side => memory.sides[id] ?? (isToolId(id) ? DEFAULT_SIDES[id] : 'bottom');
@@ -390,6 +390,7 @@ export function resetLayout(api: DockviewApi, memory: DockMemory, dockWidth: num
   api.addPanel({ ...toolPanel('inspector'), position: { referenceGroup: area, direction: 'right' }, initialWidth: TOOL_SIZE.inspector });
   api.addPanel({ ...toolPanel('toolbox'), position: { referenceGroup: area, direction: 'left' }, initialWidth: TOOL_SIZE.toolbox });
   api.addPanel({ ...toolPanel('output'), position: { referenceGroup: area, direction: 'below' }, initialHeight: TOOL_SIZE.output, inactive: true });
+  api.addPanel({ ...toolPanel('chat'), position: { referencePanel: 'output' }, inactive: true });
   // the document area takes what the panes leave (it takes the slack), but keeps 480 px at least
   markDocumentArea(api, memory);
   api.getPanel('inspector')?.group.api.setSize({ width: TOOL_SIZE.inspector });
@@ -472,5 +473,10 @@ export function applyLayout(api: DockviewApi, memory: DockMemory, saved: SavedLa
   }
   if (active !== null) api.getPanel(active)?.api.setActive();
   for (const id of saved.popped) if (!api.getPanel(id)) showTool(api, memory, id);
+  // a layout saved before a tool pane existed (Chat, 2026-10-26) never knew it: it is shown at its default place. A pane
+  // the user closed is not unknown: closing keeps its home.
+  for (const id of TOOL_IDS) {
+    if (!api.getPanel(id) && !(id in saved.dock.panels) && !saved.homes[id] && !(id in saved.sides) && !saved.hidden.includes(id)) showTool(api, memory, id);
+  }
   return saved.hidden.filter((id) => { const p = api.getPanel(id); return !p || !p.group.api.isVisible; });
 }

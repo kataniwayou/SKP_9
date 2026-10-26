@@ -163,8 +163,8 @@ Open `k8s\32-valence.yaml` in an editor.
   it only if BaseApi runs under another name, namespace (`http://<name>.<namespace>:8080`) or port. Scheme, host and
   port only: no path and no trailing slash. It must not be empty, or the pod won't start.
 
-- **The AI wand (optional):** `KIMI_BASE_URL`, `KIMI_MODEL_ID` and `KIMI_API_KEY`. With the key empty, as shipped, the
-  wand says "AI drawing is not configured", and everything else works. To use a model inside your network:
+- **The chat (optional):** `KIMI_BASE_URL`, `KIMI_MODEL_ID` and `KIMI_API_KEY`. With the key empty, as shipped, the
+  Chat pane says "The chat is not configured", and everything else works. To use a model inside your network:
   - set `KIMI_BASE_URL` to an OpenAI-compatible server, without `/chat/completions`;
   - set `KIMI_MODEL_ID` to its model name;
   - set `KIMI_API_KEY` to its key, or any non-empty value if it needs none.
@@ -235,7 +235,7 @@ Leave it running, and browse to **http://localhost:18082**. Then check:
 - `http://localhost:18082/healthz` answers `ok`.
 - The canvas draws the project's molecule, and the Output pane says where the rules came from.
 - The processors' atoms glow green or red by their health; grey means not known.
-- `http://localhost:18082/ai/config` answers 503 while the wand is off, as shipped, or `{"model":"..."}` once it's set.
+- `http://localhost:18082/ai/config` answers 503 while the chat is off, as shipped, or `{"model":"..."}` once it's set.
 
 **Browser:** a recent Chrome, Edge or Firefox, with WebGL and local storage allowed. Nothing to install.
 
@@ -284,5 +284,5 @@ The tars come from `docker pull node:24-alpine`, `docker pull nginx:1.29-alpine`
 | Pod crashes on OpenShift with permission errors | The image runs nginx as root, which OpenShift's default policy forbids. Allow the pod to run as root. Not tested. |
 | The canvas says BaseApi could not be read | BaseApi isn't answering. See step 8. |
 | Apply stays greyed: "the dry run, which is not available" | This BaseApi has no `/model/validate`. See step 8. |
-| The wand: "AI drawing is not configured" | As shipped. See step 6. |
+| The chat: "The chat is not configured" | As shipped. See step 6. |
 | A blank page | The browser has WebGL turned off, or it is too old. |

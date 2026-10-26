@@ -1,6 +1,6 @@
 import { expect, test } from './valence';
 
-// One history (spec §6c): edits, Revert, deletions, made atoms, drawn arrows and AI drawings are steps of one undo / redo
+// One history (spec §6c): edits, Revert, deletions, made atoms, and drawn arrows are steps of one undo / redo
 // list; Ctrl+Z undoes, Ctrl+Y and Ctrl+Shift+Z redo. The session keeps the draft, the history and the view across a
 // refresh (the view: camera, slide, every atom's place; never sent to BaseApi).
 
@@ -96,7 +96,7 @@ test('the view is kept in this browser: a turn, a slide and a moved atom come ba
   const after = await v.atoms();
   const worst = Math.max(...Object.keys(before).map((k) => Math.hypot(after[k]!.x - before[k]!.x, after[k]!.y - before[k]!.y)));
   expect(worst).toBeLessThan(1);
-  // a move by hand is no step of the history (wand only, the user's choice)
+  // a move by hand is no step of the history (the user's choice)
   await v.canvasKey('Control+z');
   expect(await v.lastLine()).toBe('Nothing to undo.');
 });

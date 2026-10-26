@@ -98,21 +98,18 @@ export async function standIn(page: Page): Promise<StandIn> {
     return route.fulfill({ status: 404, body: '' });
   });
 
-  // the wand's model: Valence's own /ai/ route, answered here so no key and no model are needed
+  // the chat's model: Valence's own /ai/ route, answered here so no key and no model are needed
   await page.route('**/ai/config', (route) => (state.ai === 'off'
-    ? json(route, { error: 'AI drawing is not configured' }, 503)
+    ? json(route, { error: 'The chat is not configured' }, 503)
     : json(route, { model: 'stand-in' })));
   await page.route('**/ai/chat/completions', (route) => {
     state.aiCalls++;
     if (state.ai === 'off') return route.fulfill({ status: 503, body: '' });
-    const body = route.request().postDataJSON() as { messages: { role: string; content: string }[] };
-    // every atom id the first request gave ("a1", "a2", …), placed apart on a grid: no two overlap
-    const ids = [...new Set([...body.messages[1]!.content.matchAll(/"id":"(a\d+)"/g)].map((m) => m[1]!))];
-    const atoms = Object.fromEntries(ids.map((id, i) => [id, [(i % 8) * 3, -Math.floor(i / 8) * 3, 0]]));
+    // a plain answer, no tool called
     const chunk = (delta: object) => `data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`;
     return route.fulfill({
       status: 200, contentType: 'text/event-stream',
-      body: chunk({ reasoning_content: 'placing' }) + chunk({ content: JSON.stringify({ atoms }) }) + 'data: [DONE]\n\n',
+      body: chunk({ reasoning_content: 'reading' }) + chunk({ content: 'Done.' }) + 'data: [DONE]\n\n',
     });
   });
 

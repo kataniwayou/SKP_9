@@ -4,7 +4,8 @@ import { browserTabStorage, createSaver, readTabSession, SESSION_VERSION, writeT
 import { ProjectDocument, PROJECT_ID, PROJECT_NAME } from './app/ProjectDocument';
 import { WorkflowFilter } from './app/WorkflowFilter';
 import { ApplyButton } from './app/Apply';
-import { Wand } from './app/Wand';
+import { ChatHost, ChatStoreProvider } from './chat/ChatHost';
+import { createChatStore } from './chat/chatStore';
 import { DockShell, type DockDocument } from './dock/DockShell';
 import type { ToolId } from './dock/ids';
 import { browserStorage, type SavedLayout } from './dock/layoutPersistence';
@@ -36,6 +37,13 @@ export function App({ storage, tabStorage }: AppProps) {
   const session = useMemo(() => readTabSession(tab, resolved), []);
   // the workflow filter (the main menu strip, 2026-10-16): the session keeps the picked workflows
   const highlights = useMemo(() => createHighlights(session?.highlighted ?? []), []);
+  // the chat's own store (2026-10-26, as SKP Studio's): kept per tab like the session, but separate from it
+  const chat = useMemo(() => createChatStore(tab, resolved), []);
+  useEffect(() => {
+    const flush = () => chat.flush();
+    window.addEventListener('pagehide', flush);
+    return () => { window.removeEventListener('pagehide', flush); chat.flush(); };
+  }, [chat]);
   const workspace = useMemo(() => createWorkspace({ pinned: session?.pinned ?? null, edits: session?.edits ?? {}, removed: session?.removed, history: session?.history, created: session?.created, added: session?.added }), []);
   const pinned = useWorkspace(workspace, (s) => s.pinned);
   const dirty = useWorkspace(workspace, (s) => Object.keys(s.edits).length > 0 || s.removed.atoms.length > 0 || s.removed.arrows.length > 0 || s.created.length > 0 || s.added.length > 0);
@@ -65,6 +73,7 @@ export function App({ storage, tabStorage }: AppProps) {
       case 'inspector': return <Inspector workspace={workspace} />;
       case 'output': return <Output workspace={workspace} />;
       case 'toolbox': return <Toolbox workspace={workspace} />;
+      case 'chat': return <ChatHost workspace={workspace} highlights={highlights} />;
     }
   };
   useEffect(() => {
@@ -74,22 +83,24 @@ export function App({ storage, tabStorage }: AppProps) {
   }, [saver]);
 
   return (
-    <DockShell
-      documents={documents}
-      shortcuts={SHORTCUTS}
-      activeDocumentId={PROJECT_ID}
-      notice={notice}
-      status={<><WorkflowFilter workspace={workspace} highlights={highlights} /><Wand workspace={workspace} highlights={highlights} /><ApplyButton workspace={workspace} /></>}
-      onActivateDocument={() => {}}
-      onCloseDocument={() => {}}
-      onOpenWorkflow={() => {}}
-      renderDocument={() => <ProjectDocument workspace={workspace} highlights={highlights} view={session?.view ?? null} onView={onView} />}
-      renderTool={renderTool}
-      inspectorKey={pinned ?? ''}
-      onEscape={() => {}}
-      storage={resolved}
-      restore={session?.dock ?? null}
-      onLayoutChange={(dock) => { dockState.current = dock; saver.schedule(); }}
-    />
+    <ChatStoreProvider value={chat}>
+      <DockShell
+        documents={documents}
+        shortcuts={SHORTCUTS}
+        activeDocumentId={PROJECT_ID}
+        notice={notice}
+        status={<><WorkflowFilter workspace={workspace} highlights={highlights} /><ApplyButton workspace={workspace} /></>}
+        onActivateDocument={() => {}}
+        onCloseDocument={() => {}}
+        onOpenWorkflow={() => {}}
+        renderDocument={() => <ProjectDocument workspace={workspace} highlights={highlights} view={session?.view ?? null} onView={onView} />}
+        renderTool={renderTool}
+        inspectorKey={pinned ?? ''}
+        onEscape={() => {}}
+        storage={resolved}
+        restore={session?.dock ?? null}
+        onLayoutChange={(dock) => { dockState.current = dock; saver.schedule(); }}
+      />
+    </ChatStoreProvider>
   );
 }

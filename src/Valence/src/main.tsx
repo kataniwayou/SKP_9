@@ -9,6 +9,7 @@ import 'dockview-react/dist/styles/dockview.css';
 import './canvas/tokens.css';
 import './dock/dock.css';
 import './panels/panels.css';
+import './chat/chat.css';
 import './app/document.css';
 import './app/valence.css';
 import './app.css';

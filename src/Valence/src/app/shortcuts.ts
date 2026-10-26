@@ -13,7 +13,7 @@ export const SHORTCUTS: readonly ShortcutGroup[] = [
     group: 'Canvas — keys (click the canvas first)', column: 0,
     items: [
       { keys: 'Delete', does: 'Delete the pinned atom or arrow (or take back a new one)' },
-      { keys: 'Ctrl+Z', does: 'Undo (an AI drawing too: its atoms glide back)' },
+      { keys: 'Ctrl+Z', does: 'Undo' },
       { keys: 'Ctrl+Y · Ctrl+Shift+Z', does: 'Redo' },
     ],
   },
@@ -69,6 +69,14 @@ export const SHORTCUTS: readonly ShortcutGroup[] = [
       { keys: 'Type', does: "Edit the pinned atom's fields (virtual until applied)" },
       { keys: 'Revert', does: 'Undo every edit of the pinned atom' },
       { keys: 'Read-only ▸', does: 'Show or hide the read-only fields' },
+    ],
+  },
+  {
+    group: 'Chat', column: 1,
+    items: [
+      { keys: 'Enter', does: 'Send: the chat reads and changes the project as you would (nothing is applied without your Yes)' },
+      { keys: 'Shift+Enter', does: 'A new line' },
+      { keys: '↑ · ↓', does: 'Step through what you sent before' },
     ],
   },
   {
