@@ -11,7 +11,8 @@ internal static class S3Client
     /// <summary>
     /// <b>No credentials argument</b>: the SDK's default chain supplies them. <b>Checksum behaviour
     /// is left at the SDK default</b>, so the test path and the production path are the same path.
-    /// The timeout bounds a single request, not a whole transfer.
+    /// The timeout bounds a single request, not a whole transfer. With a custom endpoint the region
+    /// only signs (<c>AuthenticationRegion</c>): setting <c>RegionEndpoint</c> would clear <c>ServiceURL</c>.
     /// </summary>
     internal static IAmazonS3 Create(S3Options options)
     {
@@ -26,9 +27,13 @@ internal static class S3Client
         if (!string.IsNullOrWhiteSpace(options.ServiceUrl))
         {
             config.ServiceURL = options.ServiceUrl;
-        }
 
-        if (!string.IsNullOrWhiteSpace(options.Region))
+            if (!string.IsNullOrWhiteSpace(options.Region))
+            {
+                config.AuthenticationRegion = options.Region;
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(options.Region))
         {
             config.RegionEndpoint = RegionEndpoint.GetBySystemName(options.Region);
         }
