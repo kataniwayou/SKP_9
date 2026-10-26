@@ -9,12 +9,23 @@ import { blockAt, itemsInRect, rectOf, topLeftOf, wireAt } from './hit';
 const two = () => loadedDocument(graphDto({ workflow: workflowDto({ entryStepIds: ['s1'] }), steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
 
 describe('hit', () => {
-  it('a rectangle picks only blocks and wires lying wholly inside it', async () => {
+  it('a rectangle picks every block and wire it touches, wholly or in part (the user, 2026-10-26)', async () => {
     const doc = await two();
     const s1 = doc.placement.steps.get('s1')!;
-    expect(itemsInRect(doc, rectOf({ x: s1.x - 8, y: s1.y - 8 }, { x: s1.x + 232, y: s1.y + 168 }))).toEqual([{ kind: 'node', id: 's1' }]);
-    const all = itemsInRect(doc, rectOf({ x: -1e4, y: -1e4 }, { x: 1e4, y: 1e4 }));
-    expect(all).toEqual(expect.arrayContaining([{ kind: 'node', id: 'wf' }, { kind: 'node', id: 's2' }, { kind: 'wire', id: 's1->s2' }, { kind: 'wire', id: 'wf->s1' }]));
+    const w = doc.wires.find((x) => x.id === 's1->s2')!;
+    const key = (ps: { kind: string; id: string }[]) => ps.map((p) => `${p.kind}:${p.id}`).sort();
+    // a corner of s1 only: s1, not s2, no wire
+    expect(itemsInRect(doc, rectOf({ x: s1.x - 40, y: s1.y - 40 }, { x: s1.x + 8, y: s1.y + 8 }))).toEqual([{ kind: 'node', id: 's1' }]);
+    // a rectangle round s1 reaches its wires' ends: they are picked too
+    expect(key(itemsInRect(doc, rectOf({ x: s1.x - 8, y: s1.y - 8 }, { x: s1.x + 232, y: s1.y + 168 })))).toEqual(['node:s1', 'wire:s1->s2', 'wire:wf->s1']);
+    // a small rectangle across the middle of a wire's first run, off every block: that wire alone
+    const [ax, ay] = w.points[0]!, [bx, by] = w.points[1]!;
+    const m = { x: (ax + bx) / 2, y: (ay + by) / 2 };
+    expect(itemsInRect(doc, rectOf({ x: m.x - 2, y: m.y - 2 }, { x: m.x + 2, y: m.y + 2 }))).toEqual([{ kind: 'wire', id: 's1->s2' }]);
+    // the hub's bounding box corner, outside its circle: not the hub
+    const { cx, cy } = doc.placement.sphere;
+    expect(itemsInRect(doc, rectOf({ x: cx - SPHERE_R - 4, y: cy - SPHERE_R - 4 }, { x: cx - SPHERE_R + 4, y: cy - SPHERE_R + 4 }))).toEqual([]);
+    expect(itemsInRect(doc, rectOf({ x: cx - 4, y: cy - SPHERE_R - 4 }, { x: cx + 4, y: cy - SPHERE_R + 4 }))).toEqual([{ kind: 'node', id: 'wf' }]);
   });
 
   it('finds the step or the hub under a point, and a block corner by node id', async () => {

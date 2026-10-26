@@ -16,7 +16,7 @@ const onEmptyCanvas = (target: Element) =>
 
 /**
  * The rectangle on empty canvas (spec §3.2; the user, 2026-10-22): a left-button drag that does not start on a block or
- * a wire picks what lies wholly inside; with Shift it adds. With Ctrl held the drag is React Flow's pan instead (`ctrl`:
+ * a wire picks what it touches, wholly or in part (the user's, 2026-10-26); with Shift it adds. With Ctrl held the drag is React Flow's pan instead (`ctrl`:
  * Ctrl is held, so the canvas shows the closed hand), as are the middle button and Space+drag.
  */
 export function useRubberBand(

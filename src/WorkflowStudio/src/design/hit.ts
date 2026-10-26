@@ -32,15 +32,39 @@ export function topLeftOf(doc: StudioDocument, id: string): Point {
 
 const inside = (r: FlowRect, x: number, y: number) => x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1;
 
-/** Every block and wire lying wholly inside the rectangle (spec §3.2). */
+/** A segment from (ax, ay) to (bx, by) touches the rectangle (Liang–Barsky clipping: some part of it lies within). */
+function segmentTouches(r: FlowRect, ax: number, ay: number, bx: number, by: number): boolean {
+  const dx = bx - ax, dy = by - ay;
+  let t0 = 0, t1 = 1;
+  for (const [p, q] of [[-dx, ax - r.x0], [dx, r.x1 - ax], [-dy, ay - r.y0], [dy, r.y1 - ay]] as const) {
+    if (p === 0) { if (q < 0) return false; continue; }
+    const t = q / p;
+    if (p < 0) t0 = Math.max(t0, t); else t1 = Math.min(t1, t);
+    if (t0 > t1) return false;
+  }
+  return true;
+}
+
+/**
+ * Every block and wire the rectangle touches, wholly or in part (the user's, 2026-10-26; spec §3.2 had wholly inside):
+ * a box that overlaps it, the hub's circle that reaches into it, a wire with any run crossing it.
+ */
 export function itemsInRect(doc: StudioDocument, r: FlowRect): Pick[] {
   const ids = [SPHERE_NODE_ID, ...doc.placement.steps.keys(), ...[...doc.placement.caches.keys()].map(cacheNodeId)];
   const picks: Pick[] = [];
   for (const id of ids) {
     const b = nodeBox(doc, id);
-    if (b && inside(r, b.x, b.y) && inside(r, b.x + b.w, b.y + b.h)) picks.push({ kind: 'node', id });
+    if (!b) continue;
+    const touches = id === SPHERE_NODE_ID
+      ? Math.hypot(Math.max(r.x0 - (b.x + SPHERE_R), 0, b.x + SPHERE_R - r.x1), Math.max(r.y0 - (b.y + SPHERE_R), 0, b.y + SPHERE_R - r.y1)) <= SPHERE_R
+      : b.x <= r.x1 && b.x + b.w >= r.x0 && b.y <= r.y1 && b.y + b.h >= r.y0;
+    if (touches) picks.push({ kind: 'node', id });
   }
-  for (const w of doc.wires) if (w.points.every(([x, y]) => inside(r, x, y))) picks.push({ kind: 'wire', id: w.id });
+  for (const w of doc.wires) {
+    const ps = w.points;
+    const touches = ps.length === 1 ? inside(r, ps[0]![0]!, ps[0]![1]!) : ps.slice(1).some(([x, y], i) => segmentTouches(r, ps[i]![0]!, ps[i]![1]!, x!, y!));
+    if (touches) picks.push({ kind: 'wire', id: w.id });
+  }
   return picks;
 }
 
