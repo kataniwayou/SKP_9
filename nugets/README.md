@@ -25,3 +25,16 @@ references any of them.
 the kind of change that fails much later, on a machine with no way to fetch a replacement, and the only
 gain from removing them is tidiness. Offline restore is the constraint that makes deletion risky, so it
 stays undone until something concrete needs the space.
+
+## `awssdk.s3` and `awssdk.core`
+
+```
+awssdk.s3.4.0.104.2.nupkg
+awssdk.core.4.0.102.9.nupkg
+```
+
+The S3 client for `Processor.ObjectFetcher` and `Processor.ObjectPersister`
+(`docs/superpowers/specs/2026-10-26-object-fetcher-persister-design.md`). `AWSSDK.S3` depends only on
+`AWSSDK.Core`, and Core's net8.0 dependency group is empty, so the whole transitive closure is these two
+files. `AWSSDK.Extensions.NETCore.Setup` is deliberately absent: the client is built by hand from
+`S3Options`.

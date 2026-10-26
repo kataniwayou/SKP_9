@@ -716,6 +716,13 @@
           "Confluent.Kafka": "[2.15.0, )"
         }
       },
+      "processor.objectfetcher": {
+        "type": "Project",
+        "dependencies": {
+          "AWSSDK.S3": "[4.0.104.2, )",
+          "BaseProcessor.Core": "[1.0.0, 1.0.0]"
+        }
+      },
       "processor.outcomerecorder": {
         "type": "Project",
         "dependencies": {
@@ -778,6 +785,21 @@
         "contentHash": "1Ub3Wvvbz7CMuFNWgLEc9qqQibiMoovDML/WHrwr5J83RPgtI20giCR92s/ipLgu7IIuqw+W/y7WpIeHqAICxg==",
         "dependencies": {
           "AspNetCore.HealthChecks.UI.Core": "9.0.0"
+        }
+      },
+      "AWSSDK.Core": {
+        "type": "CentralTransitive",
+        "requested": "[4.0.102.9, )",
+        "resolved": "4.0.102.9",
+        "contentHash": "VWGkR0QXDTmThusATC6I9IX06YtYeQNF+1/v6vBbfzIC+MaAuNjYn0aSTIyX+abciZvFhuSSi0d6/pC93wROCw=="
+      },
+      "AWSSDK.S3": {
+        "type": "CentralTransitive",
+        "requested": "[4.0.104.2, )",
+        "resolved": "4.0.104.2",
+        "contentHash": "ImZ1pO9SWh+RAN8hmN5OnonyTvq+/q4dXLxTxjtsZ60c06dnCCy+MX3sc4F3Q8c9J1bg8WoU+VkrrVIpXLviww==",
+        "dependencies": {
+          "AWSSDK.Core": "[4.0.102.9, 5.0.0)"
         }
       },
       "Confluent.Kafka": {

@@ -1,0 +1,41 @@
+# Build context is the REPO ROOT, not this directory:
+#   docker build -f src/Processor.ObjectFetcher/Dockerfile -t processor-objectfetcher:local .
+#
+# The runtime base is aspnet, not runtime: BaseConsole.Core carries a FrameworkReference on
+# Microsoft.AspNetCore.App for the embedded Kestrel that serves the health probes, and that needs the
+# ASP.NET Core shared framework present. A plain runtime image builds fine and fails at first start.
+#
+# The SourceHash target runs inside the publish below, so the identity this processor claims is
+# computed on Linux here and on the developer's machine there. The target normalises line endings and
+# path separators precisely so those two agree — if they ever diverge, a locally registered processor
+# row will not match the deployed container and discovery will retry forever.
+FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS build
+WORKDIR /src
+
+# Restore first, from csproj and lock files only, so a source-only edit does not invalidate the layer.
+# The local nugets/ feed plus NuGet.config make this an offline restore.
+COPY ["NuGet.config", "Directory.Packages.props", "Directory.Build.props", "global.json", "./"]
+COPY nugets/ nugets/
+# The repo's own libraries arrive as packages, from each packable project's own nugets/ folder.
+#
+# ALL FIVE feeds are copied, not just the ones this image consumes: NuGet validates every source in
+# NuGet.config at restore time.
+COPY src/Messaging.Contracts/nugets/ src/Messaging.Contracts/nugets/
+COPY src/Messaging.Transport/nugets/ src/Messaging.Transport/nugets/
+COPY src/BaseConsole.Core/nugets/ src/BaseConsole.Core/nugets/
+COPY src/BaseApi.Core/nugets/ src/BaseApi.Core/nugets/
+COPY src/BaseProcessor.Core/nugets/ src/BaseProcessor.Core/nugets/
+COPY ["src/Processor.ObjectFetcher/Processor.ObjectFetcher.csproj", "src/Processor.ObjectFetcher/"]
+RUN dotnet restore "src/Processor.ObjectFetcher/Processor.ObjectFetcher.csproj"
+
+COPY src/Processor.ObjectFetcher/ src/Processor.ObjectFetcher/
+RUN dotnet publish "src/Processor.ObjectFetcher/Processor.ObjectFetcher.csproj" \
+      -c Release -o /publish --no-restore /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0-bookworm-slim AS runtime
+WORKDIR /app
+COPY --from=build /publish .
+USER app
+# The health listener binds this itself from ConsoleHealth:Port; EXPOSE is documentation for a reader.
+EXPOSE 8081
+ENTRYPOINT ["dotnet", "Processor.ObjectFetcher.dll"]

@@ -132,6 +132,13 @@
          so the pin is 18.0.13 — a stable net8.0 release exposing the same LeaderElector API. -->
     <PackageVersion Include="KubernetesClient" Version="18.0.13" />
 
+    <!-- S3 for Processor.ObjectFetcher and Processor.ObjectPersister, against MinIO on kind and
+         AWS S3 alike. AWSSDK.S3's only dependency is AWSSDK.Core, and Core's net8.0 group is
+         EMPTY, so the offline feed carries exactly these two files. Core is transitive-only and
+         pinned for the NU1004 reason spelled out on Quartz above. -->
+    <PackageVersion Include="AWSSDK.S3" Version="4.0.104.2" />
+    <PackageVersion Include="AWSSDK.Core" Version="4.0.102.9" />
+
     <!-- This repo's own libraries, consumed as packages rather than project references. Each is
          packed by its own project into src/<Project>/nugets/<version>/ and resolved from there
          through the folder sources in NuGet.config.
