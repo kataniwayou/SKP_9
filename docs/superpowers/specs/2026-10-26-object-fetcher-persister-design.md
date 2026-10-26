@@ -1,7 +1,7 @@
 # ObjectFetcher and ObjectPersister — Design
 
 **Date:** 2026-10-26
-**Status:** Draft, not yet implemented. Prerequisites done: the `locator` rename (`f8b55449`, live)
+**Status:** Implemented and verified end to end 2026-10-26. Prerequisites done: the `locator` rename (`f8b55449`, live)
 and the dev MinIO container (`tools/minio-dev.ps1`, running).
 **Introduces:** `src/Processor.ObjectFetcher/`, `src/Processor.ObjectPersister/`, and two manifests
 (`44-processor-objectfetcher.yaml`, `45-processor-objectpersister.yaml`).
@@ -398,15 +398,28 @@ production path, which is the one property DevOps' "MinIO ⇒ S3" relies on.
 Schema-backed tests load `JsonSchema.Net.dll`, which Windows Application Control blocks on this
 machine (2026-10-26); they run in the `mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim` container.
 
-**Live (`src/tests/BaseApi.Tests/Live/`, against `skp-minio`):**
+**End to end, not live C# suites (the user's decision, 2026-10-26).** The three live suites this
+section first proposed are replaced by one run of the whole object chain:
+`tools/copy-object-chain.py --start` copies `filefetcher-archiveexpander-chain` 1.0.0 into
+`objectfetcher-archiveexpander-chain` 1.0.0 (object processors at the two ends, its own topics and
+consumer group), and `tools/simulate-object-feed.py` drives it with `simulate-endless-feed.py`'s
+five roles, objects in `skp-in` instead of files on the node. Verified 2026-10-26, four cycles:
 
-- `ObjectFetcherLiveTests` — seed through the SDK on `localhost:19000`, publish the importer record,
-  assert the envelope on the output topic; a missing object and an oversize object fail by name.
-- `ObjectPersisterLiveTests` — the object appears in `skp-out` with identical bytes; a destination in
-  `skp-in` fails 403 (proves the per-user policy).
-- `ObjectChainLiveTests` — `KafkaImporter → ObjectFetcher → ArchiveExpander → ArchiveCollapser →
-  ObjectPersister → KafkaExporter`; the object read back from `skp-out` equals the one seeded into
-  `skp-in`. This is the symmetric verification the file pair does between `/in` and `/out`.
+| role | observed |
+|---|---|
+| `badext` | ObjectFetcher `object s3://skp-in/sim/…-badext.dat rejected: extension '.dat' is not in the allowed list (.zip)` ×4, nothing downloaded |
+| `corrupt` | ArchiveExpander's corrupt-signature failure ×4 |
+| `triple` | Acme `an Acme item is exactly the .wav and the .json` failure ×4 |
+| `artist` | `the author cancelled the branch` ×4, nothing persisted |
+| `good` | `sim-NNNNNN-good.zip` ×4 and `track01.xml` in `skp-out`; 8 `{"location":"s3://skp-out/…"}` records on `skp-object-documents` |
+
+Plus exactly 12 records on `skp-object-failures`, no `failed its schema` line in the importer,
+either object processor or the exporter, and no `s3://` record on the original chain's topics.
+
+The first run of it found a defect no unit test had pinned: `AmazonS3Config.RegionEndpoint`'s
+setter clears `ServiceURL`, so setting the region after the endpoint sent every request to AWS
+(403 on every `HEAD`, nothing in MinIO's trace). With a custom endpoint the region now only signs
+(`AuthenticationRegion`), and `S3ClientTests` pins the client configuration for both copies.
 
 ## 14. Not in scope
 

@@ -552,3 +552,22 @@ against topics nothing provisions.
 - **Never `netstat` the default ports** to judge reachability. The forwards are on offset ports, and
   a dead forward keeps its socket bound — the port looks free and refuses connections.
 - **Never scale Redis down.** It wipes L2, and the branch outputs go with it.
+
+## Object chain (ObjectFetcher / ObjectPersister against skp-minio)
+
+`processor-objectfetcher` and `processor-objectpersister` (44, 45) are the file pair with the mount
+replaced by S3; storage is the `skp-minio` container on the kind network, not anything in `k8s/`.
+Design: `docs/superpowers/specs/2026-10-26-object-fetcher-persister-design.md`.
+
+```powershell
+tools/minio-dev.ps1 -Up                          # container, buckets skp-in / skp-out, one user per processor
+python tools/copy-object-chain.py --dry-run      # the ten copied steps, their processors and payloads
+python tools/copy-object-chain.py --start        # objectfetcher-archiveexpander-chain 1.0.0, started
+python tools/simulate-object-feed.py             # five roles per cycle into skp-in, records on skp-object-paths
+docker exec skp-minio mc ls --recursive local/skp-out
+```
+
+The copy has its own topics (`skp-object-paths`, `skp-object-documents`, `skp-object-failures`) and
+consumer group (`skp-objectchain`), so it runs beside the original chain without either stealing the
+other's records. Both pods read `skp-minio` over IPv4 without a `hostAliases` patch: .NET's resolver
+tries the A record first, unlike librdkafka (rebuild guide, Appendix C6).
