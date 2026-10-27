@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A concrete processor, and KafkaExporter's twin on TIBCO EMS: it takes the branch it was
+    dispatched, sends it to an EMS queue as a persistent BytesMessage, and reports Completed with no
+    data. Like every other processor it carries no identity, liveness, broker or Redis code —
+    AddBaseProcessor folds all of it in.
+
+    NO TIBCO REFERENCE YET, deliberately. TIBCO.EMS.dll is licensed and has no official NuGet
+    package; until it is vendored into nugets/, everything above the Ems/ seam is built and tested
+    against a fake, and ProcessorHost registers UnavailableMessageSenderFactory, which fails every
+    dispatch by name. The real adapter is the one class that changes when the DLL arrives.
+
+    Common properties (net8.0, Nullable, ImplicitUsings, TreatWarningsAsErrors) come from
+    Directory.Build.props, and package versions from Directory.Packages.props — never declare either
+    here.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Processor.EmsExporter</RootNamespace>
+    <AssemblyName>Processor.EmsExporter</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The send backstop's grace is settable by tests only, so the test assembly is named here. -->
+    <InternalsVisibleTo Include="BaseApi.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The worker SDK does not copy appsettings.json on its own. -->
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The package, not a ProjectReference: SourceHash.targets ships in the package's build/ folder
+         and NuGet imports it automatically, stamping the hash on THIS assembly — the entry assembly,
+         where the runtime reader looks. A ProjectReference could not flow build targets. -->
+    <PackageReference Include="BaseProcessor.Core" VersionOverride="[1.0.0]" />
+  </ItemGroup>
+
+</Project>
