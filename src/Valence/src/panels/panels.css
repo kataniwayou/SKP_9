@@ -9,12 +9,13 @@
 .sec-title { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 12px 0 8px; display: flex; justify-content: space-between; align-items: center; }
 .uname { margin: 10px 0 0; font-family: var(--mono); font-size: 12.5px; }
 .uname .ro { color: var(--ink); font-size: 12.5px; }
-.field { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; }
-.field label { color: var(--muted); }
+/* the label above its value (the user's request, 2026-10-27): the full pane width goes to the value */
+.field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; margin: 8px 0; font-size: 13px; }
+.field label { color: var(--muted); font-size: 11.5px; }
 .ro { font-family: var(--mono); font-size: 12px; color: var(--muted); display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ro.null { color: var(--faint); }
 .ro .dot { display: inline-block; vertical-align: middle; margin-right: 6px; }
-.metatog { margin: 2px 0 4px 104px; }
+.metatog { margin: 2px 0 4px; }
 .meta { margin: 4px 0 2px; padding: 4px 0 2px; border-top: 1px dashed var(--line); }
 .meta .field { margin: 4px 0; font-size: 12px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; }
@@ -59,7 +60,7 @@ textarea.input.json { white-space: pre; overflow: auto; }
 .cp-opt.hi { background: rgba(125, 211, 252, .10); }
 .cp-tick { color: var(--accent); font-size: 12px; }
 .field.tall { align-items: start; }
-.field.tall > label { padding-top: 7px; }
+.field.tall > label { padding-top: 0; }
 .fval { min-width: 0; }
 .ferr { margin-top: 3px; font-size: 11.5px; color: var(--f); }
 .fnote { margin-top: 3px; font-size: 11.5px; color: var(--x); }
@@ -91,8 +92,8 @@ fieldset.plain { border: 0; margin: 0; padding: 0; min-width: 0; }
 /* read-outs (the user's request, 2026-10-09): the picked wire and the workflow's graph as plain text, wrapping */
 .readout .rt { font-family: var(--mono); font-size: 12.5px; color: var(--ink); overflow-wrap: break-word; }
 .readout dl { margin: 8px 0 0; }
-.readout .rrow { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; margin: 6px 0; font-size: 12.5px; align-items: baseline; }
-.readout dt { color: var(--muted); }
+.readout .rrow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 8px 0; font-size: 12.5px; align-items: baseline; }
+.readout dt { color: var(--muted); font-size: 11.5px; }
 .readout dd { margin: 0; min-width: 0; font-family: var(--mono); font-size: 12px; color: var(--ink); overflow-wrap: break-word; }
 .readout ul { list-style: none; margin: 0; padding: 0; }
 .readout li + li { margin-top: 2px; }
