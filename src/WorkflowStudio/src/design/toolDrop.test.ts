@@ -124,6 +124,30 @@ describe('Toolbox drops (the user\'s rules, 2026-10-11)', () => {
     expect(again.draft.blocks.assigned).toEqual({ s1: 'p2' });
   });
 
+  it('a Toolbox step takes its first processor\'s name, made unique; not a later one, and never a name the user typed (2026-11-02)', async () => {
+    const base = await doc();
+    const onStep = (draft: typeof EMPTY_DRAFT, id: string) => {
+      const p = applyDesign(base, draft, EMPTY_EDITS).placement.steps.get(id)!;
+      return { x: p.x + 10, y: p.y + 10 };
+    };
+    const empty = dropTool(base, EMPTY_EDITS, EMPTY_DRAFT, { kind: 'step' }, at, ids)!;
+    const id = empty.picks[0]!.id;
+    const first = dropTool(base, EMPTY_EDITS, empty.draft, procItem, onStep(empty.draft, id), ids)!;
+    expect(first.draft.blocks.steps[id]).toMatchObject({ name: 'parser', processorId: 'p2' });
+    const p3 = processorFromDto(processorDto('p3', { name: 'writer' }));
+    const second = dropTool(base, EMPTY_EDITS, first.draft, { kind: 'processor', processor: p3, schemas: [] }, onStep(first.draft, id), ids)!;
+    expect(second.draft.blocks.steps[id]).toMatchObject({ name: 'parser', processorId: 'p3' });
+    // the name taken: the next free one
+    const other = dropTool(base, EMPTY_EDITS, first.draft, { kind: 'step' }, { x: at.x, y: at.y + 600 }, ids)!;
+    const id2 = other.picks[0]!.id;
+    const taken = dropTool(base, EMPTY_EDITS, other.draft, procItem, onStep(other.draft, id2), ids)!;
+    expect(taken.draft.blocks.steps[id2]!.name).toBe('parser-2');
+    // typed by the user, even to a Toolbox-like name: kept
+    const named = { ...EMPTY_EDITS, steps: { [id]: { updatedAt: null, fields: { name: 'step-9' } } } };
+    const kept = dropTool(base, named, empty.draft, procItem, onStep(empty.draft, id), ids)!;
+    expect(kept.draft.blocks.steps[id]!.name).toBe(empty.draft.blocks.steps[id]!.name);
+  });
+
   it('a refused Save\'s stored design brings the drops back: the assigned processor, the linked cache and the refs', async () => {
     const base = await doc();
     const s1 = base.placement.steps.get('s1')!;

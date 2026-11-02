@@ -4,7 +4,7 @@ import { graphDto, processorDto, schemaDto, stepDto } from '../api/fixtures';
 import { FIELDS } from '../store/entityForms';
 import { createStudioStore } from '../store/studioStore';
 import { loadedDocument } from './fixtures';
-import { createInspectorService } from './inspectorService';
+import { createInspectorService, NEW_SCHEMA_DEFINITION } from './inspectorService';
 
 const ok = <T,>(value: T) => ({ ok: true, value }) as const;
 const notFound = { ok: false, error: { kind: 'notFound', status: 404 } } as const;
@@ -88,7 +88,7 @@ describe('InspectorService (plan 8 §3.3: reads, then design edits)', () => {
     store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'schema', id: '', slot: 'output', processorId: 'p1' } });
     service.read('wf1');
     await flush();
-    expect(doc().inspector.saved?.dto).toEqual({ id: '', name: 'fetcher-output', version: '1.0.0', description: null, definition: '{}' });
+    expect(doc().inspector.saved?.dto).toEqual({ id: '', name: 'fetcher-output', version: '1.0.0', description: null, definition: NEW_SCHEMA_DEFINITION });
     expect(api.getEntity).toHaveBeenCalledTimes(0);
   });
 

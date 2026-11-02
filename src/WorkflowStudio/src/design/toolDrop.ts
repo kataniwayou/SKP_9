@@ -156,6 +156,9 @@ export function uniqueName(base: string, taken: ReadonlySet<string>): string {
 
 const copy = <T>(r: Readonly<Record<string, T>> = {}): Record<string, T> => Object.assign(Object.create(null) as Record<string, T>, r);
 
+/** The names `addStep` gives (`step`, `step-2`, …): a step still so named takes its first processor's name (2026-11-02). */
+const TOOLBOX_STEP_NAME = /^step(-\d+)?$/;
+
 /**
  * A new, empty step (a Toolbox step's: no processor, the next free `step` name, PreviousCompleted) with its top-left at
  * `at`, added to `draft` over the drawing `shown`.
@@ -220,9 +223,14 @@ export function dropTool(
       for (const s of item.schemas) if (!saved.graph.schemas.has(s.id)) schemas[s.id] = s;
       const refs = { processors, schemas };
       if (Object.hasOwn(b.steps, stepId)) {
-        // a step the design created: its own processor
+        // a step the design created: its own processor; a Toolbox step's first one names it, unless the user named it
         const steps = copy(b.steps);
-        steps[stepId] = { ...steps[stepId]!, processorId: pr.id };
+        const was = steps[stepId]!;
+        const named = Object.hasOwn(edits.steps[stepId]?.fields ?? {}, 'name');
+        const name = was.copyOf === null && was.processorId === null && !named && TOOLBOX_STEP_NAME.test(was.name)
+          ? uniqueName(pr.name, new Set([...shown.graph.steps.values()].filter((s) => s.id !== stepId).map((s) => s.name)))
+          : was.name;
+        steps[stepId] = { ...was, name, processorId: pr.id };
         return { draft: withBlocks({ ...b, steps, refs }), picks: [{ kind: 'node', id: stepId }] };
       }
       // a step the workflow has: the same processor it was loaded with needs no mark

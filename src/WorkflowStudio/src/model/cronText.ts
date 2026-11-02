@@ -200,3 +200,13 @@ function days(D: Field, MO: Field, W: Field): string[] {
   }
   return out;
 }
+
+/** The Cron field's presets (the user, 2026-11-02): six fields, seconds first; '' leaves the workflow unscheduled. */
+export const CRON_PRESETS: ReadonlyArray<{ label: string; expression: string }> = [
+  { label: 'Every minute', expression: '0 * * * * *' },
+  { label: 'Every 5 minutes', expression: '0 */5 * * * *' },
+  { label: 'Every hour', expression: '0 0 * * * *' },
+  { label: 'Every day at 00:00', expression: '0 0 0 * * *' },
+  { label: 'Weekdays at 08:00', expression: '0 0 8 * * MON-FRI' },
+  { label: 'Not scheduled', expression: '' },
+];

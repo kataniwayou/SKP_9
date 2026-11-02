@@ -34,7 +34,14 @@ export interface InspectorService {
   createAssignment(workflowId: Id, stepId: Id, stepName: string): Promise<void>;
   /** Removes the step's assignment in the design: no question, no other workflow checked (assignments are not shared). */
   removeAssignment(workflowId: Id, stepId: Id): void;
+  /** The definition of the config schema the step's processor has in the design (the payload's live check, 2026-11-02); null: none. */
+  configDefinition(workflowId: Id, stepId: Id): Promise<string | null>;
 }
+
+/** An empty slot's new schema starts as every schema BaseApi holds is laid out (the user, 2026-11-02): an object, no fields yet. */
+export const NEW_SCHEMA_DEFINITION = JSON.stringify({
+  $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object', required: [], properties: {}, additionalProperties: false,
+}, null, 2);
 
 /** A base for what the database does not hold yet (spec §3.2): a created assignment, an empty slot's schema. */
 function madeUp(doc: OpenDocument, target: InspectorTarget): EntityReadDto | null {
@@ -61,7 +68,7 @@ function madeUp(doc: OpenDocument, target: InspectorTarget): EntityReadDto | nul
   }
   if (target.kind === 'schema' && target.id === '' && doc.status.kind === 'ready') {
     const p = applyBlocks(doc.status.doc, doc.design.draft.blocks).graph.processors.get(target.processorId);
-    return { id: '', name: `${p?.name ?? target.processorId}-${target.slot}`, version: '1.0.0', description: null, definition: '{}' } as SchemaReadDto;
+    return { id: '', name: `${p?.name ?? target.processorId}-${target.slot}`, version: '1.0.0', description: null, definition: NEW_SCHEMA_DEFINITION } as SchemaReadDto;
   }
   return null;
 }
@@ -164,5 +171,9 @@ export function createInspectorService(api: StudioApi, store: StudioStore): Insp
       }
     },
     removeAssignment: (workflowId, stepId) => store.dispatch({ type: 'removeAssignment', workflowId, stepId }),
+    async configDefinition(workflowId, stepId) {
+      const doc = docOf(workflowId);
+      return doc === null ? null : configDefinitionOf(api, doc, stepId);
+    },
   };
 }

@@ -65,7 +65,8 @@ describe('the design tools', () => {
     const before = new Set(shown().graph.steps.keys());
     const r = done(await call('add_step', { processor: 'FileFetcher' }));
     expect(r.ok).toBe(true);
-    expect(r.action).toBe('+ step step with processor FileFetcher 1.2.0');
+    // a Toolbox step takes its first processor's name (2026-11-02)
+    expect(r.action).toBe('+ step FileFetcher with processor FileFetcher 1.2.0');
     const added = [...shown().graph.steps.values()].filter((s) => !before.has(s.id));
     expect(added).toHaveLength(1);
     expect(added[0]!.processorId).toBe('p9');

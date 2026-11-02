@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { FieldEditor } from './FieldEditor';
 
@@ -54,5 +54,28 @@ describe('FieldEditor: the cron in a few words (2026-10-11)', () => {
     const { container } = render(<FieldEditor spec={{ key: 'root', label: 'Root', kind: 'text' }} value="x" saved="" errors={[]} onChange={() => {}} />);
     expect(hint(container)).toBeNull();
     expect(container.querySelector('input')!.getAttribute('aria-describedby')).toBeNull();
+  });
+});
+
+describe('FieldEditor: cron presets and the browser\'s own checks (2026-11-02)', () => {
+  const cron = { key: 'cronExpression', label: 'Cron', kind: 'cron' as const, nullable: true };
+
+  it('types a picked preset into the Cron field, Not scheduled as blank', () => {
+    const onChange = vi.fn();
+    render(<FieldEditor spec={cron} value="" saved="" errors={[]} onChange={onChange} />);
+    const presets = screen.getByRole('combobox', { name: 'Cron presets' });
+    fireEvent.change(presets, { target: { value: '1' } });
+    expect(onChange).toHaveBeenLastCalledWith('0 */5 * * * *');
+    fireEvent.change(presets, { target: { value: '5' } });
+    expect(onChange).toHaveBeenLastCalledWith('');
+    expect((presets as HTMLSelectElement).value).toBe('');
+  });
+
+  it('shows checks in red and the note under them, and marks the field', () => {
+    const { container } = render(<FieldEditor spec={{ key: 'payload', label: 'Payload', kind: 'json' }} value="{}" saved="" errors={[]}
+      checks={['/: missing required "x"']} note="checked against x-config 1.0.0" onChange={() => {}} />);
+    expect(container.querySelector('[data-check]')!.textContent).toBe('/: missing required "x"');
+    expect(container.querySelector('.fhint')!.textContent).toBe('checked against x-config 1.0.0');
+    expect(container.querySelector('textarea')!.getAttribute('aria-invalid')).toBe('true');
   });
 });

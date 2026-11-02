@@ -220,6 +220,23 @@ describe('Inspector editing (plan 8 §3.3: the design, never BaseApi)', () => {
     expect(api.createAssignment).not.toHaveBeenCalled();
     expect(api.deleteAssignment).not.toHaveBeenCalled();
   });
+  it('checks the payload against the config schema while it is typed, under the field; nothing is written (2026-11-02)', async () => {
+    const definition = JSON.stringify({ required: ['bucket'], properties: { bucket: { type: 'string' }, retries: { type: 'integer' } } });
+    const getEntity = vi.fn(async (kind: string, id: string) => (kind === 'schema' ? ok(schemaDto('sc1', { definition })) : reads(kind, id)));
+    const { api } = await renderInspector({ getEntity }, { selection: { kind: 'step', stepId: 's1' } });
+    fireEvent.click(await screen.findByRole('button', { name: '＋ Create' }));
+    expect(await screen.findByText('/bucket: still a placeholder: fill in a string')).toBeInTheDocument();
+    expect(screen.getByText('checked against the config schema; Save checks it again')).toBeInTheDocument();
+    const payload = screen.getByLabelText('Payload');
+    expect(payload).toHaveAttribute('aria-invalid', 'true');
+    fireEvent.change(payload, { target: { value: '{"bucket":"b","retries":"x"}' } });
+    expect(await screen.findByText('/retries: must be integer')).toBeInTheDocument();
+    expect(screen.queryByText(/still a placeholder/)).toBeNull();
+    fireEvent.change(payload, { target: { value: '{"bucket":"b","retries":3}' } });
+    await waitFor(() => expect(payload).not.toHaveAttribute('aria-invalid'));
+    for (const write of [api.putEntity, api.createAssignment, api.saveDesign]) expect(write).not.toHaveBeenCalled();
+  });
+
   it("the step row drills into its assignment, and ✕ Remove takes it off in the design only", async () => {
     const getEntity = vi.fn(async (kind: string, id: string) => reads(kind, id));
     const graph = graphDto({ ...inspectorGraph, assignments: [assignmentDto('a1', { stepId: 's1', payload: '{"a":1,"b":2}' })] } as never);

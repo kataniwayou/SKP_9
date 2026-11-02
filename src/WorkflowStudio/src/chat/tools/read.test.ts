@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from '../../api/client';
 import { assignmentDto, cacheDto, graphDto, processorDto, schemaDto, stepDto, workflowDto } from '../../api/fixtures';
 import { loadedDocument } from '../../app/fixtures';
-import { createInspectorService } from '../../app/inspectorService';
+import { createInspectorService, NEW_SCHEMA_DEFINITION } from '../../app/inspectorService';
 import { newWorkflowDocument } from '../../app/newWorkflow';
 import { createStudioStore } from '../../store/studioStore';
 import { DESTRUCTIVE, TOOL_DEFS, TOOLS } from '../tools';
@@ -107,7 +107,7 @@ describe('the reading tools', () => {
     const { run } = await setup();
     expect((await run('read_entity', { target: { kind: 'assignment', step: 'fetch' } })).data.fields.payload).toBe('{"k":1}');
     expect((await run('read_entity', { target: { kind: 'schema', step: 'fetch', slot: 'config' } })).data.fields.definition).toBe('{"type":"object"}');
-    expect((await run('read_entity', { target: { kind: 'schema', step: 'fetch', slot: 'input' } })).data).toMatchObject({ fields: { definition: '{}' } });
+    expect((await run('read_entity', { target: { kind: 'schema', step: 'fetch', slot: 'input' } })).data).toMatchObject({ fields: { definition: NEW_SCHEMA_DEFINITION } });
   });
 
   it('read_entity says what is missing', async () => {

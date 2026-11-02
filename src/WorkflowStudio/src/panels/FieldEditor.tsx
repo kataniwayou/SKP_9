@@ -1,7 +1,7 @@
 import { useId, useLayoutEffect, useRef } from 'react';
 import { ConditionPicker } from './ConditionPicker';
 import { DictEditor } from './DictEditor';
-import { cronText } from '../model/cronText';
+import { CRON_PRESETS, cronText } from '../model/cronText';
 import { jsonProblem, type FieldSpec } from '../store/entityForms';
 
 /** A multi-line field opens as tall as its whole text (two lines at least), up to this share of the window, then scrolls. */
@@ -23,13 +23,16 @@ function useFitToText(ref: React.RefObject<HTMLTextAreaElement | null>, value: s
 
 /**
  * One writable field (spec §7.1). Free text: the server judges it; the browser only marks JSON that
- * does not parse and shows the saved Name or Version as the placeholder of a cleared one.
+ * does not parse and shows the saved Name or Version as the placeholder of a cleared one. `checks` are the browser's own
+ * findings while it is typed (a payload against its config schema, 2026-11-02), `note` what they were judged against.
  */
-export function FieldEditor({ spec, value, saved, errors, onChange }: {
+export function FieldEditor({ spec, value, saved, errors, checks = [], note = null, onChange }: {
   spec: FieldSpec;
   value: string;
   saved: string;
   errors: readonly string[];
+  checks?: readonly string[];
+  note?: string | null;
   onChange: (text: string) => void;
 }) {
   const id = useId();
@@ -44,15 +47,26 @@ export function FieldEditor({ spec, value, saved, errors, onChange }: {
   const common = {
     id,
     className: spec.kind === 'json' ? 'input json' : 'input',
-    'aria-invalid': errors.length > 0 || json !== null || cronProblem !== null ? true : undefined,
+    'aria-invalid': errors.length > 0 || checks.length > 0 || json !== null || cronProblem !== null ? true : undefined,
     'aria-describedby': cron ? `${id}-cron` : undefined,
     spellCheck: false,
   };
   let control;
   switch (spec.kind) {
     case 'text':
-    case 'cron':
       control = <input {...common} type="text" value={value} placeholder={spec.required ? saved : undefined} onChange={(e) => onChange(e.target.value)} />;
+      break;
+    case 'cron':
+      // a preset is typed in for the user (2026-11-02): the field stays free text
+      control = (
+        <div className="cronrow">
+          <input {...common} type="text" value={value} onChange={(e) => onChange(e.target.value)} />
+          <select className="input cronpre" aria-label="Cron presets" value="" onChange={(e) => onChange(CRON_PRESETS[Number(e.target.value)]!.expression)}>
+            <option value="" disabled>presets</option>
+            {CRON_PRESETS.map((p, i) => <option key={p.label} value={i}>{p.label}{p.expression ? ` · ${p.expression}` : ''}</option>)}
+          </select>
+        </div>
+      );
       break;
     case 'multiline':
       control = <textarea {...common} ref={area} rows={2} value={value} onChange={(e) => onChange(e.target.value)} />;
@@ -71,7 +85,9 @@ export function FieldEditor({ spec, value, saved, errors, onChange }: {
         {control}
         {json !== null && <div className="fnote">{json}</div>}
         {cron && ('text' in cron ? <div id={`${id}-cron`} className="fhint">{cron.text}</div> : <div id={`${id}-cron`} className="ferr">{cron.problem}</div>)}
+        {checks.map((message, i) => <div key={`c${i}`} className="ferr" data-check="">{message}</div>)}
         {errors.map((message, i) => <div key={i} className="ferr">{message}</div>)}
+        {note !== null && <div className="fhint">{note}</div>}
       </div>
     </div>
   );

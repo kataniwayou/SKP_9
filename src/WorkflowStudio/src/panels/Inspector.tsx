@@ -1,5 +1,5 @@
 import { EMPTY_SLOT_TIP } from '../canvas/nodes/Chip';
-import { Fragment, useEffect, useMemo } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { EntityReadDto } from '../api/entities';
 import type { StepReadDto } from '../api/types';
 import type { StudioDocument } from '../app/document';
@@ -9,6 +9,8 @@ import { applyBlocks } from '../design/blocks';
 import { fieldsOf, hasEdit, SLOT_FIELD, slotKey, valueText } from '../design/design';
 import { assignmentByStep, payloadKeyCount } from '../model/assignments';
 import { entityName } from '../model/entityNames';
+import type { Id } from '../model/graph';
+import { checkPayload } from '../model/payloadCheck';
 import { FIELDS, prettyJson, sameJson, savedText, type FieldSpec } from '../store/entityForms';
 import { crumbLabel, editTargetOf, rootTarget, targetKey, type InspectorTarget, type SchemaSlot } from '../store/inspectorTarget';
 import { activeDocument, designLocked, shownTargetOf, type OpenDocument } from '../store/studioState';
@@ -142,6 +144,24 @@ const SLOTS: ReadonlyArray<{ slot: SchemaSlot; label: string; key: 'inputSchemaI
   { slot: 'config', label: 'Config', key: 'configSchemaId' },
 ];
 
+/**
+ * The config schema an assignment's payload is checked against while typed (2026-11-02): the definition, read again when
+ * the slot names another schema or its design copy changes; null when there is none, undefined while it is read.
+ */
+function useConfigDefinition(workflowId: Id, stepId: Id | null, schemaKey: string | null): string | null | undefined {
+  const { service } = useStudioActions();
+  const [read, setRead] = useState<{ key: string; definition: string | null } | null>(null);
+  const key = `${stepId ?? ''}|${schemaKey ?? ''}`;
+  useEffect(() => {
+    if (stepId === null || schemaKey === null) return;
+    let live = true;
+    void service.configDefinition(workflowId, stepId).then((definition) => { if (live) setRead({ key, definition }); });
+    return () => { live = false; };
+  }, [service, workflowId, stepId, schemaKey, key]);
+  if (stepId === null || schemaKey === null) return null;
+  return read?.key === key ? read.definition : undefined;
+}
+
 function EntityForm({ open, doc, base, target, saved, fields, showDetails, drill }: {
   open: OpenDocument; doc: StudioDocument; base: StudioDocument; target: InspectorTarget; saved: EntityReadDto;
   fields: Readonly<Record<string, string | number | null>>; showDetails: boolean; drill: (t: InspectorTarget) => void;
@@ -156,11 +176,26 @@ function EntityForm({ open, doc, base, target, saved, fields, showDetails, drill
   // the last Save's errors on this entity, under their fields (Output pins them all)
   const entityId = target.kind === 'workflow' ? workflowId : target.kind === 'schema' ? open.edits.schemas[slotKey(target.processorId, target.slot)]?.id ?? target.id : target.id;
   const errorsOf = (key: string) => (open.errors ?? []).filter((e) => e.id === entityId && e.field === key).map((e) => e.message);
+  const { graph } = doc;
+  // an assignment's payload against its processor's config schema, as designed (a copy's text included)
+  const payloadStep = target.kind === 'assignment' ? target.stepId : null;
+  const processorId = payloadStep === null ? null : graph.steps.get(payloadStep)?.processorId ?? null;
+  const configId = processorId === null ? null : graph.processors.get(processorId)?.configSchemaId ?? null;
+  const configCopy = processorId === null ? undefined : open.edits.schemas[slotKey(processorId, 'config')];
+  const definition = useConfigDefinition(workflowId, payloadStep, configId === null ? null : `${configId}|${configCopy?.definition ?? ''}`);
+  const payloadText = payloadStep === null ? '' : shown('payload');
+  const payloadCheck = useMemo(() => (typeof definition === 'string' ? checkPayload(definition, payloadText) : null), [definition, payloadText]);
+  const configSchema = configId === null ? undefined : graph.schemas.get(configId);
+  const checksOf = (spec: FieldSpec) => (spec.key === 'payload' && payloadCheck && 'problems' in payloadCheck ? payloadCheck.problems : undefined);
+  const noteOf = (spec: FieldSpec) => {
+    if (spec.key !== 'payload' || payloadCheck === null) return null;
+    if ('unchecked' in payloadCheck) return payloadCheck.unchecked;
+    return `checked against ${configSchema ? `${configSchema.name} ${configSchema.version}` : 'the config schema'}; Save checks it again`;
+  };
   const editor = (spec: FieldSpec) => (
     <FieldEditor key={spec.key} spec={spec} value={shownOf(spec)} saved={savedText(saved, spec.key)} errors={errorsOf(spec.key)}
-      onChange={(text) => service.edit(workflowId, spec, typed(spec, text))} />
+      checks={checksOf(spec)} note={noteOf(spec)} onChange={(text) => service.edit(workflowId, spec, typed(spec, text))} />
   );
-  const { graph } = doc;
   // a schema copy and a created assignment are not in the database: they are named by what the design holds
   const copy = target.kind === 'schema' ? open.edits.schemas[slotKey(target.processorId, target.slot)] : undefined;
   const created = target.kind === 'assignment' && open.edits.assignments[target.stepId]?.op === 'create';
