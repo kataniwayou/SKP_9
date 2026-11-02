@@ -4,10 +4,13 @@ import type { EntityReadDto } from '../api/entities';
 import type { AssignmentReadDto, SchemaReadDto } from '../api/types';
 import { newId } from '../design/ids';
 import { applyBlocks, type NewAssignment } from '../design/blocks';
+import { slotKey } from '../design/design';
+import { payloadSkeleton } from '../model/assignments';
 import type { Id } from '../model/graph';
 import { fieldValue, type FieldSpec } from '../store/entityForms';
 import { graphBaseOf } from '../store/inspectorBase';
 import { crumbLabel, targetKey, type InspectorTarget, type SchemaSlot } from '../store/inspectorTarget';
+import { shownDesignOf } from '../store/problems';
 import { shownTargetOf, type OpenDocument } from '../store/studioState';
 import type { StudioStore } from '../store/studioStore';
 
@@ -24,8 +27,11 @@ export interface InspectorService {
   clearSlot(workflowId: Id, processorId: Id, slot: SchemaSlot): void;
   /** Drops the shown entity's design edits. */
   revert(workflowId: Id): void;
-  /** Creates the step's assignment in the design (`{step}-assignment`, 1.0.0, `{}`) and shows it. */
-  createAssignment(workflowId: Id, stepId: Id, stepName: string): void;
+  /**
+   * Creates the step's assignment in the design (`{step}-assignment`, 1.0.0) and shows it, its payload laid out from
+   * the config schema of the step's processor (2026-11-02; `{}` without one). Resolves once it is made.
+   */
+  createAssignment(workflowId: Id, stepId: Id, stepName: string): Promise<void>;
   /** Removes the step's assignment in the design: no question, no other workflow checked (assignments are not shared). */
   removeAssignment(workflowId: Id, stepId: Id): void;
 }
@@ -58,6 +64,21 @@ function madeUp(doc: OpenDocument, target: InspectorTarget): EntityReadDto | nul
     return { id: '', name: `${p?.name ?? target.processorId}-${target.slot}`, version: '1.0.0', description: null, definition: '{}' } as SchemaReadDto;
   }
   return null;
+}
+
+/**
+ * The definition of the config schema the step's processor has in the design: the slot's copy when the design made one,
+ * else BaseApi's row; null when the step has no processor, the processor no config schema, or the row cannot be read.
+ */
+async function configDefinitionOf(api: StudioApi, doc: OpenDocument, stepId: Id): Promise<string | null> {
+  const graph = shownDesignOf(doc)?.graph;
+  const processorId = graph?.steps.get(stepId)?.processorId ?? null;
+  const schemaId = processorId === null ? null : graph?.processors.get(processorId)?.configSchemaId ?? null;
+  if (processorId === null || schemaId === null) return null;
+  const copy = doc.edits.schemas[slotKey(processorId, 'config')];
+  if (copy?.id === schemaId) return copy.definition;
+  const r = await api.getEntity('schema', schemaId);
+  return r.ok ? ((r.value as SchemaReadDto).definition ?? null) : null;
 }
 
 /** A pasted step's own assignment (2026-10-10), when the target is one: a new row that exists only in the design. */
@@ -104,6 +125,8 @@ export async function baseDtoOf(api: StudioApi, doc: OpenDocument, target: Inspe
 export function createInspectorService(api: StudioApi, store: StudioStore): InspectorService {
   /** workflowId → the target key whose GET is in flight. */
   const reading = new Map<Id, string>();
+  /** `${workflowId}|${stepId}` of the assignments whose config schema is being read: a second click makes no second one. */
+  const creating = new Set<string>();
   const docOf = (id: Id) => store.getState().docs.find((d) => d.workflowId === id) ?? null;
 
   function read(workflowId: Id, again = false): void {
@@ -128,7 +151,18 @@ export function createInspectorService(api: StudioApi, store: StudioStore): Insp
     edit: (workflowId, spec, text) => store.dispatch({ type: 'editField', workflowId, key: spec.key, value: fieldValue(spec, text), copyId: newId() }),
     clearSlot: (workflowId, processorId, slot) => store.dispatch({ type: 'clearSlot', workflowId, processorId, slot }),
     revert: (workflowId) => store.dispatch({ type: 'revertEntity', workflowId }),
-    createAssignment: (workflowId, stepId, stepName) => store.dispatch({ type: 'createAssignment', workflowId, stepId, stepName, id: newId() }),
+    async createAssignment(workflowId, stepId, stepName) {
+      const doc = docOf(workflowId);
+      const key = `${workflowId}|${stepId}`;
+      if (doc === null || creating.has(key)) return;
+      creating.add(key);
+      try {
+        const payload = payloadSkeleton(await configDefinitionOf(api, doc, stepId));
+        store.dispatch({ type: 'createAssignment', workflowId, stepId, stepName, id: newId(), payload });
+      } finally {
+        creating.delete(key);
+      }
+    },
     removeAssignment: (workflowId, stepId) => store.dispatch({ type: 'removeAssignment', workflowId, stepId }),
   };
 }

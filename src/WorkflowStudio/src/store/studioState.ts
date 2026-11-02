@@ -133,8 +133,8 @@ export type StudioAction =
   /** Drops the shown entity's design edits. */
   | { type: 'revertEntity'; workflowId: Id }
   | { type: 'clearSlot'; workflowId: Id; processorId: Id; slot: SchemaSlot }
-  /** Creates a step's assignment in the design and shows it. */
-  | { type: 'createAssignment'; workflowId: Id; stepId: Id; stepName: string; id: Id }
+  /** Creates a step's assignment in the design and shows it; `payload` is `{}` when absent. */
+  | { type: 'createAssignment'; workflowId: Id; stepId: Id; stepName: string; id: Id; payload?: string }
   /** Removes a step's assignment in the design. */
   | { type: 'removeAssignment'; workflowId: Id; stepId: Id }
   | { type: 'saving'; workflowId: Id }
@@ -414,7 +414,7 @@ function reduceDocs(state: StudioState, action: StudioAction): StudioState {
     case 'createAssignment':
       return update(state, action.workflowId, (d) => {
         if (designLocked(d)) return d;
-        const edits = createAssignment(d.edits, action.stepId, action.stepName, action.id);
+        const edits = createAssignment(d.edits, action.stepId, action.stepName, action.id, action.payload);
         const shown = edits.assignments[action.stepId]!;
         return { ...d, edits, design: assignmentStepped(d, edits, action.stepId), inspector: { ...EMPTY_INSPECTOR, trail: [...d.inspector.trail, { kind: 'assignment', id: shown.id, stepId: action.stepId }] } };
       });

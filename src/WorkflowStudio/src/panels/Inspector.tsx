@@ -207,7 +207,7 @@ function EntityForm({ open, doc, base, target, saved, fields, showDetails, drill
             return (
               <div className="field">
                 <label>Assignment</label>
-                <button type="button" className="link" onClick={() => service.createAssignment(workflowId, target.id, shown('name'))}>＋ Create</button>
+                <button type="button" className="link" onClick={() => void service.createAssignment(workflowId, target.id, shown('name'))}>＋ Create</button>
               </div>
             );
           }

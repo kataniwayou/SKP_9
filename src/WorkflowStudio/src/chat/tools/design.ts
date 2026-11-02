@@ -88,7 +88,7 @@ export type Acted = { ok: true; entries: ChatEntry[]; before: OpenDocument; afte
  * `unchanged`, when it would change neither the design nor the edits (the gesture was refused: `unchanged` says why).
  * The Output lines and problems it causes are echoed.
  */
-export async function act(ctx: ToolContext, id: Id, given: StudioAction, opts: { unchanged?: string; run?: () => void } = {}): Promise<Acted> {
+export async function act(ctx: ToolContext, id: Id, given: StudioAction, opts: { unchanged?: string; run?: () => void | Promise<void> } = {}): Promise<Acted> {
   const state = ctx.store.getState();
   const before = state.docs.find((d) => d.workflowId === id);
   if (!before) return { ok: false, error: 'the workflow is no longer open' };
@@ -106,7 +106,7 @@ export async function act(ctx: ToolContext, id: Id, given: StudioAction, opts: {
   const had = shortsOf(before);
   const added = [...shortsOf(preview)].filter(([k]) => !had.has(k)).map(([, line]) => line);
   if (added.length > 0) return { ok: false, error: `refused, the design is unchanged: it would add a short circuit (${added.join('; ')})` };
-  const { entries } = await withEcho(ctx.store, () => [id], async () => { (opts.run ?? (() => ctx.store.dispatch(action)))(); });
+  const { entries } = await withEcho(ctx.store, () => [id], async () => { await (opts.run ?? (() => ctx.store.dispatch(action)))(); });
   const after = docOf(ctx, id);
   if (!after) return { ok: false, error: 'the workflow closed meanwhile' };
   if (opts.unchanged !== undefined && !changed(after)) return { ok: false, error: opts.unchanged };

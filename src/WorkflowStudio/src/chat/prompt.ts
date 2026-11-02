@@ -46,7 +46,7 @@ ${fields}
 - workflow: its circle on the canvas ("workflow" in tools) feeds the entry steps; cronExpression schedules it.
 - step: runs its processor; its entryCondition decides when it runs; it may have one assignment.
 - processor: an existing BaseApi processor with input, output and config schemas and a source hash; give a step one with add_step (processor) or set_processor.
-- assignment: a step's payload (JSON text); create_assignment makes it, set_field target assignment sets payload.
+- assignment: a step's payload (JSON text); create_assignment makes it, laid out from the processor's config schema, set_field target assignment sets payload.
 - schema: a processor slot's (input, output, config) definition, JSON text; editing a schema makes a schema copy for this design.
 - cache: root (unique across BaseApi: Save refuses a root another cache has) and items (a JSON object of strings).
 

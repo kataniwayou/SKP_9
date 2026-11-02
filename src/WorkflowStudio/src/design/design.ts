@@ -209,12 +209,12 @@ export function revertEntity(edits: EntityEdits, t: EditTarget): EntityEdits {
 }
 
 /**
- * Creates a step's assignment in the design (spec §3.3): `{step}-assignment`, 1.0.0, payload `{}`. When
- * the step's own row was removed in this design, that row is updated to the new values instead: one
- * operation per step.
+ * Creates a step's assignment in the design (spec §3.3): `{step}-assignment`, 1.0.0, `payload` (`{}` unless given:
+ * the Inspector's skeleton of the config schema, 2026-11-02). When the step's own row was removed in this design,
+ * that row is updated to the new values instead: one operation per step.
  */
-export function createAssignment(edits: EntityEdits, stepId: Id, stepName: string, id: Id): EntityEdits {
-  const fields: Record<string, FieldValue> = { name: `${stepName}-assignment`, version: '1.0.0', description: null, payload: '{}' };
+export function createAssignment(edits: EntityEdits, stepId: Id, stepName: string, id: Id, payload = '{}'): EntityEdits {
+  const fields: Record<string, FieldValue> = { name: `${stepName}-assignment`, version: '1.0.0', description: null, payload };
   const op = edits.assignments[stepId];
   const made: AssignmentOp = op?.op === 'delete' ? { op: 'update', id: op.id, updatedAt: op.updatedAt, fields } : { op: 'create', id, fields };
   return { ...edits, assignments: put(edits.assignments, stepId, made) };

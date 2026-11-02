@@ -241,7 +241,7 @@ const STEP_ARG = { type: 'string', description: 'The step: name or id.' };
 
 const createAssignmentTool: ToolDef = {
   name: 'create_assignment',
-  description: 'Create a step\'s assignment (the Inspector\'s ＋ Create): named {step}-assignment, version 1.0.0, payload {}; set its payload with set_field (target assignment, field payload).',
+  description: 'Create a step\'s assignment (the Inspector\'s ＋ Create): named {step}-assignment, version 1.0.0, its payload every top-level property of the step\'s processor\'s config schema (a required one as a "<type>" marker to fill in, an optional one as its default or empty value; {} without a config schema); set its payload with set_field (target assignment, field payload).',
   parameters: { type: 'object', properties: { workflow: WORKFLOW_ARG, step: STEP_ARG }, required: ['step'], additionalProperties: false },
   async run(ctx, args) {
     const asked = `create assignment of step ${text(args.step) ?? '?'}`;
@@ -262,7 +262,8 @@ const createAssignmentTool: ToolDef = {
     const op = r.after.edits.assignments[stepId];
     const label = op && op.op !== 'delete' ? `${String(op.fields.name ?? '')} ${String(op.fields.version ?? '')}`.trim() : '';
     if (!made.ok || !made.value.assignment) return done(false, `the assignment of step ${name} was not created`, `create assignment of ${name} failed`, r.entries);
-    return done(true, `created assignment ${label} (id ${made.value.assignment.id}) of step ${name}, payload {}; the Inspector shows it`, `+ assignment of ${name}`, r.entries);
+    const payload = op && op.op !== 'delete' ? String(op.fields.payload ?? '{}') : '{}';
+    return done(true, `created assignment ${label} (id ${made.value.assignment.id}) of step ${name}, payload ${payload.replace(/\s*\n\s*/g, ' ')}; the Inspector shows it`, `+ assignment of ${name}`, r.entries);
   },
 };
 

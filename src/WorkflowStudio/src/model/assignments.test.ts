@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assignmentByStep, payloadKeyCount } from './assignments';
+import { assignmentByStep, payloadKeyCount, payloadSkeleton } from './assignments';
 
 describe('assignmentByStep', () => {
   it('keeps one assignment per step: the smallest id, as the graph saver does', () => {
@@ -31,5 +31,29 @@ describe('payloadKeyCount', () => {
     expect(payloadKeyCount('{nope')).toBeNull();
     expect(payloadKeyCount('[1,2]')).toBeNull();
     expect(payloadKeyCount('')).toBeNull();
+  });
+});
+
+describe('payloadSkeleton (the user, 2026-11-02)', () => {
+  it('lays out every top-level property, one to a line: a required one as a marker, an optional one empty or its default', () => {
+    const schema = JSON.stringify({
+      type: 'object', required: ['bucket', 'retries', 'tags'],
+      properties: {
+        bucket: { type: 'string' }, retries: { type: 'integer' }, tags: { type: 'array' },
+        prefix: { type: ['string', 'null'] }, overwrite: { type: 'boolean' }, limit: { type: 'number', default: 10 },
+        options: { type: 'object', properties: { deep: { type: 'string' } } }, anything: {},
+      },
+    });
+    expect(payloadSkeleton(schema)).toBe(JSON.stringify({
+      bucket: '<string>', retries: '<integer>', tags: '<array>', prefix: '', overwrite: false, limit: 10, options: {}, anything: null,
+    }, null, 2));
+  });
+
+  it('marks a required property with no type as <value>', () => {
+    expect(JSON.parse(payloadSkeleton('{"required":["x"],"properties":{"x":{}}}'))).toEqual({ x: '<value>' });
+  });
+
+  it('is {} with no schema, one that does not parse, or one with no properties', () => {
+    for (const d of [null, undefined, '', 'not json', '{}', '[]', '{"properties":[]}', '{"properties":{}}']) expect(payloadSkeleton(d)).toBe('{}');
   });
 });

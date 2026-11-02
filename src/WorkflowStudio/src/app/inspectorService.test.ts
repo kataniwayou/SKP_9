@@ -74,9 +74,13 @@ describe('InspectorService (plan 8 §3.3: reads, then design edits)', () => {
     for (const w of Object.values(writes)) expect(w).not.toHaveBeenCalled();
   });
 
-  it('makes up the base of a created assignment and of an empty slot\'s schema, with no GET', async () => {
-    const { service, store, flush, doc, api } = await setup();
-    service.createAssignment('wf1', 's1', 'fetch');
+  it('makes up the base of a created assignment and of an empty slot\'s schema, with no GET of either', async () => {
+    const { service, store, flush, doc, api } = await setup(vi.fn().mockResolvedValue(notFound));
+    await service.createAssignment('wf1', 's1', 'fetch');
+    // the config schema read for the payload's layout (2026-11-02), not a read of the assignment
+    expect(api.getEntity).toHaveBeenCalledWith('schema', 'sc1');
+    expect(doc().edits.assignments['s1']).toMatchObject({ op: 'create', fields: { payload: '{}' } });
+    vi.mocked(api.getEntity).mockClear();
     service.read('wf1');
     await flush();
     expect(doc().inspector.saved?.dto).toMatchObject({ stepId: 's1' });
@@ -86,5 +90,28 @@ describe('InspectorService (plan 8 §3.3: reads, then design edits)', () => {
     await flush();
     expect(doc().inspector.saved?.dto).toEqual({ id: '', name: 'fetcher-output', version: '1.0.0', description: null, definition: '{}' });
     expect(api.getEntity).toHaveBeenCalledTimes(0);
+  });
+
+  it('lays a created assignment\'s payload out from the processor\'s config schema, read once however often it is clicked (2026-11-02)', async () => {
+    const definition = JSON.stringify({ required: ['bucket'], properties: { bucket: { type: 'string' }, overwrite: { type: 'boolean' } } });
+    const { service, doc, api, writes } = await setup(vi.fn().mockResolvedValue(ok(schemaDto('sc1', { definition }))));
+    await Promise.all([service.createAssignment('wf1', 's1', 'fetch'), service.createAssignment('wf1', 's1', 'fetch')]);
+    expect(api.getEntity).toHaveBeenCalledTimes(1);
+    expect(doc().edits.assignments['s1']).toMatchObject({ op: 'create', fields: { name: 'fetch-assignment', payload: '{\n  "bucket": "<string>",\n  "overwrite": false\n}' } });
+    for (const w of Object.values(writes)) expect(w).not.toHaveBeenCalled();
+  });
+
+  it('takes the config schema from the design\'s copy of the slot when it has one, with no GET', async () => {
+    const { service, store, flush, doc, api } = await setup(vi.fn().mockResolvedValue(ok(schemaDto('sc1'))));
+    store.dispatch({ type: 'select', workflowId: 'wf1', selection: { kind: 'processor', processorId: 'p1', stepId: 's1' } });
+    store.dispatch({ type: 'drill', workflowId: 'wf1', target: { kind: 'schema', id: 'sc1', slot: 'config', processorId: 'p1' } });
+    service.read('wf1');
+    await flush();
+    service.edit('wf1', spec('schema', 'definition'), '{"required":["queue"],"properties":{"queue":{"type":"string"}}}');
+    store.dispatch({ type: 'select', workflowId: 'wf1', selection: { kind: 'step', stepId: 's1' } });
+    vi.mocked(api.getEntity).mockClear();
+    await service.createAssignment('wf1', 's1', 'fetch');
+    expect(api.getEntity).not.toHaveBeenCalled();
+    expect(doc().edits.assignments['s1']).toMatchObject({ fields: { payload: '{\n  "queue": "<string>"\n}' } });
   });
 });
