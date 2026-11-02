@@ -95,6 +95,10 @@ export function applyEdits(withoutBlocks: StudioDocument, edits: EntityEdits, bl
     processors.set(id, {
       ...p, name: text(f, 'name', p.name), version: text(f, 'version', p.version), description: nullable(f, 'description', p.description),
       sourceHash: text(f, 'sourceHash', p.sourceHash), instanceId: nullable(f, 'instanceId', p.instanceId),
+      // a slot cleared in the design (2026-11-01); a copy below re-points one again
+      inputSchemaId: f.inputSchemaId === null ? null : p.inputSchemaId,
+      outputSchemaId: f.outputSchemaId === null ? null : p.outputSchemaId,
+      configSchemaId: f.configSchemaId === null ? null : p.configSchemaId,
     });
   }
 

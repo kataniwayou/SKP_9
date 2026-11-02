@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useGuard } from '../app/studioActions';
 import type { StudioDocument } from '../app/document';
 import type { DesignError } from '../model/graph';
 import { errorPicks, errorTarget } from '../store/errorTarget';
 import { entityLabel, problemsFrom, shownDesignOf } from '../store/problems';
 import { selectionKey } from '../store/selection';
+import { entityNamesOf, namedText } from '../store/output';
 import { activeDocument, type OpenDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
 
@@ -87,19 +88,42 @@ function OutputBar({ empty }: { empty: boolean }) {
 export function Output() {
   const active = useStudio(activeDocument);
   const lines = useStudio((s) => s.output);
+  const docs = useStudio((s) => s.docs);
   const { errors, shown } = useProblems(active);
+  // the ids a line names are shown by the open workflows' names: as loaded, and the design's schema copies and new blocks
+  const names = useMemo(() => entityNamesOf(
+    docs.flatMap((d) => (d.status.kind === 'ready' ? [d.status.doc.graph] : [])),
+    docs.flatMap((d) => [
+      ...Object.values(d.edits.schemas),
+      ...Object.entries(d.design.draft.blocks.steps).map(([id, n]) => ({ id, name: n.name, version: n.version })),
+      ...Object.entries(d.design.draft.blocks.caches).map(([id, c]) => ({ id, name: c.name, version: c.version })),
+    ]),
+  ), [docs]);
   const [log, setLog] = useState<HTMLDivElement | null>(null);
   // the newest line is at the bottom: every new line scrolls the log to its end (the user, 2026-10-12), even when it was
-  // scrolled up to read; so does the log being shown or resized (a hidden tab brought forward, the pinned problems growing)
+  // scrolled up to read. A resize (a pane dragged, a hidden tab brought forward) keeps the place being read: it follows
+  // the end only when the log was at its end (the user, 2026-11-01)
   const last = lines.length === 0 ? '' : `${lines.length}|${lines[lines.length - 1]!.at}|${lines[lines.length - 1]!.text}`;
+  const atEnd = useRef(true);
+  // where the log last scrolled itself: its own scroll event comes a frame late, maybe after another resize, and is not the reader's
+  const ownTop = useRef<number | null>(null);
+  const toEnd = (el: HTMLDivElement) => { el.scrollTop = el.scrollHeight; ownTop.current = el.scrollTop; };
   useEffect(() => {
-    if (log) log.scrollTop = log.scrollHeight;
+    if (log) { toEnd(log); atEnd.current = true; }
   }, [log, last]);
   useEffect(() => {
     if (!log) return undefined;
-    const seen = new ResizeObserver(() => { log.scrollTop = log.scrollHeight; });
+    // a hidden log (a tab behind another) has no height: its scroll says nothing about where the reader was
+    const onScroll = () => {
+      if (log.clientHeight === 0) return;
+      // still where it took itself, the end: the reader has not moved
+      atEnd.current = (ownTop.current !== null && Math.abs(log.scrollTop - ownTop.current) < 1)
+        || log.scrollHeight - log.scrollTop - log.clientHeight < 4;
+    };
+    const seen = new ResizeObserver(() => { if (atEnd.current) toEnd(log); });
+    log.addEventListener('scroll', onScroll);
     seen.observe(log);
-    return () => seen.disconnect();
+    return () => { seen.disconnect(); log.removeEventListener('scroll', onScroll); };
   }, [log]);
 
   if (lines.length === 0 && errors.length === 0) {
@@ -122,7 +146,7 @@ export function Output() {
       >
         {lines.map((l, i) => (
           <div key={i} className={l.level === 'error' ? 'outl err' : 'outl'} data-level={l.level}>
-            <span className="t">{timeOf(l.at)}</span> <b>{l.name}</b> {l.text}
+            <span className="t">{timeOf(l.at)}</span> <b>{l.name}</b> {namedText(l.text, names)}
           </div>
         ))}
       </div>

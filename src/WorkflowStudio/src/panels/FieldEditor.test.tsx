@@ -16,9 +16,12 @@ describe('FieldEditor sizing', () => {
     scroll.mockRestore();
   });
 
-  it('leaves a JSON editor at its rows', () => {
-    const { container } = render(<FieldEditor spec={spec('json')} value="{}" saved="" errors={[]} onChange={() => {}} />);
-    expect(container.querySelector('textarea')!.style.height).toBe('');
+  it('sizes a JSON editor to its laid-out text too, capped the same (2026-11-01)', () => {
+    const scroll = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(300);
+    Object.defineProperty(window, 'innerHeight', { value: 500, configurable: true });
+    const { container } = render(<FieldEditor spec={spec('json')} value={'{\n  "a": 1\n}'} saved="" errors={[]} onChange={() => {}} />);
+    expect(container.querySelector('textarea')!.style.height).toBe('200px');
+    scroll.mockRestore();
   });
 });
 

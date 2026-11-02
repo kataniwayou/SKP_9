@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { DockviewReact, themeVisualStudio, type DockviewApi, type DockviewGroupPanel, type DockviewPanelApi, type DockviewReadyEvent } from 'dockview-react';
+import { DockviewReact, themeVisualStudio, type DockviewApi, type DockviewGroupPanel, type DockviewPanelApi, type DockviewReadyEvent, type IDockviewPanel } from 'dockview-react';
 import { AutoHide } from './AutoHide';
 import { canDrop } from './dropRules';
 import type { Rect } from './home';
@@ -13,6 +13,7 @@ import { Picker, type PickerItem } from './Picker';
 import { Switcher, switcherOrder, touch } from './Switcher';
 import { Tooltips } from './Tooltip';
 import { windowKey } from './windowKey';
+import { applyTheme, savedTheme, saveTheme, type Theme } from '../app/theme';
 import {
   addDocument, applyLayout, autoHide, captureLayout, closeTool, dockAsDocument, dockBack, documentArea, ensureDocumentArea, floatGroup,
   floatPanel, markDocumentArea, newMemory, pinBack as pinToolBack, popOut, resetLayout, showTool, toolSide,
@@ -100,6 +101,9 @@ function documentOf(e: Event): Document {
  * studio's keys, toasts and tooltips. It knows documents only by id: what a document or a tool pane
  * shows comes from `renderDocument` and `renderTool`.
  */
+/** dockview's component behind its api: `DockviewApi.removePanel` drops the options that keep an emptied group (dockview 8.4). */
+const keepGroup = (dv: DockviewApi) => (dv as unknown as { component: { removePanel(p: IDockviewPanel, o: { removeEmptyGroup: boolean }): void } }).component;
+
 export function DockShell(props: DockShellProps) {
   const { documents, activeDocumentId, workflows, inspectorKey } = props;
   const storage = props.storage === undefined ? browserStorage() : props.storage;
@@ -118,6 +122,7 @@ export function DockShell(props: DockShellProps) {
   const [switcher, setSwitcher] = useState<{ order: string[]; index: number; doc: Document } | null>(null);
   const [toast, setToast] = useState<{ text: string; doc: Document }>({ text: '', doc: document });
   const [popouts, setPopouts] = useState<Window[]>([]);
+  const [theme, setTheme] = useState<Theme>(() => savedTheme());
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // dockview's events and the key handlers run outside React's render: they read the latest values here.
@@ -141,7 +146,15 @@ export function DockShell(props: DockShellProps) {
     const wanted = new Set(docs.map((d) => docPanelId(d.id)));
     for (const d of docs) if (!dv.getPanel(docPanelId(d.id))) addDocument(dv, memory, d.id, d.name);
     const stale = dv.panels.filter((p) => isDocPanelId(p.id) && !wanted.has(p.id));
-    for (const p of stale) dv.removePanel(p);
+    for (const p of stale) {
+      // the last document leaves its docked group in place, empty (the user, 2026-11-01): dockview would remove it and
+      // share its room out, moving and resizing every other window
+      const last = p.group.api.location.type === 'grid' && !dv.panels.some((o) => o !== p && isDocPanelId(o.id));
+      if (last) {
+        memory.documentGroupId = p.group.id;
+        keepGroup(dv).removePanel(p, { removeEmptyGroup: false });
+      } else dv.removePanel(p);
+    }
     if (stale.length > 0 && !dv.panels.some((p) => isDocPanelId(p.id))) ensureDocumentArea(dv, memory);
   }, [memory]);
 
@@ -275,6 +288,14 @@ export function DockShell(props: DockShellProps) {
   // the open documents decide which document panels exist
   useEffect(() => { if (api) syncDocuments(api); }, [api, documents, syncDocuments]);
 
+  // the theme shows in this window and in every popped-out one, and is remembered
+  useEffect(() => {
+    applyTheme(theme);
+    for (const w of popouts) applyTheme(theme, w.document);
+    saveTheme(theme);
+  }, [theme, popouts]);
+  const toggleTheme = useCallback(() => setTheme((t) => (t === 'dark' ? 'light' : 'dark')), []);
+
   // a newly active document (opened, or the next one after a close) gets its tab focused
   useEffect(() => {
     if (!api || activeDocumentId === null) return;
@@ -404,9 +425,13 @@ export function DockShell(props: DockShellProps) {
           { id: 'all', icon: '⬚', label: 'Select all', kbd: 'Ctrl+A', disabled: true, tip: NOT_YET, onSelect: () => {} },
         ];
       case 'View':
-        return TOOL_IDS.map((id) => ({
-          id, icon: api?.getPanel(id) || hidden.includes(id) ? '✓' : '', label: TOOL_TITLES[id], onSelect: () => toggleTool(id),
-        }));
+        return [
+          ...TOOL_IDS.map((id): MenuEntry => ({
+            id, icon: api?.getPanel(id) || hidden.includes(id) ? '✓' : '', label: TOOL_TITLES[id], onSelect: () => toggleTool(id),
+          })),
+          'separator',
+          { id: 'theme', icon: theme === 'dark' ? '☀' : '☾', label: theme === 'dark' ? 'Light theme' : 'Dark theme', onSelect: toggleTheme },
+        ];
       case 'Window':
         return [
           { id: 'float', icon: '⧉', label: 'Float', kbd: 'Ctrl+dbl-click', disabled: !activePanel || !docked, onSelect: () => { if (api && activePanel) floatPanel(api, memory, activePanel, dockRect()); } },
@@ -553,7 +578,11 @@ export function DockShell(props: DockShellProps) {
               </button>
             ))}
           </div>
-          {props.status !== undefined && <div className="mstatus">{props.status}</div>}
+          <div className="mstatus">
+            {props.status}
+            <button type="button" className="menu theme-toggle" aria-label={theme === 'dark' ? 'Light theme' : 'Dark theme'}
+              data-tip={theme === 'dark' ? 'Light theme' : 'Dark theme'} onClick={toggleTheme}>{theme === 'dark' ? '☀' : '☾'}</button>
+          </div>
         </div>
         <div className="dockwrap">
           <div className="dock" ref={dockRef}>

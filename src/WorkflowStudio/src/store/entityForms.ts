@@ -61,3 +61,22 @@ export function jsonProblem(text: string): string | null {
     return 'Not valid JSON';
   }
 }
+
+/** JSON laid out one field to a line, two-space indented (the user, 2026-11-01); text that does not parse is left as it is. */
+export function prettyJson(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
+
+/** Whether two JSON texts say the same thing, however laid out; text that does not parse is the same only to itself. */
+export function sameJson(a: string, b: string): boolean {
+  if (a === b) return true;
+  try {
+    return JSON.stringify(JSON.parse(a)) === JSON.stringify(JSON.parse(b));
+  } catch {
+    return false;
+  }
+}

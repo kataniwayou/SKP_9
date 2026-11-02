@@ -16,6 +16,10 @@ import './chat/chat.css';
 import './app/document.css';
 import './app.css';
 import { App } from './App';
+import { applyTheme, savedTheme } from './app/theme';
+
+// the remembered theme before the first paint, so a light page never flashes dark
+applyTheme(savedTheme());
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

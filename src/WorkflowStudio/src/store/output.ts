@@ -1,4 +1,5 @@
-import type { Id } from '../model/graph';
+import type { Graph, Id } from '../model/graph';
+import { entityName } from '../model/entityNames';
 
 /** An Output line's weight: an error line is drawn red. */
 export type OutputLevel = 'info' | 'error';
@@ -48,3 +49,24 @@ export function parseOutput(value: unknown): OutputLine[] {
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 export { plural };
+
+/** One entity a line may name: its id, name and version. */
+export interface Named { id: Id; name: string; version: string }
+
+/** Every entity of these graphs, then the extra ones, by lower-case id, under its unique name as the Inspector shows it. */
+export function entityNamesOf(graphs: readonly Graph[], extra: Iterable<Named> = []): Map<string, string> {
+  const names = new Map<string, string>();
+  const add = (x: Named) => { if (!names.has(x.id.toLowerCase())) names.set(x.id.toLowerCase(), entityName(x.name, x.version, x.id)); };
+  for (const g of graphs) {
+    add(g.workflow);
+    for (const m of [g.steps, g.processors, g.schemas, g.caches]) for (const x of m.values()) add(x);
+  }
+  for (const x of extra) add(x);
+  return names;
+}
+
+const GUIDS = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+
+/** A line's text with every id it names given its entity's unique name (the user, 2026-11-01); an unknown id stays as it is. */
+export const namedText = (text: string, names: ReadonlyMap<string, string>): string =>
+  text.replace(GUIDS, (id) => names.get(id.toLowerCase()) ?? id);

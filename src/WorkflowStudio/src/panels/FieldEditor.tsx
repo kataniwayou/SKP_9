@@ -34,7 +34,7 @@ export function FieldEditor({ spec, value, saved, errors, onChange }: {
 }) {
   const id = useId();
   const area = useRef<HTMLTextAreaElement>(null);
-  useFitToText(area, value, spec.kind === 'multiline');
+  useFitToText(area, value, spec.kind === 'multiline' || spec.kind === 'json');
   // a dictionary is a table of its own (2026-10-10)
   if (spec.kind === 'dict') return <DictEditor spec={spec} value={value} errors={errors} onChange={onChange} />;
   const json = spec.kind === 'json' ? jsonProblem(value) : null;
@@ -58,7 +58,7 @@ export function FieldEditor({ spec, value, saved, errors, onChange }: {
       control = <textarea {...common} ref={area} rows={2} value={value} onChange={(e) => onChange(e.target.value)} />;
       break;
     case 'json':
-      control = <textarea {...common} rows={6} value={value} onChange={(e) => onChange(e.target.value)} />;
+      control = <textarea {...common} ref={area} rows={6} value={value} onChange={(e) => onChange(e.target.value)} />;
       break;
     case 'condition':
       control = <ConditionPicker id={id} value={value} invalid={common['aria-invalid']} onChange={onChange} />;

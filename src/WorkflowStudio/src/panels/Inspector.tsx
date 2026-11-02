@@ -6,10 +6,10 @@ import type { StudioDocument } from '../app/document';
 import { useStudioActions } from '../app/studioActions';
 import { applyEdits } from '../design/apply';
 import { applyBlocks } from '../design/blocks';
-import { fieldsOf, hasEdit, slotKey, valueText } from '../design/design';
+import { fieldsOf, hasEdit, SLOT_FIELD, slotKey, valueText } from '../design/design';
 import { assignmentByStep, payloadKeyCount } from '../model/assignments';
 import { entityName } from '../model/entityNames';
-import { FIELDS, savedText, type FieldSpec } from '../store/entityForms';
+import { FIELDS, prettyJson, sameJson, savedText, type FieldSpec } from '../store/entityForms';
 import { crumbLabel, editTargetOf, rootTarget, targetKey, type InspectorTarget, type SchemaSlot } from '../store/inspectorTarget';
 import { activeDocument, designLocked, shownTargetOf, type OpenDocument } from '../store/studioState';
 import { useStudio, useStudioStore } from '../store/studioStore';
@@ -150,12 +150,15 @@ function EntityForm({ open, doc, base, target, saved, fields, showDetails, drill
   const { service } = useStudioActions();
   const { workflowId } = open;
   const shown = (key: string) => (Object.hasOwn(fields, key) ? valueText(fields[key]) : savedText(saved, key));
+  // JSON is shown one field to a line; typed back to what is saved, however laid out, it is no edit
+  const shownOf = (spec: FieldSpec) => (spec.kind === 'json' && !Object.hasOwn(fields, spec.key) ? prettyJson(shown(spec.key)) : shown(spec.key));
+  const typed = (spec: FieldSpec, text: string) => (spec.kind === 'json' && sameJson(text, savedText(saved, spec.key)) ? savedText(saved, spec.key) : text);
   // the last Save's errors on this entity, under their fields (Output pins them all)
   const entityId = target.kind === 'workflow' ? workflowId : target.kind === 'schema' ? open.edits.schemas[slotKey(target.processorId, target.slot)]?.id ?? target.id : target.id;
   const errorsOf = (key: string) => (open.errors ?? []).filter((e) => e.id === entityId && e.field === key).map((e) => e.message);
   const editor = (spec: FieldSpec) => (
-    <FieldEditor key={spec.key} spec={spec} value={shown(spec.key)} saved={savedText(saved, spec.key)} errors={errorsOf(spec.key)}
-      onChange={(text) => service.edit(workflowId, spec, text)} />
+    <FieldEditor key={spec.key} spec={spec} value={shownOf(spec)} saved={savedText(saved, spec.key)} errors={errorsOf(spec.key)}
+      onChange={(text) => service.edit(workflowId, spec, typed(spec, text))} />
   );
   const { graph } = doc;
   // a schema copy and a created assignment are not in the database: they are named by what the design holds
@@ -235,14 +238,19 @@ function EntityForm({ open, doc, base, target, saved, fields, showDetails, drill
             const original = base.graph.processors.get(target.id)?.[key] ?? null;
             const schema = designed ? graph.schemas.get(designed) : undefined;
             const text = designed ? (schema ? entityName(schema.name, schema.version, schema.id) : designed) : '∅';
-            const go = () => drill({ kind: 'schema', id: original ?? '', slot, processorId: target.id });
+            // a slot cleared in this design is defined afresh, not from the schema it had
+            const cleared = Object.hasOwn(fieldsOf(open.edits, { kind: 'processor', id: target.id }), SLOT_FIELD[slot]);
+            const go = () => drill({ kind: 'schema', id: cleared ? '' : original ?? '', slot, processorId: target.id });
             return (
               <div key={slot} className="slot">
                 <span className="k">{label}</span>
                 {designed
                   ? <button type="button" className="v drill" data-tipcut={text} onClick={go}>{text}</button>
                   : <span className="v null" data-tipcut={text}>{text}</span>}
-                {designed ? <span /> : <button type="button" className="link" onClick={go}>＋ Define</button>}
+                {designed
+                  ? <button type="button" className="link danger" aria-label={`Clear the ${label} schema`} data-tip="No schema in this slot"
+                    onClick={() => service.clearSlot(workflowId, target.id, slot)}>✕ Clear</button>
+                  : <button type="button" className="link" onClick={go}>＋ Define</button>}
               </div>
             );
           })}

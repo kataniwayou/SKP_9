@@ -4,7 +4,7 @@ import type { EntityReadDto } from '../api/entities';
 import type { LiveStatus } from '../api/liveStatus';
 import type { Cache, DesignError, Id, Processor, Schema } from '../model/graph';
 import {
-  createAssignment, EMPTY_DESIGN, EMPTY_EDITS, hasGraphChanges, removeAssignment, revertEntity, sameDesign, setField, storedDesignOf, withAssignmentOp,
+  clearSlot, createAssignment, EMPTY_DESIGN, EMPTY_EDITS, hasGraphChanges, removeAssignment, revertEntity, sameDesign, setField, storedDesignOf, withAssignmentOp,
   type Design, type EntityEdits, type FieldValue,
 } from '../design/design';
 import { circuitOf, type Draft } from '../design/draft';
@@ -19,8 +19,8 @@ import { keepJunctions } from '../design/keepJunctions';
 import { isShortCircuitError } from '../design/shortCircuits';
 import { CACHE_NODE_PREFIX, SPHERE_NODE_ID } from '../layout/nodeIds';
 import { EMPTY_INSPECTOR, type InspectorState } from './inspector';
-import { editBaseOf } from './inspectorBase';
-import { currentTarget, editTargetOf, rootTarget, targetKey, type InspectorTarget } from './inspectorTarget';
+import { editBaseOf, graphBaseOf } from './inspectorBase';
+import { currentTarget, editTargetOf, rootTarget, targetKey, type InspectorTarget, type SchemaSlot } from './inspectorTarget';
 import { picksOf, samePicks, type Pick } from './picks';
 import { selectionKey, type Selection } from './selection';
 import { appendOutput, capLine, type LineDraft, type OutputLine } from './output';
@@ -132,6 +132,7 @@ export type StudioAction =
   | { type: 'editField'; workflowId: Id; key: string; value: FieldValue; copyId: string }
   /** Drops the shown entity's design edits. */
   | { type: 'revertEntity'; workflowId: Id }
+  | { type: 'clearSlot'; workflowId: Id; processorId: Id; slot: SchemaSlot }
   /** Creates a step's assignment in the design and shows it. */
   | { type: 'createAssignment'; workflowId: Id; stepId: Id; stepName: string; id: Id }
   /** Removes a step's assignment in the design. */
@@ -398,6 +399,12 @@ function reduceDocs(state: StudioState, action: StudioAction): StudioState {
         const base = editBaseOf(graph, target, d.inspector.saved, targetKey(target), d.generation);
         if (base === null) return d;
         return { ...d, edits: setField(d.edits, editTargetOf(target), base, action.key, action.value, () => action.copyId) };
+      });
+    case 'clearSlot':
+      return update(state, action.workflowId, (d) => {
+        if (designLocked(d) || d.status.kind !== 'ready') return d;
+        const base = graphBaseOf(applyBlocks(d.status.doc, d.design.draft.blocks).graph, { kind: 'processor', id: action.processorId });
+        return base === null ? d : { ...d, edits: clearSlot(d.edits, action.processorId, action.slot, base.values as unknown as EntityReadDto) };
       });
     case 'revertEntity':
       return update(state, action.workflowId, (d) => {

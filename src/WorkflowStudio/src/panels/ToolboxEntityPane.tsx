@@ -1,5 +1,5 @@
 import { entityName } from '../model/entityNames';
-import type { Schema } from '../model/graph';
+import type { Processor, Schema } from '../model/graph';
 import { FIELDS } from '../store/entityForms';
 import type { ToolboxPick } from '../store/studioState';
 import { DictEditor } from './DictEditor';
@@ -49,8 +49,9 @@ export function ToolboxEntityPane({ pick }: { pick: ToolboxPick }) {
         {pick.kind === 'processor' && (
           <div className="sec">
             <div className="sec-title">Schemas</div>
-            {([['In', pick.processor.inputSchemaId], ['Out', pick.processor.outputSchemaId], ['Config', pick.processor.configSchemaId]] as const).map(([label, id]) => {
-              const s: Schema | undefined = id ? pick.schemas.find((x) => x.id === id) : undefined;
+            {(() => { const p = v as Processor; return [['In', p.inputSchemaId], ['Out', p.outputSchemaId], ['Config', p.configSchemaId]] as const; })().map(([label, id]) => {
+              // the slot as the design has it: an edited copy is named by the design's own schema
+              const s: Schema | undefined = id ? pick.schemas.find((x) => x.id === id) ?? design?.schemas.get(id) : undefined;
               const text = id ? (s ? entityName(s.name, s.version, s.id) : id) : '∅';
               return (
                 <div key={label} className="slot">

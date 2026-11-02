@@ -7,7 +7,7 @@ import { applyBlocks, type NewAssignment } from '../design/blocks';
 import type { Id } from '../model/graph';
 import { fieldValue, type FieldSpec } from '../store/entityForms';
 import { graphBaseOf } from '../store/inspectorBase';
-import { crumbLabel, targetKey, type InspectorTarget } from '../store/inspectorTarget';
+import { crumbLabel, targetKey, type InspectorTarget, type SchemaSlot } from '../store/inspectorTarget';
 import { shownTargetOf, type OpenDocument } from '../store/studioState';
 import type { StudioStore } from '../store/studioStore';
 
@@ -20,6 +20,8 @@ export interface InspectorService {
   read(workflowId: Id, again?: boolean): void;
   /** One field typed into the shown entity: a design edit. */
   edit(workflowId: Id, spec: FieldSpec, text: string): void;
+  /** Leaves a processor's slot with no schema in the design (2026-11-01). */
+  clearSlot(workflowId: Id, processorId: Id, slot: SchemaSlot): void;
   /** Drops the shown entity's design edits. */
   revert(workflowId: Id): void;
   /** Creates the step's assignment in the design (`{step}-assignment`, 1.0.0, `{}`) and shows it. */
@@ -124,6 +126,7 @@ export function createInspectorService(api: StudioApi, store: StudioStore): Insp
   return {
     read,
     edit: (workflowId, spec, text) => store.dispatch({ type: 'editField', workflowId, key: spec.key, value: fieldValue(spec, text), copyId: newId() }),
+    clearSlot: (workflowId, processorId, slot) => store.dispatch({ type: 'clearSlot', workflowId, processorId, slot }),
     revert: (workflowId) => store.dispatch({ type: 'revertEntity', workflowId }),
     createAssignment: (workflowId, stepId, stepName) => store.dispatch({ type: 'createAssignment', workflowId, stepId, stepName, id: newId() }),
     removeAssignment: (workflowId, stepId) => store.dispatch({ type: 'removeAssignment', workflowId, stepId }),

@@ -140,15 +140,44 @@ export function setField(edits: EntityEdits, t: EditTarget, base: EntityReadDto,
         description: (base as { description?: string | null }).description ?? null, definition: savedText(base, 'definition'),
       };
       const text = valueText(value);
+      // a slot cleared in this design and defined again: the copy re-points it, so the clearing goes
+      const field = SLOT_FIELD[t.slot];
+      const owner = edits.processors[t.processorId];
+      const processors = owner && Object.hasOwn(owner.fields, field) ? put(edits.processors, t.processorId, withoutField(owner, field)) : edits.processors;
       const changed: SchemaCopy =
         key === 'description' ? { ...was, description: text === '' ? null : text }
         : key === 'name' ? { ...was, name: text }
         : key === 'version' ? { ...was, version: text }
         : key === 'definition' ? { ...was, definition: text }
         : was;
-      return { ...edits, schemas: put(edits.schemas, k, changed) };
+      // a copy typed back to the schema it copies is no edit (2026-11-01): the slot keeps its own schema
+      const same = changed.name === savedText(base, 'name') && changed.version === savedText(base, 'version')
+        && (changed.description ?? '') === savedText(base, 'description') && changed.definition === savedText(base, 'definition');
+      return { ...edits, processors, schemas: put(edits.schemas, k, same && savedText(base, 'id') !== '' ? null : changed) };
     }
   }
+}
+
+/** The processor field that holds a slot's schema id. */
+export const SLOT_FIELD: Readonly<Record<SchemaSlot, 'inputSchemaId' | 'outputSchemaId' | 'configSchemaId'>> = {
+  input: 'inputSchemaId', output: 'outputSchemaId', config: 'configSchemaId',
+};
+
+/** An entity edit without one field; null when nothing is left (a shared entity has no stamp of its own). */
+function withoutField(e: EntityEdit, key: string): EntityEdit | null {
+  const fields = copy(e.fields);
+  delete fields[key];
+  return Object.keys(fields).length === 0 && e.updatedAt === null ? null : { ...e, fields };
+}
+
+/**
+ * Leaves a processor's slot with no schema (the user, 2026-11-01): the slot's copy goes, and the processor's
+ * `{slot}SchemaId` is set to null, which Save sends as a processor field. A slot that had none in the base is just
+ * left as it was.
+ */
+export function clearSlot(edits: EntityEdits, processorId: Id, slot: SchemaSlot, base: EntityReadDto): EntityEdits {
+  const without = { ...edits, schemas: put(edits.schemas, slotKey(processorId, slot), null) };
+  return setField(without, { kind: 'processor', id: processorId }, base, SLOT_FIELD[slot], null, () => processorId);
 }
 
 /**

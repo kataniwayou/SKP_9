@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { applyEdits } from '../design/apply';
 import { applyBlocks } from '../design/blocks';
-import type { Cache, Graph, Processor } from '../model/graph';
+import type { Cache, Graph, Id, Processor, Schema } from '../model/graph';
 import { activeDocument, type OpenDocument } from '../store/studioState';
 import { useStudio } from '../store/studioStore';
 
@@ -27,12 +27,25 @@ export function useActiveDesignGraph(): Graph | null {
 /** A Toolbox entity as shown: BaseApi's values, or the active design's when that design changed them (`unsaved`). */
 export interface Shown<T> { value: T; unsaved: boolean }
 
-/** A processor as the active design has it, when that design changed its name, version or description. */
+/**
+ * A processor as the active design has it, when that design changed its name, version or description, or a schema slot
+ * (cleared, or re-pointed to an edited copy: the studio is free style, so the Toolbox shows it as the canvas does, 2026-11-01).
+ */
 export function overlayProcessor(p: Processor, graph: Graph | null): Shown<Processor> {
   const d = graph?.processors.get(p.id);
-  if (!d || (d.name === p.name && d.version === p.version && d.description === p.description)) return { value: p, unsaved: false };
-  return { value: { ...p, name: d.name, version: d.version, description: d.description }, unsaved: true };
+  if (!d || (d.name === p.name && d.version === p.version && d.description === p.description
+    && d.inputSchemaId === p.inputSchemaId && d.outputSchemaId === p.outputSchemaId && d.configSchemaId === p.configSchemaId)) {
+    return { value: p, unsaved: false };
+  }
+  return {
+    value: { ...p, name: d.name, version: d.version, description: d.description, inputSchemaId: d.inputSchemaId, outputSchemaId: d.outputSchemaId, configSchemaId: d.configSchemaId },
+    unsaved: true,
+  };
 }
+
+/** BaseApi's schemas with the active design's own (its edited copies) over them, so a re-pointed slot is named. */
+export const schemasWith = (listed: ReadonlyMap<Id, Schema>, graph: Graph | null): Map<Id, Schema> =>
+  new Map([...listed, ...(graph?.schemas ?? [])]);
 
 /** The same items whatever their spacing (BaseApi's jsonb text and the Inspector's compact JSON differ only in form). */
 function sameItems(a: string, b: string): boolean {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { stepDto } from '../api/fixtures';
-import { FIELDS, fieldValue, jsonProblem, savedText, shownText } from './entityForms';
+import { FIELDS, fieldValue, jsonProblem, prettyJson, sameJson, savedText, shownText } from './entityForms';
 
 describe('form helpers', () => {
   it('reads saved values as text', () => {
@@ -24,5 +24,19 @@ describe('form helpers', () => {
     expect(fieldValue(spec('instanceId'), '')).toBeNull();
     expect(fieldValue(spec('name'), '')).toBe('');
     expect(fieldValue(spec('description'), 'typed')).toBe('typed');
+  });
+});
+
+describe('JSON laid out (the user, 2026-11-01)', () => {
+  it('puts one field to a line; text that does not parse stays as it is', () => {
+    expect(prettyJson('{"a":1,"b":[2]}')).toBe(['{', '  "a": 1,', '  "b": [', '    2', '  ]', '}'].join('\n'));
+    expect(prettyJson('{oops')).toBe('{oops');
+  });
+
+  it('tells the same JSON however laid out', () => {
+    expect(sameJson('{"a":1}', '{\n  "a": 1\n}')).toBe(true);
+    expect(sameJson('{"a":1}', '{"a":2}')).toBe(false);
+    expect(sameJson('{oops', '{oops')).toBe(true);
+    expect(sameJson('{oops', '{ oops')).toBe(false);
   });
 });

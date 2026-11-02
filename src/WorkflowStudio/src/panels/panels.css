@@ -31,7 +31,7 @@
 /* Output's pinned problems (2026-10-09: Output is the only message pane); red, above the log */
 .pinned { flex: 0 1 auto; max-height: 60%; overflow: auto; border-bottom: 1px solid var(--error); scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
 .prob { padding: 7px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--muted); cursor: pointer; }
-.prob:hover { background: rgba(125, 211, 252, .06); }
+.prob:hover { background: var(--hover); }
 .prob.static { cursor: default; }
 .prob.static:hover { background: none; }
 .prob b { color: var(--ink); font-weight: 500; }
@@ -55,9 +55,9 @@ textarea.input.json { white-space: pre; overflow: auto; }
 .cp-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .cp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-chev { color: var(--muted); font-size: 11px; }
-.cp-list { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; padding: 4px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 6px; box-shadow: 0 16px 40px -12px rgba(0, 0, 0, .8); }
+.cp-list { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; padding: 4px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 6px; box-shadow: 0 16px 40px -12px var(--shadow); }
 .cp-opt { display: flex; align-items: center; gap: 2px; padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 12.5px; color: var(--ink); }
-.cp-opt.hi { background: rgba(125, 211, 252, .10); }
+.cp-opt.hi { background: var(--hover); }
 .cp-tick { color: var(--accent); font-size: 12px; }
 .field.tall { align-items: start; }
 .field.tall > label { padding-top: 0; }

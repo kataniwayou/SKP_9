@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { assignmentDto, processorDto, schemaDto, stepDto } from '../api/fixtures';
 import {
-  createAssignment, EMPTY_DESIGN, EMPTY_EDITS, fieldsOf, hasEdit, hasGraphChanges, parseEdits, removeAssignment, revertEntity,
+  clearSlot, createAssignment, EMPTY_DESIGN, EMPTY_EDITS, fieldsOf, hasEdit, hasGraphChanges, parseEdits, removeAssignment, revertEntity,
   parseSlotKey, sameDesign, setField, slotKey, storedDesignOf,
 } from './design';
 import { EMPTY_DRAFT } from './draft';
@@ -148,5 +148,27 @@ describe('slot keys', () => {
     expect(parseSlotKey('no-colon')).toBeNull();
     expect(parseSlotKey('p1:bogus')).toBeNull();
     expect(parseSlotKey('p1:')).toBeNull();
+  });
+});
+
+describe('clearing a processor slot (the user, 2026-11-01)', () => {
+  const proc = processorDto('p1', { inputSchemaId: 'sIn' });
+
+  it('drops the slot copy and sets the processor schema id to null', () => {
+    let e = setField(EMPTY_EDITS, { kind: 'schema', processorId: 'p1', slot: 'input' }, schemaDto('sIn'), 'name', 'renamed', ids('copy'));
+    e = clearSlot(e, 'p1', 'input', proc);
+    expect(e.schemas).toEqual({});
+    expect(e.processors['p1']).toEqual({ updatedAt: null, fields: { inputSchemaId: null } });
+  });
+
+  it('a slot defined again drops the clearing: the copy re-points it', () => {
+    let e = clearSlot(EMPTY_EDITS, 'p1', 'input', proc);
+    e = setField(e, { kind: 'schema', processorId: 'p1', slot: 'input' }, schemaDto(''), 'name', 'fresh', ids('copy'));
+    expect(e.processors['p1']).toBeUndefined();
+    expect(e.schemas[slotKey('p1', 'input')]).toMatchObject({ id: 'copy', name: 'fresh' });
+  });
+
+  it('a slot the base had empty is left as it was', () => {
+    expect(clearSlot(EMPTY_EDITS, 'p1', 'output', proc)).toEqual(EMPTY_EDITS);
   });
 });

@@ -17,7 +17,7 @@ import { useHealthOf } from '../live/LiveContext';
 import { conditionInfo } from '../model/entryConditions';
 import type { Cache, Id, Processor, Schema, Step } from '../model/graph';
 import { designLocked, type ToolboxPick } from '../store/studioState';
-import { overlayCache, overlayProcessor, useActiveDesignGraph } from './toolboxView';
+import { overlayCache, overlayProcessor, schemasWith, useActiveDesignGraph } from './toolboxView';
 import { useStudio, useStudioStore } from '../store/studioStore';
 
 /**
@@ -153,6 +153,7 @@ export function Toolbox() {
   const design = useActiveDesignGraph();
   const processors = useMemo(() => (lists?.processors ?? []).map((p) => ({ p, shown: overlayProcessor(p, design) }))
     .filter(({ shown }) => matches(needle, shown.value.name, shown.value.version)), [lists, design, needle]);
+  const schemas = useMemo(() => schemasWith(lists?.schemas ?? new Map(), design), [lists, design]);
   const caches = useMemo(() => (lists?.caches ?? []).map((c) => ({ c, shown: overlayCache(c, design) }))
     .filter(({ shown }) => matches(needle, shown.value.name, shown.value.version, shown.value.root)), [lists, design, needle]);
 
@@ -237,7 +238,7 @@ export function Toolbox() {
             <div className="tb-h">Processors <span className="tb-count">{lists ? processors.length : '…'}</span></div>
             {error && <div className="note tb-error">Could not read the lists: {error}</div>}
             {processors.map(({ p, shown }) => tile(`p:${p.id}`, { kind: 'processor', processor: p, schemas: schemasOf(p) }, `processor ${shown.value.name} ${shown.value.version}`,
-              <ProcessorArt p={shown.value} schemas={lists!.schemas} fitter={fitter} health={healthOf(p.id)} />, null, shown.unsaved))}
+              <ProcessorArt p={shown.value} schemas={schemas} fitter={fitter} health={healthOf(p.id)} />, null, shown.unsaved))}
             <div className="tb-h">Caches <span className="tb-count">{lists ? caches.length : '…'}</span></div>
             {tile('newCache', { kind: 'newCache' }, 'an empty cache', <CacheArt c={EMPTY_CACHE} fitter={fitter} />, <><b>Empty cache</b><span>a new cache, no root yet</span></>)}
             {caches.map(({ c, shown: { value: v, unsaved } }) => tile(`c:${c.id}`, { kind: 'cache', cache: c }, `cache ${v.name} ${v.version}`, <CacheArt c={v} fitter={fitter} />,
