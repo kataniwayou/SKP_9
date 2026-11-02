@@ -1,5 +1,6 @@
 using System.Text.Json;
 using BaseApi.Service.Features.Cache;
+using BaseApi.Service.Features.Processor;
 using BaseApi.Service.Features.Step;
 using BaseApi.Service.Features.Workflow;
 using BaseApi.Service.Features.Workflow.Design;
@@ -41,6 +42,18 @@ public sealed class DesignFieldsTests
         DesignFields.Apply(new CacheUpdateDto("c", "1.0.0", null, "root", "{}"), F("""{"colour":"red","root":7}"""), errors);
 
         Assert.Equal(["colour", "root"], errors.Select(e => e.Field!).OrderBy(f => f, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void AProcessorSlotIsClearedByNullAndNeverPointedByAField()
+    {
+        var (input, output, config) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var errors = new List<FieldError>();
+        var dto = DesignFields.Apply(new ProcessorUpdateDto("p", "1.0.0", null, "hash", null, input, output, config),
+            F($$"""{"inputSchemaId":null,"configSchemaId":"{{Guid.NewGuid()}}"}"""), errors);
+
+        Assert.Equal(["configSchemaId"], errors.Select(e => e.Field!));
+        Assert.Equal(((Guid?)null, (Guid?)output, (Guid?)config), (dto.InputSchemaId, dto.OutputSchemaId, dto.ConfigSchemaId));
     }
 
     [Theory]

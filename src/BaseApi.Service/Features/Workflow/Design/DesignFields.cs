@@ -58,6 +58,8 @@ internal static class DesignFields
                 "description" => dto with { Description = Text(v, key, errors) },
                 "sourceHash" => dto with { SourceHash = Text(v, key, errors) ?? "" },
                 "instanceId" => dto with { InstanceId = Text(v, key, errors) },
+                // a slot left with no schema (2026-11-01); a slot is pointed at a schema only through Slots
+                "inputSchemaId" or "outputSchemaId" or "configSchemaId" => Cleared(dto, key, v, errors),
                 _ => Unknown(dto, key, errors),
             };
         return dto;
@@ -144,6 +146,22 @@ internal static class DesignFields
         if (v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n)) return n;
         errors.Add(new FieldError(key, $"{key} must be a whole number."));
         return null;
+    }
+
+    /// <summary>A processor slot cleared: only null is taken, since a copy in <c>Slots</c> is how a slot gets a schema.</summary>
+    private static ProcessorUpdateDto Cleared(ProcessorUpdateDto dto, string key, JsonElement v, List<FieldError> errors)
+    {
+        if (v.ValueKind != JsonValueKind.Null)
+        {
+            errors.Add(new FieldError(key, $"{key} can only be cleared (null); a schema is set through Slots."));
+            return dto;
+        }
+        return key switch
+        {
+            "inputSchemaId" => dto with { InputSchemaId = null },
+            "outputSchemaId" => dto with { OutputSchemaId = null },
+            _ => dto with { ConfigSchemaId = null },
+        };
     }
 
     private static T Unknown<T>(T dto, string key, List<FieldError> errors)
