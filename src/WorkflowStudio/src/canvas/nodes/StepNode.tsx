@@ -7,6 +7,8 @@ import type { FittedText } from '../fitText';
 import { useLiveArt } from '../liveArt';
 import type { Dir } from '../../design/autoConnect';
 import { AutoArrows } from './AutoArrows';
+import type { FarStep } from '../farLabels';
+import { FarPlate, useFar } from './Far';
 import { ChipView, EmptySlot, type ProcessorView } from './Chip';
 import { Label } from './Label';
 import { STEP_CAP, STEP_FRAME, STEP_FRAME_IN, STEP_GLOSS } from './nxShapes';
@@ -30,6 +32,8 @@ export type StepNodeData = {
   processor: ProcessorView | null;
   /** Its AutoConnect arrows (design mode, plan 10 phase 6). */
   arrows?: Dir[];
+  /** Its names for the far view (canvas/farLabels.ts); absent where a block is never drawn far (the Toolbox). */
+  far?: FarStep;
 };
 export type StepNodeType = Node<StepNodeData, 'step'>;
 
@@ -50,7 +54,7 @@ function Socket({ x, y, lit }: { x: number; y: number; lit: boolean }) {
  * step's: name, `STEP vX`, the entry-condition pill and the assignment keys. Its processor panel sits
  * inside, and traces run from the frame edge to the panel at every landing and departure.
  */
-export function StepView({ health, ...d }: StepNodeData & { health: Health }) {
+export function StepView({ health, farView = false, ...d }: StepNodeData & { health: Health; farView?: boolean }) {
   const ins = d.ins.length > 0 ? d.ins : [PMID];
   const outs = d.outs.length > 0 ? d.outs : [PMID];
   const versionX = 42;
@@ -78,7 +82,7 @@ export function StepView({ health, ...d }: StepNodeData & { health: Health }) {
       <text className="nx-sk" x={12} y={36}>STEP</text>
       <Label className="nx-skv" x={versionX} y={36} fitted={d.version} />
       <rect x={W - 26} y={10} width={14} height={13} rx={2} fill={d.colour} stroke="rgba(3,12,28,.4)" />
-      <text className="badge" x={W - 19} y={20} textAnchor="middle" fill="#04111F" fontWeight={600}>{d.letter}</text>
+      <text className="badge nx-letter" x={W - 19} y={20.5} textAnchor="middle">{d.letter}</text>
       {d.assignment && <text className="badge nx-asg" x={W - 12} y={36} textAnchor="end">{d.assignment}</text>}
       {d.fanIn > 1 && (
         <>
@@ -93,6 +97,8 @@ export function StepView({ health, ...d }: StepNodeData & { health: Health }) {
       {p === null
         ? <EmptySlot />
         : <ChipView p={p} health={health} ins={ins.map((y) => y - CHIP.y)} outs={outs.map((y) => y - CHIP.y)} />}
+      {/* the far view: an opaque plate over the fine print, which stays in the page (a tooltip, a handle) but unseen */}
+      {farView && d.far && <FarPlate x={6} y={6} w={W - 12} h={H - 12} main={d.far.name} second={d.far.processor} />}
     </g>
   );
 }
@@ -103,11 +109,12 @@ const PORT = { left: W, top: PMID } as const;
 export function StepNode({ id, data }: NodeProps<StepNodeType>) {
   const { health } = useLiveArt();
   const gestures = useContext(DesignContext);
+  const far = useFar();
   return (
     <>
       <Handle id="in" type="target" position={Position.Left} isConnectable={false} style={{ top: PMID }} />
       <svg width={W} height={H} overflow="visible" style={{ display: 'block' }}>
-        <StepView {...data} health={health(data.processor?.processorId ?? '')} />
+        <StepView {...data} health={health(data.processor?.processorId ?? '')} farView={far} />
       </svg>
       <Handle id="out" type="source" position={Position.Right} isConnectable={false} style={{ top: PMID }} />
       {gestures && <div className="nx-port nodrag nopan" style={PORT} onPointerDown={(e) => gestures.portPointerDown(id, e)} />}

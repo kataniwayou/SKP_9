@@ -12,6 +12,7 @@ import type { Cache, Graph, Id, Processor, Step } from '../model/graph';
 import { UNDECIDED_COLOUR, type CableEdgeType } from './edges/CableEdge';
 import type { TetherEdgeType } from './edges/TetherEdge';
 import { createTextFitter, FONT, type FittedText, type TextFitter } from './fitText';
+import { farStep, farText } from './farLabels';
 import type { CacheNodeData, CacheNodeType } from './nodes/CacheNode';
 import type { ProcessorView, StepNodeType } from './nodes/StepNode';
 import { type WorkflowNodeType } from './nodes/WorkflowNode';
@@ -79,6 +80,7 @@ export function toFlow(doc: StudioDocument, fitter: TextFitter): { nodes: Studio
         outs: outs.get(id) ?? [],
         // no processor (removed in the design, 2026-10-10): the empty slot is drawn instead
         processor: step.processorId === null ? null : processorView(graph.processors.get(step.processorId), graph, fitter),
+        far: farStep(step.name, step.processorId === null ? null : graph.processors.get(step.processorId)?.name ?? null, fitter),
       },
     });
   }
@@ -139,8 +141,8 @@ export function stepLabels(step: Step, fitter: TextFitter): { name: FittedText; 
 
 /** Room inside the cache frame (mockup v50 drawCacheTag): a name line (and the CACHE · v line), the root, and the plate. */
 const CACHE_NAME_ROOM = 132, CACHE_ROOT_ROOM = 112, PLATE_MAX = 128;
-/** The CACHE · v line's letter spacing (art.css `.nx-cl`: .2em of 8 px), added after every character. */
-const CACHE_LABEL_SPACING = 0.2 * 8;
+/** The CACHE · v line's letter spacing (art.css `.nx-cl`: .2em of 8.5 px), added after every character. */
+const CACHE_LABEL_SPACING = 0.2 * 8.5;
 
 /**
  * A cache with no root (the user's rule, 2026-10-11): drawn as an empty step's slot, dashed amber with a ⚠, until a root
@@ -169,6 +171,7 @@ export function cacheData(cache: Cache, fitter: TextFitter): CacheNodeData {
     versionLine: spaced.fit(`CACHE · v${cache.version}`, CACHE_NAME_ROOM, FONT.cacheLabel),
     root,
     plateWidth: Math.min(PLATE_MAX, fitter.width(root.text, FONT.cacheRoot) + 22),
+    far: farText(cache.name, 140, 40, 13, fitter),
     tooltip: emptyRoot(cache.root)
       ? `${cache.name} ${cache.version}\nNo root: set one in the Inspector. Save will fail until this cache has one.`
       : `${cache.name} ${cache.version}\nroot ${cache.root}`,
@@ -183,7 +186,7 @@ const VALUE_ROOM = 76;
 export function processorView(p: Processor | undefined, graph: Pick<Graph, 'schemas'>, fitter: TextFitter): ProcessorView {
   const name = p?.name ?? '(missing processor)';
   const version = p?.version ?? '';
-  // the name is drawn in the title face and the version after it in 9 px mono (Chip .nx-pv), so each is measured in its own
+  // the name is drawn in the title face and the version after it in the row's mono (Chip .nx-pv), so each is measured in its own
   const fitsWithVersion = version !== ''
     && fitter.width(name, FONT.processorTitle) + fitter.width(` ${version}`, FONT.processorRow) <= TITLE_ROOM;
   const schemaLabel = (id: Id | null | undefined) => {

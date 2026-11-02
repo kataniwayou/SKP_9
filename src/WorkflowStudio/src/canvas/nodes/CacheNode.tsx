@@ -2,6 +2,8 @@ import { Fragment } from 'react';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { CACHE_H, CACHE_W } from '../../layout/geometry';
 import type { FittedText } from '../fitText';
+import type { FarText } from '../farLabels';
+import { FarPlate, useFar } from './Far';
 import { CACHE_FRAME, CACHE_FRAME_IN, hexPoints } from './nxShapes';
 
 export type CacheNodeData = {
@@ -15,6 +17,8 @@ export type CacheNodeData = {
   tooltip: string;
   /** No items (2026-10-11): the honeycomb and the root plate give way to a dashed amber rectangle with a ⚠, as an empty step's slot. */
   empty?: boolean;
+  /** Its name for the far view (canvas/farLabels.ts). */
+  far?: FarText;
 };
 export type CacheNodeType = Node<CacheNodeData, 'cache'>;
 
@@ -25,7 +29,7 @@ const W = CACHE_W, H = CACHE_H, MID = CACHE_W / 2;
  * Inside, stacked and centred: a hex mark, the name, CACHE and version, and the root on a plate.
  * Static: a cache is shared data, not a process, so nothing on it moves.
  */
-export function CacheView({ lines, versionLine, root, plateWidth, tooltip, empty = false }: CacheNodeData) {
+export function CacheView({ lines, versionLine, root, plateWidth, tooltip, empty = false, far, farView = false }: CacheNodeData & { farView?: boolean }) {
   const one = lines.length === 1;
   return (
     <g className={empty ? 'cachetag nx cache-empty' : 'cachetag nx'} data-empty={empty ? '' : undefined}>
@@ -63,16 +67,18 @@ export function CacheView({ lines, versionLine, root, plateWidth, tooltip, empty
           <text className="nx-root" x={MID} y={138.5} textAnchor="middle">{root.text}</text>
         </>
       )}
+      {farView && far && <FarPlate x={6} y={6} w={W - 12} h={H - 12} main={far} />}
     </g>
   );
 }
 
 export function CacheNode({ data }: NodeProps<CacheNodeType>) {
+  const far = useFar();
   return (
     <>
       <Handle id="in" type="target" position={Position.Top} isConnectable={false} />
       <svg width={W} height={H} overflow="visible" style={{ display: 'block' }}>
-        <CacheView {...data} />
+        <CacheView {...data} farView={far} />
       </svg>
     </>
   );

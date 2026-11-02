@@ -11,15 +11,17 @@ export const MONO = '"IBM Plex Mono",ui-monospace,Consolas,monospace';
  * nothing has asked for yet, and @fontsource faces load lazily.
  */
 export const FONT = {
-  cacheName: `12.5px ${SANS}`,
-  cacheRoot: `10px ${MONO}`,
+  // larger and a step bolder than the mockup's (the user, 2026-11-01: the fine print read blurred below 100 %)
+  cacheName: `500 13px ${SANS}`,
+  cacheRoot: `500 10.5px ${MONO}`,
   /** CACHE · v<version>, drawn with .2em letter spacing, which a canvas measurement leaves out. */
-  cacheLabel: `8px ${MONO}`,
-  stepName: `13px ${SANS}`,
-  stepVersion: `9.5px ${MONO}`,
-  processorTitle: `11px ${SANS}`,
-  processorRow: `9px ${MONO}`,
-  hubPill: `10px ${MONO}`,
+  cacheLabel: `500 8.5px ${MONO}`,
+  stepName: `600 14px ${SANS}`,
+  stepVersion: `600 10px ${MONO}`,
+  processorTitle: `500 12px ${SANS}`,
+  processorRow: `500 9.5px ${MONO}`,
+  /** The far view's names (canvas/farLabels.ts), measured at 13 px and scaled. */
+  far: `600 13px ${SANS}`,
 } as const;
 
 export const MEASURED_FONTS: readonly string[] = [...new Set(Object.values(FONT))];

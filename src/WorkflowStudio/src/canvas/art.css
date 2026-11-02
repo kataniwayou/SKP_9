@@ -23,22 +23,24 @@
 
 /* step: dark text on the glossy cap */
 .blk .nx-frame { stroke-width: 1.1; }
-.blk .nx-sn { font: 400 13px var(--sans); fill: #04111F; }
-.blk .nx-sk { font: 400 9px var(--mono); fill: rgba(4, 17, 31, .75); letter-spacing: .12em; }
-.blk .nx-skv { font: 400 9.5px var(--mono); fill: rgba(4, 17, 31, .75); }
-.blk .nx-asg { fill: #04111F; }
+.blk .nx-sn { font: 600 14px var(--sans); fill: #020B16; }
+.blk .nx-sk { font: 600 9.5px var(--mono); fill: #15253C; letter-spacing: .12em; }
+.blk .nx-skv { font: 600 10px var(--mono); fill: #15253C; }
+.blk .nx-asg { font: 600 10.5px var(--mono); fill: #020B16; }
+/* the entry condition's letter on its coloured square: bold and a size up, so it reads at a glance */
+.blk .nx-letter { font: 700 11px var(--mono); fill: #04111F; }
 .blk .nx-socket .nx-nd { stroke-width: 1; }
 .blk.nx:hover .nx-frame { stroke-width: 1.6; }
 .studio-sel .blk.nx .nx-frame { stroke: var(--accent); stroke-width: 2; }
 
 /* processor: light text on the dark panel; health colours only the ring and the gear chip */
 .chipg .nx-panel { stroke-width: 1; }
-.chipg .nx-tp { font: 400 7px var(--mono); fill: var(--nh); letter-spacing: .16em; opacity: .85; }
-.chipg .nx-pn { font: 400 11px var(--sans); fill: var(--ink); }
-.chipg .nx-pv { font: 400 9px var(--mono); fill: var(--muted); }
-.chipg .nx-tl { font: 400 8.5px var(--mono); fill: var(--muted); }
-.chipg .nx-tv { font: 400 9px var(--mono); fill: var(--ink); }
-.chipg .nx-tn { font: 400 9px var(--mono); fill: var(--faint); }
+.chipg .nx-tp { font: 500 8px var(--mono); fill: var(--nh); letter-spacing: .14em; }
+.chipg .nx-pn { font: 500 12px var(--sans); fill: var(--ink); }
+.chipg .nx-pv { font: 500 9.5px var(--mono); fill: #A9B8CE; }
+.chipg .nx-tl { font: 500 9.5px var(--mono); fill: #A9B8CE; }
+.chipg .nx-tv { font: 500 9.5px var(--mono); fill: var(--ink); }
+.chipg .nx-tn { font: 500 9.5px var(--mono); fill: #7C8CA6; }
 .nx-health[data-health="healthy"] { --nc: var(--healthy); }
 .nx-health[data-health="unhealthy"] { --nc: var(--unhealthy); }
 .nx-health[data-health="undetermined"] { --nc: var(--undetermined); }
@@ -86,9 +88,9 @@
 .cachetag .nx-thin { stroke-width: 1; }
 .cachetag .nx-hex { stroke-width: 1.2; }
 .cachetag .nx-plate { stroke-width: .9; }
-.cachetag .nx-cn { font: 400 12.5px var(--sans); fill: #F4F9FF; }
-.cachetag .nx-cl { font: 400 8px var(--mono); fill: var(--nh); letter-spacing: .2em; }
-.cachetag .nx-root { font: 400 10px var(--mono); fill: var(--nh); }
+.cachetag .nx-cn { font: 500 13px var(--sans); fill: #F4F9FF; }
+.cachetag .nx-cl { font: 500 8.5px var(--mono); fill: var(--nh); letter-spacing: .2em; }
+.cachetag .nx-root { font: 500 10.5px var(--mono); fill: var(--nh); }
 .cachetag.nx:hover .nx-brk { stroke-width: 1.6; }
 .studio-sel .cachetag.nx .nx-brk { stroke: var(--accent); stroke-width: 1.8; }
 
@@ -132,3 +134,10 @@
 .studio-pick .wf.nx .sphere { filter: url(#glow); }
 .studio-pick .cachetag.nx .nx-brk { stroke: var(--accent); stroke-width: 1.8; }
 .wire.picked .w { stroke-width: 2.6; filter: drop-shadow(0 0 3px var(--accent)); }
+
+/* The far view (canvas/farLabels.ts, the user 2026-11-01): below 60 % zoom a block shows only its names, large, on a dark
+   plate over its art; the plate lets clicks through to the art below (a processor chip is still picked by its own click) */
+.nx-far { pointer-events: none; }
+.nx-far .far-plate { fill: #07122a; }
+.nx-far text { font-family: var(--sans); font-weight: 600; fill: #F4F9FF; dominant-baseline: central; text-anchor: middle; }
+.nx-far text.far-proc { font-weight: 500; fill: #A9C8E8; }

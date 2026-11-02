@@ -185,3 +185,35 @@ test('a light theme from the menu strip, remembered across a reload; the blocks 
   await page.getByRole('menuitem', { name: 'Dark theme' }).click();
   await expect(html).toHaveAttribute('data-theme', 'dark');
 });
+
+test('zoomed out, a block shows its names large over its fine print; from 60 % up its full detail, the step cap bolder', async ({ page }) => {
+  await fresh(page);
+  await openWorkflow(page, wf);
+  const panel = documentPanel(page, wf);
+  const zoom = () => panel.locator('.react-flow__viewport').evaluate((el) => new DOMMatrixReadOnly(getComputedStyle(el).transform).a);
+  // at Fit the workflow is far: names on a plate, at least 9 px on screen, and no fine print under it
+  await panel.getByRole('button', { name: 'Fit' }).click();
+  await expect.poll(zoom).toBeLessThan(0.6);
+  const step = panel.locator('.react-flow__node-step').first();
+  await expect(step.locator('.nx-far')).toBeVisible();
+  // the fine print stays in the page (a tooltip, a handle), under an opaque plate drawn after it
+  expect(await step.locator('.far-plate').evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+  expect(await step.evaluate((n) => {
+    const all = [...n.querySelectorAll('*')];
+    return all.indexOf(n.querySelector('.far-plate')!) > all.indexOf(n.querySelector('.chipg .nx-tv, .chipg .nx-tn')!);
+  })).toBe(true);
+  const farHeight = await step.locator('.nx-far tspan').first().evaluate((el) => el.getBoundingClientRect().height);
+  expect(farHeight).toBeGreaterThanOrEqual(9);
+  // zoomed in past 60 %: the detail again, the plate gone
+  const box = (await step.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  while (await zoom() < 0.75) {
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, -40);
+    await page.keyboard.up('Control');
+  }
+  await expect(step.locator('.nx-far')).toHaveCount(0);
+  await expect(step.locator('.nx-sn')).toBeVisible();
+  expect(await step.locator('.nx-sn').evaluate((el) => getComputedStyle(el).fontWeight)).toBe('600');
+  expect(await step.locator('.nx-letter').evaluate((el) => getComputedStyle(el).fontSize)).toBe('11px');
+});

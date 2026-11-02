@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, configure } from '@testing-library/react';
-import { afterEach } from 'vitest';
+import { afterEach, vi } from 'vitest';
 
 // findBy/waitFor wait 3 s, not Testing Library's 1 s: under the full suite's load a document's opening can take
 // longer than 1 s (App.test's "opens a workflow as a tab" failed so, 2026-10-22). They still answer as soon as it is.
@@ -44,3 +44,8 @@ Object.defineProperties(HTMLElement.prototype, {
 
 (SVGElement.prototype as unknown as { getBBox: () => DOMRect }).getBBox = () =>
   ({ x: 0, y: 0, width: 0, height: 0 }) as DOMRect;
+
+// The far view (canvas/farLabels.ts) is judged on a real zoom; jsdom's canvas, laid out by the shims above, fits at React
+// Flow's least zoom, which would draw every block far. The unit tests read the blocks' fine print: they draw near. The
+// far view's own tests import its pure functions, which this leaves as they are.
+vi.mock('../canvas/farLabels', async (actual) => ({ ...(await actual<typeof import('../canvas/farLabels')>()), FAR_ZOOM: 0 }));
