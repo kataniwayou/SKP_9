@@ -235,7 +235,7 @@ const PLACE = {
 
 const addStepTool: ToolDef = {
   name: 'add_step',
-  description: 'Add a new step, empty or with an existing processor (as a Toolbox drop on the canvas). It is named step, step-2, … and has entry condition Completed; rename it with set_field. Without x and y it goes right of the rightmost step on the workflow circle\'s row. Dropped on a wire\'s run, the wire is split through it, as on the canvas.',
+  description: 'Add a new step, empty or with an existing processor (as a Toolbox drop on the canvas). With a processor it is named after the processor (file-fetcher, file-fetcher-2, …), without one step, step-2, … (it takes the name of the first processor set_processor gives it); its entry condition is Completed; rename it with set_field. Without x and y it goes right of the rightmost step on the workflow circle\'s row. Dropped on a wire\'s run, the wire is split through it, as on the canvas.',
   parameters: {
     type: 'object',
     properties: { workflow: WORKFLOW_ARG, processor: { type: 'string', description: 'An existing processor: id, name, or "name version" (list_processors). Leave out for an empty step.' }, ...PLACE },
@@ -291,7 +291,7 @@ const addStepTool: ToolDef = {
 
 const setProcessorTool: ToolDef = {
   name: 'set_processor',
-  description: 'Give a step an existing processor, or replace its processor (as a Toolbox processor dropped on the step).',
+  description: 'Give a step an existing processor, or replace its processor (as a Toolbox processor dropped on the step). A new step still named step, step-2, … takes the processor\'s name; the result gives the new name.',
   parameters: {
     type: 'object',
     properties: { workflow: WORKFLOW_ARG, step: { type: 'string', description: 'The step: name or id.' }, processor: { type: 'string', description: 'The processor: id, name, or "name version".' } },
@@ -315,8 +315,12 @@ const setProcessorTool: ToolDef = {
     const action: StudioAction = { type: 'toolDrop', workflowId: doc.workflowId, item: item.value, at: centred(p, STEP_W, STEP_H), newId: ctx.newId };
     const r = await act(ctx, doc.workflowId, action, { unchanged: `step ${name} already has processor ${label}` });
     if (!r.ok) return fail(r.error, `set processor of ${name} refused`);
-    const now = shownDesignOf(r.after)!.graph.steps.get(step.value)?.processorId;
-    if (now !== item.value.processor.id) return done(false, `the processor did not land on step ${name}`, `set processor of ${name} failed`, r.entries);
+    const now = shownDesignOf(r.after)!.graph.steps.get(step.value);
+    if (now?.processorId !== item.value.processor.id) return done(false, `the processor did not land on step ${name}`, `set processor of ${name} failed`, r.entries);
+    // a Toolbox step takes its first processor's name (2026-11-02): say so, or the model's next call names a step gone (2026-11-03)
+    if (now.name !== name) {
+      return done(true, `step ${name} has processor ${label} now; step ${name} is named ${now.name} now (a new step takes its first processor's name), so name it ${now.name} from here on`, `processor of ${name} set to ${label}; renamed ${now.name}`, r.entries);
+    }
     return done(true, `step ${name} has processor ${label} now`, `processor of ${name} set to ${label}`, r.entries);
   },
 };

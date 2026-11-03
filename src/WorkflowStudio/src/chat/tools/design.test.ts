@@ -87,8 +87,13 @@ describe('the design tools', () => {
     expect(s.processorId).toBeNull();
     expect(shown().placement.steps.get(s.id)).toEqual({ x: 1200, y: 600 });
     const given = done(await call('set_processor', { step: 'step', processor: 'FileFetcher 1.2.0' }));
-    expect(given).toMatchObject({ ok: true, action: 'processor of step set to FileFetcher 1.2.0' });
-    expect(shown().graph.steps.get(s.id)!.processorId).toBe('p9');
+    // the step takes its processor's name (2026-11-02), and the result says so: the model's next call names it by it (2026-11-03)
+    expect(given).toMatchObject({ ok: true, action: 'processor of step set to FileFetcher 1.2.0; renamed FileFetcher' });
+    expect(given.result).toContain('step step is named FileFetcher now');
+    expect(shown().graph.steps.get(s.id)).toMatchObject({ processorId: 'p9', name: 'FileFetcher' });
+    // a step that already has a processor keeps its name, and nothing is said of one
+    const again = done(await call('set_processor', { step: 'FileFetcher', processor: 'FileFetcher 1.2.0' }));
+    expect(again.action).not.toContain('renamed');
   });
 
   it('connect a → b: b is a next step of a, no short circuit, one Undo step', async () => {
