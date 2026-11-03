@@ -21,8 +21,14 @@ internal sealed class FakeNameSource(Dictionary<Guid, string>? names = null) : I
 
     public Task<IReadOnlyDictionary<Guid, string>> ReadNamesAsync(IReadOnlyCollection<EntityRef> refs)
     {
-        Reads++;
-        Requested.AddRange(refs);
+        // Locked: a concurrent test reads from many threads at once, and List.AddRange racing itself
+        // throws, which the resolver would take for a store fault and log the fallback.
+        lock (Requested)
+        {
+            Reads++;
+            Requested.AddRange(refs);
+        }
+
         if (Stall)
         {
             return new TaskCompletionSource<IReadOnlyDictionary<Guid, string>>().Task;

@@ -122,11 +122,17 @@ and held in memory.
   it catches its own fault and returns the D2 fallback, separately from the projection reads.
 - A missing key or an unreachable Redis produces the D2 fallback. Misses are **not cached**, and a
   lookup failure never fails a step or a delivery, requeues a message, or trips a gate.
-- Resolved names are cached with no expiry.
-- **Accepted limit:** after an entity is renamed and its workflow restarted, a processor that already
-  cached the old name keeps logging it until its pod restarts, because only orchestrator replicas are
-  bound to the fanout exchange. If that proves misleading, the remedy is a cache expiry, with no
-  message change.
+- ~~Resolved names are cached with no expiry.~~ Resolved names are cached for 30 s (2026-11-03).
+- ~~**Accepted limit:** after an entity is renamed and its workflow restarted, a processor that already
+  cached the old name keeps logging it until its pod restarts.~~ **Changed 2026-11-03: L2 first, a
+  30 s TTL.** A scope reads from Redis (one round trip, capped at 250 ms) every id not cached or read
+  more than 30 s ago, and overwrites the cached names it finds, so a rename shows within 30 s of the
+  workflow's restart. The cache is the fallback: with the L2 gate closed Redis is not read at all (the
+  cached name, however old, or the suffix, with no timeout to wait out), and a read that finds nothing
+  or faults keeps the cached name for another 30 s. Cost: about one Redis read per entity per 30 s; a
+  Redis that is slow but up delays a delivery by 250 ms at most once per window. A read on every
+  delivery was weighed and rejected: Redis only gains a new name at a workflow start, so nearly every
+  such read would return the cached name.
 
 ### 5. Where the resolver is called
 
@@ -222,7 +228,8 @@ and held in memory.
 |-----------|--------|
 | Name key missing (a dispatch in flight after a stop, Redis wiped) | suffix; not cached; the next start rewrites the key |
 | Redis unavailable | suffix; the step runs normally |
-| Entity renamed and its workflow restarted | orchestrator correct; cached processors show the old name until their pod restarts (accepted) |
+| Entity renamed and its workflow restarted | orchestrator from the start; processors within 30 s (L2 first, a 30 s TTL, 2026-11-03) |
+| L2 gate closed | the cached name, however old, or the suffix; Redis is not read |
 | Elasticsearch down | no effect on starts or on the names |
 
 ## Resolved items

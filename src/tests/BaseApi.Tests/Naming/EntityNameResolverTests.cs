@@ -1,9 +1,11 @@
 using BaseApi.Tests.Support;
+using BaseConsole.Core.Gating;
 using BaseConsole.Core.Naming;
 using Messaging.Contracts;
 using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using StackExchange.Redis;
 using Xunit;
@@ -16,21 +18,34 @@ public sealed class EntityNameResolverTests
     private static readonly Guid S = Guid.Parse("22222222-2222-2222-bbbb-222222222222");
     private static readonly Guid P = Guid.Parse("33333333-3333-3333-cccc-333333333333");
 
-    private static EntityNameResolver Resolver(IEntityNameSource source) =>
-        new(source, NullLogger<EntityNameResolver>.Instance);
+    private static EntityNameResolver Resolver(IEntityNameSource source, L2Gate? gate = null, TimeProvider? clock = null) =>
+        new(source, NullLogger<EntityNameResolver>.Instance, gate, clock);
+
+    private static async Task<L2Gate> OpenGate()
+    {
+        var gate = new L2Gate(NullLogger<L2Gate>.Instance);
+        await gate.ReportHealthyAsync();
+        return gate;
+    }
 
     [Fact]
-    public async Task AHitNamesTheRecordAndIsReadOnce()
+    public async Task AHitIsReadOnceWithinTheTtlAndAgainOnceItIsOver()
     {
+        // L2 first (2026-11-03): a name is used for 30 s, then read again, so it is never older than that.
+        var clock = new FakeTimeProvider();
         var source = new FakeNameSource(new() { [W] = "wf_1.0.0-aaaa-111111111111" });
-        var resolver = Resolver(source);
+        var resolver = Resolver(source, clock: clock);
 
         var first = await resolver.ScopeAsync(W, Guid.Empty, Guid.Empty);
+        clock.Advance(EntityNameResolver.Ttl - TimeSpan.FromTicks(1));
         var second = await resolver.ScopeAsync(W, Guid.Empty, Guid.Empty);
+        Assert.Equal(1, source.Reads);
+        clock.Advance(TimeSpan.FromTicks(1));
+        await resolver.ScopeAsync(W, Guid.Empty, Guid.Empty);
 
         Assert.Equal("wf_1.0.0-aaaa-111111111111", first[EntityNames.WorkflowName]);
         Assert.Equal(first, second);
-        Assert.Equal(1, source.Reads);
+        Assert.Equal(2, source.Reads);
         Assert.False(first.ContainsKey(EntityNames.StepName));   // Guid.Empty is not an entity
     }
 
@@ -85,7 +100,7 @@ public sealed class EntityNameResolverTests
 
         Assert.Equal("wf_1.0.0-aaaa-111111111111", resolver.NameOrFallback(W));
         Assert.Equal("wf_1.0.0-aaaa-111111111111", resolver.CachedScope(W, Guid.Empty, Guid.Empty)[EntityNames.WorkflowName]);
-        Assert.Equal(1, source.Reads);
+        Assert.Equal(1, source.Reads);   // the scope's read; the two cached views made none
     }
 
     [Fact]
@@ -126,18 +141,19 @@ public sealed class EntityNameResolverTests
     }
 
     [Fact]
-    public async Task APreloadFillsTheCacheSoTheNextScopeReadsNothing()
+    public async Task APreloadFillsTheCacheAClosedGateScopesFrom()
     {
         var w = Guid.NewGuid(); var s = Guid.NewGuid();
         var source = new FakeNameSource(new() { [w] = "chain_1.0.0-aaaa-111111111111", [s] = "step-a_1.0.0-bbbb-222222222222" });
-        var resolver = new EntityNameResolver(source, NullLogger<EntityNameResolver>.Instance);
+        var resolver = Resolver(source, new L2Gate(NullLogger<L2Gate>.Instance));   // constructed closed
 
         await resolver.PreloadAsync([new(L2EntityKind.Workflow, w), new(L2EntityKind.Step, s)]);
         var reads = source.Reads;
-        await resolver.ScopeAsync(w, s, Guid.Empty);
+        var scope = await resolver.ScopeAsync(w, s, Guid.Empty);
 
         Assert.Equal(reads, source.Reads);
-        Assert.Equal("chain_1.0.0-aaaa-111111111111", resolver.NameOrFallback(w));
+        Assert.Equal("chain_1.0.0-aaaa-111111111111", scope[EntityNames.WorkflowName]);
+        Assert.Equal("step-a_1.0.0-bbbb-222222222222", scope[EntityNames.StepName]);
     }
 
     [Fact]
@@ -182,18 +198,63 @@ public sealed class EntityNameResolverTests
     }
 
     [Fact]
-    public async Task AScopeStillReadsACachedNameFromTheCacheAlone()
+    public async Task AnOpenGateScopeShowsARenameWithinTheTtlWithoutARestart()
     {
-        // The refresh is the orchestrator's; a processor's ScopeAsync keeps cache-first (spec §5).
-        var source = new FakeNameSource(new() { [W] = "old_1.0.0-aaaa-111111111111" });
-        var resolver = Resolver(source);
-        await resolver.ScopeAsync(W, Guid.Empty, Guid.Empty);
+        // The bug of 2026-11-03: a processor kept a renamed step's old name until its pod restarted.
+        var clock = new FakeTimeProvider();
+        var source = new FakeNameSource(new() { [S] = "old_1.0.0-bbbb-222222222222" });
+        var resolver = Resolver(source, await OpenGate(), clock);
+        await resolver.ScopeAsync(Guid.Empty, S, Guid.Empty);
 
-        source.Names[W] = "new_1.0.0-aaaa-111111111111";
-        var scope = await resolver.ScopeAsync(W, Guid.Empty, Guid.Empty);
+        source.Names[S] = "new_1.0.0-bbbb-222222222222";
+        clock.Advance(EntityNameResolver.Ttl);
+        var scope = await resolver.ScopeAsync(Guid.Empty, S, Guid.Empty);
 
-        Assert.Equal("old_1.0.0-aaaa-111111111111", scope[EntityNames.WorkflowName]);
+        Assert.Equal("new_1.0.0-bbbb-222222222222", scope[EntityNames.StepName]);
+        Assert.Equal("new_1.0.0-bbbb-222222222222", resolver.NameOrFallback(S));   // the cache follows the store
+        Assert.Equal(2, source.Reads);
+    }
+
+    [Fact]
+    public async Task AClosedGateScopesFromTheCacheWithoutReadingTheStore()
+    {
+        // The store is known to be down: a read would only wait out its timeout on every delivery.
+        var clock = new FakeTimeProvider();
+        var source = new FakeNameSource(new() { [S] = "old_1.0.0-bbbb-222222222222" });
+        var gate = await OpenGate();
+        var resolver = Resolver(source, gate, clock);
+        await resolver.ScopeAsync(Guid.Empty, S, P);
+
+        await gate.TripAsync();
+        source.Names[S] = "new_1.0.0-bbbb-222222222222";
+        clock.Advance(EntityNameResolver.Ttl * 10);   // however old the cached name is
+        var scope = await resolver.ScopeAsync(Guid.Empty, S, P);
+
+        Assert.Equal("old_1.0.0-bbbb-222222222222", scope[EntityNames.StepName]);
+        Assert.Equal(EntityNames.Fallback(P), scope[EntityNames.ProcessorName]);   // never cached: the fallback
         Assert.Equal(1, source.Reads);
+    }
+
+    [Fact]
+    public async Task AScopeThatFindsNothingOrFaultsKeepsTheCachedNameForAnotherWindow()
+    {
+        var clock = new FakeTimeProvider();
+        var source = new FakeNameSource(new() { [S] = "old_1.0.0-bbbb-222222222222" });
+        var resolver = Resolver(source, await OpenGate(), clock);
+        await resolver.ScopeAsync(Guid.Empty, S, Guid.Empty);
+
+        source.Names.Remove(S);
+        clock.Advance(EntityNameResolver.Ttl);
+        var missed = await resolver.ScopeAsync(Guid.Empty, S, Guid.Empty);
+        source.Fault = new RedisConnectionException(ConnectionFailureType.SocketFailure, "down");
+        clock.Advance(EntityNameResolver.Ttl);
+        var faulted = await resolver.ScopeAsync(Guid.Empty, S, Guid.Empty);
+        // a faulting store is not asked again on every delivery: the next read waits out a full window
+        await resolver.ScopeAsync(Guid.Empty, S, Guid.Empty);
+
+        Assert.Equal("old_1.0.0-bbbb-222222222222", missed[EntityNames.StepName]);
+        Assert.Equal("old_1.0.0-bbbb-222222222222", faulted[EntityNames.StepName]);
+        Assert.Equal(3, source.Reads);
     }
 
     [Fact]

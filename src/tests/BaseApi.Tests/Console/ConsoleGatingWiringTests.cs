@@ -2,6 +2,7 @@ using BaseApi.Tests.Support;
 using BaseConsole.Core.DependencyInjection;
 using BaseConsole.Core.Gating;
 using BaseConsole.Core.Loop;
+using BaseConsole.Core.Naming;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -20,10 +21,16 @@ namespace BaseApi.Tests.Console;
 [Collection(EnvironmentCollection.Name)]
 public sealed class ConsoleGatingWiringTests
 {
-    private static ServiceProvider Build(FakeTimeProvider? clock = null)
+    private static ServiceProvider Build(FakeTimeProvider? clock = null, IEntityNameSource? names = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
+
+        // Registered before the gating call so its TryAddSingleton of the Redis source stands down.
+        if (names is not null)
+        {
+            services.AddSingleton(names);
+        }
 
         // Registered before the gating call so its TryAddSingleton(TimeProvider.System) stands down.
         services.AddSingleton<TimeProvider>(clock ?? new FakeTimeProvider());
@@ -77,5 +84,22 @@ public sealed class ConsoleGatingWiringTests
         clock.Advance(TimeSpan.FromTicks(1));
         var stale = await check.CheckHealthAsync(context, TestContext.Current.CancellationToken);
         Assert.Equal(HealthStatus.Unhealthy, stale.Status);
+    }
+
+    [Fact]
+    public async Task TheNameResolverIsHandedTheGateSoAClosedGateReadsNoNames()
+    {
+        // Redis first (2026-11-03) rests on the container passing the gate: without it a closed gate
+        // would still read the store on every delivery. The gate is constructed closed.
+        var source = new FakeNameSource(new() { [Guid.NewGuid()] = "unused" });
+        using var sp = Build(names: source);
+        var resolver = sp.GetRequiredService<EntityNameResolver>();
+
+        await resolver.ScopeAsync(Guid.NewGuid(), Guid.Empty, Guid.Empty);
+        Assert.Equal(0, source.Reads);
+
+        await sp.GetRequiredService<L2Gate>().ReportHealthyAsync();
+        await resolver.ScopeAsync(Guid.NewGuid(), Guid.Empty, Guid.Empty);
+        Assert.Equal(1, source.Reads);
     }
 }
