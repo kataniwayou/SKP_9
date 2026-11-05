@@ -17,10 +17,10 @@ public sealed class KafkaImporterLoopTests
     private static readonly Guid P = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid C = Guid.Parse("44444444-4444-4444-4444-444444444444");
 
-    private static string Payload(int messageCount) =>
+    private static string Payload(int maxMessageCount, int minMessageCount = 1) =>
         $$"""
-        {"topic":"records","consumerGroup":"kafka-importer",
-         "messageCount":{{messageCount}},"idleTimeoutSeconds":1}
+        {"topic":"records","consumerGroup":"kafka-importer","minMessageCount":{{minMessageCount}},
+         "maxMessageCount":{{maxMessageCount}},"idleTimeoutSeconds":1}
         """;
 
     private static (KafkaImporterProcessor Processor, IQueueSender Sender, RecordingLogger<KafkaImporterProcessor> Log)
@@ -34,7 +34,7 @@ public sealed class KafkaImporterLoopTests
     }
 
     private static async Task<List<ProcessedData>> Run(
-        KafkaImporterProcessor processor, IQueueSender sender, int messageCount)
+        KafkaImporterProcessor processor, IQueueSender sender, int messageCount, int minMessageCount = 1)
     {
         var sends = new List<ProcessedData>();
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
@@ -42,7 +42,7 @@ public sealed class KafkaImporterLoopTests
 
         // Guid.Empty: a source step. KafkaImporter mints per record regardless, and a later fact
         // pins that it does so even when handed a non-empty id.
-        await processor.ExecuteAsync([], Payload(messageCount), Guid.Empty, CancellationToken.None);
+        await processor.ExecuteAsync([], Payload(messageCount, minMessageCount), Guid.Empty, CancellationToken.None);
         return sends;
     }
 
@@ -389,7 +389,7 @@ public sealed class KafkaImporterLoopTests
     /// real completion, so this is reported as a step failure instead.
     /// </summary>
     [Fact]
-    public async Task FailsTheStepWhenMessageCountIsLessThanOne()
+    public async Task FailsTheStepWhenMaxMessageCountIsLessThanOne()
     {
         var (processor, _, _) = Build(new FakeRecordConsumerFactory(new FakeRecordConsumer()));
 
@@ -397,7 +397,22 @@ public sealed class KafkaImporterLoopTests
             processor.ExecuteAsync([], Payload(0), Guid.Empty, CancellationToken.None));
     }
 
-    /// <summary>Same false-healthy-terminal hazard as a zero MessageCount, for the same reason.</summary>
+    /// <summary>
+    /// A floor of 0 would let an empty poll return as a success, and a floor above the ceiling could
+    /// never be met, so every dispatch would cancel. Both are authoring mistakes, reported as one.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(11)]
+    public async Task FailsTheStepWhenMinMessageCountIsOutsideOneToMax(int min)
+    {
+        var (processor, _, _) = Build(new FakeRecordConsumerFactory(new FakeRecordConsumer()));
+
+        await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(10, min), Guid.Empty, CancellationToken.None));
+    }
+
+    /// <summary>Same false-healthy-terminal hazard as a zero MaxMessageCount, for the same reason.</summary>
     [Fact]
     public async Task FailsTheStepWhenIdleTimeoutSecondsIsLessThanOne()
     {
@@ -405,7 +420,7 @@ public sealed class KafkaImporterLoopTests
         const string payload =
             """
             {"topic":"records","consumerGroup":"kafka-importer",
-             "messageCount":10,"idleTimeoutSeconds":0}
+             "maxMessageCount":10,"idleTimeoutSeconds":0}
             """;
 
         await Assert.ThrowsAsync<FailedException>(() =>
@@ -525,6 +540,62 @@ public sealed class KafkaImporterLoopTests
                                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
     }
 
+    /// <summary>
+    /// Short of the minimum is the same Cancelled an empty topic reports. The branches already sent
+    /// were committed and carry on: the floor reports a shortfall, it does not withdraw.
+    /// </summary>
+    [Fact]
+    public async Task CancelsWhenFewerThanTheMinimumWereSent()
+    {
+        var consumer = new FakeRecordConsumer().WithRecords("value-a", "value-b");
+        var (processor, sender, log) = Build(new FakeRecordConsumerFactory(consumer));
+        var sends = new List<ProcessedData>();
+        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
+                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        var cancelled = await Assert.ThrowsAsync<CancelledException>(() =>
+            processor.ExecuteAsync([], Payload(10, minMessageCount: 3), Guid.Empty, CancellationToken.None));
+
+        Assert.Contains("had 2 of the 3 record(s) required", cancelled.Message);
+        Assert.Equal(["value-a", "value-b"], sends.Select(ValueIn));
+        Assert.Equal(2, consumer.Committed.Count);
+        Assert.Contains("consumed 2/10 records; stopped because Drained", Summary(log));
+    }
+
+    [Fact]
+    public async Task ReturnsWhenTheMinimumWasSent()
+    {
+        var consumer = new FakeRecordConsumer().WithRecords("value-a", "value-b", "value-c");
+        var (processor, sender, log) = Build(new FakeRecordConsumerFactory(consumer));
+
+        var sends = await Run(processor, sender, messageCount: 10, minMessageCount: 3);
+
+        Assert.Equal(3, sends.Count);
+        Assert.Contains("consumed 3/10 records; stopped because Drained", Summary(log));
+    }
+
+    /// <summary>
+    /// A fault that leaves the dispatch short of its minimum is a broken source, not a quiet topic,
+    /// so it fails the step even though branches were sent -- and those branches still carry on.
+    /// </summary>
+    [Fact]
+    public async Task FailsWhenAFaultLeavesTheDispatchShortOfTheMinimum()
+    {
+        var consumer = new FakeRecordConsumer { ConsumeThrowsOnCall = 3 }
+            .WithRecords("value-a", "value-b", "value-c");
+        var (processor, sender, log) = Build(new FakeRecordConsumerFactory(consumer));
+        var sends = new List<ProcessedData>();
+        await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
+                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
+
+        var failed = await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(10, minMessageCount: 3), Guid.Empty, CancellationToken.None));
+
+        Assert.Contains("faulted after 2 of the 3 record(s) required", failed.Message);
+        Assert.Equal(2, sends.Count);
+        Assert.Contains("consumed 2/10 records; stopped because Faulted", Summary(log));
+    }
+
     [Fact]
     public async Task SkipsAndCommitsEmptyAndTombstoneRecordsWithoutSendingThem()
     {
@@ -590,7 +661,7 @@ public sealed class KafkaImporterLoopTests
     }
 
     /// <summary>
-    /// A skipped record takes a slot of MessageCount, so a topic full of tombstones cannot hold one
+    /// A skipped record takes a slot of MaxMessageCount, so a topic full of tombstones cannot hold one
     /// dispatch for ever.
     /// </summary>
     [Fact]

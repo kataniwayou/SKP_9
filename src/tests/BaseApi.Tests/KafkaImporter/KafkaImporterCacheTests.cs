@@ -21,7 +21,7 @@ public sealed class KafkaImporterCacheTests
     private static string Payload(string topic, string group = "kafka-importer") =>
         $$"""
         {"topic":"{{topic}}","consumerGroup":"{{group}}",
-         "messageCount":10,"idleTimeoutSeconds":1}
+         "maxMessageCount":10,"idleTimeoutSeconds":1}
         """;
 
     private static KafkaImporterProcessor Build(FakeRecordConsumerFactory factory)

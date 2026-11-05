@@ -16,11 +16,13 @@ namespace Processor.KafkaImporter;
 /// live tests, so none of it may be reworded.
 /// </para>
 /// <para>
-/// <b>It never returns without sending.</b> A dispatch either sends at least one branch, or throws
-/// <see cref="CancelledException"/> when there was nothing to import (an empty topic, or only empty
-/// and tombstone records), or throws <see cref="FailedException"/> when the source broke before
-/// anything was sent. Once a branch has gone out, a later fault ends the dispatch where it stands
-/// with a Warning, and the lineages already sent carry on.
+/// <b>It never returns without sending its minimum.</b> A dispatch either sends at least
+/// <c>minMessageCount</c> branches, or throws <see cref="CancelledException"/> when there was not
+/// enough to import (an empty topic, only empty and tombstone records, or fewer than the minimum), or
+/// throws <see cref="FailedException"/> when the source broke before the minimum was sent. Once the
+/// minimum has gone out, a later fault ends the dispatch where it stands with a Warning. Either way
+/// the lineages already sent carry on: a branch is committed before the next record is read, so a
+/// short dispatch reports the shortfall, it does not withdraw what it sent.
 /// </para>
 /// <para>
 /// <b>Each record's lineage is its <c>execution-id</c> header</b>, a contract between the producer and
@@ -53,14 +55,22 @@ public sealed class KafkaImporterProcessor(
         if (config is null)
         {
             throw new FailedException(
-                "KafkaImporter needs a step payload naming topic, consumerGroup, messageCount and idleTimeoutSeconds");
+                "KafkaImporter needs a step payload naming topic, consumerGroup, maxMessageCount and idleTimeoutSeconds");
         }
 
         // Below 1 the loop never runs and the summary would report a false healthy "0/0 Completed".
-        if (config.MessageCount < 1)
+        if (config.MaxMessageCount < 1)
         {
             throw new FailedException(
-                $"KafkaImporter needs MessageCount of at least 1; the step payload named {config.MessageCount}");
+                $"KafkaImporter needs MaxMessageCount of at least 1; the step payload named {config.MaxMessageCount}");
+        }
+
+        // Below 1 an empty poll would return as a success; above the ceiling every dispatch cancels.
+        if (config.MinMessageCount < 1 || config.MinMessageCount > config.MaxMessageCount)
+        {
+            throw new FailedException(
+                $"KafkaImporter needs MinMessageCount between 1 and MaxMessageCount ({config.MaxMessageCount}); "
+                + $"the step payload named {config.MinMessageCount}");
         }
 
         if (config.IdleTimeoutSeconds < 1)
@@ -117,7 +127,7 @@ public sealed class KafkaImporterProcessor(
 
         try
         {
-            while (read < config.MessageCount)
+            while (read < config.MaxMessageCount)
             {
                 KafkaRecord? record;
                 try
@@ -241,7 +251,7 @@ public sealed class KafkaImporterProcessor(
         logger.Log(
             reason == StopReason.Faulted ? LogLevel.Warning : LogLevel.Information,
             "consumed {Consumed}/{Requested} records; stopped because {Reason}",
-            imported, config.MessageCount, reason);
+            imported, config.MaxMessageCount, reason);
 
         // Even after earlier records were sent: they carry on, and the refusal is reported so the
         // PreviousFailed edge records it.
@@ -252,20 +262,26 @@ public sealed class KafkaImporterProcessor(
                 + "it was committed and not imported");
         }
 
-        if (sent > 0)
+        if (sent >= config.MinMessageCount)
         {
             return;
         }
 
+        // Short of the minimum because the source broke: a broker problem, not a quiet topic.
         if (fault is not null)
         {
-            throw new FailedException(
-                $"reading from {config.Topic} faulted before any record was sent: {fault.Error.Code}", fault);
+            throw new FailedException(sent == 0
+                ? $"reading from {config.Topic} faulted before any record was sent: {fault.Error.Code}"
+                : $"reading from {config.Topic} faulted after {sent} of the {config.MinMessageCount} "
+                  + $"record(s) required: {fault.Error.Code}", fault);
         }
 
-        throw new CancelledException(read == 0
-            ? $"{config.Topic} had no records to import"
-            : $"every record read from {config.Topic} was empty");
+        // Short of the minimum because the topic was: the same Cancelled an empty poll reports.
+        throw new CancelledException(
+            read == 0 ? $"{config.Topic} had no records to import"
+            : sent == 0 ? $"every record read from {config.Topic} was empty"
+            : $"{config.Topic} had {sent} of the {config.MinMessageCount} record(s) required; "
+              + "the ones sent carry on");
     }
 
     /// <summary>

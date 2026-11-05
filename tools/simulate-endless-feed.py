@@ -71,7 +71,7 @@ READING THE LAG DOES NOT JOIN THE GROUP. The lag probe builds a Consumer carryin
 group.id=skp-splitchain but never subscribes or assigns, so it issues an OffsetFetch and nothing
 else -- no join, no rebalance of the live importer, no commit. Do not add a subscribe() here.
 
-RATE. The chain's workflow is cron `5,35 * * * * *` with `messageCount: 25`, so it imports at most
+RATE. The chain's workflow is cron `5,35 * * * * *` with `maxMessageCount: 25`, so it imports at most
 50 records a minute. The default here is 5 files every 30 seconds = 10 a minute, comfortably under.
 Raising --count or lowering --interval past 50/min grows the Kafka lag without bound and the wipe
 never fires.

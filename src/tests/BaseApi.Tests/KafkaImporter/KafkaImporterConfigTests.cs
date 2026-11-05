@@ -20,8 +20,8 @@ public sealed class KafkaImporterConfigTests
     {
         const string payload =
             """
-            {"topic":"records","consumerGroup":"kafka-importer","messageCount":100,
-             "idleTimeoutSeconds":5}
+            {"topic":"records","consumerGroup":"kafka-importer","minMessageCount":10,
+             "maxMessageCount":100,"idleTimeoutSeconds":5}
             """;
 
         var config = JsonSerializer.Deserialize<KafkaImporterConfig>(
@@ -29,8 +29,40 @@ public sealed class KafkaImporterConfigTests
 
         Assert.Equal("records", config!.Topic);
         Assert.Equal("kafka-importer", config.ConsumerGroup);
-        Assert.Equal(100, config.MessageCount);
+        Assert.Equal(10, config.MinMessageCount);
+        Assert.Equal(100, config.MaxMessageCount);
         Assert.Equal(5, config.IdleTimeoutSeconds);
+    }
+
+    /// <summary>
+    /// The floor is optional and defaults to one, the behaviour every payload had before it existed.
+    /// </summary>
+    [Fact]
+    public void DefaultsMinMessageCountToOneWhenThePayloadOmitsIt()
+    {
+        const string payload =
+            """{"topic":"t","consumerGroup":"g","maxMessageCount":5,"idleTimeoutSeconds":1}""";
+
+        var config = JsonSerializer.Deserialize<KafkaImporterConfig>(
+            payload, ProcessorConfig.SerializerOptions);
+
+        Assert.Equal(1, config!.MinMessageCount);
+    }
+
+    /// <summary>
+    /// The rename is not tolerated: a leftover <c>messageCount</c> binds nothing, the ceiling is 0, and
+    /// the processor fails the step. That is why the stored payloads were rewritten with it.
+    /// </summary>
+    [Fact]
+    public void ALeftoverMessageCountBindsNoCeiling()
+    {
+        const string payload =
+            """{"topic":"t","consumerGroup":"g","messageCount":5,"idleTimeoutSeconds":1}""";
+
+        var config = JsonSerializer.Deserialize<KafkaImporterConfig>(
+            payload, ProcessorConfig.SerializerOptions);
+
+        Assert.Equal(0, config!.MaxMessageCount);
     }
 
     /// <summary>
@@ -42,7 +74,7 @@ public sealed class KafkaImporterConfigTests
     {
         const string payload =
             """
-            {"topic":"t","consumerGroup":"g","messageCount":1,
+            {"topic":"t","consumerGroup":"g","maxMessageCount":1,
              "idleTimeoutSeconds":1,"somethingAddedLater":true}
             """;
 
@@ -65,7 +97,7 @@ public sealed class KafkaImporterConfigTests
         const string payload =
             """
             {"brokerList":"stale-broker:9092","topic":"records","consumerGroup":"g",
-             "messageCount":1,"idleTimeoutSeconds":1}
+             "maxMessageCount":1,"idleTimeoutSeconds":1}
             """;
 
         var config = JsonSerializer.Deserialize<KafkaImporterConfig>(

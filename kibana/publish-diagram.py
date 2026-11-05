@@ -119,7 +119,7 @@ STYLE_RULES = {
     ".lg-step": "fill: var(--ink); font: 600 11px ui-monospace, monospace;",
     ".lg-cfg": "fill: var(--ink-soft); font: 11px ui-monospace, monospace;",
     # A KEY AND ITS VALUE ARE DIFFERENT THINGS AND LOOK IT. The line was a list of keys, so one
-    # colour was enough; `topic: skp-paths, messageCount: 25` in a single colour is a wall.
+    # colour was enough; `topic: skp-paths, maxMessageCount: 25` in a single colour is a wall.
     ".lg-key": "fill: var(--ink-soft);",
     ".lg-val": "fill: var(--ink);",
     ".lg-punct": "fill: var(--muted);",

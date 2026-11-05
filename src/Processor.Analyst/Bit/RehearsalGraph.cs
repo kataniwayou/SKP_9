@@ -51,7 +51,7 @@ internal static class RehearsalGraph
         Steps:
         [
             new StepL1(ImportStep, Always, ImporterProcessor,
-                """{"topic": "rehearsal-paths", "messageCount": 10, "idleTimeoutSeconds": 10}""",
+                """{"topic": "rehearsal-paths", "maxMessageCount": 10, "idleTimeoutSeconds": 10}""",
                 [ValidateStep, RecordStep]),
             new StepL1(ValidateStep, OnCompleted, ValidatorProcessor,
                 """{"allowedExtensions": [".zip"]}""",
