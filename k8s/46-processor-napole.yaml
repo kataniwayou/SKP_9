@@ -1,0 +1,118 @@
+# processor-napole — the scheduled round-trip reporter. On each tick it counts, from Elasticsearch,
+# how the watched workflow's executions imported in the last window ended (Failed / Cancelled /
+# Complete) and hands one count report to a kafka-exporter. Design:
+# docs/superpowers/specs/2026-11-08-napole-design.md.
+#
+# The step payload carries only the watched workflow and the window; everything below is the pod's.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: processor-napole
+  namespace: skp
+  labels:
+    app: processor-napole
+    app.kubernetes.io/part-of: skp
+spec:
+  # One: a tick is one dispatch, and a second replica would only compete for it.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: processor-napole
+  template:
+    metadata:
+      labels:
+        app: processor-napole
+    spec:
+      containers:
+        - name: processor-napole
+          image: processor-napole:local
+          imagePullPolicy: IfNotPresent
+          env:
+            # NO Service__Name / Service__Version here, deliberately, and do not add them back.
+            # A processor takes its service.name and service.version from its database row, resolved
+            # before the host is built so they can reach the OTel resource, and that row wins over
+            # configuration unconditionally. The fallback they nominally provide lives in code
+            # (ProcessorHost, "processor" / "1.0.0").
+            #
+            # The replica identity that names this pod's liveness key, its reply queue, and the
+            # service.instance.id on its telemetry. All three must be the same string, which is why it
+            # is resolved once from the downward API rather than three times from three defaults.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+            # The collector already running in this namespace. Without it the SDK still works and
+            # export simply fails quietly, so this is an enrichment rather than a dependency.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector:4317"
+            # 10s, against a 15s Prometheus scrape. Exporting faster than the scrape makes the
+            # effective resolution the scrape interval; exporting at exactly the scrape interval
+            # aliases and leaves some scrapes with nothing new.
+            - name: OTEL_METRIC_EXPORT_INTERVAL
+              value: "10000"
+            - name: RabbitMq__Host
+              value: rabbitmq
+            - name: RabbitMq__Username
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_USER }
+            - name: RabbitMq__Password
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: RABBITMQ_DEFAULT_PASS }
+            # Straight to Redis, the same address the orchestrator and the API use.
+            - name: ConnectionStrings__Redis
+              value: "redis:6379,abortConnect=false,connectTimeout=5000"
+            - name: ConsoleHealth__Port
+              value: "8081"
+            # In-cluster service DNS; appsettings.json ships the forwarded dev port for running outside.
+            - name: Napole__ElasticBaseUrl
+              value: "http://elasticsearch:9200"
+            # Spec 4.1: the window ends this far behind the tick, so runs the importer started on the
+            # same cron second have finished, and reached ES, before they are counted.
+            - name: Napole__LagSeconds
+              value: "60"
+            # How far either side of the window an execution's records are looked for (spec 4.1, 4.2).
+            - name: Napole__TrailMinutes
+              value: "10"
+            # The five report dimensions, copied into every report's commonDimentions. Dev
+            # placeholders; required, so a pod missing one fails at startup.
+            - name: Napole__Report__ReporterComponentName
+              value: "myDepartment"
+            - name: Napole__Report__ReporterSubComponentName
+              value: "myTeam"
+            - name: Napole__Report__ReporterNetworkName
+              value: "myNetwork"
+            - name: Napole__Report__SrcCode
+              value: "928"
+            - name: Napole__Report__SagCode
+              value: "LLL"
+          ports:
+            - containerPort: 8081
+          # Startup flips on the liveness loop's first beat, within moments of the host starting, so
+          # this passes long before discovery does. It is deliberately not gated on identity: a
+          # processor waiting on an unregistered row is starting correctly, however long that takes.
+          startupProbe:
+            httpGet: { path: /health/startup, port: 8081 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          # Readiness is identity resolution. It stays red until the processor row exists, and no
+          # restart will help — which is exactly why this is readiness and not liveness.
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8081 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          # Liveness is the loops still turning, and nothing else. A broker that is down must not
+          # restart this pod: the startup loop is designed to retry against it forever, and a restart
+          # only throws away the backoff progress.
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8081 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 6
+          # Two ES answers of at most a few thousand short rows and one small report per tick.
+          resources:
+            requests: { memory: "96Mi" }
+            limits:   { memory: "192Mi" }

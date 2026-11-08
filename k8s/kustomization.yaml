@@ -34,3 +34,4 @@ resources:
   - 43-processor-analyst.yaml
   - 44-processor-objectfetcher.yaml
   - 45-processor-objectpersister.yaml
+  - 46-processor-napole.yaml
