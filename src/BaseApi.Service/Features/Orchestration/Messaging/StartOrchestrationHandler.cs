@@ -8,7 +8,8 @@ using Microsoft.Extensions.Logging;
 namespace BaseApi.Service.Features.Orchestration.Messaging;
 
 /// <summary>
-/// Projects a workflow definition into L2 and marks it live. The only component that writes a workflow store.
+/// Projects a workflow definition into L2 and marks it live. The only component that writes a workflow store; the one
+/// other writer under a workflow's key, <see cref="RefreshCacheHandler"/>, rewrites a single cache's dictionary.
 /// <para>
 /// <b>Write, then join the live set, unconditionally.</b> There is no check for whether the workflow is
 /// already projected: a start is a statement about what the stored workflow should be, not a request to

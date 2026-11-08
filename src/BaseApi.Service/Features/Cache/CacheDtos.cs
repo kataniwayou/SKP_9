@@ -26,6 +26,13 @@ public sealed record CacheUpdateDto(
     string Items) : IBaseDto;
 
 /// <summary>
+/// Body of <c>PUT /caches/{id}/items</c>: the whole dictionary, which replaces the row's. The root and
+/// every other field are absent, so the one edit that reaches running workflows cannot move the address
+/// their steps read.
+/// </summary>
+public sealed record CacheItemsUpdateDto(Dictionary<string, string> Items);
+
+/// <summary>
 /// Read-side DTO returned to clients, carrying the id and the audit fields. It implements
 /// <see cref="IHasId"/> so the base controller can read the id when building the created-at
 /// response.

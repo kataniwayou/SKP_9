@@ -21,6 +21,9 @@ internal static class CacheRules
 
     public const int MaxRootLength = 200;
 
+    /// <summary>The stored form of an items dictionary, as <c>PUT /caches/{id}/items</c> writes it.</summary>
+    public static string Serialize(Dictionary<string, string> items) => JsonSerializer.Serialize(items);
+
     /// <summary>
     /// Refuses a blank root, and one carrying a colon. See <c>CacheEntity</c> for why the colon
     /// matters: the address is a concatenation, so a colon on either side of it forges another
@@ -123,6 +126,33 @@ public sealed class CacheCreateDtoValidator : AbstractValidator<CacheCreateDto>
 }
 
 /// <summary>Update-side rules — identical, and sharing <see cref="CacheRules"/> so they stay so.</summary>
+/// <summary>
+/// The items edit's own rules: the same as a stored row's items, checked on the serialized form so the
+/// two can never disagree.
+/// </summary>
+public sealed class CacheItemsUpdateDtoValidator : AbstractValidator<CacheItemsUpdateDto>
+{
+    public CacheItemsUpdateDtoValidator()
+    {
+        RuleFor(x => x.Items)
+            .Cascade(CascadeMode.Stop)
+            .NotNull()
+            .WithMessage("Items must be a JSON object.")
+            .Custom((items, ctx) =>
+            {
+                var serialized = CacheRules.Serialize(items);
+                if (serialized.Length > CacheRules.MaxItemsChars)
+                {
+                    ctx.AddFailure(nameof(CacheItemsUpdateDto.Items),
+                        $"Items must be at most {CacheRules.MaxItemsChars} characters.");
+                    return;
+                }
+
+                CacheRules.CheckItems(serialized, ctx, nameof(CacheItemsUpdateDto.Items));
+            });
+    }
+}
+
 public sealed class CacheUpdateDtoValidator : AbstractValidator<CacheUpdateDto>
 {
     public CacheUpdateDtoValidator()

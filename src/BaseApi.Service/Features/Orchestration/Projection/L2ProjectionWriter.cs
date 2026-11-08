@@ -132,6 +132,63 @@ internal sealed class L2ProjectionWriter
     }
 
     /// <summary>
+    /// Aligns one cache's dictionary of an already projected workflow with the row, and nothing else:
+    /// the store, the roots field, the names and every other cache stay as the start wrote them.
+    /// <para>
+    /// <b>Only a root the workflow's last start recorded is written</b>, and false is returned otherwise.
+    /// A cache bound after the start is a binding change, which waits for the next start like every
+    /// other; writing it here would hand the running workflow a dictionary its start never had.
+    /// </para>
+    /// <para>
+    /// <b>The same discipline as <see cref="WriteAsync"/>: one batch, the delete first.</b> The leftovers
+    /// are computed from the root's key list, which this batch overwrites, so a batch torn after the
+    /// delete leaves the rerun the same previous state.
+    /// </para>
+    /// </summary>
+    public async Task<bool> WriteCacheAsync(Guid workflowId, CacheL1 cache, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(cache);
+        ct.ThrowIfCancellationRequested();
+
+        var db = _multiplexer.GetDatabase();
+
+        var roots = ReadList(await db.HashGetAsync(L2ProjectionKeys.Workflow(workflowId), L2ProjectionKeys.RootsField)
+            .ConfigureAwait(false));
+        if (!roots.Contains(cache.Root, StringComparer.Ordinal))
+        {
+            return false;
+        }
+
+        var rootKey = L2ProjectionKeys.Cache(workflowId, cache.Root);
+        var items = cache.Items ?? new Dictionary<string, string>();
+
+        var stale = ReadList(await db.StringGetAsync(rootKey).ConfigureAwait(false))
+            .Where(k => !string.IsNullOrEmpty(k) && !items.ContainsKey(k))
+            .Distinct(StringComparer.Ordinal)
+            .Select(k => (RedisKey)L2ProjectionKeys.CacheEntry(workflowId, cache.Root, k))
+            .ToArray();
+
+        var batch = db.CreateBatch();
+        var writes = new List<Task>();
+
+        if (stale.Length > 0)
+        {
+            writes.Add(batch.KeyDeleteAsync(stale));
+        }
+
+        writes.Add(batch.StringSetAsync(rootKey, JsonSerializer.Serialize(items.Keys.ToList(), MessagingJson.Options)));
+
+        foreach (var (key, value) in items)
+        {
+            writes.Add(batch.StringSetAsync(L2ProjectionKeys.CacheEntry(workflowId, cache.Root, key), value));
+        }
+
+        batch.Execute();
+        await Task.WhenAll(writes).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
     /// The step name keys of steps this workflow dropped since its previous start and the database no
     /// longer holds. Only the dropped steps are looked up — kept and added steps are participants, so
     /// they exist by definition — and a start that dropped nothing makes no database read. A previous

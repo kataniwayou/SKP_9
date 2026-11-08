@@ -23,6 +23,9 @@ public static class MessageTypes
     /// <summary>Body is a <see cref="Messaging.Contracts.StopOrchestration"/>.</summary>
     public const string StopOrchestration = "stop-orchestration";
 
+    /// <summary>Body is a <see cref="Messaging.Contracts.RefreshCache"/>.</summary>
+    public const string RefreshCache = "refresh-cache";
+
     /// <summary>Request body is a <see cref="Messaging.Contracts.GetProcessorBySourceHash"/>.</summary>
     public const string GetProcessorBySourceHash = "get-processor-by-source-hash";
 

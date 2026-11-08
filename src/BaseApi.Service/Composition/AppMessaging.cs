@@ -80,10 +80,11 @@ internal static class AppMessaging
 
         LoopMetrics.Seed(QueueDepthLoop);
 
-        // The gated control consumer, and the two handlers it dispatches to by message type.
+        // The gated control consumer, and the three handlers it dispatches to by message type.
         services.AddBaseApiGatedConsumer(OrchestratorQueues.Control);
         services.AddScoped<IQueueMessageHandler, StartOrchestrationHandler>();
         services.AddScoped<IQueueMessageHandler, StopOrchestrationHandler>();
+        services.AddScoped<IQueueMessageHandler, RefreshCacheHandler>();
 
         // The ungated query consumers. One per queue, each constructed with the queue it serves —
         // there is no shared options object to collide over.
