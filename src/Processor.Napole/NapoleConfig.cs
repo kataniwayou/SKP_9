@@ -16,5 +16,11 @@ namespace Processor.Napole;
 /// when ticks come closer than the window, never when they come further apart -- and that is
 /// accepted.
 /// </para>
+/// <para>
+/// <b>Fire mid-slot, not on the grid line.</b> The window is <c>floor(now − lag, windowMinutes)</c>, so a
+/// tick on the line (<c>0 */10 * * * *</c>) has only the lag -- 60 s -- before a late dispatch rolls into
+/// the next slot and silently skips one. Halfway through the slot (<c>0 5/10 * * * *</c> for 10 minutes)
+/// gives about four minutes either way, and the report is 5-15 minutes old instead of 10-20.
+/// </para>
 /// </summary>
 public sealed record NapoleConfig(Guid WatchedWorkflowId, int WindowMinutes) : ProcessorConfig;

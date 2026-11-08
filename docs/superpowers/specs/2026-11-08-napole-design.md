@@ -76,8 +76,7 @@ trail = [from, to + trailMinutes)         // where the run's records are looked 
 restart or a redelivery would move the window, leaving a gap (runs never reported) or an overlap.
 With it, a tick that runs late still covers the same grid slot. Two ticks in one slot produce the
 same window twice, which is the accepted duplicate (§2). A skipped slot stays unreported
-(no watermark, §2). The cron should fire on the grid (e.g. `*/10` for 10 minutes); it does not have
-to fire at an exact second. The worked example's "10:51 tick" is `now` = 10:51:00 with a 60 s lag:
+(no watermark, §2). The cron should fire **mid-slot** (e.g. `0 5/10 * * * *` for 10 minutes), not on the grid line: on the line, only the lag (60 s) stands between a late dispatch and a silently skipped slot; mid-slot gives about four minutes either way (final review, Important 3). The worked example's "10:51 tick" is `now` = 10:51:00 with a 60 s lag:
 floor(10:50:00, 10 min) = 10:50, so the window is 10:40–10:50.
 
 - The window selects executions by **when the kafka-importer imported them**: its

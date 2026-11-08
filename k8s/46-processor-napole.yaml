@@ -4,6 +4,10 @@
 # docs/superpowers/specs/2026-11-08-napole-design.md.
 #
 # The step payload carries only the watched workflow and the window; everything below is the pod's.
+#
+# SCHEDULE: matching the workflow's cron to windowMinutes is the operator's job. Fire mid-slot, e.g.
+# `0 5/10 * * * *` for windowMinutes 10: the window is floor(now - lag, window), so a cron on the grid
+# line (`0 */10 * * * *`) leaves only the 60 s lag before a late dispatch skips a slot.
 ---
 apiVersion: apps/v1
 kind: Deployment
