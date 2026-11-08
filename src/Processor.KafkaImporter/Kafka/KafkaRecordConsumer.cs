@@ -95,6 +95,28 @@ public sealed class KafkaRecordConsumer : IRecordConsumer
         return _inner.Assignment.Count > 0;
     }
 
+    public long Backlog(TimeSpan timeout)
+    {
+        var assigned = _inner.Assignment;
+        long waiting = 0;
+
+        // Two round trips per dispatch, no records fetched. A partition this group never committed on
+        // starts at its low watermark, which is where AutoOffsetReset.Earliest starts it; a commit the
+        // retention has since passed starts there too. A record parked in _pending is not committed
+        // yet, so it is counted, as it must be: the loop is about to be handed it.
+        foreach (var committed in _inner.Committed(assigned, timeout))
+        {
+            var marks = _inner.QueryWatermarkOffsets(committed.TopicPartition, timeout);
+            var from = committed.Offset == Offset.Unset
+                ? marks.Low.Value
+                : Math.Max(committed.Offset.Value, marks.Low.Value);
+            waiting += Math.Max(0, marks.High.Value - from);
+        }
+
+        // Defensive: a record in hand is one waiting, whatever the assignment says.
+        return _pending is not null ? Math.Max(waiting, 1) : waiting;
+    }
+
     public KafkaRecord? Consume(TimeSpan timeout)
     {
         var result = _pending;

@@ -45,6 +45,18 @@ internal sealed class FakeRecordConsumer : IRecordConsumer
     public Error Fault { get; set; } = new(ErrorCode.Local_Transport);
 
     /// <summary>
+    /// What <see cref="Backlog"/> reports. Null reports the records still queued, which is what a
+    /// broker would count; a value lets a test model records arriving after the count (lower) or
+    /// offsets that are not records (higher).
+    /// </summary>
+    public long? BacklogOverride { get; set; }
+
+    /// <summary>True makes <see cref="Backlog"/> throw <see cref="Fault"/>, as an absent broker would.</summary>
+    public bool BacklogThrows { get; set; }
+
+    public int ConsumeCalls => _consumeCalls;
+
+    /// <summary>
     /// The execution id the fake stamps on the record at <paramref name="position"/>: distinct per
     /// record and valid, as the feeds' producer contract requires.
     /// </summary>
@@ -95,6 +107,16 @@ internal sealed class FakeRecordConsumer : IRecordConsumer
         }
 
         return Assigned;
+    }
+
+    public long Backlog(TimeSpan timeout)
+    {
+        if (BacklogThrows)
+        {
+            throw new KafkaException(Fault);
+        }
+
+        return BacklogOverride ?? _records.Count;
     }
 
     public KafkaRecord? Consume(TimeSpan timeout)

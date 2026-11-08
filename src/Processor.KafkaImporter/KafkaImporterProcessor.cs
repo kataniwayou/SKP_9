@@ -18,11 +18,18 @@ namespace Processor.KafkaImporter;
 /// <para>
 /// <b>It never returns without sending its minimum.</b> A dispatch either sends at least
 /// <c>minMessageCount</c> branches, or throws <see cref="CancelledException"/> when there was not
-/// enough to import (an empty topic, only empty and tombstone records, or fewer than the minimum), or
-/// throws <see cref="FailedException"/> when the source broke before the minimum was sent. Once the
-/// minimum has gone out, a later fault ends the dispatch where it stands with a Warning. Either way
-/// the lineages already sent carry on: a branch is committed before the next record is read, so a
-/// short dispatch reports the shortfall, it does not withdraw what it sent.
+/// enough to import, or throws <see cref="FailedException"/> when the source broke before the minimum
+/// was sent. Once the minimum has gone out, a later fault ends the dispatch where it stands with a
+/// Warning.
+/// </para>
+/// <para>
+/// <b>The minimum is a hold, decided before anything is read.</b> The records waiting are counted from
+/// the broker's offsets first; fewer than the minimum (none included) and the dispatch is Cancelled
+/// with nothing read, sent or committed, so they wait for a later dispatch. The count also ends the
+/// loop, so neither an empty topic nor the end of a short one costs an idle timeout. Because the count
+/// is an upper bound, a dispatch can still come up short on empty and tombstone records; that residue
+/// is reported Cancelled after the fact, and the branches it did send carry on — each is committed
+/// before the next record is read.
 /// </para>
 /// <para>
 /// <b>Each record's lineage is its <c>execution-id</c> header</b>, a contract between the producer and
@@ -43,6 +50,7 @@ public sealed class KafkaImporterProcessor(
         Drained,
         Faulted,
         Refused, // A record carried no valid execution-id header.
+        Held,    // Fewer than the minimum were waiting; nothing was read.
     }
 
     private IRecordConsumer? _consumer;
@@ -117,7 +125,36 @@ public sealed class KafkaImporterProcessor(
             throw new FailedException($"{config.Topic} was not ready within {idle}");
         }
 
-        // PART TWO: the loop. Once a branch has been sent nothing in it fails the step.
+        // The count is part of opening the source, so a fault here fails the step like the wait above.
+        long backlog;
+        try
+        {
+            backlog = consumer.Backlog(idle);
+        }
+        catch (KafkaException ex)
+        {
+            Evict();
+            throw new FailedException($"opening {config.Topic} failed: {ex.Error.Code}", ex);
+        }
+
+        // THE FLOOR IS A HOLD (2026-11-08). Short of the minimum nothing is read or sent: the records stay
+        // on the topic, uncommitted, and the next dispatch counts them again with whatever arrived since.
+        // Known from the count, so an empty or short topic costs no idle timeout to find out.
+        if (backlog < config.MinMessageCount)
+        {
+            logger.LogInformation(
+                "consumed {Consumed}/{Requested} records; stopped because {Reason}",
+                0, config.MaxMessageCount, backlog == 0 ? StopReason.Drained : StopReason.Held);
+
+            throw new CancelledException(backlog == 0
+                ? $"{config.Topic} had no records to import"
+                : $"{config.Topic} had {backlog} of the {config.MinMessageCount} record(s) required; "
+                  + "nothing was sent, they wait for the next dispatch");
+        }
+
+        // PART TWO: the loop. Once a branch has been sent nothing in it fails the step. It stops at the
+        // counted end rather than polling past it; the idle timeout only ends it when the count was high.
+        var bound = (int)Math.Min(config.MaxMessageCount, backlog);
         var read = 0;       // every record consumed, sent or skipped; bounds the dispatch
         var sent = 0;       // branches finished (in L2, outcome confirmed)
         var imported = 0;   // sent AND committed; the {Consumed} the summary has always reported
@@ -127,7 +164,7 @@ public sealed class KafkaImporterProcessor(
 
         try
         {
-            while (read < config.MaxMessageCount)
+            while (read < bound)
             {
                 KafkaRecord? record;
                 try
@@ -244,6 +281,13 @@ public sealed class KafkaImporterProcessor(
         if (reason == StopReason.Faulted)
         {
             Evict();
+        }
+
+        // Stopping at the counted end, short of the ceiling, is the topic running out: Drained, as an
+        // empty poll reported it before the count existed.
+        if (reason == StopReason.Completed && read < config.MaxMessageCount)
+        {
+            reason = StopReason.Drained;
         }
 
         // The text is unchanged and is matched by saved queries and the Analyst's run-boundary panel.

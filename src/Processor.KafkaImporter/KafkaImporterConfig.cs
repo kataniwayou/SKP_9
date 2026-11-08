@@ -10,10 +10,15 @@ namespace Processor.KafkaImporter;
 /// <para>
 /// <b>The two counts are a ceiling and a floor on what one dispatch sends.</b>
 /// <c>maxMessageCount</c> bounds the records read. <c>minMessageCount</c> is how many must be sent for
-/// the dispatch to count as an import; fewer is reported Cancelled, on the same path as an empty
-/// topic. It is a report, not a hold: each record is sent and committed before the next is read, so
-/// the branches a short dispatch did send carry on. Left out it is 1 — the behaviour every payload
-/// authored before it had. It is last only because a positional default must be.
+/// the dispatch to count as an import, and it is a hold (2026-11-08): when fewer are waiting the
+/// dispatch is Cancelled, on the same path as an empty topic, without reading any, and they stay on
+/// the topic for a later dispatch. Left out it is 1 — the behaviour every payload authored before it
+/// had. It is last only because a positional default must be.
+/// </para>
+/// <para>
+/// <c>idleTimeoutSeconds</c> bounds each broker wait. It no longer decides that a topic is empty or
+/// ended — the count of waiting records does — so it is spent only when the broker is slow or the
+/// count overstated the records.
 /// </para>
 /// <para>
 /// <c>maxMessageCount</c> was <c>messageCount</c> until 2026-11-05. Unlike the broker list below, the

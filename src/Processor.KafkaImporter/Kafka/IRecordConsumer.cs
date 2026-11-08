@@ -22,6 +22,18 @@ public interface IRecordConsumer : IDisposable
     /// <returns>True when a partition is assigned.</returns>
     bool WaitForAssignment(TimeSpan timeout);
 
+    /// <summary>
+    /// The records waiting for this group on the partitions assigned to this consumer: each one's high
+    /// watermark less its committed offset, summed. Asked after <see cref="WaitForAssignment"/>.
+    /// <para>
+    /// <b>An upper bound.</b> Compaction gaps and transaction markers take offsets and are not records,
+    /// so fewer may be read than this reports; never more, because a record produced after the count
+    /// lies beyond the watermark it was taken at. It covers only this consumer's partitions.
+    /// </para>
+    /// <para>Throws against an absent broker, as the assignment check does.</para>
+    /// </summary>
+    long Backlog(TimeSpan timeout);
+
     /// <summary>Null when no record arrived within <paramref name="timeout"/>.</summary>
     KafkaRecord? Consume(TimeSpan timeout);
 

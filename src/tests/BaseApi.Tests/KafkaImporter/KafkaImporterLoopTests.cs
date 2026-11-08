@@ -541,14 +541,121 @@ public sealed class KafkaImporterLoopTests
     }
 
     /// <summary>
-    /// Short of the minimum is the same Cancelled an empty topic reports. The branches already sent
-    /// were committed and carry on: the floor reports a shortfall, it does not withdraw.
+    /// The floor is a hold: short of the minimum nothing is read, sent or committed, so the records
+    /// wait on the topic for a dispatch that finds enough. Reported as the same Cancelled an empty
+    /// topic is.
     /// </summary>
     [Fact]
-    public async Task CancelsWhenFewerThanTheMinimumWereSent()
+    public async Task HoldsTheRecordsWhenFewerThanTheMinimumAreWaiting()
     {
         var consumer = new FakeRecordConsumer().WithRecords("value-a", "value-b");
         var (processor, sender, log) = Build(new FakeRecordConsumerFactory(consumer));
+
+        var cancelled = await Assert.ThrowsAsync<CancelledException>(() =>
+            processor.ExecuteAsync([], Payload(10, minMessageCount: 3), Guid.Empty, CancellationToken.None));
+
+        Assert.Contains("had 2 of the 3 record(s) required; nothing was sent", cancelled.Message);
+        Assert.Equal(0, consumer.ConsumeCalls);
+        Assert.Empty(consumer.Committed);
+        Assert.Contains("consumed 0/10 records; stopped because Held", Summary(log));
+        await sender.DidNotReceive().SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<ProcessedData>(),
+                                               Arg.Any<CancellationToken>(), Arg.Any<string?>());
+    }
+
+    /// <summary>A held dispatch leaves its records for the next one, which imports them once enough arrived.</summary>
+    [Fact]
+    public async Task AHeldRecordIsImportedByTheDispatchThatFindsTheMinimum()
+    {
+        var consumer = new FakeRecordConsumer().WithRecords("value-a", "value-b");
+        var (processor, sender, _) = Build(new FakeRecordConsumerFactory(consumer));
+
+        await Assert.ThrowsAsync<CancelledException>(() =>
+            processor.ExecuteAsync([], Payload(10, minMessageCount: 3), Guid.Empty, CancellationToken.None));
+
+        consumer.WithRecords("value-c");
+        var sends = await Run(processor, sender, messageCount: 10, minMessageCount: 3);
+
+        Assert.Equal(["value-a", "value-b", "value-c"], sends.Select(ValueIn));
+    }
+
+    /// <summary>
+    /// An empty topic is known from the count, so the dispatch never waits out a poll to find it.
+    /// </summary>
+    [Fact]
+    public async Task AnEmptyTopicIsCancelledWithoutPolling()
+    {
+        var consumer = new FakeRecordConsumer();
+        var (processor, _, log) = Build(new FakeRecordConsumerFactory(consumer));
+
+        var cancelled = await Assert.ThrowsAsync<CancelledException>(() =>
+            processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
+
+        Assert.Contains("had no records to import", cancelled.Message);
+        Assert.Equal(0, consumer.ConsumeCalls);
+        Assert.Contains("consumed 0/10 records; stopped because Drained", Summary(log));
+    }
+
+    /// <summary>
+    /// The loop stops at the counted end rather than polling past it: a record that arrived after
+    /// the count is the next dispatch's, and no idle timeout is spent finding the end.
+    /// </summary>
+    [Fact]
+    public async Task StopsAtTheCountedEndWithoutPollingPastIt()
+    {
+        var consumer = new FakeRecordConsumer { BacklogOverride = 2 }
+            .WithRecords("value-a", "value-b", "value-c");
+        var (processor, sender, log) = Build(new FakeRecordConsumerFactory(consumer));
+
+        var sends = await Run(processor, sender, messageCount: 10);
+
+        Assert.Equal(["value-a", "value-b"], sends.Select(ValueIn));
+        Assert.Equal(2, consumer.ConsumeCalls);
+        Assert.Contains("consumed 2/10 records; stopped because Drained", Summary(log));
+    }
+
+    /// <summary>
+    /// The count is an upper bound: compaction gaps and transaction markers take offsets and are not
+    /// records. When it is too high the poll's idle timeout still ends the dispatch.
+    /// </summary>
+    [Fact]
+    public async Task ACountAboveTheRecordsFallsBackToTheIdleTimeout()
+    {
+        var consumer = new FakeRecordConsumer { BacklogOverride = 5 }
+            .WithRecords("value-a", "value-b", "value-c");
+        var (processor, sender, log) = Build(new FakeRecordConsumerFactory(consumer));
+
+        var sends = await Run(processor, sender, messageCount: 10, minMessageCount: 3);
+
+        Assert.Equal(3, sends.Count);
+        Assert.Equal(4, consumer.ConsumeCalls);
+        Assert.Contains("consumed 3/10 records; stopped because Drained", Summary(log));
+    }
+
+    /// <summary>The count is part of opening the source: a fault there fails the step and drops the consumer.</summary>
+    [Fact]
+    public async Task FailsTheStepAndEvictsWhenTheCountFaults()
+    {
+        var consumer = new FakeRecordConsumer { BacklogThrows = true }.WithRecords("value-a");
+        var (processor, _, _) = Build(new FakeRecordConsumerFactory(consumer));
+
+        var failed = await Assert.ThrowsAsync<FailedException>(() =>
+            processor.ExecuteAsync([], Payload(10), Guid.Empty, CancellationToken.None));
+
+        Assert.Contains("opening records failed", failed.Message);
+        Assert.Equal(0, consumer.ConsumeCalls);
+        Assert.True(consumer.Disposed);
+    }
+
+    /// <summary>
+    /// A count that reaches the minimum can still come up short when some of the records are empty.
+    /// That residue keeps the old report: what was sent carries on, and the dispatch is Cancelled.
+    /// </summary>
+    [Fact]
+    public async Task CancelsWhenSkippedRecordsLeaveTheDispatchShortOfTheMinimum()
+    {
+        var consumer = new FakeRecordConsumer().WithRecords("value-a", "value-b");
+        consumer.WithTombstone();
+        var (processor, sender, _) = Build(new FakeRecordConsumerFactory(consumer));
         var sends = new List<ProcessedData>();
         await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
@@ -556,10 +663,9 @@ public sealed class KafkaImporterLoopTests
         var cancelled = await Assert.ThrowsAsync<CancelledException>(() =>
             processor.ExecuteAsync([], Payload(10, minMessageCount: 3), Guid.Empty, CancellationToken.None));
 
-        Assert.Contains("had 2 of the 3 record(s) required", cancelled.Message);
+        Assert.Contains("had 2 of the 3 record(s) required; the ones sent carry on", cancelled.Message);
         Assert.Equal(["value-a", "value-b"], sends.Select(ValueIn));
-        Assert.Equal(2, consumer.Committed.Count);
-        Assert.Contains("consumed 2/10 records; stopped because Drained", Summary(log));
+        Assert.Equal(3, consumer.Committed.Count);
     }
 
     [Fact]
