@@ -136,7 +136,8 @@ public static class ProcessorHost
         // The window is read off this clock; a test replaces it.
         builder.Services.TryAddSingleton(TimeProvider.System);
 
-        // Task 4: the trail source.
+        // A typed client: one HttpClient per resolution from the shared handler pool.
+        builder.Services.AddHttpClient<IExecutionTrailSource, ElasticTrailSource>();
 
         builder.Services.AddSingleton<BaseProcessor.Core.Processing.BaseProcessor, NapoleProcessor>();
 
