@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using BaseProcessor.Core.Processing;
+using Messaging.Contracts;
 using Microsoft.Extensions.Options;
 using Processor.Napole;
 using Xunit;
@@ -54,10 +55,31 @@ public sealed class ElasticTrailSourceTests
 
         var b = JsonDocument.Parse(handler.Requests[1].Body).RootElement;
         Assert.Equal(
-            [$"workflow={Workflow}", "trailFrom=2026-11-08T10:30:00.000Z", "trailTo=2026-11-08T11:00:00.000Z"],
+            [$"workflow={Workflow}", "trailFrom=2026-11-08T10:30:00.000Z", "trailTo=2026-11-08T11:00:00.000Z",
+             $"advanced={OutcomeTemplates.Advanced}", $"branchEnds={OutcomeTemplates.BranchEnds}", $"terminal={StepRoles.Terminal}"],
             Params(b));
         Assert.Contains($"\"{Good}\"", b.GetProperty("query").GetString(), StringComparison.Ordinal);
         Assert.Contains($"\"{BadExt}\"", b.GetProperty("query").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BranchesCloseOnTheOrchestratorsOutcomeContractNotOnLogText()
+    {
+        // A branch is returned only once the orchestrator has HANDLED its outcome -- one Advanced or
+        // BranchEnds record per outcome, a published contract -- not when the processor logs "the step
+        // returned", which it writes before the orchestrator has seen the result (final review,
+        // Important 2). The templates travel as params, from the contract's own constants.
+        var handler = new ScriptedHandler(Ids(Good), Trails($"""[1,2,0,0,0,"{Good}"]"""));
+
+        await Read(Source(handler));
+
+        var b = JsonDocument.Parse(handler.Requests[1].Body).RootElement;
+        var query = b.GetProperty("query").GetString()!;
+        Assert.Contains($"advanced={OutcomeTemplates.Advanced}", Params(b));
+        Assert.Contains($"branchEnds={OutcomeTemplates.BranchEnds}", Params(b));
+        Assert.Contains($"terminal={StepRoles.Terminal}", Params(b));
+        Assert.DoesNotContain("the step returned", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("handed off", query, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using BaseProcessor.Core.Processing;
+using Messaging.Contracts;
 using Microsoft.Extensions.Options;
 
 namespace Processor.Napole;
@@ -12,14 +13,19 @@ namespace Processor.Napole;
 /// <para>
 /// <b>A</b> selects the executions this tick owns -- the kafka-importer's import lines in the window.
 /// <b>B</b> counts each one's trail: imports, terminal records, Failed and Cancelled outcomes, and the
-/// branches handed off that never came back. Spec §4.3 had a third statement for the outcomes; the
-/// report needs no reasons or step names, so they fold into B as counts.
+/// branches dispatched whose outcome the orchestrator has not handled yet. Spec §4.3 had a third
+/// statement for the outcomes; the report needs no reasons or step names, so they fold into B as counts.
 /// </para>
 /// <para>
-/// <b>Open branches are matched by entry id, not counted.</b> B groups by execution and by branch
-/// (a hand-off's <c>NextEntryId</c>, a return's <c>EntryId</c>) first, so a step redelivered and
-/// logging its return twice is still one returned branch. A strict count would leave that run
-/// unfinished forever.
+/// <b>Open branches come from the orchestrator's outcome contract.</b> It writes exactly one
+/// <see cref="OutcomeTemplates.Advanced"/> or <see cref="OutcomeTemplates.BranchEnds"/> record per
+/// outcome it handles, and <c>Advanced</c> says how many successors it dispatched. So the steps
+/// dispatched are the entry step (its import) plus every <c>SuccessorCount</c>, the outcomes handled are
+/// the two records counted, and the difference is what is still in flight. A branch counts as returned
+/// only once the orchestrator has handled it -- after any Failed record and any further hand-off are
+/// written, so a late failure cannot hide behind an early "returned". A duplicated outcome makes the
+/// difference negative, which reads as closed; a duplicated dispatch leaves it positive, so the run is
+/// left out rather than miscounted.
 /// </para>
 /// <para>
 /// <b>Transport and failure mapping as <c>Processor.Analyst</c>'s <c>ElasticPanelSource</c></b>, with
@@ -72,7 +78,9 @@ public sealed class ElasticTrailSource : IExecutionTrailSource
 
         var (trailFrom, trailTo) = window.TrailSpan(trail);
         var rows = await QueryAsync("trails", Trails(ids), ct,
-            ("workflow", workflowId.ToString("D")), ("trailFrom", Iso(trailFrom)), ("trailTo", Iso(trailTo))).ConfigureAwait(false);
+            ("workflow", workflowId.ToString("D")), ("trailFrom", Iso(trailFrom)), ("trailTo", Iso(trailTo)),
+            ("advanced", OutcomeTemplates.Advanced), ("branchEnds", OutcomeTemplates.BranchEnds),
+            ("terminal", StepRoles.Terminal)).ConfigureAwait(false);
 
         var found = rows.ToDictionary(
             r => Guid.Parse(Text(r, "attributes.ExecutionId")),
@@ -98,16 +106,16 @@ public sealed class ElasticTrailSource : IExecutionTrailSource
           AND @timestamp >= ?trailFrom AND @timestamp < ?trailTo
         | EVAL svc = resource.attributes.service.name, fmt = TO_STRING(`attributes.{OriginalFormat}`)
         | EVAL isImport = CASE(svc == "kafka-importer" AND attributes.Record IS NOT NULL, 1, 0),
-               isHandoff = CASE(svc == "orchestrator" AND STARTS_WITH(fmt, "{{TrailRecords.HandedOff}}"), 1, 0),
-               isReturn = CASE(svc != "orchestrator" AND STARTS_WITH(fmt, "{{TrailRecords.StepReturned}}"), 1, 0),
-               isTerminal = CASE(attributes.StepRole == "terminal", 1, 0),
+               isAdvanced = CASE(svc == "orchestrator" AND fmt == ?advanced, 1, 0),
+               isEnded = CASE(svc == "orchestrator" AND fmt == ?branchEnds, 1, 0),
+               successors = CASE(svc == "orchestrator" AND fmt == ?advanced, TO_LONG(attributes.SuccessorCount), 0),
+               isTerminal = CASE(attributes.StepRole == ?terminal, 1, 0),
                isFailed = CASE(svc == "orchestrator" AND attributes.Result == "Failed", 1, 0),
                isCancelled = CASE(svc == "orchestrator" AND attributes.Result == "Cancelled", 1, 0)
-        | EVAL branch = CASE(isHandoff == 1, attributes.NextEntryId, isReturn == 1, attributes.EntryId, "-")
         | STATS imports = SUM(isImport), terminals = SUM(isTerminal), failed = SUM(isFailed), cancelled = SUM(isCancelled),
-                handedOff = MAX(isHandoff), returned = MAX(isReturn) BY attributes.ExecutionId, branch
-        | STATS imports = SUM(imports), terminals = SUM(terminals), failed = SUM(failed), cancelled = SUM(cancelled),
-                openBranches = SUM(CASE(branch != "-" AND handedOff == 1 AND returned == 0, 1, 0)) BY attributes.ExecutionId
+                handled = SUM(isAdvanced) + SUM(isEnded), dispatched = SUM(successors) BY attributes.ExecutionId
+        | EVAL openBranches = imports + dispatched - handled
+        | KEEP imports, terminals, failed, cancelled, openBranches, attributes.ExecutionId
         | LIMIT {{TrailRecords.RowLimit}}
         """;
 

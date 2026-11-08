@@ -23,6 +23,17 @@ public sealed class RoundTripRulesTests
     public void AWhitelistCancelIsCancelled() => Assert.Equal(RoundTrip.Cancelled, Decide(1, 0, 0, 0, 1));
 
     [Fact]
+    public void ACancelWithABranchStillOpenIsUnfinished()
+        // Branch A cancelled, branch B still in flight: B may yet fail, which would make it Failed, so
+        // it is not a terminated round trip and must not be counted as discarded (final review, Important 1).
+        => Assert.Equal(RoundTrip.Unfinished, Decide(1, 1, 0, 0, 1));
+
+    [Fact]
+    public void AFailureWithABranchStillOpenIsFailed()
+        // Nothing a still-open branch does can change a verdict the first failure already decided.
+        => Assert.Equal(RoundTrip.Failed, Decide(1, 1, 0, 1, 0));
+
+    [Fact]
     public void AFanOutWithOneOpenBranchIsUnfinished()
         // One document exported, the other branch still in flight: not a full round trip yet.
         => Assert.Equal(RoundTrip.Unfinished, Decide(1, 1, 1, 0, 0));
