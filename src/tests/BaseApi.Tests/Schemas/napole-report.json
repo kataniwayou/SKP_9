@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Napole report v1",
+  "description": "One tick's round-trip counts for one watched workflow. Field names are the external contract's, misspellings included. Counts are per terminated execution: outputCount + failedCount + discardedCount = inputCount.",
+  "type": "object",
+  "properties": {
+    "commonDimentions": {
+      "type": "object",
+      "properties": {
+        "reporterComponentName":    { "type": "string", "minLength": 1 },
+        "reporterSubComponentName": { "type": "string", "minLength": 1 },
+        "reporterNetworkName":      { "type": "string", "minLength": 1 },
+        "reportFromTime": { "type": "integer", "minimum": 0, "description": "Window start, epoch milliseconds." },
+        "reportToTime":   { "type": "integer", "minimum": 0, "description": "Window end, epoch milliseconds." },
+        "insertionTime":  { "type": "integer", "minimum": 0, "description": "When the report was built, epoch milliseconds." },
+        "srcCode": { "type": "string", "minLength": 1 },
+        "sagCode": { "type": "string", "minLength": 1 },
+        "timStampHour": { "type": "integer", "minimum": 0, "description": "UTC hour of reportFromTime as YYYYMMDDHH." }
+      },
+      "required": ["reporterComponentName", "reporterSubComponentName", "reporterNetworkName", "reportFromTime",
+                   "reportToTime", "insertionTime", "srcCode", "sagCode", "timStampHour"],
+      "additionalProperties": false
+    },
+    "mandatoryMeasurments": {
+      "type": "object",
+      "properties": {
+        "inputCount":     { "type": "integer", "minimum": 0, "description": "Executions imported in the window whose round trip terminated." },
+        "outputCount":    { "type": "integer", "minimum": 0, "description": "Completed the full round trip." },
+        "discardedCount": { "type": "integer", "minimum": 0, "description": "Cancelled during the round trip, e.g. not on the whitelist." },
+        "failedCount":    { "type": "integer", "minimum": 0, "description": "A step failed." }
+      },
+      "required": ["inputCount", "outputCount", "discardedCount", "failedCount"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["commonDimentions", "mandatoryMeasurments"],
+  "additionalProperties": false
+}
