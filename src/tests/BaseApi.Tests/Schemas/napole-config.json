@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Napole step payload v1",
+  "type": "object",
+  "properties": {
+    "watchedWorkflowId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "The workflow whose executions are reported. Every query Napole issues is filtered to it, which also keeps Napole's own runs out of the counts. The pattern is what enforces UUID shape -- ProcessorJsonSchemaValidator does not set RequireFormatValidation, so format:uuid alone validates any string."
+    },
+    "windowMinutes": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The time frame: each tick reports the executions imported in the windowMinutes-long grid slot behind the lag. Keeping it equal to the workflow's cron interval is the operator's responsibility; when the two disagree, executions are counted in a nearby report."
+    }
+  },
+  "required": ["watchedWorkflowId", "windowMinutes"],
+  "additionalProperties": false
+}

@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The scheduled round-trip reporter. On each tick it counts, from Elasticsearch, how the watched
+    workflow's executions imported in the last window ended, and hands one count report to its
+    successor. Like every other processor here it carries no identity, liveness, broker or Redis
+    code - AddBaseProcessor folds all of it in.
+
+    Common properties (net8.0, Nullable, ImplicitUsings, TreatWarningsAsErrors) come from
+    Directory.Build.props, and package versions from Directory.Packages.props - never declare
+    either here.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Processor.Napole</RootNamespace>
+    <AssemblyName>Processor.Napole</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The window, the verdict rules and the trail source are this processor's construction. The
+         tests drive them directly, as they do the Analyst's. -->
+    <InternalsVisibleTo Include="BaseApi.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The worker SDK does not copy appsettings.json on its own. -->
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The package, not a ProjectReference: SourceHash.targets ships in the package's build/
+         folder and stamps the hash on THIS assembly, the entry assembly the runtime reader reads. -->
+    <PackageReference Include="BaseProcessor.Core" VersionOverride="[1.0.0]" />
+
+    <!-- AddHttpClient<T>() for ElasticTrailSource. Vendored in nugets/ with its closure, as the
+         Analyst's is, because the Docker build is offline. -->
+    <PackageReference Include="Microsoft.Extensions.Http" />
+  </ItemGroup>
+
+</Project>

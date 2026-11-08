@@ -121,6 +121,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Processor.Analyst\Processor.Analyst.csproj" />
+    <ProjectReference Include="..\..\Processor.Napole\Processor.Napole.csproj" />
   </ItemGroup>
 
 </Project>
