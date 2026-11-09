@@ -18,11 +18,12 @@ namespace Processor.OutcomeRecorder;
 /// The reason lives in the failing or cancelling step's own log line, resolved by correlation id.
 /// </para>
 /// <para>
-/// <b>It reads nothing and queries nothing.</b> It does not rely on the predecessor's data: a Failed
-/// or Cancelled predecessor's successors get an empty key (<c>""</c> — no data), and a Completed
-/// edge gets a COPY of the predecessor's output, which this processor leaves unread. It does
-/// not query Elasticsearch either — it runs milliseconds after the outcome, and the line carrying
-/// the reason is the last one the predecessor's pod writes and the furthest from being indexed.
+/// <b>It reads nothing but its own note, and queries nothing.</b> It does not rely on the
+/// predecessor's data: a Failed or Cancelled predecessor's successors get an empty key (<c>""</c> —
+/// no data), and a Completed edge gets a COPY of the predecessor's output, which this processor
+/// leaves unread. It does not query Elasticsearch either — it runs milliseconds after the outcome,
+/// and the line carrying the reason is the last one the predecessor's pod writes and the furthest
+/// from being indexed.
 /// </para>
 /// </summary>
 internal sealed class OutcomeRecorderProcessor(
@@ -33,8 +34,9 @@ internal sealed class OutcomeRecorderProcessor(
     protected override async Task ProcessAsync(
         byte[] data, OutcomeRecorderConfig? config, Guid executionId, CancellationToken ct)
     {
-        // `data` and `config` are both deliberately unread. See OutcomeRecorderConfig for why a null
-        // payload must not be rejected, and the type remarks above for the cargo.
+        // `data` is deliberately unread, and of `config` only the optional note is. See
+        // OutcomeRecorderConfig for why a null payload must not be rejected, and the type remarks
+        // above for the cargo.
 
         var record = new OutcomeRecord(
             // "N". The one formatting decision in this assembly that can silently break the feature.
@@ -45,7 +47,9 @@ internal sealed class OutcomeRecorderProcessor(
             WorkflowId.ToString("D"),
             StepId.ToString("D"),
             ProcessorId.ToString("D"),
-            clock.GetUtcNow());
+            clock.GetUtcNow(),
+            // Blank is no note: omitted, not written as "", so `exists: note` stays meaningful.
+            string.IsNullOrWhiteSpace(config?.Note) ? null : config.Note);
 
         // THE LINEAGE THIS BRANCH TRAVELS ON, which is NOT always the one the record reports.
         //
@@ -61,9 +65,9 @@ internal sealed class OutcomeRecorderProcessor(
         // Conflating the two would have the record name a lineage the predecessor never had.
         var lineage = executionId == Guid.Empty ? NewExecutionId() : executionId;
 
-        // Ids only, never the cargo. RecordedExecutionId rather than ExecutionId: the dispatch scope
-        // already carries an ExecutionId attribute, and reusing the name would collide with it on
-        // the record.
+        // Ids only, never the cargo -- nor the note, which is the author's text for the record.
+        // RecordedExecutionId rather than ExecutionId: the dispatch scope already carries an
+        // ExecutionId attribute, and reusing the name would collide with it on the record.
         //
         // TWO TEMPLATES, NOT ONE WITH A SENTINEL. A prose stand-in for the absent id -- "(none)" --
         // would put text into a structured attribute, which is precisely what OutcomeRecord refuses

@@ -154,6 +154,39 @@ public sealed class ProcessorOutcomeRecorderTests
     }
 
     [Fact]
+    public async Task CarriesTheNoteFromThePayload()
+    {
+        var record = Record(await Run([], E, """{"note":"billing feed"}"""));
+
+        Assert.Equal("billing feed", record.GetProperty("note").GetString());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("{}")]
+    [InlineData("""{"note":null}""")]
+    [InlineData("""{"note":""}""")]
+    [InlineData("""{"note":"   "}""")]
+    public async Task OmitsTheNoteWhenThereIsNone(string payload)
+    {
+        // Omitted rather than "", for the reason the execution id is: `exists: note` has to find
+        // only the records that carry one.
+        var record = Record(await Run([], E, payload));
+
+        Assert.False(record.TryGetProperty("note", out _));
+    }
+
+    [Fact]
+    public async Task TheLogLineDoesNotCarryTheNote()
+    {
+        var (_, log) = await RunLogging([], E, """{"note":"billing feed"}""");
+
+        var line = Assert.Single(log.Records, r => r.Message.Contains("recorded a step outcome"));
+
+        Assert.DoesNotContain("billing feed", line.Message);
+    }
+
+    [Fact]
     public async Task IgnoresTheInputItWasHanded()
     {
         // The orchestrator hands over the predecessor's input blob. It is neither parsed nor

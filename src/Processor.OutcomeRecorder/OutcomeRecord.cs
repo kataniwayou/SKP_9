@@ -51,13 +51,20 @@ namespace Processor.OutcomeRecorder;
 /// bound a query window and to tell two records in one lineage apart; not a clock to order events
 /// by.
 /// </param>
+/// <param name="Note">
+/// The step payload's note, exactly as the workflow author wrote it, or <b>null when there is
+/// none</b> — omitted from the JSON, like <paramref name="ExecutionId"/>, so that
+/// <c>exists: note</c> matches only the records that carry one. It describes the recorder step, not
+/// the outcome: every record this step writes carries the same note.
+/// </param>
 internal sealed record OutcomeRecord(
     string CorrelationId,
     string? ExecutionId,
     string WorkflowId,
     string StepId,
     string ProcessorId,
-    DateTimeOffset RecordedAtUtc);
+    DateTimeOffset RecordedAtUtc,
+    string? Note);
 
 /// <summary>The one serializer configuration for the outcome record.</summary>
 internal static class OutcomeRecordJson
@@ -70,7 +77,7 @@ internal static class OutcomeRecordJson
     /// <para>
     /// <b><c>WhenWritingNull</c>, unlike every other record in this solution.</b> An absent
     /// execution id must be ABSENT rather than null, so that a consumer distinguishes "this outcome
-    /// had no lineage" from "this field was not populated".
+    /// had no lineage" from "this field was not populated". An absent note follows the same rule.
     /// </para>
     /// </summary>
     public static readonly JsonSerializerOptions Options = new()
