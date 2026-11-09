@@ -25,10 +25,6 @@ public sealed class NapoleHostTests
         ["RabbitMq:Username"]       = "guest",
         ["RabbitMq:Password"]       = "guest",
         ["Napole:ElasticBaseUrl"]   = "http://localhost:19200",
-        ["Napole:Report:ReporterComponentName"]    = "myDepartment",
-        ["Napole:Report:ReporterNetworkName"]      = "myNetwork",
-        ["Napole:Report:SrcCode"]                  = "928",
-        ["Napole:Report:SagCode"]                  = "LLL",
     };
 
     private static IHost Host(Dictionary<string, string?> configuration)
@@ -41,33 +37,18 @@ public sealed class NapoleHostTests
 
         Assert.IsType<NapoleProcessor>(
             host.Services.GetRequiredService<BaseProcessor.Core.Processing.BaseProcessor>());
-        Assert.Equal("LLL", host.Services.GetRequiredService<IOptions<NapoleOptions>>().Value.Report.SagCode);
         Assert.Equal(60, host.Services.GetRequiredService<IOptions<NapoleOptions>>().Value.LagSeconds);
         Assert.Equal(10, host.Services.GetRequiredService<IOptions<NapoleOptions>>().Value.TrailMinutes);
     }
 
     [Fact]
-    public async Task AMissingReportDimensionFailsAtStart()
+    public void ThePodNeedsNoReportDimensions()
     {
-        // A dimension is copied into every report, so a pod without one must never start: the
-        // alternative is a report the downstream system cannot attribute, on every tick.
-        var configuration = Configuration();
-        configuration.Remove("Napole:Report:SagCode");
-        using var host = Host(configuration);
-
-        var ex = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync(TestContext.Current.CancellationToken));
-
-        Assert.Contains("SagCode", ex.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void TheSubComponentIsNoLongerAPodSetting()
-    {
-        // It moved to the payload (sections spec §3). Options validation runs on first read, so a pod
-        // that still required it would throw here.
+        // All five moved to the step payload (reach spec §2.5). Options validation runs on first read,
+        // so a pod that still required one would throw here.
         using var host = Host(Configuration());
 
-        Assert.Equal("myDepartment", host.Services.GetRequiredService<IOptions<NapoleOptions>>().Value.Report.ReporterComponentName);
+        Assert.Equal("http://localhost:19200", host.Services.GetRequiredService<IOptions<NapoleOptions>>().Value.ElasticBaseUrl);
     }
 
     [Fact]

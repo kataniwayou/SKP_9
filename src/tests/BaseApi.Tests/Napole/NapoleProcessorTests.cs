@@ -44,10 +44,15 @@ public sealed class NapoleProcessorTests
     internal static readonly Guid FromStep = Guid.Parse("95225f8c-56b2-494b-a59d-d9b34fbde441");
     internal static readonly Guid ToStep = Guid.Parse("06f1c5fd-bdfc-43ae-93c9-5bde2995e167");
 
-    /// <summary>The whole-run section of the split chain (sections spec §3), with one field overridable.</summary>
+    /// <summary>The whole-run section of the split chain with the dev dimensions (reach spec §2.5), one field overridable.</summary>
     internal static NapoleConfig Config(
-        Guid? workflow = null, Guid? from = null, Guid? to = null, int window = 10, string subComponent = ReportBuilderTests.SubComponent)
-        => new(workflow ?? Watched, from ?? FromStep, to ?? ToStep, window, subComponent);
+        Guid? workflow = null, Guid? from = null, Guid? to = null, int window = 10, ReportDimensions? dimensions = null)
+    {
+        var d = dimensions ?? ReportBuilderTests.Dimensions();
+        return new(
+            workflow ?? Watched, from ?? FromStep, to ?? ToStep, window,
+            d.ReporterComponentName, d.ReporterSubComponentName, d.ReporterNetworkName, d.SrcCode, d.SagCode);
+    }
 
     // (roots, openBranches, failed, cancelled, reached)
     internal static ExecutionTrail Complete() => new(Guid.NewGuid(), 1, 0, 0, 0, 2);
@@ -64,7 +69,6 @@ public sealed class NapoleProcessorTests
                 ElasticBaseUrl = "http://es.test",
                 LagSeconds = 60,
                 TrailMinutes = 10,
-                Report = ReportBuilderTests.Dimensions(),
             }),
             new FakeTimeProvider(ReportBuilderTests.InsertedAt),
             logger ?? NullLogger<NapoleProcessor>.Instance);
@@ -76,7 +80,11 @@ public sealed class NapoleProcessorTests
             fromStepId = FromStep,
             toStepId = ToStep,
             windowMinutes = window,
-            reporterSubComponentName = ReportBuilderTests.SubComponent,
+            reporterComponentName = "myDepartment",
+            reporterSubComponentName = "myTeam",
+            reporterNetworkName = "myNetwork",
+            srcCode = "928",
+            sagCode = "LLL",
         });
 
     [Fact]
@@ -113,7 +121,7 @@ public sealed class NapoleProcessorTests
         Assert.Equal(1794135060412, report.CommonDimentions.InsertionTime);
         Assert.Equal("myDepartment", report.CommonDimentions.ReporterComponentName);
         Assert.Equal("LLL", report.CommonDimentions.SagCode);
-        Assert.Equal(ReportBuilderTests.SubComponent, report.CommonDimentions.ReporterSubComponentName);
+        Assert.Equal("myTeam", report.CommonDimentions.ReporterSubComponentName);
     }
 
     [Fact]
@@ -181,17 +189,41 @@ public sealed class NapoleProcessorTests
     }
 
     [Theory]
-    [InlineData("")]
-    [InlineData("  ")]
-    public async Task AWhitespaceSubComponentFails(string subComponent)
+    [InlineData("reporterComponentName")]
+    [InlineData("reporterSubComponentName")]
+    [InlineData("reporterNetworkName")]
+    [InlineData("srcCode")]
+    [InlineData("sagCode")]
+    public async Task AWhitespaceDimensionFails(string field)
     {
-        // The schema refuses "" at publish; a payload row edited by hand, or "  ", gets here.
+        // The schema refuses "" at publish; "  ", or a payload row edited by hand, gets here.
+        var d = ReportBuilderTests.Dimensions();
+        d = field switch
+        {
+            "reporterComponentName" => d with { ReporterComponentName = "  " },
+            "reporterSubComponentName" => d with { ReporterSubComponentName = "  " },
+            "reporterNetworkName" => d with { ReporterNetworkName = "  " },
+            "srcCode" => d with { SrcCode = "  " },
+            _ => d with { SagCode = "  " },
+        };
         var processor = Processor(new FakeTrailSource(Complete()));
 
         var ex = await Assert.ThrowsAsync<FailedException>(
-            () => processor.ReportAsync(Config(subComponent: subComponent), TestContext.Current.CancellationToken));
+            () => processor.ReportAsync(Config(dimensions: d), TestContext.Current.CancellationToken));
 
-        Assert.Contains("reporterSubComponentName", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(field, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheReportCarriesThePayloadsDimensions()
+    {
+        var mine = new ReportDimensions("dept-x", "split-whole-run", "net-y", "111", "ZZZ");
+
+        var report = await Processor(new FakeTrailSource(Complete()))
+            .ReportAsync(Config(dimensions: mine), TestContext.Current.CancellationToken);
+
+        var c = report!.CommonDimentions;
+        Assert.Equal(mine, new ReportDimensions(c.ReporterComponentName, c.ReporterSubComponentName, c.ReporterNetworkName, c.SrcCode, c.SagCode));
     }
 
     [Fact]

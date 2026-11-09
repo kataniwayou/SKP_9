@@ -114,21 +114,13 @@ public static class ProcessorHost
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
 
-        // Infrastructure and four report dimensions come from configuration; the section, the time
-        // frame and reporterSubComponentName, which names the section, from the step payload. Validated at start, not at first use: a pod missing a dimension or the ES address must not
-        // go ready and then fail -- or worse, report -- on every tick.
+        // Only infrastructure comes from configuration: the section, the time frame and the five report
+        // dimensions are the step payload (reach spec §2.5). Validated at start, not at first use: a pod
+        // missing the ES address must not go ready and then fail every tick.
         builder.Services.AddOptions<NapoleOptions>()
             .Bind(builder.Configuration.GetSection(NapoleOptions.Section))
             .Validate(o => !string.IsNullOrWhiteSpace(o.ElasticBaseUrl),
                 $"{NapoleOptions.Section}:{nameof(NapoleOptions.ElasticBaseUrl)} is required")
-            .Validate(o => !string.IsNullOrWhiteSpace(o.Report.ReporterComponentName),
-                $"{NapoleOptions.Section}:Report:{nameof(ReportDimensions.ReporterComponentName)} is required")
-            .Validate(o => !string.IsNullOrWhiteSpace(o.Report.ReporterNetworkName),
-                $"{NapoleOptions.Section}:Report:{nameof(ReportDimensions.ReporterNetworkName)} is required")
-            .Validate(o => !string.IsNullOrWhiteSpace(o.Report.SrcCode),
-                $"{NapoleOptions.Section}:Report:{nameof(ReportDimensions.SrcCode)} is required")
-            .Validate(o => !string.IsNullOrWhiteSpace(o.Report.SagCode),
-                $"{NapoleOptions.Section}:Report:{nameof(ReportDimensions.SagCode)} is required")
             .ValidateOnStart();
 
         // The window is read off this clock; a test replaces it.

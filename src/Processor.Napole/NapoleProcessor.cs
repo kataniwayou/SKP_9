@@ -34,7 +34,8 @@ public sealed class NapoleProcessor(
         if (config is null)
         {
             throw new FailedException(
-                "Napole needs a step payload naming watchedWorkflowId, fromStepId, toStepId, windowMinutes and reporterSubComponentName");
+                "Napole needs a step payload naming watchedWorkflowId, fromStepId, toStepId, windowMinutes, reporterComponentName, "
+                + "reporterSubComponentName, reporterNetworkName, srcCode and sagCode");
         }
 
         var report = await ReportAsync(config, ct).ConfigureAwait(false);
@@ -79,9 +80,19 @@ public sealed class NapoleProcessor(
             throw new FailedException($"Napole's windowMinutes must be at least 1; the payload named {config.WindowMinutes}");
         }
 
-        if (string.IsNullOrWhiteSpace(config.ReporterSubComponentName))
+        foreach (var (name, value) in new[]
         {
-            throw new FailedException("Napole's reporterSubComponentName is empty");
+            ("reporterComponentName", config.ReporterComponentName),
+            ("reporterSubComponentName", config.ReporterSubComponentName),
+            ("reporterNetworkName", config.ReporterNetworkName),
+            ("srcCode", config.SrcCode),
+            ("sagCode", config.SagCode),
+        })
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new FailedException($"Napole's {name} is empty");
+            }
         }
 
         var window = WindowFor(config);
@@ -102,7 +113,7 @@ public sealed class NapoleProcessor(
 
         var verdicts = trails.Select(RoundTripRules.Decide).ToList();
         var report = ReportBuilder.Build(
-            window, verdicts, options.Value.Report, config.ReporterSubComponentName, clock.GetUtcNow());
+            window, verdicts, ReportDimensions.Of(config), clock.GetUtcNow());
 
         if (report is { } r)
         {

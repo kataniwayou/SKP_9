@@ -11,8 +11,8 @@ public sealed class NapoleConfigSchemaTests
     private static string Definition()
         => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Schemas", "napole-config.json"));
 
-    // Spec §3: the whole-run section of the split chain, named as the pod named it before.
-    private const string WellFormed = """{"watchedWorkflowId":"8cfdbcdb-a7e0-4a7d-9b4d-e4120ccacf02","fromStepId":"95225f8c-56b2-494b-a59d-d9b34fbde441","toStepId":"06f1c5fd-bdfc-43ae-93c9-5bde2995e167","windowMinutes":10,"reporterSubComponentName":"split-whole-run"}""";
+    // Reach spec §2.5: the whole-run section of the split chain, with the values the pod sent before.
+    private const string WellFormed = """{"watchedWorkflowId":"8cfdbcdb-a7e0-4a7d-9b4d-e4120ccacf02","fromStepId":"95225f8c-56b2-494b-a59d-d9b34fbde441","toStepId":"06f1c5fd-bdfc-43ae-93c9-5bde2995e167","windowMinutes":10,"reporterComponentName":"myDepartment","reporterSubComponentName":"myTeam","reporterNetworkName":"myNetwork","srcCode":"928","sagCode":"LLL"}""";
 
     /// <summary>The well-formed payload with one field replaced, or removed when <paramref name="value"/> is null.</summary>
     private static string With(string field, object? value)
@@ -99,4 +99,29 @@ public sealed class NapoleConfigSchemaTests
     [Fact]
     public void ASingleStepSectionValidates()
         => Assert.True(Validates(With("toStepId", "95225f8c-56b2-494b-a59d-d9b34fbde441")));
+
+    [Fact]
+    public void APayloadWithNoComponentIsRejected() => Assert.False(Validates(With("reporterComponentName", null)));
+
+    [Fact]
+    public void AnEmptyNetworkIsRejected() => Assert.False(Validates(With("reporterNetworkName", "")));
+
+    [Fact]
+    public void AnEmptySrcCodeIsRejected() => Assert.False(Validates(With("srcCode", "")));
+
+    [Fact]
+    public void APayloadWithNoSagCodeIsRejected() => Assert.False(Validates(With("sagCode", null)));
+
+    [Fact]
+    public void ThePropertiesAreInTheDecidedOrder()
+    {
+        // The section, the time frame, then the report's five dimensions in the user's order (reach spec §2.5).
+        string[] expected =
+            ["watchedWorkflowId", "fromStepId", "toStepId", "windowMinutes", "reporterComponentName",
+             "reporterSubComponentName", "reporterNetworkName", "srcCode", "sagCode"];
+        var schema = System.Text.Json.JsonDocument.Parse(Definition()).RootElement;
+
+        Assert.Equal(expected, schema.GetProperty("properties").EnumerateObject().Select(p => p.Name));
+        Assert.Equal(expected, schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()));
+    }
 }

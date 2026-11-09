@@ -77,17 +77,7 @@ spec:
             # How far either side of the window an execution's records are looked for (spec 4.1, 4.2).
             - name: Napole__TrailMinutes
               value: "10"
-            # Four of the five report dimensions, copied into every report's commonDimentions. Dev
-            # placeholders; required, so a pod missing one fails at startup. The fifth,
-            # reporterSubComponentName, names the section and is in each Napole step's payload.
-            - name: Napole__Report__ReporterComponentName
-              value: "myDepartment"
-            - name: Napole__Report__ReporterNetworkName
-              value: "myNetwork"
-            - name: Napole__Report__SrcCode
-              value: "928"
-            - name: Napole__Report__SagCode
-              value: "LLL"
+            # The five report dimensions are not pod settings: each Napole step's payload carries them.
           ports:
             - containerPort: 8081
           # Startup flips on the liveness loop's first beat, within moments of the host starting, so

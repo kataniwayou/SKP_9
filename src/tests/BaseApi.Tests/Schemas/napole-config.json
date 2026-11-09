@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Napole step payload v2",
+  "title": "Napole step payload v3",
   "type": "object",
   "properties": {
     "watchedWorkflowId": {
@@ -26,10 +26,30 @@
       "minimum": 1,
       "description": "The time frame: each tick reports the executions that reached fromStepId in the windowMinutes-long grid slot behind the lag. Keeping it equal to the workflow's cron interval is the operator's responsibility; when the two disagree, executions are counted in a nearby report."
     },
+    "reporterComponentName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The reporting component, e.g. the department. Copied unchanged into the report's commonDimentions. The operator owns it."
+    },
     "reporterSubComponentName": {
       "type": "string",
       "minLength": 1,
-      "description": "Copied into the report's commonDimentions.reporterSubComponentName. It names the section: two sections of one workflow share the window and the pod's four other dimensions, so this is what tells their reports apart. Keeping it unique per section is the operator's responsibility."
+      "description": "The reporting sub-component, e.g. the team or the section this step reports on. Copied unchanged into the report's commonDimentions. The operator owns it."
+    },
+    "reporterNetworkName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The reporting network. Copied unchanged into the report's commonDimentions. The operator owns it."
+    },
+    "srcCode": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The source code the downstream system attributes the report to, as a string. Copied unchanged into the report's commonDimentions. The operator owns it."
+    },
+    "sagCode": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The SAG code the downstream system attributes the report to. Copied unchanged into the report's commonDimentions. The operator owns it."
     }
   },
   "required": [
@@ -37,7 +57,11 @@
     "fromStepId",
     "toStepId",
     "windowMinutes",
-    "reporterSubComponentName"
+    "reporterComponentName",
+    "reporterSubComponentName",
+    "reporterNetworkName",
+    "srcCode",
+    "sagCode"
   ],
   "additionalProperties": false
 }

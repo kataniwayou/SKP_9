@@ -19,7 +19,6 @@ public static class ReportBuilder
         ReportWindow window,
         IEnumerable<RoundTrip> verdicts,
         ReportDimensions dimensions,
-        string reporterSubComponentName,
         DateTimeOffset insertedAt)
     {
         ArgumentNullException.ThrowIfNull(verdicts);
@@ -51,7 +50,7 @@ public static class ReportBuilder
         return new NapoleReport(
             new CommonDimentions(
                 dimensions.ReporterComponentName,
-                reporterSubComponentName,
+                dimensions.ReporterSubComponentName,
                 dimensions.ReporterNetworkName,
                 window.From.ToUnixTimeMilliseconds(),
                 window.To.ToUnixTimeMilliseconds(),
