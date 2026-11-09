@@ -37,7 +37,7 @@ public sealed class NapoleOpensItsOwnLineageTests
         using var report = JsonDocument.Parse(sent.Data);
         var m = report.RootElement.GetProperty("mandatoryMeasurments");
         Assert.Equal(2, m.GetProperty("inputCount").GetInt32());
-        Assert.Equal(1, m.GetProperty("outputCount").GetInt32());
+        Assert.Equal(2, m.GetProperty("outputCount").GetInt32()); // two arrivals at toStepId, no deduplication
         Assert.Equal(1, m.GetProperty("failedCount").GetInt32());
     }
 
