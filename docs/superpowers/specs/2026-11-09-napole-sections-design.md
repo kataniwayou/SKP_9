@@ -1,6 +1,6 @@
 # Napole sections — Design
 
-**Date:** 2026-11-09 · **Status:** draft for review · **Branch:** `feature/ems-exporter` (Napole merged 2026-11-09)
+**Date:** 2026-11-09 · **Status:** implemented (plan `2026-11-09-napole-sections.md`) · **Branch:** `feature/ems-exporter` (Napole merged 2026-11-09)
 **Revises:** [2026-11-08-napole-design.md](2026-11-08-napole-design.md). That document stays the
 authority for everything this one does not change, named per section below.
 
@@ -272,6 +272,19 @@ filefetcher `1f0e6725-b48e-42c6-ba13-ca8d4cd150cd`, archiveexpander
 archivecollapser `b8b926fe-fcf8-42db-9690-b8228050f95c`, filepersister
 `3f316aba-f13f-4401-88cb-11778192a414`, split-exporter `06f1c5fd-bdfc-43ae-93c9-5bde2995e167`,
 export-outcome `9b4224a5-b9a0-4b9f-a35f-d48dda62b15b`.
+
+**Live, after the rollout (2026-11-09):** three ticks of the deployed build, each recounted
+independently from raw records, with identical counts:
+
+| tick | section | window | input | output | failed | discarded |
+|---|---|---|---|---|---|---|
+| 08:05 | importer → split-exporter (whole run) | 07:50–08:00 | 80 | 16 | 48 | 16 |
+| 08:15 | importer → split-filefetcher (first hop) | 08:00–08:10 | 90 | 72 | 18 | 0 |
+| 08:25 | normalizer → split-archivecollapser (end mid-graph) | 08:10–08:20 | 48 | 16 | 16 | 16 |
+
+The whole-run report carried `reporterSubComponentName` "myTeam" from the payload. The first-hop
+section counted only the filefetcher's failures. The mid-graph section counted 32 completions at the
+collapser as 16 executions. The workflow is back on the whole-run section.
 
 ## 9. Tests (builder's call on the shape)
 
