@@ -71,7 +71,12 @@ Five fields. *The names `fromStepId` and `toStepId` are my call* ("maybe generic
   **(decided)**. `fromStepId == toStepId` is allowed: a one-step section (*my call*).
 - **The operator owns the ids (decided)**, as they already own matching the cron to the window
   (2026-11-08 §5). In particular:
-  - A wrong id makes the section match nothing, and the tick reports nothing (§6).
+  - A wrong `fromStepId` makes the section match nothing, and the tick reports nothing (§6). A
+    wrong `toStepId` does not: the runs are still selected, none reaches the end, and a report with
+    `outputCount` 0 goes out. Napole then logs a warning naming `toStepId`, because a failure-path
+    end looks the same and only the operator can tell them apart (final review).
+  - Swapped ids, or an end step that ran before the start, count nothing as output: only
+    completions at or after the section's start count.
   - Pointing `toStepId` at a failure-path step gives `outputCount` 0 every tick, because a failure
     in the section wins over reaching the end (§5.2). The live example is §8's last row.
 - Pod configuration (`Napole__*`: ES URL, lag, trail, and four of the report dimensions) is
@@ -183,6 +188,14 @@ Hence:
 - A failure on a **sibling branch that is outside the section**, timed between `fromT` and `toT`,
   marks the run failed.
 - With no `toT`, every failure after `fromT` counts, on any branch.
+- **The other direction, an under-count (found in the final review, not yet decided):** when two
+  branches are each heading for `toStepId`, branch A can complete there at t1 while branch B fails
+  later, at t2 > t1, before reaching it. Then `toT` = t1, B's failure falls outside the section, and
+  the run is **Complete**. If B had failed before t1, the same run would be **Failed**. Which one
+  Napole reports depends on which branch finished first. The live split chain never shows this,
+  because both branches of a run always end the same way. It needs the user's ruling: keep the time
+  bound and accept it, or count failures after `toT` too (and so count downstream failures again),
+  or bring in the step graph.
 
 Exact sections need the graph (step → successors) from BaseApi's workflow definition. Out of scope
 (§2); this design accepts the time bound.

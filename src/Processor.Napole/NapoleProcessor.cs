@@ -88,17 +88,33 @@ public sealed class NapoleProcessor(
         var trails = await source.ReadAsync(
             WatchedSection.Of(config), window, TimeSpan.FromMinutes(options.Value.TrailMinutes), ct).ConfigureAwait(false);
 
+        // A typo in toStepId does not empty the answer the way one in fromStepId does: the runs are still
+        // selected, nothing ever reaches the end, and a plausible report with output 0 goes out every
+        // tick (final review, Important 2). A failure-path end step looks the same, so this warns rather
+        // than fails: the operator decides which it is.
+        if (trails.Count > 0 && trails.All(t => t.Reached == 0))
+        {
+            logger.LogWarning(
+                "none of the {Selected} executions of {WatchedWorkflowId} that reached {FromStepId} in window "
+                + "{From:o}..{To:o} completed toStepId {ToStepId}; if that is not expected, check the step id",
+                trails.Count, config.WatchedWorkflowId, config.FromStepId, window.From, window.To, config.ToStepId);
+        }
+
+        var verdicts = trails.Select(RoundTripRules.Decide).ToList();
         var report = ReportBuilder.Build(
-            window, trails.Select(RoundTripRules.Decide), options.Value.Report, config.ReporterSubComponentName, clock.GetUtcNow());
+            window, verdicts, options.Value.Report, config.ReporterSubComponentName, clock.GetUtcNow());
 
         if (report is { } r)
         {
+            // Unfinished and bypassed runs are in no count; this line is the only place they show.
             var m = r.MandatoryMeasurments;
             logger.LogInformation(
                 "reported {InputCount} executions of {WatchedWorkflowId} {FromStepId}..{ToStepId}: {OutputCount} complete, "
-                + "{DiscardedCount} discarded, {FailedCount} failed, window {ReportFromTime}..{ReportToTime}",
+                + "{DiscardedCount} discarded, {FailedCount} failed; left out {UnfinishedCount} unfinished, "
+                + "{BypassedCount} bypassed; window {ReportFromTime}..{ReportToTime}",
                 m.InputCount, config.WatchedWorkflowId, config.FromStepId, config.ToStepId, m.OutputCount, m.DiscardedCount,
-                m.FailedCount, r.CommonDimentions.ReportFromTime, r.CommonDimentions.ReportToTime);
+                m.FailedCount, verdicts.Count(v => v == RoundTrip.Unfinished), verdicts.Count(v => v == RoundTrip.Bypassed),
+                r.CommonDimentions.ReportFromTime, r.CommonDimentions.ReportToTime);
         }
 
         return report;

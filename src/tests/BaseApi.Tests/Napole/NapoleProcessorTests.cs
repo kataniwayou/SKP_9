@@ -3,6 +3,7 @@ using BaseApi.Tests.Support;
 using BaseProcessor.Core.Processing;
 using Messaging.Contracts;
 using Messaging.Transport;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -24,6 +25,19 @@ internal sealed class FakeTrailSource(params ExecutionTrail[] trails) : IExecuti
     }
 }
 
+/// <summary>Keeps every line logged through it, with its level, so a test can read what the operator would see.</summary>
+internal sealed class CapturingLogger<T> : ILogger<T>
+{
+    internal List<(LogLevel Level, string Message)> Lines { get; } = [];
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        => Lines.Add((logLevel, formatter(state, exception)));
+}
+
 public sealed class NapoleProcessorTests
 {
     internal static readonly Guid Watched = Guid.Parse("8cfdbcdb-a7e0-4a7d-9b4d-e4120ccacf02");
@@ -42,7 +56,7 @@ public sealed class NapoleProcessorTests
     internal static ExecutionTrail Open() => new(Guid.NewGuid(), 1, 1, 0, 0, 1);
     internal static ExecutionTrail Bypassed() => new(Guid.NewGuid(), 1, 0, 0, 0, 0);
 
-    internal static NapoleProcessor Processor(IExecutionTrailSource source)
+    internal static NapoleProcessor Processor(IExecutionTrailSource source, ILogger<NapoleProcessor>? logger = null)
         => new(
             source,
             Options.Create(new NapoleOptions
@@ -53,7 +67,7 @@ public sealed class NapoleProcessorTests
                 Report = ReportBuilderTests.Dimensions(),
             }),
             new FakeTimeProvider(ReportBuilderTests.InsertedAt),
-            NullLogger<NapoleProcessor>.Instance);
+            logger ?? NullLogger<NapoleProcessor>.Instance);
 
     internal static string Payload(Guid? workflow = null, int window = 10)
         => JsonSerializer.Serialize(new
@@ -188,5 +202,45 @@ public sealed class NapoleProcessorTests
         await Processor(source).ReportAsync(Config(to: FromStep), TestContext.Current.CancellationToken);
 
         Assert.NotNull(source.Asked);
+    }
+
+    [Fact]
+    public async Task ATickWhereNoRunReachedTheEndWarnsNamingTheEndStep()
+    {
+        // A typo in toStepId still selects runs by fromStepId, so it sends a plausible report with
+        // output 0 every tick (final review, Important 2). The warning is how the operator finds out.
+        var logger = new CapturingLogger<NapoleProcessor>();
+
+        var report = await Processor(new FakeTrailSource(Failed(), Cancelled(), Bypassed()), logger)
+            .ReportAsync(Config(), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(report);
+        var warning = Assert.Single(logger.Lines, l => l.Level == LogLevel.Warning);
+        Assert.Contains(ToStep.ToString(), warning.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ATickWhereARunReachedTheEndDoesNotWarn()
+    {
+        var logger = new CapturingLogger<NapoleProcessor>();
+
+        await Processor(new FakeTrailSource(Complete(), Failed()), logger)
+            .ReportAsync(Config(), TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(logger.Lines, l => l.Level == LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task TheReportLineCountsTheRunsLeftOut()
+    {
+        // Unfinished and bypassed runs are in no count; the log line is the only place they show.
+        var logger = new CapturingLogger<NapoleProcessor>();
+
+        await Processor(new FakeTrailSource(Complete(), Open(), Bypassed(), Bypassed()), logger)
+            .ReportAsync(Config(), TestContext.Current.CancellationToken);
+
+        var line = Assert.Single(logger.Lines, l => l.Level == LogLevel.Information).Message;
+        Assert.Contains("1 unfinished", line, StringComparison.Ordinal);
+        Assert.Contains("2 bypassed", line, StringComparison.Ordinal);
     }
 }

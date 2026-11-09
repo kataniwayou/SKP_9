@@ -89,7 +89,10 @@ public sealed class ElasticTrailSource : IExecutionTrailSource
     // Run word for word against the dev cluster on 2026-11-09: it reproduced every section of spec §8.
     // `res` leaves the root record out because it carries a Result too; `root` is a SUM so two runs of
     // one id stay two even if they ever shared an EntryId. INLINE STATS gives each step run its
-    // execution's section bounds without a second round trip.
+    // execution's section bounds without a second round trip. The end counts only completions at or
+    // after fromT, which needs fromT first, hence two INLINE STATS: with the ids swapped, or an end step
+    // that ran before the start, a completion before the section would otherwise make every run
+    // Complete (final review).
     private static readonly string Statement = $$"""
         FROM {{TrailRecords.Index}}
         | WHERE attributes.WorkflowId == ?workflow AND resource.attributes.service.name == "orchestrator"
@@ -102,14 +105,15 @@ public sealed class ElasticTrailSource : IExecutionTrailSource
         | STATS root = SUM(isRoot), adv = MAX(isAdv), ended = MAX(isEnded), succ = SUM(succ), res = MAX(res), ts = MIN(@timestamp)
                 BY attributes.ExecutionId, attributes.EntryId, attributes.StepId
         | EVAL outcome = COALESCE(res, "Completed")
-        | INLINE STATS fromT = MIN(CASE(attributes.StepId == ?fromStep, ts, null)),
-                       toT = MAX(CASE(attributes.StepId == ?toStep AND outcome == "Completed", ts, null)) BY attributes.ExecutionId
+        | INLINE STATS fromT = MIN(CASE(attributes.StepId == ?fromStep, ts, null)) BY attributes.ExecutionId
         | WHERE fromT IS NOT NULL
+        | EVAL atEnd = CASE(attributes.StepId == ?toStep AND outcome == "Completed" AND ts >= fromT, 1, 0)
+        | INLINE STATS toT = MAX(CASE(atEnd == 1, ts, null)) BY attributes.ExecutionId
         | EVAL inSection = CASE(ts >= fromT AND (toT IS NULL OR ts <= toT), 1, 0)
         | STATS fromT = MIN(fromT), roots = SUM(root), dispatched = SUM(succ), handled = SUM(adv) + SUM(ended),
                 failed = SUM(CASE(inSection == 1 AND outcome == "Failed", 1, 0)),
                 cancelled = SUM(CASE(inSection == 1 AND outcome == "Cancelled", 1, 0)),
-                reached = SUM(CASE(attributes.StepId == ?toStep AND outcome == "Completed", 1, 0)) BY attributes.ExecutionId
+                reached = SUM(atEnd) BY attributes.ExecutionId
         | WHERE fromT >= ?from AND fromT < ?to
         | EVAL openBranches = roots + dispatched - handled
         | KEEP attributes.ExecutionId, roots, openBranches, failed, cancelled, reached
