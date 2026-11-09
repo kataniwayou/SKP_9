@@ -36,4 +36,24 @@ public sealed class StepRolesContractTests
             OutcomeTemplates.BranchEnds);
         Assert.Equal([OutcomeTemplates.BranchEnds, OutcomeTemplates.Advanced], OutcomeTemplates.All);
     }
+
+    // Napole reads these two by exact equality on {OriginalFormat}, against the text the running
+    // orchestrator already writes, so they are pinned as literals: a reworded template would make every
+    // advanced-anyway step read as Completed, with no error anywhere.
+    [Fact]
+    public void TheEntryTemplateIsWhatTheOrchestratorWritesToday()
+        => Assert.Equal("the entry step completed with {Result}", OutcomeTemplates.EntryCompleted);
+
+    [Fact]
+    public void TheAdvancedAnywayTemplateIsWhatTheOrchestratorWritesToday()
+        => Assert.Equal(
+            "advancing {SuccessorCount} successor(s) on a {Result} step — their entry conditions accept it",
+            OutcomeTemplates.AdvancedAnyway);
+
+    [Fact]
+    public void NapolesTemplatesStayOutOfTheFunnelList()
+    {
+        Assert.DoesNotContain(OutcomeTemplates.EntryCompleted, OutcomeTemplates.All);
+        Assert.DoesNotContain(OutcomeTemplates.AdvancedAnyway, OutcomeTemplates.All);
+    }
 }

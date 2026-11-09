@@ -15,4 +15,26 @@ public static class OutcomeTemplates
     public const string Advanced = "advanced {SuccessorCount} successor(s) in {ElapsedMs}ms";
 
     public static IReadOnlyList<string> All { get; } = [BranchEnds, Advanced];
+
+    /// <summary>
+    /// The opening half of a run's record: an entry step's outcome, one per run of a workflow entry
+    /// step. Napole counts it as the run's root when it checks that every branch has ended.
+    /// <para>
+    /// <b>Not in <see cref="All"/>.</b> That list is the funnel's one-record-per-outcome set, and this
+    /// line rides beside an entry step's <see cref="Advanced"/> or <see cref="BranchEnds"/> record
+    /// rather than replacing it. An entry step that fails or cancels writes it with an empty execution
+    /// id, which the log scope leaves out, so only a run that produced an execution carries one.
+    /// </para>
+    /// </summary>
+    public const string EntryCompleted = "the entry step completed with {Result}";
+
+    /// <summary>
+    /// The warning written before <see cref="Advanced"/> when a Failed or Cancelled step still
+    /// advances, because a successor's entry condition accepts that result. It is the only record that
+    /// says such a step did not complete. Napole reads its <c>Result</c> as that step run's outcome.
+    /// Not in <see cref="All"/>: the step's one outcome record is the <see cref="Advanced"/> line that
+    /// follows it.
+    /// </summary>
+    public const string AdvancedAnyway =
+        "advancing {SuccessorCount} successor(s) on a {Result} step — their entry conditions accept it";
 }

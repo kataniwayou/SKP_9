@@ -266,7 +266,7 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
         // Both halves now name themselves, under the correlation id the fire minted.
         if (entry.Definition.EntryStepIds.Contains(m.StepId))
         {
-            _logger.Log(level, "the entry step completed with {Result}", m.Result);
+            _logger.Log(level, OutcomeTemplates.EntryCompleted, m.Result);
         }
 
         var selection = StepAdvancement.SelectNext(m.Result, completed, entry.Steps);
@@ -426,10 +426,7 @@ internal sealed class StepOutcomeHandler : IQueueMessageHandler
             // instead of it: the count and the elapsed time are still the record of what happened.
             if (m.Result != StepResult.Completed)
             {
-                _logger.LogWarning(
-                    "advancing {SuccessorCount} successor(s) on a {Result} step — their entry "
-                    + "conditions accept it",
-                    selection.Matches.Count, m.Result);
+                _logger.LogWarning(OutcomeTemplates.AdvancedAnyway, selection.Matches.Count, m.Result);
             }
 
             _logger.LogInformation(

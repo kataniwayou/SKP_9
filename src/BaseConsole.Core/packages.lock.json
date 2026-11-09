@@ -6,7 +6,7 @@
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "g6O1uIfcVD3lvPJBqszIw6cOT0P6UBDg+smPbhH85zIkG3ZlMh+V0I01jNVyPlLCerwh74tZezsDpIMSzomS+g=="
+        "contentHash": "otIZ0X+HgZ3YXB9BTQyR4tjWvAIDQX51pYYxef3yJFIPwbbUxChvBoms0CY/xERzsmiBrBFWZ1tXZtkny5fDvQ=="
       },
       "Messaging.Transport": {
         "type": "Direct",
