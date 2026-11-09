@@ -124,4 +124,17 @@ public sealed class NapoleConfigSchemaTests
         Assert.Equal(expected, schema.GetProperty("properties").EnumerateObject().Select(p => p.Name));
         Assert.Equal(expected, schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()));
     }
+
+    [Fact]
+    public void TheEndStepDescriptionStatesTheReachRule()
+    {
+        // The operator reads this when choosing toStepId. Under the reach rule a failure-path end counts
+        // the runs that reached it as output (live: 48), so the sections-era "outputCount 0" text would
+        // tell them the opposite (final review, Important 1).
+        var description = System.Text.Json.JsonDocument.Parse(Definition()).RootElement
+            .GetProperty("properties").GetProperty("toStepId").GetProperty("description").GetString()!;
+
+        Assert.Contains("one per arrival", description, StringComparison.Ordinal);
+        Assert.DoesNotContain("outputCount 0", description, StringComparison.Ordinal);
+    }
 }

@@ -19,7 +19,7 @@
       "type": "string",
       "format": "uuid",
       "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-      "description": "Where the section ends: an execution is output when this step completed for it. Any step of the workflow, not only a terminal one, and may equal fromStepId. A failure-path step here makes outputCount 0 every tick, because a failure in the section wins."
+      "description": "Where the section ends. An execution with at least one outcome here at or after its first fromStepId outcome counts only its outcomes here, one per arrival: Completed -> outputCount, Failed -> failedCount, Cancelled -> discardedCount. One that never gets here counts its Failed and Cancelled outcomes on the way. Any step of the workflow, not only a terminal one, and it may equal fromStepId. A failure-path step here counts the runs that reached it as output."
     },
     "windowMinutes": {
       "type": "integer",
