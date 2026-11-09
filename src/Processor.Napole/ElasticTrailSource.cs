@@ -8,24 +8,30 @@ using Microsoft.Extensions.Options;
 namespace Processor.Napole;
 
 /// <summary>
-/// The trails, from two ES|QL statements against <see cref="TrailRecords.Index"/>, both filtered to
-/// the watched workflow so Napole's own records and every other workflow's stay out.
+/// The trails of one section, from one ES|QL statement against <see cref="TrailRecords.Index"/>,
+/// filtered to the watched workflow so Napole's own records and every other workflow's stay out.
 /// <para>
-/// <b>A</b> selects the executions this tick owns -- the kafka-importer's import lines in the window.
-/// <b>B</b> counts each one's trail: imports, terminal records, Failed and Cancelled outcomes, and the
-/// branches dispatched whose outcome the orchestrator has not handled yet. Spec §4.3 had a third
-/// statement for the outcomes; the report needs no reasons or step names, so they fold into B as counts.
+/// <b>Read from step outcomes alone</b> (sections spec §4). The orchestrator writes one outcome record
+/// per step run (<c>EntryId</c>): <see cref="OutcomeTemplates.BranchEnds"/> carries its <c>Result</c>;
+/// an <see cref="OutcomeTemplates.Advanced"/> record is Completed unless an
+/// <see cref="OutcomeTemplates.AdvancedAnyway"/> warning for the same run says Failed or Cancelled. The
+/// statement folds those into one row per step run, then one row per execution: its root
+/// (<see cref="OutcomeTemplates.EntryCompleted"/>), its open branches, and the Failed, Cancelled and
+/// <c>toStepId</c>-Completed step runs. The templates travel as params from the contract, never as text
+/// in the statement. A run belongs to the tick when its first outcome at <c>fromStepId</c> is in the
+/// window, so any entry processor works, not only the kafka-importer.
 /// </para>
 /// <para>
-/// <b>Open branches come from the orchestrator's outcome contract.</b> It writes exactly one
-/// <see cref="OutcomeTemplates.Advanced"/> or <see cref="OutcomeTemplates.BranchEnds"/> record per
-/// outcome it handles, and <c>Advanced</c> says how many successors it dispatched. So the steps
-/// dispatched are the entry step (its import) plus every <c>SuccessorCount</c>, the outcomes handled are
-/// the two records counted, and the difference is what is still in flight. A branch counts as returned
-/// only once the orchestrator has handled it -- after any Failed record and any further hand-off are
-/// written, so a late failure cannot hide behind an early "returned". A duplicated outcome makes the
-/// difference negative, which reads as closed; a duplicated dispatch leaves it positive, so the run is
-/// left out rather than miscounted.
+/// <b>Open branches</b> are roots + Σ <c>SuccessorCount</c> − (<c>Advanced</c> + <c>BranchEnds</c>), over
+/// the whole run: a branch counts as ended only once the orchestrator has handled its outcome. A
+/// duplicated outcome makes the difference negative, which reads as closed; none was found in 425,000.
+/// </para>
+/// <para>
+/// <b>The section is bounded by time, not by the graph</b> (spec §5.3): failures and cancels count from
+/// the first <c>fromStepId</c> outcome up to the last completed <c>toStepId</c> one, or to the end of the
+/// run if <c>toStepId</c> never completed. The ids do not chain from step to step, so a failure on a
+/// sibling branch outside the section but inside that span is counted. Exact sections need the step
+/// graph, which this source does not read.
 /// </para>
 /// <para>
 /// <b>Transport and failure mapping as <c>Processor.Analyst</c>'s <c>ElasticPanelSource</c></b>, with
@@ -60,62 +66,53 @@ public sealed class ElasticTrailSource : IExecutionTrailSource
     }
 
     public async Task<IReadOnlyList<ExecutionTrail>> ReadAsync(
-        Guid workflowId, ReportWindow window, TimeSpan trail, CancellationToken ct)
+        WatchedSection section, ReportWindow window, TimeSpan trail, CancellationToken ct)
     {
         if (_misconfigured is not null)
         {
             throw new FailedException(_misconfigured);
         }
 
-        var imported = await QueryAsync("imports", Imports(), ct,
-            ("workflow", workflowId.ToString("D")), ("from", Iso(window.From)), ("to", Iso(window.To))).ConfigureAwait(false);
-
-        var ids = imported.Select(r => Guid.Parse(Text(r, "attributes.ExecutionId"))).ToList();
-        if (ids.Count == 0)
-        {
-            return [];
-        }
-
         var (trailFrom, trailTo) = window.TrailSpan(trail);
-        var rows = await QueryAsync("trails", Trails(ids), ct,
-            ("workflow", workflowId.ToString("D")), ("trailFrom", Iso(trailFrom)), ("trailTo", Iso(trailTo)),
-            ("advanced", OutcomeTemplates.Advanced), ("branchEnds", OutcomeTemplates.BranchEnds),
-            ("terminal", StepRoles.Terminal)).ConfigureAwait(false);
+        var rows = await QueryAsync("section", Statement, ct,
+            ("workflow", section.WorkflowId.ToString("D")), ("trailFrom", Iso(trailFrom)), ("trailTo", Iso(trailTo)),
+            ("root", OutcomeTemplates.EntryCompleted), ("advanced", OutcomeTemplates.Advanced),
+            ("branchEnds", OutcomeTemplates.BranchEnds), ("advancedAnyway", OutcomeTemplates.AdvancedAnyway),
+            ("fromStep", section.FromStepId.ToString("D")), ("toStep", section.ToStepId.ToString("D")),
+            ("from", Iso(window.From)), ("to", Iso(window.To))).ConfigureAwait(false);
 
-        var found = rows.ToDictionary(
-            r => Guid.Parse(Text(r, "attributes.ExecutionId")),
-            r => new ExecutionTrail(
-                Guid.Parse(Text(r, "attributes.ExecutionId")),
-                Long(r, "imports"), Long(r, "openBranches"), Long(r, "terminals"), Long(r, "failed"), Long(r, "cancelled")));
-
-        return [.. ids.Select(id => found.TryGetValue(id, out var t) ? t : new ExecutionTrail(id, 0, 0, 0, 0, 0))];
+        return [.. rows.Select(r => new ExecutionTrail(
+            Guid.Parse(Text(r, "attributes.ExecutionId")),
+            Long(r, "roots"), Long(r, "openBranches"), Long(r, "failed"), Long(r, "cancelled"), Long(r, "reached")))];
     }
 
-    private static string Imports() => $"""
-        FROM {TrailRecords.Index}
-        | WHERE resource.attributes.service.name == "kafka-importer" AND attributes.Record IS NOT NULL
-          AND attributes.WorkflowId == ?workflow AND @timestamp >= ?from AND @timestamp < ?to
-        | STATS BY attributes.ExecutionId
-        | LIMIT {TrailRecords.RowLimit}
-        """;
-
-    // The IN list is spliced, not a param: every element is a Guid this method formatted itself.
-    private static string Trails(IEnumerable<Guid> ids) => $$"""
+    // Run word for word against the dev cluster on 2026-11-09: it reproduced every section of spec §8.
+    // `res` leaves the root record out because it carries a Result too; `root` is a SUM so two runs of
+    // one id stay two even if they ever shared an EntryId. INLINE STATS gives each step run its
+    // execution's section bounds without a second round trip.
+    private static readonly string Statement = $$"""
         FROM {{TrailRecords.Index}}
-        | WHERE attributes.WorkflowId == ?workflow AND attributes.ExecutionId IN ({{string.Join(", ", ids.Select(i => $"\"{i:D}\""))}})
-          AND @timestamp >= ?trailFrom AND @timestamp < ?trailTo
-        | EVAL svc = resource.attributes.service.name, fmt = TO_STRING(`attributes.{OriginalFormat}`)
-        | EVAL isImport = CASE(svc == "kafka-importer" AND attributes.Record IS NOT NULL, 1, 0),
-               isAdvanced = CASE(svc == "orchestrator" AND fmt == ?advanced, 1, 0),
-               isEnded = CASE(svc == "orchestrator" AND fmt == ?branchEnds, 1, 0),
-               successors = CASE(svc == "orchestrator" AND fmt == ?advanced, TO_LONG(attributes.SuccessorCount), 0),
-               isTerminal = CASE(attributes.StepRole == ?terminal, 1, 0),
-               isFailed = CASE(svc == "orchestrator" AND attributes.Result == "Failed", 1, 0),
-               isCancelled = CASE(svc == "orchestrator" AND attributes.Result == "Cancelled", 1, 0)
-        | STATS imports = SUM(isImport), terminals = SUM(isTerminal), failed = SUM(isFailed), cancelled = SUM(isCancelled),
-                handled = SUM(isAdvanced) + SUM(isEnded), dispatched = SUM(successors) BY attributes.ExecutionId
-        | EVAL openBranches = imports + dispatched - handled
-        | KEEP imports, terminals, failed, cancelled, openBranches, attributes.ExecutionId
+        | WHERE attributes.WorkflowId == ?workflow AND resource.attributes.service.name == "orchestrator"
+          AND attributes.ExecutionId IS NOT NULL AND @timestamp >= ?trailFrom AND @timestamp < ?trailTo
+        | EVAL fmt = TO_STRING(`attributes.{OriginalFormat}`)
+        | WHERE fmt == ?root OR fmt == ?advanced OR fmt == ?branchEnds OR fmt == ?advancedAnyway
+        | EVAL isRoot = CASE(fmt == ?root, 1, 0), isAdv = CASE(fmt == ?advanced, 1, 0), isEnded = CASE(fmt == ?branchEnds, 1, 0),
+               succ = CASE(fmt == ?advanced, TO_LONG(attributes.SuccessorCount), 0),
+               res = CASE(fmt == ?branchEnds OR fmt == ?advancedAnyway, attributes.Result, null)
+        | STATS root = SUM(isRoot), adv = MAX(isAdv), ended = MAX(isEnded), succ = SUM(succ), res = MAX(res), ts = MIN(@timestamp)
+                BY attributes.ExecutionId, attributes.EntryId, attributes.StepId
+        | EVAL outcome = COALESCE(res, "Completed")
+        | INLINE STATS fromT = MIN(CASE(attributes.StepId == ?fromStep, ts, null)),
+                       toT = MAX(CASE(attributes.StepId == ?toStep AND outcome == "Completed", ts, null)) BY attributes.ExecutionId
+        | WHERE fromT IS NOT NULL
+        | EVAL inSection = CASE(ts >= fromT AND (toT IS NULL OR ts <= toT), 1, 0)
+        | STATS fromT = MIN(fromT), roots = SUM(root), dispatched = SUM(succ), handled = SUM(adv) + SUM(ended),
+                failed = SUM(CASE(inSection == 1 AND outcome == "Failed", 1, 0)),
+                cancelled = SUM(CASE(inSection == 1 AND outcome == "Cancelled", 1, 0)),
+                reached = SUM(CASE(attributes.StepId == ?toStep AND outcome == "Completed", 1, 0)) BY attributes.ExecutionId
+        | WHERE fromT >= ?from AND fromT < ?to
+        | EVAL openBranches = roots + dispatched - handled
+        | KEEP attributes.ExecutionId, roots, openBranches, failed, cancelled, reached
         | LIMIT {{TrailRecords.RowLimit}}
         """;
 

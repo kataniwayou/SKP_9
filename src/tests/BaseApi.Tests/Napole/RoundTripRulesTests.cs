@@ -5,50 +5,58 @@ namespace BaseApi.Tests.Napole;
 
 public sealed class RoundTripRulesTests
 {
-    private static RoundTrip Decide(long imports, long open, long terminals, long failed, long cancelled)
-        => RoundTripRules.Decide(new ExecutionTrail(Guid.NewGuid(), imports, open, terminals, failed, cancelled));
+    private static RoundTrip Decide(long roots, long open, long failed, long cancelled, long reached)
+        => RoundTripRules.Decide(new ExecutionTrail(Guid.NewGuid(), roots, open, failed, cancelled, reached));
 
     [Fact]
-    public void AFullRoundTripIsComplete() => Assert.Equal(RoundTrip.Complete, Decide(1, 0, 2, 0, 0));
+    public void AWholeSectionIsComplete() => Assert.Equal(RoundTrip.Complete, Decide(1, 0, 0, 0, 1));
+
+    [Fact]
+    public void TwoEndsAtTheTerminatorAreOneOutput()
+        // The split chain's good file: two branches meet again at split-exporter, so toStepId completes
+        // twice for one execution. Counted per execution, it is one output (sections spec §5.4).
+        => Assert.Equal(RoundTrip.Complete, Decide(1, 0, 0, 0, 2));
 
     [Fact]
     public void AFailureThatRanToItsFailureExportIsFailed()
-        // record-outcome -> export-outcome ends with a terminal Completed; the first failure still decides.
-        => Assert.Equal(RoundTrip.Failed, Decide(1, 0, 1, 1, 0));
-
-    [Fact]
-    public void AFailureOnOneBranchAndACancelOnAnotherIsFailed() => Assert.Equal(RoundTrip.Failed, Decide(1, 0, 0, 1, 1));
-
-    [Fact]
-    public void AWhitelistCancelIsCancelled() => Assert.Equal(RoundTrip.Cancelled, Decide(1, 0, 0, 0, 1));
-
-    [Fact]
-    public void ACancelWithABranchStillOpenIsUnfinished()
-        // Branch A cancelled, branch B still in flight: B may yet fail, which would make it Failed, so
-        // it is not a terminated round trip and must not be counted as discarded (final review, Important 1).
-        => Assert.Equal(RoundTrip.Unfinished, Decide(1, 1, 0, 0, 1));
+        // record-outcome -> export-outcome completes after the failure; the first failure still decides.
+        => Assert.Equal(RoundTrip.Failed, Decide(1, 0, 1, 0, 0));
 
     [Fact]
     public void AFailureWithABranchStillOpenIsFailed()
-        // Nothing a still-open branch does can change a verdict the first failure already decided.
-        => Assert.Equal(RoundTrip.Failed, Decide(1, 1, 0, 1, 0));
+        // Failed is decided before open branches (sections spec §5.2): there is no catch-up, so a failed
+        // run still running a slow failure branch would otherwise never be reported at all.
+        => Assert.Equal(RoundTrip.Failed, Decide(1, 1, 1, 0, 0));
 
     [Fact]
-    public void AFanOutWithOneOpenBranchIsUnfinished()
-        // One document exported, the other branch still in flight: not a full round trip yet.
-        => Assert.Equal(RoundTrip.Unfinished, Decide(1, 1, 1, 0, 0));
+    public void AFailureAndACancelIsFailed() => Assert.Equal(RoundTrip.Failed, Decide(1, 0, 1, 1, 0));
 
     [Fact]
-    public void NoTerminalIsUnfinished() => Assert.Equal(RoundTrip.Unfinished, Decide(1, 0, 0, 0, 0));
+    public void AWhitelistCancelIsCancelled() => Assert.Equal(RoundTrip.Cancelled, Decide(1, 0, 0, 1, 0));
 
     [Fact]
-    public void TwoImportsInTheTrailAreUnfinished() => Assert.Equal(RoundTrip.Unfinished, Decide(2, 0, 4, 0, 0));
+    public void ACancelWithABranchStillOpenIsUnfinished()
+        // The branch still in flight may yet fail, which would make the run Failed.
+        => Assert.Equal(RoundTrip.Unfinished, Decide(1, 1, 0, 1, 0));
 
     [Fact]
-    public void NoRecordsAtAllAreUnfinished() => Assert.Equal(RoundTrip.Unfinished, Decide(0, 0, 0, 0, 0));
+    public void AnOpenBranchIsUnfinished()
+        // One branch reached the terminator, the other has not ended: not yet a terminated run.
+        => Assert.Equal(RoundTrip.Unfinished, Decide(1, 1, 0, 0, 1));
 
     [Fact]
-    public void AFailureWithTwoImportsIsStillUnfinished()
-        // Two runs of one id mixed in one trail: whose failure it is cannot be told, so neither counts.
-        => Assert.Equal(RoundTrip.Unfinished, Decide(2, 0, 1, 1, 0));
+    public void ACleanRunThatNeverReachedTheTerminatorIsBypassed()
+        // Finished, nothing failed or cancelled in the section, and toStepId never completed: the run
+        // left by another route, so it is in no count (sections spec §5.2, 6).
+        => Assert.Equal(RoundTrip.Bypassed, Decide(1, 0, 0, 0, 0));
+
+    [Fact]
+    public void TwoRootsAreUnfinished()
+        // Two runs of one execution id in the trail -- a re-import -- cannot be told apart.
+        => Assert.Equal(RoundTrip.Unfinished, Decide(2, 0, 1, 0, 2));
+
+    [Fact]
+    public void NoRootIsUnfinished()
+        // The entry's record is outside the trail, so whether every branch ended cannot be known.
+        => Assert.Equal(RoundTrip.Unfinished, Decide(0, 0, 0, 0, 1));
 }

@@ -5,8 +5,9 @@ using Microsoft.Extensions.Options;
 namespace Processor.Napole;
 
 /// <summary>
-/// The scheduled round-trip reporter: on each tick, how the watched workflow's executions imported in
-/// the last window ended, as one count report handed to its successor (a kafka-exporter).
+/// The scheduled section reporter: on each tick, how the executions that reached the section's start
+/// step in the last window ended inside the section, as one count report handed to its successor (a
+/// kafka-exporter).
 /// <para>
 /// <b>Its workflow's ENTRY step</b>, so <c>executionId</c> arrives as <see cref="Guid.Empty"/>. It opens
 /// a lineage exactly as the Analyst does: the kafka-exporter refuses an empty id, and a source step is
@@ -14,7 +15,7 @@ namespace Processor.Napole;
 /// continuing someone else's lineage and stays in it.
 /// </para>
 /// <para>
-/// <b>Nothing terminated in the window is a Cancelled step, never a silent return.</b> The framework
+/// <b>Nothing counted in the window is a Cancelled step, never a silent return.</b> The framework
 /// reports a step that returns without sending as Failed (the "one output rule" in
 /// <c>ProcessDispatchHandler</c>), and an empty branch would fail the exporter instead. Cancelled is
 /// the path the kafka-importer takes for an empty topic, and no report is sent (spec §6).
@@ -40,8 +41,10 @@ public sealed class NapoleProcessor(
         if (report is null)
         {
             var window = WindowFor(config);
+            // Both step ids, because a typo in one matches nothing and this message is where it shows.
             throw new CancelledException(
-                $"no executions of {config.WatchedWorkflowId} terminated in {window.From:o}..{window.To:o}");
+                $"no executions of {config.WatchedWorkflowId} counted in section {config.FromStepId}..{config.ToStepId}, "
+                + $"window {window.From:o}..{window.To:o}");
         }
 
         // PostSendException must propagate: the framework takes the duplicate over a lost report.
@@ -49,7 +52,7 @@ public sealed class NapoleProcessor(
             report.Serialize(), executionId == Guid.Empty ? NewExecutionId() : executionId, ct).ConfigureAwait(false);
     }
 
-    /// <summary>The tick, short of sending: the report, or null when nothing in the window terminated.</summary>
+    /// <summary>The tick, short of sending: the report, or null when nothing in the window was counted.</summary>
     internal async Task<NapoleReport?> ReportAsync(NapoleConfig config, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -83,7 +86,7 @@ public sealed class NapoleProcessor(
 
         var window = WindowFor(config);
         var trails = await source.ReadAsync(
-            config.WatchedWorkflowId, window, TimeSpan.FromMinutes(options.Value.TrailMinutes), ct).ConfigureAwait(false);
+            WatchedSection.Of(config), window, TimeSpan.FromMinutes(options.Value.TrailMinutes), ct).ConfigureAwait(false);
 
         var report = ReportBuilder.Build(
             window, trails.Select(RoundTripRules.Decide), options.Value.Report, config.ReporterSubComponentName, clock.GetUtcNow());
@@ -92,10 +95,10 @@ public sealed class NapoleProcessor(
         {
             var m = r.MandatoryMeasurments;
             logger.LogInformation(
-                "reported {InputCount} executions of {WatchedWorkflowId}: {OutputCount} complete, {DiscardedCount} discarded, "
-                + "{FailedCount} failed, window {ReportFromTime}..{ReportToTime}",
-                m.InputCount, config.WatchedWorkflowId, m.OutputCount, m.DiscardedCount, m.FailedCount,
-                r.CommonDimentions.ReportFromTime, r.CommonDimentions.ReportToTime);
+                "reported {InputCount} executions of {WatchedWorkflowId} {FromStepId}..{ToStepId}: {OutputCount} complete, "
+                + "{DiscardedCount} discarded, {FailedCount} failed, window {ReportFromTime}..{ReportToTime}",
+                m.InputCount, config.WatchedWorkflowId, config.FromStepId, config.ToStepId, m.OutputCount, m.DiscardedCount,
+                m.FailedCount, r.CommonDimentions.ReportFromTime, r.CommonDimentions.ReportToTime);
         }
 
         return report;

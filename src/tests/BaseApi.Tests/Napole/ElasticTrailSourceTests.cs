@@ -11,132 +11,114 @@ namespace BaseApi.Tests.Napole;
 
 public sealed class ElasticTrailSourceTests
 {
-    private static readonly Guid Workflow = Guid.Parse("8cfdbcdb-a7e0-4a7d-9b4d-e4120ccacf02");
     private static readonly Guid Good = Guid.Parse("09f6b055-c309-5ffb-aaa1-ee5d165d39ca");
     private static readonly Guid BadExt = Guid.Parse("11cfa200-ccc2-56c1-a32f-da781e1f13d6");
     private static readonly TimeSpan Trail = TimeSpan.FromMinutes(10);
 
-    // The response shapes, as the live cluster answered the two statements on 2026-11-08.
-    private static string Ids(params Guid[] ids) => JsonSerializer.Serialize(new
-    {
-        columns = new[] { new { name = "attributes.ExecutionId", type = "keyword" } },
-        values = ids.Select(i => new object[] { i.ToString("D") }),
-    });
+    private static readonly WatchedSection Section = new(
+        NapoleProcessorTests.Watched, NapoleProcessorTests.FromStep, NapoleProcessorTests.ToStep);
 
-    private const string BColumns = """
-        [{"name":"imports","type":"long"},{"name":"terminals","type":"long"},{"name":"failed","type":"long"},
-         {"name":"cancelled","type":"long"},{"name":"openBranches","type":"long"},{"name":"attributes.ExecutionId","type":"keyword"}]
+    // The answer's shape, as the live cluster returned the statement on 2026-11-09.
+    private const string Columns = """
+        [{"name":"attributes.ExecutionId","type":"keyword"},{"name":"roots","type":"long"},{"name":"openBranches","type":"long"},
+         {"name":"failed","type":"long"},{"name":"cancelled","type":"long"},{"name":"reached","type":"long"}]
         """;
 
-    private static string Trails(params string[] rows) => $$"""{"columns":{{BColumns}},"values":[{{string.Join(",", rows)}}]}""";
+    private static string Answer(params string[] rows) => $$"""{"columns":{{Columns}},"values":[{{string.Join(",", rows)}}]}""";
+
+    private static string Ids(params Guid[] ids)
+        => Answer([.. ids.Select(i => $"""["{i}",1,0,0,0,1]""")]);
 
     private static ElasticTrailSource Source(HttpMessageHandler handler, string baseUrl = "http://es.test")
         => new(new HttpClient(handler), Options.Create(new NapoleOptions { ElasticBaseUrl = baseUrl }));
 
     private static Task<IReadOnlyList<ExecutionTrail>> Read(ElasticTrailSource source)
-        => source.ReadAsync(Workflow, ReportBuilderTests.Window, Trail, TestContext.Current.CancellationToken);
+        => source.ReadAsync(Section, ReportBuilderTests.Window, Trail, TestContext.Current.CancellationToken);
 
     [Fact]
-    public async Task ItPostsBothStatementsWithTheWindowAsParams()
+    public async Task ItPostsOneStatementWithTheSectionAsParams()
     {
-        var handler = new ScriptedHandler(Ids(Good, BadExt), Trails(
-            $"""[1,2,0,0,0,"{Good}"]""", $"""[1,1,1,0,0,"{BadExt}"]"""));
+        var handler = new ScriptedHandler(Ids(Good));
 
         await Read(Source(handler));
 
-        Assert.Equal(2, handler.Requests.Count);
-        Assert.All(handler.Requests, r => Assert.Equal("/_query?allow_partial_results=false", r.Path));
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("/_query?allow_partial_results=false", request.Path);
 
-        var a = JsonDocument.Parse(handler.Requests[0].Body).RootElement;
+        var body = JsonDocument.Parse(request.Body).RootElement;
         Assert.Equal(
-            [$"workflow={Workflow}", "from=2026-11-08T10:40:00.000Z", "to=2026-11-08T10:50:00.000Z"],
-            Params(a));
-        Assert.Contains("\"kafka-importer\"", a.GetProperty("query").GetString(), StringComparison.Ordinal);
+            [$"workflow={NapoleProcessorTests.Watched}", "trailFrom=2026-11-08T10:30:00.000Z", "trailTo=2026-11-08T11:00:00.000Z",
+             $"root={OutcomeTemplates.EntryCompleted}", $"advanced={OutcomeTemplates.Advanced}",
+             $"branchEnds={OutcomeTemplates.BranchEnds}", $"advancedAnyway={OutcomeTemplates.AdvancedAnyway}",
+             $"fromStep={NapoleProcessorTests.FromStep}", $"toStep={NapoleProcessorTests.ToStep}",
+             "from=2026-11-08T10:40:00.000Z", "to=2026-11-08T10:50:00.000Z"],
+            Params(body));
 
-        var b = JsonDocument.Parse(handler.Requests[1].Body).RootElement;
-        Assert.Equal(
-            [$"workflow={Workflow}", "trailFrom=2026-11-08T10:30:00.000Z", "trailTo=2026-11-08T11:00:00.000Z",
-             $"advanced={OutcomeTemplates.Advanced}", $"branchEnds={OutcomeTemplates.BranchEnds}", $"terminal={StepRoles.Terminal}"],
-            Params(b));
-        Assert.Contains($"\"{Good}\"", b.GetProperty("query").GetString(), StringComparison.Ordinal);
-        Assert.Contains($"\"{BadExt}\"", b.GetProperty("query").GetString(), StringComparison.Ordinal);
+        var query = body.GetProperty("query").GetString()!;
+        Assert.Contains("INLINE STATS", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("kafka-importer", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("Record", query, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task BranchesCloseOnTheOrchestratorsOutcomeContractNotOnLogText()
+    public async Task TheStepOutcomeTemplatesTravelAsParams()
     {
-        // A branch is returned only once the orchestrator has HANDLED its outcome -- one Advanced or
-        // BranchEnds record per outcome, a published contract -- not when the processor logs "the step
-        // returned", which it writes before the orchestrator has seen the result (final review,
-        // Important 2). The templates travel as params, from the contract's own constants.
-        var handler = new ScriptedHandler(Ids(Good), Trails($"""[1,2,0,0,0,"{Good}"]"""));
+        // The outcome is read by exact equality on the orchestrator's templates, so they come from the
+        // contract constants and are never spliced into the statement as text.
+        var handler = new ScriptedHandler(Ids(Good));
 
         await Read(Source(handler));
 
-        var b = JsonDocument.Parse(handler.Requests[1].Body).RootElement;
-        var query = b.GetProperty("query").GetString()!;
-        Assert.Contains($"advanced={OutcomeTemplates.Advanced}", Params(b));
-        Assert.Contains($"branchEnds={OutcomeTemplates.BranchEnds}", Params(b));
-        Assert.Contains($"terminal={StepRoles.Terminal}", Params(b));
-        Assert.DoesNotContain("the step returned", query, StringComparison.Ordinal);
-        Assert.DoesNotContain("handed off", query, StringComparison.Ordinal);
+        var query = JsonDocument.Parse(Assert.Single(handler.Requests).Body).RootElement.GetProperty("query").GetString()!;
+        Assert.DoesNotContain("the entry step completed", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("advanced {SuccessorCount}", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("advancing", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("no successor accepts it", query, StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task ItReadsTheTrailsBack()
     {
-        var handler = new ScriptedHandler(Ids(Good, BadExt), Trails(
-            $"""[1,2,0,0,0,"{Good}"]""", $"""[1,1,1,0,0,"{BadExt}"]"""));
+        // The good file reaches split-exporter on both branches; the bad extension fails at the fetcher.
+        var handler = new ScriptedHandler(Answer($"""["{Good}",1,0,0,0,2]""", $"""["{BadExt}",1,0,1,0,0]"""));
 
         var trails = await Read(Source(handler));
 
         Assert.Equal(
-            [new ExecutionTrail(Good, 1, 0, 2, 0, 0), new ExecutionTrail(BadExt, 1, 0, 1, 1, 0)],
-            trails.OrderBy(t => t.ExecutionId == Good ? 0 : 1));
+            [new ExecutionTrail(Good, Roots: 1, OpenBranches: 0, Failed: 0, Cancelled: 0, Reached: 2),
+             new ExecutionTrail(BadExt, Roots: 1, OpenBranches: 0, Failed: 1, Cancelled: 0, Reached: 0)],
+            trails);
+        Assert.Equal([RoundTrip.Complete, RoundTrip.Failed], trails.Select(RoundTripRules.Decide));
     }
 
     [Fact]
     public async Task ItReadsRowsByColumnName()
     {
         const string shuffled = """
-            [{"name":"attributes.ExecutionId","type":"keyword"},{"name":"openBranches","type":"long"},{"name":"cancelled","type":"long"},
-             {"name":"failed","type":"long"},{"name":"terminals","type":"long"},{"name":"imports","type":"long"}]
+            [{"name":"reached","type":"long"},{"name":"cancelled","type":"long"},{"name":"failed","type":"long"},
+             {"name":"openBranches","type":"long"},{"name":"roots","type":"long"},{"name":"attributes.ExecutionId","type":"keyword"}]
             """;
-        var handler = new ScriptedHandler(Ids(Good), $$"""{"columns":{{shuffled}},"values":[["{{Good}}",1,0,0,1,1]]}""");
+        var handler = new ScriptedHandler($$"""{"columns":{{shuffled}},"values":[[1,0,0,1,1,"{{Good}}"]]}""");
 
         var trail = Assert.Single(await Read(Source(handler)));
 
-        Assert.Equal(new ExecutionTrail(Good, Imports: 1, OpenBranches: 1, Terminals: 1, Failed: 0, Cancelled: 0), trail);
+        Assert.Equal(new ExecutionTrail(Good, Roots: 1, OpenBranches: 1, Failed: 0, Cancelled: 0, Reached: 1), trail);
     }
 
     [Fact]
-    public async Task AnIdBHasNoRowForComesBackWithNoImports()
+    public async Task AnEmptyAnswerIsNoTrails()
     {
-        var handler = new ScriptedHandler(Ids(Good, BadExt), Trails($"""[1,2,0,0,0,"{Good}"]"""));
-
-        var trails = await Read(Source(handler));
-
-        Assert.Equal(new ExecutionTrail(BadExt, 0, 0, 0, 0, 0), Assert.Single(trails, t => t.ExecutionId == BadExt));
-    }
-
-    [Fact]
-    public async Task NoImportsSendsOnlyTheFirstStatement()
-    {
-        var handler = new ScriptedHandler(Ids());
+        var handler = new ScriptedHandler(Answer());
 
         Assert.Empty(await Read(Source(handler)));
-        Assert.Single(handler.Requests);
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    public async Task APartialAnswerFails(int which)
+    [Fact]
+    public async Task APartialAnswerFails()
     {
-        var bodies = new[] { Ids(Good), Trails($"""[1,2,0,0,0,"{Good}"]""") };
-        bodies[which] = bodies[which].Insert(1, "\"is_partial\":true,");
+        var body = Ids(Good).Insert(1, "\"is_partial\":true,");
 
-        await Assert.ThrowsAsync<FailedException>(() => Read(Source(new ScriptedHandler(bodies))));
+        await Assert.ThrowsAsync<FailedException>(() => Read(Source(new ScriptedHandler(body))));
     }
 
     [Fact]
@@ -179,7 +161,7 @@ public sealed class ElasticTrailSourceTests
     [Fact]
     public async Task AMalformedBaseUrlFailsWhenRead()
     {
-        var source = Source(new ScriptedHandler(Ids()), baseUrl: "not a url");
+        var source = Source(new ScriptedHandler(Answer()), baseUrl: "not a url");
 
         await Assert.ThrowsAsync<FailedException>(() => Read(source));
     }

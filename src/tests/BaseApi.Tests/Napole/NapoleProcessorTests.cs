@@ -15,11 +15,11 @@ namespace BaseApi.Tests.Napole;
 /// <summary>Answers every read with the trails it was given, and remembers what it was asked.</summary>
 internal sealed class FakeTrailSource(params ExecutionTrail[] trails) : IExecutionTrailSource
 {
-    internal (Guid Workflow, ReportWindow Window, TimeSpan Trail)? Asked { get; private set; }
+    internal (WatchedSection Section, ReportWindow Window, TimeSpan Trail)? Asked { get; private set; }
 
-    public Task<IReadOnlyList<ExecutionTrail>> ReadAsync(Guid workflowId, ReportWindow window, TimeSpan trail, CancellationToken ct)
+    public Task<IReadOnlyList<ExecutionTrail>> ReadAsync(WatchedSection section, ReportWindow window, TimeSpan trail, CancellationToken ct)
     {
-        Asked = (workflowId, window, trail);
+        Asked = (section, window, trail);
         return Task.FromResult<IReadOnlyList<ExecutionTrail>>(trails);
     }
 }
@@ -35,10 +35,12 @@ public sealed class NapoleProcessorTests
         Guid? workflow = null, Guid? from = null, Guid? to = null, int window = 10, string subComponent = ReportBuilderTests.SubComponent)
         => new(workflow ?? Watched, from ?? FromStep, to ?? ToStep, window, subComponent);
 
-    internal static ExecutionTrail Complete() => new(Guid.NewGuid(), 1, 0, 2, 0, 0);
-    internal static ExecutionTrail Failed() => new(Guid.NewGuid(), 1, 0, 1, 1, 0);
-    internal static ExecutionTrail Cancelled() => new(Guid.NewGuid(), 1, 0, 0, 0, 1);
-    internal static ExecutionTrail Open() => new(Guid.NewGuid(), 1, 1, 1, 0, 0);
+    // (roots, openBranches, failed, cancelled, reached)
+    internal static ExecutionTrail Complete() => new(Guid.NewGuid(), 1, 0, 0, 0, 2);
+    internal static ExecutionTrail Failed() => new(Guid.NewGuid(), 1, 0, 1, 0, 0);
+    internal static ExecutionTrail Cancelled() => new(Guid.NewGuid(), 1, 0, 0, 1, 0);
+    internal static ExecutionTrail Open() => new(Guid.NewGuid(), 1, 1, 0, 0, 1);
+    internal static ExecutionTrail Bypassed() => new(Guid.NewGuid(), 1, 0, 0, 0, 0);
 
     internal static NapoleProcessor Processor(IExecutionTrailSource source)
         => new(
@@ -64,13 +66,25 @@ public sealed class NapoleProcessorTests
         });
 
     [Fact]
-    public async Task ItAsksForTheSnappedWindow()
+    public async Task ItAsksForTheSectionAndTheSnappedWindow()
     {
         var source = new FakeTrailSource(Complete());
 
         await Processor(source).ReportAsync(Config(), TestContext.Current.CancellationToken);
 
-        Assert.Equal((Watched, ReportBuilderTests.Window, TimeSpan.FromMinutes(10)), source.Asked);
+        Assert.Equal(
+            (new WatchedSection(Watched, FromStep, ToStep), ReportBuilderTests.Window, TimeSpan.FromMinutes(10)),
+            source.Asked);
+    }
+
+    [Fact]
+    public async Task BypassedRunsAreInNoCount()
+    {
+        var source = new FakeTrailSource(Complete(), Bypassed());
+
+        var report = await Processor(source).ReportAsync(Config(), TestContext.Current.CancellationToken);
+
+        Assert.Equal(new MandatoryMeasurments(InputCount: 1, OutputCount: 1, DiscardedCount: 0, FailedCount: 0), report!.MandatoryMeasurments);
     }
 
     [Fact]
@@ -89,17 +103,20 @@ public sealed class NapoleProcessorTests
     }
 
     [Fact]
-    public async Task NothingTerminatedIsCancelledAndSendsNothing()
+    public async Task NothingCountedIsCancelledAndNamesTheSection()
     {
-        // Not a silent return: the framework reports a step that sends nothing as Failed.
+        // Not a silent return: the framework reports a step that sends nothing as Failed. The message
+        // names both step ids, because a typo in one matches nothing and this is where it shows.
         var sender = Substitute.For<IQueueSender>();
-        var processor = Processor(new FakeTrailSource(Open(), Open()));
+        var processor = Processor(new FakeTrailSource(Open(), Bypassed()));
         processor.BeginDispatch(TestDispatch.State(sender, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()));
 
         var ex = await Assert.ThrowsAsync<CancelledException>(
             () => processor.ExecuteAsync([], Payload(), Guid.Empty, TestContext.Current.CancellationToken));
 
         Assert.Contains(Watched.ToString(), ex.Message, StringComparison.Ordinal);
+        Assert.Contains(FromStep.ToString(), ex.Message, StringComparison.Ordinal);
+        Assert.Contains(ToStep.ToString(), ex.Message, StringComparison.Ordinal);
         Assert.Contains("2026-11-08T10:40:00", ex.Message, StringComparison.Ordinal);
         Assert.Empty(sender.ReceivedCalls());
     }
