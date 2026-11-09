@@ -240,6 +240,8 @@ public sealed class NapoleProcessorTests
         Assert.NotNull(report);
         var warning = Assert.Single(logger.Lines, l => l.Level == LogLevel.Warning);
         Assert.Contains(ToStep.ToString(), warning.Message, StringComparison.Ordinal);
+        // Reached, not completed: any outcome at toStepId is an arrival (reach spec §2.2).
+        Assert.Contains("reached toStepId", warning.Message, StringComparison.Ordinal);
     }
 
     [Fact]

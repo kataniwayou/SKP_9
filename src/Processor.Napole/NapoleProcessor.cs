@@ -100,15 +100,15 @@ public sealed class NapoleProcessor(
         var trails = await source.ReadAsync(
             WatchedSection.Of(config), window, TimeSpan.FromMinutes(options.Value.TrailMinutes), ct).ConfigureAwait(false);
 
-        // A typo in toStepId does not empty the answer the way one in fromStepId does: the runs are still
-        // selected, nothing ever reaches the end, and a plausible report with output 0 goes out every
-        // tick (final review, Important 2). A failure-path end step looks the same, so this warns rather
-        // than fails: the operator decides which it is.
+        // A typo in toStepId does not empty the answer the way one in fromStepId does: the executions are
+        // still traced, none ever reaches the end, and a report with output 0 goes out every tick (final
+        // review). So when traced executions exist and none reached toStepId, say so; whether that is a
+        // typo or simply a window where nothing got there is the operator's call.
         if (trails.Count > 0 && trails.All(t => t.Reached == 0))
         {
             logger.LogWarning(
                 "none of the {Selected} executions of {WatchedWorkflowId} that reached {FromStepId} in window "
-                + "{From:o}..{To:o} completed toStepId {ToStepId}; if that is not expected, check the step id",
+                + "{From:o}..{To:o} reached toStepId {ToStepId}; if that is not expected, check the step id",
                 trails.Count, config.WatchedWorkflowId, config.FromStepId, window.From, window.To, config.ToStepId);
         }
 

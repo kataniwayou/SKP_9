@@ -74,4 +74,17 @@ public sealed class NapoleReportSchemaTests
     }
 
     private static string[] Names(JsonElement e) => [.. e.EnumerateObject().Select(p => p.Name)];
+
+    [Theory]
+    [InlineData("failedCount")]
+    [InlineData("discardedCount")]
+    public void TheWayCountersSayAtOrAfterTheStart(string counter)
+    {
+        // The rule counts outcomes at fromStepId itself too (ts >= fromT), so "after" alone misstates it.
+        var description = JsonDocument.Parse(Definition()).RootElement
+            .GetProperty("properties").GetProperty("mandatoryMeasurments")
+            .GetProperty("properties").GetProperty(counter).GetProperty("description").GetString()!;
+
+        Assert.Contains("at or after", description, StringComparison.Ordinal);
+    }
 }

@@ -34,8 +34,12 @@ public sealed record CommonDimentions(
     string SagCode,
     long TimStampHour);
 
-/// <summary>Per execution, terminated ones only: <c>OutputCount + FailedCount + DiscardedCount == InputCount</c>.</summary>
-/// <param name="OutputCount">Complete.</param>
-/// <param name="DiscardedCount">Cancelled during the round trip.</param>
-/// <param name="FailedCount">Failed.</param>
+/// <summary>
+/// The tick's counts (reach spec §2.2-2.3). <paramref name="InputCount"/> counts executions; the other
+/// three count step outcomes, with no deduplication, so they may add up to more than the input.
+/// </summary>
+/// <param name="InputCount">traced executions with a proven end: they reached <c>toStepId</c>, or failed or were cancelled on the way.</param>
+/// <param name="OutputCount">Completed outcomes at <c>toStepId</c>, one per arrival.</param>
+/// <param name="DiscardedCount">Cancelled outcomes: at <c>toStepId</c> if the execution reached it, otherwise at or after its first <c>fromStepId</c> outcome.</param>
+/// <param name="FailedCount">Failed outcomes: at <c>toStepId</c> if the execution reached it, otherwise at or after its first <c>fromStepId</c> outcome.</param>
 public sealed record MandatoryMeasurments(int InputCount, int OutputCount, int DiscardedCount, int FailedCount);

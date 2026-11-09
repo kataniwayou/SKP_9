@@ -77,12 +77,12 @@
         "discardedCount": {
           "type": "integer",
           "minimum": 0,
-          "description": "Cancelled outcomes: at toStepId for executions that reached it, otherwise on the way after fromStepId (e.g. not on the whitelist)."
+          "description": "Cancelled outcomes: at toStepId for executions that reached it, otherwise on the way at or after their first fromStepId outcome (e.g. not on the whitelist)."
         },
         "failedCount": {
           "type": "integer",
           "minimum": 0,
-          "description": "Failed outcomes: at toStepId for executions that reached it, otherwise on the way after fromStepId."
+          "description": "Failed outcomes: at toStepId for executions that reached it, otherwise on the way at or after their first fromStepId outcome."
         }
       },
       "required": [

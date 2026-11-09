@@ -137,4 +137,10 @@ public sealed class NapoleConfigSchemaTests
         Assert.Contains("one per arrival", description, StringComparison.Ordinal);
         Assert.DoesNotContain("outputCount 0", description, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void AnEmptyComponentIsRejected() => Assert.False(Validates(With("reporterComponentName", "")));
+
+    [Fact]
+    public void AnEmptySagCodeIsRejected() => Assert.False(Validates(With("sagCode", "")));
 }

@@ -18,7 +18,8 @@ public static class OutcomeTemplates
 
     /// <summary>
     /// The opening half of a run's record: an entry step's outcome, one per run of a workflow entry
-    /// step. Napole counts it as the run's root when it checks that every branch has ended.
+    /// step. Napole counts these per execution to spot a re-import: two in one trail are two runs of one
+    /// ExecutionId, which it leaves out rather than mix.
     /// <para>
     /// <b>Not in <see cref="All"/>.</b> That list is the funnel's one-record-per-outcome set, and this
     /// line rides beside an entry step's <see cref="Advanced"/> or <see cref="BranchEnds"/> record
