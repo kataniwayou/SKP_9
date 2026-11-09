@@ -1,6 +1,6 @@
 # Napole sections — Design
 
-**Date:** 2026-11-09 · **Status:** draft for review · **Branch:** `feature/napole`
+**Date:** 2026-11-09 · **Status:** draft for review · **Branch:** `feature/ems-exporter` (Napole merged 2026-11-09)
 **Revises:** [2026-11-08-napole-design.md](2026-11-08-napole-design.md). That document stays the
 authority for everything this one does not change, named per section below.
 
@@ -8,7 +8,8 @@ Napole today reports on a whole round trip, from the kafka-importer to any termi
 revision makes it report on **any section of a workflow's graph**, named by two step ids: a start
 step and an end step. The verdict for each execution is read from **step outcomes only**
 (Completed, Failed, Cancelled), which the orchestrator writes for every step of every execution.
-The report, its contract and the hermetic identity do not change.
+The report's fields and the hermetic identity do not change. One field, `reporterSubComponentName`,
+now comes from the step payload instead of the pod, so each section's report names itself.
 
 Sections marked **(decided)** are the user's decisions. *My call* marks a default the builder may
 change without asking.
@@ -47,19 +48,25 @@ and two reports **(decided)**.
 
 ## 3. Step payload (decided)
 
-Four fields. *The names `fromStepId` and `toStepId` are my call* ("maybe generic names").
+Five fields. *The names `fromStepId` and `toStepId` are my call* ("maybe generic names").
 
 ```json
 {
   "watchedWorkflowId": "8cfdbcdb-a7e0-4a7d-9b4d-e4120ccacf02",
   "fromStepId": "95225f8c-56b2-494b-a59d-d9b34fbde441",
   "toStepId": "06f1c5fd-bdfc-43ae-93c9-5bde2995e167",
-  "windowMinutes": 10
+  "windowMinutes": 10,
+  "reporterSubComponentName": "split-whole-run"
 }
 ```
 
-- All four are required. A missing payload, an empty GUID, or `windowMinutes` < 1 is a
-  `FailedException`, as today.
+- All five are required. A missing payload, an empty GUID, `windowMinutes` < 1, or a missing,
+  empty or whitespace-only `reporterSubComponentName` is a `FailedException`, as today. The config
+  schema requires it too, with `minLength: 1`.
+- **`reporterSubComponentName` names the section in the report (decided).** It is copied unchanged
+  into `commonDimentions.reporterSubComponentName`. Two sections of one workflow cover the same
+  window, so without it their reports would differ only in their counts. **The operator keeps the
+  values unique (decided)**, as with the ids: Napole does not check that.
 - `fromStepId` need not be the graph's first step, and `toStepId` need not be its last
   **(decided)**. `fromStepId == toStepId` is allowed: a one-step section (*my call*).
 - **The operator owns the ids (decided)**, as they already own matching the cron to the window
@@ -67,13 +74,18 @@ Four fields. *The names `fromStepId` and `toStepId` are my call* ("maybe generic
   - A wrong id makes the section match nothing, and the tick reports nothing (§6).
   - Pointing `toStepId` at a failure-path step gives `outputCount` 0 every tick, because a failure
     in the section wins over reaching the end (§5.2). The live example is §8's last row.
-- Pod configuration (`Napole__*`: ES URL, lag, trail, the five report dimensions) is unchanged
-  (2026-11-08 §5).
+- Pod configuration (`Napole__*`: ES URL, lag, trail, and four of the report dimensions) is
+  unchanged (2026-11-08 §5), except that **`Napole__Report__ReporterSubComponentName` is removed
+  (decided)**. It moves from `ReportDimensions` and its startup validation to the payload. *My
+  call:* if the variable is still set, it is ignored. It does not override the payload or act as a
+  fallback.
 
 ## 4. The records relied on
 
 All from `service.name == "orchestrator"`, all carrying `attributes.WorkflowId`,
 `attributes.ExecutionId`, `attributes.StepId` and `attributes.EntryId` (one `EntryId` per step run).
+The one exception is the root record of an entry step that failed or cancelled, which has no execution
+(below).
 
 | record | template | carries |
 |---|---|---|
@@ -92,6 +104,23 @@ All from `service.name == "orchestrator"`, all carrying `attributes.WorkflowId`,
 
 Verified on every step of the live workflow (§8). The kafka-importer's import record is **no longer
 used**: the root record replaces it, for every entry processor.
+
+**An entry step that fails or cancels has no execution.** The dispatch carries no execution id. If
+the entry step fails or cancels, it reports `Guid.Empty`, and the log scope leaves empty ids out, so
+that root record has no `ExecutionId` or `EntryId` and the query never sees it. Examples are the
+importer failing to reach Kafka, or cancelling on an empty topic. So **input means runs that produced
+an execution**, which is what the import record meant before. A section that starts at the entry
+step never counts the entry step's own failures. A one-step section on the entry step reports
+output equal to input. *My call:* that is accepted and documented. Counting them would need the
+orchestrator to give those records a key, which is outside Napole.
+
+The user's rule says the same thing from the other side **(decided)**: once there is an ExecutionId,
+the execution is moving through the workflow, and it can fail, cancel or complete on the way to
+`toStepId`. Checked in ES (all data to 2026-11-09):
+- all 70,212 Completed root records carry an ExecutionId;
+- none of the 9,056 Cancelled root records do, and neither does the 1 Failed one;
+- the code is `ProcessDispatchHandler.cs:361`, where a failure outcome carries the dispatch's own,
+  empty, execution id.
 
 **Contract.** `Advanced` and `BranchEnds` are already constants in `Messaging.Contracts`. The root
 and advanced-anyway templates are still literal strings in the orchestrator, and the second is
@@ -126,10 +155,13 @@ In this order:
 
 1. `roots ≠ 1` → **left out** (two runs of one id in the trail, or the entry not in the trail).
    This replaces the old `imports ≠ 1` guard (2026-11-08 §4.2).
-2. `open > 0` → **unfinished**, left out. The whole execution must have finished, including steps
-   after `toStepId`.
-3. a Failed outcome in the section → **failed**. The first failure wins, even if a failure branch
-   then completes (unchanged).
+2. a Failed outcome in the section → **failed**, even with a branch still open. The first failure
+   wins, even if a failure branch then completes. This is the decided order from 2026-11-08 §4.4,
+   as `RoundTripRules.Decide` implements it today: a failed run that is still running a slow
+   failure branch must not be lost as unfinished, since no later tick will report it.
+3. `open > 0` → **unfinished**, left out. The whole execution must have finished, including steps
+   after `toStepId`. A cancel with a branch still open is unfinished, as today, because that branch
+   could still fail.
 4. a Cancelled outcome in the section → **discarded**.
 5. a Completed outcome at `toStepId` → **output**.
 6. otherwise → **bypassed**: the run finished cleanly by a route that does not pass `toStepId`.
@@ -202,7 +234,7 @@ the logs.
 
 ## 7. Unchanged
 
-The report contract and field names (2026-11-08 §6), failures (§7), layout and deployment (§8),
+The report field names and their values (2026-11-08 §6), except where `reporterSubComponentName` comes from (§3); failures (§7), layout and deployment (§8),
 and the window, lag and trail (§4.1).
 
 ## 8. Evidence (ES, 2026-11-09)
@@ -223,6 +255,10 @@ independently in Python from raw records; identical in every case:
 | importer → split-filefetcher (first hop) | 80 | 64 | 16 | 0 | – | ✓ |
 | split-filefetcher → export-outcome (failure path) | 64 | 0 | 48 | 16 | 16 bypassed | ✓ |
 
+- **The verdict order.** The proof script checks *unfinished* before *failed*, where §5.2 checks
+  failed first. In this window no run was unfinished, so the two orders give the same counts, and
+  the table is valid for §5.2. A fixture with a failure and an open branch (§9) covers the
+  difference.
 - **The upper bound matters.** Without `toT`, the first-hop section counted 48 failed, 32 of them
   failing after `split-filefetcher`. With it, 16, which is right.
 - **The open rule with the root record** balances to exactly 0 for all **42,817** executions in
@@ -240,11 +276,12 @@ export-outcome `9b4224a5-b9a0-4b9f-a35f-d48dda62b15b`.
 ## 9. Tests (builder's call on the shape)
 
 - **Outcome per step run:** each of the three record combinations in §4.
-- **Verdict:** each row of §5.2, including a split that meets again at `toStepId` (one output), a
+- **Verdict:** each row of §5.2, including a failure in the section with a branch still open
+  (failed), a split that meets again at `toStepId` (one output), a
   failure after `toT` (not counted), a failure before `fromT` (not counted), a bypassed run, and
   `roots = 2`.
 - **The five sections of §8** as fixtures, with their counts.
-- **Payload:** the four fields required; `fromStepId == toStepId` accepted.
+- **Payload:** the five fields required, including an empty or whitespace `reporterSubComponentName` refused; `fromStepId == toStepId` accepted; the report carries the payload's `reporterSubComponentName`, and the pod no longer requires the variable.
 - **Live:** redeploy beside the split chain with a whole-run section, and check one tick against an
   independent recount, as 2026-11-08 §9 did.
 
@@ -252,8 +289,16 @@ export-outcome `9b4224a5-b9a0-4b9f-a35f-d48dda62b15b`.
 
 The payload shape changes, so the `napole-config` schema row is frozen and needs a **new version**,
 and the running `napole-splitchain` workflow must be stopped, its Napole assignment updated with
-the two step ids, and started again. Use the repo's existing order for a config change: new
+the two step ids and `reporterSubComponentName`, and started again. The manifest
+(`k8s/46-processor-napole.yaml`) drops `Napole__Report__ReporterSubComponentName`. The live
+assignment keeps the value the pod sends today, so the topic's existing reports and the new ones
+match. Use the repo's existing order for a config change: new
 schema, stop, PUT the assignment, new image and pod, PUT the processor row, start.
+
+**The orchestrator is not redeployed with Napole** (*my call*). The two templates moved into
+`OutcomeTemplates` (§4) must stay byte-identical, em dash included, and a test pins them. Napole can
+then ship on the repacked package while the running orchestrator still writes the same text. The
+orchestrator picks up the constants at its next release, and nothing changes in ES.
 
 ## 11. Rejected shapes
 
