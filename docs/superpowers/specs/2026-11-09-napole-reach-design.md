@@ -66,8 +66,8 @@ happened before the section started is not part of it).
   (`output + failed + discarded = input`) is **replaced**.
 - No proven end in the window → no report, a `CancelledException` naming the section (unchanged,
   sections spec §6).
-- The report's fields, names and `reporterSubComponentName` from the payload are unchanged
-  (sections spec §3, 2026-11-08 §6).
+- The report's fields and names are unchanged (2026-11-08 §6). All five dimensions now come from
+  the payload (§2.5).
 - **The published report contract changes meaning** (*my call*, following the decision above).
   `napole-report.json` describes `inputCount` as executions "whose round trip terminated" and says
   the counters sum to it. Its descriptions are rewritten to §2.2–2.3, and it is published as a new
@@ -89,10 +89,45 @@ happened before the section started is not part of it).
 | warning when no traced execution reached `toStepId` | **kept** (*my call*): a typo in `toStepId` still turns every execution into "not reached", so the warning is still how the operator notices |
 | left-out counts in the report log line | kept, as "not in report" (no proven end) and "re-imported" (`roots > 1`) |
 
+### 2.5 The payload: all five report dimensions move in (decided)
+
+The five report dimensions leave the pod's environment and join the step payload, **in this
+order, after the four existing fields (decided)**:
+
+```json
+{
+  "watchedWorkflowId": "8cfdbcdb-a7e0-4a7d-9b4d-e4120ccacf02",
+  "fromStepId": "95225f8c-56b2-494b-a59d-d9b34fbde441",
+  "toStepId": "06f1c5fd-bdfc-43ae-93c9-5bde2995e167",
+  "windowMinutes": 10,
+  "reporterComponentName": "myDepartment",
+  "reporterSubComponentName": "myTeam",
+  "reporterNetworkName": "myNetwork",
+  "srcCode": "928",
+  "sagCode": "LLL"
+}
+```
+
+- **Nine fields, all required.** Each dimension is a string, `minLength: 1` in the schema, and a
+  whitespace-only value is a `FailedException` at run time. That is the rule `reporterSubComponentName`
+  already has, now applied to all five (*my call*). `srcCode` stays a string, as the report carries
+  it.
+- They are copied unchanged into the report's `commonDimentions`, as today.
+- **The order** is the order of the schema's `properties` and `required`, of the `NapoleConfig`
+  record's parameters, and of every example. JSON readers do not depend on it.
+- **The pod's `Napole:Report:*` section goes** (decided): the `ReportDimensions` options class, its
+  four startup validations, and the four `Napole__Report__*` variables in
+  `k8s/46-processor-napole.yaml`. The pod keeps `ElasticBaseUrl`, `LagSeconds` and `TrailMinutes`. A
+  leftover `Napole__Report__*` variable binds to nothing and is ignored.
+- Each Napole step now carries its own full set of dimensions. Two sections can be told apart by any
+  of them. Keeping them right is the operator's responsibility, as with the ids.
+- **Schema:** `napole-config` 3.0.0, with the nine fields, `additionalProperties: false`, title
+  "Napole step payload v3".
+
 ## 3. Unchanged
 
-- The payload's five fields, their validation and the schema: sections spec §3 and
-  `napole-config` 2.0.0. **No schema change, no new config version.**
+- The payload's first four fields and their validation: sections spec §3. The rest of the payload
+  changes (§2.5).
 - The records and how a step run's outcome is derived: sections spec §4.
 - The window, lag, trail and mid-slot cron: 2026-11-08 §4.1.
 - Report fields, failures and deployment: 2026-11-08 §6–8.
@@ -153,20 +188,30 @@ The rule computed in Python from raw orchestrator records, window 07:50–08:00 
   - `roots = 0` and reached → counted.
 - **Report:** counters may exceed input; no identity assertion; nothing with a proven end → no report.
 - **Source:** the new columns read by name; the params unchanged.
+- **Payload:**
+  - the nine fields, all required;
+  - each dimension refused when empty in the schema, and when whitespace at run time;
+  - each dimension copied into the report;
+  - the pod starts with no `Napole:Report:*` settings.
 - **Live:** the whole-run section on the next tick, checked against `reach.py` for the same window.
 
 ## 7. Rollout
 
-The processor code changes and the payload does not.
-1. POST the rewritten `napole-report.json` as `napole-report` 2.0.0 (§2.3).
-2. Build the image and read the new source hash.
-3. PUT the processor row (`d336a2e3`, version 2.1.0, *my call*) with the new hash and the new
-   `outputSchemaId`.
-4. Let the pod roll.
+The processor code and the payload both change, so this follows the repo's order for a config
+change (sections spec §10):
+1. POST `napole-config` 3.0.0 (§2.5), and the rewritten `napole-report.json` as `napole-report`
+   2.0.0 (§2.3).
+2. Stop `napole-splitchain`.
+3. PUT the Napole assignment (`dc5ca477`) with the nine-field payload. It keeps the current
+   section and the values the pod sends today: `myDepartment`, `myTeam`, `myNetwork`, `928`, `LLL`.
+4. Build the image, apply `k8s/46-processor-napole.yaml` alone (the `Napole__Report__*` variables
+   removed), and restart the pod. Read the new source hash from its log.
+5. PUT the processor row (`d336a2e3`, version 3.0.0, *my call*: the payload breaks) with the new
+   hash, `configSchemaId` 3.0.0 and `outputSchemaId` 2.0.0.
+6. Start the workflow.
 
-**No config schema version, no assignment change, no workflow stop.** This is sections spec §10's
-order, minus the payload steps. The kafka-exporter step after Napole has no input schema of its own
-to change; the builder confirms that from its processor row.
+The kafka-exporter step after Napole has no input schema of its own to change; the builder confirms
+that from its processor row.
 
 ## 8. Rejected shapes
 
