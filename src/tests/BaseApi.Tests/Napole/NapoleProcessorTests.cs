@@ -54,12 +54,12 @@ public sealed class NapoleProcessorTests
             d.ReporterComponentName, d.ReporterSubComponentName, d.ReporterNetworkName, d.SrcCode, d.SagCode);
     }
 
-    // (roots, openBranches, failed, cancelled, reached)
-    internal static ExecutionTrail Complete() => new(Guid.NewGuid(), 1, 0, 0, 0, 2);
-    internal static ExecutionTrail Failed() => new(Guid.NewGuid(), 1, 0, 1, 0, 0);
-    internal static ExecutionTrail Cancelled() => new(Guid.NewGuid(), 1, 0, 0, 1, 0);
-    internal static ExecutionTrail Open() => new(Guid.NewGuid(), 1, 1, 0, 0, 1);
-    internal static ExecutionTrail Bypassed() => new(Guid.NewGuid(), 1, 0, 0, 0, 0);
+    // (roots, reached, endCompleted, endFailed, endCancelled, wayFailed, wayCancelled)
+    internal static ExecutionTrail Reached2() => new(Guid.NewGuid(), 1, 2, 2, 0, 0, 0, 0);
+    internal static ExecutionTrail FailedOnTheWay() => new(Guid.NewGuid(), 1, 0, 0, 0, 0, 1, 0);
+    internal static ExecutionTrail CancelledOnTheWay() => new(Guid.NewGuid(), 1, 0, 0, 0, 0, 0, 1);
+    internal static ExecutionTrail NoEnd() => new(Guid.NewGuid(), 1, 0, 0, 0, 0, 0, 0);
+    internal static ExecutionTrail ReImported() => new(Guid.NewGuid(), 2, 1, 1, 0, 0, 0, 0);
 
     internal static NapoleProcessor Processor(IExecutionTrailSource source, ILogger<NapoleProcessor>? logger = null)
         => new(
@@ -90,7 +90,7 @@ public sealed class NapoleProcessorTests
     [Fact]
     public async Task ItAsksForTheSectionAndTheSnappedWindow()
     {
-        var source = new FakeTrailSource(Complete());
+        var source = new FakeTrailSource(Reached2());
 
         await Processor(source).ReportAsync(Config(), TestContext.Current.CancellationToken);
 
@@ -99,25 +99,16 @@ public sealed class NapoleProcessorTests
             source.Asked);
     }
 
-    [Fact]
-    public async Task BypassedRunsAreInNoCount()
-    {
-        var source = new FakeTrailSource(Complete(), Bypassed());
-
-        var report = await Processor(source).ReportAsync(Config(), TestContext.Current.CancellationToken);
-
-        Assert.Equal(new MandatoryMeasurments(InputCount: 1, OutputCount: 1, DiscardedCount: 0, FailedCount: 0), report!.MandatoryMeasurments);
-    }
 
     [Fact]
-    public async Task TheReportCountsTheTrails()
+    public async Task TheReportCountsStepOutcomes()
     {
-        var source = new FakeTrailSource(Complete(), Complete(), Failed(), Cancelled(), Open());
+        var source = new FakeTrailSource(Reached2(), FailedOnTheWay(), CancelledOnTheWay(), NoEnd());
 
         var report = await Processor(source).ReportAsync(Config(), TestContext.Current.CancellationToken);
 
         Assert.NotNull(report);
-        Assert.Equal(new MandatoryMeasurments(InputCount: 4, OutputCount: 2, DiscardedCount: 1, FailedCount: 1), report.MandatoryMeasurments);
+        Assert.Equal(new MandatoryMeasurments(InputCount: 3, OutputCount: 2, DiscardedCount: 1, FailedCount: 1), report.MandatoryMeasurments);
         Assert.Equal(1794135060412, report.CommonDimentions.InsertionTime);
         Assert.Equal("myDepartment", report.CommonDimentions.ReporterComponentName);
         Assert.Equal("LLL", report.CommonDimentions.SagCode);
@@ -130,7 +121,7 @@ public sealed class NapoleProcessorTests
         // Not a silent return: the framework reports a step that sends nothing as Failed. The message
         // names both step ids, because a typo in one matches nothing and this is where it shows.
         var sender = Substitute.For<IQueueSender>();
-        var processor = Processor(new FakeTrailSource(Open(), Bypassed()));
+        var processor = Processor(new FakeTrailSource(NoEnd(), ReImported()));
         processor.BeginDispatch(TestDispatch.State(sender, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()));
 
         var ex = await Assert.ThrowsAsync<CancelledException>(
@@ -146,7 +137,7 @@ public sealed class NapoleProcessorTests
     [Fact]
     public async Task NoPayloadFails()
     {
-        var processor = Processor(new FakeTrailSource(Complete()));
+        var processor = Processor(new FakeTrailSource(Reached2()));
 
         await Assert.ThrowsAsync<FailedException>(
             () => processor.ExecuteAsync([], "", Guid.Empty, TestContext.Current.CancellationToken));
@@ -155,7 +146,7 @@ public sealed class NapoleProcessorTests
     [Fact]
     public async Task AnEmptyWorkflowIdFails()
     {
-        var processor = Processor(new FakeTrailSource(Complete()));
+        var processor = Processor(new FakeTrailSource(Reached2()));
 
         await Assert.ThrowsAsync<FailedException>(
             () => processor.ReportAsync(Config(workflow: Guid.Empty), TestContext.Current.CancellationToken));
@@ -164,7 +155,7 @@ public sealed class NapoleProcessorTests
     [Fact]
     public async Task AWindowBelowOneFails()
     {
-        var processor = Processor(new FakeTrailSource(Complete()));
+        var processor = Processor(new FakeTrailSource(Reached2()));
 
         await Assert.ThrowsAsync<FailedException>(
             () => processor.ReportAsync(Config(window: 0), TestContext.Current.CancellationToken));
@@ -173,7 +164,7 @@ public sealed class NapoleProcessorTests
     [Fact]
     public async Task AnEmptyFromStepFails()
     {
-        var processor = Processor(new FakeTrailSource(Complete()));
+        var processor = Processor(new FakeTrailSource(Reached2()));
 
         await Assert.ThrowsAsync<FailedException>(
             () => processor.ReportAsync(Config(from: Guid.Empty), TestContext.Current.CancellationToken));
@@ -182,7 +173,7 @@ public sealed class NapoleProcessorTests
     [Fact]
     public async Task AnEmptyToStepFails()
     {
-        var processor = Processor(new FakeTrailSource(Complete()));
+        var processor = Processor(new FakeTrailSource(Reached2()));
 
         await Assert.ThrowsAsync<FailedException>(
             () => processor.ReportAsync(Config(to: Guid.Empty), TestContext.Current.CancellationToken));
@@ -206,7 +197,7 @@ public sealed class NapoleProcessorTests
             "srcCode" => d with { SrcCode = "  " },
             _ => d with { SagCode = "  " },
         };
-        var processor = Processor(new FakeTrailSource(Complete()));
+        var processor = Processor(new FakeTrailSource(Reached2()));
 
         var ex = await Assert.ThrowsAsync<FailedException>(
             () => processor.ReportAsync(Config(dimensions: d), TestContext.Current.CancellationToken));
@@ -219,7 +210,7 @@ public sealed class NapoleProcessorTests
     {
         var mine = new ReportDimensions("dept-x", "split-whole-run", "net-y", "111", "ZZZ");
 
-        var report = await Processor(new FakeTrailSource(Complete()))
+        var report = await Processor(new FakeTrailSource(Reached2()))
             .ReportAsync(Config(dimensions: mine), TestContext.Current.CancellationToken);
 
         var c = report!.CommonDimentions;
@@ -229,7 +220,7 @@ public sealed class NapoleProcessorTests
     [Fact]
     public async Task ASingleStepSectionIsAccepted()
     {
-        var source = new FakeTrailSource(Complete());
+        var source = new FakeTrailSource(Reached2());
 
         await Processor(source).ReportAsync(Config(to: FromStep), TestContext.Current.CancellationToken);
 
@@ -243,7 +234,7 @@ public sealed class NapoleProcessorTests
         // output 0 every tick (final review, Important 2). The warning is how the operator finds out.
         var logger = new CapturingLogger<NapoleProcessor>();
 
-        var report = await Processor(new FakeTrailSource(Failed(), Cancelled(), Bypassed()), logger)
+        var report = await Processor(new FakeTrailSource(FailedOnTheWay(), NoEnd()), logger)
             .ReportAsync(Config(), TestContext.Current.CancellationToken);
 
         Assert.NotNull(report);
@@ -256,7 +247,7 @@ public sealed class NapoleProcessorTests
     {
         var logger = new CapturingLogger<NapoleProcessor>();
 
-        await Processor(new FakeTrailSource(Complete(), Failed()), logger)
+        await Processor(new FakeTrailSource(Reached2(), FailedOnTheWay()), logger)
             .ReportAsync(Config(), TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain(logger.Lines, l => l.Level == LogLevel.Warning);
@@ -265,14 +256,14 @@ public sealed class NapoleProcessorTests
     [Fact]
     public async Task TheReportLineCountsTheRunsLeftOut()
     {
-        // Unfinished and bypassed runs are in no count; the log line is the only place they show.
+        // Executions with no proven end, and re-imports, are in no count; the log line is the only place they show.
         var logger = new CapturingLogger<NapoleProcessor>();
 
-        await Processor(new FakeTrailSource(Complete(), Open(), Bypassed(), Bypassed()), logger)
+        await Processor(new FakeTrailSource(Reached2(), NoEnd(), ReImported(), ReImported()), logger)
             .ReportAsync(Config(), TestContext.Current.CancellationToken);
 
         var line = Assert.Single(logger.Lines, l => l.Level == LogLevel.Information).Message;
-        Assert.Contains("1 unfinished", line, StringComparison.Ordinal);
-        Assert.Contains("2 bypassed", line, StringComparison.Ordinal);
+        Assert.Contains("1 not in report", line, StringComparison.Ordinal);
+        Assert.Contains("2 re-imported", line, StringComparison.Ordinal);
     }
 }

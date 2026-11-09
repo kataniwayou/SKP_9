@@ -15,12 +15,16 @@ public sealed class ReportBuilderTests
     /// <summary>The values the dev pod sent before the dimensions moved to the payload, kept by the rollout.</summary>
     internal static ReportDimensions Dimensions() => new("myDepartment", "myTeam", "myNetwork", "928", "LLL");
 
-    private static IEnumerable<RoundTrip> Many(RoundTrip verdict, int count) => Enumerable.Repeat(verdict, count);
+    private static IEnumerable<Contribution> Many(Contribution contribution, int count) => Enumerable.Repeat(contribution, count);
 
-    /// <summary>The 10:51 UTC tick of 2026-11-08, as ES counted it, plus three runs still in flight.</summary>
+    /// <summary>
+    /// The live window 07:50-08:00 UTC of 2026-11-09 on the whole run, as the reach rule counts it (reach
+    /// spec §5): 16 good files reaching split-exporter twice, 48 failing and 16 cancelled on the way, plus
+    /// three with no proven end.
+    /// </summary>
     internal static NapoleReport WorkedExample() => ReportBuilder.Build(
         Window,
-        [.. Many(RoundTrip.Failed, 48), .. Many(RoundTrip.Cancelled, 16), .. Many(RoundTrip.Complete, 16), .. Many(RoundTrip.Unfinished, 3)],
+        [.. Many(new(1, 2, 0, 0), 16), .. Many(new(1, 0, 1, 0), 48), .. Many(new(1, 0, 0, 1), 16), .. Many(default, 3)],
         Dimensions(),
         InsertedAt)!;
 
@@ -29,7 +33,7 @@ public sealed class ReportBuilderTests
     {
         var report = WorkedExample();
 
-        Assert.Equal(new MandatoryMeasurments(InputCount: 80, OutputCount: 16, DiscardedCount: 16, FailedCount: 48),
+        Assert.Equal(new MandatoryMeasurments(InputCount: 80, OutputCount: 32, DiscardedCount: 16, FailedCount: 48),
             report.MandatoryMeasurments);
         Assert.Equal(new CommonDimentions(
             "myDepartment", "myTeam", "myNetwork",
@@ -38,39 +42,26 @@ public sealed class ReportBuilderTests
     }
 
     [Fact]
-    public void NothingTerminatedIsNoReport()
+    public void TheCountersMayExceedTheInput()
     {
-        Assert.Null(ReportBuilder.Build(Window, [RoundTrip.Unfinished, RoundTrip.Unfinished], Dimensions(), InsertedAt));
-        Assert.Null(ReportBuilder.Build(Window, [], Dimensions(), InsertedAt));
+        // Input counts executions, the counters count step outcomes: no identity holds any more (reach spec §2.3).
+        var m = ReportBuilder.Build(Window, [new(1, 2, 0, 0)], Dimensions(), InsertedAt)!.MandatoryMeasurments;
+
+        Assert.Equal(new MandatoryMeasurments(InputCount: 1, OutputCount: 2, DiscardedCount: 0, FailedCount: 0), m);
     }
 
     [Fact]
-    public void TheCountsAlwaysAddUp()
+    public void NothingWithAProvenEndIsNoReport()
     {
-        var random = new Random(20261108);
-        for (var i = 0; i < 200; i++)
-        {
-            var verdicts = Enumerable.Range(0, random.Next(1, 120))
-                .Select(_ => (RoundTrip)random.Next(0, 4))
-                .ToList();
-
-            var m = ReportBuilder.Build(Window, verdicts, Dimensions(), InsertedAt)?.MandatoryMeasurments;
-            if (m is null)
-            {
-                Assert.All(verdicts, v => Assert.Equal(RoundTrip.Unfinished, v));
-                continue;
-            }
-
-            Assert.Equal(m.InputCount, m.OutputCount + m.FailedCount + m.DiscardedCount);
-            Assert.Equal(verdicts.Count(v => v != RoundTrip.Unfinished), m.InputCount);
-        }
+        Assert.Null(ReportBuilder.Build(Window, [default, default], Dimensions(), InsertedAt));
+        Assert.Null(ReportBuilder.Build(Window, [], Dimensions(), InsertedAt));
     }
 
     [Fact]
     public void TimStampHourIsTheUtcHourOfFrom()
     {
         static long Hour(DateTimeOffset from) => ReportBuilder.Build(
-            new ReportWindow(from, from.AddMinutes(10)), [RoundTrip.Complete], Dimensions(), InsertedAt)!
+            new ReportWindow(from, from.AddMinutes(10)), [new Contribution(1, 1, 0, 0)], Dimensions(), InsertedAt)!
             .CommonDimentions.TimStampHour;
 
         Assert.Equal(2026123123, Hour(new DateTimeOffset(2026, 12, 31, 23, 50, 0, TimeSpan.Zero)));

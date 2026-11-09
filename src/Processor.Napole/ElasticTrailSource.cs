@@ -15,23 +15,16 @@ namespace Processor.Napole;
 /// per step run (<c>EntryId</c>): <see cref="OutcomeTemplates.BranchEnds"/> carries its <c>Result</c>;
 /// an <see cref="OutcomeTemplates.Advanced"/> record is Completed unless an
 /// <see cref="OutcomeTemplates.AdvancedAnyway"/> warning for the same run says Failed or Cancelled. The
-/// statement folds those into one row per step run, then one row per execution: its root
-/// (<see cref="OutcomeTemplates.EntryCompleted"/>), its open branches, and the Failed, Cancelled and
-/// <c>toStepId</c>-Completed step runs. The templates travel as params from the contract, never as text
-/// in the statement. A run belongs to the tick when its first outcome at <c>fromStepId</c> is in the
-/// window, so any entry processor works, not only the kafka-importer.
+/// templates travel as params from the contract, never as text in the statement.
 /// </para>
 /// <para>
-/// <b>Open branches</b> are roots + Σ <c>SuccessorCount</c> − (<c>Advanced</c> + <c>BranchEnds</c>), over
-/// the whole run: a branch counts as ended only once the orchestrator has handled its outcome. A
-/// duplicated outcome makes the difference negative, which reads as closed; none was found in 425,000.
-/// </para>
-/// <para>
-/// <b>The section is bounded by time, not by the graph</b> (spec §5.3): failures and cancels count from
-/// the first <c>fromStepId</c> outcome up to the last completed <c>toStepId</c> one, or to the end of the
-/// run if <c>toStepId</c> never completed. The ids do not chain from step to step, so a failure on a
-/// sibling branch outside the section but inside that span is counted. Exact sections need the step
-/// graph, which this source does not read.
+/// <b>Reach counting</b> (reach spec §2, §4). An execution is traced when its first <c>fromStepId</c>
+/// outcome is in the window, so any entry processor works. From that moment on, the statement counts
+/// its step runs of <c>toStepId</c> and their outcomes, and its Failed and Cancelled outcomes at any
+/// step, plus its root records (<see cref="OutcomeTemplates.EntryCompleted"/>) for the re-import guard.
+/// Which of those count is <see cref="ReachRules"/>' decision. There is no open-branch check and no
+/// upper time bound: Napole does not wait for branches, and once an execution has reached
+/// <c>toStepId</c>, only that step's outcomes count.
 /// </para>
 /// <para>
 /// <b>Transport and failure mapping as <c>Processor.Analyst</c>'s <c>ElasticPanelSource</c></b>, with
@@ -83,40 +76,36 @@ public sealed class ElasticTrailSource : IExecutionTrailSource
 
         return [.. rows.Select(r => new ExecutionTrail(
             Guid.Parse(Text(r, "attributes.ExecutionId")),
-            Long(r, "roots"), Long(r, "openBranches"), Long(r, "failed"), Long(r, "cancelled"), Long(r, "reached")))];
+            Long(r, "roots"), Long(r, "reached"), Long(r, "endCompleted"), Long(r, "endFailed"), Long(r, "endCancelled"),
+            Long(r, "wayFailed"), Long(r, "wayCancelled")))];
     }
 
-    // Run word for word against the dev cluster on 2026-11-09: it reproduced every section of spec §8.
-    // `res` leaves the root record out because it carries a Result too; `root` is a SUM so two runs of
-    // one id stay two even if they ever shared an EntryId. INLINE STATS gives each step run its
-    // execution's section bounds without a second round trip. The end counts only completions at or
-    // after fromT, which needs fromT first, hence two INLINE STATS: with the ids swapped, or an end step
-    // that ran before the start, a completion before the section would otherwise make every run
-    // Complete (final review).
+    // Run word for word against the dev cluster on 2026-11-09: it reproduced reach spec §5 on all five
+    // sections. `res` leaves the root record out because it carries a Result too; `root` is a SUM so two
+    // runs of one id stay two even if they ever shared an EntryId. INLINE STATS gives each step run its
+    // execution's fromT without a second round trip; nothing before fromT is counted.
     private static readonly string Statement = $$"""
         FROM {{TrailRecords.Index}}
         | WHERE attributes.WorkflowId == ?workflow AND resource.attributes.service.name == "orchestrator"
           AND attributes.ExecutionId IS NOT NULL AND @timestamp >= ?trailFrom AND @timestamp < ?trailTo
         | EVAL fmt = TO_STRING(`attributes.{OriginalFormat}`)
         | WHERE fmt == ?root OR fmt == ?advanced OR fmt == ?branchEnds OR fmt == ?advancedAnyway
-        | EVAL isRoot = CASE(fmt == ?root, 1, 0), isAdv = CASE(fmt == ?advanced, 1, 0), isEnded = CASE(fmt == ?branchEnds, 1, 0),
-               succ = CASE(fmt == ?advanced, TO_LONG(attributes.SuccessorCount), 0),
+        | EVAL isRoot = CASE(fmt == ?root, 1, 0),
                res = CASE(fmt == ?branchEnds OR fmt == ?advancedAnyway, attributes.Result, null)
-        | STATS root = SUM(isRoot), adv = MAX(isAdv), ended = MAX(isEnded), succ = SUM(succ), res = MAX(res), ts = MIN(@timestamp)
+        | STATS root = SUM(isRoot), res = MAX(res), ts = MIN(@timestamp)
                 BY attributes.ExecutionId, attributes.EntryId, attributes.StepId
         | EVAL outcome = COALESCE(res, "Completed")
         | INLINE STATS fromT = MIN(CASE(attributes.StepId == ?fromStep, ts, null)) BY attributes.ExecutionId
         | WHERE fromT IS NOT NULL
-        | EVAL atEnd = CASE(attributes.StepId == ?toStep AND outcome == "Completed" AND ts >= fromT, 1, 0)
-        | INLINE STATS toT = MAX(CASE(atEnd == 1, ts, null)) BY attributes.ExecutionId
-        | EVAL inSection = CASE(ts >= fromT AND (toT IS NULL OR ts <= toT), 1, 0)
-        | STATS fromT = MIN(fromT), roots = SUM(root), dispatched = SUM(succ), handled = SUM(adv) + SUM(ended),
-                failed = SUM(CASE(inSection == 1 AND outcome == "Failed", 1, 0)),
-                cancelled = SUM(CASE(inSection == 1 AND outcome == "Cancelled", 1, 0)),
-                reached = SUM(atEnd) BY attributes.ExecutionId
+        | EVAL after = CASE(ts >= fromT, 1, 0), atEnd = CASE(after == 1 AND attributes.StepId == ?toStep, 1, 0)
+        | STATS fromT = MIN(fromT), roots = SUM(root), reached = SUM(atEnd),
+                endCompleted = SUM(CASE(atEnd == 1 AND outcome == "Completed", 1, 0)),
+                endFailed = SUM(CASE(atEnd == 1 AND outcome == "Failed", 1, 0)),
+                endCancelled = SUM(CASE(atEnd == 1 AND outcome == "Cancelled", 1, 0)),
+                wayFailed = SUM(CASE(after == 1 AND outcome == "Failed", 1, 0)),
+                wayCancelled = SUM(CASE(after == 1 AND outcome == "Cancelled", 1, 0)) BY attributes.ExecutionId
         | WHERE fromT >= ?from AND fromT < ?to
-        | EVAL openBranches = roots + dispatched - handled
-        | KEEP attributes.ExecutionId, roots, openBranches, failed, cancelled, reached
+        | KEEP attributes.ExecutionId, roots, reached, endCompleted, endFailed, endCancelled, wayFailed, wayCancelled
         | LIMIT {{TrailRecords.RowLimit}}
         """;
 

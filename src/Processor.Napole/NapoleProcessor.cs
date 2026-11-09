@@ -5,8 +5,9 @@ using Microsoft.Extensions.Options;
 namespace Processor.Napole;
 
 /// <summary>
-/// The scheduled section reporter: on each tick, how the executions that reached the section's start
-/// step in the last window ended inside the section, as one count report handed to its successor (a
+/// The scheduled section reporter: on each tick, it traces the executions that reached the section's
+/// start step in the last window and counts the step outcomes where each one ended -- at the section's
+/// end step if it got there, on the way if it did not -- as one report handed to its successor (a
 /// kafka-exporter).
 /// <para>
 /// <b>Its workflow's ENTRY step</b>, so <c>executionId</c> arrives as <see cref="Guid.Empty"/>. It opens
@@ -111,20 +112,21 @@ public sealed class NapoleProcessor(
                 trails.Count, config.WatchedWorkflowId, config.FromStepId, window.From, window.To, config.ToStepId);
         }
 
-        var verdicts = trails.Select(RoundTripRules.Decide).ToList();
+        var reaches = trails.Select(ReachRules.Classify).ToList();
         var report = ReportBuilder.Build(
-            window, verdicts, ReportDimensions.Of(config), clock.GetUtcNow());
+            window, trails.Select(ReachRules.Count), ReportDimensions.Of(config), clock.GetUtcNow());
 
         if (report is { } r)
         {
-            // Unfinished and bypassed runs are in no count; this line is the only place they show.
+            // Executions with no proven end, and re-imports, are in no count; this line is the only place
+            // they show.
             var m = r.MandatoryMeasurments;
             logger.LogInformation(
-                "reported {InputCount} executions of {WatchedWorkflowId} {FromStepId}..{ToStepId}: {OutputCount} complete, "
-                + "{DiscardedCount} discarded, {FailedCount} failed; left out {UnfinishedCount} unfinished, "
-                + "{BypassedCount} bypassed; window {ReportFromTime}..{ReportToTime}",
+                "reported {InputCount} executions of {WatchedWorkflowId} {FromStepId}..{ToStepId}: {OutputCount} output, "
+                + "{DiscardedCount} discarded, {FailedCount} failed; left out {NoEndCount} not in report, "
+                + "{ReImportedCount} re-imported; window {ReportFromTime}..{ReportToTime}",
                 m.InputCount, config.WatchedWorkflowId, config.FromStepId, config.ToStepId, m.OutputCount, m.DiscardedCount,
-                m.FailedCount, verdicts.Count(v => v == RoundTrip.Unfinished), verdicts.Count(v => v == RoundTrip.Bypassed),
+                m.FailedCount, reaches.Count(x => x == Reach.NoProvenEnd), reaches.Count(x => x == Reach.ReImported),
                 r.CommonDimentions.ReportFromTime, r.CommonDimentions.ReportToTime);
         }
 

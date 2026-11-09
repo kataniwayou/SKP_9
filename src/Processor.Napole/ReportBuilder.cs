@@ -1,51 +1,44 @@
 using System.Globalization;
-using BaseProcessor.Core.Processing;
 
 namespace Processor.Napole;
 
 public static class ReportBuilder
 {
     /// <summary>
-    /// The report for one window, or null when no execution in it terminated -- the tick then sends
-    /// nothing (spec §6).
+    /// The report for one window, or null when no traced execution has a proven end -- the tick then
+    /// sends nothing (sections spec §6).
     /// <para>
-    /// <b>Hermetic by construction, asserted anyway.</b> Each terminated execution is counted once,
-    /// under its verdict, so the three counts cannot fail to add up to the input -- but a report
-    /// that does not add up must never reach the topic looking plausible, so the identity is checked
-    /// before the report leaves here.
+    /// <b>The counters count step outcomes; they may exceed the input</b> (reach spec §2.3, decided).
+    /// The input counts executions with a proven end. The counters add each one's outcomes at
+    /// <c>toStepId</c>, or on the way, with no deduplication: two branches reaching <c>toStepId</c> add
+    /// two. The 2026-11-08 identity (output + failed + discarded = input) is replaced, so it is no
+    /// longer checked.
     /// </para>
     /// </summary>
     public static NapoleReport? Build(
         ReportWindow window,
-        IEnumerable<RoundTrip> verdicts,
+        IEnumerable<Contribution> contributions,
         ReportDimensions dimensions,
         DateTimeOffset insertedAt)
     {
-        ArgumentNullException.ThrowIfNull(verdicts);
+        ArgumentNullException.ThrowIfNull(contributions);
         ArgumentNullException.ThrowIfNull(dimensions);
 
-        int output = 0, discarded = 0, failed = 0;
-        foreach (var verdict in verdicts)
+        int input = 0, output = 0, discarded = 0, failed = 0;
+        foreach (var c in contributions)
         {
-            switch (verdict)
-            {
-                case RoundTrip.Complete: output++; break;
-                case RoundTrip.Cancelled: discarded++; break;
-                case RoundTrip.Failed: failed++; break;
-            }
+            input += c.Input;
+            output += c.Output;
+            discarded += c.Discarded;
+            failed += c.Failed;
         }
 
-        var input = output + discarded + failed;
         if (input == 0)
         {
             return null;
         }
 
         var measurements = new MandatoryMeasurments(input, output, discarded, failed);
-        if (measurements.OutputCount + measurements.FailedCount + measurements.DiscardedCount != measurements.InputCount)
-        {
-            throw new FailedException($"the report does not add up: {measurements}");
-        }
 
         return new NapoleReport(
             new CommonDimentions(

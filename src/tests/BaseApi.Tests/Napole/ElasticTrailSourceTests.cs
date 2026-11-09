@@ -20,14 +20,15 @@ public sealed class ElasticTrailSourceTests
 
     // The answer's shape, as the live cluster returned the statement on 2026-11-09.
     private const string Columns = """
-        [{"name":"attributes.ExecutionId","type":"keyword"},{"name":"roots","type":"long"},{"name":"openBranches","type":"long"},
-         {"name":"failed","type":"long"},{"name":"cancelled","type":"long"},{"name":"reached","type":"long"}]
+        [{"name":"attributes.ExecutionId","type":"keyword"},{"name":"roots","type":"long"},{"name":"reached","type":"long"},
+         {"name":"endCompleted","type":"long"},{"name":"endFailed","type":"long"},{"name":"endCancelled","type":"long"},
+         {"name":"wayFailed","type":"long"},{"name":"wayCancelled","type":"long"}]
         """;
 
     private static string Answer(params string[] rows) => $$"""{"columns":{{Columns}},"values":[{{string.Join(",", rows)}}]}""";
 
     private static string Ids(params Guid[] ids)
-        => Answer([.. ids.Select(i => $"""["{i}",1,0,0,0,1]""")]);
+        => Answer([.. ids.Select(i => $"""["{i}",1,1,1,0,0,0,0]""")]);
 
     private static ElasticTrailSource Source(HttpMessageHandler handler, string baseUrl = "http://es.test")
         => new(new HttpClient(handler), Options.Create(new NapoleOptions { ElasticBaseUrl = baseUrl }));
@@ -56,6 +57,10 @@ public sealed class ElasticTrailSourceTests
 
         var query = body.GetProperty("query").GetString()!;
         Assert.Contains("INLINE STATS", query, StringComparison.Ordinal);
+        Assert.Contains("endCompleted", query, StringComparison.Ordinal);
+        Assert.Contains("wayFailed", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("openBranches", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("toT", query, StringComparison.Ordinal);
         Assert.DoesNotContain("kafka-importer", query, StringComparison.Ordinal);
         Assert.DoesNotContain("Record", query, StringComparison.Ordinal);
     }
@@ -80,29 +85,30 @@ public sealed class ElasticTrailSourceTests
     public async Task ItReadsTheTrailsBack()
     {
         // The good file reaches split-exporter on both branches; the bad extension fails at the fetcher.
-        var handler = new ScriptedHandler(Answer($"""["{Good}",1,0,0,0,2]""", $"""["{BadExt}",1,0,1,0,0]"""));
+        var handler = new ScriptedHandler(Answer($"""["{Good}",1,2,2,0,0,0,0]""", $"""["{BadExt}",1,0,0,0,0,1,0]"""));
 
         var trails = await Read(Source(handler));
 
         Assert.Equal(
-            [new ExecutionTrail(Good, Roots: 1, OpenBranches: 0, Failed: 0, Cancelled: 0, Reached: 2),
-             new ExecutionTrail(BadExt, Roots: 1, OpenBranches: 0, Failed: 1, Cancelled: 0, Reached: 0)],
+            [new ExecutionTrail(Good, Roots: 1, Reached: 2, EndCompleted: 2, EndFailed: 0, EndCancelled: 0, WayFailed: 0, WayCancelled: 0),
+             new ExecutionTrail(BadExt, Roots: 1, Reached: 0, EndCompleted: 0, EndFailed: 0, EndCancelled: 0, WayFailed: 1, WayCancelled: 0)],
             trails);
-        Assert.Equal([RoundTrip.Complete, RoundTrip.Failed], trails.Select(RoundTripRules.Decide));
+        Assert.Equal([new Contribution(1, 2, 0, 0), new Contribution(1, 0, 1, 0)], trails.Select(ReachRules.Count));
     }
 
     [Fact]
     public async Task ItReadsRowsByColumnName()
     {
         const string shuffled = """
-            [{"name":"reached","type":"long"},{"name":"cancelled","type":"long"},{"name":"failed","type":"long"},
-             {"name":"openBranches","type":"long"},{"name":"roots","type":"long"},{"name":"attributes.ExecutionId","type":"keyword"}]
+            [{"name":"wayCancelled","type":"long"},{"name":"wayFailed","type":"long"},{"name":"endCancelled","type":"long"},
+             {"name":"endFailed","type":"long"},{"name":"endCompleted","type":"long"},{"name":"reached","type":"long"},
+             {"name":"roots","type":"long"},{"name":"attributes.ExecutionId","type":"keyword"}]
             """;
-        var handler = new ScriptedHandler($$"""{"columns":{{shuffled}},"values":[[1,0,0,1,1,"{{Good}}"]]}""");
+        var handler = new ScriptedHandler($$"""{"columns":{{shuffled}},"values":[[7,6,5,4,3,2,1,"{{Good}}"]]}""");
 
         var trail = Assert.Single(await Read(Source(handler)));
 
-        Assert.Equal(new ExecutionTrail(Good, Roots: 1, OpenBranches: 1, Failed: 0, Cancelled: 0, Reached: 1), trail);
+        Assert.Equal(new ExecutionTrail(Good, Roots: 1, Reached: 2, EndCompleted: 3, EndFailed: 4, EndCancelled: 5, WayFailed: 6, WayCancelled: 7), trail);
     }
 
     [Fact]

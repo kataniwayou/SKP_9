@@ -17,7 +17,7 @@ public sealed class NapoleOpensItsOwnLineageTests
                                Arg.Any<CancellationToken>(), Arg.Any<string?>());
 
         var processor = NapoleProcessorTests.Processor(new FakeTrailSource(
-            NapoleProcessorTests.Complete(), NapoleProcessorTests.Failed()));
+            NapoleProcessorTests.Reached2(), NapoleProcessorTests.FailedOnTheWay()));
         processor.BeginDispatch(TestDispatch.State(sender, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()));
 
         await processor.ExecuteAsync([], NapoleProcessorTests.Payload(), incomingExecutionId, TestContext.Current.CancellationToken);
