@@ -114,8 +114,8 @@ public static class ProcessorHost
         // Everything else: broker, Redis, health probes, the schema loop and the liveness loop.
         builder.Services.AddBaseProcessor(builder.Configuration, identity);
 
-        // Infrastructure and report dimensions come from configuration, the target and the time
-        // frame from the step payload. Validated at start, not at first use: a pod missing a dimension or the ES address must not
+        // Infrastructure and four report dimensions come from configuration; the section, the time
+        // frame and reporterSubComponentName, which names the section, from the step payload. Validated at start, not at first use: a pod missing a dimension or the ES address must not
         // go ready and then fail -- or worse, report -- on every tick.
         builder.Services.AddOptions<NapoleOptions>()
             .Bind(builder.Configuration.GetSection(NapoleOptions.Section))
@@ -123,8 +123,6 @@ public static class ProcessorHost
                 $"{NapoleOptions.Section}:{nameof(NapoleOptions.ElasticBaseUrl)} is required")
             .Validate(o => !string.IsNullOrWhiteSpace(o.Report.ReporterComponentName),
                 $"{NapoleOptions.Section}:Report:{nameof(ReportDimensions.ReporterComponentName)} is required")
-            .Validate(o => !string.IsNullOrWhiteSpace(o.Report.ReporterSubComponentName),
-                $"{NapoleOptions.Section}:Report:{nameof(ReportDimensions.ReporterSubComponentName)} is required")
             .Validate(o => !string.IsNullOrWhiteSpace(o.Report.ReporterNetworkName),
                 $"{NapoleOptions.Section}:Report:{nameof(ReportDimensions.ReporterNetworkName)} is required")
             .Validate(o => !string.IsNullOrWhiteSpace(o.Report.SrcCode),

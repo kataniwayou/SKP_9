@@ -77,12 +77,11 @@ spec:
             # How far either side of the window an execution's records are looked for (spec 4.1, 4.2).
             - name: Napole__TrailMinutes
               value: "10"
-            # The five report dimensions, copied into every report's commonDimentions. Dev
-            # placeholders; required, so a pod missing one fails at startup.
+            # Four of the five report dimensions, copied into every report's commonDimentions. Dev
+            # placeholders; required, so a pod missing one fails at startup. The fifth,
+            # reporterSubComponentName, names the section and is in each Napole step's payload.
             - name: Napole__Report__ReporterComponentName
               value: "myDepartment"
-            - name: Napole__Report__ReporterSubComponentName
-              value: "myTeam"
             - name: Napole__Report__ReporterNetworkName
               value: "myNetwork"
             - name: Napole__Report__SrcCode

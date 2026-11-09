@@ -15,11 +15,13 @@ public sealed class ReportBuilderTests
     internal static ReportDimensions Dimensions() => new()
     {
         ReporterComponentName = "myDepartment",
-        ReporterSubComponentName = "myTeam",
         ReporterNetworkName = "myNetwork",
         SrcCode = "928",
         SagCode = "LLL",
     };
+
+    /// <summary>The value the dev pod sent before the field moved to the payload, kept by the rollout.</summary>
+    internal const string SubComponent = "myTeam";
 
     private static IEnumerable<RoundTrip> Many(RoundTrip verdict, int count) => Enumerable.Repeat(verdict, count);
 
@@ -28,6 +30,7 @@ public sealed class ReportBuilderTests
         Window,
         [.. Many(RoundTrip.Failed, 48), .. Many(RoundTrip.Cancelled, 16), .. Many(RoundTrip.Complete, 16), .. Many(RoundTrip.Unfinished, 3)],
         Dimensions(),
+        SubComponent,
         InsertedAt)!;
 
     [Fact]
@@ -46,8 +49,8 @@ public sealed class ReportBuilderTests
     [Fact]
     public void NothingTerminatedIsNoReport()
     {
-        Assert.Null(ReportBuilder.Build(Window, [RoundTrip.Unfinished, RoundTrip.Unfinished], Dimensions(), InsertedAt));
-        Assert.Null(ReportBuilder.Build(Window, [], Dimensions(), InsertedAt));
+        Assert.Null(ReportBuilder.Build(Window, [RoundTrip.Unfinished, RoundTrip.Unfinished], Dimensions(), SubComponent, InsertedAt));
+        Assert.Null(ReportBuilder.Build(Window, [], Dimensions(), SubComponent, InsertedAt));
     }
 
     [Fact]
@@ -60,7 +63,7 @@ public sealed class ReportBuilderTests
                 .Select(_ => (RoundTrip)random.Next(0, 4))
                 .ToList();
 
-            var m = ReportBuilder.Build(Window, verdicts, Dimensions(), InsertedAt)?.MandatoryMeasurments;
+            var m = ReportBuilder.Build(Window, verdicts, Dimensions(), SubComponent, InsertedAt)?.MandatoryMeasurments;
             if (m is null)
             {
                 Assert.All(verdicts, v => Assert.Equal(RoundTrip.Unfinished, v));
@@ -76,7 +79,7 @@ public sealed class ReportBuilderTests
     public void TimStampHourIsTheUtcHourOfFrom()
     {
         static long Hour(DateTimeOffset from) => ReportBuilder.Build(
-            new ReportWindow(from, from.AddMinutes(10)), [RoundTrip.Complete], Dimensions(), InsertedAt)!
+            new ReportWindow(from, from.AddMinutes(10)), [RoundTrip.Complete], Dimensions(), SubComponent, InsertedAt)!
             .CommonDimentions.TimStampHour;
 
         Assert.Equal(2026123123, Hour(new DateTimeOffset(2026, 12, 31, 23, 50, 0, TimeSpan.Zero)));
@@ -92,5 +95,15 @@ public sealed class ReportBuilderTests
 
         Assert.Equal(("myDepartment", "myTeam", "myNetwork", "928", "LLL"),
             (d.ReporterComponentName, d.ReporterSubComponentName, d.ReporterNetworkName, d.SrcCode, d.SagCode));
+    }
+
+    [Fact]
+    public void ThePayloadsSubComponentNamesTheReport()
+    {
+        // Two sections of one workflow share the window and the pod's four dimensions; this field is
+        // what tells their reports apart (sections spec §3).
+        var report = ReportBuilder.Build(Window, [RoundTrip.Complete], Dimensions(), "split-whole-run", InsertedAt)!;
+
+        Assert.Equal("split-whole-run", report.CommonDimentions.ReporterSubComponentName);
     }
 }

@@ -30,12 +30,20 @@ public sealed class NapoleOptions
     public ReportDimensions Report { get; set; } = new();
 }
 
-/// <summary>The five dimension values copied unchanged into every report's <c>commonDimentions</c>. All required.</summary>
+/// <summary>
+/// Four of the five dimension values copied unchanged into every report's <c>commonDimentions</c>.
+/// All required.
+/// <para>
+/// <b>The fifth, <c>reporterSubComponentName</c>, is in the step payload (sections spec §3).</b>
+/// Two sections of one workflow share the window and these four values, so the sub-component is what
+/// tells their reports apart, and it has to differ per step, not per pod. A
+/// <c>Napole__Report__ReporterSubComponentName</c> variable left in a manifest binds to nothing and is
+/// ignored: it does not override the payload, and it is not a fallback.
+/// </para>
+/// </summary>
 public sealed class ReportDimensions
 {
     public string ReporterComponentName { get; set; } = "";
-
-    public string ReporterSubComponentName { get; set; } = "";
 
     public string ReporterNetworkName { get; set; } = "";
 

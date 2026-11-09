@@ -26,7 +26,6 @@ public sealed class NapoleHostTests
         ["RabbitMq:Password"]       = "guest",
         ["Napole:ElasticBaseUrl"]   = "http://localhost:19200",
         ["Napole:Report:ReporterComponentName"]    = "myDepartment",
-        ["Napole:Report:ReporterSubComponentName"] = "myTeam",
         ["Napole:Report:ReporterNetworkName"]      = "myNetwork",
         ["Napole:Report:SrcCode"]                  = "928",
         ["Napole:Report:SagCode"]                  = "LLL",
@@ -59,6 +58,16 @@ public sealed class NapoleHostTests
         var ex = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync(TestContext.Current.CancellationToken));
 
         Assert.Contains("SagCode", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheSubComponentIsNoLongerAPodSetting()
+    {
+        // It moved to the payload (sections spec §3). Options validation runs on first read, so a pod
+        // that still required it would throw here.
+        using var host = Host(Configuration());
+
+        Assert.Equal("myDepartment", host.Services.GetRequiredService<IOptions<NapoleOptions>>().Value.Report.ReporterComponentName);
     }
 
     [Fact]

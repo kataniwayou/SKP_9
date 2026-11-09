@@ -32,7 +32,8 @@ public sealed class NapoleProcessor(
     {
         if (config is null)
         {
-            throw new FailedException("Napole needs a step payload naming watchedWorkflowId and windowMinutes");
+            throw new FailedException(
+                "Napole needs a step payload naming watchedWorkflowId, fromStepId, toStepId, windowMinutes and reporterSubComponentName");
         }
 
         var report = await ReportAsync(config, ct).ConfigureAwait(false);
@@ -53,10 +54,21 @@ public sealed class NapoleProcessor(
     {
         ArgumentNullException.ThrowIfNull(config);
 
-        // The schema refuses both at publish; a payload row edited by hand is not checked there.
+        // The schema refuses these at publish; a payload row edited by hand is not checked there, and
+        // the schema lets a whitespace-only name through.
         if (config.WatchedWorkflowId == Guid.Empty)
         {
             throw new FailedException("Napole's watchedWorkflowId is empty");
+        }
+
+        if (config.FromStepId == Guid.Empty)
+        {
+            throw new FailedException("Napole's fromStepId is empty");
+        }
+
+        if (config.ToStepId == Guid.Empty)
+        {
+            throw new FailedException("Napole's toStepId is empty");
         }
 
         if (config.WindowMinutes < 1)
@@ -64,12 +76,17 @@ public sealed class NapoleProcessor(
             throw new FailedException($"Napole's windowMinutes must be at least 1; the payload named {config.WindowMinutes}");
         }
 
+        if (string.IsNullOrWhiteSpace(config.ReporterSubComponentName))
+        {
+            throw new FailedException("Napole's reporterSubComponentName is empty");
+        }
+
         var window = WindowFor(config);
         var trails = await source.ReadAsync(
             config.WatchedWorkflowId, window, TimeSpan.FromMinutes(options.Value.TrailMinutes), ct).ConfigureAwait(false);
 
         var report = ReportBuilder.Build(
-            window, trails.Select(RoundTripRules.Decide), options.Value.Report, clock.GetUtcNow());
+            window, trails.Select(RoundTripRules.Decide), options.Value.Report, config.ReporterSubComponentName, clock.GetUtcNow());
 
         if (report is { } r)
         {

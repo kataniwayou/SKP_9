@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Napole step payload v1",
+  "title": "Napole step payload v2",
   "type": "object",
   "properties": {
     "watchedWorkflowId": {
@@ -9,12 +9,35 @@
       "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
       "description": "The workflow whose executions are reported. Every query Napole issues is filtered to it, which also keeps Napole's own runs out of the counts. The pattern is what enforces UUID shape -- ProcessorJsonSchemaValidator does not set RequireFormatValidation, so format:uuid alone validates any string."
     },
+    "fromStepId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "Where the section starts: an execution belongs to the tick when this step's first outcome for it falls in the window. Any step of the workflow, not only an entry step. The operator owns the id; a wrong one matches nothing and the tick reports nothing."
+    },
+    "toStepId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "Where the section ends: an execution is output when this step completed for it. Any step of the workflow, not only a terminal one, and may equal fromStepId. A failure-path step here makes outputCount 0 every tick, because a failure in the section wins."
+    },
     "windowMinutes": {
       "type": "integer",
       "minimum": 1,
-      "description": "The time frame: each tick reports the executions imported in the windowMinutes-long grid slot behind the lag. Keeping it equal to the workflow's cron interval is the operator's responsibility; when the two disagree, executions are counted in a nearby report."
+      "description": "The time frame: each tick reports the executions that reached fromStepId in the windowMinutes-long grid slot behind the lag. Keeping it equal to the workflow's cron interval is the operator's responsibility; when the two disagree, executions are counted in a nearby report."
+    },
+    "reporterSubComponentName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Copied into the report's commonDimentions.reporterSubComponentName. It names the section: two sections of one workflow share the window and the pod's four other dimensions, so this is what tells their reports apart. Keeping it unique per section is the operator's responsibility."
     }
   },
-  "required": ["watchedWorkflowId", "windowMinutes"],
+  "required": [
+    "watchedWorkflowId",
+    "fromStepId",
+    "toStepId",
+    "windowMinutes",
+    "reporterSubComponentName"
+  ],
   "additionalProperties": false
 }
