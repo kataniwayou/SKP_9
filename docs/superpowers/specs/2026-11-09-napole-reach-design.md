@@ -1,6 +1,6 @@
 # Napole reach counting — Design
 
-**Date:** 2026-11-09 · **Status:** draft for review · **Branch:** `feature/ems-exporter`
+**Date:** 2026-11-09 · **Status:** implemented (plan `2026-11-09-napole-reach.md`) · **Branch:** `feature/ems-exporter`
 **Revises:** [2026-11-09-napole-sections-design.md](2026-11-09-napole-sections-design.md) (implemented
 and live), which revised [2026-11-08-napole-design.md](2026-11-08-napole-design.md). Those documents
 stay the authority for everything this one does not change, named per section below.
@@ -174,6 +174,17 @@ The rule computed in Python from raw orchestrator records, window 07:50–08:00 
   report. Choosing this end is the operator's responsibility.
 - Proof script: `reach.py` in the session scratchpad
   (`C:\Users\katan\AppData\Local\Temp\claude\C--Users-katan-source-repos-SK-P11\b6d3f0bf-0f32-4bc5-885f-8c3d177d6c11\scratchpad\reach.py`).
+
+**Live, after the rollout (2026-11-09):** processor 3.0.0 with config schema 3.0.0 and report
+schema 2.0.0. Two ticks, each recounted independently with `reach.py`, gave identical counts:
+
+| tick | section | window | input | output | failed | discarded | not in report |
+|---|---|---|---|---|---|---|---|
+| 10:15 | importer → split-exporter (whole run) | 10:00–10:10 | 90 | 36 | 54 | 18 | 0 |
+| 10:25 | importer → export-outcome (failure path) | 10:10–10:20 | 64 | 48 | 0 | 16 | 16 |
+
+The whole-run report carried the five dimensions from the payload. The pod has no `Napole__Report__*`
+variables. The workflow is back on the whole-run section.
 
 ## 6. Tests (builder's call on the shape)
 
