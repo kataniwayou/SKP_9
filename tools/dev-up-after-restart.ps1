@@ -20,7 +20,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$chain = '1a56b3ca-e276-4815-87fa-5c2f48ab6dad'
+$chain = '8cfdbcdb-a7e0-4a7d-9b4d-e4120ccacf02'
 
 function Step($text) { Write-Host "`n== $text" -ForegroundColor Cyan }
 function PortOpen([int]$port) {
