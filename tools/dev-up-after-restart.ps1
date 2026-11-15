@@ -6,7 +6,8 @@ Brings the dev stack back after a host restart, in order:
   3. The nine supervised port-forwards (tools/skp-forward-loop.ps1), skipping any port already bound.
   4. Waits for BaseApi, Grafana and Kibana to answer.
   5. Opens every Grafana and Kibana dashboard, one tab each.
-  6. Starts the chain workflow (filefetcher-archiveexpander-chain), which a Redis restart forgets.
+  6. Starts the chain workflow (filefetcher-archiveexpander-chain) and the Napole reporter (napole-splitchain),
+     which a Redis restart forgets.
   7. Runs the endless feed in this window (Ctrl+C stops it).
 analyst-monitor is deliberately NOT started: it costs money per fire.
 
@@ -20,7 +21,11 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$chain = '8cfdbcdb-a7e0-4a7d-9b4d-e4120ccacf02'
+# Workflows a Redis restart forgets, started in this order: the chain first, then Napole, which reports on it.
+$workflows = [ordered]@{
+    'chain'  = '8cfdbcdb-a7e0-4a7d-9b4d-e4120ccacf02'  # filefetcher-archiveexpander-chain
+    'napole' = '2975f4b3-516e-4167-a025-0baef9a7ba86'  # napole-splitchain, cron 0 5/10 * * * *
+}
 
 function Step($text) { Write-Host "`n== $text" -ForegroundColor Cyan }
 function PortOpen([int]$port) {
@@ -100,13 +105,16 @@ if (-not $NoBrowser) {
     }
 }
 
-Step 'Chain workflow'
-$live = kubectl -n skp exec redis-0 -- redis-cli SISMEMBER skp:live $chain 2>$null
-if ($live -eq '1') { Write-Host 'chain already live' }
-else {
-    $r = Invoke-WebRequest -Method Post -Uri 'http://localhost:18080/api/v1/orchestration/start' `
-        -ContentType 'application/json' -Body "`"$chain`"" -UseBasicParsing -SkipHttpErrorCheck
-    Write-Host "start chain: $($r.StatusCode) $($r.Content)"
+Step 'Workflows'
+foreach ($name in $workflows.Keys) {
+    $id = $workflows[$name]
+    $live = kubectl -n skp exec redis-0 -- redis-cli SISMEMBER skp:live $id 2>$null
+    if ($live -eq '1') { Write-Host "$name already live" }
+    else {
+        $r = Invoke-WebRequest -Method Post -Uri 'http://localhost:18080/api/v1/orchestration/start' `
+            -ContentType 'application/json' -Body "`"$id`"" -UseBasicParsing -SkipHttpErrorCheck
+        Write-Host "start ${name}: $($r.StatusCode) $($r.Content)"
+    }
 }
 
 if (-not $NoFeed) {
