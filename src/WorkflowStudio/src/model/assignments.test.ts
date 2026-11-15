@@ -49,6 +49,14 @@ describe('payloadSkeleton (the user, 2026-11-02)', () => {
     }, null, 2));
   });
 
+  it('keeps the config schema\'s property order, required ones in place, not moved first', () => {
+    const schema = JSON.stringify({
+      required: ['minimumSizeBytes', 'maximumSizeBytes'],
+      properties: { maximumSizeBytes: { type: 'integer' }, allowedExtensions: { type: 'array' }, minimumSizeBytes: { type: 'integer' } },
+    });
+    expect(Object.keys(JSON.parse(payloadSkeleton(schema)))).toEqual(['maximumSizeBytes', 'allowedExtensions', 'minimumSizeBytes']);
+  });
+
   it('marks a required property with no type as <value>', () => {
     expect(JSON.parse(payloadSkeleton('{"required":["x"],"properties":{"x":{}}}'))).toEqual({ x: '<value>' });
   });
