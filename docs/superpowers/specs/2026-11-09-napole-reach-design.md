@@ -64,8 +64,8 @@ happened before the section started is not part of it).
   step outcomes. With two branches meeting at `toStepId`, output is twice the executions that reached
   it. The identity assertion in `ReportBuilder` goes. The 2026-11-08 "hermetic" rule
   (`output + failed + discarded = input`) is **replaced**.
-- No proven end in the window → no report, a `CancelledException` naming the section (unchanged,
-  sections spec §6).
+- No proven end in the window → a report of 0,0,0,0 and a warning naming the section (the user,
+  2026-11-15: every tick reports; this replaced "no report, a `CancelledException`", sections spec §6).
 - The report's fields and names are unchanged (2026-11-08 §6). All five dimensions now come from
   the payload (§2.5).
 - **The published report contract changes meaning** (*my call*, following the decision above).
@@ -197,7 +197,7 @@ variables. The workflow is back on the whole-run section.
   - not reached and nothing failed → not in input;
   - `roots = 2` → left out;
   - `roots = 0` and reached → counted.
-- **Report:** counters may exceed input; no identity assertion; nothing with a proven end → no report.
+- **Report:** counters may exceed input; no identity assertion; nothing with a proven end → a report of 0,0,0,0 (2026-11-15).
 - **Source:** the new columns read by name; the params unchanged.
 - **Payload:**
   - the nine fields, all required;

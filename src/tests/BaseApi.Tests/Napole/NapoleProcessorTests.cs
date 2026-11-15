@@ -116,22 +116,30 @@ public sealed class NapoleProcessorTests
     }
 
     [Fact]
-    public async Task NothingCountedIsCancelledAndNamesTheSection()
+    public async Task NothingCountedSendsAReportOfZerosAndWarnsNamingTheSection()
     {
-        // Not a silent return: the framework reports a step that sends nothing as Failed. The message
-        // names both step ids, because a typo in one matches nothing and this is where it shows.
-        var sender = Substitute.For<IQueueSender>();
-        var processor = Processor(new FakeTrailSource(NoEnd(), ReImported()));
-        processor.BeginDispatch(TestDispatch.State(sender, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()));
+        // the user, 2026-11-15: every tick reports. The warning names both step ids, because a typo in
+        // one matches nothing and this is where it shows.
+        foreach (var trails in new[] { Array.Empty<ExecutionTrail>(), [NoEnd(), ReImported()] })
+        {
+            var sender = Substitute.For<IQueueSender>();
+            var sends = new List<ProcessedData>();
+            await sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Do<ProcessedData>(sends.Add),
+                                   Arg.Any<CancellationToken>(), Arg.Any<string?>());
+            var logger = new CapturingLogger<NapoleProcessor>();
+            var processor = Processor(new FakeTrailSource(trails), logger);
+            processor.BeginDispatch(TestDispatch.State(sender, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()));
 
-        var ex = await Assert.ThrowsAsync<CancelledException>(
-            () => processor.ExecuteAsync([], Payload(), Guid.Empty, TestContext.Current.CancellationToken));
+            await processor.ExecuteAsync([], Payload(), Guid.Empty, TestContext.Current.CancellationToken);
 
-        Assert.Contains(Watched.ToString(), ex.Message, StringComparison.Ordinal);
-        Assert.Contains(FromStep.ToString(), ex.Message, StringComparison.Ordinal);
-        Assert.Contains(ToStep.ToString(), ex.Message, StringComparison.Ordinal);
-        Assert.Contains("2026-11-08T10:40:00", ex.Message, StringComparison.Ordinal);
-        Assert.Empty(sender.ReceivedCalls());
+            using var report = JsonDocument.Parse(Assert.Single(sends).Data);
+            var m = report.RootElement.GetProperty("mandatoryMeasurments");
+            Assert.Equal([0, 0, 0, 0], new[] { "inputCount", "outputCount", "discardedCount", "failedCount" }.Select(n => m.GetProperty(n).GetInt32()));
+            var warning = Assert.Single(logger.Lines, l => l.Level == LogLevel.Warning).Message;
+            Assert.Contains($"of workflow {Watched} counted from step {FromStep} to step {ToStep}", warning, StringComparison.Ordinal);
+            Assert.Contains("2026-11-08T10:40:00", warning, StringComparison.Ordinal);
+            Assert.Contains("reported 0 executions", Assert.Single(logger.Lines, l => l.Level == LogLevel.Information).Message, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -241,7 +249,8 @@ public sealed class NapoleProcessorTests
         var warning = Assert.Single(logger.Lines, l => l.Level == LogLevel.Warning);
         Assert.Contains(ToStep.ToString(), warning.Message, StringComparison.Ordinal);
         // Reached, not completed: any outcome at toStepId is an arrival (reach spec §2.2).
-        Assert.Contains("reached toStepId", warning.Message, StringComparison.Ordinal);
+        Assert.Contains($"reached to step {ToStep}", warning.Message, StringComparison.Ordinal);
+        Assert.Contains($"of workflow {Watched} that reached from step {FromStep}", warning.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -265,6 +274,7 @@ public sealed class NapoleProcessorTests
             .ReportAsync(Config(), TestContext.Current.CancellationToken);
 
         var line = Assert.Single(logger.Lines, l => l.Level == LogLevel.Information).Message;
+        Assert.Contains($"executions of workflow {Watched} from step {FromStep} to step {ToStep}:", line, StringComparison.Ordinal);
         Assert.Contains("1 not in report", line, StringComparison.Ordinal);
         Assert.Contains("2 re-imported", line, StringComparison.Ordinal);
     }

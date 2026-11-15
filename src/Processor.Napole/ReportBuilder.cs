@@ -5,8 +5,8 @@ namespace Processor.Napole;
 public static class ReportBuilder
 {
     /// <summary>
-    /// The report for one window, or null when no traced execution has a proven end -- the tick then
-    /// sends nothing (sections spec §6).
+    /// The report for one window; when no traced execution has a proven end, a report of 0,0,0,0 (the
+    /// user, 2026-11-15: every tick reports, replacing sections spec §6's "no report").
     /// <para>
     /// <b>The counters count step outcomes; they may exceed the input</b> (reach spec §2.3, decided).
     /// The input counts executions with a proven end. The counters add each one's outcomes at
@@ -15,7 +15,7 @@ public static class ReportBuilder
     /// longer checked.
     /// </para>
     /// </summary>
-    public static NapoleReport? Build(
+    public static NapoleReport Build(
         ReportWindow window,
         IEnumerable<Contribution> contributions,
         ReportDimensions dimensions,
@@ -31,11 +31,6 @@ public static class ReportBuilder
             output += c.Output;
             discarded += c.Discarded;
             failed += c.Failed;
-        }
-
-        if (input == 0)
-        {
-            return null;
         }
 
         var measurements = new MandatoryMeasurments(input, output, discarded, failed);

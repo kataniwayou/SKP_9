@@ -51,10 +51,14 @@ public sealed class ReportBuilderTests
     }
 
     [Fact]
-    public void NothingWithAProvenEndIsNoReport()
+    public void NothingWithAProvenEndIsAReportOfZeros()
     {
-        Assert.Null(ReportBuilder.Build(Window, [default, default], Dimensions(), InsertedAt));
-        Assert.Null(ReportBuilder.Build(Window, [], Dimensions(), InsertedAt));
+        // the user, 2026-11-15: every tick reports; this replaced "nothing finished → no report"
+        var zero = new MandatoryMeasurments(InputCount: 0, OutputCount: 0, DiscardedCount: 0, FailedCount: 0);
+        Assert.Equal(zero, ReportBuilder.Build(Window, [default, default], Dimensions(), InsertedAt).MandatoryMeasurments);
+        var empty = ReportBuilder.Build(Window, [], Dimensions(), InsertedAt);
+        Assert.Equal(zero, empty.MandatoryMeasurments);
+        Assert.Equal((Window.From.ToUnixTimeMilliseconds(), "LLL"), (empty.CommonDimentions.ReportFromTime, empty.CommonDimentions.SagCode));
     }
 
     [Fact]

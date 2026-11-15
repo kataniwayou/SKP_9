@@ -16,10 +16,9 @@ namespace Processor.Napole;
 /// continuing someone else's lineage and stays in it.
 /// </para>
 /// <para>
-/// <b>Nothing counted in the window is a Cancelled step, never a silent return.</b> The framework
-/// reports a step that returns without sending as Failed (the "one output rule" in
-/// <c>ProcessDispatchHandler</c>), and an empty branch would fail the exporter instead. Cancelled is
-/// the path the kafka-importer takes for an empty topic, and no report is sent (spec §6).
+/// <b>Every tick sends one report; nothing counted in the window is a report of 0,0,0,0</b> (the user,
+/// 2026-11-15, replacing "nothing finished → no report", spec §6), with a warning naming the section,
+/// because a typo in a step id matches nothing and that warning is where it shows.
 /// </para>
 /// </summary>
 public sealed class NapoleProcessor(
@@ -40,22 +39,14 @@ public sealed class NapoleProcessor(
         }
 
         var report = await ReportAsync(config, ct).ConfigureAwait(false);
-        if (report is null)
-        {
-            var window = WindowFor(config);
-            // Both step ids, because a typo in one matches nothing and this message is where it shows.
-            throw new CancelledException(
-                $"no executions of {config.WatchedWorkflowId} counted in section {config.FromStepId}..{config.ToStepId}, "
-                + $"window {window.From:o}..{window.To:o}");
-        }
 
         // PostSendException must propagate: the framework takes the duplicate over a lost report.
         await SendToPostAsync(
             report.Serialize(), executionId == Guid.Empty ? NewExecutionId() : executionId, ct).ConfigureAwait(false);
     }
 
-    /// <summary>The tick, short of sending: the report, or null when nothing in the window was counted.</summary>
-    internal async Task<NapoleReport?> ReportAsync(NapoleConfig config, CancellationToken ct)
+    /// <summary>The tick, short of sending: the report, of 0,0,0,0 when nothing in the window was counted.</summary>
+    internal async Task<NapoleReport> ReportAsync(NapoleConfig config, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(config);
 
@@ -100,35 +91,40 @@ public sealed class NapoleProcessor(
         var trails = await source.ReadAsync(
             WatchedSection.Of(config), window, TimeSpan.FromMinutes(options.Value.TrailMinutes), ct).ConfigureAwait(false);
 
-        // A typo in toStepId does not empty the answer the way one in fromStepId does: the executions are
-        // still traced, none ever reaches the end, and a report with output 0 goes out every tick (final
-        // review). So when traced executions exist and none reached toStepId, say so; whether that is a
-        // typo or simply a window where nothing got there is the operator's call.
-        if (trails.Count > 0 && trails.All(t => t.Reached == 0))
-        {
-            logger.LogWarning(
-                "none of the {Selected} executions of {WatchedWorkflowId} that reached {FromStepId} in window "
-                + "{From:o}..{To:o} reached toStepId {ToStepId}; if that is not expected, check the step id",
-                trails.Count, config.WatchedWorkflowId, config.FromStepId, window.From, window.To, config.ToStepId);
-        }
-
         var reaches = trails.Select(ReachRules.Classify).ToList();
         var report = ReportBuilder.Build(
             window, trails.Select(ReachRules.Count), ReportDimensions.Of(config), clock.GetUtcNow());
+        var m = report.MandatoryMeasurments;
 
-        if (report is { } r)
+        if (m.InputCount == 0)
         {
-            // Executions with no proven end, and re-imports, are in no count; this line is the only place
-            // they show.
-            var m = r.MandatoryMeasurments;
-            logger.LogInformation(
-                "reported {InputCount} executions of {WatchedWorkflowId} {FromStepId}..{ToStepId}: {OutputCount} output, "
-                + "{DiscardedCount} discarded, {FailedCount} failed; left out {NoEndCount} not in report, "
-                + "{ReImportedCount} re-imported; window {ReportFromTime}..{ReportToTime}",
-                m.InputCount, config.WatchedWorkflowId, config.FromStepId, config.ToStepId, m.OutputCount, m.DiscardedCount,
-                m.FailedCount, reaches.Count(x => x == Reach.NoProvenEnd), reaches.Count(x => x == Reach.ReImported),
-                r.CommonDimentions.ReportFromTime, r.CommonDimentions.ReportToTime);
+            // Both step ids, because a typo in one matches nothing and this warning is where it shows.
+            logger.LogWarning(
+                "no executions of workflow {WatchedWorkflowId} counted from step {FromStepId} to step {ToStepId}, "
+                + "window {From:o}..{To:o}; a report with 0,0,0,0 is sent",
+                config.WatchedWorkflowId, config.FromStepId, config.ToStepId, window.From, window.To);
         }
+        else if (trails.All(t => t.Reached == 0))
+        {
+            // A typo in toStepId does not empty the answer the way one in fromStepId does: the executions are
+            // still traced, none ever reaches the end, and a report with output 0 goes out every tick (final
+            // review). So when counted executions exist and none reached toStepId, say so; whether that is a
+            // typo or simply a window where nothing got there is the operator's call.
+            logger.LogWarning(
+                "none of the {Selected} executions of workflow {WatchedWorkflowId} that reached from step {FromStepId} in window "
+                + "{From:o}..{To:o} reached to step {ToStepId}; if that is not expected, check the step id",
+                trails.Count, config.WatchedWorkflowId, config.FromStepId, window.From, window.To, config.ToStepId);
+        }
+
+        // Executions with no proven end, and re-imports, are in no count; this line is the only place
+        // they show.
+        logger.LogInformation(
+            "reported {InputCount} executions of workflow {WatchedWorkflowId} from step {FromStepId} to step {ToStepId}: "
+            + "{OutputCount} output, {DiscardedCount} discarded, {FailedCount} failed; left out {NoEndCount} not in report, "
+            + "{ReImportedCount} re-imported; window {ReportFromTime}..{ReportToTime}",
+            m.InputCount, config.WatchedWorkflowId, config.FromStepId, config.ToStepId, m.OutputCount, m.DiscardedCount,
+            m.FailedCount, reaches.Count(x => x == Reach.NoProvenEnd), reaches.Count(x => x == Reach.ReImported),
+            report.CommonDimentions.ReportFromTime, report.CommonDimentions.ReportToTime);
 
         return report;
     }
