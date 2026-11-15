@@ -82,7 +82,7 @@ public sealed record ModelEntityFieldsDto(string Table, IReadOnlyList<ModelField
 /// <param name="Column">The column it is stored in, or null when it is held elsewhere (a link table's rows).</param>
 /// <param name="Type">string, guid, enum, integer, number, boolean, datetime, object, or an item type with <c>[]</c> for a list.</param>
 /// <param name="Nullable">Whether an update may send null.</param>
-/// <param name="StoreType">The column's database type (<c>jsonb</c> holds JSON), or null with no column.</param>
+/// <param name="StoreType">The column's database type (<c>json</c> or <c>jsonb</c> holds JSON), or null with no column.</param>
 /// <param name="Rules">The validator's rules for it, in the order they run.</param>
 /// <param name="Values">For an enum, every value with its name; the rules say which are refused.</param>
 public sealed record ModelFieldDto(

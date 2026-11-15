@@ -48,7 +48,7 @@ namespace BaseApi.Service.Persistence.Migrations
 
                     b.Property<string>("Payload")
                         .IsRequired()
-                        .HasColumnType("jsonb")
+                        .HasColumnType("json")
                         .HasColumnName("payload");
 
                     b.Property<Guid>("StepId")
@@ -255,7 +255,7 @@ namespace BaseApi.Service.Persistence.Migrations
 
                     b.Property<string>("Definition")
                         .IsRequired()
-                        .HasColumnType("jsonb")
+                        .HasColumnType("json")
                         .HasColumnName("definition");
 
                     b.Property<string>("Description")

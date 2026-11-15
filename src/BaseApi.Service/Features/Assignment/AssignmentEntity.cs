@@ -10,7 +10,7 @@ namespace BaseApi.Service.Features.Assignment;
 /// other direction — creating an assignment whose step id names nothing — raises 23503.
 /// </para>
 /// <para>
-/// <c>Payload</c> stores an arbitrary JSON document as a Postgres <c>jsonb</c> column. The validator
+/// <c>Payload</c> stores an arbitrary JSON document as a Postgres <c>json</c> column, kept as written. The validator
 /// confirms the syntax parses and enforces a maximum length. Validating the payload against a schema
 /// is not possible at this layer, because the assignment carries no schema reference.
 /// </para>

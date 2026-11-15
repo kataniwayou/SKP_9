@@ -1,5 +1,5 @@
 {
-  "etag": "f0c7e8cdfcdcf019",
+  "etag": "6c4f53e0e4133a9d",
   "entities": [
     {
       "table": "assignments",
@@ -85,7 +85,7 @@
           "column": "payload",
           "type": "string",
           "nullable": false,
-          "storeType": "jsonb",
+          "storeType": "json",
           "rules": [
             {
               "kind": "required",
@@ -477,7 +477,7 @@
           "column": "definition",
           "type": "string",
           "nullable": false,
-          "storeType": "jsonb",
+          "storeType": "json",
           "rules": [
             {
               "kind": "required",

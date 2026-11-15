@@ -7,7 +7,8 @@ namespace BaseApi.Service.Persistence.Configurations;
 
 /// <summary>
 /// Configuration for <see cref="AssignmentEntity"/>: the payload column is stored as Postgres
-/// <c>jsonb</c>, and there is one non-nullable foreign key to <see cref="StepEntity"/>.
+/// <c>json</c>, which keeps the text and its property order as written (the user, 2026-11-15; <c>jsonb</c>
+/// sorted the keys by length), and there is one non-nullable foreign key to <see cref="StepEntity"/>.
 /// <para>
 /// The delete behaviour restricts, so deleting a step an assignment references raises SQLSTATE
 /// 23001 and becomes a 422; the insert direction raises 23503.
@@ -28,7 +29,7 @@ internal sealed class AssignmentEntityConfiguration : IEntityTypeConfiguration<A
     {
         entity.Property(e => e.Payload)
             .IsRequired()
-            .HasColumnType("jsonb");
+            .HasColumnType("json");
 
         entity.HasOne<StepEntity>()
             .WithMany()

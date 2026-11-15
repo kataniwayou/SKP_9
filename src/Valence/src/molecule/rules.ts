@@ -49,7 +49,7 @@ export const labelOf = (field: string) => {
 const isArrow = (f: ModelField) => f.type === 'guid' || f.type.endsWith('[]');
 
 function kindOf(f: ModelField): FieldKind {
-  if (f.storeType === 'jsonb') return 'json';
+  if (f.storeType === 'json' || f.storeType === 'jsonb') return 'json';
   if (f.type === 'enum') return 'choice';
   const max = f.rules.find((r) => r.kind === 'maxLength');
   return max && Number(max.value) >= 1000 ? 'multiline' : 'text';

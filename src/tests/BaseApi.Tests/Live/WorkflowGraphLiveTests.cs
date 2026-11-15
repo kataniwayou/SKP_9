@@ -101,6 +101,41 @@ public sealed class WorkflowGraphLiveTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ASchemaDefinitionAndAnAssignmentPayloadComeBackInTheirWrittenPropertyOrder()
+    {
+        // the user, 2026-11-15: a new assignment's payload follows its config schema's property order, so
+        // neither column may reorder keys (jsonb sorted them by length: b, zeta, alpha, minimumSizeBytes, ...)
+        RealStack.SkipUnlessEnabled();
+        string[] order = ["zeta", "minimumSizeBytes", "b", "alpha"];
+        var schema = await PostAsync("schemas", new
+        {
+            name = $"order-live-{Guid.NewGuid():N}"[..24], version = "1.0.0", description = (string?)null,
+            definition = """{"type":"object","properties":{"zeta":{"type":"string"},"minimumSizeBytes":{"type":"integer"},"b":{"type":"boolean"},"alpha":{"type":"array"}}}""",
+        });
+        _cleanup.Add($"schemas/{schema}");
+        var (wf, s) = (Guid.NewGuid(), Guid.NewGuid());
+        Track(wf, s);
+
+        var (status, graph) = await PutGraphAsync(wf, Body(null, [s],
+            steps: [Step(s, _processor)],
+            assignments: [new { stepId = s, payload = """{"zeta":"","minimumSizeBytes":0,"b":false,"alpha":[]}""" }]));
+        if (status == HttpStatusCode.OK && graph.GetProperty("assignments").GetArrayLength() > 0)
+            _cleanup.Add($"assignments/{graph.GetProperty("assignments")[0].GetProperty("id").GetGuid()}");
+        Assert.Equal(HttpStatusCode.OK, status);
+
+        static string[] Keys(string? json) => JsonDocument.Parse(json!).RootElement.EnumerateObject().Select(p => p.Name).ToArray();
+        async Task<string?> TextAsync(string path, string field)
+        {
+            using var r = await _http.GetAsync($"/api/v1/{path}", Ct);
+            return JsonDocument.Parse(await r.Content.ReadAsStringAsync(Ct)).RootElement.GetProperty(field).GetString();
+        }
+        var definition = await TextAsync($"schemas/{schema}", "definition");
+        Assert.Equal(order, Keys(JsonDocument.Parse(definition!).RootElement.GetProperty("properties").GetRawText()));
+        var asg = graph.GetProperty("assignments")[0].GetProperty("id").GetGuid();
+        Assert.Equal(order, Keys(await TextAsync($"assignments/{asg}", "payload")));
+    }
+
+    [Fact]
     public async Task NewStepsWiredToEachOtherAndAnAssignmentLandInOneSave()
     {
         RealStack.SkipUnlessEnabled();

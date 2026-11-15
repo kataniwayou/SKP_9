@@ -6,7 +6,7 @@ namespace BaseApi.Service.Features.Schema;
 /// Schema domain entity — the root of the entity foreign-key graph, referenced by a processor's
 /// input, output and config schema ids.
 /// <para>
-/// <c>Definition</c> stores a JSON Schema document as a Postgres <c>jsonb</c> column, wired by
+/// <c>Definition</c> stores a JSON Schema document as a Postgres <c>json</c> column, kept as written, wired by
 /// <c>SchemaEntityConfiguration</c>. The validator parses the value and evaluates it against the
 /// draft 2020-12 meta-schema before it is persisted.
 /// </para>

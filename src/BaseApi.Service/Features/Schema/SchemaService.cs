@@ -40,11 +40,11 @@ public sealed class SchemaService :
         var existing = await DbContext.Set<SchemaEntity>().AsNoTracking()
             .FirstOrDefaultAsync(s => s.Id == id, ct);
 
-        // Only the definition is frozen. The stored value is a Postgres jsonb column, so it round-trips
-        // normalized — insignificant whitespace stripped, object keys reordered — and will rarely be
-        // byte-identical to the raw request string. Comparing canonical JSON rather than raw bytes is
-        // what stops a name-only re-submission of the same body looking like a definition change and
-        // falsely returning 409.
+        // Only the definition is frozen. A re-submission of the same schema may differ from the stored
+        // text in whitespace, key order or number spelling (and rows written while the column was jsonb
+        // were normalized by Postgres), so the two are compared as canonical JSON rather than raw bytes.
+        // That is what stops a name-only re-submission of the same body looking like a definition change
+        // and falsely returning 409.
         if (existing is not null && DefinitionChanged(existing.Definition, dto.Definition))
         {
             // All three schema roles count as referenced. Assignments carry no direct schema foreign
@@ -61,9 +61,9 @@ public sealed class SchemaService :
 
     /// <summary>
     /// True only when the incoming body is a semantically different schema from the stored one.
-    /// Because the definition is persisted as jsonb, the stored value is normalized on write, and an
-    /// ordinal compare against the raw request body produces false positives on whitespace and key
-    /// order. Both values are already-validated JSON, so they are canonicalized and compared. A value
+    /// The stored text may differ from the request body in whitespace, key order and number spelling
+    /// without meaning anything else (rows written while the column was jsonb were normalized on write),
+    /// so an ordinal compare alone produces false positives. Both values are already-validated JSON, so they are canonicalized and compared. A value
     /// that fails to parse is treated as changed — conservative, preferring to freeze over silently
     /// letting a change through.
     /// </summary>
@@ -115,8 +115,8 @@ public sealed class SchemaService :
                 writer.WriteEndArray();
                 break;
             case JsonValueKind.Number:
-                // Postgres jsonb normalizes number tokens too — 3.140 becomes 3.14, 1e3 becomes 1000 —
-                // so an ordinal compare of the raw token still false-positives. Re-emitting through the
+                // The same number can be spelled 3.140 or 3.14, 1e3 or 1000 (and jsonb, the column's
+                // earlier type, rewrote them so), so an ordinal compare of the raw token false-positives. Re-emitting through the
                 // shortest round-trippable form applies the same normalization to both sides, so
                 // semantically equal numbers always canonicalize equal.
                 if (element.TryGetDouble(out var d))
