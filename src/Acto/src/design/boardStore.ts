@@ -28,8 +28,10 @@ export interface BoardStore {
   replace(id: Id, bw: BoardWorkflow): void;
   setProblems(id: Id, n: number): void;
   setSaving(id: Id, saving: boolean): void;
-  /** The save was applied but the re-read failed: the present state becomes the base. */
+  /** The save was applied but the re-read failed: the present state becomes the base (the layout stays as last set). */
   adoptPresent(id: Id): void;
+  /** BaseAPI stored this layout (it does on every save it reads, applied or not): what the next save compares against. */
+  setLayout(id: Id, layout: unknown): void;
   subscribe(fn: () => void): () => void;
 }
 
@@ -94,7 +96,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
         }
         if (draft) output.log(`${name}: unsaved work from before the refresh was dropped because the workflow changed`, 'warn');
         if (bw.graph.design != null) {
-          const applied = applyStored(rec.base!, bw.graph.design, bw.graph.layout);
+          const applied = applyStored(rec.base!, bw.graph.design, bw.graph.layout, bw.designCaches);
           recs.set(id, withHistory(rec, historyOf(applied)));
           if (!sameState(applied, rec.base!)) output.log(`${name}: loaded unsaved work from a save that failed`, 'warn');
           continue;
@@ -159,9 +161,15 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       const r = recs.get(id);
       if (!r) return;
       const next = make(boardWorkflowOf(r.history.present, r.baseBw, processors));
-      next.view = { ...next.view, saving: r.view.saving };
+      next.view = { ...next.view, saving: r.view.saving, layout: r.view.layout };
       recs.set(id, next);
       changed();
+    },
+    setLayout(id, layout) {
+      const r = recs.get(id);
+      if (!r) return;
+      recs.set(id, { ...r, view: { ...r.view, layout } });
+      notify();
     },
     replace(id, bw) {
       const next = make(bw);

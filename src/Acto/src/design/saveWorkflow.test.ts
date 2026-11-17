@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from '../api/client';
 import { fakeApi, graphWith } from '../board/testApi';
+import type { DesignSaveRequest } from './request';
 import { createOutputStore } from '../output/outputStore';
 import { createBoardStore } from './boardStore';
 import { bwFull, proc } from './fixtures';
@@ -86,6 +87,44 @@ describe('saveWorkflow', () => {
     expect(api.saveDesign).toHaveBeenCalledTimes(1);
     expect(texts()).toContain('info:orders is already saving');
     expect(store.entry('w1')!.saving).toBe(false);
+  });
+  // BaseAPI stores the layout before its dry run, so the next save must compare against what was sent
+  const sentLayout = (api: StudioApi, call = 0) => ((api.saveDesign as ReturnType<typeof vi.fn>).mock.calls[call]![1] as DesignSaveRequest).layout;
+  const serveLayout = (api: StudioApi, layout: unknown) =>
+    (api.getGraph as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, value: graphWith({ entry: ['a'], steps: { a: ['b'], b: [] }, layout }) });
+  const elsewhere = 'warn:orders changed elsewhere since it was loaded; saving over it';
+  it('does not warn of a change elsewhere when retrying after a refused save', async () => {
+    const { api, store, output, texts } = setup({ applied: false });
+    expect(await saveWorkflow(api, store, output, 'w1')).toBe('refused');
+    serveLayout(api, sentLayout(api));
+    await saveWorkflow(api, store, output, 'w1');
+    expect(texts()).not.toContain(elsewhere);
+    expect(sentLayout(api, 1)).toEqual(sentLayout(api, 0));
+  });
+  it('does not warn of a change elsewhere when saving again after a failed re-read', async () => {
+    const { api, store, output, texts } = setup();
+    const get = api.getGraph as ReturnType<typeof vi.fn>;
+    get.mockImplementationOnce(get.getMockImplementation()!).mockResolvedValueOnce({ ok: false, error: { kind: 'network', message: 'down' } });
+    expect(await saveWorkflow(api, store, output, 'w1')).toBe('saved');
+    store.edit('w1', (s) => moveStep(s, 'a', { x: 120, y: 120 }));
+    serveLayout(api, sentLayout(api));
+    await saveWorkflow(api, store, output, 'w1');
+    expect(texts()).not.toContain(elsewhere);
+  });
+  it('does not warn of a change elsewhere when retrying after a 409', async () => {
+    const { api, store, output, texts } = setup();
+    (api.saveDesign as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, error: { kind: 'conflict', status: 409, detail: 'stale', entity: null } });
+    expect(await saveWorkflow(api, store, output, 'w1')).toBe('failed');
+    serveLayout(api, sentLayout(api));
+    await saveWorkflow(api, store, output, 'w1');
+    expect(texts()).not.toContain(elsewhere);
+  });
+  it('keeps the step positions it saved instead of the re-read defaults', async () => {
+    const { api, store, output } = setup();
+    store.edit('w1', (s) => moveStep(s, 'a', { x: 150, y: 80 }));
+    expect(await saveWorkflow(api, store, output, 'w1')).toBe('saved');
+    expect(store.entry('w1')!.base!.steps.a!.at).toEqual({ x: 150, y: 80 });
+    expect(store.boards()[0]!.stepAt.get('a')).toEqual({ x: 150, y: 80 });
   });
   it('refuses an edit during a save', async () => {
     const { api, store, output, texts } = setup();

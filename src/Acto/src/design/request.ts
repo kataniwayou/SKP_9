@@ -1,10 +1,10 @@
 import type { components } from '../api/schema';
-import type { Id } from '../model/graph';
+import type { Cache, Id } from '../model/graph';
 import { cacheChipAt } from '../board/cacheChips';
 import { FRAME_PAD, STEP_H } from '../board/geometry';
 import { derivedEntrySteps, stepRoles } from '../board/roles';
 import { wiresOf } from '../board/wires';
-import type { AssignmentState, CacheState, StepState, WorkflowState } from './state';
+import type { AssignmentState, CacheFields, CacheState, StepState, WorkflowState } from './state';
 import { removeStep } from './state';
 
 export type DesignSaveRequest = components['schemas']['DesignSaveRequest'];
@@ -96,8 +96,10 @@ export function designRequest(base: WorkflowState | null, cur: WorkflowState, st
       newCaches.push({ id: c.id, copyOf: null, fields: diff(undefined, c, CACHE_KEYS) });
       continue;
     }
-    const fields = diff(base?.caches[c.id], c, CACHE_KEYS);
-    if (base?.caches[c.id] && has(fields)) caches.push({ id: c.id, fields });
+    // an existing cache linked here and not saved yet is diffed against what it was when linked
+    const ref = base?.caches[c.id] ?? c.linked;
+    const fields = diff(ref, c, CACHE_KEYS);
+    if (ref && has(fields)) caches.push({ id: c.id, fields });
   }
   req.caches = caches;
   if (newCaches.length) req.newCaches = newCaches;
@@ -158,7 +160,13 @@ const WF_TYPES: Record<string, Kind> = { name: 'string', version: 'string', desc
 const CACHE_TYPES: Record<string, Kind> = { name: 'string', version: 'string', description: 'nstring', root: 'string', items: 'string' };
 const ASSIGN_TYPES: Record<string, Kind> = { name: 'string', version: 'string', description: 'nstring', payload: 'string' };
 
-export function applyStored(base: WorkflowState, stored: unknown, storedLayout: unknown = null): WorkflowState {
+/**
+ * `known`: existing caches the design links that the base does not hold, as read from the server (their real
+ * fields); without one such a cache is restored from the design alone.
+ */
+export function applyStored(
+  base: WorkflowState, stored: unknown, storedLayout: unknown = null, known: ReadonlyMap<Id, Cache> = new Map(),
+): WorkflowState {
   const d = obj(stored);
   if (!d) return base;
   let s: WorkflowState = { ...base };
@@ -221,11 +229,17 @@ export function applyStored(base: WorkflowState, stored: unknown, storedLayout: 
   if (ids) {
     const caches: Record<Id, CacheState> = {};
     for (const id of ids) {
-      const known = s.caches[id];
-      if (known) caches[id] = known;
-      else if (created.has(id) || changed.has(id)) {
-        const f = created.get(id)?.fields ?? changed.get(id);
-        caches[id] = pickFields({ id, name: id, version: '1.0.0', description: null, root: '', items: '{}', isNew: created.has(id) }, f, CACHE_TYPES);
+      const held = s.caches[id];
+      const made = created.get(id);
+      const e = known.get(id);
+      if (held) caches[id] = held;
+      else if (made) caches[id] = pickFields({ id, name: id, version: '1.0.0', description: null, root: '', items: '{}', isNew: true }, made.fields, CACHE_TYPES);
+      else {
+        // an existing cache linked by the design: its edits (below) are diffed against it as linked
+        const linked: CacheFields = e
+          ? { name: e.name, version: e.version, description: e.description, root: e.root, items: e.items }
+          : { name: id, version: '1.0.0', description: null, root: '', items: '{}' };
+        caches[id] = { id, ...linked, isNew: false, linked };
       }
     }
     s = { ...s, caches };

@@ -48,7 +48,11 @@ async function run(
     }
   }
 
-  const saved = await api.saveDesign(workflowId, designRequest(entry.base, present, entry.layout));
+  const req = designRequest(entry.base, present, entry.layout);
+  const saved = await api.saveDesign(workflowId, req);
+  // BaseAPI stores the layout before it dry-runs the design (only a new workflow it refuses is not stored)
+  const stored = saved.ok ? saved.value.applied || entry.base !== null : saved.error.kind === 'conflict' || saved.error.kind === 'unprocessable';
+  if (stored) store.setLayout(workflowId, req.layout);
   if (!saved.ok) { output.log(`${name}: ${describeError(saved.error)}`, 'error'); return 'failed'; }
   if (!saved.value.applied) {
     for (const e of saved.value.errors ?? []) {
@@ -65,7 +69,9 @@ async function run(
     return 'saved';
   }
   const { storedFrame: _stored, ...rest } = loaded.value;
-  const bw = { ...rest, frame: { ...present.frame } };
+  // what was just saved stays where it was drawn; only a step the save newly brought in takes the re-read place
+  const stepAt = new Map(rest.stepIds.map((id) => [id, present.steps[id] ? { ...present.steps[id]!.at } : rest.stepAt.get(id)!]));
+  const bw = { ...rest, stepAt, frame: { ...present.frame } };
   store.replace(workflowId, bw);
 
   const v = await api.validateWorkflow(workflowId);

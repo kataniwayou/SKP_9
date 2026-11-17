@@ -9,8 +9,11 @@ export interface StepState {
   id: Id; name: string; version: string; description: string | null; entryCondition: number;
   processorId: Id | null; nextStepIds: Id[]; at: Point; updatedAt: string | null; isNew: boolean;
 }
-export interface CacheState {
-  id: Id; name: string; version: string; description: string | null; root: string; items: string; isNew: boolean;
+export interface CacheFields { name: string; version: string; description: string | null; root: string; items: string }
+export interface CacheState extends CacheFields {
+  id: Id; isNew: boolean;
+  /** An existing cache linked here and not saved yet: its fields as linked, what an edit is diffed against. */
+  linked?: CacheFields;
 }
 export interface AssignmentState {
   id: Id; stepId: Id; name: string; version: string; description: string | null; payload: string;
@@ -233,10 +236,8 @@ export function addCache(s: WorkflowState, cache: CacheState): WorkflowState {
 
 export function linkCache(s: WorkflowState, cache: Cache): WorkflowState {
   if (s.caches[cache.id]) return s;
-  const c: CacheState = {
-    id: cache.id, name: cache.name, version: cache.version, description: cache.description,
-    root: cache.root, items: cache.items, isNew: false,
-  };
+  const fields: CacheFields = { name: cache.name, version: cache.version, description: cache.description, root: cache.root, items: cache.items };
+  const c: CacheState = { id: cache.id, ...fields, isNew: false, linked: fields };
   return { ...s, caches: { ...s.caches, [cache.id]: c } };
 }
 

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { AUDIT } from '../model/fixtures';
 import { bwFull, proc } from './fixtures';
 import { applyStored, designRequest } from './request';
 import {
-  addCache, addStep, addWire, moveStep, newWorkflowState, removeAssignment, removeStep, removeWire, setPayload,
-  setStepField, stateOf, swapProcessor, unlinkCache,
+  addCache, addStep, addWire, linkCache, moveStep, newWorkflowState, removeAssignment, removeStep, removeWire, setCacheField,
+  setPayload, setStepField, stateOf, swapProcessor, unlinkCache,
 } from './state';
 
 describe('design request', () => {
@@ -79,6 +80,25 @@ describe('design request', () => {
     expect([...added.workflow!.cacheIds!].sort()).toEqual(['c1', 'c2']);
     expect(designRequest(base, unlinkCache(base, 'c1'), null).workflow!.cacheIds).toEqual([]);
     expect(designRequest(base, base, null).workflow!.cacheIds).toBeUndefined();
+  });
+  it('sends an edit to an existing cache linked here, before the link is saved', () => {
+    const base = stateOf(bwFull());
+    const shared = { id: 'c9', name: 'shared', version: '2.0.0', description: null, root: 'real-root', items: '{"k":1}', audit: AUDIT };
+    const cur = setCacheField(linkCache(base, shared), 'c9', 'root', 'new-root');
+    const r = designRequest(base, cur, null);
+    expect(r.caches).toEqual([{ id: 'c9', fields: { root: 'new-root' } }]);
+    expect(r.newCaches).toBeUndefined();
+    expect(designRequest(base, linkCache(base, shared), null).caches).toEqual([]);
+  });
+  it('restores an existing cache linked by a stored design with its real fields and the edit', () => {
+    const base = stateOf(bwFull());
+    const shared = { id: 'c9', name: 'shared', version: '2.0.0', description: null, root: 'real-root', items: '{"k":1}', audit: AUDIT };
+    const stored = JSON.parse(JSON.stringify(designRequest(base, setCacheField(linkCache(base, shared), 'c9', 'name', 'renamed'), null)));
+    const back = applyStored(base, stored, null, new Map([['c9', shared]]));
+    expect(back.caches.c9).toMatchObject({ name: 'renamed', root: 'real-root', items: '{"k":1}', isNew: false });
+    expect(designRequest(base, back, null).caches).toEqual([{ id: 'c9', fields: { name: 'renamed' } }]);
+    const plain = applyStored(base, JSON.parse(JSON.stringify(designRequest(base, linkCache(base, shared), null))), null, new Map([['c9', shared]]));
+    expect(plain.caches.c9).toMatchObject({ name: 'shared', root: 'real-root' });
   });
   it('sends a processor swap as a step field', () => {
     const base = stateOf(bwFull());

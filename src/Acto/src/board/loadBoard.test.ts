@@ -54,6 +54,25 @@ describe('loadWorkflow', () => {
     expect(w.frame.w).toBeGreaterThanOrEqual(428 + 210 + 28);
     expect(w.frame.h).toBeGreaterThanOrEqual(46 + 228 + 92 + 28);
   });
+  it('keeps positions Acto stored (a board rectangle, nothing negative) exactly where they were', async () => {
+    const r = await loadWorkflow(fakeApi({ graph: graphWith({ entry: ['a'], steps: { a: ['b'], b: [] },
+      layout: { board: { x: 0, y: 0, w: 900, h: 500 }, steps: { a: { x: 150, y: 80 }, b: { x: 450, y: 80 } } } }) }), 'w1');
+    expect(r.ok && r.value.stepAt.get('a')).toEqual({ x: 150, y: 80 });
+    expect(r.ok && r.value.stepAt.get('b')).toEqual({ x: 450, y: 80 });
+  });
+  it('still shifts a layout with a board rectangle when a position is negative (WorkflowStudio canvas)', async () => {
+    const r = await loadWorkflow(fakeApi({ graph: graphWith({ entry: ['a'], steps: { a: [] },
+      layout: { board: { x: 0, y: 0, w: 900, h: 500 }, steps: { a: { x: -40, y: 80 } } } }) }), 'w1');
+    expect(r.ok && r.value.stepAt.get('a')).toEqual({ x: 28, y: 28 });
+  });
+  it('fetches the caches a stored design links that the workflow does not hold yet', async () => {
+    const api = fakeApi({ graph: { ...graphWith({ entry: ['a'], steps: { a: [] } }), design: { workflow: { cacheIds: ['c9'] } } } as never });
+    api.getEntity = (async (kind: string, id: string) => (kind === 'cache' && id === 'c9'
+      ? { ok: true, value: { id: 'c9', name: 'shared', version: '2.0.0', description: null, root: 'real-root', items: '{"k":1}' } }
+      : { ok: false, error: { kind: 'notFound', status: 404 } })) as typeof api.getEntity;
+    const r = await loadWorkflow(api, 'w1');
+    expect(r.ok && r.value.designCaches?.get('c9')).toMatchObject({ name: 'shared', root: 'real-root', items: '{"k":1}' });
+  });
   it('puts unplaced steps below the stored ones, never on top of them', async () => {
     const r = await loadWorkflow(fakeApi({ graph: graphWith({ entry: ['a'], steps: { a: ['b'], b: [] }, layout: { steps: { b: { x: -50, y: -200 } } } }) }), 'w1');
     expect(r.ok && r.value.stepAt.get('b')).toEqual({ x: 28, y: 28 });

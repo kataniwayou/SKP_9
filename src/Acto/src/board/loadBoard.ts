@@ -1,12 +1,12 @@
 import type { ApiResult, StudioApi } from '../api/client';
-import { graphFromDto, processorFromDto, stepFromDto } from '../api/toModel';
-import type { Graph, Id } from '../model/graph';
+import { cacheFromDto, graphFromDto, processorFromDto, stepFromDto } from '../api/toModel';
+import type { Cache, Graph, Id } from '../model/graph';
 import type { Point, Rect } from '../model/geometry';
 import { reachableStepIds } from '../model/reachability';
 import { parseActoLayout } from './layoutDoc';
 import { describeError } from '../api/describeError';
 import { FRAME_PAD, STEP_H } from './geometry';
-import { defaultStepPositions, frameSizeOf, placeFrames } from './placement';
+import { defaultStepPositions, minFrameSize, placeFrames } from './placement';
 import { derivedEntrySteps, entryDiff, stepRoles, type StepRole } from './roles';
 import { wiresOf, type Wire } from './wires';
 
@@ -18,6 +18,8 @@ export interface BoardWorkflow {
   roles: Map<Id, StepRole>;
   wires: Wire[];
   entryDiff: { stops: Id[]; starts: Id[] };
+  /** Existing caches a stored design (a save that failed) links that the workflow does not hold yet, by id. */
+  designCaches?: ReadonlyMap<Id, Cache>;
 }
 export interface BoardLoad {
   /** False when the workflow list itself failed: nothing was loaded, and `failures` says why. */
@@ -43,11 +45,13 @@ export async function loadWorkflow(api: StudioApi, workflowId: Id): Promise<ApiR
 const DEFAULT_GAP = 40;
 
 /**
- * Stored positions may be anywhere (WorkflowStudio kept canvas coordinates, some negative). Shift
- * them together so the top-left-most step sits at FRAME_PAD, keeping their layout relative to each other.
+ * Acto stores frame-local positions with a `board` rectangle; those load as they are. A layout without
+ * `board`, or with a negative position, is WorkflowStudio's canvas coordinates: shift it so the top-left-most
+ * step sits at FRAME_PAD, keeping the steps' layout relative to each other.
  */
-function shiftedIntoFrame(stored: [Id, Point][]): Map<Id, Point> {
+function shiftedIntoFrame(stored: [Id, Point][], actoLayout: boolean): Map<Id, Point> {
   if (stored.length === 0) return new Map();
+  if (actoLayout && stored.every(([, p]) => p.x >= 0 && p.y >= 0)) return new Map(stored.map(([id, p]) => [id, { ...p }]));
   const dx = FRAME_PAD - Math.min(...stored.map(([, p]) => p.x));
   const dy = FRAME_PAD - Math.min(...stored.map(([, p]) => p.y));
   return new Map(stored.map(([id, p]) => [id, { x: p.x + dx, y: p.y + dy }]));
@@ -81,7 +85,7 @@ async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<Loaded>> 
     }
   }
 
-  const placed = shiftedIntoFrame(stepIds.filter((id) => layout.steps[id]).map((id) => [id, layout.steps[id]!]));
+  const placed = shiftedIntoFrame(stepIds.filter((id) => layout.steps[id]).map((id) => [id, layout.steps[id]!]), layout.board !== null);
   const stepAt = new Map<Id, Point>(placed);
   const inFrameSteps = new Map(stepIds.map((id) => [id, graph.steps.get(id)!]));
   // Defaults start at FRAME_PAD; push them below the stored steps so they never sit on top of them.
@@ -92,7 +96,23 @@ async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<Loaded>> 
   const wires = wiresOf(stepIds, graph.steps);
   const roles = stepRoles(stepIds, wires);
   const diff = entryDiff(graph.workflow.entryStepIds, derivedEntrySteps(roles));
-  return { ok: true, value: { graph, stepIds, stepAt, roles, wires, entryDiff: diff, storedFrame: layout.board } };
+  const designCaches = await designCachesOf(api, graph);
+  return { ok: true, value: { graph, stepIds, stepAt, roles, wires, entryDiff: diff, storedFrame: layout.board, ...(designCaches.size ? { designCaches } : {}) } };
+}
+
+/** Best effort: a cache that cannot be read is restored from the stored design alone. */
+async function designCachesOf(api: StudioApi, graph: Graph): Promise<Map<Id, Cache>> {
+  const out = new Map<Id, Cache>();
+  const design = graph.design as { workflow?: { cacheIds?: unknown } } | null;
+  const ids = Array.isArray(design?.workflow?.cacheIds) ? design.workflow.cacheIds : [];
+  for (const id of ids) {
+    if (typeof id !== 'string' || graph.caches.has(id) || out.has(id)) continue;
+    try {
+      const r = await api.getEntity('cache', id);
+      if (r.ok) out.set(id, cacheFromDto(r.value));
+    } catch { /* restored without it */ }
+  }
+  return out;
 }
 
 /** Every workflow, `concurrency` at a time; one that fails is listed in `failures`, the rest still load. */
@@ -120,7 +140,7 @@ export async function loadBoard(api: StudioApi, concurrency = 4): Promise<BoardL
   });
 
   const sizes = ok.map(({ w }) => {
-    const own = frameSizeOf(w.stepAt);
+    const own = minFrameSize(w.stepAt, w.graph.caches.size);
     return { w: Math.max(own.w, w.storedFrame?.w ?? 0), h: Math.max(own.h, w.storedFrame?.h ?? 0) };
   });
   const frames = placeFrames(ok.map(({ w, i }, k) => ({
