@@ -468,6 +468,8 @@ analyzer-reports/phase-88-screenshots/
 
 # SKP Studio build output
 src/WorkflowStudio/dist/
+src/Acto/dist/
+src/Acto/tsconfig.tsbuildinfo
 src/Valence/dist/
 
 # SKP Studio end-to-end output
