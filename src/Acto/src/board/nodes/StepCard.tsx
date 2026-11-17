@@ -21,8 +21,8 @@ export function StepCard({ data, selected }: NodeProps) {
   const proc = step?.processorId ? info.graph.processors.get(step.processorId)?.name : undefined;
   return (
     <div className={`node${role === 'parked' ? ' parked' : ''}${role === 'first' ? ' first' : ''}${selected ? ' sel' : ''}`}>
-      <Handle type="target" position={Position.Left} isConnectable={false} />
-      <Handle type="source" position={Position.Right} isConnectable={false} />
+      <Handle type="target" position={Position.Left} />
+      <Handle type="source" position={Position.Right} />
       {role === 'first' && <span className="tag">FIRST</span>}
       {role === 'parked' && <span className="tag">PARKED</span>}
       <div className="nh">

@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createApi, type StudioApi } from './api/client';
 import { describeError } from './api/describeError';
 import { processorFromDto } from './api/toModel';
-import { Board } from './board/Board';
+import { Board, type BoardEdit } from './board/Board';
 import { loadBoard } from './board/loadBoard';
 import type { Selection } from './board/selection';
+import { addWire, moveFrame, moveStep, resizeFrame } from './design/state';
 import { createBoardStore, useBoard, type BoardStore } from './design/boardStore';
 import { InspectorPanel } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
@@ -110,6 +111,17 @@ export function App(props: AppProps) {
     persist(selectionRef.current);
   }, [persist]);
 
+  const onEdit = useMemo<BoardEdit>(() => ({
+    moveStep: (wf, step, at) => store.edit(wf, (s) => moveStep(s, step, at)),
+    moveFrame: (wf, at) => store.edit(wf, (s) => moveFrame(s, at)),
+    resizeFrame: (wf, size, at) => store.edit(wf, (s) => resizeFrame(at ? moveFrame(s, at) : s, size)),
+    connect: (fromWf, from, toWf, to) => {
+      if (to === null || toWf === null) { output.log('A wire must end on a step', 'warn'); return; }
+      if (toWf !== fromWf) { output.log('A wire stays inside its workflow', 'warn'); return; }
+      store.editOrRefuse(fromWf, (s) => addWire(s, from, to));
+    },
+  }), [store, output]);
+
   return (
     <LiveStoreProvider value={live}>
       <OutputProvider store={output}>
@@ -122,7 +134,7 @@ export function App(props: AppProps) {
               ? <div className="board-wait">Loading the board…</div>
               : <Board workflows={workflows} selection={selection} onSelect={onSelect}
                   {...(saved ? { initialView: { x: saved.x, y: saved.y, zoom: saved.zoom } } : {})}
-                  onViewChange={onViewChange} />}
+                  onViewChange={onViewChange} onEdit={onEdit} />}
             inspector={<InspectorPanel workflows={workflows} selection={selection} />}
             output={<OutputPanel />}
             chat={<div className="ph"><span>Chat</span></div>}

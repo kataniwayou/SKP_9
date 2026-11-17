@@ -1,4 +1,6 @@
-import { useStore, type NodeProps } from '@xyflow/react';
+import { NodeResizer, useStore, type NodeProps } from '@xyflow/react';
+import { frameSizeOf } from '../placement';
+import { useBoardEdit } from './boardContext';
 import { cronText } from '../../model/cronText';
 import { ZOOM_DETAIL } from '../geometry';
 import { useWorkflowStatus } from '../../live/LiveContext';
@@ -16,8 +18,14 @@ export function WorkflowFrame({ data, selected }: NodeProps) {
   const parsed = cron ? cronText(cron) : null;
   const schedule = parsed === null ? 'not scheduled' : 'text' in parsed ? parsed.text : cron;
   const n = info.stepIds.length;
+  const edit = useBoardEdit();
+  const min = frameSizeOf(info.stepAt);
   return (
     <div className={`frame${selected ? ' sel' : ''}${far ? ' far' : ''}`}>
+      {selected && edit && (
+        <NodeResizer minWidth={min.w} minHeight={min.h} isVisible
+          onResizeEnd={(_, p) => edit.resizeFrame(workflowId, { w: p.width, h: p.height }, { x: p.x, y: p.y })} />
+      )}
       <div className="fh" style={{ boxShadow: `inset 0 4px 0 ${STATE_COLOUR[status]}` }}>
         <span className="nm">{workflow.name}</span>
         {!far && <span className="meta">{workflow.version} · {schedule}</span>}

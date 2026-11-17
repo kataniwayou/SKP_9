@@ -16,7 +16,7 @@ export function toFlow(workflows: BoardWorkflow[]): { nodes: Node[]; edges: Edge
     const wfId = w.graph.workflow.id;
     const parent = `wf:${wfId}`;
     nodes.push({
-      id: parent, type: 'workflow', position: { x: w.frame.x, y: w.frame.y }, style: { width: w.frame.w, height: w.frame.h },
+      id: parent, type: 'workflow', position: { x: w.frame.x, y: w.frame.y }, style: { width: w.frame.w, height: w.frame.h }, width: w.frame.w, height: w.frame.h,
       data: { workflowId: wfId }, draggable: false,
     });
     for (const stepId of w.stepIds) {
