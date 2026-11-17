@@ -78,7 +78,7 @@ describe('Toolbar in the app', () => {
     (api as unknown as { listLive: unknown }).listLive = vi.fn(async () => ({ ok: true, value: [] }));
     render(<App api={api} live={liveStub()} storage={memoryStorage()} session={memoryStorage()} />);
     await screen.findByText('Board loaded: 1 workflow');
-    fireEvent.click(await screen.findByText('w1-name'));
+    fireEvent.click(await screen.findByText('w1-name', { selector: '.nm' }));
     await act(async () => { fireEvent.click(screen.getByText('Delete')); });
     expect(await screen.findByText('1 step, 2 assignments go. Delete w1-name?')).toBeInTheDocument();
     expect(del).toHaveBeenCalledTimes(1);

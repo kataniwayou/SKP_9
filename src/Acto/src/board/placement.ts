@@ -75,7 +75,7 @@ export function placeFrames(
   for (const it of items) if (it.stored) out.set(it.id, { ...it.stored });
   const rest = items
     .filter((it) => !it.stored)
-    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   for (const it of rest) {
     const taken = [...out.values()];
     const ys = [0, ...taken.map((r) => r.y + r.h + FRAME_GAP)].sort((a, b) => a - b);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { applyNodeChanges, Background, BackgroundVariant, Controls, MiniMap, Panel, ReactFlow, useStore, type EdgeChange, type EdgeTypes, type Node, type NodeChange, type NodeTypes, type Viewport } from '@xyflow/react';
+import { applyNodeChanges, Background, BackgroundVariant, Controls, Panel, ReactFlow, useStore, type EdgeChange, type EdgeTypes, type Node, type NodeChange, type NodeTypes, type Viewport } from '@xyflow/react';
 import { HEADER_H, ZOOM_DETAIL } from './geometry';
 import type { BoardWorkflow } from './loadBoard';
 import { pickKey, type Pick } from './picks';
@@ -9,9 +9,7 @@ import { CacheChip } from './nodes/CacheChip';
 import { dropVerdictItem, stepAt, type DropItem } from './dropTarget';
 import { StepCard } from './nodes/StepCard';
 import { WorkflowFrame } from './nodes/WorkflowFrame';
-import { useLive, useLiveStore } from '../live/LiveContext';
-import { statusOf } from '../live/liveState';
-import { STATE_COLOUR } from './live/StateBadge';
+import { BoardMiniMap } from './BoardMiniMap';
 import { BoardContext, EditContext, ToolbarContext, type ToolbarActions } from './nodes/boardContext';
 import './board.css';
 
@@ -66,9 +64,7 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
   };
   // React Flow's own selection is off: picks decide. Only a keyboard select (Enter/Space on a focused node) comes from it.
   const keySelect = useRef(false);
-  const live = useLiveStore();
-  useLive((st) => st.running); // re-render the minimap strokes when a workflow starts or stops
-  useLive((st) => st.workflows);
+  const picked = useMemo(() => new Set(picks.map(pickKey)), [picks]);
   // Far out the step cards render nothing; their wrappers must not catch clicks meant for the frame.
   const [far, setFar] = useState(false);
   const byId = useMemo(() => new Map(workflows.map((w) => [w.graph.workflow.id, w])), [workflows]);
@@ -238,10 +234,7 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
           <FarWatch onFar={setFar} />
           {bar && <Panel position="top-center">{bar}</Panel>}
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-          <MiniMap pannable zoomable nodeStrokeColor={(n) => {
-            if (n.type !== 'workflow') return 'transparent';
-            return STATE_COLOUR[statusOf(live.getState(), (n.data as { workflowId: string }).workflowId)];
-          }} />
+          <BoardMiniMap picked={picked} />
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>

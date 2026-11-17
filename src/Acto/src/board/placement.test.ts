@@ -29,4 +29,11 @@ describe('placement', () => {
     const steps = new Map([['e', { nextStepIds: [] }]]);
     expect(defaultStepPositions(['e'], steps, new Map([['e', { x: 1, y: 2 }]])).size).toBe(0);
   });
+  it('breaks equal createdAt ties by id whatever the input order', () => {
+    const mk = (id: string) => ({ id, createdAt: '2026-01-01', stored: null, size: { w: 500, h: 300 } });
+    const a = placeFrames([mk('b'), mk('a'), mk('c')]);
+    const b = placeFrames([mk('c'), mk('a'), mk('b')]);
+    for (const id of ['a', 'b', 'c']) expect(a.get(id)).toEqual(b.get(id));
+    expect(a.get('a')).toEqual({ x: 0, y: 0, w: 500, h: 300 });
+  });
 });

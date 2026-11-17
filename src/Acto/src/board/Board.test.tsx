@@ -7,7 +7,7 @@ import { bw } from './fixtures';
 describe('Board', () => {
   it('shows every workflow name, an empty frame line and the minimap', async () => {
     render(<Board workflows={[bw('w1', ['a']), bw('w2', [])]} picks={[]} onPick={() => {}} />);
-    expect(await screen.findByText('w1-name')).toBeInTheDocument();
+    expect(await screen.findByText('w1-name', { selector: '.nm' })).toBeInTheDocument();
     expect(screen.getByText('Empty workflow')).toBeInTheDocument();
     expect(document.querySelector('.react-flow__minimap')).not.toBeNull();
   });
@@ -38,7 +38,7 @@ describe('Board', () => {
   it('reports a click on a frame header as a workflow selection', async () => {
     const onPick = vi.fn();
     render(<Board workflows={[bw('w1', ['a'])]} picks={[]} onPick={onPick} />);
-    fireEvent.click(await screen.findByText('w1-name'));
+    fireEvent.click(await screen.findByText('w1-name', { selector: '.nm' }));
     expect(onPick).toHaveBeenCalledWith({ kind: 'workflow', workflowId: 'w1' }, false);
   });
   it('draws a wire with its condition letter', async () => {

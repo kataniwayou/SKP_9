@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { memoryStorage } from '../test/memoryStorage';
 import { Shell } from './Shell';
 
@@ -42,5 +42,19 @@ describe('Shell', () => {
     const sep = screen.getAllByRole('separator')[0]!;
     fireEvent.pointerMove(sep, { clientX: 900 });
     expect(screen.getByTestId('shell')).toHaveStyle({ '--tw': '200px' });
+  });
+
+  it('writes the sizes once, on pointer-up, not on every move', () => {
+    const st = memoryStorage();
+    const set = vi.spyOn(st, 'setItem');
+    render(ui(st));
+    const sep = screen.getAllByRole('separator')[0]!;
+    fireEvent.pointerDown(sep, { clientX: 0 });
+    for (const x of [10, 20, 30, 40, 50]) fireEvent.pointerMove(sep, { clientX: x });
+    expect(screen.getByTestId('shell')).toHaveStyle({ '--tw': '250px' });
+    expect(set).not.toHaveBeenCalled();
+    fireEvent.pointerUp(sep);
+    expect(set).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(st.getItem('acto.panels')!).tools).toBe(250);
   });
 });

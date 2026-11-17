@@ -12,7 +12,7 @@ function browserStorage(): Storage | null {
   try { return window.localStorage; } catch { return null; }
 }
 
-interface Drag { key: SizeKey; start: number; from: number; sign: 1 | -1; axis: 'x' | 'y' }
+interface Drag { key: SizeKey; start: number; from: number; sign: 1 | -1; axis: 'x' | 'y'; moved?: boolean }
 
 export function Shell({ toolbox, board, inspector, output, chat, storage }: ShellProps) {
   const store = useRef<Storage | null>(storage === undefined ? browserStorage() : storage).current;
@@ -21,6 +21,8 @@ export function Shell({ toolbox, board, inspector, output, chat, storage }: Shel
   const drag = useRef<Drag | null>(null);
   const outputEl = useRef<HTMLDivElement>(null);
 
+  const latest = useRef(sizes);
+  latest.current = sizes;
   const commit = (next: PanelSizes) => { setSizes(next); writeSizes(store, next); };
 
   const splitter = (key: SizeKey, axis: 'x' | 'y', sign: 1 | -1, label: string) => {
@@ -35,9 +37,17 @@ export function Shell({ toolbox, board, inspector, output, chat, storage }: Shel
       const d = drag.current;
       if (!d || d.key !== key) return;
       const delta = (d.axis === 'x' ? e.clientX : e.clientY) - d.start;
-      commit({ ...sizes, [key]: clampSize(key, d.from + d.sign * delta) });
+      const next = { ...latest.current, [key]: clampSize(key, d.from + d.sign * delta) };
+      latest.current = next;
+      setSizes(next); // live while dragging; written once on release
+      d.moved = true;
     };
-    const onUp = () => { drag.current = null; setActive(null); };
+    const onUp = () => {
+      const d = drag.current;
+      drag.current = null;
+      setActive(null);
+      if (d?.moved) writeSizes(store, latest.current);
+    };
     const reset = () => commit({ ...sizes, [key]: DEFAULT_SIZES[key] });
     return (
       <div role="separator" aria-orientation={axis === 'x' ? 'vertical' : 'horizontal'} aria-label={label}
