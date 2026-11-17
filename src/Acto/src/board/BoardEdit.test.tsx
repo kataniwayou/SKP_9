@@ -90,6 +90,27 @@ describe('Board editing', () => {
     act(() => seen.props!.onNodeDragStop!({}, stepNode('w1', 'a', p.x + 8, p.y + HEADER_H)));
     expect(onEdit.moveMany).toHaveBeenCalledTimes(1);
   });
+  it.each([['step'], ['workflow']])('the Delete and Backspace keys leave a picked %s on the board', async (kind) => {
+    const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    const picks = kind === 'step' ? [{ kind: 'step' as const, workflowId: 'w1', stepId: 'a' }] : [{ kind: 'workflow' as const, workflowId: 'w1' }];
+    render(<Board workflows={[bw('w1', ['a', 'b'])]} picks={picks} onPick={() => {}} initialZoom={1} onEdit={onEdit} />);
+    await screen.findByText('a-name');
+    const count = () => document.querySelectorAll('.react-flow__node').length;
+    const before = count();
+    for (const key of ['Backspace', 'Delete']) {
+      fireEvent.keyDown(document.body, { key, code: key });
+      fireEvent.keyUp(document.body, { key, code: key });
+    }
+    // React Flow's own remove changes (from any source) must not drop nodes the store still holds
+    act(() => (seen.props!.onNodesChange as unknown as (c: unknown[]) => void)([{ type: 'remove', id: 'st:w1:a' }, { type: 'remove', id: 'wf:w1' }]));
+    expect(count()).toBe(before);
+    expect(seen.props!.deleteKeyCode).toBeNull();
+    expect(screen.getByText('a-name')).toBeInTheDocument();
+    expect(document.querySelector('.react-flow__node-workflow')).not.toBeNull();
+    expect(onEdit.moveMany).not.toHaveBeenCalled();
+    expect(onEdit.resizeFrame).not.toHaveBeenCalled();
+    expect(onEdit.connect).not.toHaveBeenCalled();
+  });
   it('stays read-only without onEdit', async () => {
     render(<Board workflows={[bw('w1', ['a'])]} picks={[]} onPick={() => {}} initialZoom={1} />);
     await screen.findByText('a-name');

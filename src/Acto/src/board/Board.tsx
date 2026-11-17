@@ -106,7 +106,8 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
     }
     // after Esc the pointer may still be down: its moves must not drag the nodes away again
     const cancelled = drag.current?.cancelled === true;
-    setDragged((ns) => applyNodeChanges(changes.filter((c) => c.type !== 'select' && !(cancelled && c.type === 'position')), ns));
+    // nodes leave the board only through the store: a 'remove' from React Flow would hide what is still there
+    setDragged((ns) => applyNodeChanges(changes.filter((c) => c.type !== 'select' && c.type !== 'remove' && !(cancelled && c.type === 'position')), ns));
   };
   const onEdgesChange = (changes: EdgeChange[]) => {
     if (!keySelect.current) return;
@@ -220,6 +221,7 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
           onMoveEnd={(_, v) => onViewChange?.(v)}
           multiSelectionKeyCode={null}
           selectionKeyCode={null}
+          deleteKeyCode={null}
           onEdgesChange={onEdgesChange}
           {...(!editable ? { onNodesChange } : {})}
           onNodeClick={(ev, n) => { keySelect.current = false; select(nodePick(n), ev.ctrlKey || ev.metaKey); }}
