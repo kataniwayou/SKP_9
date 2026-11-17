@@ -66,7 +66,7 @@ entities need the lock first) · 4 chat, themes, deployment, transition.
 ### Task 1: The workflow edit model
 
 **Files:**
-- Create: `src/Acto/src/design/state.ts`, `src/Acto/src/design/ids.ts`
+- Create: `src/Acto/src/design/state.ts`, `src/Acto/src/design/ids.ts`, `src/Acto/src/design/fixtures.ts` (used by Tasks 2–9)
 - Test: `src/Acto/src/design/state.test.ts`
 
 **Interfaces:**
@@ -83,6 +83,9 @@ entities need the lock first) · 4 chat, themes, deployment, transition.
     deletedSteps: Record<Id, string | null>; frame: Rect }
   stateOf(bw: BoardWorkflow): WorkflowState
   newWorkflowState(id: Id, name: string, at: Point): WorkflowState
+  // design/fixtures.ts: bwFull(over?: { updatedAt?: string }): BoardWorkflow — workflow w1 'orders', steps a→b
+  //   (names a-name, b-name, step updatedAt '2026-01-01T00:00:00Z', processor p1 'Analyst'), an assignment on a,
+  //   one linked cache c1; proc(id, name): Processor; procs(): Map<Id, Processor>
   boardWorkflowOf(state: WorkflowState, base: BoardWorkflow | null, processors: ReadonlyMap<Id, Processor>): BoardWorkflow
   moveStep(s, stepId, at): WorkflowState; moveFrame(s, at: Point); resizeFrame(s, size: { w; h })  // clamps to frameSizeOf
   addStep(s, processor: Processor, at, id): WorkflowState; swapProcessor(s, stepId, processor); removeStep(s, stepId)
@@ -173,7 +176,7 @@ it('sends only what changed', () => {
   expect((r.layout as any).steps.b).toEqual({ x: 500, y: 40 });
 });
 it('writes derived first steps and a plain circuit WorkflowStudio reads', () => {
-  const cur = removeWire(stateOf(bwFull()), 'a', 'b');           // b becomes parked (no wires) — a is lone? no: 2 steps, both parked
+  const cur = removeWire(stateOf(bwFull()), 'a', 'b');           // a and b now have no wires (both parked)
   const r = designRequest(stateOf(bwFull()), addWire(cur, 'b', 'a').state!, null);
   expect(r.workflow!.entryStepIds).toEqual(['b']);
   expect((r.layout as any).wires).toEqual({
