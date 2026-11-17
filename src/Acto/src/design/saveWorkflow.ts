@@ -6,6 +6,7 @@ import type { OutputStore } from '../output/outputStore';
 import type { BoardStore } from './boardStore';
 import { diagramSvg } from './diagramSvg';
 import { designRequest } from './request';
+import { changedEntities, holders, type EntityKey } from './shared';
 import type { WorkflowState } from './state';
 
 function entityName(s: WorkflowState, base: WorkflowState | null, id: string): string {
@@ -40,6 +41,8 @@ async function run(
 ): Promise<'saved' | 'refused' | 'failed'> {
   const present = entry.history.present;
   const name = present.fields.name;
+  // what this save changes, taken before the save replaces the base: the workflows sharing it re-read it after
+  const changed = changedEntities(entry.base, present);
 
   if (entry.base) {
     const now = await api.getGraph(workflowId);
@@ -66,6 +69,7 @@ async function run(
   if (!loaded.ok) {
     store.adoptPresent(workflowId);
     output.log(`${name} saved, but could not be read back: ${describeError(loaded.error)}. Reload before editing it again`, 'error');
+    await refreshSharers(api, store, output, workflowId, changed);
     return 'saved';
   }
   const { storedFrame: _stored, ...rest } = loaded.value;
@@ -86,5 +90,42 @@ async function run(
   const pub = await api.publishDiagram(workflowId, diagramSvg(bw));
   if (pub.ok) output.log(`${name}: Kibana diagram published`, 'ok');
   else output.log(`${name}: Kibana diagram not published — ${describeError(pub.error)}`, 'warn');
+  await refreshSharers(api, store, output, workflowId, changed);
   return 'saved';
+}
+
+/**
+ * After `savedId` saved the entities in `changed`, every other workflow showing one of them re-reads itself and takes
+ * the new values of those entities, keeping its own unsaved work (BoardStore.rebase). One that cannot be re-read
+ * stays as it was. Never throws.
+ */
+export async function refreshSharers(
+  api: StudioApi, store: BoardStore, output: OutputStore, savedId: Id, changed: Set<EntityKey>,
+): Promise<void> {
+  if (changed.size === 0) return;
+  const held = holders(store.boards());
+  const keysOf = new Map<Id, Set<EntityKey>>();
+  for (const key of changed) {
+    for (const wf of held.get(key) ?? []) {
+      if (wf === savedId) continue;
+      const ks = keysOf.get(wf) ?? new Set<EntityKey>();
+      ks.add(key);
+      keysOf.set(wf, ks);
+    }
+  }
+  const savedName = store.entry(savedId)?.history.present.fields.name ?? savedId;
+  for (const [wf, keys] of keysOf) {
+    const entry = store.entry(wf);
+    if (!entry?.base) continue; // never saved: BaseAPI has nothing to re-read
+    const name = entry.history.present.fields.name;
+    const loaded = await loadWorkflow(api, wf);
+    if (!loaded.ok) {
+      output.log(`${name}: could not re-read after ${savedName} saved — ${describeError(loaded.error)}`, 'warn');
+      continue;
+    }
+    const { storedFrame: _stored, ...rest } = loaded.value;
+    const frame = store.boards().find((b) => b.graph.workflow.id === wf)?.frame ?? { x: 0, y: 0, w: 0, h: 0 };
+    store.rebase(wf, { ...rest, frame }, keys);
+    output.log(`${name}: re-read after ${savedName} saved`, 'info');
+  }
 }

@@ -21,7 +21,8 @@ function cacheChanged(c: CacheState, was: CacheState | undefined): boolean {
 }
 
 /**
- * Entities whose stored fields differ: a step's fields, processorId, nextStepIds or deletion (not its position);
+ * Entities whose stored fields differ: a step's fields, processorId, nextStepIds or deletion (not its position, nor
+ * its leaving this workflow only);
  * a processor with a different ProcessorEdit; a cache's fields (not linking/unlinking). Against `null` (a workflow
  * never saved) everything it holds is new, and new things are held by it alone.
  */
@@ -32,7 +33,8 @@ export function changedEntities(base: WorkflowState | null, cur: WorkflowState):
     const was = bSteps[id];
     if (!was || !sameStep(s, was)) out.add(`step:${id}`);
   }
-  for (const id of Object.keys(bSteps)) if (!cur.steps[id]) out.add(`step:${id}`);
+  // a step that left `steps` without being deleted (removeStepHere) left this workflow only: the step is unchanged
+  for (const id of Object.keys(bSteps)) if (!cur.steps[id] && id in cur.deletedSteps) out.add(`step:${id}`);
   const bp = base?.processors ?? {};
   const cp = cur.processors ?? {};
   if (bp !== cp) {
@@ -68,4 +70,15 @@ export function entityLabel(key: EntityKey, boards: BoardWorkflow[]): string {
     if (e) return `${kind} ${e.name}`;
   }
   return `${kind} ${id}`;
+}
+
+/** For a step delete in `wf`: its steps another workflow shows too, and those other workflows' names (board order). */
+export function stepSharing(boards: BoardWorkflow[], wf: Id): { shared: Set<Id>; others: (stepId: Id) => string[] } {
+  const held = holders(boards);
+  const names = new Map(boards.map((b) => [b.graph.workflow.id, b.graph.workflow.name]));
+  const shared = new Set<Id>();
+  for (const id of boards.find((b) => b.graph.workflow.id === wf)?.stepIds ?? []) {
+    if ((held.get(`step:${id}`)?.length ?? 0) > 1) shared.add(id);
+  }
+  return { shared, others: (id) => (held.get(`step:${id}`) ?? []).filter((w) => w !== wf).map((w) => names.get(w) ?? w) };
 }

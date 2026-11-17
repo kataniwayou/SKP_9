@@ -5,7 +5,7 @@ import { AUDIT } from '../model/fixtures';
 import { bwFull, proc, procs } from './fixtures';
 import {
   addCache, addStep, addWire, boardWorkflowOf, deleteParts, linkCache, moveFrame, moveStep, newWorkflowState, removeAssignment,
-  removeStep, removeWire, resizeFrame, sameState, setCacheField, setPayload, setStepField, setWorkflowField,
+  removeStep, removeStepHere, removeWire, resizeFrame, sameState, setCacheField, setPayload, setStepField, setWorkflowField,
   clearSlot, setProcessorField, setSlotField, stateOf, swapProcessor, unlinkCache,
 } from './state';
 
@@ -110,11 +110,60 @@ describe('workflow edit model', () => {
   });
   it('deleteParts removes steps like removeStep, and wires', () => {
     const s = stateOf(bwFull());
-    const out = deleteParts(s, ['b'], []);
-    expect(out).toEqual(removeStep(s, 'b'));
-    const w = deleteParts(s, [], [['a', 'b']]);
-    expect(w).toEqual(removeWire(s, 'a', 'b'));
-    expect(deleteParts(s, ['b'], [['a', 'b']]).steps.a!.nextStepIds).not.toContain('b');
+    const out = deleteParts(s, ['b'], [], new Set());
+    expect(out).toEqual({ state: removeStep(s, 'b'), refused: [] });
+    const w = deleteParts(s, [], [['a', 'b']], new Set());
+    expect(w.state).toEqual(removeWire(s, 'a', 'b'));
+    expect(deleteParts(s, ['b'], [['a', 'b']], new Set()).state.steps.a!.nextStepIds).not.toContain('b');
+  });
+  describe('removing a shared step from one workflow (removeStepHere)', () => {
+    // x → s → t, and y → s2 with y shared: x, s, t, y, s2
+    const wired = () => stateOf(bw('w1', ['x', 's', 't', 'y', 's2'], [
+      { id: 'x>s', from: 'x', to: 's', condition: 4 }, { id: 's>t', from: 's', to: 't', condition: 4 },
+      { id: 'y>s2', from: 'y', to: 's2', condition: 4 },
+    ]));
+    const billing = () => ['billing'];
+    it('a step no other workflow holds is deleted as removeStep deletes it', () => {
+      const s = wired();
+      expect(removeStepHere(s, 's', new Set(['s2']), billing)).toEqual({ state: removeStep(s, 's') });
+    });
+    it('a shared step reached from a non-shared source leaves this workflow only: no deletedSteps', () => {
+      const s = setPayload(wired(), 's', '{"k":1}', () => 'as9');
+      const res = removeStepHere(s, 's', new Set(['s']), billing);
+      if (!('state' in res)) throw new Error(res.refused);
+      expect(res.state.steps.s).toBeUndefined();
+      expect(res.state.steps.x!.nextStepIds).toEqual([]);
+      expect(res.state.steps.t).toBeDefined();
+      expect(res.state.assignments.s).toBeUndefined();
+      expect(res.state.deletedSteps).toEqual({});
+    });
+    it('a shared first step leaves this workflow with no wire to drop', () => {
+      const s = wired();
+      const res = removeStepHere(s, 'x', new Set(['x']), billing);
+      if (!('state' in res)) throw new Error(res.refused);
+      expect(Object.keys(res.state.steps)).toEqual(['s', 't', 'y', 's2']);
+      expect(res.state.deletedSteps).toEqual({});
+    });
+    it('refuses a shared step a shared step of this workflow wires to', () => {
+      const s = wired();
+      expect(removeStepHere(s, 's2', new Set(['y', 's2']), billing)).toEqual({
+        refused: 's2-name is reached from y-name, which billing share too — deleting it here would change them',
+      });
+    });
+    it('deleteParts keeps a refused step and reports why, and still deletes the rest', () => {
+      const s = wired();
+      const out = deleteParts(s, ['s2', 't'], [], new Set(['y', 's2']), billing);
+      expect(out.state.steps.s2).toBeDefined();
+      expect(out.state.steps.t).toBeUndefined();
+      expect(out.refused).toEqual(['s2-name is reached from y-name, which billing share too — deleting it here would change them']);
+    });
+    it('deleteParts takes a shared step and the shared step reaching it together, in either pick order', () => {
+      const s = wired();
+      for (const order of [['s2', 'y'], ['y', 's2']]) {
+        const out = deleteParts(s, order, [], new Set(['y', 's2']), billing);
+        expect([order, out.refused, out.state.steps.y, out.state.steps.s2]).toEqual([order, [], undefined, undefined]);
+      }
+    });
   });
 const P = { ...proc('p1', 'Analyst'), configSchemaId: 'sc1', inputSchemaId: null };
 const SC = { id: 'sc1', name: 'cfg', version: '1', description: null, audit: AUDIT, definition: '{"type":"object"}' };
@@ -142,7 +191,7 @@ const SC = { id: 'sc1', name: 'cfg', version: '1', description: null, audit: AUD
       expect(one.processors!.p1).toBeDefined();
       const none = removeStep(one, 'b');
       expect(none.processors).toEqual({});
-      expect(deleteParts(edited, ['a', 'b'], []).processors).toEqual({});
+      expect(deleteParts(edited, ['a', 'b'], [], new Set()).state.processors).toEqual({});
       const swapped = swapProcessor(edited, 'a', proc('p2', 'Other'));
       expect(swapped.processors!.p1).toBeDefined();
       expect(swapProcessor(swapped, 'b', proc('p2', 'Other')).processors).toEqual({});

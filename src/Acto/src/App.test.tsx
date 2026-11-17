@@ -222,6 +222,34 @@ describe('App', () => {
     });
   });
 
+  describe('deleting a shared step', () => {
+    // w1 and w2 both run a → b: every step is shared
+    const shared = () => fakeApi({ workflows: [wf('w1'), wf('w2')], graph: graphWith({ entry: ['a'], steps: { a: ['b'], b: [] } }) });
+    const view = () => memoryStorage({ 'acto.view': JSON.stringify({ x: 0, y: 0, zoom: 1, selection: null }) });
+    const cards = (n: string) => screen.getAllByText(n, { selector: '.sn' });
+    it('refuses a step a shared step wires to, and takes a shared first step out of this workflow only', async () => {
+      renderApp(shared(), view());
+      await screen.findByText('Board loaded: 2 workflows');
+      fireEvent.click(cards('b-name')[0]!);
+      fireEvent.click(screen.getByText('Delete'));
+      expect(await screen.findByText('b-name is reached from a-name, which w2-name share too — deleting it here would change them')).toBeInTheDocument();
+      expect(cards('b-name')).toHaveLength(2);
+      fireEvent.click(cards('a-name')[0]!);
+      fireEvent.click(screen.getByText('Delete'));
+      await vi.waitFor(() => expect(cards('a-name')).toHaveLength(1));
+      expect(cards('b-name')).toHaveLength(2);
+    });
+    it('Delete on the selection bar keeps a refused step, says why, and deletes the rest', async () => {
+      renderApp(fakeApi({ workflows: [wf('w1'), wf('w2')], graph: graphWith({ entry: ['a'], steps: { a: ['b'], b: ['c'], c: [] } }) }), view());
+      await screen.findByText('Board loaded: 2 workflows');
+      fireEvent.click(cards('c-name')[0]!);
+      fireEvent.click(cards('a-name')[0]!, { ctrlKey: true });
+      fireEvent.click(await screen.findByText('Delete'));
+      expect(await screen.findByText('c-name is reached from b-name, which w2-name share too — deleting it here would change them')).toBeInTheDocument();
+      await vi.waitFor(() => expect(cards('a-name')).toHaveLength(1));
+      expect(cards('c-name')).toHaveLength(2);
+    });
+  });
   describe('copy and paste', () => {
     const two = () => fakeApi({ workflows: [wf('w1')], graph: graphWith({ entry: ['a'], steps: { a: ['b'], b: [] } }) });
     const view = () => memoryStorage({ 'acto.view': JSON.stringify({ x: 0, y: 0, zoom: 1, selection: null }) });

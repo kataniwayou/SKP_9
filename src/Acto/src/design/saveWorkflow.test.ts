@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from '../api/client';
-import { fakeApi, graphWith } from '../board/testApi';
+import { fakeApi, graphWith, wf } from '../board/testApi';
 import type { DesignSaveRequest } from './request';
 import { createOutputStore } from '../output/outputStore';
 import { createBoardStore } from './boardStore';
 import { bwFull, proc } from './fixtures';
-import { moveStep, removeStep } from './state';
+import { moveStep, removeStep, setStepField } from './state';
+import { bw } from '../board/fixtures';
 import { saveWorkflow } from './saveWorkflow';
 
 function setup(opts: { applied?: boolean; problems?: { title: string; detail: string }[]; layout?: unknown } = {}) {
@@ -134,5 +135,63 @@ describe('saveWorkflow', () => {
     expect(store.entry('w1')!.history).toBe(before);
     expect(texts()).toContain('warn:orders is saving — wait for it to finish');
     await p;
+  });
+});
+
+describe('re-reading the workflows that share what a save changed', () => {
+  /** w1 'orders' [a → b], w2 'billing' [a] shares step a, w3 'audit' [z] shares nothing. */
+  function sharing(graphError?: Record<string, { kind: 'network'; message: string }>) {
+    const output = createOutputStore(null, () => '00:00:00');
+    const store = createBoardStore(output, null);
+    const w2 = bw('w2', ['a']);
+    w2.graph.workflow = { ...w2.graph.workflow, name: 'billing' };
+    const w3 = bw('w3', ['z']);
+    w3.graph.workflow = { ...w3.graph.workflow, name: 'audit' };
+    store.load({ listed: true, workflows: [bwFull(), w2, w3], failures: [] }, [proc('p1', 'Analyst')]);
+    const renamedA = graphWith({ entry: ['a'], steps: { a: [] } });
+    renamedA.steps = renamedA.steps!.map((s) => ({ ...s, name: 'renamed' }));
+    const api = fakeApi({
+      workflows: [{ ...wf('w1'), name: 'orders' }, { ...wf('w2'), name: 'billing' }],
+      graph: graphWith({ entry: ['a'], steps: { a: ['b'], b: [] } }),
+      graphs: { w2: renamedA },
+      graphError,
+    });
+    Object.assign(api, {
+      saveDesign: vi.fn().mockResolvedValue({ ok: true, value: { applied: true, errors: [] } }),
+      validateWorkflow: vi.fn().mockResolvedValue({ ok: true, value: { valid: true, problems: [] } }),
+    });
+    return { api: api as StudioApi, store, output, texts: () => output.lines().map((l) => `${l.level}:${l.text}`) };
+  }
+  const reads = (api: StudioApi) => (api.getGraph as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+
+  it('an applied save of a shared-step change re-reads the sharer only', async () => {
+    const { api, store, output, texts } = sharing();
+    store.edit('w1', (s) => setStepField(s, 'a', 'name', 'renamed'));
+    expect(await saveWorkflow(api, store, output, 'w1')).toBe('saved');
+    expect(reads(api)).toEqual(['w1', 'w1', 'w2']);
+    expect(texts()).toContain('info:billing: re-read after orders saved');
+    expect(store.entry('w2')!.history.present.steps.a!.name).toBe('renamed');
+    expect(store.entry('w3')!.history.present.steps.z!.name).toBe('z-name');
+  });
+  it('re-reads nobody when only a move was saved', async () => {
+    const { api, store, output } = sharing();
+    store.edit('w1', (s) => moveStep(s, 'a', { x: 300, y: 300 }));
+    await saveWorkflow(api, store, output, 'w1');
+    expect(reads(api)).toEqual(['w1', 'w1']);
+  });
+  it('re-reads nobody when the save was not applied', async () => {
+    const { api, store, output } = sharing();
+    (api.saveDesign as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, value: { applied: false, errors: [] } });
+    store.edit('w1', (s) => setStepField(s, 'a', 'name', 'renamed'));
+    await saveWorkflow(api, store, output, 'w1');
+    expect(reads(api)).toEqual(['w1']);
+  });
+  it('a sharer that cannot be re-read stays as it was, with a warning', async () => {
+    const { api, store, output, texts } = sharing({ w2: { kind: 'network', message: 'down' } });
+    const before = store.entry('w2');
+    store.edit('w1', (s) => setStepField(s, 'a', 'name', 'renamed'));
+    await saveWorkflow(api, store, output, 'w1');
+    expect(texts()).toContain('warn:billing: could not re-read after orders saved — Network error: down');
+    expect(store.entry('w2')).toBe(before);
   });
 });

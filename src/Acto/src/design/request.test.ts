@@ -3,11 +3,23 @@ import { AUDIT } from '../model/fixtures';
 import { bwFull, proc } from './fixtures';
 import { applyStored, designRequest } from './request';
 import {
-  addCache, addStep, addWire, linkCache, moveStep, newWorkflowState, removeAssignment, removeStep, removeWire, setCacheField,
+  addCache, addStep, addWire, linkCache, moveStep, newWorkflowState, removeAssignment, removeStep, removeStepHere, removeWire, setCacheField,
   clearSlot, setPayload, setProcessorField, setSlotField, setStepField, stateOf, swapProcessor, unlinkCache,
 } from './state';
 
 describe('design request', () => {
+  it('a shared step removed here holds no deletedSteps: only the wire, entry and assignment here change', () => {
+    const base = stateOf(bwFull());
+    const here = (id: string) => { const r = removeStepHere(base, id, new Set([id])); if (!('state' in r)) throw new Error(r.refused); return r.state; };
+    const b = designRequest(base, here('b'), null);
+    expect(b.deletedSteps).toBeUndefined();
+    expect(b.steps).toEqual([{ id: 'a', updatedAt: '2026-01-01T00:00:00Z', fields: {}, nextStepIds: [] }]);
+    expect((b.layout as { parked: string[] }).parked).toEqual(['a']);
+    const a = designRequest(base, here('a'), null);
+    expect(a.deletedSteps).toBeUndefined();
+    expect(a.workflow!.entryStepIds).toEqual(['b']);
+    expect(a.assignments).toEqual([{ op: 'delete', id: 'as0', stepId: 'a', updatedAt: '2026-01-01T00:00:00Z' }]);
+  });
   it('sends only what changed', () => {
     const base = stateOf(bwFull()); const cur = setStepField(moveStep(base, 'b', { x: 500, y: 40 }), 'b', 'name', 'renamed');
     const r = designRequest(base, cur, null);

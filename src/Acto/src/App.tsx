@@ -7,10 +7,11 @@ import { SelectionBar, type BarActions } from './board/SelectionBarView';
 import { barOf } from './board/selectionBar';
 import { loadBoard } from './board/loadBoard';
 import { lastPick, livePicks, togglePick, type Pick } from './board/picks';
-import { addCache, addStep, addWire, deleteParts, linkCache, moveFrame, moveMany, newWorkflowState, removeStep, removeWire, resizeFrame, swapProcessor, unlinkCache } from './design/state';
+import { addCache, addStep, addWire, deleteParts, linkCache, moveFrame, moveMany, newWorkflowState, removeStepHere, removeWire, resizeFrame, swapProcessor, unlinkCache } from './design/state';
 import { dropVerdict, type DropItem } from './board/dropTarget';
 import { newId } from './design/ids';
 import { saveWorkflow } from './design/saveWorkflow';
+import { stepSharing } from './design/shared';
 import type { ToolbarActions } from './board/nodes/boardContext';
 import { createBoardStore, useBoard, type BoardStore } from './design/boardStore';
 import { nudgeKey, pasteKey, undoRedoKey } from './design/keys';
@@ -265,7 +266,8 @@ export function App(props: AppProps) {
     stop: (wf) => { void runWorkflow(api, store, output, live, wf, 'stop'); },
     copy: (wf, step) => copyPicks({ wf, step }),
     deleteStep: (wf, step) => {
-      store.editOrRefuse(wf, (s) => ({ state: removeStep(s, step) }));
+      const { shared, others } = stepSharing(store.boards(), wf);
+      store.editOrRefuse(wf, (s) => removeStepHere(s, step, shared, others));
       onSelect({ kind: 'workflow', workflowId: wf });
     },
     deleteWire: (wf, wireId) => {
@@ -322,7 +324,15 @@ export function App(props: AppProps) {
       }
       // one edit (one undo step) per workflow
       for (const [wf, e] of per) {
-        store.editOrRefuse(wf, (st) => ({ state: e.caches.reduce(unlinkCache, deleteParts(st, e.steps, e.wires)) }));
+        const { shared, others } = stepSharing(store.boards(), wf);
+        let refused: string[] = [];
+        store.editOrRefuse(wf, (st) => {
+          const out = deleteParts(st, e.steps, e.wires, shared, others);
+          refused = out.refused;
+          return { state: e.caches.reduce(unlinkCache, out.state) };
+        });
+        // a refused step stays; the rest of the pick still goes
+        for (const why of refused) output.log(why, 'warn');
       }
       if (last) setAllPicks([{ kind: 'workflow', workflowId: last.workflowId }]);
     },

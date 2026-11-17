@@ -220,12 +220,59 @@ export function removeStep(s: WorkflowState, stepId: Id): WorkflowState {
   return pruneProcessors({ ...s, steps, assignments, deletedSteps });
 }
 
-/** Several steps and wires at once, as one state (each step goes as `removeStep` does). */
-export function deleteParts(s: WorkflowState, stepIds: Id[], wires: [Id, Id][]): WorkflowState {
+/**
+ * Deletes a step from this workflow only (spec §8b). A step no other workflow holds goes as `removeStep` deletes it.
+ * A shared step (`shared` holds the ids other workflows show too) is not deleted in BaseAPI: its wires from this
+ * workflow's steps go, it leaves `steps` (so the layout no longer lists it) and its assignment here goes. Refused
+ * when a shared step of this workflow wires to it: dropping that wire would change the other workflows too.
+ * `others(stepId)` names the other workflows that show a step, for the refusal.
+ */
+export function removeStepHere(
+  s: WorkflowState, stepId: Id, shared: ReadonlySet<Id>, others: (stepId: Id) => string[] = () => [],
+): { state: WorkflowState } | { refused: string } {
+  const st = s.steps[stepId];
+  if (!st || !shared.has(stepId)) return { state: removeStep(s, stepId) };
+  const from = Object.values(s.steps).find((x) => x.id !== stepId && shared.has(x.id) && x.nextStepIds.includes(stepId));
+  if (from) {
+    const names = others(from.id);
+    return {
+      refused: `${st.name} is reached from ${from.name}, which ${names.length ? names.join(', ') : 'other workflows'} share too — deleting it here would change them`,
+    };
+  }
+  const steps: Record<Id, StepState> = {};
+  for (const [id, x] of Object.entries(s.steps)) {
+    if (id === stepId) continue;
+    steps[id] = x.nextStepIds.includes(stepId) ? { ...x, nextStepIds: x.nextStepIds.filter((n) => n !== stepId) } : x;
+  }
+  const assignments = { ...s.assignments };
+  delete assignments[stepId];
+  return { state: pruneProcessors({ ...s, steps, assignments }) };
+}
+
+/**
+ * Several steps and wires at once, as one state (each step goes as `removeStepHere` takes it). A refused step stays;
+ * `refused` says why, for the Output. A step refused only because another picked step reaches it is tried again once
+ * that one has gone.
+ */
+export function deleteParts(
+  s: WorkflowState, stepIds: Id[], wires: [Id, Id][], shared: ReadonlySet<Id>, others?: (stepId: Id) => string[],
+): { state: WorkflowState; refused: string[] } {
   let out = s;
+  const refused: string[] = [];
   for (const [from, to] of wires) out = removeWire(out, from, to);
-  for (const id of stepIds) out = removeStep(out, id);
-  return out;
+  // a step refused only because a picked shared step still reaches it goes once that step has gone: pick order never matters
+  let left = stepIds;
+  for (;;) {
+    const next: Id[] = [];
+    refused.length = 0;
+    for (const id of left) {
+      const r = removeStepHere(out, id, shared, others);
+      if ('refused' in r) { next.push(id); refused.push(r.refused); } else out = r.state;
+    }
+    if (next.length === left.length) break;
+    left = next;
+  }
+  return { state: out, refused };
 }
 
 export function addWire(s: WorkflowState, from: Id, to: Id): { state: WorkflowState } | { refused: string } {

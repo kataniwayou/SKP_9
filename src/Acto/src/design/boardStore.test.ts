@@ -4,7 +4,7 @@ import { createOutputStore } from '../output/outputStore';
 import { createBoardStore } from './boardStore';
 import { bwFull, proc } from './fixtures';
 import { canUndo } from './history';
-import { addWire, moveMany, moveStep, newWorkflowState, removeWire, setStepField, type WorkflowState } from './state';
+import { addWire, moveMany, moveStep, newWorkflowState, removeWire, setProcessorField, setStepField, type WorkflowState } from './state';
 import { bw } from '../board/fixtures';
 import { memoryStorage } from '../test/memoryStorage';
 
@@ -234,5 +234,66 @@ describe('the shared-entity lock', () => {
     st.undo('w2');
     st.undo('w1');
     expect([st.entry('w1')!.unsaved, st.entry('w2')!.unsaved]).toEqual([false, false]);
+  });
+});
+
+describe('rebase: a sharer re-read after another workflow saved', () => {
+  /** w1 'orders' [s1, t] and w2 'billing' [s1 → s9] share s1 'extract'. */
+  function sharedPair() {
+    const w1 = bw('w1', ['s1', 't']);
+    w1.graph.workflow = { ...w1.graph.workflow, name: 'orders' };
+    const w2 = bw('w2', ['s1', 's9'], [{ id: 's1>s9', from: 's1', to: 's9', condition: 4 }]);
+    w2.graph.workflow = { ...w2.graph.workflow, name: 'billing' };
+    const output = createOutputStore(null, () => '00:00:00');
+    const st = createBoardStore(output, null);
+    st.load({ listed: true, workflows: [w1, w2], failures: [] }, []);
+    return st;
+  }
+  /** w2 as re-read after w1 renamed s1 and wired it to n (which w2 now reaches too). */
+  function reread() {
+    const r = bw('w2', ['s1', 's9', 'n'], [
+      { id: 's1>s9', from: 's1', to: 's9', condition: 4 }, { id: 's1>n', from: 's1', to: 'n', condition: 4 },
+    ]);
+    r.graph.workflow = { ...r.graph.workflow, name: 'billing' };
+    r.graph.steps.set('s1', { ...r.graph.steps.get('s1')!, name: 'renamed', updatedAt: 'T2' });
+    r.stepAt.set('s1', { x: 999, y: 999 });
+    return r;
+  }
+
+  it('takes the re-read values and stamps of the changed entities and keeps its own unsaved work', () => {
+    const st = sharedPair();
+    const s1At = { ...st.entry('w2')!.history.present.steps.s1!.at };
+    st.edit('w2', (s) => moveStep(s, 's9', { x: 400, y: 300 }));
+    st.edit('w2', (s) => setProcessorField(s, proc('p-s9', 's9-proc'), 'name', 'mine'));
+    const procs = st.entry('w2')!.history.present.processors;
+    st.rebase('w2', reread(), new Set(['step:s1']));
+    const e = st.entry('w2')!;
+    expect(e.history.present.steps.s1).toMatchObject({ name: 'renamed', updatedAt: 'T2', at: s1At, nextStepIds: ['s9', 'n'] });
+    expect(e.history.present.steps.s9!.at).toEqual({ x: 400, y: 300 });
+    expect(e.history.present.processors).toEqual(procs);
+    expect(e.unsaved).toBe(true);
+    expect(e.base!.steps.s1!.name).toBe('renamed');
+    expect(e.history.past.every((s) => s.steps.s1!.name === 'renamed')).toBe(true);
+    st.undo('w2');
+    st.undo('w2');
+    expect(st.entry('w2')!.unsaved).toBe(false);
+  });
+  it('places a newly reached step right of its source', () => {
+    const st = sharedPair();
+    const s1At = { ...st.entry('w2')!.history.present.steps.s1!.at };
+    st.rebase('w2', reread(), new Set(['step:s1']));
+    expect(st.entry('w2')!.history.present.steps.n!.at).toEqual({ x: s1At.x + 210 + 60, y: s1At.y });
+    expect(st.boards()[1]!.stepIds).toContain('n');
+  });
+  it('leaves entities not named in the keys as they were', () => {
+    const st = sharedPair();
+    st.rebase('w2', reread(), new Set());
+    expect(st.entry('w2')!.history.present.steps.s1!.name).toBe('s1-name');
+  });
+  it('keeps the save lock', () => {
+    const st = sharedPair();
+    st.setSaving('w2', true);
+    st.rebase('w2', reread(), new Set(['step:s1']));
+    expect(st.entry('w2')!.saving).toBe(true);
   });
 });

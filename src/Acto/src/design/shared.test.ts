@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { bw } from '../board/fixtures';
 import { AUDIT } from '../model/fixtures';
 import { bwFull, proc } from './fixtures';
-import { changedEntities, entityLabel, holders } from './shared';
-import { addCache, addStep, addWire, linkCache, moveStep, newWorkflowState, setCacheField, setProcessorField, setStepField, stateOf, swapProcessor, unlinkCache } from './state';
+import { changedEntities, entityLabel, holders, stepSharing } from './shared';
+import { addCache, addStep, addWire, linkCache, moveStep, newWorkflowState, removeStepHere, setCacheField, setProcessorField, setStepField, stateOf, swapProcessor, unlinkCache } from './state';
 
 const base = () => stateOf(bwFull());
 
@@ -23,7 +23,13 @@ describe('changedEntities', () => {
   it('a deleted step is a change, its position is not', () => {
     const b = base();
     const { a: _gone, ...steps } = b.steps;
-    expect(changedEntities(b, { ...b, steps })).toContain('step:a');
+    expect(changedEntities(b, { ...b, steps, deletedSteps: { a: null } })).toContain('step:a');
+  });
+  it('a step that only left this workflow (not deleted) is no change to it', () => {
+    const b = base();
+    const r = removeStepHere(b, 'b', new Set(['b']));
+    if (!('state' in r)) throw new Error(r.refused);
+    expect([...changedEntities(b, r.state)]).toEqual(['step:a']);
   });
   it('a processor edit is a processor change', () => {
     const b = base();
@@ -67,5 +73,12 @@ describe('holders and labels', () => {
     expect(entityLabel('step:s1', boards)).toBe('step s1-name');
     expect(entityLabel('processor:p-s1', boards)).toBe('processor s1-proc');
     expect(entityLabel('cache:c1', [bwFull()])).toBe('cache c1-name');
+  });
+  it('stepSharing: the steps of a workflow others show too, and the names of those others', () => {
+    const three = [...boards, bw('w3', ['s1'])];
+    const { shared, others } = stepSharing(three, 'w1');
+    expect([...shared]).toEqual(['s1']);
+    expect(others('s1')).toEqual(['w2-name', 'w3-name']);
+    expect(others('a')).toEqual([]);
   });
 });

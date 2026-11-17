@@ -1,12 +1,14 @@
 import { useSyncExternalStore } from 'react';
 import type { BoardLoad, BoardWorkflow } from '../board/loadBoard';
+import { FRAME_PAD, STEP_W } from '../board/geometry';
 import type { Id, Processor, Schema } from '../model/graph';
+import type { Point } from '../model/geometry';
 import type { OutputStore } from '../output/outputStore';
 import { readDrafts, writeDrafts, type Drafts } from './drafts';
 import { commit, historyOf, redo, undo, type History } from './history';
 import { applyStored } from './request';
 import { changedEntities, entityLabel, holders, type EntityKey } from './shared';
-import { boardWorkflowOf, sameState, stateOf, type WorkflowState } from './state';
+import { boardWorkflowOf, sameState, stateOf, type CacheState, type StepState, type WorkflowState } from './state';
 
 export interface BoardEntry { base: WorkflowState | null; history: History; unsaved: boolean;
   /** The stored layout the workflow had when loaded (opaque JSON), to spot a change made elsewhere. */
@@ -31,6 +33,12 @@ export interface BoardStore {
   redo(id: Id): void;
   addWorkflow(state: WorkflowState): void;
   replace(id: Id, bw: BoardWorkflow): void;
+  /**
+   * Another workflow saved changes to the entities in `keys` this one shows too: `bw` (this workflow re-read) becomes
+   * the base, and in every history state those entities take the re-read values and stamps (positions, the frame and
+   * everything else stay). A step the re-read reaches that the base did not hold is added next to its source.
+   */
+  rebase(id: Id, bw: BoardWorkflow, keys: Set<EntityKey>): void;
   /** The workflow is gone (deleted, or never saved and discarded): its entry and its draft with it. */
   remove(id: Id): void;
   setProblems(id: Id, n: number): void;
@@ -252,6 +260,84 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       const next = make(bw);
       next.view = { ...next.view, saving: recs.get(id)?.view.saving ?? false };
       recs.set(id, next);
+      changed();
+    },
+    rebase(id, bw, keys) {
+      const r = recs.get(id);
+      if (!r || !r.base || !r.baseBw) return;
+      const oldBase = r.base;
+      const reached = new Set(bw.stepIds);
+      const sourceOf = (stepId: Id) => bw.stepIds.find((s) => bw.graph.steps.get(s)?.nextStepIds.includes(stepId));
+      /** Where a step the re-read brings in goes, given where this state has the others: right of its source. */
+      const placeIn = (at: (id: Id) => Point | undefined, stepId: Id): Point => {
+        const src = sourceOf(stepId);
+        const p = src !== undefined ? at(src) : undefined;
+        if (p) return { x: p.x + STEP_W + 60, y: p.y };
+        return { ...(bw.stepAt.get(stepId) ?? { x: FRAME_PAD, y: FRAME_PAD }) };
+      };
+      const appeared = bw.stepIds.filter((s) => !oldBase.steps[s]);
+      const baseAt = new Map<Id, Point>();
+      for (const s of bw.stepIds) if (oldBase.steps[s]) baseAt.set(s, { ...oldBase.steps[s]!.at });
+      for (const s of appeared) baseAt.set(s, placeIn((x) => baseAt.get(x), s));
+      const baseBw: BoardWorkflow = { ...bw, stepAt: baseAt, frame: { ...r.baseBw.frame } };
+      const base = stateOf(baseBw);
+
+      for (const key of keys) {
+        if (!key.startsWith('processor:')) continue;
+        const p = bw.graph.processors.get(key.slice('processor:'.length));
+        if (p) { processors = new Map(processors).set(p.id, p); procVersion++; }
+      }
+      const rebased = (s: WorkflowState): WorkflowState => {
+        let steps = s.steps;
+        let caches = s.caches;
+        let assignments = s.assignments;
+        let deletedSteps = s.deletedSteps;
+        const setStep = (stepId: Id, st: StepState) => { steps = { ...steps, [stepId]: st }; };
+        for (const key of keys) {
+          const i = key.indexOf(':');
+          const kind = key.slice(0, i);
+          const eid = key.slice(i + 1);
+          if (kind === 'step') {
+            const now = reached.has(eid) ? base.steps[eid] : undefined;
+            const had = steps[eid];
+            if (now && had) {
+              setStep(eid, { ...had, name: now.name, version: now.version, description: now.description, entryCondition: now.entryCondition,
+                processorId: now.processorId, nextStepIds: [...now.nextStepIds], updatedAt: now.updatedAt, isNew: false });
+            } else if (!now) {
+              // deleted by the workflow that saved: gone here too, with the wires to it
+              if (had && !had.isNew) {
+                const rest: Record<Id, StepState> = {};
+                for (const [sid, x] of Object.entries(steps)) {
+                  if (sid === eid) continue;
+                  rest[sid] = x.nextStepIds.includes(eid) ? { ...x, nextStepIds: x.nextStepIds.filter((n) => n !== eid) } : x;
+                }
+                steps = rest;
+                if (assignments[eid]) { assignments = { ...assignments }; delete assignments[eid]; }
+              }
+              if (eid in deletedSteps) { deletedSteps = { ...deletedSteps }; delete deletedSteps[eid]; }
+            }
+          } else if (kind === 'cache') {
+            const c = bw.graph.caches.get(eid);
+            const held = caches[eid];
+            if (!c || !held) continue;
+            const fields = { name: c.name, version: c.version, description: c.description, root: c.root, items: c.items };
+            const next: CacheState = { ...held, ...fields, isNew: false, ...(held.linked ? { linked: fields } : {}) };
+            caches = { ...caches, [eid]: next };
+          }
+        }
+        for (const sid of appeared) {
+          if (steps[sid] || sid in deletedSteps) continue;
+          const cur = steps;
+          setStep(sid, { ...base.steps[sid]!, at: placeIn((x) => cur[x]?.at, sid) });
+        }
+        if (steps === s.steps && caches === s.caches && assignments === s.assignments && deletedSteps === s.deletedSteps) return s;
+        return { ...s, steps, caches, assignments, deletedSteps };
+      };
+      const h = r.history;
+      const history: History = { past: h.past.map(rebased), present: rebased(h.present), future: h.future.map(rebased), merge: null };
+      recs.set(id, {
+        baseBw, base, history, view: viewOf(base, history, r.view.layout, r.view.problems, r.view.saving), bwFor: null, bw: null,
+      });
       changed();
     },
     setProblems(id, n) {
