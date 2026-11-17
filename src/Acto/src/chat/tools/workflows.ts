@@ -5,6 +5,9 @@ import { runWorkflow, type RunOp } from '../../operate/runWorkflow';
 import type { ToolContext, ToolDef, ToolOutcome } from '../toolTypes';
 import { done, fail, target, textOf, withOutput, WORKFLOW_ID } from './common';
 
+/** The confirm text each delete question was asked with, per board and workflow: what an answer is checked against. */
+const asked = new WeakMap<object, Map<string, string>>();
+
 const ARG = { type: 'object', properties: { workflow_id: WORKFLOW_ID }, required: ['workflow_id'], additionalProperties: false };
 
 const newWorkflow: ToolDef = {
@@ -86,7 +89,15 @@ const deleteWorkflow: ToolDef = {
     const prepared = await withOutput(ctx, t.name, () => prepareDelete(ctx.api, ctx.store, ctx.output, [t.id]));
     const plan = prepared.value;
     if (plan === null) return fail(`${t.name} was not deleted: ${textOf(prepared.lines, 'refused')}`, `delete ${t.name} refused`, prepared.entries);
-    if (answer === undefined) return { kind: 'ask', question: { text: confirmText(plan), choices: ['Delete', 'Cancel'], pin: t.id } };
+    const text = confirmText(plan);
+    const memory = asked.get(ctx.store) ?? new Map<string, string>();
+    asked.set(ctx.store, memory);
+    // what the user confirmed is what is deleted: a plan that changed since the question is asked again
+    if (answer === undefined || memory.get(t.id) !== text) {
+      memory.set(t.id, text);
+      return { kind: 'ask', question: { text, choices: ['Delete', 'Cancel'], pin: t.id } };
+    }
+    memory.delete(t.id);
     const ran = await withOutput(ctx, t.name, () => commitDelete(ctx.api, ctx.store, ctx.output, plan));
     if (ran.value.includes(t.id)) return done(true, `deleted ${t.name}. ${textOf(ran.lines)}`, `deleted ${t.name}`, ran.entries);
     return fail(`${t.name} was not deleted: ${textOf(ran.lines, 'refused')}`, `delete ${t.name} failed`, ran.entries);

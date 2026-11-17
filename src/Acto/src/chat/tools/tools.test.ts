@@ -132,6 +132,48 @@ describe('workflow tools', () => {
     expect(await edit(ctx, 'ghost', (s) => s)).toMatchObject({ ok: false, result: 'no workflow ghost on the board' });
   });
 
+  it('a save result holds only that workflow own lines, not other lines logged meanwhile nor an order toggle', async () => {
+    const { ctx, api, output } = setup();
+    let release!: (v: unknown) => void;
+    api.saveDesign = vi.fn(() => new Promise((r) => { release = r; }));
+    const running = call(ctx, 'save', { workflow_id: 'w1' });
+    await vi.waitFor(() => expect(api.saveDesign).toHaveBeenCalled());
+    output.log('billing saved', 'ok');
+    output.setNewestFirst(true);
+    output.setNewestFirst(false);
+    release({ ok: true, value: { applied: true, errors: [] } });
+    const o = done(await running);
+    expect(o.ok).toBe(true);
+    expect(o.result).toContain('orders saved');
+    expect(o.result).not.toContain('billing');
+    expect(o.entries.every((e) => e.kind !== 'output' || !e.text.startsWith('billing'))).toBe(true);
+    expect(o.result.match(/orders saved/g)).toHaveLength(1);
+  });
+
+  it('a clear of Output during the call does not hide or repeat lines', async () => {
+    const { ctx, api, output } = setup();
+    output.log('old line');
+    let release!: (v: unknown) => void;
+    api.saveDesign = vi.fn(() => new Promise((r) => { release = r; }));
+    const running = call(ctx, 'save', { workflow_id: 'w1' });
+    await vi.waitFor(() => expect(api.saveDesign).toHaveBeenCalled());
+    output.clear();
+    release({ ok: true, value: { applied: true, errors: [] } });
+    const o = done(await running);
+    expect(o.result).toContain('orders saved');
+    expect(o.result).not.toContain('old line');
+  });
+
+  it('an edit the store refuses without a line is still a failed result, never an unrelated line', async () => {
+    const { ctx, store, output } = setup();
+    output.log('unrelated warning', 'warn');
+    store.setSaving('w1', true);
+    store.setSaving('w1', false);
+    const e = await edit(ctx, 'w1', () => ({ refused: 'A step cannot wire to itself' }));
+    expect(e).toMatchObject({ ok: false, result: 'A step cannot wire to itself' });
+    expect(e.result).not.toContain('unrelated');
+  });
+
   it('start on a never-saved workflow fails with the not-saved line', async () => {
     const { ctx, api } = setup();
     const id = 'n1';
@@ -180,6 +222,22 @@ describe('workflow tools', () => {
     const gone = done(await call(ctx, 'delete_workflow', {}, 'Delete', 'w1'));
     expect(gone.ok).toBe(true);
     expect(api.deleteWorkflow).toHaveBeenLastCalledWith('w1', false);
+    expect(store.entry('w1')).toBeNull();
+  });
+
+  it('delete_workflow whose plan changed since the question asks again and deletes nothing', async () => {
+    const { ctx, api, store, live } = setup();
+    live.known([]);
+    const first = await call(ctx, 'delete_workflow', { workflow_id: 'w1' });
+    expect(first).toMatchObject({ kind: 'ask', question: { text: '2 steps, 1 assignment go. Delete orders?' } });
+    api.deleteWorkflow.mockClear();
+    api.deleteWorkflow.mockResolvedValue({ ok: true, value: { applied: true, errors: [], steps: 5, assignments: 3, caches: 0, processors: 0 } });
+    const again = await call(ctx, 'delete_workflow', {}, 'Delete', 'w1');
+    expect(again).toMatchObject({ kind: 'ask', question: { text: '5 steps, 3 assignments go. Delete orders?', pin: 'w1' } });
+    expect(api.deleteWorkflow).not.toHaveBeenCalledWith('w1', false);
+    expect(store.entry('w1')).not.toBeNull();
+    // answered against the new text, it goes
+    expect(done(await call(ctx, 'delete_workflow', {}, 'Delete', 'w1')).ok).toBe(true);
     expect(store.entry('w1')).toBeNull();
   });
 

@@ -19,18 +19,27 @@ export function target(ctx: ToolContext, args: Record<string, unknown>, action: 
 
 const entryOf = (l: OutputLine, name: string): ChatEntry => ({ kind: 'output', text: l.text, level: l.level, name });
 
-/** Runs `fn` and returns what it logged to Output meanwhile (the lines the user's own gesture would have shown). */
+/** The lines Output gained since `before` was taken: robust to clear() (all there is then) and to the order toggle. */
+export function linesSince(ctx: ToolContext, before: OutputLine | undefined): OutputLine[] {
+  const all = ctx.output.lines();
+  if (before === undefined) return [...all];
+  const at = all.lastIndexOf(before);
+  return at < 0 ? [...all] : all.slice(at + 1);
+}
+
+/** True for the lines a workflow's own action logs: they start with its name (`<name> ...` or `<name>: ...`). */
+const ownLine = (name: string, l: OutputLine): boolean => l.text === name || l.text.startsWith(`${name} `) || l.text.startsWith(`${name}:`);
+
+/**
+ * Runs `fn` and returns the Output lines the action itself logged meanwhile: those appended during the call that
+ * begin with the workflow's name. Lines of other workflows or of the live set, logged while the call waited, are not
+ * its result.
+ */
 export async function withOutput<T>(ctx: ToolContext, name: string, fn: () => T | Promise<T>): Promise<{ value: T; lines: OutputLine[]; entries: ChatEntry[] }> {
-  const lines: OutputLine[] = [];
-  const unsub = ctx.output.subscribe(() => {
-    const all = ctx.output.lines();
-    const last = all[all.length - 1];
-    if (last) lines.push(last);
-  });
-  try {
-    const value = await fn();
-    return { value, lines, entries: lines.map((l) => entryOf(l, name)) };
-  } finally { unsub(); }
+  const before = ctx.output.lines().at(-1);
+  const value = await fn();
+  const lines = linesSince(ctx, before).filter((l) => ownLine(name, l));
+  return { value, lines, entries: lines.map((l) => entryOf(l, name)) };
 }
 
 /** The lines as one text for the model; `fallback` when there were none. */
@@ -47,14 +56,16 @@ export async function edit(
 ): Promise<{ ok: boolean; result: string; lines: OutputLine[]; entries: ChatEntry[] }> {
   const before = ctx.store.entry(workflowId);
   if (!before) return { ok: false, result: `no workflow ${workflowId} on the board`, lines: [], entries: [] };
-  const { lines, entries } = await withOutput(ctx, before.history.present.fields.name, () => {
-    const res = fn(before.history.present);
-    if ('refused' in res) ctx.store.editOrRefuse(workflowId, () => res);
-    else ctx.store.edit(workflowId, () => res, merge);
-  });
+  const name = before.history.present.fields.name;
+  // the edit is synchronous: every line logged during it is the store's own (a refusal names its own entity)
+  const mark = ctx.output.lines().at(-1);
+  const res = fn(before.history.present);
+  if ('refused' in res) ctx.store.editOrRefuse(workflowId, () => res);
+  else ctx.store.edit(workflowId, () => res, merge);
+  const lines = linesSince(ctx, mark);
+  const entries = lines.map((l) => entryOf(l, name));
   const now = ctx.store.entry(workflowId);
   if (now !== null && now.history.present !== before.history.present) return { ok: true, result: textOf(lines, 'done'), lines, entries };
-  const refusals = lines.filter((l) => l.level === 'warn' || l.level === 'error');
-  if (refusals.length > 0) return { ok: false, result: textOf(refusals), lines, entries };
-  return { ok: true, result: 'nothing to change', lines, entries };
+  if (res && !('refused' in res) && res === before.history.present) return { ok: true, result: 'nothing to change', lines, entries };
+  return { ok: false, result: textOf(lines, `${name}: the edit was refused`), lines, entries };
 }
