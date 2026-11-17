@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { BoardLoad, BoardWorkflow } from '../board/loadBoard';
-import { FRAME_PAD, STEP_W } from '../board/geometry';
+import { STEP_W } from '../board/geometry';
 import type { Id, Processor, Schema } from '../model/graph';
 import type { Point } from '../model/geometry';
 import type { OutputStore } from '../output/outputStore';
@@ -265,22 +265,17 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     rebase(id, bw, keys) {
       const r = recs.get(id);
       if (!r || !r.base || !r.baseBw) return;
-      const oldBase = r.base;
+      // the re-read is only where the changed entities' new values come from: the base is the old base with
+      // exactly the same patch the history states get, so nothing else the re-read differs in reaches this workflow
+      const reread = bw.graph.steps;
       const reached = new Set(bw.stepIds);
-      const sourceOf = (stepId: Id) => bw.stepIds.find((s) => bw.graph.steps.get(s)?.nextStepIds.includes(stepId));
-      /** Where a step the re-read brings in goes, given where this state has the others: right of its source. */
-      const placeIn = (at: (id: Id) => Point | undefined, stepId: Id): Point => {
-        const src = sourceOf(stepId);
-        const p = src !== undefined ? at(src) : undefined;
-        if (p) return { x: p.x + STEP_W + 60, y: p.y };
-        return { ...(bw.stepAt.get(stepId) ?? { x: FRAME_PAD, y: FRAME_PAD }) };
+      const fromReread = (stepId: Id, at: Point): StepState => {
+        const g = reread.get(stepId)!;
+        return {
+          id: stepId, name: g.name, version: g.version, description: g.description, entryCondition: g.entryCondition,
+          processorId: g.processorId, nextStepIds: [...g.nextStepIds], at, updatedAt: g.updatedAt, isNew: false,
+        };
       };
-      const appeared = bw.stepIds.filter((s) => !oldBase.steps[s]);
-      const baseAt = new Map<Id, Point>();
-      for (const s of bw.stepIds) if (oldBase.steps[s]) baseAt.set(s, { ...oldBase.steps[s]!.at });
-      for (const s of appeared) baseAt.set(s, placeIn((x) => baseAt.get(x), s));
-      const baseBw: BoardWorkflow = { ...bw, stepAt: baseAt, frame: { ...r.baseBw.frame } };
-      const base = stateOf(baseBw);
 
       for (const key of keys) {
         if (!key.startsWith('processor:')) continue;
@@ -292,18 +287,16 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
         let caches = s.caches;
         let assignments = s.assignments;
         let deletedSteps = s.deletedSteps;
-        const setStep = (stepId: Id, st: StepState) => { steps = { ...steps, [stepId]: st }; };
+        const keyed: Id[] = [];
         for (const key of keys) {
           const i = key.indexOf(':');
           const kind = key.slice(0, i);
           const eid = key.slice(i + 1);
           if (kind === 'step') {
-            const now = reached.has(eid) ? base.steps[eid] : undefined;
             const had = steps[eid];
-            if (now && had) {
-              setStep(eid, { ...had, name: now.name, version: now.version, description: now.description, entryCondition: now.entryCondition,
-                processorId: now.processorId, nextStepIds: [...now.nextStepIds], updatedAt: now.updatedAt, isNew: false });
-            } else if (!now) {
+            if (reached.has(eid) && reread.has(eid)) {
+              if (had) { steps = { ...steps, [eid]: fromReread(eid, had.at) }; keyed.push(eid); }
+            } else {
               // deleted by the workflow that saved: gone here too, with the wires to it
               if (had && !had.isNew) {
                 const rest: Record<Id, StepState> = {};
@@ -325,14 +318,39 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
             caches = { ...caches, [eid]: next };
           }
         }
-        for (const sid of appeared) {
-          if (steps[sid] || sid in deletedSteps) continue;
-          const cur = steps;
-          setStep(sid, { ...base.steps[sid]!, at: placeIn((x) => cur[x]?.at, sid) });
+        // a step a changed step now wires to that this state lacks (never held, or removed here) comes in right of
+        // its source, and so on down what it reaches; one this state deleted stays deleted
+        const queue = keyed.flatMap((k) => steps[k]!.nextStepIds.map((to) => [k, to] as const));
+        while (queue.length) {
+          const [from, to] = queue.shift()!;
+          if (steps[to] || to in deletedSteps || !reread.has(to)) continue;
+          const src = steps[from]!.at;
+          steps = { ...steps, [to]: fromReread(to, { x: src.x + STEP_W + 60, y: src.y }) };
+          for (const n of steps[to]!.nextStepIds) queue.push([to, n]);
         }
         if (steps === s.steps && caches === s.caches && assignments === s.assignments && deletedSteps === s.deletedSteps) return s;
         return { ...s, steps, caches, assignments, deletedSteps };
       };
+      const base = rebased(r.base);
+      // graph lookups (audits, processors, schemas, caches) see the re-read where the base did not have them
+      const g0 = r.baseBw.graph;
+      const merged = <K, V>(old: Map<K, V>, add: Map<K, V>, take: (k: K) => boolean) => {
+        const m = new Map(old);
+        for (const [k, v] of add) if (!m.has(k) || take(k)) m.set(k, v);
+        return m;
+      };
+      const lookup: BoardWorkflow = {
+        ...r.baseBw,
+        graph: {
+          ...g0,
+          steps: merged(g0.steps, reread, (k) => keys.has(`step:${k}`)),
+          processors: merged(g0.processors, bw.graph.processors, (k) => keys.has(`processor:${k}`)),
+          schemas: merged(g0.schemas, bw.graph.schemas, () => false),
+          caches: merged(g0.caches, bw.graph.caches, (k) => keys.has(`cache:${k}`)),
+        },
+      };
+      const built = boardWorkflowOf(base, lookup, processors);
+      const baseBw: BoardWorkflow = { ...built, graph: { ...built.graph, processors: lookup.graph.processors, schemas: lookup.graph.schemas } };
       const h = r.history;
       const history: History = { past: h.past.map(rebased), present: rebased(h.present), future: h.future.map(rebased), merge: null };
       recs.set(id, {

@@ -4,7 +4,7 @@ import { createOutputStore } from '../output/outputStore';
 import { createBoardStore } from './boardStore';
 import { bwFull, proc } from './fixtures';
 import { canUndo } from './history';
-import { addWire, moveMany, moveStep, newWorkflowState, removeWire, setProcessorField, setStepField, type WorkflowState } from './state';
+import { addWire, moveMany, moveStep, newWorkflowState, removeStepHere, removeWire, setProcessorField, setStepField, type WorkflowState } from './state';
 import { bw } from '../board/fixtures';
 import { memoryStorage } from '../test/memoryStorage';
 
@@ -289,6 +289,35 @@ describe('rebase: a sharer re-read after another workflow saved', () => {
     const st = sharedPair();
     st.rebase('w2', reread(), new Set());
     expect(st.entry('w2')!.history.present.steps.s1!.name).toBe('s1-name');
+  });
+  it('re-reads only the changed entities: anything else the re-read differs in stays as B had it', () => {
+    const st = sharedPair();
+    const r = reread();
+    r.graph.steps.set('s9', { ...r.graph.steps.get('s9')!, name: 'changed-elsewhere', updatedAt: 'T9' });
+    r.graph.workflow = { ...r.graph.workflow, updatedAt: 'W2', name: 'renamed-elsewhere' };
+    st.rebase('w2', r, new Set(['step:s1']));
+    const e = st.entry('w2')!;
+    expect(e.unsaved).toBe(false);
+    expect(e.base!.steps.s9).toMatchObject({ name: 's9-name', updatedAt: '' });
+    expect(e.base!.updatedAt).toBe('');
+    expect(e.base!.fields.name).toBe('billing');
+    expect(e.base!.steps.s1).toMatchObject({ name: 'renamed', updatedAt: 'T2' });
+    expect(st.boards()[1]!.graph.workflow.name).toBe('billing');
+  });
+  it('a step this workflow removed here comes back when a changed step now wires to it, never as a dangling wire', () => {
+    const w1 = bw('w1', ['s1', 'n']);
+    const w2 = bw('w2', ['s1', 'm', 'n'], [{ id: 'm>n', from: 'm', to: 'n', condition: 4 }]);
+    const st = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
+    st.load({ listed: true, workflows: [w1, w2], failures: [] }, []);
+    st.editOrRefuse('w2', (s) => removeStepHere(s, 'n', new Set(['s1', 'n'])));
+    expect(st.entry('w2')!.history.present.steps.n).toBeUndefined();
+    const r = bw('w2', ['s1', 'm', 'n'], [{ id: 's1>n', from: 's1', to: 'n', condition: 4 }, { id: 'm>n', from: 'm', to: 'n', condition: 4 }]);
+    st.rebase('w2', r, new Set(['step:s1']));
+    const present = st.entry('w2')!.history.present;
+    const s1 = present.steps.s1!;
+    expect(s1.nextStepIds).toEqual(['n']);
+    expect(present.steps.n!.at).toEqual({ x: s1.at.x + 210 + 60, y: s1.at.y });
+    for (const x of Object.values(present.steps)) for (const to of x.nextStepIds) expect([x.id, to, !!present.steps[to]]).toEqual([x.id, to, true]);
   });
   it('keeps the save lock', () => {
     const st = sharedPair();

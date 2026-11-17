@@ -186,6 +186,21 @@ describe('re-reading the workflows that share what a save changed', () => {
     await saveWorkflow(api, store, output, 'w1');
     expect(reads(api)).toEqual(['w1']);
   });
+  it('the saved workflow is editable again while its sharers are still being re-read', async () => {
+    const { api, store, output } = sharing();
+    const get = api.getGraph as ReturnType<typeof vi.fn>;
+    const real = get.getMockImplementation()! as (id: string) => unknown;
+    let release: () => void = () => {};
+    get.mockImplementation((id: string) => (id === 'w2' ? new Promise((res) => { release = () => res(real(id)); }) : real(id)));
+    store.edit('w1', (s) => setStepField(s, 'a', 'name', 'renamed'));
+    const saving = saveWorkflow(api, store, output, 'w1');
+    await vi.waitFor(() => expect(reads(api)).toContain('w2'));
+    expect(store.entry('w1')!.saving).toBe(false);
+    store.edit('w1', (s) => moveStep(s, 'a', { x: 321, y: 123 }));
+    expect(store.entry('w1')!.history.present.steps.a!.at).toEqual({ x: 321, y: 123 });
+    release();
+    expect(await saving).toBe('saved');
+  });
   it('a sharer that cannot be re-read stays as it was, with a warning', async () => {
     const { api, store, output, texts } = sharing({ w2: { kind: 'network', message: 'down' } });
     const before = store.entry('w2');

@@ -29,16 +29,23 @@ export async function saveWorkflow(
     return 'refused';
   }
   store.setSaving(workflowId, true);
+  let out: Ran;
   try {
-    return await run(api, store, output, workflowId, entry);
+    out = await run(api, store, output, workflowId, entry);
   } finally {
     store.setSaving(workflowId, false);
   }
+  // after the save lock is released: the saved workflow is editable again while its sharers re-read
+  if (out.sharers) await refreshSharers(api, store, output, workflowId, out.sharers);
+  return out.result;
 }
+
+/** How the save went, and (after an applied save) what it changed that other workflows may show too. */
+interface Ran { result: 'saved' | 'refused' | 'failed'; sharers?: Set<EntityKey> }
 
 async function run(
   api: StudioApi, store: BoardStore, output: OutputStore, workflowId: Id, entry: NonNullable<ReturnType<BoardStore['entry']>>,
-): Promise<'saved' | 'refused' | 'failed'> {
+): Promise<Ran> {
   const present = entry.history.present;
   const name = present.fields.name;
   // what this save changes, taken before the save replaces the base: the workflows sharing it re-read it after
@@ -56,12 +63,12 @@ async function run(
   // BaseAPI stores the layout before it dry-runs the design (only a new workflow it refuses is not stored)
   const stored = saved.ok ? saved.value.applied || entry.base !== null : saved.error.kind === 'conflict' || saved.error.kind === 'unprocessable';
   if (stored) store.setLayout(workflowId, req.layout);
-  if (!saved.ok) { output.log(`${name}: ${describeError(saved.error)}`, 'error'); return 'failed'; }
+  if (!saved.ok) { output.log(`${name}: ${describeError(saved.error)}`, 'error'); return { result: 'failed' }; }
   if (!saved.value.applied) {
     for (const e of saved.value.errors ?? []) {
       output.log(`${name}: ${e.id ? entityName(present, entry.base, e.id) : name} — ${e.message ?? ''}`, 'error');
     }
-    return 'refused';
+    return { result: 'refused' };
   }
   output.log(`${name} saved`, 'ok');
 
@@ -69,8 +76,7 @@ async function run(
   if (!loaded.ok) {
     store.adoptPresent(workflowId);
     output.log(`${name} saved, but could not be read back: ${describeError(loaded.error)}. Reload before editing it again`, 'error');
-    await refreshSharers(api, store, output, workflowId, changed);
-    return 'saved';
+    return { result: 'saved', sharers: changed };
   }
   const { storedFrame: _stored, ...rest } = loaded.value;
   // what was just saved stays where it was drawn; only a step the save newly brought in takes the re-read place
@@ -90,8 +96,7 @@ async function run(
   const pub = await api.publishDiagram(workflowId, diagramSvg(bw));
   if (pub.ok) output.log(`${name}: Kibana diagram published`, 'ok');
   else output.log(`${name}: Kibana diagram not published — ${describeError(pub.error)}`, 'warn');
-  await refreshSharers(api, store, output, workflowId, changed);
-  return 'saved';
+  return { result: 'saved', sharers: changed };
 }
 
 /**
