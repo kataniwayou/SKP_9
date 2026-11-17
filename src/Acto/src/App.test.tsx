@@ -46,7 +46,7 @@ describe('App', () => {
     expect(await screen.findByText('Cruncher')).toBeInTheDocument();
     expect(await screen.findByText('Board: 1 workflow, 0 running')).toBeInTheDocument();
     fireEvent.click(await screen.findByText('s1-name'));
-    expect(await screen.findByText('Entry condition')).toBeInTheDocument();
+    expect(await screen.findByText(/Entry condition/)).toBeInTheDocument();
   });
   const saved = (selection: unknown) => memoryStorage({ 'acto.view': JSON.stringify({ x: 0, y: 0, zoom: 1, selection }) });
   const inspector = () => within(document.querySelector('[data-panel="inspector"]') as HTMLElement);
@@ -54,7 +54,7 @@ describe('App', () => {
   it('restores a saved selection into the inspector', async () => {
     renderApp(fakeApi({ workflows: [wf('w1')] }), saved({ kind: 'workflow', workflowId: 'w1' }));
     expect(await inspector().findByText('Wires')).toBeInTheDocument();
-    expect(inspector().getByText('w1-name')).toBeInTheDocument();
+    expect(inspector().getByDisplayValue('w1-name')).toBeInTheDocument();
     expect(inspector().queryByText(/^Board:/)).toBeNull();
   });
   it.each([
@@ -64,6 +64,6 @@ describe('App', () => {
     renderApp(fakeApi({ workflows: [wf('w1')] }), saved(selection));
     expect(await inspector().findByText('Board: 1 workflow, 0 running')).toBeInTheDocument();
     expect(inspector().queryByText('Wires')).toBeNull();
-    expect(inspector().queryByText('Entry condition')).toBeNull();
+    expect(inspector().queryByText(/Entry condition/)).toBeNull();
   });
 });

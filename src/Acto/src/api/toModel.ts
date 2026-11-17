@@ -67,7 +67,7 @@ export function processorFromDto(dto: ProcessorReadDto): Processor {
 export function schemaFromDto(dto: SchemaReadDto): Schema {
   return {
     id: required(dto.id, 'schema id'), name: text(dto.name), version: text(dto.version),
-    description: optional(dto.description), audit: audit(dto),
+    description: optional(dto.description), definition: optional(dto.definition), audit: audit(dto),
   };
 }
 

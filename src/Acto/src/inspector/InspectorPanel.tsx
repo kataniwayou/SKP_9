@@ -4,7 +4,12 @@ import type { Selection } from '../board/selection';
 import { useLive, useLiveStore, useProcessorLive } from '../live/LiveContext';
 import { livenessText, statusOf } from '../live/liveState';
 import { cronText } from '../model/cronText';
-import { conditionInfo } from '../model/entryConditions';
+import { CONDITIONS, conditionInfo } from '../model/entryConditions';
+import { checkPayload } from '../model/payloadCheck';
+import type { BoardStore } from '../design/boardStore';
+import { newId } from '../design/ids';
+import { removeAssignment, setCacheField, setPayload, setStepField, setWorkflowField } from '../design/state';
+import { AreaField, SelectField, TextField } from './fields';
 
 const Row = ({ k, children }: { k: string; children: ReactNode }) => (
   <div className="in-row"><span className="in-k">{k}</span><span className="in-v">{children}</span></div>
@@ -90,17 +95,94 @@ function CacheView({ w, cacheId }: { w: BoardWorkflow; cacheId: string }) {
   );
 }
 
-/** Read-only in Plan 1: what the selection is, as the loaded board knows it. */
-export function InspectorPanel({ workflows, selection }: { workflows: BoardWorkflow[]; selection: Selection | null }) {
+const orNull = (v: string) => (v === '' ? null : v);
+
+function EditWorkflow({ w, store }: { w: BoardWorkflow; store: BoardStore }) {
+  const { workflow } = w.graph;
+  const id = workflow.id;
+  const set = (key: 'name' | 'version' | 'description' | 'cronExpression', v: string | null) =>
+    store.edit(id, (s) => setWorkflowField(s, key, v), `field:${id}:${key}`);
+  const parsed = workflow.cronExpression ? cronText(workflow.cronExpression) : null;
+  return (
+    <>
+      <TextField key={`${id}:name`} label="Name" value={workflow.name} onChange={(v) => set('name', v)} />
+      <TextField key={`${id}:version`} label="Version" value={workflow.version} onChange={(v) => set('version', v)} />
+      <TextField key={`${id}:description`} label="Description" value={workflow.description} onChange={(v) => set('description', orNull(v))} />
+      <TextField key={`${id}:cron`} label="Cron" value={workflow.cronExpression} onChange={(v) => set('cronExpression', orNull(v))} />
+      <p className="in-note">{parsed === null ? 'not scheduled' : 'text' in parsed ? parsed.text : workflow.cronExpression}</p>
+      <Row k="Steps">{w.stepIds.length}</Row>
+      <Row k="Wires">{w.wires.length}</Row>
+    </>
+  );
+}
+
+function PayloadCheckNote({ w, stepId, payload }: { w: BoardWorkflow; stepId: string; payload: string }) {
+  const step = w.graph.steps.get(stepId);
+  const processor = step?.processorId ? w.graph.processors.get(step.processorId) : undefined;
+  const schema = processor?.configSchemaId ? w.graph.schemas.get(processor.configSchemaId) : undefined;
+  if (!schema?.definition) return null;
+  const r = checkPayload(schema.definition, payload);
+  if ('unchecked' in r) return <p className="in-note">{r.unchecked}</p>;
+  return <>{r.problems.map((p, i) => <p key={i} className="in-problem">{p}</p>)}</>;
+}
+
+function EditStep({ w, stepId, workflows, store }: { w: BoardWorkflow; stepId: string; workflows: BoardWorkflow[]; store: BoardStore }) {
+  const step = w.graph.steps.get(stepId);
+  if (!step) return null;
+  const wf = w.graph.workflow.id;
+  const set = (key: 'name' | 'version' | 'description' | 'entryCondition', v: string | number | null) =>
+    store.edit(wf, (s) => setStepField(s, stepId, key, v), `field:${stepId}:${key}`);
+  const assignment = w.graph.assignments.find((a) => a.stepId === stepId);
+  const payload = assignment?.payload ?? '';
+  const processor = step.processorId ? w.graph.processors.get(step.processorId) : undefined;
+  const sharing = workflows.filter((x) => x.stepIds.includes(stepId));
+  return (
+    <>
+      <TextField key={`${stepId}:name`} label="Name" value={step.name} onChange={(v) => set('name', v)} />
+      <TextField key={`${stepId}:version`} label="Version" value={step.version} onChange={(v) => set('version', v)} />
+      <TextField key={`${stepId}:description`} label="Description" value={step.description} onChange={(v) => set('description', orNull(v))} />
+      <SelectField key={`${stepId}:entryCondition`} label="Entry condition · colours every wire into this step" value={step.entryCondition}
+        options={CONDITIONS.map((c) => ({ value: c.value, label: `${c.letter} ${c.name}` }))} onChange={(v) => set('entryCondition', v)} />
+      <Row k="Processor">{!step.processorId ? 'none' : processor?.name ?? step.processorId}</Row>
+      {step.processorId && <ProcessorLine processorId={step.processorId} />}
+      <Row k="Role">{w.roles.get(stepId) ?? 'reached'}</Row>
+      {sharing.length > 1 && <Row k="Shared">{`shared · ${sharing.length}: ${sharing.map((x) => x.graph.workflow.name).join(', ')}`}</Row>}
+      <AreaField key={`${stepId}:payload`} label="Payload (JSON)" value={payload}
+        onChange={(v) => { if (v === '' && !assignment) return; store.edit(wf, (s) => setPayload(s, stepId, v, newId), `field:${stepId}:payload`); }} />
+      {assignment && <PayloadCheckNote w={w} stepId={stepId} payload={payload} />}
+      {assignment && <button type="button" className="in-act" onClick={() => store.edit(wf, (s) => removeAssignment(s, stepId))}>Remove assignment</button>}
+    </>
+  );
+}
+
+function EditCache({ w, cacheId, store }: { w: BoardWorkflow; cacheId: string; store: BoardStore }) {
+  const cache = w.graph.caches.get(cacheId);
+  if (!cache) return null;
+  const wf = w.graph.workflow.id;
+  const set = (key: 'name' | 'version' | 'description' | 'root' | 'items', v: string | null) =>
+    store.edit(wf, (s) => setCacheField(s, cacheId, key, v), `field:${cacheId}:${key}`);
+  return (
+    <>
+      <TextField key={`${cacheId}:name`} label="Name" value={cache.name} onChange={(v) => set('name', v)} />
+      <TextField key={`${cacheId}:version`} label="Version" value={cache.version} onChange={(v) => set('version', v)} />
+      <TextField key={`${cacheId}:description`} label="Description" value={cache.description} onChange={(v) => set('description', orNull(v))} />
+      <TextField key={`${cacheId}:root`} label="Root" value={cache.root} onChange={(v) => set('root', v)} />
+      <AreaField key={`${cacheId}:items`} label="Items" value={cache.items} onChange={(v) => set('items', v)} />
+    </>
+  );
+}
+
+/** What the selection is, as the loaded board knows it; editable when given the store. */
+export function InspectorPanel({ workflows, selection, store }: { workflows: BoardWorkflow[]; selection: Selection | null; store?: BoardStore }) {
   const w = selection === null ? undefined : workflows.find((x) => x.graph.workflow.id === selection.workflowId);
   return (
     <>
       <div className="ph"><span>Inspector</span></div>
       <div className="pb">
         {selection === null || !w ? <BoardSummary workflows={workflows} />
-          : selection.kind === 'workflow' ? <WorkflowView w={w} />
-          : selection.kind === 'step' ? <StepView w={w} stepId={selection.stepId} workflows={workflows} />
-          : selection.kind === 'cache' ? <CacheView w={w} cacheId={selection.cacheId} />
+          : selection.kind === 'workflow' ? (store ? <EditWorkflow w={w} store={store} /> : <WorkflowView w={w} />)
+          : selection.kind === 'step' ? (store ? <EditStep w={w} stepId={selection.stepId} workflows={workflows} store={store} /> : <StepView w={w} stepId={selection.stepId} workflows={workflows} />)
+          : selection.kind === 'cache' ? (store ? <EditCache w={w} cacheId={selection.cacheId} store={store} /> : <CacheView w={w} cacheId={selection.cacheId} />)
           : <WireView w={w} wireId={selection.wireId} />}
       </div>
     </>

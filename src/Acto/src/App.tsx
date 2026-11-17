@@ -11,6 +11,8 @@ import { newId } from './design/ids';
 import { saveWorkflow } from './design/saveWorkflow';
 import type { ToolbarActions } from './board/nodes/boardContext';
 import { createBoardStore, useBoard, type BoardStore } from './design/boardStore';
+import { undoRedoKey } from './design/keys';
+import { canRedo, canUndo } from './design/history';
 import { InspectorPanel } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
 import { LiveStoreProvider } from './live/LiveContext';
@@ -119,6 +121,21 @@ export function App(props: AppProps) {
     return () => { cancelled = true; };
   }, [api, output]);
 
+  const selWf = selection?.workflowId ?? null;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const act = undoRedoKey(e);
+      if (!act || selWf === null) return;
+      e.preventDefault();
+      if (act === 'undo') store.undo(selWf); else store.redo(selWf);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [store, selWf]);
+
+  const selEntry = selWf === null ? null : store.entry(selWf);
+  const selName = selWf === null ? null : workflows.find((x) => x.graph.workflow.id === selWf)?.graph.workflow.name ?? null;
+
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   const persist = useCallback((sel: Selection | null) => {
@@ -213,7 +230,11 @@ export function App(props: AppProps) {
     <LiveStoreProvider value={live}>
       <OutputProvider store={output}>
         <div className="acto">
-          <header className="topbar"><span className="brand">Acto</span></header>
+          <header className="topbar"><span className="brand">Acto</span>
+            {selName !== null && <span className="tb-wf">{selName}</span>}
+            <button type="button" disabled={!selEntry || !canUndo(selEntry.history)} onClick={() => selWf && store.undo(selWf)}>Undo</button>
+            <button type="button" disabled={!selEntry || !canRedo(selEntry.history)} onClick={() => selWf && store.redo(selWf)}>Redo</button>
+          </header>
           <Shell
             storage={storage}
             toolbox={<ToolboxPanel processors={processors} caches={caches} />}
@@ -222,7 +243,7 @@ export function App(props: AppProps) {
               : <Board workflows={workflows} selection={selection} onSelect={onSelect}
                   {...(saved ? { initialView: { x: saved.x, y: saved.y, zoom: saved.zoom } } : {})}
                   onViewChange={onViewChange} onEdit={onEdit} toolbar={toolbar} onDropItem={onDropItem} />}
-            inspector={<InspectorPanel workflows={workflows} selection={selection} />}
+            inspector={<InspectorPanel workflows={workflows} selection={selection} store={store} />}
             output={<OutputPanel />}
             chat={<div className="ph"><span>Chat</span></div>}
           />

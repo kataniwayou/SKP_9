@@ -61,6 +61,8 @@ export interface Processor {
 
 export interface Schema {
   id: Id;
+  /** The JSON Schema text; absent where a caller did not load it. */
+  definition?: string | null;
   name: string;
   version: string;
   description: string | null;
