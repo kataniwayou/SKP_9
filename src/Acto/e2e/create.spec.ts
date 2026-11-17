@@ -105,6 +105,24 @@ test.describe('wires', () => {
     await expect(b.locator('.tag')).toHaveCount(0);
   });
 
+  test("a step's right handle stays under the pointer when the pointer rests on it", async ({ page }) => {
+    // APP BUG: board.css's hover rule `.node:hover .react-flow__handle { transform: translate(-50%, -50%) scale(1.3) }`
+    // replaces React Flow's `translate(50%, -50%)` for the RIGHT handle, so on hover the source handle jumps a full
+    // handle width (about 11 px) to the left, out from under the pointer. A press where the handle was drawn then grabs
+    // the card and drags it instead of drawing a wire (seen in the slowed, headed run: every wire drag failed and the
+    // card moved). Only a press made within the 0.12 s transition, or one re-aimed at the moved handle, draws a wire.
+    test.fail();
+    await openEmptyBoard(page);
+    const f = await throwaway(page, 2);
+    const handle = f.steps[0]!.locator('.react-flow__handle.source');
+    const h = (await handle.boundingBox())!;
+    const at = { x: h.x + h.width / 2, y: h.y + h.height / 2 };
+    await page.mouse.move(at.x, at.y);
+    await page.waitForTimeout(300);
+    const under = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.classList.contains('react-flow__handle') ?? false, at);
+    expect(under, 'the handle is still under the pointer after the hover transition').toBe(true);
+  });
+
   test('refused wires say why in Output and draw nothing', async ({ page }) => {
     await openEmptyBoard(page);
     const f = await throwaway(page, 2);

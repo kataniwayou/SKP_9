@@ -138,8 +138,13 @@ export async function dropStep(page: Page, f: Frame, processor: string, dx: numb
 
 /** A real mouse drag from `from`'s right handle onto the middle of `to` (or onto a page point). */
 export async function drawWire(page: Page, from: Locator, to: Locator | { x: number; y: number }) {
-  const h = (await from.locator('.react-flow__handle.source').boundingBox())!;
+  const handle = from.locator('.react-flow__handle.source');
   const target = 'x' in to ? to : await (async () => { const b = (await to.boundingBox())!; return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })();
+  // the card's hover grows its handles and (see create.spec.ts) shifts the right one: aim at where it is drawn once hovered
+  const h0 = (await handle.boundingBox())!;
+  await page.mouse.move(h0.x + h0.width / 2, h0.y + h0.height / 2);
+  await page.waitForTimeout(200);
+  const h = (await handle.boundingBox())!;
   await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
   await page.mouse.down();
   await page.mouse.move(target.x, target.y, { steps: 12 });
