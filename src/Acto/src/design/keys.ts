@@ -9,3 +9,15 @@ export function undoRedoKey(e: KeyboardEvent): 'undo' | 'redo' | null {
   if (k === 'y' && !e.shiftKey) return 'redo';
   return null;
 }
+
+const typing = (e: KeyboardEvent) => {
+  const t = e.target as { tagName?: string; isContentEditable?: boolean } | null;
+  const tag = t?.tagName?.toUpperCase();
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!t?.isContentEditable;
+};
+
+/** Ctrl/Cmd+V pastes; left to the browser while typing in a field. */
+export function pasteKey(e: KeyboardEvent): boolean {
+  if (typing(e) || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return false;
+  return e.key.toLowerCase() === 'v';
+}

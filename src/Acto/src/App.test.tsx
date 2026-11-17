@@ -168,4 +168,64 @@ describe('App', () => {
       expect(inspector().queryByText(/selected/)).toBeNull();
     });
   });
+
+  describe('copy and paste', () => {
+    const two = () => fakeApi({ workflows: [wf('w1')], graph: graphWith({ entry: ['a'], steps: { a: ['b'], b: [] } }) });
+    const view = () => memoryStorage({ 'acto.view': JSON.stringify({ x: 0, y: 0, zoom: 1, selection: null }) });
+    const mount = (api: StudioApi, session: Storage) => render(<App api={api} live={liveStub()} storage={view()} session={session} />);
+    const cards = () => document.querySelectorAll('.react-flow__node-step').length;
+    const clipOf = (n: number) => JSON.stringify({
+      steps: Array.from({ length: n }, (_, i) => ({ id: `x${i}`, name: `x${i}-name`, version: '1.0.0', description: null, entryCondition: 1, processorId: null, at: { x: 40 + i * 300, y: 200 }, payload: null })),
+      wires: n === 2 ? [['x0', 'x1']] : [], pasted: 0,
+    });
+
+    it('Copy on a step toolbar says what was copied, and Ctrl+V pastes beside it as one undo step', async () => {
+      const session = memoryStorage();
+      mount(two(), session);
+      fireEvent.click(await screen.findByText('a-name', { selector: '.sn' }));
+      fireEvent.click(screen.getByText('Copy'));
+      expect(await screen.findByText('Copied 1 step')).toBeInTheDocument();
+      expect(JSON.parse(session.getItem('acto.clip')!).steps).toHaveLength(1);
+      expect(cards()).toBe(2);
+      fireEvent.keyDown(document.body, { key: 'v', ctrlKey: true });
+      await vi.waitFor(() => expect(cards()).toBe(3));
+      expect(await inspector().findByDisplayValue('a-name-2')).toBeInTheDocument();
+      expect(JSON.parse(session.getItem('acto.clip')!).pasted).toBe(1);
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+      await vi.waitFor(() => expect(cards()).toBe(2));
+    });
+    it('Ctrl+V with a workflow picked adds every clip step at once, picks them, and counts the pastes', async () => {
+      const session = memoryStorage({ 'acto.clip': clipOf(2) });
+      mount(two(), session);
+      fireEvent.click(await screen.findByText('w1-name', { selector: '.nm' }));
+      fireEvent.keyDown(document.body, { key: 'v', ctrlKey: true });
+      await vi.waitFor(() => expect(cards()).toBe(4));
+      expect(await inspector().findByText('2 selected')).toBeInTheDocument();
+      fireEvent.keyDown(document.body, { key: 'v', ctrlKey: true });
+      await vi.waitFor(() => expect(cards()).toBe(6));
+      expect(JSON.parse(session.getItem('acto.clip')!).pasted).toBe(2);
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+      await vi.waitFor(() => expect(cards()).toBe(4));
+    });
+    it('says what is missing', async () => {
+      mount(two(), memoryStorage({ 'acto.clip': clipOf(1) }));
+      await screen.findByText('a-name', { selector: '.sn' });
+      fireEvent.keyDown(document.body, { key: 'v', ctrlKey: true });
+      expect(await screen.findByText('Select a workflow to paste into')).toBeInTheDocument();
+    });
+    it('says when nothing was copied', async () => {
+      mount(two(), memoryStorage());
+      fireEvent.click(await screen.findByText('w1-name', { selector: '.nm' }));
+      fireEvent.keyDown(document.body, { key: 'v', ctrlKey: true });
+      expect(await screen.findByText('Nothing copied yet')).toBeInTheDocument();
+      expect(cards()).toBe(2);
+    });
+    it('ignores Ctrl+V while typing in a field', async () => {
+      mount(two(), memoryStorage({ 'acto.clip': clipOf(1) }));
+      fireEvent.click(await screen.findByText('w1-name', { selector: '.nm' }));
+      const input = await inspector().findByDisplayValue('w1-name');
+      fireEvent.keyDown(input, { key: 'v', ctrlKey: true });
+      expect(cards()).toBe(2);
+    });
+  });
 });

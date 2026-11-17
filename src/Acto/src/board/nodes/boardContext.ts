@@ -18,6 +18,8 @@ export interface ToolbarActions {
   save(wf: string): void;
   start(wf: string): void;
   stop(wf: string): void;
+  /** Copies the picked steps (and the one whose toolbar was used) to the clipboard. */
+  copy(wf: string, step: string): void;
   deleteStep(wf: string, step: string): void;
   deleteWire(wf: string, wireId: string): void;
   /** Unlinks the cache (a cache created here and never saved is simply removed). */

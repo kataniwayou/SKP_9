@@ -152,7 +152,7 @@ export function resizeFrame(s: WorkflowState, size: { w: number; h: number }): W
   return { ...s, frame: { ...s.frame, w, h } };
 }
 
-function uniqueName(s: WorkflowState, base: string): string {
+export function uniqueName(s: WorkflowState, base: string): string {
   const taken = new Set(Object.values(s.steps).map((x) => x.name));
   if (!taken.has(base)) return base;
   for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;

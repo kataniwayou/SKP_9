@@ -1,7 +1,7 @@
 import type { RunOp } from '../operate/runWorkflow';
 
 export interface ToolbarSelection { kind: 'workflow' | 'step' | 'wire' | 'cache' }
-export interface ToolbarButtons { onSave?: () => void; onDelete?: () => void }
+export interface ToolbarButtons { onSave?: () => void; onDelete?: () => void; onCopy?: () => void }
 export interface ToolbarConfirm { text: string; onConfirm: () => void; onCancel: () => void }
 export interface ToolbarRun { op: RunOp; enabled: boolean; onRun: () => void }
 
@@ -22,7 +22,10 @@ export function Toolbar({ selection, actions, unsaved = false, saving = false, r
           <button type="button" className={unsaved ? 'primary' : undefined} disabled={saving} onClick={actions.onSave}>{saving ? 'Saving…' : 'Save'}</button>
           <button type="button" className="danger" onClick={actions.onDelete}>Delete</button>
         </>
-        : <button type="button" className="danger" onClick={actions.onDelete}>Delete</button>}
+        : <>
+          {selection.kind === 'step' && <button type="button" onClick={actions.onCopy}>Copy</button>}
+          <button type="button" className="danger" onClick={actions.onDelete}>Delete</button>
+        </>}
       <span className="toolbar-arrow" />
     </div>
   );

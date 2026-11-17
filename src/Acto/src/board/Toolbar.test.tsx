@@ -10,7 +10,7 @@ const labels = () => screen.getAllByRole('button').map((b) => b.textContent);
 
 describe('Toolbar', () => {
   it('shows exactly the right button per kind', () => {
-    for (const [kind, label] of [['workflow', 'Save,Delete'], ['step', 'Delete'], ['wire', 'Delete'], ['cache', 'Delete']] as const) {
+    for (const [kind, label] of [['workflow', 'Save,Delete'], ['step', 'Copy,Delete'], ['wire', 'Delete'], ['cache', 'Delete']] as const) {
       const { container, unmount } = render(<Toolbar selection={{ kind }} actions={{}} />);
       expect(labels().join(',')).toBe(label);
       expect(container.firstElementChild!.classList.contains('toolbar')).toBe(true);

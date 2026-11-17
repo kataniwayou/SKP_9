@@ -11,7 +11,8 @@ import { newId } from './design/ids';
 import { saveWorkflow } from './design/saveWorkflow';
 import type { ToolbarActions } from './board/nodes/boardContext';
 import { createBoardStore, useBoard, type BoardStore } from './design/boardStore';
-import { undoRedoKey } from './design/keys';
+import { pasteKey, undoRedoKey } from './design/keys';
+import { copyClip, copyMessage, pasteClip, readClip, writeClip } from './operate/clipboard';
 import { InspectorPanel } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
 import { LiveStoreProvider } from './live/LiveContext';
@@ -45,7 +46,8 @@ export function App(props: AppProps) {
   const [live] = useState<LiveStore>(() => props.live ?? createLiveStore({ api, hub: signalRHub() }));
   const [storage] = useState<Storage | null>(() => (props.storage === undefined ? browserStorage() : props.storage));
   const [output] = useState<OutputStore>(() => createOutputStore(storage));
-  const [store] = useState<BoardStore>(() => createBoardStore(output, props.session === undefined ? browserSession() : props.session));
+  const [session] = useState<Storage | null>(() => (props.session === undefined ? browserSession() : props.session));
+  const [store] = useState<BoardStore>(() => createBoardStore(output, session));
   const [saved] = useState<SavedView | null>(() => readView(storage));
 
   const [loaded, setLoaded] = useState(false);
@@ -157,6 +159,29 @@ export function App(props: AppProps) {
     // a pick change drops a pending delete confirm (and a still-running preparation) silently
     removeToken.current++; pendingRef.current = null; setPending(null);
   }, [persist]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!pasteKey(e)) return;
+      e.preventDefault();
+      const last = lastPick(picksRef.current);
+      const target = last ? store.entry(last.workflowId) : null;
+      if (!last || !target) { output.log('Select a workflow to paste into', 'warn'); return; }
+      const clip = readClip(session);
+      if (!clip) { output.log('Nothing copied yet', 'warn'); return; }
+      let pasted: string[] = [];
+      store.edit(last.workflowId, (s) => {
+        const r = pasteClip(s, clip, last.kind === 'step' ? last.stepId : null, newId);
+        pasted = r.pasted;
+        return r.state;
+      });
+      if (pasted.length === 0) return;
+      writeClip(session, { ...clip, pasted: clip.pasted + 1 });
+      setAllPicks(pasted.map((stepId) => ({ kind: 'step' as const, workflowId: last.workflowId, stepId })));
+      output.log(`Pasted ${pasted.length} step${pasted.length === 1 ? '' : 's'} into ${target.history.present.fields.name}`, 'ok');
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [store, output, session, setAllPicks]);
   const onPick = useCallback((p: Pick | null, additive: boolean) => {
     if (p === null) { if (!additive) setAllPicks([]); return; }
     setAllPicks(additive ? togglePick(picksRef.current, p) : [p]);
@@ -181,6 +206,18 @@ export function App(props: AppProps) {
     save: (wf) => { void saveWorkflow(api, store, output, wf); },
     start: (wf) => { void runWorkflow(api, store, output, live, wf, 'start'); },
     stop: (wf) => { void runWorkflow(api, store, output, live, wf, 'stop'); },
+    copy: (wf, step) => {
+      const ids = new Map<string, Set<string>>([[wf, new Set([step])]]);
+      for (const p of picksRef.current) if (p.kind === 'step') (ids.get(p.workflowId) ?? ids.set(p.workflowId, new Set()).get(p.workflowId)!).add(p.stepId);
+      const parts = [...ids].flatMap(([id, set]) => {
+        const state = store.entry(id)?.history.present;
+        return state ? [{ state, stepIds: [...set] }] : [];
+      });
+      const clip = copyClip(parts);
+      if (!clip) { output.log('Nothing to copy — pick steps', 'warn'); return; }
+      writeClip(session, clip);
+      output.log(copyMessage(clip), 'ok');
+    },
     deleteStep: (wf, step) => {
       store.editOrRefuse(wf, (s) => ({ state: removeStep(s, step) }));
       onSelect({ kind: 'workflow', workflowId: wf });
@@ -221,7 +258,7 @@ export function App(props: AppProps) {
       const e = store.entry(wf);
       return { unsaved: e?.unsaved ?? false, problems: e?.problems ?? 0, saving: e?.saving ?? false, run: statusOf(live.getState(), wf) };
     },
-  }), [api, store, output, live, onSelect, setAllPicks, pending]);
+  }), [api, store, output, live, session, onSelect, setAllPicks, pending]);
 
   const workflowsRef = useRef(workflows);
   workflowsRef.current = workflows;

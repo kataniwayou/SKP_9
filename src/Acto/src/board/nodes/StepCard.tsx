@@ -36,7 +36,7 @@ export function StepCard({ data, selected }: NodeProps) {
       <PickBadge pick={pick} />
       {selected && pick?.solo && tb && (
         <NodeToolbar isVisible position={Position.Top} offset={10}>
-          <Toolbar selection={{ kind: 'step' }} actions={{ onDelete: () => tb.deleteStep(workflowId, stepId) }} />
+          <Toolbar selection={{ kind: 'step' }} actions={{ onCopy: () => tb.copy(workflowId, stepId), onDelete: () => tb.deleteStep(workflowId, stepId) }} />
         </NodeToolbar>
       )}
       <Handle type="target" position={Position.Left} />
