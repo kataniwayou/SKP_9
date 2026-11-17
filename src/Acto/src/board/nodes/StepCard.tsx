@@ -5,6 +5,7 @@ import { ZOOM_DETAIL } from '../geometry';
 import { HealthDot } from '../live/HealthDot';
 import { useBoardWorkflow, useToolbarActions } from './boardContext';
 import { Toolbar } from '../Toolbar';
+import { PickBadge, type PickInfo } from './PickBadge';
 
 const PALETTE = [1, 2, 3, 4, 5].map((c) => conditionStyle(c).colour);
 export function processorColour(name: string): string {
@@ -14,7 +15,7 @@ export function processorColour(name: string): string {
 }
 
 export function StepCard({ data, selected }: NodeProps) {
-  const { workflowId, stepId, role } = data as { workflowId: string; stepId: string; role: StepRole };
+  const { workflowId, stepId, role, pick } = data as { workflowId: string; stepId: string; role: StepRole; pick?: PickInfo };
   const info = useBoardWorkflow(workflowId);
   const far = useStore((s) => s.transform[2] < ZOOM_DETAIL);
   const tb = useToolbarActions();
@@ -32,7 +33,8 @@ export function StepCard({ data, selected }: NodeProps) {
   const proc = step?.processorId ? info.graph.processors.get(step.processorId)?.name : undefined;
   return (
     <div className={`node${role === 'parked' ? ' parked' : ''}${role === 'first' ? ' first' : ''}${selected ? ' sel' : ''}`}>
-      {selected && tb && (
+      <PickBadge pick={pick} />
+      {selected && pick?.solo && tb && (
         <NodeToolbar isVisible position={Position.Top} offset={10}>
           <Toolbar selection={{ kind: 'step' }} actions={{ onDelete: () => tb.deleteStep(workflowId, stepId) }} />
         </NodeToolbar>

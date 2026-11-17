@@ -14,7 +14,7 @@ describe('cache chips', () => {
     const toolbar = { save: vi.fn(), deleteStep: vi.fn(), deleteWire: vi.fn(), deleteCache, status: () => ({ unsaved: false, problems: 0, saving: false }) };
     const onEdit = { moveStep: vi.fn(), moveFrame: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
     render(<LiveStoreProvider value={liveStub()}>
-      <Board workflows={[w]} selection={{ kind: 'cache', workflowId: 'w1', cacheId: 'c1' }} onSelect={() => {}} initialZoom={1} onEdit={onEdit} toolbar={toolbar} />
+      <Board workflows={[w]} picks={[{ kind: 'cache', workflowId: 'w1', cacheId: 'c1' }]} onPick={() => {}} initialZoom={1} onEdit={onEdit} toolbar={toolbar} />
     </LiveStoreProvider>);
     expect(await screen.findByText('orders')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));

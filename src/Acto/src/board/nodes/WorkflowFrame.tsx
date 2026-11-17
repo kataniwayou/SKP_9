@@ -7,6 +7,7 @@ import { useWorkflowStatus } from '../../live/LiveContext';
 import { STATE_COLOUR, StateBadge } from '../live/StateBadge';
 import { useBoardWorkflow, useToolbarActions } from './boardContext';
 import { Toolbar } from '../Toolbar';
+import { PickBadge, type PickInfo } from './PickBadge';
 
 /** Spec §5: the right edge, the bottom edge and their corner resize a frame; its top-left never moves. */
 const RESIZE: { position: ControlPosition; variant: ResizeControlVariant }[] = [
@@ -16,7 +17,7 @@ const RESIZE: { position: ControlPosition; variant: ResizeControlVariant }[] = [
 ];
 
 export function WorkflowFrame({ data, selected }: NodeProps) {
-  const workflowId = (data as { workflowId: string }).workflowId;
+  const { workflowId, pick } = data as { workflowId: string; pick?: PickInfo };
   const info = useBoardWorkflow(workflowId);
   const status = useWorkflowStatus(workflowId);
   const far = useStore((s) => s.transform[2] < ZOOM_DETAIL);
@@ -36,7 +37,8 @@ export function WorkflowFrame({ data, selected }: NodeProps) {
         <NodeResizeControl key={position} position={position} variant={variant} minWidth={min.w} minHeight={min.h}
           onResizeEnd={(_, p) => edit.resizeFrame(workflowId, { w: p.width, h: p.height })} />
       ))}
-      {selected && tb && st && (
+      <PickBadge pick={pick} />
+      {selected && pick?.solo && tb && st && (
         <NodeToolbar isVisible position={Position.Top} offset={10}>
           <Toolbar selection={{ kind: 'workflow' }} actions={{ onSave: () => tb.save(workflowId) }} unsaved={st.unsaved} saving={st.saving} />
         </NodeToolbar>

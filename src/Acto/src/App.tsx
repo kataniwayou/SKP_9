@@ -4,7 +4,7 @@ import { describeError } from './api/describeError';
 import { cacheFromDto, processorFromDto } from './api/toModel';
 import { Board, type BoardEdit } from './board/Board';
 import { loadBoard } from './board/loadBoard';
-import type { Selection } from './board/selection';
+import { lastPick, livePicks, togglePick, type Pick } from './board/picks';
 import { addCache, addStep, addWire, linkCache, moveFrame, moveStep, newWorkflowState, removeStep, removeWire, resizeFrame, swapProcessor, unlinkCache } from './design/state';
 import { dropVerdict, type DropItem } from './board/dropTarget';
 import { newId } from './design/ids';
@@ -19,7 +19,7 @@ import { signalRHub } from './live/signalrHub';
 import type { Cache, Processor } from './model/graph';
 import { OutputPanel } from './output/OutputPanel';
 import { createOutputStore, OutputProvider, type OutputStore } from './output/outputStore';
-import { keepExistingSelection, readView, writeView, type SavedView } from './session/view';
+import { readView, writeView, type SavedView } from './session/view';
 import { Shell } from './shell/Shell';
 import { ToolboxPanel } from './toolbox/ToolboxPanel';
 import './app.css';
@@ -49,7 +49,7 @@ export function App(props: AppProps) {
   const [processors, setProcessors] = useState<Processor[]>([]);
   const [caches, setCaches] = useState<Cache[]>([]);
   const processorsRef = useRef<Processor[]>([]);
-  const [selection, setSelection] = useState<Selection | null>(saved?.selection ?? null);
+  const [picks, setPicks] = useState<Pick[]>(() => (saved?.selection ? [saved.selection] : []));
   const viewport = useRef<{ x: number; y: number; zoom: number } | null>(saved && { x: saved.x, y: saved.y, zoom: saved.zoom });
 
   useEffect(() => { live.start(); return () => live.stop(); }, [live]);
@@ -72,7 +72,7 @@ export function App(props: AppProps) {
           ].filter(Boolean);
           if (parts.length > 0) output.log(`${w.graph.workflow.name}: on Save, ${parts.join('; ')}`, 'warn');
         }
-        setSelection((s) => keepExistingSelection(s, board.workflows));
+        setPicks((ps) => livePicks(ps, board.workflows));
         store.load(board, processorsRef.current);
         setLoaded(true);
       } catch (e) {
@@ -120,7 +120,13 @@ export function App(props: AppProps) {
     return () => { cancelled = true; };
   }, [api, output]);
 
-  const selWf = selection?.workflowId ?? null;
+  // a picked thing that disappears (workflow deleted, step undone away) leaves the picks
+  useEffect(() => {
+    if (!loaded) return;
+    setPicks((ps) => { const l = livePicks(ps, workflows); return l.length === ps.length ? ps : l; });
+  }, [loaded, workflows]);
+
+  const selWf = lastPick(picks)?.workflowId ?? null;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const act = undoRedoKey(e);
@@ -132,16 +138,21 @@ export function App(props: AppProps) {
     return () => document.removeEventListener('keydown', onKey);
   }, [store, selWf]);
 
-  const selectionRef = useRef(selection);
-  selectionRef.current = selection;
-  const persist = useCallback((sel: Selection | null) => {
+  const picksRef = useRef(picks);
+  picksRef.current = picks;
+  const persist = useCallback((ps: Pick[]) => {
     const v = viewport.current;
-    if (v) writeView(storage, { ...v, selection: sel });
+    if (v) writeView(storage, { ...v, selection: lastPick(ps) });
   }, [storage]);
-  const onSelect = useCallback((s: Selection | null) => { setSelection(s); persist(s); }, [persist]);
+  const setAllPicks = useCallback((ps: Pick[]) => { picksRef.current = ps; setPicks(ps); persist(ps); }, [persist]);
+  const onPick = useCallback((p: Pick | null, additive: boolean) => {
+    if (p === null) { if (!additive) setAllPicks([]); return; }
+    setAllPicks(additive ? togglePick(picksRef.current, p) : [p]);
+  }, [setAllPicks]);
+  const onSelect = useCallback((s: Pick) => setAllPicks([s]), [setAllPicks]);
   const onViewChange = useCallback((v: { x: number; y: number; zoom: number }) => {
     viewport.current = v;
-    persist(selectionRef.current);
+    persist(picksRef.current);
   }, [persist]);
 
   const onEdit = useMemo<BoardEdit>(() => ({
@@ -233,10 +244,10 @@ export function App(props: AppProps) {
             toolbox={<ToolboxPanel processors={processors} caches={caches} />}
             board={!loaded
               ? <div className="board-wait">Loading the board…</div>
-              : <Board workflows={workflows} selection={selection} onSelect={onSelect}
+              : <Board workflows={workflows} picks={picks} onPick={onPick}
                   {...(saved ? { initialView: { x: saved.x, y: saved.y, zoom: saved.zoom } } : {})}
                   onViewChange={onViewChange} onEdit={onEdit} toolbar={toolbar} onDropItem={onDropItem} />}
-            inspector={<InspectorPanel workflows={workflows} selection={selection} store={store} />}
+            inspector={<InspectorPanel workflows={workflows} picks={picks} store={store} />}
             output={<OutputPanel />}
             chat={<div className="ph"><span>Chat</span></div>}
           />

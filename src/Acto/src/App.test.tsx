@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { createEvent, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import type { StudioApi } from './api/client';
@@ -99,6 +99,71 @@ describe('App', () => {
       await inspector().findByDisplayValue('s1-name');
       expect(document.querySelector('.topbar')!.querySelectorAll('button')).toHaveLength(0);
       expect(inspector().getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+    });
+  });
+
+  describe('picks', () => {
+    const two = () => fakeApi({ workflows: [wf('w1')], graph: graphWith({ entry: ['a'], steps: { a: ['b'], b: [] } }) });
+    const card = (n: string) => screen.getByText(n, { selector: '.sn' });
+    const view = () => memoryStorage({ 'acto.view': JSON.stringify({ x: 0, y: 0, zoom: 1, selection: null }) });
+    it('a plain click replaces the picks and Ctrl+click toggles', async () => {
+      renderApp(two(), view());
+      fireEvent.click(await screen.findByText('a-name', { selector: '.sn' }));
+      expect(await inspector().findByDisplayValue('a-name')).toBeInTheDocument();
+      fireEvent.click(card('b-name'), { ctrlKey: true });
+      expect(await inspector().findByText('2 selected')).toBeInTheDocument();
+      fireEvent.click(card('b-name'), { ctrlKey: true });
+      expect(await inspector().findByDisplayValue('a-name')).toBeInTheDocument();
+      fireEvent.click(card('a-name'), { ctrlKey: true });
+      fireEvent.click(card('b-name'), { ctrlKey: true });
+      fireEvent.click(card('b-name'));
+      expect(await inspector().findByDisplayValue('b-name')).toBeInTheDocument();
+      expect(inspector().queryByText(/selected/)).toBeNull();
+    });
+    it('moving one of two picked steps keeps both picks', async () => {
+      renderApp(two(), view());
+      fireEvent.click(await screen.findByText('a-name', { selector: '.sn' }));
+      fireEvent.click(card('b-name'), { ctrlKey: true });
+      await inspector().findByText('2 selected');
+      const node = card('a-name').closest('.react-flow__node') as HTMLElement;
+      const mouse = (target: Element | Window, type: 'mousedown' | 'mousemove' | 'mouseup', x: number, y: number) => {
+        const ev = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 });
+        Object.defineProperty(ev, 'view', { value: window }); // d3-drag reads event.view, which jsdom leaves null
+        fireEvent(target, ev);
+      };
+      mouse(node, 'mousedown', 100, 100);
+      mouse(window, 'mousemove', 140, 130);
+      mouse(window, 'mouseup', 140, 130);
+      expect(await inspector().findByText('2 selected')).toBeInTheDocument();
+    });
+    it('keyboard selection (Enter on a focused node) reaches the inspector', async () => {
+      renderApp(two(), view());
+      const node = (await screen.findByText('a-name', { selector: '.sn' })).closest('.react-flow__node') as HTMLElement;
+      node.focus();
+      fireEvent.keyDown(node, { key: 'Enter' });
+      expect(await inspector().findByDisplayValue('a-name')).toBeInTheDocument();
+    });
+    it('a picked step that is undone away drops out of the picks', async () => {
+      const api = { ...fakeApi({ workflows: [wf('w1')] }), listProcessors: vi.fn().mockResolvedValue({ ok: true, value: [processorDto('p1', { name: 'Cruncher' })] }) } as StudioApi;
+      renderApp(api, view());
+      await screen.findByText('s1-name');
+      await screen.findAllByText('Cruncher');
+      const before = document.querySelectorAll('.react-flow__node-step').length;
+      fireEvent.click(screen.getByText('w1-name', { selector: '.nm' }));
+      await inspector().findByDisplayValue('w1-name');
+      const drop = createEvent.drop(document.querySelector('.react-flow')!, { dataTransfer: { getData: () => JSON.stringify({ kind: 'step', processorId: 'p1' }) } });
+      Object.defineProperties(drop, { clientX: { value: 350 }, clientY: { value: 150 } }); // jsdom has no DragEvent, so no coordinates
+      fireEvent(document.querySelector('.react-flow')!, drop);
+      await vi.waitFor(() => expect(document.querySelectorAll('.react-flow__node-step').length).toBe(before + 1));
+      const added = [...document.querySelectorAll('.react-flow__node-step')].find((n) => !n.textContent?.includes('s1-name')) as HTMLElement;
+      fireEvent.click(added.querySelector('.sn')!);
+      await inspector().findByText('Entry condition · colours every wire into this step');
+      fireEvent.click(screen.getByText('w1-name', { selector: '.nm' }), { ctrlKey: true });
+      await inspector().findByText('2 selected');
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+      await vi.waitFor(() => expect(document.querySelectorAll('.react-flow__node-step').length).toBe(before));
+      expect(await inspector().findByDisplayValue('w1-name')).toBeInTheDocument();
+      expect(inspector().queryByText(/selected/)).toBeNull();
     });
   });
 });

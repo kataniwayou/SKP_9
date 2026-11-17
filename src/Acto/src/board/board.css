@@ -68,3 +68,9 @@
 .cache-chip.sel { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, .3); }
 .cache-chip .cache-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cache-chip .cache-ico { font-weight: 700; }
+
+/* pick badges: pink, numbered in pick order, one size at any zoom (scaled by 1/zoom in the component) */
+.pick-no { position: absolute; left: -8px; top: -8px; width: 18px; height: 18px; border-radius: 50%; background: #FF0072; color: #fff;
+  font: 600 11px "Inter Tight", "Helvetica Neue", Arial, sans-serif; display: grid; place-items: center; z-index: 5; pointer-events: none;
+  transform-origin: center; }
+.pick-no.inline { position: static; }

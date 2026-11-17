@@ -16,7 +16,7 @@ function setup(sel: Selection | null, tweak?: (b: ReturnType<typeof bwFull>) => 
   store.load({ listed: true, workflows: [b], failures: [] }, [{ ...proc('p1', 'Analyst'), configSchemaId: 's1' }]);
   function Harness({ s }: { s: BoardStore }) {
     const ws = useBoard(s);
-    return <InspectorPanel workflows={ws} selection={sel} store={s} />;
+    return <InspectorPanel workflows={ws} picks={sel === null ? [] : [sel]} store={s} />;
   }
   render(<LiveStoreProvider value={liveStub()}><Harness s={store} /></LiveStoreProvider>);
   return store;
@@ -95,7 +95,7 @@ describe('inspector editing', () => {
       expect(stepName(st)).toBe('ab');
     });
     it('does not offer Undo/Redo without a store', () => {
-      render(<LiveStoreProvider value={liveStub()}><InspectorPanel workflows={[bwFull()]} selection={A} /></LiveStoreProvider>);
+      render(<LiveStoreProvider value={liveStub()}><InspectorPanel workflows={[bwFull()]} picks={[A]} /></LiveStoreProvider>);
       expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
     });
   });

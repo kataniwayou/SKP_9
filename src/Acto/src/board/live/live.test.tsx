@@ -42,7 +42,7 @@ describe('live state', () => {
     const stub = liveStub();
     stub.known(['w1'], {});
     const wires = [{ id: 'a>b', from: 'a', to: 'b', condition: 1 }];
-    render(<LiveStoreProvider value={stub}><Board workflows={[bw('w1', ['a', 'b'], wires)]} selection={null} onSelect={() => {}} initialZoom={1} /></LiveStoreProvider>);
+    render(<LiveStoreProvider value={stub}><Board workflows={[bw('w1', ['a', 'b'], wires)]} picks={[]} onPick={() => {}} initialZoom={1} /></LiveStoreProvider>);
     await screen.findByText('a-name');
     expect(screen.getByText('Running')).toBeInTheDocument();
     expect(document.querySelector('.wire.running')).not.toBeNull();

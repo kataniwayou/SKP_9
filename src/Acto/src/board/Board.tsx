@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { applyNodeChanges, Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useStore, type EdgeTypes, type Node, type NodeChange, type NodeTypes, type Viewport } from '@xyflow/react';
+import { applyNodeChanges, Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useStore, type EdgeChange, type EdgeTypes, type Node, type NodeChange, type NodeTypes, type Viewport } from '@xyflow/react';
 import { HEADER_H, ZOOM_DETAIL } from './geometry';
 import type { BoardWorkflow } from './loadBoard';
-import type { Selection } from './selection';
+import { pickKey, type Pick } from './picks';
 import { toFlow } from './toFlow';
 import { LinkWire } from './edges/LinkWire';
 import { CacheChip } from './nodes/CacheChip';
@@ -38,8 +38,10 @@ interface NodeData { workflowId: string; stepId?: string; cacheId?: string }
 
 export interface BoardProps {
   workflows: BoardWorkflow[];
-  selection: Selection | null;
-  onSelect: (s: Selection | null) => void;
+  /** Everything picked, in pick order. */
+  picks: Pick[];
+  /** `additive` is true while Ctrl or Meta is held; null means a click on empty board. */
+  onPick: (p: Pick | null, additive: boolean) => void;
   /** Tests and view restore: start at this zoom instead of fitting every frame. */
   initialZoom?: number;
   /** View restore: start here instead of fitting every frame. */
@@ -54,12 +56,14 @@ export interface BoardProps {
   onDropItem?: (item: DropItem, at: { x: number; y: number }) => void;
 }
 
-export function Board({ workflows, selection, onSelect, initialZoom, initialView, onViewChange, onEdit, toolbar, onDropItem }: BoardProps) {
+export function Board({ workflows, picks, onPick, initialZoom, initialView, onViewChange, onEdit, toolbar, onDropItem }: BoardProps) {
   const flow = useRef<{ getViewport: () => Viewport; screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number } } | null>(null);
-  const select = (s: Selection | null) => {
+  const select = (s: Pick | null, additive = false) => {
     if (flow.current) onViewChange?.(flow.current.getViewport());
-    onSelect(s);
+    onPick(s, additive);
   };
+  // React Flow's own selection is off: picks decide. Only a keyboard select (Enter/Space on a focused node) comes from it.
+  const keySelect = useRef(false);
   const live = useLiveStore();
   useLive((st) => st.running); // re-render the minimap strokes when a workflow starts or stops
   useLive((st) => st.workflows);
@@ -69,22 +73,20 @@ export function Board({ workflows, selection, onSelect, initialZoom, initialView
   const editable = onEdit !== undefined;
   const { nodes: derived, edges } = useMemo(() => {
     const flow = toFlow(workflows);
-    const sel = selection;
+    const order = new Map(picks.map((p, i) => [pickKey(p), i + 1]));
+    const pickOf = (id: string) => { const no = order.get(id); return no === undefined ? undefined : { no, solo: picks.length === 1 }; };
     return {
       nodes: flow.nodes.map((n) => ({
         ...n,
+        data: { ...n.data, ...(pickOf(n.id) ? { pick: pickOf(n.id) } : {}), ...(editable && n.type === 'workflow' ? { editable: true } : {}) },
         ...(editable && n.type !== 'cache' ? { draggable: true } : {}),
-        ...(editable && n.type === 'workflow' ? { data: { ...n.data, editable: true } } : {}),
         ...(far && n.type === 'step' ? { style: { ...n.style, pointerEvents: 'none' as const } } : {}),
-        selected: sel !== null && (
-          (sel.kind === 'workflow' && n.id === `wf:${sel.workflowId}`) ||
-          (sel.kind === 'step' && n.id === `st:${sel.workflowId}:${sel.stepId}`) ||
-          (sel.kind === 'cache' && n.id === `ca:${sel.workflowId}:${sel.cacheId}`)),
+        selected: order.has(n.id),
       })),
       // far out the step cards draw no handles: React Flow would warn for every wire it cannot place
-      edges: flow.edges.map((e) => ({ ...e, hidden: far, selected: sel?.kind === 'wire' && e.id === `wi:${sel.workflowId}:${sel.wireId}` })),
+      edges: flow.edges.map((e) => ({ ...e, hidden: far, selected: order.has(e.id), data: { ...e.data, ...(pickOf(e.id) ? { pick: pickOf(e.id) } : {}) } })),
     };
-  }, [workflows, selection, far, editable]);
+  }, [workflows, picks, far, editable]);
 
   // Editing: React Flow needs the nodes in state so a drag moves them before anything is committed.
   const [dragged, setDragged] = useState<Node[]>(derived);
@@ -92,10 +94,36 @@ export function Board({ workflows, selection, onSelect, initialZoom, initialView
   derivedRef.current = derived;
   useEffect(() => { setDragged(derived); }, [derived]);
   const nodes = editable ? dragged : derived;
-  const onNodesChange = (changes: NodeChange[]) => setDragged((ns) => applyNodeChanges(changes, ns));
+  const nodePick = (n: { type?: string | undefined; data: unknown }): Pick => {
+    const d = n.data as NodeData;
+    return n.type === 'cache' && d.cacheId !== undefined ? { kind: 'cache', workflowId: d.workflowId, cacheId: d.cacheId }
+      : n.type === 'step' && d.stepId !== undefined ? { kind: 'step', workflowId: d.workflowId, stepId: d.stepId }
+      : { kind: 'workflow', workflowId: d.workflowId };
+  };
+  const onNodesChange = (changes: NodeChange[]) => {
+    if (keySelect.current) {
+      const id = changes.flatMap((c) => (c.type === 'select' && c.selected ? [c.id] : []))[0];
+      const n = id === undefined ? undefined : nodes.find((x) => x.id === id);
+      if (n) { keySelect.current = false; select(nodePick(n)); }
+    }
+    setDragged((ns) => applyNodeChanges(changes.filter((c) => c.type !== 'select'), ns));
+  };
+  const onEdgesChange = (changes: EdgeChange[]) => {
+    if (!keySelect.current) return;
+    const id = changes.flatMap((c) => (c.type === 'select' && c.selected ? [c.id] : []))[0];
+    const e = id === undefined ? undefined : edges.find((x) => x.id === id);
+    if (e) { keySelect.current = false; const d = e.data as { workflowId: string; wireId: string }; select({ kind: 'wire', workflowId: d.workflowId, wireId: d.wireId }); }
+  };
   const dataOf = (n: Node) => n.data as unknown as NodeData;
 
-  const dragStop = (n: Node) => {
+  const dragStop = (n: Node, dragged?: Node[]) => {
+    if (!onEdit) return;
+    // React Flow drags every selected node together; commit each one that moved
+    if (dragged && dragged.length > 1) { for (const m of dragged) commitMove(m); setDragged(derivedRef.current); return; }
+    commitMove(n);
+    setDragged(derivedRef.current); // a refused or unchanged drag snaps back
+  };
+  const commitMove = (n: Node) => {
     if (!onEdit) return;
     const d = dataOf(n);
     const w = byId.get(d.workflowId);
@@ -108,7 +136,6 @@ export function Board({ workflows, selection, onSelect, initialZoom, initialView
         if (w.frame.x !== n.position.x || w.frame.y !== n.position.y) onEdit.moveFrame(d.workflowId, { x: n.position.x, y: n.position.y });
       }
     }
-    setDragged(derivedRef.current); // a refused or unchanged drag snaps back
   };
   const nodeById = (id: string) => nodes.find((x) => x.id === id);
 
@@ -116,7 +143,7 @@ export function Board({ workflows, selection, onSelect, initialZoom, initialView
     <BoardContext.Provider value={byId}>
       <EditContext.Provider value={onEdit ?? null}>
       <ToolbarContext.Provider value={editable ? toolbar ?? null : null}>
-      <div className="board">
+      <div className="board" onKeyDownCapture={(e) => { if (e.key === 'Enter' || e.key === ' ') { keySelect.current = true; queueMicrotask(() => { keySelect.current = false; }); } }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -126,7 +153,7 @@ export function Board({ workflows, selection, onSelect, initialZoom, initialView
           nodesConnectable={editable}
           {...(editable ? {
             onNodesChange,
-            onNodeDragStop: (_: unknown, n: Node) => dragStop(n),
+            onNodeDragStop: (_: unknown, n: Node, all?: Node[]) => dragStop(n, all),
             onConnect: (c: { source: string; target: string }) => {
               if (!onEdit) return;
               const a = nodeById(c.source);
@@ -166,18 +193,16 @@ export function Board({ workflows, selection, onSelect, initialZoom, initialView
           }}
           onInit={(rf) => { flow.current = rf; }}
           onMoveEnd={(_, v) => onViewChange?.(v)}
-          onNodeClick={(_, n) => {
-            const d = n.data as unknown as NodeData;
-            select(n.type === 'cache' && d.cacheId !== undefined ? { kind: 'cache', workflowId: d.workflowId, cacheId: d.cacheId }
-              : n.type === 'step' && d.stepId !== undefined
-              ? { kind: 'step', workflowId: d.workflowId, stepId: d.stepId }
-              : { kind: 'workflow', workflowId: d.workflowId });
-          }}
-          onEdgeClick={(_, e) => {
+          multiSelectionKeyCode={null}
+          onEdgesChange={onEdgesChange}
+          {...(!editable ? { onNodesChange } : {})}
+          onNodeClick={(ev, n) => { keySelect.current = false; select(nodePick(n), ev.ctrlKey || ev.metaKey); }}
+          onEdgeClick={(ev, e) => {
+            keySelect.current = false;
             const d = e.data as { workflowId: string; wireId: string };
-            select({ kind: 'wire', workflowId: d.workflowId, wireId: d.wireId });
+            select({ kind: 'wire', workflowId: d.workflowId, wireId: d.wireId }, ev.ctrlKey || ev.metaKey);
           }}
-          onPaneClick={() => select(null)}
+          onPaneClick={(ev) => select(null, ev.ctrlKey || ev.metaKey)}
           proOptions={{ hideAttribution: true }}
         >
           <FarWatch onFar={setFar} />

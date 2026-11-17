@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { BoardWorkflow } from '../board/loadBoard';
-import type { Selection } from '../board/selection';
+import { lastPick, type Pick } from '../board/picks';
 import { useLive, useLiveStore, useProcessorLive } from '../live/LiveContext';
 import { livenessText, statusOf } from '../live/liveState';
 import { cronText } from '../model/cronText';
@@ -184,15 +184,43 @@ function Header({ store, workflowId, name }: { store: BoardStore; workflowId: st
   );
 }
 
+function pickName(p: Pick, workflows: BoardWorkflow[]): string | null {
+  const w = workflows.find((x) => x.graph.workflow.id === p.workflowId);
+  if (!w) return null;
+  if (p.kind === 'workflow') return w.graph.workflow.name;
+  if (p.kind === 'step') return w.graph.steps.get(p.stepId)?.name ?? null;
+  if (p.kind === 'cache') return w.graph.caches.get(p.cacheId)?.name ?? null;
+  const wire = w.wires.find((x) => x.id === p.wireId);
+  if (!wire) return null;
+  const name = (id: string) => w.graph.steps.get(id)?.name ?? id;
+  return `${name(wire.from)} → ${name(wire.to)}`;
+}
+
+function PickList({ picks, workflows }: { picks: Pick[]; workflows: BoardWorkflow[] }) {
+  return (
+    <>
+      <div className="in-title">{`${picks.length} selected`}</div>
+      <ol className="in-picks">
+        {picks.map((p) => {
+          const n = pickName(p, workflows);
+          return n === null ? null : <li key={`${p.kind}:${p.workflowId}:${'stepId' in p ? p.stepId : 'wireId' in p ? p.wireId : 'cacheId' in p ? p.cacheId : ''}`} data-kind={p.kind}>{n}</li>;
+        })}
+      </ol>
+    </>
+  );
+}
+
 /** What the selection is, as the loaded board knows it; editable when given the store. */
-export function InspectorPanel({ workflows, selection, store }: { workflows: BoardWorkflow[]; selection: Selection | null; store?: BoardStore }) {
+export function InspectorPanel({ workflows, picks, store }: { workflows: BoardWorkflow[]; picks: Pick[]; store?: BoardStore }) {
+  const selection = lastPick(picks);
   const w = selection === null ? undefined : workflows.find((x) => x.graph.workflow.id === selection.workflowId);
   return (
     <>
       {store ? <Header store={store} workflowId={w ? w.graph.workflow.id : null} name={w ? w.graph.workflow.name : null} />
         : <div className="ph"><span>Inspector</span></div>}
       <div className="pb">
-        {selection === null || !w ? <BoardSummary workflows={workflows} />
+        {picks.length > 1 ? <PickList picks={picks} workflows={workflows} />
+          : selection === null || !w ? <BoardSummary workflows={workflows} />
           : selection.kind === 'workflow' ? (store ? <EditWorkflow w={w} store={store} /> : <WorkflowView w={w} />)
           : selection.kind === 'step' ? (store ? <EditStep w={w} stepId={selection.stepId} workflows={workflows} store={store} /> : <StepView w={w} stepId={selection.stepId} workflows={workflows} />)
           : selection.kind === 'cache' ? (store ? <EditCache w={w} cacheId={selection.cacheId} store={store} /> : <CacheView w={w} cacheId={selection.cacheId} />)
