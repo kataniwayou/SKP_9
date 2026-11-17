@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeApi } from '../board/testApi';
 import { createBoardStore } from '../design/boardStore';
 import { newWorkflowState } from '../design/state';
@@ -41,10 +41,16 @@ describe('workflowArg', () => {
   });
 });
 
-describe('the tool list', () => {
-  afterEach(() => { TOOL_DEFS.splice(0, TOOL_DEFS.length); });
+// the real tools are set aside while a test puts its own in
+let realTools: typeof TOOL_DEFS = [];
+const setAsideReal = () => { realTools = TOOL_DEFS.splice(0, TOOL_DEFS.length); };
+const putBackReal = () => { TOOL_DEFS.splice(0, TOOL_DEFS.length, ...realTools); };
 
-  it('is empty until the tools are added, and the destructive ones are named', () => {
+describe('the tool list', () => {
+  beforeEach(setAsideReal);
+  afterEach(putBackReal);
+
+  it('is empty with none added, and the destructive ones are named', () => {
     expect(TOOL_DEFS).toEqual([]);
     expect(toolsForModel()).toEqual([]);
     expect([...DESTRUCTIVE].sort()).toEqual(['delete_picked', 'delete_workflow', 'remove_assignment', 'stop']);
@@ -57,7 +63,8 @@ describe('the tool list', () => {
 });
 
 describe('runTool', () => {
-  afterEach(() => { TOOL_DEFS.splice(0, TOOL_DEFS.length); });
+  beforeEach(setAsideReal);
+  afterEach(putBackReal);
 
   it('a name that is no tool is a failed result naming it', async () => {
     expect(done(await runTool(context(), { id: 'c', name: 'nope', arguments: '{}' }))).toMatchObject({ ok: false, result: 'there is no tool named nope' });

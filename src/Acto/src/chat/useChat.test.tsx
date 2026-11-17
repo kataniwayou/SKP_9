@@ -85,7 +85,15 @@ function setup(...answers: Scripted[]) {
   return { store, ctx, chat, hook, state, idle, bodies, aborted, fetchFn };
 }
 
-describe('useChat with no tools (TOOL_DEFS empty, as this task leaves it)', () => {
+// the real tools are set aside while a test puts its own in
+let realTools: typeof TOOL_DEFS = [];
+const setAsideReal = () => { realTools = TOOL_DEFS.splice(0, TOOL_DEFS.length); };
+const putBackReal = () => { TOOL_DEFS.splice(0, TOOL_DEFS.length, ...realTools); };
+
+describe('useChat with no tools', () => {
+  beforeEach(setAsideReal);
+  afterEach(putBackReal);
+
   it('a message gets the model\'s text, sent with an empty tool list and the system prompt', async () => {
     expect(TOOL_DEFS).toEqual([]);
     const t = setup([delta({ content: 'Hello there.' })]);
@@ -110,8 +118,8 @@ describe('useChat with no tools (TOOL_DEFS empty, as this task leaves it)', () =
 });
 
 describe('useChat', () => {
-  beforeEach(() => { TOOL_DEFS.push(...TEST_TOOLS); poked.length = 0; wiped.length = 0; });
-  afterEach(() => { TOOL_DEFS.splice(0, TOOL_DEFS.length); });
+  beforeEach(() => { setAsideReal(); TOOL_DEFS.push(...TEST_TOOLS); poked.length = 0; wiped.length = 0; });
+  afterEach(putBackReal);
 
   it('runs a turn\'s calls in order, answers each by its id, then shows the final text', async () => {
     const t = setup(
