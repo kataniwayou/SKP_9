@@ -10,6 +10,7 @@ import { processorDto, schemaDto } from '../api/fixtures';
 import { AUDIT } from '../model/fixtures';
 import { bw } from '../board/fixtures';
 import { saveWorkflow } from './saveWorkflow';
+import { memoryStorage } from '../test/memoryStorage';
 
 function setup(opts: { applied?: boolean; problems?: { title: string; detail: string }[]; layout?: unknown } = {}) {
   const output = createOutputStore(null, () => '00:00:00');
@@ -142,9 +143,9 @@ describe('saveWorkflow', () => {
 
 describe('re-reading the workflows that share what a save changed', () => {
   /** w1 'orders' [a → b], w2 'billing' [a] shares step a, w3 'audit' [z] shares nothing. */
-  function sharing(graphError?: Record<string, { kind: 'network'; message: string }>) {
+  function sharing(graphError?: Record<string, { kind: 'network'; message: string }>, session: Storage | null = null) {
     const output = createOutputStore(null, () => '00:00:00');
-    const store = createBoardStore(output, null);
+    const store = createBoardStore(output, session);
     const w2 = bw('w2', ['a']);
     w2.graph.workflow = { ...w2.graph.workflow, name: 'billing' };
     const w3 = bw('w3', ['z']);
@@ -202,6 +203,27 @@ describe('re-reading the workflows that share what a save changed', () => {
     expect(store.entry('w1')!.history.present.steps.a!.at).toEqual({ x: 321, y: 123 });
     release();
     expect(await saving).toBe('saved');
+  });
+  it('says so when the sharer had its own unsaved change to what was saved, which the save replaced', async () => {
+    // drafts brought back both workflows renaming step a (the lock lets neither block the other)
+    const draftOf = (wfId: string, name: string) => {
+      const session = memoryStorage();
+      const { store } = sharing(undefined, session);
+      store.edit(wfId, (s) => setStepField(s, 'a', 'name', name));
+      return JSON.parse(session.getItem('acto.drafts')!) as Record<string, unknown>;
+    };
+    const session = memoryStorage({ 'acto.drafts': JSON.stringify({ ...draftOf('w1', 'renamed'), ...draftOf('w2', 'mine') }) });
+    const { api, store, output, texts } = sharing(undefined, session);
+    expect(store.entry('w2')!.history.present.steps.a!.name).toBe('mine');
+    expect(await saveWorkflow(api, store, output, 'w1')).toBe('saved');
+    expect(store.entry('w2')!.history.present.steps.a!.name).toBe('renamed');
+    expect(texts()).toContain('warn:billing: step renamed was saved by orders; your unsaved change to it was replaced');
+  });
+  it('says nothing more when the sharer had no change of its own to what was saved', async () => {
+    const { api, store, output, texts } = sharing();
+    store.edit('w1', (s) => setStepField(s, 'a', 'name', 'renamed'));
+    await saveWorkflow(api, store, output, 'w1');
+    expect(texts().filter((t) => t.includes('your unsaved change'))).toEqual([]);
   });
   it('a sharer that cannot be re-read stays as it was, with a warning', async () => {
     const { api, store, output, texts } = sharing({ w2: { kind: 'network', message: 'down' } });

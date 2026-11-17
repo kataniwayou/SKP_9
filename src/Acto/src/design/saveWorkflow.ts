@@ -6,7 +6,7 @@ import type { OutputStore } from '../output/outputStore';
 import type { BoardStore } from './boardStore';
 import { diagramSvg } from './diagramSvg';
 import { designRequest } from './request';
-import { changedEntities, holders, type EntityKey } from './shared';
+import { changedEntities, entityLabel, holders, type EntityKey } from './shared';
 import type { WorkflowState } from './state';
 
 function entityName(s: WorkflowState, base: WorkflowState | null, id: string): string {
@@ -101,8 +101,9 @@ async function run(
 
 /**
  * After `savedId` saved the entities in `changed`, every other workflow showing one of them re-reads itself and takes
- * the new values of those entities, keeping its own unsaved work (BoardStore.rebase). One that cannot be re-read
- * stays as it was. Never throws.
+ * the new values of those entities, keeping its own unsaved work (BoardStore.rebase) except its own change to one of
+ * those entities, which the saved value replaces (said in Output). One that cannot be re-read stays as it was.
+ * Never throws.
  */
 export async function refreshSharers(
   api: StudioApi, store: BoardStore, output: OutputStore, savedId: Id, changed: Set<EntityKey>,
@@ -129,8 +130,16 @@ export async function refreshSharers(
       continue;
     }
     const { storedFrame: _stored, ...rest } = loaded.value;
-    const frame = store.boards().find((b) => b.graph.workflow.id === wf)?.frame ?? { x: 0, y: 0, w: 0, h: 0 };
-    store.rebase(wf, { ...rest, frame }, keys);
+    const boards = store.boards();
+    const frame = boards.find((b) => b.graph.workflow.id === wf)?.frame ?? { x: 0, y: 0, w: 0, h: 0 };
+    // drafts or a failed save can leave both holding a change to the same entity (Ruling T8a): the save wins
+    const now = store.entry(wf);
+    const own = now?.base ? changedEntities(now.base, now.history.present) : new Set<EntityKey>();
+    const reread = { ...rest, frame };
+    // named as the re-read has it: the value that replaced this workflow's own
+    const replaced = [...keys].filter((k) => own.has(k)).map((k) => entityLabel(k, [reread, ...boards]));
+    store.rebase(wf, reread, keys);
+    for (const label of replaced) output.log(`${name}: ${label} was saved by ${savedName}; your unsaved change to it was replaced`, 'warn');
     output.log(`${name}: re-read after ${savedName} saved`, 'info');
   }
 }

@@ -4,6 +4,11 @@ import type { WorkflowDeleteOutcomeDto } from '../api/types';
 import type { BoardStore } from '../design/boardStore';
 import { createOutputStore } from '../output/outputStore';
 import { commitDelete, confirmText, FRESH_READING_MS, prepareDelete, type DeletePlan } from './deleteWorkflow';
+import { bw } from '../board/fixtures';
+import { graphWith } from '../board/testApi';
+import { createBoardStore } from '../design/boardStore';
+import { saveWorkflow } from '../design/saveWorkflow';
+import { moveStep, newWorkflowState } from '../design/state';
 
 const names: Record<string, string> = { w1: 'orders', w2: 'billing', w3: 'extra', n1: 'new-workflow-1', n2: 'new-workflow-2' };
 const saved = (id: string) => !id.startsWith('n');
@@ -121,5 +126,48 @@ describe('commitDelete', () => {
     expect(await commitDelete(api, store, o, plan({ ids: ['n1'], names: ['new-workflow-1'], neverSaved: ['n1'] }))).toEqual(['n1']);
     expect(del).not.toHaveBeenCalled(); expect(remove).toHaveBeenCalledWith('n1');
     expect(texts(o)).toEqual([['ok', 'new-workflow-1 discarded']]);
+  });
+});
+
+describe('delete while saving', () => {
+  const real = (base: 'saved' | 'new') => {
+    const output = createOutputStore(null, () => '00:00:00');
+    const store = createBoardStore(output, null);
+    store.load({ listed: true, workflows: base === 'saved' ? [bw('w1', ['a'])] : [], failures: [] }, []);
+    if (base === 'new') store.addWorkflow(newWorkflowState('w1', 'new-workflow-1', { x: 0, y: 0 }));
+    else store.edit('w1', (s) => moveStep(s, 'a', { x: 99, y: 99 }));
+    let land: () => void = () => {};
+    const api = {
+      getGraph: vi.fn(async () => ({ ok: true, value: graphWith({ entry: ['a'], steps: { a: [] } }) })),
+      saveDesign: vi.fn(() => new Promise((res) => { land = () => res({ ok: true, value: { applied: true, errors: [] } }); })),
+      validateWorkflow: vi.fn().mockResolvedValue({ ok: true, value: { valid: true, problems: [] } }),
+      publishDiagram: vi.fn().mockResolvedValue({ ok: true, value: null }),
+      getStep: vi.fn(), getProcessor: vi.fn(), getEntity: vi.fn(),
+      listLive: vi.fn().mockResolvedValue({ ok: true, value: [] }),
+      deleteWorkflow: vi.fn().mockResolvedValue({ ok: true, value: { applied: true, errors: [] } }),
+    } as unknown as StudioApi;
+    return { api, store, output, land: () => land() };
+  };
+  it.each([['saved'], ['new']] as const)('a %s workflow that is saving is not deleted, and no delete is sent', async (base) => {
+    const { api, store, output, land } = real(base);
+    const saving = saveWorkflow(api, store, output, 'w1');
+    await vi.waitFor(() => expect(api.saveDesign).toHaveBeenCalled());
+    const name = store.entry('w1')!.history.present.fields.name;
+    expect(await prepareDelete(api, store, output, ['w1'], () => never)).toBeNull();
+    expect(texts(output)).toContainEqual(['error', `${name}: not deleted — it is saving, wait for it to finish`]);
+    expect(api.listLive).not.toHaveBeenCalled(); expect(api.deleteWorkflow).not.toHaveBeenCalled();
+    land();
+    expect(await saving).toBe('saved');
+    expect(store.entry('w1')).not.toBeNull();
+  });
+  it('a confirm reached while a save started is refused at commit too', async () => {
+    const { api, store, output } = real('new');
+    const p = await prepareDelete(api, store, output, ['w1'], () => never);
+    void saveWorkflow(api, store, output, 'w1');
+    await vi.waitFor(() => expect(api.saveDesign).toHaveBeenCalled());
+    expect(await commitDelete(api, store, output, p!)).toEqual([]);
+    expect(store.entry('w1')).not.toBeNull();
+    expect(texts(output)).toContainEqual(['error', 'new-workflow-1: not deleted — it is saving, wait for it to finish']);
+    expect(texts(output)).not.toContainEqual(['ok', 'new-workflow-1 discarded']);
   });
 });

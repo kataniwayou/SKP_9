@@ -20,6 +20,7 @@ export interface DeletePlan {
   neverSaved: Id[];
 }
 
+const SAVING = 'it is saving, wait for it to finish';
 const sleep = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
 const count = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 const goes = (steps: number, assignments: number) => `${count(steps, 'step')}, ${count(assignments, 'assignment')}`;
@@ -32,10 +33,17 @@ const messagesOf = (dto: WorkflowDeleteOutcomeDto): string => {
  * Delete up to the confirm: a live reading taken now (a status already shown never counts) raced against
  * FRESH_READING_MS, `running` refuses; then BaseAPI's dry run, which refuses on errors. Several workflows are all or
  * nothing (R4): any refusal returns null, each logged under its workflow's name. Never-saved ones need no request.
+ * One that is saving is refused first, before any request.
  */
 export async function prepareDelete(api: StudioApi, store: BoardStore, output: OutputStore, ids: Id[],
   wait: (ms: number) => Promise<void> = sleep): Promise<DeletePlan | null> {
   const nameOf = (id: Id) => store.entry(id)?.history.present.fields.name ?? id;
+  // a save in flight would land after the delete and bring the workflow back
+  const saving = ids.filter((id) => store.entry(id)?.saving === true);
+  if (saving.length > 0) {
+    for (const id of saving) output.log(`${nameOf(id)}: not deleted — ${SAVING}`, 'error');
+    return null;
+  }
   const unsavedIds = ids.filter((id) => store.entry(id)?.base === null);
   const savedIds = ids.filter((id) => !unsavedIds.includes(id));
   const plan: DeletePlan = { ids, names: ids.map(nameOf), steps: 0, assignments: 0, caches: 0, processors: 0, neverSaved: unsavedIds };
@@ -85,6 +93,8 @@ export async function commitDelete(api: StudioApi, store: BoardStore, output: Ou
   for (let i = 0; i < plan.ids.length; i++) {
     const id = plan.ids[i]!;
     const name = plan.names[i] ?? id;
+    // a save may have started since the confirm was offered
+    if (store.entry(id)?.saving === true) { output.log(`${name}: not deleted — ${SAVING}`, 'error'); continue; }
     if (plan.neverSaved.includes(id)) {
       store.remove(id); gone.push(id);
       output.log(`${name} discarded`, 'ok');

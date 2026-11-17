@@ -273,9 +273,12 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       notify();
     },
     replace(id, bw) {
+      // a save that lands after its workflow left the board (deleted, discarded) must not bring it back
+      const r = recs.get(id);
+      if (!r) return;
       learnProcessors(bw.graph.processors.values());
       const next = make(bw);
-      next.view = { ...next.view, saving: recs.get(id)?.view.saving ?? false };
+      next.view = { ...next.view, saving: r.view.saving };
       recs.set(id, next);
       changed();
     },

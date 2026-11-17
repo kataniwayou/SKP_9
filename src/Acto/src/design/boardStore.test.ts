@@ -104,6 +104,14 @@ describe('board store', () => {
     expect(st.entry('w1')).toBeNull(); expect(st.boards()).toHaveLength(0); expect(n).toBe(1);
     expect(session.getItem('acto.drafts')).toBeNull();
   });
+  it('a workflow gone from the board stays gone when a save in flight lands after it', () => {
+    const st = storeWith(bwFull());
+    let n = 0; st.subscribe(() => n++);
+    st.remove('w1');
+    st.replace('w1', bwFull());
+    st.adoptPresent('w1'); st.setLayout('w1', {}); st.setProblems('w1', 2);
+    expect(st.entry('w1')).toBeNull(); expect(st.boards()).toHaveLength(0); expect(n).toBe(1);
+  });
   it('keeps the draft of a workflow a partial load did not bring back, and restores it on a later load', () => {
     const session = memoryStorage();
     storeWith(bwFull(), session).edit('w1', (s) => moveStep(s, 'a', { x: 5, y: 5 }));
