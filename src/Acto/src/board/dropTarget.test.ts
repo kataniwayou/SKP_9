@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dropVerdict, dropVerdictItem } from './dropTarget';
+import { dropVerdict, dropVerdictItem, stepAt } from './dropTarget';
 import { HEADER_H } from './geometry';
 import { bw } from './fixtures';
 
@@ -42,5 +42,15 @@ describe('dropVerdict', () => {
   it('parses only our payloads', () => {
     expect(dropVerdictItem('{"kind":"step","processorId":"p"}')).toEqual({ kind: 'step', processorId: 'p' });
     expect(dropVerdictItem('nope')).toBeNull();
+  });
+});
+
+describe('stepAt', () => {
+  it('finds the step under a board point, and nothing off the steps', () => {
+    const b = boards();
+    const p = b[0]!.stepAt.get('a')!;
+    expect(stepAt(b, { x: 100 + p.x + 5, y: 100 + HEADER_H + p.y + 5 })).toEqual({ workflowId: 'w1', stepId: 'a' });
+    expect(stepAt(b, { x: 100 + p.x - 5, y: 100 + HEADER_H + p.y + 5 })).toBeNull();
+    expect(stepAt(b, { x: 5000, y: 5000 })).toBeNull();
   });
 });

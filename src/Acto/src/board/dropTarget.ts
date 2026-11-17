@@ -16,9 +16,28 @@ export type DropVerdict =
   | { do: 'linkCache'; workflowId: string; cacheId: string }
   | { refused: string };
 
+const frameAt = (boards: BoardWorkflow[], at: Point) =>
+  boards.find((b) => at.x >= b.frame.x && at.x <= b.frame.x + b.frame.w && at.y >= b.frame.y && at.y <= b.frame.y + b.frame.h);
+
+function stepIn(frame: BoardWorkflow, at: Point): string | null {
+  const rel = { x: at.x - frame.frame.x, y: at.y - frame.frame.y - HEADER_H };
+  for (const stepId of frame.stepIds) {
+    const p = frame.stepAt.get(stepId);
+    if (p && rel.x >= p.x && rel.x <= p.x + STEP_W && rel.y >= p.y && rel.y <= p.y + STEP_H) return stepId;
+  }
+  return null;
+}
+
+/** The step card under the board point `at`, or null. */
+export function stepAt(boards: BoardWorkflow[], at: Point): { workflowId: string; stepId: string } | null {
+  const frame = frameAt(boards, at);
+  const stepId = frame ? stepIn(frame, at) : null;
+  return frame && stepId !== null ? { workflowId: frame.graph.workflow.id, stepId } : null;
+}
+
 /** What dropping `item` at `at` (board coordinates) does. A step's `at` is relative to its frame's content area. */
 export function dropVerdict(item: DropItem, at: Point, boards: BoardWorkflow[]): DropVerdict {
-  const frame = boards.find((b) => at.x >= b.frame.x && at.x <= b.frame.x + b.frame.w && at.y >= b.frame.y && at.y <= b.frame.y + b.frame.h);
+  const frame = frameAt(boards, at);
   if (!frame) {
     return item.kind === 'workflow' ? { do: 'newWorkflow', at } : { refused: item.kind === 'step' ? 'Drop a step inside a workflow' : 'Drop a cache inside a workflow' };
   }
@@ -27,11 +46,9 @@ export function dropVerdict(item: DropItem, at: Point, boards: BoardWorkflow[]):
     case 'workflow':
       return { refused: 'Drop a new workflow on empty board' };
     case 'step': {
+      const stepId = stepIn(frame, at);
+      if (stepId !== null) return { do: 'swap', workflowId, stepId };
       const rel = { x: at.x - frame.frame.x, y: at.y - frame.frame.y - HEADER_H };
-      for (const stepId of frame.stepIds) {
-        const p = frame.stepAt.get(stepId);
-        if (p && rel.x >= p.x && rel.x <= p.x + STEP_W && rel.y >= p.y && rel.y <= p.y + STEP_H) return { do: 'swap', workflowId, stepId };
-      }
       return { do: 'addStep', workflowId, at: { x: Math.max(0, rel.x), y: Math.max(0, rel.y) } };
     }
     case 'cache-new':

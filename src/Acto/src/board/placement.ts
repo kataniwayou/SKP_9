@@ -1,5 +1,6 @@
 import type { Id, Step } from '../model/graph';
 import type { Point, Rect } from '../model/geometry';
+import { CHIP_GAP, CHIP_ROW_H, CHIP_W } from './cacheChips';
 import {
   BOARD_ROW_W, FRAME_GAP, FRAME_MIN_BODY_H, FRAME_MIN_W, FRAME_PAD, HEADER_H, STEP_H, STEP_W,
 } from './geometry';
@@ -17,6 +18,16 @@ export function frameSizeOf(stepAt: ReadonlyMap<Id, Point>): { w: number; h: num
     w: Math.max(FRAME_MIN_W, hasSteps ? right + FRAME_PAD : 0),
     h: Math.max(HEADER_H + FRAME_MIN_BODY_H, hasSteps ? HEADER_H + bottom + FRAME_PAD : 0),
   };
+}
+
+/** The smallest a frame may be: its steps, plus the cache chip row along the bottom when caches are linked. */
+export function minFrameSize(stepAt: ReadonlyMap<Id, Point>, cacheCount: number): { w: number; h: number } {
+  const size = frameSizeOf(stepAt);
+  if (cacheCount > 0) {
+    size.h += CHIP_ROW_H;
+    size.w = Math.max(size.w, 2 * FRAME_PAD + cacheCount * CHIP_W + (cacheCount - 1) * CHIP_GAP);
+  }
+  return size;
 }
 
 /** Positions for the steps not in `placed`: columns by BFS depth from the entry steps. */

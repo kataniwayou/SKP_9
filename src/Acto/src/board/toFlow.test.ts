@@ -37,6 +37,11 @@ describe('toFlow', () => {
       in: { x: 1000 + b.x, y: 500 + HEADER_H + b.y + STEP_H / 2 },
     });
   });
+  it('keeps a step below the header: its extent starts at the content origin', () => {
+    const w = bw('w1', ['a']);
+    const step = toFlow([w]).nodes.find((n) => n.id === 'st:w1:a')!;
+    expect(step.extent).toEqual([[0, HEADER_H], [w.frame.w, w.frame.h]]);
+  });
   it('gives an empty workflow a frame at the minimum size', () => {
     const frame = toFlow([bw('w2', [])]).nodes.find((n) => n.id === 'wf:w2')!;
     expect(frame.style).toMatchObject({ width: 420, height: 196 });

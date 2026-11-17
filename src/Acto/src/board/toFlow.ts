@@ -23,7 +23,9 @@ export function toFlow(workflows: BoardWorkflow[]): { nodes: Node[]; edges: Edge
     for (const stepId of w.stepIds) {
       const p = w.stepAt.get(stepId) ?? { x: 0, y: 0 };
       nodes.push({
-        id: `st:${wfId}:${stepId}`, type: 'step', parentId: parent, extent: 'parent', position: { x: p.x, y: p.y + HEADER_H },
+        id: `st:${wfId}:${stepId}`, type: 'step', parentId: parent,
+        // relative to the frame and clamped by the step's size: never into the header band
+        extent: [[0, HEADER_H], [w.frame.w, w.frame.h]], position: { x: p.x, y: p.y + HEADER_H },
         style: { width: STEP_W, height: STEP_H }, width: STEP_W, height: STEP_H, draggable: false,
         handles: STEP_HANDLES,
         data: { workflowId: wfId, stepId, role: w.roles.get(stepId) ?? 'reached' },

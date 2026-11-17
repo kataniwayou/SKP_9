@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import type { Node } from '@xyflow/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
@@ -59,6 +59,38 @@ describe('Board editing', () => {
     expect(document.querySelector('.react-flow__resize-control')).toBeNull();
     rerender(<Board workflows={[bw('w1', ['a'])]} selection={{ kind: 'workflow', workflowId: 'w1' }} onSelect={() => {}} initialZoom={1} onEdit={onEdit} />);
     expect(document.querySelector('.react-flow__resize-control')).not.toBeNull();
+  });
+  it('resizes only from the right edge, the bottom edge and their corner', async () => {
+    const onEdit = { moveStep: vi.fn(), moveFrame: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    render(<Board workflows={[bw('w1', ['a'])]} selection={{ kind: 'workflow', workflowId: 'w1' }} onSelect={() => {}} initialZoom={1} onEdit={onEdit} />);
+    await screen.findByText('a-name');
+    const controls = [...document.querySelectorAll('.react-flow__resize-control')];
+    expect(controls.some((c) => c.classList.contains('top') || c.classList.contains('left'))).toBe(false);
+    expect(controls.map((c) => [...c.classList].filter((k) => k === 'right' || k === 'bottom').join(' ')).sort()).toEqual(['bottom', 'bottom right', 'right']);
+  });
+  it('connects a wire dropped on the body of a step', async () => {
+    const onEdit = { moveStep: vi.fn(), moveFrame: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    const w = bw('w1', ['a', 'b']);
+    render(<Board workflows={[w]} selection={null} onSelect={() => {}} initialZoom={1} onEdit={onEdit} />);
+    await screen.findByText('a-name');
+    const a = w.stepAt.get('a')!;
+    act(() => seen.props!.onConnectEnd!({ clientX: a.x + 50, clientY: HEADER_H + a.y + 40 },
+      { isValid: false, fromNode: stepNode('w1', 'b', 0, 0), toNode: null }));
+    expect(onEdit.connect).toHaveBeenCalledWith('w1', 'b', 'w1', 'a');
+  });
+  it('connects a wire dropped on the wrong handle of a step to that step', async () => {
+    const onEdit = { moveStep: vi.fn(), moveFrame: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    render(<Board workflows={[bw('w1', ['a', 'b'])]} selection={null} onSelect={() => {}} initialZoom={1} onEdit={onEdit} />);
+    await screen.findByText('a-name');
+    act(() => seen.props!.onConnectEnd!({ clientX: 5000, clientY: 5000 },
+      { isValid: false, fromNode: stepNode('w1', 'b', 0, 0), toNode: stepNode('w1', 'a', 0, 0) }));
+    expect(onEdit.connect).toHaveBeenCalledWith('w1', 'b', 'w1', 'a');
+  });
+  it('hides the wires when zoomed far out, where the steps draw no handles', async () => {
+    render(<Board workflows={[bw('w1', ['a', 'b'], [{ id: 'a>b', from: 'a', to: 'b', condition: 1 }])]} selection={null} onSelect={() => {}} initialZoom={0.2} />);
+    await screen.findByText('2 steps');
+    const edges = () => seen.props!.edges as unknown as { hidden?: boolean }[];
+    await waitFor(() => expect(edges().map((e) => e.hidden)).toEqual([true]));
   });
 });
 

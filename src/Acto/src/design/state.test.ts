@@ -54,6 +54,12 @@ describe('workflow edit model', () => {
     expect(s.frame.w).toBeGreaterThanOrEqual(420); expect(s.frame.h).toBeGreaterThanOrEqual(196);
     expect(s.frame.w).toBeGreaterThanOrEqual(frameSizeOf(new Map([['a', s.steps.a!.at], ['b', s.steps.b!.at]])).w);
   });
+  it('keeps room for the cache chip row when resizing a frame with a cache', () => {
+    const s = stateOf(bwFull());
+    const min = frameSizeOf(new Map([['a', s.steps.a!.at], ['b', s.steps.b!.at]]));
+    const fitted = { ...s, frame: { ...s.frame, w: Math.max(min.w, 2 * 28 + 140), h: min.h + 44 } };
+    expect(resizeFrame(fitted, { w: fitted.frame.w, h: min.h })).toBe(fitted);
+  });
   it('creates an assignment on first payload edit', () => {
     const s = setPayload(stateOf(bw('w1', ['b'])), 'b', '{"x":1}', () => 'as1');
     expect(s.assignments.b).toMatchObject({ id: 'as1', name: 'b-name-assignment', version: '1.0.0', payload: '{"x":1}', isNew: true });

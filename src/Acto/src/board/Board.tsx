@@ -6,7 +6,7 @@ import type { Selection } from './selection';
 import { toFlow } from './toFlow';
 import { LinkWire } from './edges/LinkWire';
 import { CacheChip } from './nodes/CacheChip';
-import { dropVerdictItem, type DropItem } from './dropTarget';
+import { dropVerdictItem, stepAt, type DropItem } from './dropTarget';
 import { StepCard } from './nodes/StepCard';
 import { WorkflowFrame } from './nodes/WorkflowFrame';
 import { useLive, useLiveStore } from '../live/LiveContext';
@@ -81,7 +81,8 @@ export function Board({ workflows, selection, onSelect, initialZoom, initialView
           (sel.kind === 'step' && n.id === `st:${sel.workflowId}:${sel.stepId}`) ||
           (sel.kind === 'cache' && n.id === `ca:${sel.workflowId}:${sel.cacheId}`)),
       })),
-      edges: flow.edges.map((e) => ({ ...e, selected: sel?.kind === 'wire' && e.id === `wi:${sel.workflowId}:${sel.wireId}` })),
+      // far out the step cards draw no handles: React Flow would warn for every wire it cannot place
+      edges: flow.edges.map((e) => ({ ...e, hidden: far, selected: sel?.kind === 'wire' && e.id === `wi:${sel.workflowId}:${sel.wireId}` })),
     };
   }, [workflows, selection, far, editable]);
 
@@ -133,11 +134,21 @@ export function Board({ workflows, selection, onSelect, initialZoom, initialView
               if (!a || !b || a.type !== 'step' || b.type !== 'step') return;
               onEdit.connect(dataOf(a).workflowId, dataOf(a).stepId!, dataOf(b).workflowId, dataOf(b).stepId!);
             },
-            onConnectEnd: (_: unknown, st: { isValid: boolean | null; fromNode: Node | null; toNode: Node | null }) => {
+            onConnectEnd: (e: MouseEvent | TouchEvent, st: { isValid: boolean | null; fromNode: Node | null; toNode: Node | null }) => {
               if (!onEdit) return;
-              if (st.isValid === true || !st.fromNode || st.fromNode.type !== 'step') return;
-              if (st.toNode && st.toNode.type === 'step') return; // landed on a step; React Flow reports it through onConnect
-              onEdit.connect(dataOf(st.fromNode).workflowId, dataOf(st.fromNode).stepId!, null, null);
+              if (st.isValid === true || !st.fromNode || st.fromNode.type !== 'step') return; // reported through onConnect
+              const from = dataOf(st.fromNode);
+              // React Flow only finds a step near one of its handles: a drop on the card's body is found here
+              const pt = 'changedTouches' in e ? e.changedTouches[0] : e;
+              const hit = pt && flow.current ? stepAt(workflows, flow.current.screenToFlowPosition({ x: pt.clientX, y: pt.clientY })) : null;
+              if (hit) { onEdit.connect(from.workflowId, from.stepId!, hit.workflowId, hit.stepId); return; }
+              // dropped on a step's other handle: still that step
+              if (st.toNode && st.toNode.type === 'step') {
+                const to = dataOf(st.toNode);
+                onEdit.connect(from.workflowId, from.stepId!, to.workflowId, to.stepId!);
+                return;
+              }
+              onEdit.connect(from.workflowId, from.stepId!, null, null);
             },
           } : {})}
           elementsSelectable
