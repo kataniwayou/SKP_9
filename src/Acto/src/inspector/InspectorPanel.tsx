@@ -6,7 +6,8 @@ import { livenessText, statusOf } from '../live/liveState';
 import { cronText } from '../model/cronText';
 import { CONDITIONS, conditionInfo } from '../model/entryConditions';
 import { checkPayload } from '../model/payloadCheck';
-import type { BoardStore } from '../design/boardStore';
+import { useEntry, type BoardStore } from '../design/boardStore';
+import { canRedo, canUndo } from '../design/history';
 import { newId } from '../design/ids';
 import { removeAssignment, setCacheField, setPayload, setStepField, setWorkflowField } from '../design/state';
 import { AreaField, SelectField, TextField } from './fields';
@@ -141,12 +142,12 @@ function EditStep({ w, stepId, workflows, store }: { w: BoardWorkflow; stepId: s
       <TextField key={`${stepId}:name`} label="Name" value={step.name} onChange={(v) => set('name', v)} />
       <TextField key={`${stepId}:version`} label="Version" value={step.version} onChange={(v) => set('version', v)} />
       <TextField key={`${stepId}:description`} label="Description" value={step.description} onChange={(v) => set('description', orNull(v))} />
-      <SelectField key={`${stepId}:entryCondition`} label="Entry condition · colours every wire into this step" value={step.entryCondition}
+      <SelectField key={`${stepId}:entryCondition`} label="Entry condition Â· colours every wire into this step" value={step.entryCondition}
         options={CONDITIONS.map((c) => ({ value: c.value, label: `${c.letter} ${c.name}` }))} onChange={(v) => set('entryCondition', v)} />
       <Row k="Processor">{!step.processorId ? 'none' : processor?.name ?? step.processorId}</Row>
       {step.processorId && <ProcessorLine processorId={step.processorId} />}
       <Row k="Role">{w.roles.get(stepId) ?? 'reached'}</Row>
-      {sharing.length > 1 && <Row k="Shared">{`shared · ${sharing.length}: ${sharing.map((x) => x.graph.workflow.name).join(', ')}`}</Row>}
+      {sharing.length > 1 && <Row k="Shared">{`shared Â· ${sharing.length}: ${sharing.map((x) => x.graph.workflow.name).join(', ')}`}</Row>}
       <AreaField key={`${stepId}:payload`} label="Payload (JSON)" value={payload}
         onChange={(v) => { if (v === '' && !assignment) return; store.edit(wf, (s) => setPayload(s, stepId, v, newId), `field:${stepId}:payload`); }} />
       {assignment && <PayloadCheckNote w={w} stepId={stepId} payload={payload} />}
@@ -172,12 +173,24 @@ function EditCache({ w, cacheId, store }: { w: BoardWorkflow; cacheId: string; s
   );
 }
 
+function Header({ store, workflowId, name }: { store: BoardStore; workflowId: string | null; name: string | null }) {
+  const entry = useEntry(store, workflowId ?? '');
+  return (
+    <div className="ph"><span>Inspector</span>
+      {name !== null && <span className="ph-wf">{name}</span>}
+      <button type="button" disabled={!entry || !canUndo(entry.history)} onClick={() => workflowId && store.undo(workflowId)}>Undo</button>
+      <button type="button" disabled={!entry || !canRedo(entry.history)} onClick={() => workflowId && store.redo(workflowId)}>Redo</button>
+    </div>
+  );
+}
+
 /** What the selection is, as the loaded board knows it; editable when given the store. */
 export function InspectorPanel({ workflows, selection, store }: { workflows: BoardWorkflow[]; selection: Selection | null; store?: BoardStore }) {
   const w = selection === null ? undefined : workflows.find((x) => x.graph.workflow.id === selection.workflowId);
   return (
     <>
-      <div className="ph"><span>Inspector</span></div>
+      {store ? <Header store={store} workflowId={w ? w.graph.workflow.id : null} name={w ? w.graph.workflow.name : null} />
+        : <div className="ph"><span>Inspector</span></div>}
       <div className="pb">
         {selection === null || !w ? <BoardSummary workflows={workflows} />
           : selection.kind === 'workflow' ? (store ? <EditWorkflow w={w} store={store} /> : <WorkflowView w={w} />)

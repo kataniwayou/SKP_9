@@ -12,7 +12,6 @@ import { saveWorkflow } from './design/saveWorkflow';
 import type { ToolbarActions } from './board/nodes/boardContext';
 import { createBoardStore, useBoard, type BoardStore } from './design/boardStore';
 import { undoRedoKey } from './design/keys';
-import { canRedo, canUndo } from './design/history';
 import { InspectorPanel } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
 import { LiveStoreProvider } from './live/LiveContext';
@@ -133,9 +132,6 @@ export function App(props: AppProps) {
     return () => document.removeEventListener('keydown', onKey);
   }, [store, selWf]);
 
-  const selEntry = selWf === null ? null : store.entry(selWf);
-  const selName = selWf === null ? null : workflows.find((x) => x.graph.workflow.id === selWf)?.graph.workflow.name ?? null;
-
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   const persist = useCallback((sel: Selection | null) => {
@@ -231,9 +227,6 @@ export function App(props: AppProps) {
       <OutputProvider store={output}>
         <div className="acto">
           <header className="topbar"><span className="brand">Acto</span>
-            {selName !== null && <span className="tb-wf">{selName}</span>}
-            <button type="button" disabled={!selEntry || !canUndo(selEntry.history)} onClick={() => selWf && store.undo(selWf)}>Undo</button>
-            <button type="button" disabled={!selEntry || !canRedo(selEntry.history)} onClick={() => selWf && store.redo(selWf)}>Redo</button>
           </header>
           <Shell
             storage={storage}

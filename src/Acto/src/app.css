@@ -24,5 +24,4 @@
 .in-in { width: 100%; box-sizing: border-box; font: inherit; }
 .in-problem { color: #B42318; font-size: 12px; margin: 2px 0; }
 .in-act { margin-top: 8px; }
-.topbar { gap: 8px; }
-.tb-wf { margin-left: 16px; font-weight: 600; }
+.ph-wf { margin-left: 8px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--ink, #1A1D29); }

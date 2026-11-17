@@ -66,4 +66,39 @@ describe('App', () => {
     expect(inspector().queryByText('Wires')).toBeNull();
     expect(inspector().queryByText(/Entry condition/)).toBeNull();
   });
+
+  describe('undo/redo keys', () => {
+    const selectedStep = saved({ kind: 'step', workflowId: 'w1', stepId: 's1' });
+    const edit = async () => {
+      renderApp(fakeApi({ workflows: [wf('w1')] }), selectedStep);
+      const input = await inspector().findByDisplayValue('s1-name');
+      fireEvent.change(input, { target: { value: 's1-x' } });
+      return input;
+    };
+    it('Ctrl+Z undoes and Ctrl+Y redoes the selected workflow', async () => {
+      await edit();
+      expect(inspector().getByDisplayValue('s1-x')).toBeInTheDocument();
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+      expect(inspector().getByDisplayValue('s1-name')).toBeInTheDocument();
+      fireEvent.keyDown(document.body, { key: 'y', ctrlKey: true });
+      expect(inspector().getByDisplayValue('s1-x')).toBeInTheDocument();
+    });
+    it('leaves Ctrl+Z to a focused input', async () => {
+      const input = await edit();
+      fireEvent.keyDown(input, { key: 'z', ctrlKey: true });
+      expect(inspector().getByDisplayValue('s1-x')).toBeInTheDocument();
+    });
+    it('does nothing with no selection', async () => {
+      renderApp(fakeApi({ workflows: [wf('w1')] }));
+      await inspector().findByText('Board: 1 workflow, 0 running');
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+      expect(inspector().getByText('Board: 1 workflow, 0 running')).toBeInTheDocument();
+    });
+    it('keeps Undo/Redo out of the top bar', async () => {
+      renderApp(fakeApi({ workflows: [wf('w1')] }), selectedStep);
+      await inspector().findByDisplayValue('s1-name');
+      expect(document.querySelector('.topbar')!.querySelectorAll('button')).toHaveLength(0);
+      expect(inspector().getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+    });
+  });
 });

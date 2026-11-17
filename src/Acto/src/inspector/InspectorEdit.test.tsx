@@ -9,11 +9,11 @@ import { liveStub } from '../test/liveStub';
 import type { Selection } from '../board/selection';
 import { InspectorPanel } from './InspectorPanel';
 
-function setup(sel: Selection, tweak?: (b: ReturnType<typeof bwFull>) => void) {
+function setup(sel: Selection | null, tweak?: (b: ReturnType<typeof bwFull>) => void) {
   const b = bwFull();
   tweak?.(b);
   const store = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
-  store.load({ listed: true, workflows: [b], failures: [] }, [{ ...proc('p1', 'Analyst'), configSchemaId: b.graph.schemas.size > 0 ? 's1' : null }]);
+  store.load({ listed: true, workflows: [b], failures: [] }, [{ ...proc('p1', 'Analyst'), configSchemaId: 's1' }]);
   function Harness({ s }: { s: BoardStore }) {
     const ws = useBoard(s);
     return <InspectorPanel workflows={ws} selection={sel} store={s} />;
@@ -43,7 +43,7 @@ describe('inspector editing', () => {
   it('recolours the wires into the step when the entry condition changes', () => {
     const st = setup({ kind: 'step', workflowId: 'w1', stepId: 'b' });
     fireEvent.change(screen.getByLabelText(/Entry condition/), { target: { value: '2' } });
-    const edge = toFlow(st.boards()).edges.find((e) => e.id.includes('a') && e.target === 'b' || (e.data as { wireId?: string })?.wireId === 'a>b');
+    const edge = toFlow(st.boards()).edges.find((e) => e.id === 'wi:w1:a>b');
     expect((edge!.data as { condition: number }).condition).toBe(2);
   });
   it('shows the checker message for an invalid payload and keeps it', () => {
@@ -68,5 +68,35 @@ describe('inspector editing', () => {
     const input = screen.getByDisplayValue('a-name');
     fireEvent.change(input, { target: { value: 'zzz' } });
     expect((input as HTMLInputElement).value).toBe('a-name');
+  });
+
+  describe('header', () => {
+    const header = () => document.querySelector('.ph') as HTMLElement;
+    const btn = (n: string) => screen.getByRole('button', { name: n }) as HTMLButtonElement;
+    it('is greyed with no name when nothing is selected', () => {
+      setup(null);
+      expect(btn('Undo').disabled).toBe(true);
+      expect(btn('Redo').disabled).toBe(true);
+      expect(header().textContent).not.toContain('orders');
+    });
+    it('shows the workflow name and enables Undo/Redo as the history allows', () => {
+      const st = setup(A);
+      expect(header().textContent).toContain('orders');
+      expect(btn('Undo').disabled).toBe(true);
+      expect(btn('Redo').disabled).toBe(true);
+      fireEvent.change(screen.getByDisplayValue('a-name'), { target: { value: 'ab' } });
+      expect(btn('Undo').disabled).toBe(false);
+      expect(btn('Redo').disabled).toBe(true);
+      fireEvent.click(btn('Undo'));
+      expect(stepName(st)).toBe('a-name');
+      expect(btn('Undo').disabled).toBe(true);
+      expect(btn('Redo').disabled).toBe(false);
+      fireEvent.click(btn('Redo'));
+      expect(stepName(st)).toBe('ab');
+    });
+    it('does not offer Undo/Redo without a store', () => {
+      render(<LiveStoreProvider value={liveStub()}><InspectorPanel workflows={[bwFull()]} selection={A} /></LiveStoreProvider>);
+      expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+    });
   });
 });
