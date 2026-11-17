@@ -3,7 +3,7 @@
 #   docker build -f src/Acto/Dockerfile -t acto:local .
 # The npm packages come only from Studio-offline/npm-offline/ (2026-10-12; in the kit since 2026-10-19), the npm
 # counterpart of nugets/: the build never reaches an npm registry, and a package missing there fails it by name
-# (node tools/vendor-npm.mjs acto keeps the folder in step with the lock file). The base images are build settings,
+# (node tools/vendor-npm.mjs acto adds what Acto's lock file needs; the kit is shared with WorkflowStudio, so it keeps their tarballs too). The base images are build settings,
 # for a registry such as Artifactory (defaults: Docker Hub, or the tars in Studio-offline/images/ loaded into Docker):
 # --build-arg NODE_IMAGE=<registry>/node:24-alpine --build-arg NGINX_IMAGE=<registry>/nginx:1.29-alpine
 ARG NODE_IMAGE=node:24-alpine
@@ -24,9 +24,9 @@ RUN npm run build
 
 FROM ${NGINX_IMAGE}
 # nginx.conf is a template (the chat's model, 2026-10-11): at start the image writes it to conf.d/default.conf with only these
-# variables filled in, so nginx's own $variables stay: the model's base URL, id and key (env KIMI_BASE_URL,
+# variables filled in, so nginx's own $variables stay: BASEAPI_URL, the model's base URL, id and key (env KIMI_BASE_URL,
 # KIMI_MODEL_ID, KIMI_API_KEY, set by k8s/47-acto.yaml; any empty: /ai answers 503) and the pod's DNS
-# resolvers (the /ai upstream is resolved per request).
+# resolvers (NGINX_LOCAL_RESOLVERS; the /ai upstream is resolved per request).
 # BaseApi's address (env BASEAPI_URL, 2026-10-18; k8s/47-acto.yaml): scheme, host and port only, looked up when nginx
 # starts; the default is the cluster's service.
 ENV BASEAPI_URL="http://baseapi-service:8080" \

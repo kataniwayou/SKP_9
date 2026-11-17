@@ -2,12 +2,12 @@
 // package an app's package-lock.json installs, as the registry's own .tgz, in its kit's npm-offline/. The app's Docker
 // build installs from that folder only, never from the network, so a package missing there fails the build by name.
 //
-//   node tools/vendor-npm.mjs <app>            download what is missing, remove what the lock file no longer names
+//   node tools/vendor-npm.mjs <app>            download what is missing, remove what no app of the kit names any more
 //   node tools/vendor-npm.mjs <app> --check    only check: every package present and matching the lock file's checksum
 //   node tools/vendor-npm.mjs <app> --install  offline: check, then npm ci in the app's folder from npm-offline/ alone
 //                                              (a temporary cache, never the network), for a compile outside Docker
 //
-// <app> is studio (src/WorkflowStudio, Studio-offline/npm-offline) or valence (src/Valence, Valence-offline/npm-offline).
+// <app> is studio (src/WorkflowStudio, Studio-offline/npm-offline), acto (src/Acto, the same kit) or valence (src/Valence, Valence-offline/npm-offline).
 // Run it after every change to the app's package-lock.json, and commit npm-offline/ with it. Platform builds are kept
 // only for the platforms below (the Docker build's Linux, both libcs, and Windows for a local npm ci); a machine on
 // another platform installs its own from npm.
@@ -38,14 +38,25 @@ const PLATFORMS = [['linux', 'x64'], ['linux', 'arm64'], ['win32', 'x64']];
 /** The file a package is kept as: its name with the scope's slash made a plus, and its version. */
 export const fileOf = (name, version) => `${name.replace('/', '+')}-${version}.tgz`;
 
-const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
-const wanted = new Map();
-for (const [path, p] of Object.entries(lock.packages)) {
-  if (!path || p.link || !p.resolved) continue;
-  const kept = !p.os && !p.cpu || PLATFORMS.some(([os, cpu]) => (!p.os || p.os.includes(os)) && (!p.cpu || p.cpu.includes(cpu)));
-  if (!kept) continue;
-  const name = p.name ?? path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length);
-  wanted.set(fileOf(name, p.version), { url: p.resolved, integrity: p.integrity });
+/** The tarballs a lock file names, for the platforms kept: file -> { url, integrity }. */
+const wantedBy = (sourceDir) => {
+  const lock = JSON.parse(readFileSync(join(repo, sourceDir, 'package-lock.json'), 'utf8'));
+  const out = new Map();
+  for (const [path, p] of Object.entries(lock.packages)) {
+    if (!path || p.link || !p.resolved) continue;
+    const kept = !p.os && !p.cpu || PLATFORMS.some(([os, cpu]) => (!p.os || p.os.includes(os)) && (!p.cpu || p.cpu.includes(cpu)));
+    if (!kept) continue;
+    const name = p.name ?? path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length);
+    out.set(fileOf(name, p.version), { url: p.resolved, integrity: p.integrity });
+  }
+  return out;
+};
+const wanted = wantedBy(app.source);
+// Apps that share this kit: a tarball another of them still needs is never stale (and never removed) here.
+const sharedBy = new Map();
+for (const [other, o] of Object.entries(APPS)) {
+  if (o === app || o.kit !== app.kit) continue;
+  for (const f of wantedBy(o.source).keys()) if (!sharedBy.has(f)) sharedBy.set(f, other);
 }
 
 const matches = (bytes, integrity) => {
@@ -67,7 +78,10 @@ for (const [file, { url, integrity }] of wanted) {
   writeFileSync(at, bytes);
   fetched++;
 }
-const stale = readdirSync(feed).filter((f) => f.endsWith('.tgz') && !wanted.has(f));
+const unwanted = readdirSync(feed).filter((f) => f.endsWith('.tgz') && !wanted.has(f));
+const keptForOthers = unwanted.filter((f) => sharedBy.has(f));
+const stale = unwanted.filter((f) => !sharedBy.has(f));
+if (keptForOthers.length) console.log(`${keptForOthers.length} tarball(s) kept: not in ${process.argv[2]}'s lock file but needed by another app of ${app.kit} (${[...new Set(keptForOthers.map((f) => sharedBy.get(f)))].join(', ')})`);
 if (check) stale.forEach((f) => problems.push(`${f}: not in the lock file`));
 else stale.forEach((f) => unlinkSync(join(feed, f)));
 
