@@ -7,7 +7,11 @@ import { commit, historyOf, redo, undo, type History } from './history';
 import { applyStored } from './request';
 import { boardWorkflowOf, sameState, stateOf, type WorkflowState } from './state';
 
-export interface BoardEntry { base: WorkflowState | null; history: History; unsaved: boolean }
+export interface BoardEntry { base: WorkflowState | null; history: History; unsaved: boolean;
+  /** The stored layout the workflow had when loaded (opaque JSON), to spot a change made elsewhere. */
+  layout: unknown;
+  /** Validation problems the last save found; 0 when valid or never saved. */
+  problems: number }
 
 export interface BoardStore {
   load(board: BoardLoad, processors: Processor[]): void;
@@ -20,6 +24,7 @@ export interface BoardStore {
   redo(id: Id): void;
   addWorkflow(state: WorkflowState): void;
   replace(id: Id, bw: BoardWorkflow): void;
+  setProblems(id: Id, n: number): void;
   subscribe(fn: () => void): () => void;
 }
 
@@ -38,15 +43,15 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
   let cached: BoardWorkflow[] | null = null;
   const subs = new Set<() => void>();
 
-  const viewOf = (base: WorkflowState | null, history: History): BoardEntry => ({
-    base, history, unsaved: !base || !sameState(history.present, base),
+  const viewOf = (base: WorkflowState | null, history: History, layout: unknown = null, problems = 0): BoardEntry => ({
+    base, history, unsaved: !base || !sameState(history.present, base), layout, problems,
   });
   const make = (baseBw: BoardWorkflow | null, history?: History): Rec => {
     const base = baseBw ? stateOf(baseBw) : null;
     const h = history ?? historyOf(base!);
-    return { baseBw, base, history: h, view: viewOf(base, h), bwFor: null, bw: null };
+    return { baseBw, base, history: h, view: viewOf(base, h, baseBw?.graph.layout ?? null), bwFor: null, bw: null };
   };
-  const withHistory = (r: Rec, h: History): Rec => ({ ...r, history: h, view: viewOf(r.base, h), bwFor: null, bw: null });
+  const withHistory = (r: Rec, h: History): Rec => ({ ...r, history: h, view: viewOf(r.base, h, r.view.layout, r.view.problems), bwFor: null, bw: null });
   const notify = () => { cached = null; subs.forEach((f) => f()); };
   const changed = () => {
     const drafts: Drafts = { ...kept };
@@ -137,6 +142,12 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     replace(id, bw) {
       recs.set(id, make(bw));
       changed();
+    },
+    setProblems(id, n) {
+      const r = recs.get(id);
+      if (!r || r.view.problems === n) return;
+      recs.set(id, { ...r, view: { ...r.view, problems: n } });
+      notify();
     },
     subscribe(fn) { subs.add(fn); return () => { subs.delete(fn); }; },
   };

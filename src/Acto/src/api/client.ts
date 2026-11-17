@@ -1,5 +1,5 @@
 import { ENTITY_PATH, type EntityKind, type ReadDtoOf, type UpdateDtoOf } from './entities';
-import type { AssignmentCreateDto, AssignmentReadDto, CacheReadDto, DesignOutcomeDto, DesignSaveRequest, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowDeleteOutcomeDto, WorkflowGraphDto, WorkflowReadDto } from './types';
+import type { AssignmentCreateDto, AssignmentReadDto, CacheReadDto, DesignOutcomeDto, DesignSaveRequest, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowDeleteOutcomeDto, WorkflowGraphDto, WorkflowReadDto, WorkflowValidationDto } from './types';
 
 /**
  * Every way a request can fail, as data. The UI shows these in its status line (Output in plan 5);
@@ -68,6 +68,8 @@ export interface StudioApi {
    * dashboard's diagram panel shows (`GET /workflows/{id}.svg`). Leaves the workflow's `updatedAt` where it was. 204.
    */
   publishDiagram(workflowId: string, svg: string): Promise<ApiResult<null>>;
+  /** `POST /workflows/{id}/validate` with no body: the start gates' problems for the workflow as stored. */
+  validateWorkflow(workflowId: string): Promise<ApiResult<WorkflowValidationDto>>;
 }
 
 interface Problem {
@@ -172,6 +174,7 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
       }
       return response.ok ? { ok: true, value: null } : { ok: false, error: await toError(response) };
     },
+    validateWorkflow: (workflowId) => request<WorkflowValidationDto>('POST', `/workflows/${id(workflowId)}/validate`),
     deleteWorkflow: (workflowId, dryRun) => request<WorkflowDeleteOutcomeDto>('POST', `/workflows/${id(workflowId)}/delete${dryRun ? '?dryRun=true' : ''}`),
   };
 }

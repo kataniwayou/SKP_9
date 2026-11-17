@@ -23,3 +23,4 @@ export type DesignSaveRequest = Schemas['DesignSaveRequest'];
 export type DesignOutcomeDto = Schemas['DesignOutcomeDto'];
 export type WorkflowDeleteOutcomeDto = Schemas['WorkflowDeleteOutcomeDto'];
 export type DesignErrorDto = Schemas['DesignErrorDto'];
+export type WorkflowValidationDto = Schemas['WorkflowValidationDto'];
