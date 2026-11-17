@@ -56,6 +56,50 @@ describe('Board editing', () => {
     act(() => seen.props!.onNodeDragStop!({}, { id: 'wf:w1', type: 'workflow', position: { x: 40, y: 50 }, data: { workflowId: 'w1' } }));
     expect(onEdit.moveMany).toHaveBeenCalledWith('w1', { steps: [], frame: { x: 40, y: 50 } });
   });
+  describe('a press on a frame, through React Flow', () => {
+    // React Flow's own drag (d3-drag): the press on the node, the moves and the release on the window
+    const gesture = (el: HTMLElement, path: [number, number][]) => {
+      // d3-drag listens on the event's view (jsdom's MouseEvent will not take the test window as one: set after)
+      const view = el.ownerDocument.defaultView!;
+      const mouse = (type: string, x: number, y: number) => {
+        const e = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, buttons: type === 'mouseup' ? 0 : 1, clientX: x, clientY: y });
+        Object.defineProperty(e, 'view', { value: view });
+        return e;
+      };
+      const [x0, y0] = path[0]!;
+      fireEvent(el, mouse('mousedown', x0, y0));
+      for (const [x, y] of path.slice(1)) fireEvent(view, mouse('mousemove', x, y));
+      const [x1, y1] = path.at(-1)!;
+      fireEvent(view, mouse('mouseup', x1, y1));
+    };
+    const frame = () => document.querySelector('[data-id="wf:w1"]') as HTMLElement;
+
+    it('a click that wobbles a few pixels picks the frame and moves nothing', async () => {
+      const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+      const onPick = vi.fn();
+      render(<Board workflows={[bw('w1', ['a'])]} picks={[]} onPick={onPick} initialZoom={0.5} onEdit={onEdit} />);
+      await screen.findByText('a-name');
+      // a hand on a mouse: a few one-pixel twitches between press and release (3 px down-left in all)
+      act(() => gesture(frame(), [[200, 120], [199, 119], [198, 118], [197, 117]]));
+      fireEvent.click(frame(), { clientX: 197, clientY: 117 });
+      expect(onEdit.moveMany).not.toHaveBeenCalled();
+      expect(onPick).toHaveBeenCalledWith({ kind: 'workflow', workflowId: 'w1' }, false);
+    });
+    it('a real drag of the frame still moves it, by the distance dragged', async () => {
+      const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+      const w = bw('w1', ['a']);
+      render(<Board workflows={[w]} picks={[]} onPick={() => {}} initialZoom={1} onEdit={onEdit} />);
+      await screen.findByText('a-name');
+      const path: [number, number][] = [[200, 120]];
+      for (let i = 1; i <= 20; i++) path.push([200 + i * 5, 120]);
+      act(() => gesture(frame(), path));
+      expect(onEdit.moveMany).toHaveBeenCalledTimes(1);
+      const [wf, moved] = onEdit.moveMany.mock.calls[0]! as [string, { frame: { x: number; y: number } }];
+      expect(wf).toBe('w1');
+      // most of the 100 px dragged (jsdom's board has no size, so React Flow's edge auto-pan adds a little)
+      expect(moved.frame.x - w.frame.x).toBeGreaterThan(80);
+    });
+  });
   it('Esc during a drag puts the node back and the drag end commits nothing', async () => {
     const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
     const w = bw('w1', ['a']);

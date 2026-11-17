@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { applyNodeChanges, Background, BackgroundVariant, Controls, Panel, ReactFlow, useStore, type EdgeChange, type EdgeTypes, type Node, type NodeChange, type NodeTypes, type Viewport } from '@xyflow/react';
-import { HEADER_H, ZOOM_DETAIL } from './geometry';
+import { CLICK_SLOP, HEADER_H, ZOOM_DETAIL } from './geometry';
 import type { BoardWorkflow } from './loadBoard';
 import { pickKey, type Pick } from './picks';
 import { toFlow } from './toFlow';
@@ -218,6 +218,9 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
           edgeTypes={edgeTypes}
           nodesDraggable={editable}
           nodesConnectable={editable}
+          // a click whose pointer wobbles a few pixels is still a click: it picks and moves nothing
+          nodeDragThreshold={CLICK_SLOP}
+          nodeClickDistance={CLICK_SLOP}
           {...(editable ? {
             onNodesChange,
             onNodeDragStart: (_: unknown, n: Node, all?: Node[]) => dragStart(n, all),
