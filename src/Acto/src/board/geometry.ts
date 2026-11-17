@@ -6,3 +6,5 @@ export const FRAME_MIN_W = 420;
 export const FRAME_MIN_BODY_H = 150;
 export const FRAME_GAP = 80;
 export const BOARD_ROW_W = 2400;
+/** Below this zoom a frame shows only its name, state and step count. */
+export const ZOOM_DETAIL = 0.4;

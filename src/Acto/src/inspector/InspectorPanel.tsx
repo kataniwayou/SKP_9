@@ -15,7 +15,7 @@ function BoardSummary({ workflows }: { workflows: BoardWorkflow[] }) {
   useLive((s) => s.running);
   useLive((s) => s.workflows);
   const running = workflows.filter((w) => statusOf(store.getState(), w.graph.workflow.id) === 'running').length;
-  return <div className="in-sum">{`Board: ${workflows.length} workflows, ${running} running`}</div>;
+  return <div className="in-sum">{`Board: ${workflows.length} workflow${workflows.length === 1 ? '' : 's'}, ${running} running`}</div>;
 }
 
 function WorkflowView({ w }: { w: BoardWorkflow }) {
@@ -47,15 +47,15 @@ function StepView({ w, stepId, workflows }: { w: BoardWorkflow; stepId: string; 
   const step = w.graph.steps.get(stepId);
   if (!step) return null;
   const cond = conditionInfo(step.entryCondition);
-  const processor = step.processorId === null ? undefined : w.graph.processors.get(step.processorId);
+  const processor = step.processorId ? w.graph.processors.get(step.processorId) : undefined;
   const sharing = workflows.filter((x) => x.stepIds.includes(stepId));
   return (
     <>
       <div className="in-title">{step.name}</div>
       <Row k="Version">{step.version}</Row>
       <Row k="Entry condition">{`${cond.letter} ${cond.name}`}</Row>
-      <Row k="Processor">{step.processorId === null ? 'none' : processor?.name ?? step.processorId}</Row>
-      {step.processorId !== null && <ProcessorLine processorId={step.processorId} />}
+      <Row k="Processor">{!step.processorId ? 'none' : processor?.name ?? step.processorId}</Row>
+      {step.processorId && <ProcessorLine processorId={step.processorId} />}
       <Row k="Role">{w.roles.get(stepId) ?? 'reached'}</Row>
       {sharing.length > 1 && <Row k="Shared">{`shared · ${sharing.length}: ${sharing.map((x) => x.graph.workflow.name).join(', ')}`}</Row>}
     </>

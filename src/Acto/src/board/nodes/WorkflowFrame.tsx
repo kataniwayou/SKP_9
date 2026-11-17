@@ -1,6 +1,6 @@
 import { useStore, type NodeProps } from '@xyflow/react';
 import { cronText } from '../../model/cronText';
-import { ZOOM_DETAIL } from '../edges/LinkWire';
+import { ZOOM_DETAIL } from '../geometry';
 import { useWorkflowStatus } from '../../live/LiveContext';
 import { STATE_COLOUR, StateBadge } from '../live/StateBadge';
 import { useBoardWorkflow } from './boardContext';

@@ -1,5 +1,6 @@
-import { useMemo, useRef } from 'react';
-import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, type EdgeTypes, type NodeTypes, type Viewport } from '@xyflow/react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useStore, type EdgeTypes, type NodeTypes, type Viewport } from '@xyflow/react';
+import { ZOOM_DETAIL } from './geometry';
 import type { BoardWorkflow } from './loadBoard';
 import type { Selection } from './selection';
 import { toFlow } from './toFlow';
@@ -14,6 +15,13 @@ import './board.css';
 
 const nodeTypes: NodeTypes = { workflow: WorkflowFrame, step: StepCard };
 const edgeTypes: EdgeTypes = { link: LinkWire };
+
+/** Inside the flow: reports when the zoom crosses ZOOM_DETAIL (the selector is a boolean, so only then). */
+function FarWatch({ onFar }: { onFar: (far: boolean) => void }) {
+  const far = useStore((s) => s.transform[2] < ZOOM_DETAIL);
+  useEffect(() => { onFar(far); }, [far, onFar]);
+  return null;
+}
 
 export interface BoardProps {
   workflows: BoardWorkflow[];
@@ -36,6 +44,8 @@ export function Board({ workflows, selection, onSelect, initialZoom, initialView
   const live = useLiveStore();
   useLive((st) => st.running); // re-render the minimap strokes when a workflow starts or stops
   useLive((st) => st.workflows);
+  // Far out the step cards render nothing; their wrappers must not catch clicks meant for the frame.
+  const [far, setFar] = useState(false);
   const byId = useMemo(() => new Map(workflows.map((w) => [w.graph.workflow.id, w])), [workflows]);
   const { nodes, edges } = useMemo(() => {
     const flow = toFlow(workflows);
@@ -43,13 +53,14 @@ export function Board({ workflows, selection, onSelect, initialZoom, initialView
     return {
       nodes: flow.nodes.map((n) => ({
         ...n,
+        ...(far && n.type === 'step' ? { style: { ...n.style, pointerEvents: 'none' as const } } : {}),
         selected: sel !== null && (
           (sel.kind === 'workflow' && n.id === `wf:${sel.workflowId}`) ||
           (sel.kind === 'step' && n.id === `st:${sel.workflowId}:${sel.stepId}`)),
       })),
       edges: flow.edges.map((e) => ({ ...e, selected: sel?.kind === 'wire' && e.id === `wi:${sel.workflowId}:${sel.wireId}` })),
     };
-  }, [workflows, selection]);
+  }, [workflows, selection, far]);
 
   return (
     <BoardContext.Provider value={byId}>
@@ -81,6 +92,7 @@ export function Board({ workflows, selection, onSelect, initialZoom, initialView
           onPaneClick={() => select(null)}
           proOptions={{ hideAttribution: true }}
         >
+          <FarWatch onFar={setFar} />
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
           <MiniMap pannable zoomable nodeStrokeColor={(n) => {
             if (n.type !== 'workflow') return 'transparent';

@@ -1,7 +1,7 @@
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import type { StepRole } from '../roles';
 import { conditionStyle } from '../wires';
-import { ZOOM_DETAIL } from '../edges/LinkWire';
+import { ZOOM_DETAIL } from '../geometry';
 import { HealthDot } from '../live/HealthDot';
 import { useBoardWorkflow } from './boardContext';
 

@@ -28,6 +28,13 @@ describe('InspectorPanel', () => {
     expect(screen.getByText('Steps').nextSibling).toHaveTextContent('2');
     expect(screen.getByText('Wires').nextSibling).toHaveTextContent('1');
   });
+  it('shows "none" and no liveness for a step whose processor id is empty', () => {
+    const w = bw('w1', ['a']);
+    w.graph.steps.set('a', { ...w.graph.steps.get('a')!, processorId: '' });
+    render(<LiveStoreProvider value={liveStub()}><InspectorPanel workflows={[w]} selection={{ kind: 'step', workflowId: 'w1', stepId: 'a' }} /></LiveStoreProvider>);
+    expect(screen.getByText('Processor').nextSibling).toHaveTextContent('none');
+    expect(screen.queryByText('Liveness')).toBeNull();
+  });
   it('describes a step with condition, processor, liveness and role', () => {
     const live = liveStub(); live.known([], { 'p-a': true });
     render(<LiveStoreProvider value={live}><InspectorPanel workflows={[bw('w1', ['a'])]} selection={{ kind: 'step', workflowId: 'w1', stepId: 'a' }} /></LiveStoreProvider>);

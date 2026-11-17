@@ -2,15 +2,13 @@ import { useStore, type EdgeProps } from '@xyflow/react';
 import { useWorkflowStatus } from '../../live/LiveContext';
 import { conditionStyle } from '../wires';
 import type { Point } from '../../model/geometry';
-
-/** Below this zoom a frame shows only its name, state and step count. */
-export const ZOOM_DETAIL = 0.4;
+import { ZOOM_DETAIL } from '../geometry';
 
 export function LinkWire({ id, data, selected }: EdgeProps) {
   const workflowId = (data as { workflowId?: string } | undefined)?.workflowId ?? '';
   const running = useWorkflowStatus(workflowId) === 'running';
-  const zoom = useStore((s) => s.transform[2]);
-  if (zoom < ZOOM_DETAIL) return null;
+  const far = useStore((s) => s.transform[2] < ZOOM_DETAIL);
+  if (far) return null;
   const { condition, out, in: inn } = data as { condition: number; out: Point; in: Point };
   const style = conditionStyle(condition);
   const tx = inn.x - 9;

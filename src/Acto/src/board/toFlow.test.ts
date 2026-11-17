@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { bw } from './fixtures';
+import { HEADER_H, STEP_H, STEP_W } from './geometry';
 import { toFlow } from './toFlow';
 
 describe('toFlow', () => {
@@ -22,6 +23,19 @@ describe('toFlow', () => {
     expect(nodes.find((n) => n.id === 'st:w1:a')!.position.y).toBeGreaterThanOrEqual(46);
     const d = edges[0]!.data as { out: { x: number }; in: { x: number } };
     expect(d.in.x).toBeGreaterThan(d.out.x);
+  });
+  it('places steps relative to a frame at (1000, 500) and lands wires in board coordinates', () => {
+    const w = bw('w1', ['a', 'b'], [{ id: 'a>b', from: 'a', to: 'b', condition: 1 }], { x: 1000, y: 500 });
+    const a = w.stepAt.get('a')!;
+    const b = w.stepAt.get('b')!;
+    const { nodes, edges } = toFlow([w]);
+    expect(nodes.find((n) => n.id === 'wf:w1')!.position).toEqual({ x: 1000, y: 500 });
+    expect(nodes.find((n) => n.id === 'st:w1:a')!.position).toEqual({ x: a.x, y: a.y + HEADER_H });
+    expect(nodes.find((n) => n.id === 'st:w1:b')!.position).toEqual({ x: b.x, y: b.y + HEADER_H });
+    expect(edges[0]!.data).toMatchObject({
+      out: { x: 1000 + a.x + STEP_W, y: 500 + HEADER_H + a.y + STEP_H / 2 },
+      in: { x: 1000 + b.x, y: 500 + HEADER_H + b.y + STEP_H / 2 },
+    });
   });
   it('gives an empty workflow a frame at the minimum size', () => {
     const frame = toFlow([bw('w2', [])]).nodes.find((n) => n.id === 'wf:w2')!;

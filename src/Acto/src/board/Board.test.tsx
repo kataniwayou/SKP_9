@@ -16,6 +16,12 @@ describe('Board', () => {
     expect(await screen.findByText('2 steps')).toBeInTheDocument();
     expect(screen.queryByText('a-name')).toBeNull();
   });
+  it('lets a click at far zoom fall through the hidden steps to the frame', async () => {
+    render(<Board workflows={[bw('w1', ['a'])]} selection={null} onSelect={() => {}} initialZoom={0.3} />);
+    await screen.findByText('1 step');
+    const node = document.querySelector('.react-flow__node-step') as HTMLElement;
+    expect(node.style.pointerEvents).toBe('none');
+  });
   it('reports a click on a step as a step selection', async () => {
     const onSelect = vi.fn();
     render(<Board workflows={[bw('w1', ['a'])]} selection={null} onSelect={onSelect} />);

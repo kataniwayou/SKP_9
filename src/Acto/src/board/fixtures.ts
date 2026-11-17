@@ -6,7 +6,7 @@ import type { Wire } from './wires';
 import type { BoardWorkflow } from './loadBoard';
 
 /** Tests only: a BoardWorkflow named `id + '-name'` whose steps are named `stepId + '-name'`. */
-export function bw(id: string, stepIds: string[], wires: Wire[] = []): BoardWorkflow {
+export function bw(id: string, stepIds: string[], wires: Wire[] = [], at: { x: number; y: number } = { x: 0, y: 0 }): BoardWorkflow {
   const steps = new Map<string, Step>();
   const processors = new Map<string, Processor>();
   for (const s of stepIds) {
@@ -28,7 +28,7 @@ export function bw(id: string, stepIds: string[], wires: Wire[] = []): BoardWork
   const stepAt = defaultStepPositions(graph.workflow.entryStepIds, steps, new Map());
   const size = frameSizeOf(stepAt);
   return {
-    graph, stepIds, stepAt, frame: { x: 0, y: 0, ...size }, roles: stepRoles(stepIds, wires), wires,
+    graph, stepIds, stepAt, frame: { ...at, ...size }, roles: stepRoles(stepIds, wires), wires,
     entryDiff: { stops: [], starts: [] },
   };
 }

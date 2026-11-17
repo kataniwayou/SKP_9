@@ -4,6 +4,8 @@ import type { Graph, Id } from '../model/graph';
 import type { Point, Rect } from '../model/geometry';
 import { reachableStepIds } from '../model/reachability';
 import { parseActoLayout } from './layoutDoc';
+import { describeError } from '../api/describeError';
+import { FRAME_PAD, STEP_H } from './geometry';
 import { defaultStepPositions, frameSizeOf, placeFrames } from './placement';
 import { derivedEntrySteps, entryDiff, stepRoles, type StepRole } from './roles';
 import { wiresOf, type Wire } from './wires';
@@ -18,6 +20,8 @@ export interface BoardWorkflow {
   entryDiff: { stops: Id[]; starts: Id[] };
 }
 export interface BoardLoad {
+  /** False when the workflow list itself failed: nothing was loaded, and `failures` says why. */
+  listed: boolean;
   workflows: BoardWorkflow[];
   failures: { workflowId: Id; name: string; detail: string }[];
 }
@@ -34,6 +38,19 @@ export async function loadWorkflow(api: StudioApi, workflowId: Id): Promise<ApiR
   } catch (e) {
     return { ok: false, error: { kind: 'http', status: 0, detail: `Could not open the workflow: ${e instanceof Error ? e.message : String(e)}` } };
   }
+}
+
+const DEFAULT_GAP = 40;
+
+/**
+ * Stored positions may be anywhere (WorkflowStudio kept canvas coordinates, some negative). Shift
+ * them together so the top-left-most step sits at FRAME_PAD, keeping their layout relative to each other.
+ */
+function shiftedIntoFrame(stored: [Id, Point][]): Map<Id, Point> {
+  if (stored.length === 0) return new Map();
+  const dx = FRAME_PAD - Math.min(...stored.map(([, p]) => p.x));
+  const dy = FRAME_PAD - Math.min(...stored.map(([, p]) => p.y));
+  return new Map(stored.map(([id, p]) => [id, { x: p.x + dx, y: p.y + dy }]));
 }
 
 async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<Loaded>> {
@@ -57,18 +74,20 @@ async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<Loaded>> 
     stepIds.push(id);
     inFrame.add(id);
     const pid = model.processorId;
-    if (pid !== null && !graph.processors.has(pid)) {
+    if (pid && !graph.processors.has(pid)) {
       const processor = await api.getProcessor(pid);
       if (processor.ok) graph.processors.set(pid, processorFromDto(processor.value));
       else if (processor.error.kind !== 'notFound') return processor;
     }
   }
 
-  const placed = new Map<Id, Point>();
-  for (const id of stepIds) if (layout.steps[id]) placed.set(id, layout.steps[id]);
+  const placed = shiftedIntoFrame(stepIds.filter((id) => layout.steps[id]).map((id) => [id, layout.steps[id]!]));
   const stepAt = new Map<Id, Point>(placed);
   const inFrameSteps = new Map(stepIds.map((id) => [id, graph.steps.get(id)!]));
-  for (const [id, p] of defaultStepPositions(graph.workflow.entryStepIds, inFrameSteps, placed)) stepAt.set(id, p);
+  // Defaults start at FRAME_PAD; push them below the stored steps so they never sit on top of them.
+  let below = 0;
+  for (const p of placed.values()) below = Math.max(below, p.y + STEP_H + DEFAULT_GAP - FRAME_PAD);
+  for (const [id, p] of defaultStepPositions(graph.workflow.entryStepIds, inFrameSteps, placed)) stepAt.set(id, { x: p.x, y: p.y + below });
 
   const wires = wiresOf(stepIds, graph.steps);
   const roles = stepRoles(stepIds, wires);
@@ -80,9 +99,7 @@ async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<Loaded>> 
 export async function loadBoard(api: StudioApi, concurrency = 4): Promise<BoardLoad> {
   const list = await api.listWorkflows();
   if (!list.ok) {
-    const e = list.error;
-    const detail = 'detail' in e ? e.detail : 'message' in e ? e.message : e.kind;
-    return { workflows: [], failures: [{ workflowId: '', name: 'workflow list', detail }] };
+    return { listed: false, workflows: [], failures: [{ workflowId: '', name: 'the workflow list', detail: describeError(list.error) }] };
   }
   const items = list.value.filter((w): w is typeof w & { id: string } => !!w.id).map((w) => ({ id: w.id, name: w.name ?? w.id }));
   const results: (ApiResult<Loaded> | undefined)[] = new Array(items.length);
@@ -99,10 +116,7 @@ export async function loadBoard(api: StudioApi, concurrency = 4): Promise<BoardL
   const failures: BoardLoad['failures'] = [];
   results.forEach((r, i) => {
     if (r?.ok) ok.push({ w: r.value, i });
-    else if (r) {
-      const e = r.error;
-      failures.push({ workflowId: items[i].id, name: items[i].name, detail: 'detail' in e ? e.detail : 'message' in e ? e.message : e.kind });
-    }
+    else if (r) failures.push({ workflowId: items[i].id, name: items[i].name, detail: describeError(r.error) });
   });
 
   const sizes = ok.map(({ w }) => {
@@ -112,7 +126,7 @@ export async function loadBoard(api: StudioApi, concurrency = 4): Promise<BoardL
   const frames = placeFrames(ok.map(({ w, i }, k) => ({
     id: items[i].id, createdAt: w.graph.workflow.audit.createdAt, stored: w.storedFrame && { ...w.storedFrame, ...sizes[k] }, size: sizes[k],
   })));
-  return { workflows: ok.map(({ w, i }) => ({ ...omitStored(w), frame: frames.get(items[i].id)! })), failures };
+  return { listed: true, workflows: ok.map(({ w, i }) => ({ ...omitStored(w), frame: frames.get(items[i].id)! })), failures };
 }
 
 function omitStored({ storedFrame: _s, ...rest }: Loaded): Omit<BoardWorkflow, 'frame'> {

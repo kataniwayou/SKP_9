@@ -32,6 +32,11 @@ describe('live state', () => {
     expect(ok).toHaveAttribute('title', 'live · 2 of 2 replicas healthy');
     expect(unknown).toHaveAttribute('data-health', 'undetermined');
     expect(none).toHaveAttribute('data-health', 'undetermined');
+    expect(ok).toHaveAttribute('aria-label', 'live · 2 of 2 replicas healthy');
+  });
+  it('treats an empty processor id as no processor', () => {
+    renderWithLive(<HealthDot processorId="" />, { processorsKnown: 'known', processors: new Map() });
+    expect(screen.getByTestId('health-dot')).toHaveAttribute('data-health', 'undetermined');
   });
   it('marks a running workflow on the board: badge, wire class', async () => {
     const stub = liveStub();

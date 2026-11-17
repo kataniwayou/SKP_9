@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createApi, type StudioApi } from './api/client';
+import { describeError } from './api/describeError';
 import { processorFromDto } from './api/toModel';
 import { Board } from './board/Board';
 import { loadBoard, type BoardWorkflow } from './board/loadBoard';
@@ -45,7 +46,7 @@ export function App(props: AppProps) {
         const board = await loadBoard(api);
         if (cancelled) return;
         const n = board.workflows.length;
-        output.log(`Board loaded: ${n} workflow${n === 1 ? '' : 's'}`, 'ok');
+        if (board.listed) output.log(`Board loaded: ${n} workflow${n === 1 ? '' : 's'}`, 'ok');
         for (const f of board.failures) output.log(`Could not load ${f.name}: ${f.detail}`, 'error');
         for (const w of board.workflows) {
           const name = (id: string) => w.graph.steps.get(id)?.name ?? id;
@@ -59,7 +60,9 @@ export function App(props: AppProps) {
         setSelection((s) => keepExistingSelection(s, board.workflows));
         setWorkflows(board.workflows);
       } catch (e) {
-        if (!cancelled) output.log(`Could not load the board: ${message(e)}`, 'error');
+        if (cancelled) return;
+        output.log(`Could not load the board: ${message(e)}`, 'error');
+        setWorkflows([]);
       }
     })();
     return () => { cancelled = true; };
@@ -72,7 +75,7 @@ export function App(props: AppProps) {
         const r = await api.listProcessors?.();
         if (cancelled || !r) return;
         if (r.ok) setProcessors(r.value.map(processorFromDto));
-        else output.log('Could not list the processors', 'error');
+        else output.log(`Could not list the processors: ${describeError(r.error)}`, 'error');
       } catch (e) {
         if (!cancelled) output.log(`Could not list the processors: ${message(e)}`, 'error');
       }

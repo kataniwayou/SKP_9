@@ -6,10 +6,13 @@ export interface Wire { id: string; from: Id; to: Id; condition: number }
 export function wiresOf(stepIds: Id[], steps: ReadonlyMap<Id, Pick<Step, 'nextStepIds' | 'entryCondition'>>): Wire[] {
   const known = new Set(stepIds);
   const wires: Wire[] = [];
+  const seen = new Set<string>();
   for (const from of stepIds) {
     for (const to of steps.get(from)?.nextStepIds ?? []) {
-      if (!known.has(to)) continue;
-      wires.push({ id: `${from}>${to}`, from, to, condition: steps.get(to)!.entryCondition });
+      const id = `${from}>${to}`;
+      if (!known.has(to) || seen.has(id)) continue;
+      seen.add(id);
+      wires.push({ id, from, to, condition: steps.get(to)!.entryCondition });
     }
   }
   return wires;
