@@ -54,10 +54,19 @@ export interface BoardProps {
   onDropItem?: (item: DropItem, at: { x: number; y: number }) => void;
   /** Pinned top-centre of the board (the selection bar). */
   bar?: ReactNode;
+  /** False while workflows are still arriving: the first fit of every frame waits until it turns true. */
+  settled?: boolean;
 }
 
-export function Board({ workflows, picks, onPick, initialZoom, initialView, onViewChange, onEdit, toolbar, onDropItem, bar }: BoardProps) {
-  const flow = useRef<{ getViewport: () => Viewport; screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number } } | null>(null);
+export function Board({ workflows, picks, onPick, initialZoom, initialView, onViewChange, onEdit, toolbar, onDropItem, bar, settled = true }: BoardProps) {
+  const fitAtMount = useRef(settled);
+  const flow = useRef<{ getViewport: () => Viewport; fitView: () => unknown; screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number } } | null>(null);
+  // the first fit waited for the last workflow: fit once it is in (a saved view or a given zoom is never fitted over)
+  useEffect(() => {
+    if (!settled || fitAtMount.current) return;
+    fitAtMount.current = true;
+    if (initialView === undefined && initialZoom === undefined) void flow.current?.fitView();
+  }, [settled, initialView, initialZoom]);
   const select = (s: Pick | null, additive = false) => {
     if (flow.current) onViewChange?.(flow.current.getViewport());
     onPick(s, additive);
@@ -208,7 +217,7 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
           minZoom={0.05}
           maxZoom={2}
           {...(initialView !== undefined ? { defaultViewport: initialView }
-            : initialZoom !== undefined ? { defaultViewport: { x: 0, y: 0, zoom: initialZoom } } : { fitView: true })}
+            : initialZoom !== undefined ? { defaultViewport: { x: 0, y: 0, zoom: initialZoom } } : { fitView: fitAtMount.current })}
           onDragOver={(e) => { if (editable && onDropItem) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }}
           onDrop={(e) => {
             if (!editable || !onDropItem || !flow.current) return;

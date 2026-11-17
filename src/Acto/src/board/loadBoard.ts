@@ -115,38 +115,49 @@ async function designCachesOf(api: StudioApi, graph: Graph): Promise<Map<Id, Cac
   return out;
 }
 
-/** Every workflow, `concurrency` at a time; one that fails is listed in `failures`, the rest still load. */
-export async function loadBoard(api: StudioApi, concurrency = 4): Promise<BoardLoad> {
+/**
+ * Every workflow, `concurrency` at a time; one that fails is listed in `failures`, the rest still load.
+ * `onWorkflow` is called as each graph arrives, with its frame already placed: a stored frame stays, any other goes
+ * into the first free slot after the frames placed so far. The result lists the workflows in list order.
+ */
+export async function loadBoard(api: StudioApi, concurrency = 4, onWorkflow?: (bw: BoardWorkflow) => void): Promise<BoardLoad> {
   const list = await api.listWorkflows();
   if (!list.ok) {
     return { listed: false, workflows: [], failures: [{ workflowId: '', name: 'the workflow list', detail: describeError(list.error) }] };
   }
   const items = list.value.filter((w): w is typeof w & { id: string } => !!w.id).map((w) => ({ id: w.id, name: w.name ?? w.id }));
-  const results: (ApiResult<Loaded> | undefined)[] = new Array(items.length);
+  const results: (BoardWorkflow | { error: string } | undefined)[] = new Array(items.length);
+  const placed = new Map<Id, Rect>();
+  const place = (id: Id, w: Loaded): BoardWorkflow => {
+    const own = minFrameSize(w.stepAt, w.graph.caches.size);
+    const size = { w: Math.max(own.w, w.storedFrame?.w ?? 0), h: Math.max(own.h, w.storedFrame?.h ?? 0) };
+    const taken = [...placed].map(([tid, r]) => ({ id: tid, createdAt: '', stored: r, size: { w: r.w, h: r.h } }));
+    const frames = placeFrames([...taken, { id, createdAt: w.graph.workflow.audit.createdAt, stored: w.storedFrame && { ...w.storedFrame, ...size }, size }]);
+    const frame = frames.get(id)!;
+    placed.set(id, frame);
+    return { ...omitStored(w), frame };
+  };
   let next = 0;
   const worker = async () => {
     while (next < items.length) {
       const i = next++;
-      results[i] = await loadWorkflow(api, items[i].id);
+      const r = await loadWorkflow(api, items[i].id);
+      if (!r.ok) { results[i] = { error: describeError(r.error) }; continue; }
+      const bw = place(items[i].id, r.value);
+      results[i] = bw;
+      onWorkflow?.(bw);
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, worker));
 
-  const ok: { w: Loaded; i: number }[] = [];
+  const workflows: BoardWorkflow[] = [];
   const failures: BoardLoad['failures'] = [];
   results.forEach((r, i) => {
-    if (r?.ok) ok.push({ w: r.value, i });
-    else if (r) failures.push({ workflowId: items[i].id, name: items[i].name, detail: describeError(r.error) });
+    if (!r) return;
+    if ('error' in r) failures.push({ workflowId: items[i].id, name: items[i].name, detail: r.error });
+    else workflows.push(r);
   });
-
-  const sizes = ok.map(({ w }) => {
-    const own = minFrameSize(w.stepAt, w.graph.caches.size);
-    return { w: Math.max(own.w, w.storedFrame?.w ?? 0), h: Math.max(own.h, w.storedFrame?.h ?? 0) };
-  });
-  const frames = placeFrames(ok.map(({ w, i }, k) => ({
-    id: items[i].id, createdAt: w.graph.workflow.audit.createdAt, stored: w.storedFrame && { ...w.storedFrame, ...sizes[k] }, size: sizes[k],
-  })));
-  return { listed: true, workflows: ok.map(({ w, i }) => ({ ...omitStored(w), frame: frames.get(items[i].id)! })), failures };
+  return { listed: true, workflows, failures };
 }
 
 function omitStored({ storedFrame: _s, ...rest }: Loaded): Omit<BoardWorkflow, 'frame'> {

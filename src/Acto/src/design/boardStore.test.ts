@@ -333,4 +333,46 @@ describe('rebase: a sharer re-read after another workflow saved', () => {
     st.rebase('w2', reread(), new Set(['step:s1']));
     expect(st.entry('w2')!.saving).toBe(true);
   });
+  describe('begin, arrive, finish', () => {
+    const fresh = (session: Storage) => {
+      const output = createOutputStore(null, () => '00:00:00');
+      return Object.assign(createBoardStore(output, session), { output });
+    };
+    const drafted = () => {
+      const session = memoryStorage();
+      const a = storeWith(bwFull(), session);
+      a.edit('w1', (s) => moveStep(s, 'a', { x: 77, y: 88 }));
+      const nw = newWorkflowState('n1', 'brand-new', { x: 2000, y: 0 });
+      a.addWorkflow(nw);
+      // a draft for a workflow that will not load
+      const raw = JSON.parse(session.getItem('acto.drafts')!);
+      raw.w3 = { ...raw.w1, updatedAt: 'later' };
+      session.setItem('acto.drafts', JSON.stringify(raw));
+      return session;
+    };
+    it('adds one workflow per arrival, applying its draft, and keeps the rest of the drafts until finish', () => {
+      const session = drafted();
+      const st = fresh(session);
+      st.begin([proc('p1', 'Analyst')]);
+      expect(st.boards()).toHaveLength(0);
+      st.arrive(bwFull());
+      expect(st.boards()).toHaveLength(1);
+      expect(st.boards()[0]!.stepAt.get('a')).toEqual({ x: 77, y: 88 });
+      expect(st.entry('w1')!.unsaved).toBe(true);
+      // mid-load the session still holds the drafts of workflows not yet arrived
+      expect(Object.keys(JSON.parse(session.getItem('acto.drafts')!)).sort()).toEqual(['n1', 'w1', 'w3']);
+      expect(st.entry('n1')).toBeNull();
+      st.finish({ listed: true, workflows: [bwFull()], failures: [] });
+      expect(st.entry('n1')).not.toBeNull();
+      expect(st.boards()).toHaveLength(2);
+      expect(Object.keys(JSON.parse(session.getItem('acto.drafts')!)).sort()).toEqual(['n1', 'w1', 'w3']);
+    });
+    it('load is begin, arrive each, finish', () => {
+      const a = fresh(drafted());
+      a.load({ listed: true, workflows: [bwFull()], failures: [] }, [proc('p1', 'Analyst')]);
+      const b = fresh(drafted());
+      b.begin([proc('p1', 'Analyst')]); b.arrive(bwFull()); b.finish({ listed: true, workflows: [bwFull()], failures: [] });
+      expect(b.boards().map((x) => x.graph.workflow.id)).toEqual(a.boards().map((x) => x.graph.workflow.id));
+    });
+  });
 });

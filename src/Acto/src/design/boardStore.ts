@@ -19,7 +19,14 @@ export interface BoardEntry { base: WorkflowState | null; history: History; unsa
   saving: boolean }
 
 export interface BoardStore {
+  /** `begin`, `arrive` for each workflow, `finish`: the board at once. */
   load(board: BoardLoad, processors: Processor[]): void;
+  /** Clears the board and reads the session drafts once; they stay pending (and in the session) until their workflow arrives. */
+  begin(processors: Processor[]): void;
+  /** One workflow joins the board, with its draft or the design of a failed save applied. */
+  arrive(bw: BoardWorkflow): void;
+  /** New-workflow drafts become frames; drafts for workflows that never arrived are kept for later. */
+  finish(board: BoardLoad): void;
   setProcessors(processors: Processor[]): void;
   boards(): BoardWorkflow[];
   /**
@@ -170,37 +177,42 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
 
   const store: BoardStore = {
     load(board, procs) {
+      store.begin(procs);
+      for (const bw of board.workflows) store.arrive(bw);
+      store.finish(board);
+    },
+    begin(procs) {
       processors = new Map(procs.map((p) => [p.id, p]));
       procVersion++;
       recs.clear();
-      const drafts = readDrafts(session);
-      for (const bw of board.workflows) {
-        const id = bw.graph.workflow.id;
-        const name = bw.graph.workflow.name;
-        const rec = make(bw);
-        const draft = drafts[id];
-        if (draft && draft.updatedAt === bw.graph.workflow.updatedAt) {
-          recs.set(id, withHistory(rec, draft.history));
-          continue;
-        }
+      kept = readDrafts(session);
+      changed();
+    },
+    arrive(bw) {
+      const id = bw.graph.workflow.id;
+      const name = bw.graph.workflow.name;
+      const rec = make(bw);
+      const draft = kept[id];
+      delete kept[id];
+      if (draft && draft.updatedAt === bw.graph.workflow.updatedAt) {
+        recs.set(id, withHistory(rec, draft.history));
+      } else {
         if (draft) output.log(`${name}: unsaved work from before the refresh was dropped because the workflow changed`, 'warn');
-        if (bw.graph.design != null) {
-          const applied = applyStored(rec.base!, bw.graph.design, bw.graph.layout, bw.designCaches);
-          if (sameState(applied, rec.base!)) { recs.set(id, rec); continue; }
+        const applied = bw.graph.design != null ? applyStored(rec.base!, bw.graph.design, bw.graph.layout, bw.designCaches) : null;
+        if (applied && !sameState(applied, rec.base!)) {
           // one step on from the saved workflow, so Undo goes back to it
           recs.set(id, withHistory(rec, commit(rec.history, applied)));
           output.log(`${name}: loaded unsaved work from a save that failed`, 'warn');
-          continue;
-        }
-        recs.set(id, rec);
+        } else recs.set(id, rec);
       }
+      changed();
+    },
+    finish() {
       // a workflow created in the designer and not yet saved is not on the server to match against
-      kept = {};
-      const loaded = new Set(board.workflows.map((w) => w.graph.workflow.id));
-      for (const [id, d] of Object.entries(drafts)) {
-        if (loaded.has(id)) continue;
-        if (d.history.present.isNew) recs.set(id, make(null, d.history));
-        else kept[id] = d;
+      for (const [id, d] of Object.entries(kept)) {
+        if (!d.history.present.isNew || recs.has(id)) continue;
+        recs.set(id, make(null, d.history));
+        delete kept[id];
       }
       changed();
     },

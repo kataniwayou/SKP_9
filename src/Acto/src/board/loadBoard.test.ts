@@ -26,6 +26,38 @@ describe('loadBoard', () => {
   });
 });
 
+describe('loadBoard as graphs arrive', () => {
+  it('calls onWorkflow as each graph is placed, and the result matches the one-shot placement for stored frames', async () => {
+    const stored = { x: 500, y: 600, w: 900, h: 700 };
+    const mk = () => fakeApi({
+      workflows: [wf('w1'), wf('w2')],
+      graphs: { w1: graphWith({ entry: ['a'], steps: { a: [] }, layout: { board: stored } }), w2: graphWith({ entry: ['a'], steps: { a: [] }, layout: { board: { x: 0, y: 0, w: 400, h: 300 } } }) },
+    });
+    const gate = (api: ReturnType<typeof fakeApi>) => {
+      const get = api.getGraph;
+      const slow: Record<string, () => void> = {};
+      api.getGraph = ((id: string) => id === 'w1' ? new Promise((res) => { slow.w1 = () => res(get(id)); }) : get(id)) as typeof api.getGraph;
+      return slow;
+    };
+    const api = mk();
+    const slow = gate(api);
+    const seen: string[] = [];
+    const p = loadBoard(api, 4, (bw) => { seen.push(bw.graph.workflow.id); if (bw.graph.workflow.id === 'w2') slow.w1!(); });
+    const r = await p;
+    expect(seen).toEqual(['w2', 'w1']);
+    const once = await loadBoard(mk(), 4);
+    expect(r).toEqual(once);
+    expect(r.workflows.map((w) => w.graph.workflow.id)).toEqual(['w1', 'w2']);
+    expect(r.workflows[0].frame).toEqual(stored);
+  });
+  it('places a frame without a stored one clear of those already on the board', async () => {
+    const placedFrames: { x: number; y: number; w: number; h: number }[] = [];
+    await loadBoard(fakeApi({ workflows: [wf('w1', '2026-01-01'), wf('w2', '2026-01-02')] }), 1, (bw) => placedFrames.push(bw.frame));
+    expect(placedFrames).toHaveLength(2);
+    expect(placedFrames[1]).not.toEqual(placedFrames[0]);
+  });
+});
+
 describe('loadWorkflow', () => {
   it('brings parked steps from the layout and drops ones that are gone', async () => {
     const r = await loadWorkflow(fakeApi({ graph: graphWith({ entry: ['a'], steps: { a: [] }, layout: { parked: ['p', 'gone'] } }), extraSteps: { p: stepDto('p') } }), 'w1');

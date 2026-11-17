@@ -23,6 +23,23 @@ describe('App', () => {
     expect(await screen.findByText('Could not load w2-name: 500: boom')).toBeInTheDocument();
     expect(screen.getByText('Board loaded: 1 workflow')).toBeInTheDocument();
   });
+  it('shows the board as soon as the first workflow arrives, while another is still loading', async () => {
+    const api = fakeApi({ workflows: [wf('w1'), wf('w2')] });
+    const get = api.getGraph;
+    let release: () => void = () => {};
+    api.getGraph = ((id: string) => id === 'w2' ? new Promise((res) => { release = () => res(get(id)); }) : get(id)) as typeof api.getGraph;
+    renderApp(api);
+    expect(await screen.findByTestId('rf__node-wf:w1')).toBeInTheDocument();
+    expect(screen.queryByText('Loading the board…')).toBeNull();
+    expect(screen.queryByText(/Board loaded/)).toBeNull();
+    release();
+    expect(await screen.findByText('Board loaded: 2 workflows')).toBeInTheDocument();
+  });
+  it('shows the others and logs the failure when one graph read fails', async () => {
+    renderApp(fakeApi({ workflows: [wf('w1'), wf('w2')], graphError: { w2: { kind: 'http', status: 500, detail: 'boom' } } }));
+    expect(await screen.findByTestId('rf__node-wf:w1')).toBeInTheDocument();
+    expect(await screen.findByText('Could not load w2-name: 500: boom')).toBeInTheDocument();
+  });
   it('logs instead of crashing when the workflow list itself throws', async () => {
     const api = fakeApi();
     (api.listWorkflows as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('offline'));

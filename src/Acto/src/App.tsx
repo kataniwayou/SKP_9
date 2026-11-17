@@ -83,7 +83,8 @@ export function App(props: AppProps) {
     let cancelled = false;
     (async () => {
       try {
-        const board = await loadBoard(api);
+        store.begin(processorsRef.current);
+        const board = await loadBoard(api, 4, (bw) => { if (!cancelled) store.arrive(bw); });
         if (cancelled) return;
         const n = board.workflows.length;
         if (board.listed) output.log(`Board loaded: ${n} workflow${n === 1 ? '' : 's'}`, 'ok');
@@ -98,12 +99,12 @@ export function App(props: AppProps) {
           if (parts.length > 0) output.log(`${w.graph.workflow.name}: on Save, ${parts.join('; ')}`, 'warn');
         }
         setPicks((ps) => livePicks(ps, board.workflows));
-        store.load(board, processorsRef.current);
+        store.finish(board);
         setLoaded(true);
       } catch (e) {
         if (cancelled) return;
         output.log(`Could not load the board: ${message(e)}`, 'error');
-        store.load({ listed: false, workflows: [], failures: [] }, processorsRef.current);
+        store.finish({ listed: false, workflows: [], failures: [] });
         setLoaded(true);
       }
     })();
@@ -411,9 +412,9 @@ export function App(props: AppProps) {
           <Shell
             storage={storage}
             toolbox={<ToolboxPanel processors={processors} caches={caches} />}
-            board={!loaded
+            board={!loaded && workflows.length === 0
               ? <div className="board-wait">Loading the board…</div>
-              : <Board workflows={workflows} picks={picks} onPick={onPick}
+              : <Board workflows={workflows} picks={picks} onPick={onPick} settled={loaded}
                   {...(saved ? { initialView: { x: saved.x, y: saved.y, zoom: saved.zoom } } : {})}
                   onViewChange={onViewChange} onEdit={onEdit} toolbar={toolbar} onDropItem={onDropItem}
                   bar={<PickBar picks={picks} status={toolbar.status} actions={barActions} pending={pending} onConfirm={toolbar.confirmRemove} onCancel={toolbar.cancelRemove} />} />}
