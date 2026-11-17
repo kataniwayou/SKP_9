@@ -6,6 +6,7 @@ import { applyDraft } from './apply';
 import { storedDesignOf } from './design';
 import { circuitOf, EMPTY_DRAFT, setShape, withCircuit } from './draft';
 import { layoutOf } from './layoutDesign';
+import type { StudioDocument } from '../app/document';
 
 const two = () => loadedDocument(graphDto({ steps: [stepDto('s1', { nextStepIds: ['s2'] }), stepDto('s2')] }));
 
@@ -27,5 +28,19 @@ describe('layoutOf (plan 9 §7)', () => {
     const layout = layoutOf(base, EMPTY_DRAFT);
     expect(Object.keys(layout.wires)).toEqual(['wf->s1', 's1->s2']);
     expect(storedDesignOf(null, JSON.parse(JSON.stringify(layout))).draft.wires).toEqual(layout.wires);
+  });
+  const withRawLayout = async (raw: unknown): Promise<StudioDocument> => {
+    const base = await two();
+    return { ...base, graph: { ...base.graph, layout: raw } };
+  };
+
+  it('carries the Acto board rectangle through unchanged', async () => {
+    const doc = await withRawLayout({ v: 2, board: { x: 1200, y: 480, w: 960, h: 420 } });
+    expect(layoutOf(doc, EMPTY_DRAFT).board).toEqual({ x: 1200, y: 480, w: 960, h: 420 });
+  });
+
+  it('drops a board that is not four finite numbers', async () => {
+    expect(layoutOf(await withRawLayout({ v: 2, board: { x: 'a', y: 0, w: 1, h: 1 } }), EMPTY_DRAFT)).not.toHaveProperty('board');
+    expect(layoutOf(await withRawLayout(null), EMPTY_DRAFT)).not.toHaveProperty('board');
   });
 });

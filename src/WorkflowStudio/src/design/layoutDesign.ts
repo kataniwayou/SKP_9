@@ -26,10 +26,21 @@ export interface SavedLayout {
   linked?: Record<Id, Omit<LinkedCache, 'at'>>;
   /** Processors and schemas the design's steps use that the workflow does not carry (pasted or dropped). Absent when none. */
   refs?: { processors: Record<Id, Processor>; schemas: Record<Id, Schema> };
+  /** The frame's board rectangle, written by Acto; this studio only carries it through a save. Absent when none is stored. */
+  board?: { x: number; y: number; w: number; h: number };
+}
+
+/** The stored layout's `board`, when it is an object of four finite numbers. */
+function boardOf(raw: unknown): SavedLayout['board'] {
+  const b = (raw as { board?: unknown } | null)?.board as Record<string, unknown> | null | undefined;
+  if (typeof b !== 'object' || b === null) return undefined;
+  const { x, y, w, h } = b;
+  return [x, y, w, h].every((n) => typeof n === 'number' && Number.isFinite(n)) ? { x: x as number, y: y as number, w: w as number, h: h as number } : undefined;
 }
 
 /** The layout of what the canvas shows: the draft's circuit, or the workflow's own wires when it has none. */
 export function layoutOf(shown: StudioDocument, draft: Draft): SavedLayout {
+  const board = boardOf(shown.graph.layout);
   const points = (m: ReadonlyMap<Id, Point>) => Object.fromEntries([...m].map(([id, p]) => [id, { x: p.x, y: p.y }]));
   return {
     v: 2,
@@ -42,5 +53,6 @@ export function layoutOf(shown: StudioDocument, draft: Draft): SavedLayout {
       ? { linked: Object.fromEntries(Object.entries(draft.blocks.linked).map(([id, c]) => [id, { name: c.name, version: c.version, description: c.description, root: c.root, items: c.items }])) }
       : {}),
     ...(Object.keys(draft.blocks.refs.processors).length > 0 ? { refs: { processors: { ...draft.blocks.refs.processors }, schemas: { ...draft.blocks.refs.schemas } } } : {}),
+    ...(board ? { board } : {}),
   };
 }
