@@ -11,7 +11,9 @@ export interface BoardEntry { base: WorkflowState | null; history: History; unsa
   /** The stored layout the workflow had when loaded (opaque JSON), to spot a change made elsewhere. */
   layout: unknown;
   /** Validation problems the last save found; 0 when valid or never saved. */
-  problems: number }
+  problems: number;
+  /** True while a save is in flight: a second save is refused and edits wait. */
+  saving: boolean }
 
 export interface BoardStore {
   load(board: BoardLoad, processors: Processor[]): void;
@@ -25,6 +27,9 @@ export interface BoardStore {
   addWorkflow(state: WorkflowState): void;
   replace(id: Id, bw: BoardWorkflow): void;
   setProblems(id: Id, n: number): void;
+  setSaving(id: Id, saving: boolean): void;
+  /** The save was applied but the re-read failed: the present state becomes the base. */
+  adoptPresent(id: Id): void;
   subscribe(fn: () => void): () => void;
 }
 
@@ -43,15 +48,15 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
   let cached: BoardWorkflow[] | null = null;
   const subs = new Set<() => void>();
 
-  const viewOf = (base: WorkflowState | null, history: History, layout: unknown = null, problems = 0): BoardEntry => ({
-    base, history, unsaved: !base || !sameState(history.present, base), layout, problems,
+  const viewOf = (base: WorkflowState | null, history: History, layout: unknown = null, problems = 0, saving = false): BoardEntry => ({
+    base, history, unsaved: !base || !sameState(history.present, base), layout, problems, saving,
   });
   const make = (baseBw: BoardWorkflow | null, history?: History): Rec => {
     const base = baseBw ? stateOf(baseBw) : null;
     const h = history ?? historyOf(base!);
     return { baseBw, base, history: h, view: viewOf(base, h, baseBw?.graph.layout ?? null), bwFor: null, bw: null };
   };
-  const withHistory = (r: Rec, h: History): Rec => ({ ...r, history: h, view: viewOf(r.base, h, r.view.layout, r.view.problems), bwFor: null, bw: null });
+  const withHistory = (r: Rec, h: History): Rec => ({ ...r, history: h, view: viewOf(r.base, h, r.view.layout, r.view.problems, r.view.saving), bwFor: null, bw: null });
   const notify = () => { cached = null; subs.forEach((f) => f()); };
   const changed = () => {
     const drafts: Drafts = { ...kept };
@@ -60,6 +65,11 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     }
     writeDrafts(session, drafts);
     notify();
+  };
+  const locked = (r: Rec): boolean => {
+    if (!r.view.saving) return false;
+    output.log(`${r.history.present.fields.name} is saving — wait for it to finish`, 'warn');
+    return true;
   };
   const setHistory = (id: Id, r: Rec, h: History) => {
     if (h === r.history) return;
@@ -124,23 +134,39 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     entry: (id) => recs.get(id)?.view ?? null,
     edit(id, fn, merge) {
       const r = recs.get(id);
-      if (r) setHistory(id, r, commit(r.history, fn(r.history.present), merge));
+      if (r && !locked(r)) setHistory(id, r, commit(r.history, fn(r.history.present), merge));
     },
     editOrRefuse(id, fn) {
       const r = recs.get(id);
-      if (!r) return;
+      if (!r || locked(r)) return;
       const res = fn(r.history.present);
       if ('refused' in res) output.log(res.refused, 'warn');
       else setHistory(id, r, commit(r.history, res.state));
     },
-    undo(id) { const r = recs.get(id); if (r) setHistory(id, r, undo(r.history)); },
-    redo(id) { const r = recs.get(id); if (r) setHistory(id, r, redo(r.history)); },
+    undo(id) { const r = recs.get(id); if (r && !locked(r)) setHistory(id, r, undo(r.history)); },
+    redo(id) { const r = recs.get(id); if (r && !locked(r)) setHistory(id, r, redo(r.history)); },
     addWorkflow(state) {
       recs.set(state.workflowId, make(null, historyOf(state)));
       changed();
     },
+    setSaving(id, saving) {
+      const r = recs.get(id);
+      if (!r || r.view.saving === saving) return;
+      recs.set(id, { ...r, view: { ...r.view, saving } });
+      notify();
+    },
+    adoptPresent(id) {
+      const r = recs.get(id);
+      if (!r) return;
+      const next = make(boardWorkflowOf(r.history.present, r.baseBw, processors));
+      next.view = { ...next.view, saving: r.view.saving };
+      recs.set(id, next);
+      changed();
+    },
     replace(id, bw) {
-      recs.set(id, make(bw));
+      const next = make(bw);
+      next.view = { ...next.view, saving: recs.get(id)?.view.saving ?? false };
+      recs.set(id, next);
       changed();
     },
     setProblems(id, n) {

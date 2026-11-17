@@ -4,7 +4,7 @@ import { fakeApi, graphWith } from '../board/testApi';
 import { createOutputStore } from '../output/outputStore';
 import { createBoardStore } from './boardStore';
 import { bwFull, proc } from './fixtures';
-import { moveStep } from './state';
+import { moveStep, removeStep } from './state';
 import { saveWorkflow } from './saveWorkflow';
 
 function setup(opts: { applied?: boolean; problems?: { title: string; detail: string }[]; layout?: unknown } = {}) {
@@ -57,5 +57,43 @@ describe('saveWorkflow', () => {
     (api.saveDesign as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, error: { kind: 'network', message: 'down' } });
     expect(await saveWorkflow(api, store, output, 'w1')).toBe('failed');
     expect(texts()).toContain('error:orders: Network error: down');
+  });
+  it('names an assignment error and a deleted step from the base', async () => {
+    const { api, store, output, texts } = setup({ applied: false });
+    store.edit('w1', (s) => removeStep(s, 'b'));
+    (api.saveDesign as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true, value: { applied: false, errors: [{ kind: 'assignment', id: 'as0', message: 'm1' }, { kind: 'step', id: 'b', message: 'm2' }] },
+    });
+    await saveWorkflow(api, store, output, 'w1');
+    expect(texts()).toContain('error:orders: a-name-assignment — m1');
+    expect(texts()).toContain('error:orders: b-name — m2');
+  });
+  it('adopts the present state when the re-read fails', async () => {
+    const { api, store, output, texts } = setup();
+    const get = api.getGraph as ReturnType<typeof vi.fn>;
+    const first = get.getMockImplementation()!;
+    get.mockImplementationOnce(first).mockResolvedValue({ ok: false, error: { kind: 'network', message: 'down' } });
+    expect(await saveWorkflow(api, store, output, 'w1')).toBe('saved');
+    expect(store.entry('w1')!.unsaved).toBe(false);
+    expect(texts()).toContain('error:orders saved, but could not be read back: Network error: down. Reload before editing it again');
+    expect(api.validateWorkflow).not.toHaveBeenCalled();
+    expect(api.publishDiagram).not.toHaveBeenCalled();
+  });
+  it('refuses a second save while one is in flight', async () => {
+    const { api, store, output, texts } = setup();
+    const [a, b] = await Promise.all([saveWorkflow(api, store, output, 'w1'), saveWorkflow(api, store, output, 'w1')]);
+    expect([a, b]).toEqual(['saved', 'refused']);
+    expect(api.saveDesign).toHaveBeenCalledTimes(1);
+    expect(texts()).toContain('info:orders is already saving');
+    expect(store.entry('w1')!.saving).toBe(false);
+  });
+  it('refuses an edit during a save', async () => {
+    const { api, store, output, texts } = setup();
+    const p = saveWorkflow(api, store, output, 'w1');
+    const before = store.entry('w1')!.history;
+    store.edit('w1', (s) => moveStep(s, 'a', { x: 1, y: 1 }));
+    expect(store.entry('w1')!.history).toBe(before);
+    expect(texts()).toContain('warn:orders is saving — wait for it to finish');
+    await p;
   });
 });

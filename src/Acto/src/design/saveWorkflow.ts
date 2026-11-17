@@ -8,8 +8,13 @@ import { diagramSvg } from './diagramSvg';
 import { designRequest } from './request';
 import type { WorkflowState } from './state';
 
-function entityName(s: WorkflowState, id: string): string {
-  return s.steps[id]?.name ?? s.caches[id]?.name ?? s.assignments[id]?.name ?? (id === s.workflowId ? s.fields.name : id);
+function entityName(s: WorkflowState, base: WorkflowState | null, id: string): string {
+  for (const st of [s, base]) {
+    if (!st) continue;
+    const found = st.steps[id]?.name ?? st.caches[id]?.name ?? Object.values(st.assignments).find((a) => a.id === id)?.name;
+    if (found) return found;
+  }
+  return id === s.workflowId ? s.fields.name : id;
 }
 
 /** Saves one workflow: design request, validation, Kibana diagram. Never throws; the Output says what happened. */
@@ -18,6 +23,21 @@ export async function saveWorkflow(
 ): Promise<'saved' | 'refused' | 'failed'> {
   const entry = store.entry(workflowId);
   if (!entry) return 'failed';
+  if (entry.saving) {
+    output.log(`${entry.history.present.fields.name} is already saving`, 'info');
+    return 'refused';
+  }
+  store.setSaving(workflowId, true);
+  try {
+    return await run(api, store, output, workflowId, entry);
+  } finally {
+    store.setSaving(workflowId, false);
+  }
+}
+
+async function run(
+  api: StudioApi, store: BoardStore, output: OutputStore, workflowId: Id, entry: NonNullable<ReturnType<BoardStore['entry']>>,
+): Promise<'saved' | 'refused' | 'failed'> {
   const present = entry.history.present;
   const name = present.fields.name;
 
@@ -32,14 +52,18 @@ export async function saveWorkflow(
   if (!saved.ok) { output.log(`${name}: ${describeError(saved.error)}`, 'error'); return 'failed'; }
   if (!saved.value.applied) {
     for (const e of saved.value.errors ?? []) {
-      output.log(`${name}: ${e.id ? entityName(present, e.id) : name} — ${e.message ?? ''}`, 'error');
+      output.log(`${name}: ${e.id ? entityName(present, entry.base, e.id) : name} — ${e.message ?? ''}`, 'error');
     }
     return 'refused';
   }
   output.log(`${name} saved`, 'ok');
 
   const loaded = await loadWorkflow(api, workflowId);
-  if (!loaded.ok) { output.log(`${name}: ${describeError(loaded.error)}`, 'error'); return 'saved'; }
+  if (!loaded.ok) {
+    store.adoptPresent(workflowId);
+    output.log(`${name} saved, but could not be read back: ${describeError(loaded.error)}. Reload before editing it again`, 'error');
+    return 'saved';
+  }
   const { storedFrame: _stored, ...rest } = loaded.value;
   const bw = { ...rest, frame: { ...present.frame } };
   store.replace(workflowId, bw);
