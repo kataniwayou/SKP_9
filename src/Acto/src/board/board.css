@@ -50,3 +50,14 @@
   .link-wire .wire.running { animation: none; stroke-dasharray: none; }
 }
 .fh .diff-tag { font: 600 10px ui-monospace, Consolas, monospace; letter-spacing: .05em; text-transform: uppercase; color: #92590A; background: #FEF3C7; border: 1px solid #F5B841; border-radius: 5px; padding: 1px 6px; }
+
+/* toolbars */
+.toolbar { position: relative; display: flex; gap: 2px; padding: 4px; background: #1A1D29; border-radius: 9px; box-shadow: 0 10px 28px -10px rgba(20,24,40,.5); }
+.toolbar-arrow { position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px; margin-left: -5px; background: #1A1D29; transform: rotate(45deg); }
+.toolbar button { font: 500 12.5px "Inter Tight", "Helvetica Neue", Arial, sans-serif; color: #fff; background: none; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; position: relative; z-index: 1; }
+.toolbar button:hover { background: rgba(127,127,127,.3); }
+.toolbar button:disabled { opacity: .5; cursor: default; background: none; }
+.toolbar button.primary { background: #FF0072; }
+.toolbar button.danger { color: #FF8A8A; }
+.fh .unsaved-tag { font: 600 10px ui-monospace, Consolas, monospace; letter-spacing: .05em; text-transform: uppercase; color: #B45309; background: rgba(217,119,6,.12); border-radius: 5px; padding: 1px 6px; }
+.fh .warn-mark { font: 600 11px ui-monospace, Consolas, monospace; color: #B45309; }

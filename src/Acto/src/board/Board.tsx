@@ -10,7 +10,7 @@ import { WorkflowFrame } from './nodes/WorkflowFrame';
 import { useLive, useLiveStore } from '../live/LiveContext';
 import { statusOf } from '../live/liveState';
 import { STATE_COLOUR } from './live/StateBadge';
-import { BoardContext, EditContext } from './nodes/boardContext';
+import { BoardContext, EditContext, ToolbarContext, type ToolbarActions } from './nodes/boardContext';
 import './board.css';
 
 const nodeTypes: NodeTypes = { workflow: WorkflowFrame, step: StepCard };
@@ -46,9 +46,11 @@ export interface BoardProps {
   onViewChange?: (view: { x: number; y: number; zoom: number }) => void;
   /** Without it the board is read-only. */
   onEdit?: BoardEdit;
+  /** Save, Delete and the unsaved/problems status; without it no toolbars show. */
+  toolbar?: ToolbarActions;
 }
 
-export function Board({ workflows, selection, onSelect, initialZoom, initialView, onViewChange, onEdit }: BoardProps) {
+export function Board({ workflows, selection, onSelect, initialZoom, initialView, onViewChange, onEdit, toolbar }: BoardProps) {
   const flow = useRef<{ getViewport: () => Viewport } | null>(null);
   const select = (s: Selection | null) => {
     if (flow.current) onViewChange?.(flow.current.getViewport());
@@ -107,6 +109,7 @@ export function Board({ workflows, selection, onSelect, initialZoom, initialView
   return (
     <BoardContext.Provider value={byId}>
       <EditContext.Provider value={onEdit ?? null}>
+      <ToolbarContext.Provider value={editable ? toolbar ?? null : null}>
       <div className="board">
         <ReactFlow
           nodes={nodes}
@@ -161,6 +164,7 @@ export function Board({ workflows, selection, onSelect, initialZoom, initialView
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>
+      </ToolbarContext.Provider>
       </EditContext.Provider>
     </BoardContext.Provider>
   );

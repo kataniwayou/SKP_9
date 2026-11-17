@@ -5,7 +5,9 @@ import { processorFromDto } from './api/toModel';
 import { Board, type BoardEdit } from './board/Board';
 import { loadBoard } from './board/loadBoard';
 import type { Selection } from './board/selection';
-import { addWire, moveFrame, moveStep, resizeFrame } from './design/state';
+import { addWire, moveFrame, moveStep, removeStep, removeWire, resizeFrame } from './design/state';
+import { saveWorkflow } from './design/saveWorkflow';
+import type { ToolbarActions } from './board/nodes/boardContext';
 import { createBoardStore, useBoard, type BoardStore } from './design/boardStore';
 import { InspectorPanel } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
@@ -122,6 +124,23 @@ export function App(props: AppProps) {
     },
   }), [store, output]);
 
+  const toolbar = useMemo<ToolbarActions>(() => ({
+    save: (wf) => { void saveWorkflow(api, store, output, wf); },
+    deleteStep: (wf, step) => {
+      store.editOrRefuse(wf, (s) => ({ state: removeStep(s, step) }));
+      onSelect({ kind: 'workflow', workflowId: wf });
+    },
+    deleteWire: (wf, wireId) => {
+      const i = wireId.indexOf('>');
+      store.editOrRefuse(wf, (s) => ({ state: removeWire(s, wireId.slice(0, i), wireId.slice(i + 1)) }));
+      onSelect({ kind: 'workflow', workflowId: wf });
+    },
+    status: (wf) => {
+      const e = store.entry(wf);
+      return { unsaved: e?.unsaved ?? false, problems: e?.problems ?? 0, saving: e?.saving ?? false };
+    },
+  }), [api, store, output, onSelect]);
+
   return (
     <LiveStoreProvider value={live}>
       <OutputProvider store={output}>
@@ -134,7 +153,7 @@ export function App(props: AppProps) {
               ? <div className="board-wait">Loading the board…</div>
               : <Board workflows={workflows} selection={selection} onSelect={onSelect}
                   {...(saved ? { initialView: { x: saved.x, y: saved.y, zoom: saved.zoom } } : {})}
-                  onViewChange={onViewChange} onEdit={onEdit} />}
+                  onViewChange={onViewChange} onEdit={onEdit} toolbar={toolbar} />}
             inspector={<InspectorPanel workflows={workflows} selection={selection} />}
             output={<OutputPanel />}
             chat={<div className="ph"><span>Chat</span></div>}
