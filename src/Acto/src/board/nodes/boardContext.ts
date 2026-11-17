@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react';
+import type { DeletePlan } from '../../operate/deleteWorkflow';
 import type { BoardWorkflow } from '../loadBoard';
 
 /** The loaded workflows by id: node data carries only ids, the nodes read what they show from here. */
@@ -21,6 +22,11 @@ export interface ToolbarActions {
   deleteWire(wf: string, wireId: string): void;
   /** Unlinks the cache (a cache created here and never saved is simply removed). */
   deleteCache(wf: string, cacheId: string): void;
+  /** Delete workflows: the fresh live reading and the dry run first; a plan then waits for confirmRemove or cancelRemove. */
+  remove(wfs: string[]): void;
+  confirmRemove(): void;
+  cancelRemove(): void;
+  pendingRemove(): DeletePlan | null;
   status(wf: string): BlockStatus;
 }
 export const ToolbarContext = createContext<ToolbarActions | null>(null);

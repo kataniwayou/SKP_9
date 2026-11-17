@@ -6,6 +6,7 @@ import { ZOOM_DETAIL } from '../geometry';
 import { useWorkflowStatus } from '../../live/LiveContext';
 import { STATE_COLOUR, StateBadge } from '../live/StateBadge';
 import { useBoardWorkflow, useToolbarActions } from './boardContext';
+import { confirmText } from '../../operate/deleteWorkflow';
 import { Toolbar } from '../Toolbar';
 import { PickBadge, type PickInfo } from './PickBadge';
 
@@ -30,6 +31,8 @@ export function WorkflowFrame({ data, selected }: NodeProps) {
   const schedule = parsed === null ? 'not scheduled' : 'text' in parsed ? parsed.text : cron;
   const n = info.stepIds.length;
   const st = tb?.status(workflowId);
+  const plan = tb?.pendingRemove() ?? null;
+  const pending = plan && plan.ids.includes(workflowId) ? plan : null;
   const min = minFrameSize(info.stepAt, info.graph.caches.size);
   return (
     <div className={`frame${selected ? ' sel' : ''}${far ? ' far' : ''}`}>
@@ -40,7 +43,8 @@ export function WorkflowFrame({ data, selected }: NodeProps) {
       <PickBadge pick={pick} />
       {selected && pick?.solo && tb && st && (
         <NodeToolbar isVisible position={Position.Top} offset={10}>
-          <Toolbar selection={{ kind: 'workflow' }} actions={{ onSave: () => tb.save(workflowId) }} unsaved={st.unsaved} saving={st.saving}
+          <Toolbar selection={{ kind: 'workflow' }} actions={{ onSave: () => tb.save(workflowId), onDelete: () => tb.remove([workflowId]) }} unsaved={st.unsaved} saving={st.saving}
+            {...(pending ? { confirm: { text: confirmText(pending), onConfirm: tb.confirmRemove, onCancel: tb.cancelRemove } } : {})}
             run={status === 'running' ? { op: 'stop', enabled: true, onRun: () => tb.stop(workflowId) } : { op: 'start', enabled: status === 'stopped', onRun: () => tb.start(workflowId) }} />
         </NodeToolbar>
       )}

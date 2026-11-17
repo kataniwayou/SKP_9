@@ -26,6 +26,8 @@ export interface BoardStore {
   redo(id: Id): void;
   addWorkflow(state: WorkflowState): void;
   replace(id: Id, bw: BoardWorkflow): void;
+  /** The workflow is gone (deleted, or never saved and discarded): its entry and its draft with it. */
+  remove(id: Id): void;
   setProblems(id: Id, n: number): void;
   setSaving(id: Id, saving: boolean): void;
   /** The save was applied but the re-read failed: the present state becomes the base (the layout stays as last set). */
@@ -156,6 +158,11 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     redo(id) { const r = recs.get(id); if (r && !locked(r)) setHistory(id, r, redo(r.history)); },
     addWorkflow(state) {
       recs.set(state.workflowId, make(null, historyOf(state)));
+      changed();
+    },
+    remove(id) {
+      if (!recs.delete(id) && !(id in kept)) return;
+      delete kept[id];
       changed();
     },
     setSaving(id, saving) {

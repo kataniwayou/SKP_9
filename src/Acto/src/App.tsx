@@ -16,6 +16,7 @@ import { InspectorPanel } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
 import { LiveStoreProvider } from './live/LiveContext';
 import { statusOf } from './live/liveState';
+import { commitDelete, prepareDelete, type DeletePlan } from './operate/deleteWorkflow';
 import { runWorkflow } from './operate/runWorkflow';
 import { watchTransitions } from './operate/transitions';
 import { signalRHub } from './live/signalrHub';
@@ -53,6 +54,9 @@ export function App(props: AppProps) {
   const [caches, setCaches] = useState<Cache[]>([]);
   const processorsRef = useRef<Processor[]>([]);
   const [picks, setPicks] = useState<Pick[]>(() => (saved?.selection ? [saved.selection] : []));
+  const [pending, setPending] = useState<DeletePlan | null>(null);
+  const pendingRef = useRef<DeletePlan | null>(null);
+  const removeToken = useRef(0);
   const viewport = useRef<{ x: number; y: number; zoom: number } | null>(saved && { x: saved.x, y: saved.y, zoom: saved.zoom });
 
   useEffect(() => { live.start(); return () => live.stop(); }, [live]);
@@ -148,7 +152,11 @@ export function App(props: AppProps) {
     const v = viewport.current;
     if (v) writeView(storage, { ...v, selection: lastPick(ps) });
   }, [storage]);
-  const setAllPicks = useCallback((ps: Pick[]) => { picksRef.current = ps; setPicks(ps); persist(ps); }, [persist]);
+  const setAllPicks = useCallback((ps: Pick[]) => {
+    picksRef.current = ps; setPicks(ps); persist(ps);
+    // a pick change drops a pending delete confirm (and a still-running preparation) silently
+    removeToken.current++; pendingRef.current = null; setPending(null);
+  }, [persist]);
   const onPick = useCallback((p: Pick | null, additive: boolean) => {
     if (p === null) { if (!additive) setAllPicks([]); return; }
     setAllPicks(additive ? togglePick(picksRef.current, p) : [p]);
@@ -186,11 +194,34 @@ export function App(props: AppProps) {
       store.editOrRefuse(wf, (s) => ({ state: unlinkCache(s, cacheId) }));
       onSelect({ kind: 'workflow', workflowId: wf });
     },
+    remove: (wfs) => {
+      const token = ++removeToken.current;
+      void prepareDelete(api, store, output, wfs).then((plan) => {
+        if (token !== removeToken.current) return;
+        pendingRef.current = plan; setPending(plan);
+      });
+    },
+    confirmRemove: () => {
+      const plan = pendingRef.current;
+      if (!plan) return;
+      pendingRef.current = null; setPending(null);
+      const token = ++removeToken.current;
+      void commitDelete(api, store, output, plan).then((gone) => {
+        if (gone.length === 0 || token !== removeToken.current) return;
+        setAllPicks(picksRef.current.filter((p) => !gone.includes(p.workflowId)));
+      });
+    },
+    cancelRemove: () => {
+      if (!pendingRef.current) return;
+      removeToken.current++; pendingRef.current = null; setPending(null);
+      output.log('Delete cancelled — nothing was sent');
+    },
+    pendingRemove: () => pending,
     status: (wf) => {
       const e = store.entry(wf);
       return { unsaved: e?.unsaved ?? false, problems: e?.problems ?? 0, saving: e?.saving ?? false, run: statusOf(live.getState(), wf) };
     },
-  }), [api, store, output, live, onSelect]);
+  }), [api, store, output, live, onSelect, setAllPicks, pending]);
 
   const workflowsRef = useRef(workflows);
   workflowsRef.current = workflows;

@@ -94,6 +94,15 @@ describe('board store', () => {
     st.addWorkflow(newWorkflowState('w2', 'fresh', { x: 0, y: 0 }));
     expect(st.entry('w2')!.unsaved).toBe(true); expect(n).toBe(1); expect(st.boards()).toHaveLength(2);
   });
+  it('remove drops the workflow and its draft', () => {
+    const session = memoryStorage(); const st = storeWith(bwFull(), session);
+    st.edit('w1', (s) => moveStep(s, 'a', { x: 5, y: 5 }));
+    expect(session.getItem('acto.drafts')).not.toBeNull();
+    let n = 0; st.subscribe(() => n++);
+    st.remove('w1');
+    expect(st.entry('w1')).toBeNull(); expect(st.boards()).toHaveLength(0); expect(n).toBe(1);
+    expect(session.getItem('acto.drafts')).toBeNull();
+  });
   it('keeps the draft of a workflow a partial load did not bring back, and restores it on a later load', () => {
     const session = memoryStorage();
     storeWith(bwFull(), session).edit('w1', (s) => moveStep(s, 'a', { x: 5, y: 5 }));
