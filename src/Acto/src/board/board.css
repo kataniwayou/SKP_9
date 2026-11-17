@@ -33,7 +33,8 @@
 .link-wire .pilltx { font: 600 10px ui-monospace, Consolas, monospace; fill: #fff; pointer-events: none; }
 
 /* handles only anchor React Flow's edge geometry; the wires draw their own ends */
-.node .react-flow__handle { opacity: 0; pointer-events: none; }
+.node .react-flow__handle { opacity: 0; width: 14px; height: 14px; }
+.node .react-flow__handle.connectionindicator { pointer-events: all; cursor: crosshair; }
 
 .link-wire .wire.sel { stroke: #FF0072; }
 

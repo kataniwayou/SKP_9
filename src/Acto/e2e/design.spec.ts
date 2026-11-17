@@ -106,6 +106,26 @@ test('design a workflow on the board, save it, and find it again after a reload'
   await expect(stepAgain).toHaveCount(1);
   near((await stepAgain.boundingBox())!, drawn, 'step after reload');
 
+  // a second step, then a real mouse drag from the first step's right handle onto the second step's body draws a wire
+  // zoom in on the frame (mouse wheel) until its steps are big enough to grab
+  const c0 = (await again.boundingBox())!;
+  await page.mouse.move(c0.x + c0.width / 2, c0.y + c0.height / 2);
+  for (let i = 0; i < 20 && (await again.boundingBox())!.width < 500; i++) { await page.mouse.wheel(0, -300); await page.waitForTimeout(80); }
+  await page.waitForTimeout(300);
+  const fa = (await again.boundingBox())!;
+  await dragOnto(page, page.getByTestId('toolbox-step').first(), fa.x + 8, fa.y + fa.height * 0.7);
+  const steps = page.locator(`.react-flow__node-step[data-id*=":${frameId}:"]`);
+  await expect(steps).toHaveCount(2);
+  await expect(again.locator('.unsaved-tag')).toBeVisible();
+  const edgesBefore = await page.locator('.react-flow__edge').count();
+  const h = (await steps.nth(0).locator('.react-flow__handle.source').boundingBox())!;
+  const body = (await steps.nth(1).boundingBox())!;
+  await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(body.x + body.width / 2, body.y + body.height / 2, { steps: 12 });
+  await page.mouse.up();
+  await expect(page.locator('.react-flow__edge')).toHaveCount(edgesBefore + 1);
+
   const svg = await request.get(`/api/v1/workflows/${createdId}.svg`);
   expect(svg.status()).toBe(200);
   expect(await svg.text()).toContain('<svg');
