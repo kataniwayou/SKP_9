@@ -1,4 +1,5 @@
 import { useStore, type EdgeProps } from '@xyflow/react';
+import { useWorkflowStatus } from '../../live/LiveContext';
 import { conditionStyle } from '../wires';
 import type { Point } from '../../model/geometry';
 
@@ -6,6 +7,8 @@ import type { Point } from '../../model/geometry';
 export const ZOOM_DETAIL = 0.4;
 
 export function LinkWire({ id, data, selected }: EdgeProps) {
+  const workflowId = (data as { workflowId?: string } | undefined)?.workflowId ?? '';
+  const running = useWorkflowStatus(workflowId) === 'running';
   const zoom = useStore((s) => s.transform[2]);
   if (zoom < ZOOM_DETAIL) return null;
   const { condition, out, in: inn } = data as { condition: number; out: Point; in: Point };
@@ -27,7 +30,7 @@ export function LinkWire({ id, data, selected }: EdgeProps) {
         </marker>
       </defs>
       <path className="wire-hit" d={d} />
-      <path className={`wire${selected ? ' sel' : ''}`} d={d} stroke={style.colour} strokeWidth={selected ? 3.6 : 2.2} fill="none" markerEnd={`url(#${marker})`} />
+      <path className={`wire${selected ? ' sel' : ''}${running ? ' running' : ''}`} d={d} stroke={style.colour} strokeWidth={selected ? 3.6 : 2.2} fill="none" markerEnd={`url(#${marker})`} />
       <circle cx={px} cy={py} r={8} fill={style.colour} />
       <text className="pilltx" x={px} y={py} textAnchor="middle" dominantBaseline="central">{style.letter}</text>
     </g>

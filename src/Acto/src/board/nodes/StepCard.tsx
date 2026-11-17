@@ -2,6 +2,7 @@ import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import type { StepRole } from '../roles';
 import { conditionStyle } from '../wires';
 import { ZOOM_DETAIL } from '../edges/LinkWire';
+import { HealthDot } from '../live/HealthDot';
 import { useBoardWorkflow } from './boardContext';
 
 const PALETTE = [1, 2, 3, 4, 5].map((c) => conditionStyle(c).colour);
@@ -31,7 +32,7 @@ export function StepCard({ data, selected }: NodeProps) {
           <div className="sp2">{proc ?? 'no processor'}</div>
         </div>
       </div>
-      <div className="nf"><span>{step?.version}</span><span className="health-slot" /></div>
+      <div className="nf"><span>{step?.version}</span><span className="health-slot"><HealthDot processorId={step?.processorId ?? null} /></span></div>
     </div>
   );
 }

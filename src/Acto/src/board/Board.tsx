@@ -6,6 +6,9 @@ import { toFlow } from './toFlow';
 import { LinkWire } from './edges/LinkWire';
 import { StepCard } from './nodes/StepCard';
 import { WorkflowFrame } from './nodes/WorkflowFrame';
+import { useLive, useLiveStore } from '../live/LiveContext';
+import { statusOf } from '../live/liveState';
+import { STATE_COLOUR } from './live/StateBadge';
 import { BoardContext } from './nodes/boardContext';
 import './board.css';
 
@@ -21,6 +24,9 @@ export interface BoardProps {
 }
 
 export function Board({ workflows, selection, onSelect, initialZoom }: BoardProps) {
+  const live = useLiveStore();
+  useLive((st) => st.running); // re-render the minimap strokes when a workflow starts or stops
+  useLive((st) => st.workflows);
   const byId = useMemo(() => new Map(workflows.map((w) => [w.graph.workflow.id, w])), [workflows]);
   const { nodes, edges } = useMemo(() => {
     const flow = toFlow(workflows);
@@ -64,7 +70,10 @@ export function Board({ workflows, selection, onSelect, initialZoom }: BoardProp
           proOptions={{ hideAttribution: true }}
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-          <MiniMap pannable zoomable />
+          <MiniMap pannable zoomable nodeStrokeColor={(n) => {
+            if (n.type !== 'workflow') return 'transparent';
+            return STATE_COLOUR[statusOf(live.getState(), (n.data as { workflowId: string }).workflowId)];
+          }} />
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>

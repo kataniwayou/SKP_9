@@ -36,3 +36,16 @@
 .node .react-flow__handle { opacity: 0; pointer-events: none; }
 
 .link-wire .wire.sel { stroke: #FF0072; }
+
+/* live state */
+.state-badge { display: inline-flex; align-items: center; gap: 6px; font: 600 11px ui-monospace, Consolas, monospace; border: 1px solid; border-radius: 999px; padding: 2px 9px; background: #fff; }
+.state-badge .sb-dot { width: 7px; height: 7px; border-radius: 50%; }
+.state-badge .sb-dot.pulse { animation: sb-pulse 1.4s ease-in-out infinite; }
+@keyframes sb-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(1.5); } }
+.health-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+.link-wire .wire.running { stroke-dasharray: 7 4; animation: wire-flow .8s linear infinite; }
+@keyframes wire-flow { to { stroke-dashoffset: -11; } }
+@media (prefers-reduced-motion: reduce) {
+  .state-badge .sb-dot.pulse { animation: none; }
+  .link-wire .wire.running { animation: none; stroke-dasharray: none; }
+}
