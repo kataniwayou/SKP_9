@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "e2e": "playwright test",
+    "e2e:watch": "node scripts/e2e-watch.mjs",
     "gen:api": "node scripts/gen-api.mjs"
   },
   "dependencies": {
