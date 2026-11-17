@@ -9,7 +9,7 @@ const idle: ChatState = { entries: [], wire: [], question: null, busy: false };
 
 function pane() {
   const onSend = vi.fn();
-  render(<ChatPane chat={idle} onSend={onSend} onAnswer={() => {}} onStop={() => {}} onNewChat={() => {}} status={null} configured />);
+  render(<ChatPane chat={idle} onSend={onSend} onAnswer={() => {}} onStop={() => {}} onNewChat={() => {}} status={null} configured storage={localStorage} />);
   const box = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement;
   const type = (text: string) => fireEvent.change(box, { target: { value: text } });
   // the key pressed with the caret at `caret` (default: the end)

@@ -25,13 +25,17 @@ export interface ChatHostProps {
   ctx: ToolContext;
   /** The model's fetch (/ai/config and /ai/chat/completions); the browser's by default. */
   fetchFn?: typeof fetch;
+  /** False while the board is still loading (App's `loaded`): the pane takes no message or answer until then. */
+  ready?: boolean;
+  /** The page's localStorage, for the sent-message history; null where the browser keeps nothing. */
+  storage?: Storage | null;
 }
 
 /**
  * The Chat pane connected to the model (WorkflowStudio's ChatHost, without its dock and studio context): the agent loop
  * acts on the board through `ctx`. The chat is written to storage when the page goes away.
  */
-export function ChatHost({ chat, ctx, fetchFn }: ChatHostProps) {
+export function ChatHost({ chat, ctx, fetchFn, ready = true, storage = null }: ChatHostProps) {
   const state = useSyncExternalStore(chat.subscribe, chat.getState);
   const { send, answer, stop, newChat, status } = useChat(ctx, chat, fetchFn);
   const configured = useConfigured(fetchFn);
@@ -40,5 +44,5 @@ export function ChatHost({ chat, ctx, fetchFn }: ChatHostProps) {
     window.addEventListener('pagehide', flush);
     return () => { window.removeEventListener('pagehide', flush); chat.flush(); };
   }, [chat]);
-  return <ChatPane chat={state} configured={configured} status={status} onSend={send} onAnswer={answer} onStop={stop} onNewChat={newChat} />;
+  return <ChatPane chat={state} configured={configured} status={status} onSend={send} onAnswer={answer} onStop={stop} onNewChat={newChat} ready={ready} storage={storage} />;
 }

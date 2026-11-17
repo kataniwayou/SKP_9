@@ -1,11 +1,13 @@
 /**
  * What the user sent in the chat (2026-10-24), oldest first, for ↑ / ↓ in the message box as in Claude Code. Kept in the
  * browser, so it outlives a refresh and New chat; the same message sent twice in a row is kept once.
+ * The storage is the page's own (App's, null where the browser keeps nothing): never read from a default, which would
+ * throw outside the try where site data is blocked.
  */
 export const HISTORY_KEY = 'acto.chat.history';
 export const HISTORY_MAX = 100;
 
-export function readHistory(storage: Storage | undefined = globalThis.localStorage): string[] {
+export function readHistory(storage: Storage | null): string[] {
   try {
     const v: unknown = JSON.parse(storage?.getItem(HISTORY_KEY) ?? '[]');
     return Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string').slice(-HISTORY_MAX) : [];
@@ -19,7 +21,7 @@ export function withSent(history: readonly string[], text: string): string[] {
   return (history.at(-1) === text ? [...history] : [...history, text]).slice(-HISTORY_MAX);
 }
 
-export function writeHistory(history: readonly string[], storage: Storage | undefined = globalThis.localStorage): void {
+export function writeHistory(history: readonly string[], storage: Storage | null): void {
   try {
     storage?.setItem(HISTORY_KEY, JSON.stringify(history));
   } catch {

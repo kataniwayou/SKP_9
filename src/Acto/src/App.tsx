@@ -116,7 +116,7 @@ export function App(props: AppProps) {
           ].filter(Boolean);
           if (parts.length > 0) output.log(`${w.graph.workflow.name}: on Save, ${parts.join('; ')}`, 'warn');
         }
-        setPicks((ps) => livePicks(ps, board.workflows));
+        // the picks are trimmed by the effect below once loaded, against the whole board (drafts and new frames too)
         store.finish(board);
         setLoaded(true);
       } catch (e) {
@@ -421,6 +421,9 @@ export function App(props: AppProps) {
     }
   }, [store, output, onSelect, caches]);
 
+  // the store's board, never the last render's: a chat tool pans (or places) right after its own edit
+  const workflowNow = useCallback((id: string) => store.boards().find((w) => w.graph.workflow.id === id), [store]);
+
   // what the chat's tools act on: the same store, histories and picks as the user's own gestures
   const chatCtx = useMemo<ToolContext>(() => ({
     store, api, output, live, session, newId,
@@ -430,7 +433,7 @@ export function App(props: AppProps) {
       focus: (workflowId, stepIds) => boardFocus.current?.(workflowId, stepIds),
       setPicks: setAllPicks,
       picks: () => picksRef.current,
-      newWorkflowAt: () => freeSlot(workflowsRef.current.map((w) => w.frame)),
+      newWorkflowAt: () => freeSlot(store.boards().map((w) => w.frame)),
     },
   }), [store, api, output, live, session, setAllPicks]);
 
@@ -448,11 +451,11 @@ export function App(props: AppProps) {
               ? <div className="board-wait">Loading the board…</div>
               : <Board workflows={workflows} picks={picks} onPick={onPick} settled={loaded}
                   {...(saved ? { initialView: { x: saved.x, y: saved.y, zoom: saved.zoom } } : {})}
-                  onViewChange={onViewChange} onEdit={onEdit} toolbar={toolbar} onDropItem={onDropItem} focusRef={boardFocus}
+                  onViewChange={onViewChange} onEdit={onEdit} toolbar={toolbar} onDropItem={onDropItem} focusRef={boardFocus} workflowNow={workflowNow}
                   bar={<PickBar picks={picks} status={toolbar.status} actions={barActions} pending={pending} onConfirm={toolbar.confirmRemove} onCancel={toolbar.cancelRemove} />} />}
             inspector={<InspectorPanel workflows={workflows} picks={picks} store={store} />}
             output={<OutputPanel />}
-            chat={<ChatHost chat={chat} ctx={chatCtx} {...(props.aiFetch ? { fetchFn: props.aiFetch } : {})} />}
+            chat={<ChatHost chat={chat} ctx={chatCtx} ready={loaded} storage={storage} {...(props.aiFetch ? { fetchFn: props.aiFetch } : {})} />}
           />
         </div>
       </OutputProvider>

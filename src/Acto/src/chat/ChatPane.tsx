@@ -17,6 +17,10 @@ export interface ChatPaneProps {
   status: ChatStatus | null;
   /** Whether the model has a key on the server: null while that is not known yet. */
   configured: boolean | null;
+  /** False while the board is still loading: nothing can be sent or answered until every workflow is in. */
+  ready?: boolean;
+  /** Where the sent messages are kept (the page's localStorage); null or absent: only while the pane is open. */
+  storage?: Storage | null;
 }
 
 function Entry({ entry }: { entry: ChatEntry }) {
@@ -42,7 +46,7 @@ const NEAR_END = 24;
  * In the box ↑ on the first line and ↓ on the last walk what was sent before (2026-10-24, as in Claude Code), ↓ past the
  * newest giving back what was being written.
  */
-export function ChatPane({ chat, onSend, onAnswer, onStop, onNewChat, status, configured }: ChatPaneProps) {
+export function ChatPane({ chat, onSend, onAnswer, onStop, onNewChat, status, configured, ready = true, storage = null }: ChatPaneProps) {
   const [text, setText] = useState('');
   const [log, setLog] = useState<HTMLDivElement | null>(null);
   // follows the end while the user is there; a user who scrolled up to read is left where they are
@@ -51,8 +55,10 @@ export function ChatPane({ chat, onSend, onAnswer, onStop, onNewChat, status, co
     if (log && following.current) log.scrollTop = log.scrollHeight;
   }, [log, chat.entries, chat.question, chat.busy]);
   const blocked = configured === false;
+  // the tools act on the board: a message or an answer before every workflow is in would find half of it
+  const closed = blocked || !ready;
   // the sent messages, the one the box shows (null: the user's own draft, kept aside while they walk back)
-  const [history, setHistory] = useState(readHistory);
+  const [history, setHistory] = useState(() => readHistory(storage));
   const [at, setAt] = useState<number | null>(null);
   const draft = useRef('');
   const input = useRef<HTMLTextAreaElement>(null);
@@ -65,10 +71,10 @@ export function ChatPane({ chat, onSend, onAnswer, onStop, onNewChat, status, co
 
   const send = () => {
     const t = text.trim();
-    if (t === '' || chat.busy || blocked) return;
+    if (t === '' || chat.busy || closed) return;
     const next = withSent(history, t);
     setHistory(next);
-    writeHistory(next);
+    writeHistory(next, storage);
     setAt(null);
     draft.current = '';
     setText('');
@@ -112,12 +118,13 @@ export function ChatPane({ chat, onSend, onAnswer, onStop, onNewChat, status, co
         {chat.entries.length === 0 && !blocked && <div className="chat-empty">Ask for a change to a workflow, and watch it happen on the board.</div>}
         {chat.entries.map((e, i) => <Entry key={i} entry={e} />)}
         {blocked && <div className="chat-e chat-note err" data-level="error">{NOT_CONFIGURED}</div>}
+        {!ready && !blocked && <div className="chat-e chat-note" data-level="info">Loading the board…</div>}
         {chat.question && (
           <div className="chat-question" role="group" aria-label="Question">
             <div className="chat-q-text">{chat.question.text}</div>
             {chat.question.warnings?.map((w, i) => <div key={i} className="chat-q-warn">{w}</div>)}
             <div className="chat-choices">
-              {chat.question.choices.map((c) => <button key={c} type="button" className="pbtn" onClick={() => onAnswer(c)}>{c}</button>)}
+              {chat.question.choices.map((c) => <button key={c} type="button" className="pbtn" disabled={!ready} onClick={() => onAnswer(c)}>{c}</button>)}
             </div>
           </div>
         )}
@@ -134,7 +141,7 @@ export function ChatPane({ chat, onSend, onAnswer, onStop, onNewChat, status, co
         rows={2}
         placeholder={chat.busy ? 'Working…' : 'Write a message'}
         value={text}
-        disabled={chat.busy || blocked}
+        disabled={chat.busy || closed}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
       />

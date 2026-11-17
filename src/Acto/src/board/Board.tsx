@@ -62,12 +62,17 @@ export interface BoardProps {
    * The chat's `focus` command calls it; it changes nothing else.
    */
   focusRef?: MutableRefObject<BoardFocus | null>;
+  /**
+   * The workflow as it is now, for `focusRef` (App: the board store's): a tool pans right after its store edit, before
+   * React has drawn it, so the `workflows` of the last render may not hold it yet. Without it, the last render's.
+   */
+  workflowNow?: (workflowId: string) => BoardWorkflow | undefined;
 }
 
 /** Pans the board to a workflow (and, given, steps in it); a workflow not on the board is ignored. */
 export type BoardFocus = (workflowId: string, stepIds?: string[]) => void;
 
-export function Board({ workflows, picks, onPick, initialZoom, initialView, onViewChange, onEdit, toolbar, onDropItem, bar, settled = true, focusRef }: BoardProps) {
+export function Board({ workflows, picks, onPick, initialZoom, initialView, onViewChange, onEdit, toolbar, onDropItem, bar, settled = true, focusRef, workflowNow }: BoardProps) {
   const fitAtMount = useRef(settled);
   const flow = useRef<{
     getViewport: () => Viewport; fitView: () => unknown; screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number };
@@ -75,10 +80,12 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
   } | null>(null);
   const workflowsNow = useRef(workflows);
   workflowsNow.current = workflows;
+  const lookup = useRef(workflowNow);
+  lookup.current = workflowNow;
   useEffect(() => {
     if (!focusRef) return;
     focusRef.current = (workflowId, stepIds) => {
-      const w = workflowsNow.current.find((x) => x.graph.workflow.id === workflowId);
+      const w = lookup.current ? lookup.current(workflowId) : workflowsNow.current.find((x) => x.graph.workflow.id === workflowId);
       const rf = flow.current;
       if (!w || !rf) return;
       const b = focusBounds(w.frame, w.stepAt, stepIds);

@@ -30,7 +30,7 @@ describe('App', () => {
     api.getGraph = ((id: string) => id === 'w2' ? new Promise((res) => { release = () => res(get(id)); }) : get(id)) as typeof api.getGraph;
     renderApp(api);
     expect(await screen.findByTestId('rf__node-wf:w1')).toBeInTheDocument();
-    expect(screen.queryByText('Loading the board…')).toBeNull();
+    expect(document.querySelector('.board-wait')).toBeNull(); // the board's own wait line (the chat says it too, until the last arrives)
     expect(screen.queryByText(/Board loaded/)).toBeNull();
     release();
     expect(await screen.findByText('Board loaded: 2 workflows')).toBeInTheDocument();
@@ -203,6 +203,21 @@ describe('App', () => {
       await vi.waitFor(() => expect(document.querySelectorAll('.react-flow__node-step').length).toBe(before));
       expect(await inspector().findByDisplayValue('w1-name')).toBeInTheDocument();
       expect(inspector().queryByText(/selected/)).toBeNull();
+    });
+    it('a workflow made and picked while the board is still loading stays picked once it has loaded (S2)', async () => {
+      const api = fakeApi({ workflows: [wf('w1'), wf('w2')] });
+      const get = api.getGraph;
+      let release: () => void = () => {};
+      api.getGraph = ((id: string) => (id === 'w2' ? new Promise((res) => { release = () => res(get(id)); }) : get(id))) as typeof api.getGraph;
+      renderApp(api, view());
+      await screen.findByText('s1-name');
+      const drop = createEvent.drop(document.querySelector('.react-flow')!, { dataTransfer: { getData: () => JSON.stringify({ kind: 'workflow' }) } });
+      Object.defineProperties(drop, { clientX: { value: 3000 }, clientY: { value: 3000 } }); // far from w1: a new workflow
+      fireEvent(document.querySelector('.react-flow')!, drop);
+      expect(await inspector().findByDisplayValue('new-workflow-1')).toBeInTheDocument();
+      release();
+      expect(await screen.findByText('Board loaded: 2 workflows')).toBeInTheDocument();
+      expect(inspector().getByDisplayValue('new-workflow-1')).toBeInTheDocument();
     });
   });
 
