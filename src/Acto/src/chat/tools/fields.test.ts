@@ -31,7 +31,7 @@ function setup() {
     commands: { focus, setPicks: (p) => { picks = p; }, picks: () => picks, newWorkflowAt: () => ({ x: 700, y: 40 }) },
     processors: () => [p1], caches: () => [], session: null, newId: () => `n${++n}`,
   };
-  return { ctx, store };
+  return { ctx, store, w1 };
 }
 
 type Store = ReturnType<typeof setup>['store'];
@@ -133,5 +133,43 @@ describe('field tools', () => {
     expect(ok.ok).toBe(true);
     expect(state(store).assignments.a).toBeUndefined();
     expect(done(await call(ctx, 'remove_assignment', { workflow_id: 'w1', step_id: 'a' })).ok).toBe(false);
+  });
+
+  it('two consecutive chat edits of one field are two undo steps', async () => {
+    const { ctx, store } = setup();
+    const before = state(store);
+    await setF(ctx, { kind: 'step', id: 'a' }, 'name', 'x');
+    const x = state(store);
+    await setF(ctx, { kind: 'step', id: 'a' }, 'name', 'y');
+    store.undo('w1');
+    expect(state(store)).toBe(x);
+    store.undo('w1');
+    expect(state(store)).toBe(before);
+    await call(ctx, 'create_assignment', { workflow_id: 'w1', step_id: 'b', payload: '{"n":1}' });
+    const one = state(store);
+    await call(ctx, 'create_assignment', { workflow_id: 'w1', step_id: 'b', payload: '{"n":2}' });
+    store.undo('w1');
+    expect(state(store)).toBe(one);
+  });
+
+  it('a cleared slot is refused; an edited copy stays editable when the original is not loaded', async () => {
+    const { ctx, store, w1 } = setup();
+    const cfg = { kind: 'slot', id: 'p1', slot: 'config' };
+    await setF(ctx, cfg, 'name', 'copy1');
+    w1.graph.schemas.get('sc1')!.definition = null;
+    expect(done(await setF(ctx, cfg, 'name', 'copy2')).ok).toBe(true);
+    expect((state(store).processors!.p1!.slots.config as { copy: { name: string } }).copy.name).toBe('copy2');
+    store.edit('w1', (s) => ({ ...s, processors: { p1: { fields: {}, slots: { config: { cleared: true } } } } }));
+    expect(done(await setF(ctx, cfg, 'name', 'copy3')).result).toContain('the config schema is cleared');
+  });
+
+  it('null clears description and cronExpression; a number for a text key fails', async () => {
+    const { ctx, store } = setup();
+    await setF(ctx, { kind: 'workflow' }, 'description', 'd');
+    const o = done(await call(ctx, 'set_field', { workflow_id: 'w1', target: { kind: 'workflow' }, key: 'description', value: null }));
+    expect(o.ok).toBe(true);
+    expect(state(store).fields.description).toBeNull();
+    expect(done(await setF(ctx, { kind: 'workflow' }, 'name', 5)).result).toContain('name needs a text value');
+    expect(done(await call(ctx, 'set_field', { workflow_id: 'w1', target: { kind: 'workflow' }, key: 'name', value: null })).result).toContain('name needs a text value');
   });
 });

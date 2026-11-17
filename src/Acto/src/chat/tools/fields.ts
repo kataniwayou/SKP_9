@@ -49,7 +49,7 @@ const setField: ToolDef = {
       workflow_id: WORKFLOW_ID,
       target: { type: 'object', properties: { kind: { type: 'string', enum: ['workflow', 'step', 'cache', 'processor', 'slot'] }, id: { type: 'string' }, slot: { type: 'string', enum: ['input', 'output', 'config'] } }, required: ['kind'] },
       key: { type: 'string' },
-      value: { type: ['string', 'number'] },
+      value: { type: ['string', 'number', 'null'] },
     },
     required: ['workflow_id', 'target', 'key', 'value'], additionalProperties: false,
   },
@@ -63,48 +63,51 @@ const setField: ToolDef = {
     if (!keys.includes(key)) return fail(`${kind} has no field ${key} (it has ${keys.join(', ')})`, 'set field failed');
     const s0 = ctx.store.entry(t.id)!.history.present;
     const raw = args.value;
-    let text: string | null = typeof raw === 'string' ? raw : null;
+    let text: string | null = null;
     let cond = 0;
     if (key === 'entryCondition') {
       const c = CONDITIONS.find((x) => x.value === Number(raw) || x.name.toLowerCase() === str(raw).toLowerCase());
       if (!c) return fail(`entryCondition must be one of ${CONDITIONS.map((x) => `${x.value} ${x.name}`).join(', ')}`, 'set field failed');
       cond = c.value;
-    } else if (text === null) {
-      if (typeof raw === 'number') text = String(raw);
-      else return fail(`${key} needs a text value`, 'set field failed');
-    }
-    const v: string | null = text !== null && text === '' && NULLABLE.has(key) ? null : text;
+    } else if (typeof raw === 'string') text = raw;
+    else if (raw !== null || !NULLABLE.has(key)) return fail(`${key} needs a text value`, 'set field failed');
+    const v: string | null = text === '' && NULLABLE.has(key) ? null : text;
     let label: string;
     let r: Awaited<ReturnType<typeof edit>>;
     let extra = '';
     if (kind === 'workflow') {
       label = `${t.name} ${key}`;
-      r = await edit(ctx, t.id, (s) => setWorkflowField(s, key as 'name', v), `chat:field:${t.id}:${key}`);
+      r = await edit(ctx, t.id, (s) => setWorkflowField(s, key as 'name', v));
     } else if (kind === 'step') {
       const step = s0.steps[id];
       if (!step) return fail(`no step ${id} in ${t.name}`, 'set field failed');
       label = `step ${step.name} ${key}`;
-      r = await edit(ctx, t.id, (s) => setStepField(s, id, key as 'name', key === 'entryCondition' ? cond : v), `chat:field:${id}:${key}`);
+      r = await edit(ctx, t.id, (s) => setStepField(s, id, key as 'name', key === 'entryCondition' ? cond : v));
     } else if (kind === 'cache') {
       const c = s0.caches[id];
       if (!c) return fail(`no cache ${id} in ${t.name}`, 'set field failed');
       label = `cache ${c.name} ${key}`;
-      r = await edit(ctx, t.id, (s) => setCacheField(s, id, key as 'name', v), `chat:field:${id}:${key}`);
+      r = await edit(ctx, t.id, (s) => setCacheField(s, id, key as 'name', v));
     } else {
       const base = ctx.store.processor(id, t.id);
       if (!base) return fail(`no processor ${id} in ${t.name}`, 'set field failed');
       if (kind === 'processor') {
         label = `processor ${base.name} ${key}`;
-        r = await edit(ctx, t.id, (s) => setProcessorField(s, base, key as 'name', v), `chat:field:processor:${id}:${key}`);
+        r = await edit(ctx, t.id, (s) => setProcessorField(s, base, key as 'name', v));
       } else {
         if (!SLOTS.includes(slot as Slot)) return fail('target.slot must be input, output or config', 'set field failed');
         const sl = slot as Slot;
+        const cur = s0.processors?.[id]?.slots[sl];
+        if (cur && 'cleared' in cur) return fail(`the ${sl} schema is cleared`, 'set field failed');
         const originalId = base[SLOT_FIELD[sl]];
-        if (originalId === null) return fail(`processor ${base.name} has no ${sl} schema`, 'set field failed');
-        const original = ctx.store.schema(originalId, t.id);
-        if (!original || original.definition === null || original.definition === undefined) return fail(`the ${sl} schema of processor ${base.name} is not loaded (definition not loaded)`, 'set field failed');
+        let original = originalId === null ? null : ctx.store.schema(originalId, t.id) ?? null;
+        if (!cur) {
+          // the first edit copies the original, which must be there to copy
+          if (originalId === null) return fail(`processor ${base.name} has no ${sl} schema`, 'set field failed');
+          if (!original || original.definition === null || original.definition === undefined) return fail(`the ${sl} schema of processor ${base.name} is not loaded (definition not loaded)`, 'set field failed');
+        } else if (original && (original.definition === null || original.definition === undefined)) original = null;
         label = `processor ${base.name} ${sl} schema ${key}`;
-        r = await edit(ctx, t.id, (s) => setSlotField(s, base, sl, original, key as 'name', v, ctx.newId), `chat:field:slot:${id}:${sl}:${key}`);
+        r = await edit(ctx, t.id, (s) => setSlotField(s, base, sl, original, key as 'name', v, ctx.newId));
         if (r.ok && sl === 'config' && key === 'definition') {
           // the payloads of this workflow's steps that run the processor are checked against the new definition
           const now = ctx.store.entry(t.id)!.history.present;
@@ -131,7 +134,7 @@ const createAssignment: ToolDef = {
     const payload = args.payload;
     const step = ctx.store.entry(t.id)!.history.present.steps[stepId];
     if (!step) return fail(`no step ${stepId} in ${t.name}`, 'create assignment failed');
-    const r = await edit(ctx, t.id, (s) => setPayload(s, stepId, payload, ctx.newId), `chat:field:${stepId}:payload`);
+    const r = await edit(ctx, t.id, (s) => setPayload(s, stepId, payload, ctx.newId));
     if (!r.ok) return fail(`${t.name}: ${r.result}`, 'create assignment failed', r.entries);
     ctx.commands.focus(t.id, [stepId]);
     const problems = checkText(ctx, t.id, ctx.store.entry(t.id)!.history.present, stepId);
