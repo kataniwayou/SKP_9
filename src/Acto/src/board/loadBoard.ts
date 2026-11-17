@@ -26,6 +26,11 @@ export interface BoardLoad {
   listed: boolean;
   workflows: BoardWorkflow[];
   failures: { workflowId: Id; name: string; detail: string }[];
+  /**
+   * Frames that arrived in a provisional slot (no stored position) and ended elsewhere once every workflow was in:
+   * the one-shot layout, in creation order, which does not depend on which graph answered first.
+   */
+  finalFrames?: ReadonlyMap<Id, Rect>;
 }
 type Loaded = Omit<BoardWorkflow, 'frame'> & { storedFrame: Rect | null };
 
@@ -128,6 +133,7 @@ export async function loadBoard(api: StudioApi, concurrency = 4, onWorkflow?: (b
   const items = list.value.filter((w): w is typeof w & { id: string } => !!w.id).map((w) => ({ id: w.id, name: w.name ?? w.id }));
   const results: (BoardWorkflow | { error: string } | undefined)[] = new Array(items.length);
   const placed = new Map<Id, Rect>();
+  const arrived: ({ w: Loaded; size: { w: number; h: number } } | undefined)[] = new Array(items.length);
   const place = (id: Id, w: Loaded): BoardWorkflow => {
     const own = minFrameSize(w.stepAt, w.graph.caches.size);
     const size = { w: Math.max(own.w, w.storedFrame?.w ?? 0), h: Math.max(own.h, w.storedFrame?.h ?? 0) };
@@ -135,6 +141,7 @@ export async function loadBoard(api: StudioApi, concurrency = 4, onWorkflow?: (b
     const frames = placeFrames([...taken, { id, createdAt: w.graph.workflow.audit.createdAt, stored: w.storedFrame && { ...w.storedFrame, ...size }, size }]);
     const frame = frames.get(id)!;
     placed.set(id, frame);
+    arrived[items.findIndex((x) => x.id === id)] = { w, size };
     return { ...omitStored(w), frame };
   };
   let next = 0;
@@ -150,6 +157,19 @@ export async function loadBoard(api: StudioApi, concurrency = 4, onWorkflow?: (b
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, worker));
 
+  // the one-shot layout: every stored frame is an obstacle, the rest go by creation time
+  const okAt = items.map((_, i) => i).filter((i) => arrived[i]);
+  const finals = placeFrames(okAt.map((i) => {
+    const { w, size } = arrived[i]!;
+    return { id: items[i].id, createdAt: w.graph.workflow.audit.createdAt, stored: w.storedFrame && { ...w.storedFrame, ...size }, size };
+  }));
+  const finalFrames = new Map<Id, Rect>();
+  for (const i of okAt) {
+    const r = results[i] as BoardWorkflow;
+    const f = finals.get(items[i].id)!;
+    if (!arrived[i]!.w.storedFrame && (f.x !== r.frame.x || f.y !== r.frame.y)) finalFrames.set(items[i].id, f);
+    results[i] = { ...r, frame: f };
+  }
   const workflows: BoardWorkflow[] = [];
   const failures: BoardLoad['failures'] = [];
   results.forEach((r, i) => {
@@ -157,7 +177,7 @@ export async function loadBoard(api: StudioApi, concurrency = 4, onWorkflow?: (b
     if ('error' in r) failures.push({ workflowId: items[i].id, name: items[i].name, detail: r.error });
     else workflows.push(r);
   });
-  return { listed: true, workflows, failures };
+  return { listed: true, workflows, failures, finalFrames };
 }
 
 function omitStored({ storedFrame: _s, ...rest }: Loaded): Omit<BoardWorkflow, 'frame'> {

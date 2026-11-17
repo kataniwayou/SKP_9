@@ -367,6 +367,27 @@ describe('rebase: a sharer re-read after another workflow saved', () => {
       expect(st.boards()).toHaveLength(2);
       expect(Object.keys(JSON.parse(session.getItem('acto.drafts')!)).sort()).toEqual(['n1', 'w1', 'w3']);
     });
+    it('finish moves a frame the user has not touched to its final slot, without marking it unsaved', () => {
+      const st = fresh(memoryStorage());
+      st.begin([proc('p1', 'Analyst')]);
+      const first = bwFull();
+      st.arrive(first);
+      const final = { ...first.frame, x: 4000, y: 10 };
+      st.finish({ listed: true, workflows: [{ ...first, frame: final }], failures: [], finalFrames: new Map([['w1', final]]) });
+      expect(st.boards()[0]!.frame).toMatchObject({ x: 4000, y: 10 });
+      expect(st.entry('w1')!.unsaved).toBe(false);
+      expect(st.entry('w1')!.history.past).toHaveLength(0);
+    });
+    it('finish leaves a frame the user already moved', () => {
+      const st = fresh(memoryStorage());
+      st.begin([proc('p1', 'Analyst')]);
+      const first = bwFull();
+      st.arrive(first);
+      st.edit('w1', (s) => ({ ...s, frame: { ...s.frame, x: 123 } }));
+      st.finish({ listed: true, workflows: [], failures: [], finalFrames: new Map([['w1', { ...first.frame, x: 4000 }]]) });
+      expect(st.boards()[0]!.frame.x).toBe(123);
+      expect(st.entry('w1')!.history.past[0]!.frame.x).toBe(4000);
+    });
     it('load is begin, arrive each, finish', () => {
       const a = fresh(drafted());
       a.load({ listed: true, workflows: [bwFull()], failures: [] }, [proc('p1', 'Analyst')]);

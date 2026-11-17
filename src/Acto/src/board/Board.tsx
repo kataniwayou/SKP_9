@@ -64,8 +64,10 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
   // the first fit waited for the last workflow: fit once it is in (a saved view or a given zoom is never fitted over)
   useEffect(() => {
     if (!settled || fitAtMount.current) return;
-    fitAtMount.current = true;
-    if (initialView === undefined && initialZoom === undefined) void flow.current?.fitView();
+    if (initialView !== undefined || initialZoom !== undefined) { fitAtMount.current = true; return; }
+    // let React Flow measure the frames that just arrived first
+    const raf = requestAnimationFrame(() => { fitAtMount.current = true; void flow.current?.fitView(); });
+    return () => cancelAnimationFrame(raf);
   }, [settled, initialView, initialZoom]);
   const select = (s: Pick | null, additive = false) => {
     if (flow.current) onViewChange?.(flow.current.getViewport());

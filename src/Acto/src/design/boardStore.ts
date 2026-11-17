@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react';
 import type { BoardLoad, BoardWorkflow } from '../board/loadBoard';
 import { STEP_W } from '../board/geometry';
 import type { Id, Processor, Schema } from '../model/graph';
-import type { Point } from '../model/geometry';
+import type { Point, Rect } from '../model/geometry';
 import type { OutputStore } from '../output/outputStore';
 import { readDrafts, writeDrafts, type Drafts } from './drafts';
 import { commit, historyOf, redo, undo, type History } from './history';
@@ -74,6 +74,8 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
   const recs = new Map<Id, Rec>();
   // drafts for workflows this load did not bring back: left in the session untouched until they load
   let kept: Drafts = {};
+  // the frame each workflow arrived with: a final layout only moves a frame still there
+  const arrivedFrame = new Map<Id, Rect>();
   let processors = new Map<Id, Processor>();
   let procVersion = 0;
   let bwProcVersion = 0;
@@ -185,6 +187,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       processors = new Map(procs.map((p) => [p.id, p]));
       procVersion++;
       recs.clear();
+      arrivedFrame.clear();
       kept = readDrafts(session);
       changed();
     },
@@ -194,6 +197,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       const rec = make(bw);
       const draft = kept[id];
       delete kept[id];
+      arrivedFrame.set(id, { ...bw.frame });
       if (draft && draft.updatedAt === bw.graph.workflow.updatedAt) {
         recs.set(id, withHistory(rec, draft.history));
       } else {
@@ -207,7 +211,21 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       }
       changed();
     },
-    finish() {
+    finish(board) {
+      // the one-shot layout: base and every history state move, only where the frame is still the provisional one
+      for (const [id, to] of board.finalFrames ?? []) {
+        const r = recs.get(id);
+        const from = arrivedFrame.get(id);
+        if (!r || !r.base || !r.baseBw || !from) continue;
+        const move = (s: WorkflowState): WorkflowState => (s.frame.x === from.x && s.frame.y === from.y ? { ...s, frame: { ...s.frame, x: to.x, y: to.y } } : s);
+        const base = move(r.base);
+        const h = r.history;
+        const history: History = { past: h.past.map(move), present: move(h.present), future: h.future.map(move), merge: h.merge };
+        recs.set(id, {
+          ...r, baseBw: { ...r.baseBw, frame: { ...r.baseBw.frame, x: to.x, y: to.y } }, base, history,
+          view: viewOf(base, history, r.view.layout, r.view.problems, r.view.saving), bwFor: null, bw: null,
+        });
+      }
       // a workflow created in the designer and not yet saved is not on the server to match against
       for (const [id, d] of Object.entries(kept)) {
         if (!d.history.present.isNew || recs.has(id)) continue;

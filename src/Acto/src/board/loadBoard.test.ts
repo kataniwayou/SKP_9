@@ -58,6 +58,51 @@ describe('loadBoard as graphs arrive', () => {
   });
 });
 
+describe('loadBoard final layout', () => {
+  const g = (board?: { x: number; y: number; w: number; h: number }) => graphWith({ entry: ['a'], steps: { a: [] }, ...(board ? { layout: { board } } : {}) });
+  /** Graph reads resolve in `order`, one by one. */
+  async function inOrder(workflows: ReturnType<typeof wf>[], graphs: Record<string, ReturnType<typeof g>>, order: string[]) {
+    const api = fakeApi({ workflows, graphs });
+    const get = api.getGraph;
+    const gates = new Map<string, () => void>();
+    api.getGraph = ((id: string) => new Promise((res) => { gates.set(id, () => res(get(id))); })) as typeof api.getGraph;
+    const p = loadBoard(api, 10);
+    for (const id of order) {
+      while (!gates.has(id)) await new Promise((r) => setTimeout(r, 0));
+      gates.get(id)!();
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    return p;
+  }
+  const frames = (r: Awaited<ReturnType<typeof loadBoard>>) => Object.fromEntries(r.workflows.map((w) => [w.graph.workflow.id, w.frame]));
+  const hit = (a: { x: number; y: number; w: number; h: number }, b: typeof a) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+  it('lays unstored frames out in creation order whatever order they arrive in', async () => {
+    const wfs = [wf('w1', '2026-01-01'), wf('w2', '2026-01-02')];
+    const gs = { w1: g(), w2: g() };
+    const late = await inOrder(wfs, gs, ['w2', 'w1']);
+    const early = await inOrder(wfs, gs, ['w1', 'w2']);
+    expect(frames(late)).toEqual(frames(early));
+    expect(late.workflows[0].frame.x).toBe(0);
+    expect(late.workflows[1].frame.x).toBeGreaterThan(0);
+  });
+  it('a stored frame arriving last leaves no overlap', async () => {
+    const wfs = [wf('w1', '2026-01-01'), wf('w2', '2026-01-02')];
+    const r = await inOrder(wfs, { w1: g({ x: 0, y: 0, w: 600, h: 400 }), w2: g() }, ['w2', 'w1']);
+    const f = frames(r);
+    expect(hit(f.w1!, f.w2!)).toBe(false);
+    expect(f.w1).toEqual({ x: 0, y: 0, w: 600, h: 400 });
+  });
+  it('reports the final frames of those whose provisional slot changed', async () => {
+    const wfs = [wf('w1', '2026-01-01'), wf('w2', '2026-01-02')];
+    const seen: Record<string, unknown> = {};
+    const r = await inOrder(wfs, { w1: g({ x: 0, y: 0, w: 600, h: 400 }), w2: g() }, ['w2', 'w1']);
+    void seen;
+    expect(r.finalFrames!.get('w2')).toEqual(frames(r).w2);
+    expect(r.finalFrames!.has('w1')).toBe(false);
+  });
+});
+
 describe('loadWorkflow', () => {
   it('brings parked steps from the layout and drops ones that are gone', async () => {
     const r = await loadWorkflow(fakeApi({ graph: graphWith({ entry: ['a'], steps: { a: [] }, layout: { parked: ['p', 'gone'] } }), extraSteps: { p: stepDto('p') } }), 'w1');
