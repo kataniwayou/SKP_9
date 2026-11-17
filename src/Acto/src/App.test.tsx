@@ -169,6 +169,59 @@ describe('App', () => {
     });
   });
 
+  describe('arrow nudges', () => {
+    const two = () => fakeApi({ workflows: [wf('w1')], graph: graphWith({ entry: ['a'], steps: { a: ['b'], b: [] } }) });
+    const view = () => memoryStorage({ 'acto.view': JSON.stringify({ x: 0, y: 0, zoom: 1, selection: null }) });
+    const pos = (name: string) => {
+      const card = [...document.querySelectorAll('.react-flow__node-step')].find((n) => n.textContent?.includes(name)) as HTMLElement;
+      const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(card.style.transform)!;
+      return { x: Number(m[1]), y: Number(m[2]) };
+    };
+    const frame = () => { const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec((document.querySelector('.react-flow__node-workflow') as HTMLElement).style.transform)!; return { x: Number(m[1]), y: Number(m[2]) }; };
+
+    it('moves every picked step 8 px per press, as one undo step', async () => {
+      render(<App api={two()} live={liveStub()} storage={view()} />);
+      fireEvent.click(await screen.findByText('a-name', { selector: '.sn' }));
+      fireEvent.click(screen.getByText('b-name', { selector: '.sn' }), { ctrlKey: true });
+      const a0 = pos('a-name'); const b0 = pos('b-name');
+      for (let i = 0; i < 3; i++) fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+      await vi.waitFor(() => expect(pos('a-name').x).toBe(a0.x + 24));
+      expect(pos('b-name')).toEqual({ x: b0.x + 24, y: b0.y });
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+      await vi.waitFor(() => expect(pos('a-name')).toEqual(a0));
+      expect(pos('b-name')).toEqual(b0);
+    });
+    it('moves a picked frame', async () => {
+      render(<App api={two()} live={liveStub()} storage={view()} />);
+      fireEvent.click(await screen.findByText('w1-name', { selector: '.nm' }));
+      const f0 = frame();
+      fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+      fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+      await vi.waitFor(() => expect(frame()).toEqual({ x: f0.x, y: f0.y + 16 }));
+    });
+    it('never puts a step above the header band', async () => {
+      render(<App api={two()} live={liveStub()} storage={view()} />);
+      fireEvent.click(await screen.findByText('a-name', { selector: '.sn' }));
+      const a0 = pos('a-name');
+      for (let i = 0; i < 10; i++) fireEvent.keyDown(document.body, { key: 'ArrowUp' });
+      for (let i = 0; i < 10; i++) fireEvent.keyDown(document.body, { key: 'ArrowLeft' });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(pos('a-name').y).toBeGreaterThanOrEqual(46 + 28);
+      expect(pos('a-name').x).toBeGreaterThanOrEqual(28);
+      expect(a0.y).toBeGreaterThanOrEqual(46 + 28);
+    });
+    it('is ignored while typing and with nothing picked', async () => {
+      render(<App api={two()} live={liveStub()} storage={view()} />);
+      fireEvent.click(await screen.findByText('a-name', { selector: '.sn' }));
+      const a0 = pos('a-name');
+      fireEvent.keyDown(await inspector().findByDisplayValue('a-name'), { key: 'ArrowRight' });
+      fireEvent.click(document.querySelector('.react-flow__pane')!);
+      fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(pos('a-name')).toEqual(a0);
+    });
+  });
+
   describe('copy and paste', () => {
     const two = () => fakeApi({ workflows: [wf('w1')], graph: graphWith({ entry: ['a'], steps: { a: ['b'], b: [] } }) });
     const view = () => memoryStorage({ 'acto.view': JSON.stringify({ x: 0, y: 0, zoom: 1, selection: null }) });

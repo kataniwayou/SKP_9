@@ -13,7 +13,8 @@ import { newId } from './design/ids';
 import { saveWorkflow } from './design/saveWorkflow';
 import type { ToolbarActions } from './board/nodes/boardContext';
 import { createBoardStore, useBoard, type BoardStore } from './design/boardStore';
-import { pasteKey, undoRedoKey } from './design/keys';
+import { nudgeKey, pasteKey, undoRedoKey } from './design/keys';
+import { FRAME_PAD } from './board/geometry';
 import { copyClip, copyMessage, pasteClip, readClip, writeClip } from './operate/clipboard';
 import { InspectorPanel } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
@@ -195,6 +196,34 @@ export function App(props: AppProps) {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [store, output, session, setAllPicks]);
+  // arrows nudge picked steps (or a picked frame) by 8 px: one history step per workflow while the keys repeat
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const d = nudgeKey(e);
+      if (!d) return;
+      const byWf = new Map<string, { steps: string[]; frame: boolean }>();
+      for (const p of picksRef.current) {
+        if (p.kind !== 'step' && p.kind !== 'workflow') continue;
+        let g = byWf.get(p.workflowId);
+        if (!g) { g = { steps: [], frame: false }; byWf.set(p.workflowId, g); }
+        if (p.kind === 'step') g.steps.push(p.stepId); else g.frame = true;
+      }
+      if (byWf.size === 0) return;
+      e.preventDefault();
+      for (const [wf, g] of byWf) {
+        store.edit(wf, (s) => moveMany(s, {
+          steps: g.steps.flatMap((id) => {
+            const st = s.steps[id];
+            return st ? [{ id, at: { x: Math.max(FRAME_PAD, st.at.x + d.dx), y: Math.max(FRAME_PAD, st.at.y + d.dy) } }] : [];
+          }),
+          ...(g.frame ? { frame: { x: s.frame.x + d.dx, y: s.frame.y + d.dy } } : {}),
+        }), `nudge:${wf}`);
+      }
+    };
+    // capture, so it runs before the board stops the arrow reaching React Flow's own node movement
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [store]);
   const onPick = useCallback((p: Pick | null, additive: boolean) => {
     if (p === null) { if (!additive) setAllPicks([]); return; }
     setAllPicks(additive ? togglePick(picksRef.current, p) : [p]);

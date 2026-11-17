@@ -108,7 +108,9 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
       const n = id === undefined ? undefined : nodes.find((x) => x.id === id);
       if (n) { keySelect.current = false; select(nodePick(n)); }
     }
-    setDragged((ns) => applyNodeChanges(changes.filter((c) => c.type !== 'select'), ns));
+    // after Esc the pointer may still be down: its moves must not drag the nodes away again
+    const cancelled = drag.current?.cancelled === true;
+    setDragged((ns) => applyNodeChanges(changes.filter((c) => c.type !== 'select' && !(cancelled && c.type === 'position')), ns));
   };
   const onEdgesChange = (changes: EdgeChange[]) => {
     if (!keySelect.current) return;
@@ -118,9 +120,29 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
   };
   const dataOf = (n: Node) => n.data as unknown as NodeData;
 
+  // A drag in progress: where each dragged node began, and whether Esc has cancelled it.
+  const drag = useRef<{ start: Map<string, { x: number; y: number }>; cancelled: boolean } | null>(null);
+  const dragStart = (n: Node, all?: Node[]) => {
+    drag.current = { start: new Map((all && all.length > 0 ? all : [n]).map((m) => [m.id, { ...m.position }])), cancelled: false };
+  };
+  useEffect(() => {
+    if (!editable) return;
+    const onKey = (e: KeyboardEvent) => {
+      const d = drag.current;
+      if (e.key !== 'Escape' || !d || d.cancelled) return;
+      d.cancelled = true;
+      setDragged((ns) => ns.map((n) => { const p = d.start.get(n.id); return p ? { ...n, position: { ...p } } : n; }));
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [editable]);
+
   /** One edit per workflow, however many nodes React Flow dragged together. */
   const dragStop = (n: Node, all?: Node[]) => {
+    const cancelled = drag.current?.cancelled === true;
+    drag.current = null;
     if (!onEdit) return;
+    if (cancelled) { setDragged(derivedRef.current); return; }
     const moved = new Map<string, { steps: { id: string; at: { x: number; y: number } }[]; frame?: { x: number; y: number } }>();
     for (const m of all && all.length > 1 ? all : [n]) {
       const d = dataOf(m);
@@ -144,7 +166,11 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
     <BoardContext.Provider value={byId}>
       <EditContext.Provider value={onEdit ?? null}>
       <ToolbarContext.Provider value={editable ? toolbar ?? null : null}>
-      <div className="board" onKeyDownCapture={(e) => { keySelect.current = e.key === 'Enter' || e.key === ' '; }} onKeyDown={() => { keySelect.current = false; }} onKeyUp={() => { keySelect.current = false; }}>
+      <div className="board" onKeyDownCapture={(e) => {
+        // arrows nudge picks (App): React Flow's own keyboard move of a focused node must not add to it
+        if (e.key.startsWith('Arrow') && !(e.target instanceof HTMLElement && (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.target.isContentEditable))) e.stopPropagation();
+        keySelect.current = e.key === 'Enter' || e.key === ' ';
+      }} onKeyDown={() => { keySelect.current = false; }} onKeyUp={() => { keySelect.current = false; }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -154,6 +180,7 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
           nodesConnectable={editable}
           {...(editable ? {
             onNodesChange,
+            onNodeDragStart: (_: unknown, n: Node, all?: Node[]) => dragStart(n, all),
             onNodeDragStop: (_: unknown, n: Node, all?: Node[]) => dragStop(n, all),
 
             onConnect: (c: { source: string; target: string }) => {

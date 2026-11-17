@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Node } from '@xyflow/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
@@ -55,6 +55,40 @@ describe('Board editing', () => {
     await screen.findByText('a-name');
     act(() => seen.props!.onNodeDragStop!({}, { id: 'wf:w1', type: 'workflow', position: { x: 40, y: 50 }, data: { workflowId: 'w1' } }));
     expect(onEdit.moveMany).toHaveBeenCalledWith('w1', { steps: [], frame: { x: 40, y: 50 } });
+  });
+  it('Esc during a drag puts the node back and the drag end commits nothing', async () => {
+    const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    const w = bw('w1', ['a']);
+    render(<Board workflows={[w]} picks={[]} onPick={() => {}} initialZoom={1} onEdit={onEdit} />);
+    await screen.findByText('a-name');
+    const p = w.stepAt.get('a')!;
+    const at = (x: number, y: number) => stepNode('w1', 'a', x, y + HEADER_H);
+    const card = () => document.querySelector('.react-flow__node-step') as HTMLElement;
+    const before = card().style.transform;
+    act(() => seen.props!.onNodeDragStart!({}, at(p.x, p.y), [at(p.x, p.y)]));
+    act(() => (seen.props!.onNodesChange as unknown as (c: unknown[]) => void)([{ type: 'position', id: 'st:w1:a', position: { x: p.x + 80, y: p.y + HEADER_H + 40 }, dragging: true }]));
+    expect(card().style.transform).not.toBe(before);
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(card().style.transform).toBe(before);
+    act(() => (seen.props!.onNodesChange as unknown as (c: unknown[]) => void)([{ type: 'position', id: 'st:w1:a', position: { x: p.x + 90, y: p.y + HEADER_H + 50 }, dragging: true }]));
+    expect(card().style.transform).toBe(before);
+    act(() => seen.props!.onNodeDragStop!({}, at(p.x + 90, p.y + 50)));
+    expect(onEdit.moveMany).not.toHaveBeenCalled();
+    expect(card().style.transform).toBe(before);
+    // a later drag commits again
+    act(() => seen.props!.onNodeDragStart!({}, at(p.x, p.y)));
+    act(() => seen.props!.onNodeDragStop!({}, at(p.x + 16, p.y)));
+    expect(onEdit.moveMany).toHaveBeenCalledTimes(1);
+  });
+  it('Esc with no drag in progress does nothing', async () => {
+    const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    const w = bw('w1', ['a']);
+    render(<Board workflows={[w]} picks={[]} onPick={() => {}} initialZoom={1} onEdit={onEdit} />);
+    await screen.findByText('a-name');
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    const p = w.stepAt.get('a')!;
+    act(() => seen.props!.onNodeDragStop!({}, stepNode('w1', 'a', p.x + 8, p.y + HEADER_H)));
+    expect(onEdit.moveMany).toHaveBeenCalledTimes(1);
   });
   it('stays read-only without onEdit', async () => {
     render(<Board workflows={[bw('w1', ['a'])]} picks={[]} onPick={() => {}} initialZoom={1} />);

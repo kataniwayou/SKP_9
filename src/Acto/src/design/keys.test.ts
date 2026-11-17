@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pasteKey, undoRedoKey } from './keys';
+import { nudgeKey, pasteKey, undoRedoKey } from './keys';
 
 const key = (init: KeyboardEventInit, target?: HTMLElement) => {
   const e = new KeyboardEvent('keydown', init);
@@ -43,5 +43,28 @@ describe('pasteKey', () => {
     const d = document.createElement('div');
     Object.defineProperty(d, 'isContentEditable', { value: true });
     expect(k({ key: 'v', ctrlKey: true }, d)).toBe(false);
+  });
+});
+
+describe('nudgeKey', () => {
+  const k = (init: KeyboardEventInit, target?: HTMLElement) => {
+    const e = new KeyboardEvent('keydown', init);
+    if (target) Object.defineProperty(e, 'target', { value: target });
+    return nudgeKey(e);
+  };
+  it('maps the arrows to 8 px', () => {
+    expect(k({ key: 'ArrowLeft' })).toEqual({ dx: -8, dy: 0 });
+    expect(k({ key: 'ArrowRight' })).toEqual({ dx: 8, dy: 0 });
+    expect(k({ key: 'ArrowUp' })).toEqual({ dx: 0, dy: -8 });
+    expect(k({ key: 'ArrowDown' })).toEqual({ dx: 0, dy: 8 });
+    expect(k({ key: 'a' })).toBeNull();
+  });
+  it('is null with a modifier', () => {
+    expect(k({ key: 'ArrowLeft', ctrlKey: true })).toBeNull();
+    expect(k({ key: 'ArrowLeft', metaKey: true })).toBeNull();
+    expect(k({ key: 'ArrowLeft', altKey: true })).toBeNull();
+  });
+  it.each(['input', 'textarea', 'select'])('is null inside a %s', (tag) => {
+    expect(k({ key: 'ArrowLeft' }, document.createElement(tag))).toBeNull();
   });
 });

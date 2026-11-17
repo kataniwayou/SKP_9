@@ -21,3 +21,15 @@ export function pasteKey(e: KeyboardEvent): boolean {
   if (typing(e) || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return false;
   return e.key.toLowerCase() === 'v';
 }
+
+export const NUDGE = 8;
+const ARROWS: Record<string, { dx: number; dy: number }> = {
+  ArrowLeft: { dx: -NUDGE, dy: 0 }, ArrowRight: { dx: NUDGE, dy: 0 }, ArrowUp: { dx: 0, dy: -NUDGE }, ArrowDown: { dx: 0, dy: NUDGE },
+};
+
+/** An arrow key moves what is picked by 8 px; left alone while typing or with a modifier held. */
+export function nudgeKey(e: KeyboardEvent): { dx: number; dy: number } | null {
+  if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return null;
+  const d = ARROWS[e.key];
+  return d ? { ...d } : null;
+}
