@@ -5,7 +5,7 @@ import { createBoardStore } from './boardStore';
 import { bwFull, proc } from './fixtures';
 import { canUndo } from './history';
 import { addWire, moveStep, newWorkflowState } from './state';
-import { memoryStorage } from './testStorage';
+import { memoryStorage } from '../test/memoryStorage';
 
 function storeWith(bw: BoardWorkflow, session: Storage | null = null) {
   const output = createOutputStore(null, () => '00:00:00');
@@ -64,5 +64,13 @@ describe('board store', () => {
     const st = storeWith(bwFull()); let n = 0; st.subscribe(() => n++);
     st.addWorkflow(newWorkflowState('w2', 'fresh', { x: 0, y: 0 }));
     expect(st.entry('w2')!.unsaved).toBe(true); expect(n).toBe(1); expect(st.boards()).toHaveLength(2);
+  });
+  it('keeps the draft of a workflow a partial load did not bring back, and restores it on a later load', () => {
+    const session = memoryStorage();
+    storeWith(bwFull(), session).edit('w1', (s) => moveStep(s, 'a', { x: 5, y: 5 }));
+    const partial = createBoardStore(createOutputStore(null, () => '00:00:00'), session);
+    partial.load({ listed: true, workflows: [], failures: [{ workflowId: 'w1', name: 'orders', detail: 'x' }] }, []);
+    expect(Object.keys(JSON.parse(session.getItem('acto.drafts')!))).toEqual(['w1']);
+    expect(storeWith(bwFull(), session).entry('w1')!.unsaved).toBe(true);
   });
 });

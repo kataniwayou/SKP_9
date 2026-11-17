@@ -30,6 +30,8 @@ interface Rec {
 
 export function createBoardStore(output: OutputStore, session: Storage | null): BoardStore {
   const recs = new Map<Id, Rec>();
+  // drafts for workflows this load did not bring back: left in the session untouched until they load
+  let kept: Drafts = {};
   let processors = new Map<Id, Processor>();
   let procVersion = 0;
   let bwProcVersion = 0;
@@ -47,7 +49,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
   const withHistory = (r: Rec, h: History): Rec => ({ ...r, history: h, view: viewOf(r.base, h), bwFor: null, bw: null });
   const notify = () => { cached = null; subs.forEach((f) => f()); };
   const changed = () => {
-    const drafts: Drafts = {};
+    const drafts: Drafts = { ...kept };
     for (const [id, r] of recs) {
       if (r.view.unsaved) drafts[id] = { updatedAt: r.baseBw ? r.baseBw.graph.workflow.updatedAt : null, history: r.history };
     }
@@ -85,8 +87,12 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
         recs.set(id, rec);
       }
       // a workflow created in the designer and not yet saved is not on the server to match against
+      kept = {};
+      const loaded = new Set(board.workflows.map((w) => w.graph.workflow.id));
       for (const [id, d] of Object.entries(drafts)) {
-        if (!recs.has(id) && d.history.present.isNew) recs.set(id, make(null, d.history));
+        if (loaded.has(id)) continue;
+        if (d.history.present.isNew) recs.set(id, make(null, d.history));
+        else kept[id] = d;
       }
       changed();
     },

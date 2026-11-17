@@ -3,7 +3,7 @@ import { readDrafts, writeDrafts } from './drafts';
 import { bwFull } from './fixtures';
 import { historyOf } from './history';
 import { stateOf } from './state';
-import { memoryStorage } from './testStorage';
+import { memoryStorage } from '../test/memoryStorage';
 
 describe('drafts', () => {
   it('round-trips and removes the key when empty', () => {
