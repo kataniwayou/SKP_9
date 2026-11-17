@@ -75,7 +75,7 @@ const addCacheTool: ToolDef = {
       const r = await edit(ctx, t.id, (s) => linkCache(s, c));
       return outcome(ctx, t, r, `linked cache ${c.name} to ${t.name}`, `linked cache ${c.name}`);
     }
-    const taken = new Set(ctx.store.boards().flatMap((b) => [...b.graph.caches.values()].map((c) => c.name)));
+    const taken = new Set([...ctx.store.boards().flatMap((b) => [...b.graph.caches.values()].map((c) => c.name)), ...ctx.caches().map((c) => c.name)]);
     let n = 1;
     while (taken.has(`new-cache-${n}`)) n++;
     const name = `new-cache-${n}`;
@@ -223,19 +223,37 @@ const deletePicked: ToolDef = {
   name: 'delete_picked',
   description: 'Delete the picked steps, wires and caches (what the selection bar Delete does; a shared step goes from this workflow only). The user is asked first. Picked workflows are not deleted here (delete_workflow).',
   parameters: NO_ARGS,
-  async run(ctx, _args, answer) {
+  async run(ctx, _args, answer, pin) {
+    // the question names the picks it was asked about and pins them: an answer deletes exactly those
+    let picked: Pick[] = [];
+    if (answer === undefined) picked = ctx.commands.picks();
+    else {
+      try { const v: unknown = JSON.parse(pin ?? '[]'); if (Array.isArray(v)) picked = v as Pick[]; } catch { /* no pin: nothing */ }
+    }
     const per = new Map<Id, { steps: Id[]; wires: [Id, Id][]; caches: Id[] }>();
-    for (const p of ctx.commands.picks()) {
+    const named: string[] = [];
+    const stepName = (wf: Id, step: Id) => ctx.store.entry(wf)?.history.present.steps[step]?.name ?? step;
+    for (const p of picked) {
       if (p.kind === 'workflow') continue;
+      const wfName = ctx.store.entry(p.workflowId)?.history.present.fields.name ?? p.workflowId;
       const e = per.get(p.workflowId) ?? { steps: [], wires: [], caches: [] };
       per.set(p.workflowId, e);
-      if (p.kind === 'step') e.steps.push(p.stepId);
-      else if (p.kind === 'wire') { const i = p.wireId.indexOf('>'); e.wires.push([p.wireId.slice(0, i), p.wireId.slice(i + 1)]); }
-      else e.caches.push(p.cacheId);
+      if (p.kind === 'step') { e.steps.push(p.stepId); named.push(`step ${stepName(p.workflowId, p.stepId)} (${wfName})`); }
+      else if (p.kind === 'wire') {
+        const i = p.wireId.indexOf('>');
+        const from = p.wireId.slice(0, i), to = p.wireId.slice(i + 1);
+        e.wires.push([from, to]);
+        named.push(`wire ${stepName(p.workflowId, from)} → ${stepName(p.workflowId, to)} (${wfName})`);
+      } else {
+        e.caches.push(p.cacheId);
+        named.push(`cache ${ctx.store.entry(p.workflowId)?.history.present.caches[p.cacheId]?.name ?? p.cacheId} (${wfName})`);
+      }
     }
     if (per.size === 0) return fail('nothing is picked to delete (pick steps, wires or caches first)', 'delete failed');
-    const count = [...per.values()].reduce((n, e) => n + e.steps.length + e.wires.length + e.caches.length, 0);
-    if (answer === undefined) return { kind: 'ask', question: { text: `Delete ${count} picked item${count === 1 ? '' : 's'}?`, choices: ['Delete', 'Cancel'] } };
+    if (answer === undefined) {
+      const shown = named.slice(0, 5).join(', ') + (named.length > 5 ? ` and ${named.length - 5} more` : '');
+      return { kind: 'ask', question: { text: `Delete ${shown}?`, choices: ['Delete', 'Cancel'], pin: JSON.stringify(picked) } };
+    }
     if (answer !== 'Delete') return fail('the user declined', 'user declined: delete picked');
     const notes: string[] = [];
     const entries: Entries = [];
@@ -245,6 +263,7 @@ const deletePicked: ToolDef = {
       if (name === undefined) { notes.push(`no workflow ${wf} on the board`); failed++; continue; }
       const { shared, others } = stepSharing(ctx.store.boards(), wf);
       let refused: string[] = [];
+      const before = ctx.store.entry(wf)?.history.present;
       const r = await edit(ctx, wf, (st: WorkflowState) => {
         const out = deleteParts(st, e.steps, e.wires, shared, others);
         refused = out.refused;
@@ -252,8 +271,11 @@ const deletePicked: ToolDef = {
       });
       entries.push(...r.entries);
       notes.push(...refused);
-      if (r.ok) ctx.commands.focus(wf);
-      else { failed++; notes.push(`${name}: ${r.result}`); }
+      if (r.ok && ctx.store.entry(wf)?.history.present !== before) ctx.commands.focus(wf);
+      else {
+        failed++;   // refused, or nothing there to delete any more
+        if (!r.ok) notes.push(`${name}: ${r.result}`);
+      }
     }
     const last = ctx.commands.picks().at(-1);
     if (last && failed < per.size) ctx.commands.setPicks([{ kind: 'workflow', workflowId: last.workflowId }]);

@@ -29,8 +29,8 @@ function setup() {
 }
 
 type Store = ReturnType<typeof setup>['store'];
-const call = (ctx: ToolContext, name: string, args: object = {}, answer?: string) =>
-  runTool(ctx, { id: 'c', name, arguments: JSON.stringify(args) }, answer);
+const call = (ctx: ToolContext, name: string, args: object = {}, answer?: string, pin?: string) =>
+  runTool(ctx, { id: 'c', name, arguments: JSON.stringify(args) }, answer, pin);
 const done = (o: ToolOutcome) => { if (o.kind !== 'done') throw new Error('asked'); return o; };
 const state = (store: Store) => store.entry('w1')!.history.present;
 
@@ -127,14 +127,65 @@ describe('design tools', () => {
     expect(picks().every((p) => p.kind === 'step' && state(store).steps[p.stepId]?.isNew)).toBe(true);
   });
 
+  it('delete_picked names what it asks about and deletes exactly that, whatever is picked meanwhile', async () => {
+    const { ctx, store } = setup();
+    await call(ctx, 'pick', { items: [{ kind: 'step', workflowId: 'w1', stepId: 'b' }, { kind: 'wire', workflowId: 'w1', wireId: 'a>b' }, { kind: 'cache', workflowId: 'w1', cacheId: 'c1' }] });
+    const asked = await call(ctx, 'delete_picked');
+    if (asked.kind !== 'ask') throw new Error('not asked');
+    expect(asked.question.text).toContain('step ');
+    expect(asked.question.text).toContain('wire ');
+    expect(asked.question.text).toContain('cache c1-name');
+    expect(asked.question.text).toContain('(orders)');
+    expect(JSON.parse(asked.question.pin!)).toHaveLength(3);
+    await call(ctx, 'pick', { items: [{ kind: 'step', workflowId: 'w1', stepId: 'a' }] });
+    const o = done(await call(ctx, 'delete_picked', {}, 'Delete', asked.question.pin));
+    expect(o.ok).toBe(true);
+    expect(state(store).steps.b).toBeUndefined();
+    expect(state(store).steps.a).toBeDefined();
+    expect(state(store).caches.c1).toBeUndefined();
+  });
+
+  it('delete_picked lists five names then "and N more"', async () => {
+    const { ctx } = setup();
+    for (let i = 0; i < 4; i++) done(await call(ctx, 'add_step', { workflow_id: 'w1', processor_id: 'p1' }));
+    const items = Object.keys(state(ctx.store).steps).map((stepId) => ({ kind: 'step', workflowId: 'w1', stepId }));
+    await call(ctx, 'pick', { items });
+    const asked = await call(ctx, 'delete_picked');
+    if (asked.kind !== 'ask') throw new Error('not asked');
+    expect(asked.question.text).toContain('and 1 more');
+  });
+
+  it('delete_picked reports nothing deleted when every step is refused', async () => {
+    const { ctx, store } = setup();
+    const second = bwFull();
+    second.graph.workflow = { ...second.graph.workflow, id: 'w2', name: 'billing' };
+    second.stepIds = ['a', 'b'];
+    store.load({ listed: true, workflows: [bwFull(), second], failures: [] }, [proc('p1', 'Analyst')]);
+    await call(ctx, 'pick', { items: [{ kind: 'step', workflowId: 'w1', stepId: 'b' }] });
+    const asked = await call(ctx, 'delete_picked');
+    if (asked.kind !== 'ask') throw new Error('not asked');
+    const o = done(await call(ctx, 'delete_picked', {}, 'Delete', asked.question.pin));
+    expect(o.ok).toBe(false);
+    expect(o.result).toContain('nothing was deleted');
+    expect(o.result).not.toContain('deleted the picked');
+  });
+
+  it('add_cache avoids names in the library list', async () => {
+    const { ctx, store } = setup();
+    ctx.caches = () => [{ id: 'x', name: 'new-cache-1', version: '1.0.0', description: null, root: '', items: '{}', audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null } }];
+    done(await call(ctx, 'add_cache', { workflow_id: 'w1' }));
+    expect(Object.values(state(store).caches).map((c) => c.name)).toContain('new-cache-2');
+  });
+
   it('delete_picked asks, then deletes like the selection bar; declining does nothing', async () => {
     const { ctx, store } = setup();
     expect(done(await call(ctx, 'delete_picked')).ok).toBe(false);
     await call(ctx, 'pick', { items: [{ kind: 'step', workflowId: 'w1', stepId: 'b' }] });
-    expect((await call(ctx, 'delete_picked')).kind).toBe('ask');
-    expect(done(await call(ctx, 'delete_picked', {}, 'Cancel')).ok).toBe(false);
+    const q = await call(ctx, 'delete_picked');
+    if (q.kind !== 'ask') throw new Error('not asked');
+    expect(done(await call(ctx, 'delete_picked', {}, 'Cancel', q.question.pin)).ok).toBe(false);
     expect(state(store).steps.b).toBeDefined();
-    expect(done(await call(ctx, 'delete_picked', {}, 'Delete')).ok).toBe(true);
+    expect(done(await call(ctx, 'delete_picked', {}, 'Delete', q.question.pin)).ok).toBe(true);
     expect(state(store).steps.b).toBeUndefined();
   });
 });
