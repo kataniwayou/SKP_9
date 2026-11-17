@@ -104,7 +104,8 @@ export function designRequest(base: WorkflowState | null, cur: WorkflowState, st
   req.caches = caches;
   if (newCaches.length) req.newCaches = newCaches;
 
-  const edits = Object.entries(cur.processors ?? {}).sort(([a], [b]) => (a < b ? -1 : 1));
+  const used = new Set(Object.values(cur.steps).map((x) => x.processorId));
+  const edits = Object.entries(cur.processors ?? {}).filter(([id]) => used.has(id)).sort(([a], [b]) => (a < b ? -1 : 1));
   if (edits.length) {
     const copies: SchemaCopy[] = [];
     req.processors = edits.map(([id, e]) => {

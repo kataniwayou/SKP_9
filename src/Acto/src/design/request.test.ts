@@ -141,5 +141,11 @@ describe('design request', () => {
       const stored = JSON.parse(JSON.stringify(designRequest(base, cur, null)));
       expect(applyStored(base, stored).processors).toEqual(cur.processors);
     });
+    it('leaves out edits of a processor no step uses', () => {
+      const base = stateOf(bwFull());
+      const cur = { ...base, processors: { p9: { fields: { name: 'N' }, slots: {} } } };
+      expect(designRequest(base, cur, null).processors).toBeUndefined();
+      expect(designRequest(base, cur, null).schemas).toBeUndefined();
+    });
   });
 });

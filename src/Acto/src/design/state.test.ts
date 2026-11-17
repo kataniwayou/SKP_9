@@ -135,6 +135,18 @@ const SC = { id: 'sc1', name: 'cfg', version: '1', description: null, audit: AUD
       expect(f.processors!.p1!.fields).toEqual({ name: 'N' });
       expect(sameState(setProcessorField(f, P, 'name', 'Analyst'), base)).toBe(true);
     });
+    it('drops a processor edit when no remaining step uses the processor, and keeps it while one does', () => {
+      const base = stateOf(bwFull());
+      const edited = setProcessorField(base, P, 'name', 'N');
+      const one = removeStep(edited, 'a');
+      expect(one.processors!.p1).toBeDefined();
+      const none = removeStep(one, 'b');
+      expect(none.processors).toEqual({});
+      expect(deleteParts(edited, ['a', 'b'], []).processors).toEqual({});
+      const swapped = swapProcessor(edited, 'a', proc('p2', 'Other'));
+      expect(swapped.processors!.p1).toBeDefined();
+      expect(swapProcessor(swapped, 'b', proc('p2', 'Other')).processors).toEqual({});
+    });
     it('treats an absent map and an empty one as the same state', () => {
       const base = stateOf(bwFull());
       expect(sameState(base, { ...base, processors: {} })).toBe(true);

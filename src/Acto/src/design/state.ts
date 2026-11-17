@@ -192,10 +192,18 @@ export function addStep(s: WorkflowState, processor: Processor, at: Point, id: I
   return { ...s, steps: { ...s.steps, [id]: step } };
 }
 
+/** Drops the edits of processors no step uses any more (undo brings them back: states are immutable). */
+function pruneProcessors(s: WorkflowState): WorkflowState {
+  if (!s.processors) return s;
+  const used = new Set(Object.values(s.steps).map((x) => x.processorId));
+  const keep = Object.entries(s.processors).filter(([id]) => used.has(id));
+  return keep.length === Object.keys(s.processors).length ? s : { ...s, processors: Object.fromEntries(keep) };
+}
+
 export function swapProcessor(s: WorkflowState, stepId: Id, processor: Processor): WorkflowState {
   const st = s.steps[stepId];
   if (!st || st.processorId === processor.id) return s;
-  return { ...s, steps: { ...s.steps, [stepId]: { ...st, processorId: processor.id } } };
+  return pruneProcessors({ ...s, steps: { ...s.steps, [stepId]: { ...st, processorId: processor.id } } });
 }
 
 export function removeStep(s: WorkflowState, stepId: Id): WorkflowState {
@@ -209,7 +217,7 @@ export function removeStep(s: WorkflowState, stepId: Id): WorkflowState {
   const assignments = { ...s.assignments };
   delete assignments[stepId];
   const deletedSteps = st.isNew ? s.deletedSteps : { ...s.deletedSteps, [stepId]: st.updatedAt };
-  return { ...s, steps, assignments, deletedSteps };
+  return pruneProcessors({ ...s, steps, assignments, deletedSteps });
 }
 
 /** Several steps and wires at once, as one state (each step goes as `removeStep` does). */

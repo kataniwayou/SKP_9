@@ -131,10 +131,12 @@ describe('inspector editing', () => {
       const st = setup(A, withSchema('{}'));
       fireEvent.change(screen.getByLabelText(/Payload/), { target: { value: '{"y":1}' } });
       expect(document.querySelectorAll('.in-problem')).toHaveLength(0);
+      const pastBefore = st.entry('w1')!.history.past.length;
       fireEvent.change(defn(), { target: { value: '{"type":"object","required":["x"]}' } });
       fireEvent.change(defn(), { target: { value: '{"type":"object","required":["x"],"a":1}' } });
       const ps = st.entry('w1')!.history.present.processors!;
       expect(Object.keys(ps)).toEqual(['p1']);
+      expect(st.entry('w1')!.history.past).toHaveLength(pastBefore + 1);
       expect((ps.p1!.slots.config as { copy: { name: string } }).copy.name).toBe('cfg');
       expect(document.querySelectorAll('.in-problem').length).toBeGreaterThan(0);
       const before = st.entry('w1')!.history.present;
