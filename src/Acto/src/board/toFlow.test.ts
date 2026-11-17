@@ -23,4 +23,8 @@ describe('toFlow', () => {
     const d = edges[0]!.data as { out: { x: number }; in: { x: number } };
     expect(d.in.x).toBeGreaterThan(d.out.x);
   });
+  it('gives an empty workflow a frame at the minimum size', () => {
+    const frame = toFlow([bw('w2', [])]).nodes.find((n) => n.id === 'wf:w2')!;
+    expect(frame.style).toMatchObject({ width: 420, height: 196 });
+  });
 });

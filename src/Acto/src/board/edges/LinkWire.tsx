@@ -27,7 +27,7 @@ export function LinkWire({ id, data, selected }: EdgeProps) {
         </marker>
       </defs>
       <path className="wire-hit" d={d} />
-      <path className="wire" d={d} stroke={style.colour} strokeWidth={selected ? 3.6 : 2.2} fill="none" markerEnd={`url(#${marker})`} />
+      <path className={`wire${selected ? ' sel' : ''}`} d={d} stroke={style.colour} strokeWidth={selected ? 3.6 : 2.2} fill="none" markerEnd={`url(#${marker})`} />
       <circle cx={px} cy={py} r={8} fill={style.colour} />
       <text className="pilltx" x={px} y={py} textAnchor="middle" dominantBaseline="central">{style.letter}</text>
     </g>
