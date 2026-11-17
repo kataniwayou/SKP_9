@@ -27,6 +27,7 @@
 .sp2 { font-size: 12px; color: #6B7186; }
 .nf { margin-top: 9px; padding-top: 7px; border-top: 1px dashed #E3E5EC; display: flex; justify-content: space-between; align-items: center;
   font: 11px ui-monospace, Consolas, monospace; color: #6B7186; }
+.nf .shared-tag { margin-left: 8px; padding: 0 5px; border: 1px solid #C9CCD6; border-radius: 3px; color: #4A5068; }
 
 .link-wire .wire-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; pointer-events: stroke; }
 .link-wire .wire { pointer-events: none; }

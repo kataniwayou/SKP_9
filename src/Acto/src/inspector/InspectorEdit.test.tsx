@@ -9,6 +9,9 @@ import { LiveStoreProvider } from '../live/LiveContext';
 import { liveStub } from '../test/liveStub';
 import type { Selection } from '../board/selection';
 import { InspectorPanel } from './InspectorPanel';
+import { bw } from '../board/fixtures';
+import type { Pick } from '../board/picks';
+import { setCacheField, setProcessorField, setStepField } from '../design/state';
 
 function setup(sel: Selection | null, tweak?: (b: ReturnType<typeof bwFull>) => void) {
   const b = bwFull();
@@ -151,5 +154,56 @@ describe('inspector editing', () => {
       expect(screen.queryByLabelText('Config schema definition')).toBeNull();
       expect(screen.queryByRole('button', { name: 'Clear Config' })).toBeNull();
     });
+  });
+});
+
+describe('the shared-entity lock', () => {
+  /** w1 'orders' and w2 'billing' share step s1 (processor p-s1) and cache c1; w2's s1 is picked. */
+  function sharedSetup(lockIn: (st: BoardStore) => void, pick: Pick) {
+    const cache = { id: 'c1', name: 'rates', version: '1', description: null, root: 'r', items: '{}', audit: AUDIT };
+    const mk = (id: string, name: string) => {
+      const b = bw(id, ['s1']);
+      b.graph.workflow = { ...b.graph.workflow, name, cacheIds: ['c1'] };
+      b.graph.caches = new Map([['c1', cache]]);
+      return b;
+    };
+    const store = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
+    store.load({ listed: true, workflows: [mk('w1', 'orders'), mk('w2', 'billing')], failures: [] }, []);
+    lockIn(store);
+    function Harness({ s }: { s: BoardStore }) {
+      const ws = useBoard(s);
+      return <InspectorPanel workflows={ws} picks={[pick]} store={s} />;
+    }
+    render(<LiveStoreProvider value={liveStub()}><Harness s={store} /></LiveStoreProvider>);
+    return store;
+  }
+  const S2: Pick = { kind: 'step', workflowId: 'w2', stepId: 's1' };
+  const input = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
+
+  it('shows a step being changed elsewhere with its saved value, read-only', () => {
+    sharedSetup((st) => st.edit('w1', (s) => setStepField(s, 's1', 'name', 'renamed')), S2);
+    expect(screen.getByText('being changed in orders')).toBeInTheDocument();
+    expect(input('Name').value).toBe('s1-name');
+    expect(input('Name').disabled).toBe(true);
+    expect((screen.getByLabelText(/Entry condition/) as HTMLSelectElement).disabled).toBe(true);
+    expect(input('Processor name').disabled).toBe(false);
+  });
+  it('locks the processor fields while another workflow changes the processor', () => {
+    sharedSetup((st) => st.edit('w1', (s) => setProcessorField(s, st.processor('p-s1', 'w1')!, 'name', 'Other')), S2);
+    expect(screen.getByText('being changed in orders')).toBeInTheDocument();
+    expect(input('Processor name').disabled).toBe(true);
+    expect(input('Processor name').value).toBe('s1-proc');
+    expect(input('Name').disabled).toBe(false);
+  });
+  it('locks a cache another workflow is changing', () => {
+    sharedSetup((st) => st.edit('w1', (s) => setCacheField(s, 'c1', 'root', 'z')), { kind: 'cache', workflowId: 'w2', cacheId: 'c1' });
+    expect(screen.getByText('being changed in orders')).toBeInTheDocument();
+    expect(input('Root').disabled).toBe(true);
+    expect(input('Root').value).toBe('r');
+  });
+  it('leaves the fields open in the workflow making the change', () => {
+    sharedSetup((st) => st.edit('w1', (s) => setStepField(s, 's1', 'name', 'renamed')), { kind: 'step', workflowId: 'w1', stepId: 's1' });
+    expect(screen.queryByText(/being changed in/)).toBeNull();
+    expect(input('Name').disabled).toBe(false);
   });
 });

@@ -54,6 +54,12 @@ describe('Board', () => {
     expect(screen.getAllByText('PARKED')).toHaveLength(2);
     expect(screen.getByText(/not scheduled/)).toBeInTheDocument();
   });
+  it('tags a step shown in several workflows as shared', async () => {
+    render(<Board workflows={[bw('w1', ['s', 'a']), bw('w2', ['s'], [], { x: 0, y: 600 })]} picks={[]} onPick={() => {}} initialZoom={1} />);
+    await screen.findAllByText('s-name');
+    expect(screen.getAllByText('shared · 2')).toHaveLength(2);
+    expect(screen.getAllByText('a-name')).toHaveLength(1);
+  });
   it('reports a click on empty board as no selection', async () => {
     const onPick = vi.fn();
     render(<Board workflows={[bw('w1', ['a'])]} picks={[]} onPick={onPick} initialZoom={1} />);

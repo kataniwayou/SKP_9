@@ -21,6 +21,7 @@
 .in-k { color: #6B7186; }
 .in-v { overflow-wrap: anywhere; }
 .in-note { margin: 10px 0 0; font-size: 12px; color: #6B7186; line-height: 1.5; }
+.in-lock { color: #A15C00; font-weight: 600; }
 .in-in { width: 100%; box-sizing: border-box; font: inherit; }
 .in-problem { color: #B42318; font-size: 12px; margin: 2px 0; }
 .in-act { margin-top: 8px; }

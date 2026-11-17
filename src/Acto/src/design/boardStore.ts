@@ -5,6 +5,7 @@ import type { OutputStore } from '../output/outputStore';
 import { readDrafts, writeDrafts, type Drafts } from './drafts';
 import { commit, historyOf, redo, undo, type History } from './history';
 import { applyStored } from './request';
+import { changedEntities, entityLabel, holders, type EntityKey } from './shared';
 import { boardWorkflowOf, sameState, stateOf, type WorkflowState } from './state';
 
 export interface BoardEntry { base: WorkflowState | null; history: History; unsaved: boolean;
@@ -38,6 +39,8 @@ export interface BoardStore {
   adoptPresent(id: Id): void;
   /** BaseAPI stored this layout (it does on every save it reads, applied or not): what the next save compares against. */
   setLayout(id: Id, layout: unknown): void;
+  /** The other workflow holding an unsaved change to this step, processor or cache; null when none (or only `except`). */
+  lockedBy(key: EntityKey, except: Id): Id | null;
   subscribe(fn: () => void): () => void;
 }
 
@@ -56,6 +59,10 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
   let cached: BoardWorkflow[] | null = null;
   let draftsFailed = false;
   const subs = new Set<() => void>();
+  // what each workflow has unsaved, kept per present state (states are immutable)
+  const changedCache = new WeakMap<WorkflowState, { base: WorkflowState | null; keys: Set<EntityKey> }>();
+  // shared steps whose wiring change each workflow was already told about, until it is back to its base
+  const warned = new Map<Id, Set<Id>>();
 
   const viewOf = (base: WorkflowState | null, history: History, layout: unknown = null, problems = 0, saving = false): BoardEntry => ({
     base, history, unsaved: !base || !sameState(history.present, base), layout, problems, saving,
@@ -72,6 +79,8 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     for (const [id, r] of recs) {
       if (r.view.unsaved) drafts[id] = { updatedAt: r.baseBw ? r.baseBw.graph.workflow.updatedAt : null, history: r.history };
     }
+    for (const [id, r] of recs) if (!r.view.unsaved) warned.delete(id);
+    for (const id of warned.keys()) if (!recs.has(id)) warned.delete(id);
     const failed = writeDrafts(session, drafts);
     if (failed !== null && !draftsFailed) {
       draftsFailed = true;
@@ -84,13 +93,60 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     output.log(`${r.history.present.fields.name} is saving — wait for it to finish`, 'warn');
     return true;
   };
+  const changedOf = (r: Rec): Set<EntityKey> => {
+    const present = r.history.present;
+    const hit = changedCache.get(present);
+    if (hit && hit.base === r.base) return hit.keys;
+    const keys = changedEntities(r.base, present);
+    changedCache.set(present, { base: r.base, keys });
+    return keys;
+  };
+  const lockedBy = (key: EntityKey, except: Id): Id | null => {
+    for (const [id, r] of recs) if (id !== except && changedOf(r).has(key)) return id;
+    return null;
+  };
+  /** A change another workflow holds is refused; a first wiring change out of a shared step is announced. */
+  const allowed = (id: Id, r: Rec, next: WorkflowState): boolean => {
+    const cur = r.history.present;
+    if (next === cur) return true;
+    const keys = changedEntities(cur, next);
+    const mine = changedOf(r);
+    for (const key of keys) {
+      // already changed here too (drafts or a failed save brought both back): refusing would only block the way out
+      if (mine.has(key)) continue;
+      const other = lockedBy(key, id);
+      if (other === null) continue;
+      const own = store.boards().filter((b) => b.graph.workflow.id === id);
+      const label = entityLabel(key, [...own, ...store.boards()]);
+      output.log(`${label} is being changed in ${recs.get(other)!.history.present.fields.name} — save or undo it there first`, 'warn');
+      return false;
+    }
+    let held: Map<EntityKey, Id[]> | null = null;
+    for (const key of keys) {
+      if (!key.startsWith('step:')) continue;
+      const stepId = key.slice(5);
+      const a = cur.steps[stepId];
+      const b = next.steps[stepId];
+      if (!a || !b || (a.nextStepIds.length === b.nextStepIds.length && a.nextStepIds.every((n, i) => n === b.nextStepIds[i]))) continue;
+      if (warned.get(id)?.has(stepId)) continue;
+      held ??= holders(store.boards());
+      const others = (held.get(key) ?? []).filter((w) => w !== id).map((w) => recs.get(w)?.history.present.fields.name ?? w);
+      if (others.length === 0) continue;
+      const set = warned.get(id) ?? new Set<Id>();
+      set.add(stepId);
+      warned.set(id, set);
+      const names = others.join(', ');
+      output.log(`${a.name} is shared with ${names}: changing its wires changes what ${names} run${others.length === 1 ? 's' : ''} too`, 'warn');
+    }
+    return true;
+  };
   const setHistory = (id: Id, r: Rec, h: History) => {
-    if (h === r.history) return;
+    if (h === r.history || !allowed(id, r, h.present)) return;
     recs.set(id, withHistory(r, h));
     changed();
   };
 
-  return {
+  const store: BoardStore = {
     load(board, procs) {
       processors = new Map(procs.map((p) => [p.id, p]));
       procVersion++;
@@ -203,8 +259,10 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       recs.set(id, { ...r, view: { ...r.view, problems: n } });
       notify();
     },
+    lockedBy,
     subscribe(fn) { subs.add(fn); return () => { subs.delete(fn); }; },
   };
+  return store;
 }
 
 export function useBoard(store: BoardStore): BoardWorkflow[] {

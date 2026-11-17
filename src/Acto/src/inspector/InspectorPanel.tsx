@@ -10,7 +10,7 @@ import { useEntry, type BoardStore } from '../design/boardStore';
 import { canRedo, canUndo } from '../design/history';
 import { newId } from '../design/ids';
 import { removeAssignment, setCacheField, setPayload, setStepField, setWorkflowField } from '../design/state';
-import { AreaField, SelectField, TextField } from './fields';
+import { AreaField, LockNote, lockerName, SelectField, TextField } from './fields';
 import { ProcessorSection } from './ProcessorSection';
 
 const Row = ({ k, children }: { k: string; children: ReactNode }) => (
@@ -137,12 +137,16 @@ function EditStep({ w, stepId, workflows, store }: { w: BoardWorkflow; stepId: s
   const assignment = w.graph.assignments.find((a) => a.stepId === stepId);
   const payload = assignment?.payload ?? '';
   const sharing = workflows.filter((x) => x.stepIds.includes(stepId));
+  // another workflow is changing this step: its saved value shows here, read-only
+  const by = lockerName(store, `step:${stepId}`, wf);
+  const locked = by !== null;
   return (
     <>
-      <TextField key={`${stepId}:name`} label="Name" value={step.name} onChange={(v) => set('name', v)} />
-      <TextField key={`${stepId}:version`} label="Version" value={step.version} onChange={(v) => set('version', v)} />
-      <TextField key={`${stepId}:description`} label="Description" value={step.description} onChange={(v) => set('description', orNull(v))} />
-      <SelectField key={`${stepId}:entryCondition`} label="Entry condition · colours every wire into this step" value={step.entryCondition}
+      <LockNote by={by} />
+      <TextField key={`${stepId}:name`} label="Name" value={step.name} disabled={locked} onChange={(v) => set('name', v)} />
+      <TextField key={`${stepId}:version`} label="Version" value={step.version} disabled={locked} onChange={(v) => set('version', v)} />
+      <TextField key={`${stepId}:description`} label="Description" value={step.description} disabled={locked} onChange={(v) => set('description', orNull(v))} />
+      <SelectField key={`${stepId}:entryCondition`} label="Entry condition · colours every wire into this step" value={step.entryCondition} disabled={locked}
         options={CONDITIONS.map((c) => ({ value: c.value, label: `${c.letter} ${c.name}` }))} onChange={(v) => set('entryCondition', v)} />
       {step.processorId ? <ProcessorSection w={w} store={store} processorId={step.processorId} /> : <Row k="Processor">none</Row>}
       {step.processorId && <ProcessorLine processorId={step.processorId} />}
@@ -162,13 +166,16 @@ function EditCache({ w, cacheId, store }: { w: BoardWorkflow; cacheId: string; s
   const wf = w.graph.workflow.id;
   const set = (key: 'name' | 'version' | 'description' | 'root' | 'items', v: string | null) =>
     store.edit(wf, (s) => setCacheField(s, cacheId, key, v), `field:${cacheId}:${key}`);
+  const by = lockerName(store, `cache:${cacheId}`, wf);
+  const locked = by !== null;
   return (
     <>
-      <TextField key={`${cacheId}:name`} label="Name" value={cache.name} onChange={(v) => set('name', v)} />
-      <TextField key={`${cacheId}:version`} label="Version" value={cache.version} onChange={(v) => set('version', v)} />
-      <TextField key={`${cacheId}:description`} label="Description" value={cache.description} onChange={(v) => set('description', orNull(v))} />
-      <TextField key={`${cacheId}:root`} label="Root" value={cache.root} onChange={(v) => set('root', v)} />
-      <AreaField key={`${cacheId}:items`} label="Items" value={cache.items} onChange={(v) => set('items', v)} />
+      <LockNote by={by} />
+      <TextField key={`${cacheId}:name`} label="Name" value={cache.name} disabled={locked} onChange={(v) => set('name', v)} />
+      <TextField key={`${cacheId}:version`} label="Version" value={cache.version} disabled={locked} onChange={(v) => set('version', v)} />
+      <TextField key={`${cacheId}:description`} label="Description" value={cache.description} disabled={locked} onChange={(v) => set('description', orNull(v))} />
+      <TextField key={`${cacheId}:root`} label="Root" value={cache.root} disabled={locked} onChange={(v) => set('root', v)} />
+      <AreaField key={`${cacheId}:items`} label="Items" value={cache.items} disabled={locked} onChange={(v) => set('items', v)} />
     </>
   );
 }

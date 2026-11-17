@@ -352,7 +352,7 @@ export function clearSlot(s: WorkflowState, base: Processor, slot: Slot): Workfl
   return putEdit(s, base.id, { ...e, slots });
 }
 
-function deepEqual(a: unknown, b: unknown): boolean {
+export function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeof a !== 'object' || typeof b !== 'object' || !a || !b) return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;

@@ -1,11 +1,24 @@
+import { useContext } from 'react';
 import { Handle, NodeToolbar, Position, useStore, type NodeProps } from '@xyflow/react';
 import type { StepRole } from '../roles';
 import { conditionStyle } from '../wires';
 import { ZOOM_DETAIL } from '../geometry';
 import { HealthDot } from '../live/HealthDot';
-import { useBoardWorkflow, useToolbarActions } from './boardContext';
+import { BoardContext, useBoardWorkflow, useToolbarActions } from './boardContext';
 import { Toolbar } from '../Toolbar';
 import { PickBadge, type PickInfo } from './PickBadge';
+import { holders, type EntityKey } from '../../design/shared';
+import type { BoardWorkflow } from '../loadBoard';
+import type { Id } from '../../model/graph';
+
+// one holders map per board (the context map is rebuilt when the workflows change)
+const heldCache = new WeakMap<ReadonlyMap<string, BoardWorkflow>, Map<EntityKey, Id[]>>();
+function useSharedCount(stepId: string): number {
+  const byId = useContext(BoardContext);
+  let held = heldCache.get(byId);
+  if (!held) { held = holders([...byId.values()]); heldCache.set(byId, held); }
+  return held.get(`step:${stepId}`)?.length ?? 0;
+}
 
 const PALETTE = [1, 2, 3, 4, 5].map((c) => conditionStyle(c).colour);
 export function processorColour(name: string): string {
@@ -19,6 +32,7 @@ export function StepCard({ data, selected }: NodeProps) {
   const info = useBoardWorkflow(workflowId);
   const far = useStore((s) => s.transform[2] < ZOOM_DETAIL);
   const tb = useToolbarActions();
+  const sharedIn = useSharedCount(stepId);
   if (!info) return null;
   // far out the card is not drawn, but its handles stay (invisible) so React Flow can always place the wires
   if (far) {
@@ -50,7 +64,7 @@ export function StepCard({ data, selected }: NodeProps) {
           <div className="sp2">{proc ?? 'no processor'}</div>
         </div>
       </div>
-      <div className="nf"><span>{step?.version}</span><span className="health-slot"><HealthDot processorId={step?.processorId ?? null} /></span></div>
+      <div className="nf"><span>{step?.version}{sharedIn > 1 && <span className="shared-tag">{`shared · ${sharedIn}`}</span>}</span><span className="health-slot"><HealthDot processorId={step?.processorId ?? null} /></span></div>
     </div>
   );
 }
