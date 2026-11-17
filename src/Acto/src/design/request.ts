@@ -70,20 +70,21 @@ export function designRequest(base: WorkflowState | null, cur: WorkflowState, st
   if (deleted.length) req.deletedSteps = deleted;
 
   const assignments: NonNullable<DesignSaveRequest['assignments']> = [];
+  if (base) {
+    // deletes go first: a removed then re-added assignment is a delete of the old row and a create of the new one
+    for (const b of Object.values(base.assignments)) {
+      // a deleted step takes its assignment with it; the studio leaves those out too
+      if (cur.assignments[b.stepId]?.id === b.id || b.stepId in cur.deletedSteps) continue;
+      assignments.push({ op: 'delete', id: b.id, stepId: b.stepId, updatedAt: b.updatedAt });
+    }
+  }
   for (const a of Object.values(cur.assignments)) {
     const b = base?.assignments[a.stepId];
-    if (a.isNew || !b) {
+    if (a.isNew || !b || b.id !== a.id) {
       assignments.push({ op: 'create', id: a.id, stepId: a.stepId, updatedAt: null, fields: diff(undefined, a, ASSIGN_KEYS) });
     } else {
       const fields = diff(b, a, ASSIGN_KEYS);
       if (has(fields)) assignments.push({ op: 'update', id: a.id, stepId: a.stepId, updatedAt: a.updatedAt, fields });
-    }
-  }
-  if (base) {
-    for (const b of Object.values(base.assignments)) {
-      // a deleted step takes its assignment with it; the studio leaves those out too
-      if (cur.assignments[b.stepId] || b.stepId in cur.deletedSteps) continue;
-      assignments.push({ op: 'delete', id: b.id, stepId: b.stepId, updatedAt: b.updatedAt });
     }
   }
   req.assignments = assignments;
@@ -157,7 +158,7 @@ const WF_TYPES: Record<string, Kind> = { name: 'string', version: 'string', desc
 const CACHE_TYPES: Record<string, Kind> = { name: 'string', version: 'string', description: 'nstring', root: 'string', items: 'string' };
 const ASSIGN_TYPES: Record<string, Kind> = { name: 'string', version: 'string', description: 'nstring', payload: 'string' };
 
-export function applyStored(base: WorkflowState, stored: unknown): WorkflowState {
+export function applyStored(base: WorkflowState, stored: unknown, storedLayout: unknown = null): WorkflowState {
   const d = obj(stored);
   if (!d) return base;
   let s: WorkflowState = { ...base };
@@ -174,15 +175,17 @@ export function applyStored(base: WorkflowState, stored: unknown): WorkflowState
     s = { ...s, steps: { ...s.steps, [st.id]: next } };
   }
 
-  // positions are not in the stored design (the layout is): new steps stack down the frame until the layout says otherwise
+  // positions are in the stored layout; without one a new step stacks down the frame
+  const laid = obj(obj(storedLayout)?.steps);
   for (const e of list(d.newSteps)) {
     const o = obj(e);
     if (!o || !str(o.id) || s.steps[o.id]) continue;
     const n = Object.keys(s.steps).length;
+    const p = laid?.[o.id];
     const st: StepState = pickFields({
       id: o.id, name: o.id, version: '1.0.0', description: null, entryCondition: 1,
       processorId: nullableStr(o.processorId), nextStepIds: list(o.nextStepIds).filter(str),
-      at: { x: FRAME_PAD, y: FRAME_PAD + n * (STEP_H + 40) }, updatedAt: null, isNew: true,
+      at: isPoint(p) ? { x: p.x, y: p.y } : { x: FRAME_PAD, y: FRAME_PAD + n * (STEP_H + 40) }, updatedAt: null, isNew: true,
     }, o.fields, { name: 'string', version: 'string', description: 'nstring', entryCondition: 'number' });
     s = { ...s, steps: { ...s.steps, [st.id]: st } };
   }
