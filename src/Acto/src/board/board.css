@@ -1,0 +1,36 @@
+.board { width: 100%; height: 100%; min-height: 480px; background: #FAFAFB; }
+.board .react-flow__background { background: #FAFAFB; }
+
+.frame { width: 100%; height: 100%; border: 1.5px solid #D9DCE5; border-radius: 16px; background: rgba(255,255,255,.55);
+  box-shadow: 0 1px 2px rgba(20,24,40,.05), 0 18px 40px -24px rgba(20,24,40,.25); position: relative; }
+.frame.sel { border-color: #FF0072; box-shadow: 0 0 0 4px rgba(255,0,114,.14), 0 18px 40px -24px rgba(20,24,40,.3); }
+.fh { height: 46px; padding: 0 14px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #E6E8EE;
+  border-radius: 15px 15px 0 0; background: rgba(255,255,255,.9); box-shadow: inset 0 4px 0 #94A3B8; }
+.fh .nm { font-weight: 700; font-size: 15px; color: #1A1D29; }
+.fh .meta { font: 11px ui-monospace, Consolas, monospace; color: #6B7186; }
+.fh .sp { flex: 1; }
+.empty { position: absolute; left: 0; right: 0; top: 46px; bottom: 0; display: grid; place-items: center; color: #8A90A3; font-size: 13px; text-align: center; padding: 10px; }
+.far .far-body { display: grid; place-items: center; height: calc(100% - 46px); font-size: 28px; font-weight: 600; color: #6B7186; }
+.far .fh .nm { font-size: 28px; }
+.far .fh { height: 60px; }
+
+.node { position: relative; width: 100%; height: 100%; background: #fff; border: 1px solid #E3E5EC; border-radius: 12px; padding: 11px 13px;
+  box-shadow: 0 1px 2px rgba(20,24,40,.06), 0 8px 24px -12px rgba(20,24,40,.18); font-family: "Inter Tight", "Helvetica Neue", Arial, sans-serif; }
+.node.sel { border-color: #FF0072; box-shadow: 0 0 0 3px rgba(255,0,114,.14), 0 14px 32px -12px rgba(20,24,40,.28); }
+.node.parked { opacity: .6; border-style: dashed; }
+.node .tag { position: absolute; left: -1px; top: -18px; font: 600 9.5px ui-monospace, Consolas, monospace; letter-spacing: .06em; text-transform: uppercase;
+  color: #1A1D29; background: #fff; border: 1px solid #E3E5EC; border-bottom: 0; border-radius: 5px 5px 0 0; padding: 1px 6px; }
+.node.parked .tag { color: #6B7186; background: #F4F5F8; border: 1px dashed #C9CCD6; border-bottom: 0; }
+.nh { display: flex; align-items: center; gap: 10px; }
+.ico { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #fff; font: 600 13px ui-monospace, Consolas, monospace; flex: none; }
+.sn { font-weight: 600; font-size: 14px; color: #1A1D29; }
+.sp2 { font-size: 12px; color: #6B7186; }
+.nf { margin-top: 9px; padding-top: 7px; border-top: 1px dashed #E3E5EC; display: flex; justify-content: space-between; align-items: center;
+  font: 11px ui-monospace, Consolas, monospace; color: #6B7186; }
+
+.link-wire .wire-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; pointer-events: stroke; }
+.link-wire .wire { pointer-events: none; }
+.link-wire .pilltx { font: 600 10px ui-monospace, Consolas, monospace; fill: #fff; pointer-events: none; }
+
+/* handles only anchor React Flow's edge geometry; the wires draw their own ends */
+.node .react-flow__handle { opacity: 0; pointer-events: none; }
