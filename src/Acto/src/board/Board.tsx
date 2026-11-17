@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
-import { applyNodeChanges, Background, BackgroundVariant, Controls, Panel, ReactFlow, type EdgeChange, type EdgeTypes, type Node, type NodeChange, type NodeTypes, type Viewport } from '@xyflow/react';
+import { applyNodeChanges, Controls, Panel, ReactFlow, type EdgeChange, type EdgeTypes, type Node, type NodeChange, type NodeTypes, type Viewport } from '@xyflow/react';
 import { CLICK_SLOP, HEADER_H } from './geometry';
 import type { BoardWorkflow } from './loadBoard';
 import { pickKey, type Pick } from './picks';
@@ -268,10 +268,9 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
           onPaneClick={(ev) => select(null, ev.ctrlKey || ev.metaKey)}
           proOptions={{ hideAttribution: true }}
         >
-          {bar && <Panel position="top-center">{bar}</Panel>}
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+          {bar && <Panel position="top-center" className="selbar-panel">{bar}</Panel>}
           <BoardMiniMap picked={picked} />
-          <Controls showInteractive={false} />
+          <Controls showInteractive={false} orientation="vertical" />
         </ReactFlow>
       </div>
       </ToolbarContext.Provider>

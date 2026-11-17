@@ -46,6 +46,7 @@ export function StepCard({ data, selected }: NodeProps) {
       <Handle type="source" position={Position.Right} />
       {role === 'first' && <span className="tag">FIRST</span>}
       {role === 'parked' && <span className="tag">PARKED</span>}
+      {sharedIn > 1 && <span className="tag shared">{`shared · ${sharedIn}`}</span>}
       <div className="nh">
         <span className="ico" style={{ background: processorColour(proc ?? '') }}>{(proc ?? '?').charAt(0).toUpperCase()}</span>
         <div>
@@ -53,7 +54,7 @@ export function StepCard({ data, selected }: NodeProps) {
           <div className="sp2">{proc ?? 'no processor'}</div>
         </div>
       </div>
-      <div className="nf"><span>{step?.version}{sharedIn > 1 && <span className="shared-tag">{`shared · ${sharedIn}`}</span>}</span><span className="health-slot"><HealthDot processorId={step?.processorId ?? null} /></span></div>
+      <div className="nf"><span className="mt">{step?.version}</span><HealthDot processorId={step?.processorId ?? null} /></div>
     </div>
   );
 }

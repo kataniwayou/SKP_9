@@ -33,7 +33,7 @@ export function WorkflowFrame({ data, selected }: NodeProps) {
   const pending = plan && plan.ids.includes(workflowId) ? plan : null;
   const min = minFrameSize(info.stepAt, info.graph.caches.size);
   return (
-    <div className={`frame${selected ? ' sel' : ''}`}>
+    <div className={`frame${selected ? ' sel' : ''} ${status === 'running' ? 'is-on' : status === 'stopped' ? 'is-off' : 'is-checking'}`}>
       {selected && edit && RESIZE.map(({ position, variant }) => (
         <NodeResizeControl key={position} position={position} variant={variant} minWidth={min.w} minHeight={min.h}
           onResizeEnd={(_, p) => edit.resizeFrame(workflowId, { w: p.width, h: p.height })} />
@@ -50,12 +50,12 @@ export function WorkflowFrame({ data, selected }: NodeProps) {
         <span className="nm">{workflow.name}</span>
         <span className="meta">{workflow.version} · {schedule}</span>
         {info.entryDiff.stops.length + info.entryDiff.starts.length > 0 && <span className="diff-tag">first steps differ</span>}
-        {st?.unsaved && <span className="unsaved-tag">unsaved</span>}
         {st && st.problems > 0 && <span className="warn-mark" title={`${st.problems} validation problem${st.problems === 1 ? '' : 's'}`}>⚠ {st.problems}</span>}
         <span className="sp" />
-        <span className="state-slot"><StateBadge status={status} /></span>
+        {st?.unsaved && <span className="unsaved-tag">unsaved</span>}
+        <StateBadge status={status} />
       </div>
-      {n === 0 && <div className="empty">Empty workflow</div>}
+      {n === 0 && <div className="empty"><span>Empty workflow</span>. Drag a step here from the toolbox.</div>}
     </div>
   );
 }

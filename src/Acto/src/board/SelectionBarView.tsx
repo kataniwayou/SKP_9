@@ -24,12 +24,13 @@ export function SelectionBar({ bar, actions, confirm }: { bar: Bar; actions: Bar
       {bar.kind === 'workflows' && (confirm
         ? <>
           <span className="selbar-text">{confirm.text}</span>
-          <button type="button" className="danger" onClick={confirm.onConfirm}>Delete</button>
+          <button type="button" className="primary danger" onClick={confirm.onConfirm}>Delete</button>
           <button type="button" onClick={confirm.onCancel}>Cancel</button>
         </>
         : <>
           {bar.start.length > 0 && <button type="button" className="go" onClick={() => actions.start(bar.start)}>▶ Start {bar.start.length}</button>}
           {bar.stop.length > 0 && <button type="button" className="stop" onClick={() => actions.stop(bar.stop)}>■ Stop {bar.stop.length}</button>}
+          {bar.start.length + bar.stop.length > 0 && <span className="sep" />}
           {bar.save.length > 0 && <button type="button" className="primary" onClick={() => actions.save(bar.save)}>Save {bar.save.length}</button>}
           <button type="button" className="danger" onClick={actions.deleteWorkflows}>Delete</button>
         </>)}

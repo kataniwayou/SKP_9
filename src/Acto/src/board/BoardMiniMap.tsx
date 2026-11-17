@@ -4,8 +4,11 @@ import { BoardContext, useBoardWorkflow } from './nodes/boardContext';
 import { STATE_COLOUR } from './live/StateBadge';
 import { useWorkflowStatus } from '../live/LiveContext';
 import { minimapLabel, minimapScale } from './minimapScale';
+import { processorColour } from './nodes/StepCard';
 
 const ACCENT = '#FF0072';
+/** The mock's minimap: 210 × 130. */
+const SIZE = { w: 210, h: 130 };
 
 interface MiniInfo { picked: ReadonlySet<string>; scale: number }
 const MiniContext = createContext<MiniInfo>({ picked: new Set(), scale: 1 });
@@ -22,7 +25,7 @@ function FrameMini({ id, x, y, width, height, onClick }: MiniMapNodeProps) {
   return (
     <g data-mini-frame={workflowId} style={{ cursor: 'pointer' }} onClick={onClick ? (e: ReactMouseEvent<SVGGElement>) => onClick(e, id) : undefined}>
       <title>{name}</title>
-      <rect x={x} y={y} width={width} height={height} rx={l.stroke * 2} style={{ fill: on ? 'rgba(255,0,114,.08)' : 'var(--mini-fill)' }}
+      <rect x={x} y={y} width={width} height={height} rx={l.stroke * 3} style={{ fill: on ? 'rgba(255,0,114,.18)' : 'var(--mini-frame)' }}
         stroke={on ? ACCENT : STATE_COLOUR[status]} strokeWidth={l.stroke} />
       {l.text && (
         <text x={x + l.fontSize * 0.4} y={y + l.fontSize * 1.3} fontSize={l.fontSize} fontWeight={600} style={{ pointerEvents: 'none', fill: 'var(--mini-ink)' }}>
@@ -33,9 +36,19 @@ function FrameMini({ id, x, y, width, height, onClick }: MiniMapNodeProps) {
   );
 }
 
-/** Steps and caches mount this too: they must cost nothing, so no hook runs before the id check. */
+/** A step as the mock draws it: a block in its processor's colour. */
+function StepMini({ id, x, y, width, height }: MiniMapNodeProps) {
+  const byId = useContext(BoardContext);
+  const [, wf, stepId] = id.split(':');
+  const w = byId.get(wf ?? '');
+  const step = w?.graph.steps.get(stepId ?? '');
+  const proc = step?.processorId ? w?.graph.processors.get(step.processorId)?.name : undefined;
+  return <rect x={x} y={y} width={width} height={height} rx={Math.min(14, height / 6)} fill={processorColour(proc ?? '')} opacity={0.75} style={{ pointerEvents: 'none' }} />;
+}
+
+/** Caches mount this too: they must cost nothing, so no hook runs before the id check. */
 function MiniNode(p: MiniMapNodeProps) {
-  return p.id.startsWith('wf:') ? <FrameMini {...p} /> : null;
+  return p.id.startsWith('wf:') ? <FrameMini {...p} /> : p.id.startsWith('st:') ? <StepMini {...p} /> : null;
 }
 
 /** Inside the flow: the minimap with frame names, accent outlines for picks, and click-to-jump at the current zoom. */
@@ -46,12 +59,12 @@ export function BoardMiniMap({ picked }: { picked: ReadonlySet<string> }) {
   const frames = useMemo(() => [...byId.values()].map((w) => ({ x: w.frame.x, y: w.frame.y, w: w.frame.w, h: w.frame.h })), [byId]);
   const scale = useStore((s) => {
     const z = s.transform[2];
-    return minimapScale(frames, { x: -s.transform[0] / z, y: -s.transform[1] / z, w: s.width / z, h: s.height / z });
+    return minimapScale(frames, { x: -s.transform[0] / z, y: -s.transform[1] / z, w: s.width / z, h: s.height / z }, SIZE);
   });
   const info = useMemo(() => ({ picked, scale }), [picked, scale]);
   return (
     <MiniContext.Provider value={info}>
-      <MiniMap pannable zoomable nodeComponent={MiniNode}
+      <MiniMap pannable zoomable nodeComponent={MiniNode} style={{ width: SIZE.w, height: SIZE.h }} maskStrokeWidth={1.5}
         onNodeClick={(_, n) => {
           if (n.type !== 'workflow') return;
           const w = n.measured?.width ?? n.width ?? 0;

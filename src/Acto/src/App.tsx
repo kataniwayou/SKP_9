@@ -441,8 +441,8 @@ export function App(props: AppProps) {
     <LiveStoreProvider value={live}>
       <OutputProvider store={output}>
         <div className="acto">
-          <header className="topbar"><span className="brand">Acto</span>
-            <button type="button" className="theme-toggle" onClick={toggleTheme}>{theme === 'dark' ? 'Light' : 'Dark'}</button>
+          <header className="topbar"><span className="brand">Act<span>o</span></span>
+            <button type="button" className="pbtn theme-toggle" onClick={toggleTheme}>{theme === 'dark' ? 'Light' : 'Dark'}</button>
           </header>
           <Shell
             storage={storage}

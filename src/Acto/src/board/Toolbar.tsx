@@ -13,12 +13,12 @@ export function Toolbar({ selection, actions, unsaved = false, saving = false, r
       {selection.kind === 'workflow' && confirm
         ? <>
           <span className="confirm-text">{confirm.text}</span>
-          <button type="button" className="danger" onClick={confirm.onConfirm}>Delete</button>
+          <button type="button" className="primary danger" onClick={confirm.onConfirm}>Delete</button>
           <button type="button" onClick={confirm.onCancel}>Cancel</button>
         </>
         : selection.kind === 'workflow'
         ? <>
-          {run && <button type="button" className={run.op === 'start' ? 'go' : 'stop'} disabled={!run.enabled} onClick={run.onRun}>{run.op === 'start' ? '▶ Start' : '■ Stop'}</button>}
+          {run && <><button type="button" className={run.op === 'start' ? 'go' : 'stop'} disabled={!run.enabled} onClick={run.onRun}>{run.op === 'start' ? '▶ Start' : '■ Stop'}</button><span className="sep" /></>}
           <button type="button" className={unsaved ? 'primary' : undefined} disabled={saving} onClick={actions.onSave}>{saving ? 'Saving…' : 'Save'}</button>
           <button type="button" className="danger" onClick={actions.onDelete}>Delete</button>
         </>

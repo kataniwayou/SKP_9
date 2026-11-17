@@ -1,4 +1,5 @@
-.app { height: 100vh; box-sizing: border-box; padding: 8px; display: grid;
+/* The window layout (the mock's .app): toolbox | board over (output | chat) | inspector, 8 px splitters. */
+.app { flex: 1; min-height: 0; display: grid;
   grid-template-columns: var(--tw) 8px minmax(0, 1fr) 8px var(--iw);
   grid-template-rows: minmax(0, 1fr) 8px var(--bh);
   grid-template-areas: "tools s1 board s2 insp" "tools s1 sh s2 insp" "tools s1 bottom s2 insp"; }
@@ -13,18 +14,29 @@
 .split:hover::after, .split.on::after { background: var(--accent); }
 .split.col:hover::after, .split.col.on::after { height: 100%; } .split.row:hover::after, .split.row.on::after { width: 100%; }
 
+/* a panel: the same rounded card as the toolbox */
 .pane { background: var(--card); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
-.ph { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 11px ui-monospace, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); flex: none; }
+.ph { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); flex: none; }
 .ph .sp { flex: 1; }
 .ph .cnt { font-size: 10.5px; letter-spacing: 0; text-transform: none; }
-.pbtn { font: 500 11.5px system-ui, sans-serif; letter-spacing: 0; text-transform: none; color: var(--ink); background: var(--card-2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; cursor: pointer; }
+.ph .hw { font-size: 10.5px; letter-spacing: 0; text-transform: none; color: var(--ink); max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pbtn { font: 500 11.5px var(--sans); letter-spacing: 0; text-transform: none; color: var(--ink); background: var(--card-2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; cursor: pointer; }
 .pbtn:hover:not(:disabled) { border-color: var(--accent); }
+.pbtn:disabled { opacity: .4; cursor: default; }
 .pbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .seg2 { display: inline-flex; } .seg2 .pbtn { border-radius: 0; } .seg2 .pbtn:first-child { border-radius: 6px 0 0 6px; } .seg2 .pbtn:last-child { border-radius: 0 6px 6px 0; border-left: 0; }
 .pbtn.on { background: var(--ink); color: var(--page); border-color: var(--ink); }
 .pb { flex: 1; overflow: auto; padding: 10px 12px; min-height: 0; }
-.out-empty { color: var(--muted); font-size: 12.5px; }
-.log { font: 12px/1.6 ui-monospace, Consolas, monospace; }
-.log > div { display: grid; grid-template-columns: 62px 1fr; gap: 8px; border-bottom: 1px dashed var(--line); padding: 2px 0; }
+.none { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0 0 12px; }
+
+/* output */
+.log { font: 12px/1.6 var(--mono); padding: 6px 12px; }
+.log .row { display: grid; grid-template-columns: 62px 1fr; gap: 8px; border-bottom: 1px dashed var(--line); padding: 2px 0; }
 .log time { color: var(--muted); }
-.log .k-ok { color: var(--ok); } .log .k-warn { color: var(--warn); } .log .k-err { color: var(--err); }
+.log .k-ok { color: var(--ok); } .log .k-warn { color: var(--warn); } .log .k-err { color: var(--danger); }
+
+@media (max-width: 900px) {
+  .acto { overflow: auto; height: auto; }
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 480px auto auto; grid-template-areas: "tools" "board" "insp" "bottom"; gap: 10px; }
+  .s1, .s2, .sh, .split { display: none; } .bottom { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+}

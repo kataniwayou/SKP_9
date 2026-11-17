@@ -59,7 +59,7 @@ describe('App', () => {
   it('shows Acto in the top bar, the processors in the toolbox, and the selection in the inspector', async () => {
     const api = { ...fakeApi({ workflows: [wf('w1')] }), listProcessors: vi.fn().mockResolvedValue({ ok: true, value: [processorDto('p1', { name: 'Cruncher' })] }) } as StudioApi;
     renderApp(api);
-    expect(screen.getByText('Acto')).toBeInTheDocument();
+    expect(document.querySelector('.topbar .brand')).toHaveTextContent(/^Acto$/);
     expect(await screen.findByText('Cruncher')).toBeInTheDocument();
     expect(await screen.findByText('Board: 1 workflow, 0 running')).toBeInTheDocument();
     fireEvent.click(await screen.findByText('s1-name'));

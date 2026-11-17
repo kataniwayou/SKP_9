@@ -1,54 +1,59 @@
-/* Every surface, text, border, shadow and board colour of Acto. The accent pink, the entry-condition colours and the
-   run-state colours are constants (the same in both themes) and live in the components. The dark values come from
-   WorkflowStudio's canvas/tokens.css. Set on html[data-theme] by shell/theme.ts. */
+/* Every surface, text, border, shadow and board colour of Acto, from the approved mock
+   (.superpowers/sdd/2026-11-17-acto-ui-polish/mock.html). The page chrome follows the theme; the board keeps the
+   reactflow.dev look in both themes (white frames and cards on the paper), so its tokens are the same in both blocks.
+   The entry-condition and run-state colours are constants in the components. Set on html[data-theme] by shell/theme.ts. */
 :root, [data-theme="light"] {
-  --accent: #FF0072; --on-colour: #FFFFFF;
-  --page: #F4F5F8; --card: #FFFFFF; --card-2: #F4F5F8;
-  --board-bg: #FAFAFB; --board-dot: #C9CCD6;
-  --line: #E6E8EE; --line-2: #D9DCE5; --line-3: #C9CCD6;
-  --ink: #1A1D29; --ink-2: #4A5068; --muted: #6B7186; --faint: #8A90A3;
-  --frame-bg: rgba(255, 255, 255, .55); --frame-head: rgba(255, 255, 255, .9);
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --sans: "Inter Tight", "Helvetica Neue", Arial, sans-serif;
+  /* page chrome */
+  --page: #F3F4F7; --ink: #1A1D29; --muted: #5D6478; --line: #DCDFE7; --card: #FFFFFF; --card-2: #F7F8FA;
+  --accent: #FF0072; --accent-soft: rgba(255, 0, 114, .14); --on-colour: #FFFFFF;
+  --ok: #16A34A; --warn: #D97706; --idle: #94A3B8; --danger: #DC2626; --warn-ink: #B45309;
+  --paper: #FAFAFB; --dot: #C9CCD6;
+  /* toolbars */
+  --bar: #1A1D29; --bar-ink: #FFFFFF; --bar-danger: #FF8A8A; --bar-hover: rgba(127, 127, 127, .22);
+  --sh-bar: 0 8px 22px -8px rgba(0, 0, 0, .45);
+  --sh-multi: 0 10px 28px -10px rgba(255, 0, 114, .45);
+  --go: #16A34A; --go-hover: #15803D; --stop: #DC2626; --stop-hover: #B91C1C;
+  /* the board (reactflow.dev look, both themes) */
+  --b-ink: #1A1D29; --b-muted: #6B7186; --b-faint: #8A90A3;
+  --b-frame-line: #D9DCE5; --b-frame-bg: rgba(255, 255, 255, .55); --b-frame-head: rgba(255, 255, 255, .9); --b-head-line: #E6E8EE;
+  --b-node: #FFFFFF; --b-node-line: #E3E5EC; --b-soft: #F4F5F8; --b-line-3: #C9CCD6; --b-handle: #9AA0B4; --b-ctl-line: #EEF0F4;
   --sh-frame: 0 1px 2px rgba(20, 24, 40, .05), 0 18px 40px -24px rgba(20, 24, 40, .25);
-  --sh-frame-sel: 0 0 0 4px rgba(255, 0, 114, .14), 0 18px 40px -24px rgba(20, 24, 40, .3);
+  --sh-frame-sel: 0 18px 40px -24px rgba(20, 24, 40, .3);
   --sh-node: 0 1px 2px rgba(20, 24, 40, .06), 0 8px 24px -12px rgba(20, 24, 40, .18);
-  --sh-node-sel: 0 0 0 3px rgba(255, 0, 114, .14), 0 14px 32px -12px rgba(20, 24, 40, .28);
-  --sh-bar: 0 6px 18px -8px rgba(20, 24, 40, .35);
-  --sh-tool: 0 10px 28px -10px rgba(20, 24, 40, .5);
-  --tool-bg: #1A1D29; --tool-ink: #FFFFFF; --tool-danger: #FF8A8A;
-  --hover: rgba(127, 127, 127, .3); --hover-2: rgba(127, 127, 127, .15);
-  --ico-bg: #1A1D29; --ico-ink: #FFFFFF;
-  --ok: #16A34A; --warn: #D97706; --err: #DC2626; --err-ink: #B42318;
-  --go: #1E8E5A; --stop: #C93A3A;
-  --warn-ink: #92590A; --warn-bg: #FEF3C7; --warn-line: #F5B841; --amber: #B45309; --amber-bg: rgba(217, 119, 6, .12); --lock: #A15C00;
+  --sh-node-hover: 0 1px 2px rgba(20, 24, 40, .08), 0 14px 32px -12px rgba(20, 24, 40, .28);
+  --sh-ctl: 0 4px 12px -6px rgba(20, 24, 40, .2);
+  --run-bg: rgba(22, 163, 74, .13); --run-ink: #15803D; --halt-bg: rgba(220, 38, 38, .11); --halt-ink: #B91C1C;
+  --dirty-bg: rgba(217, 119, 6, .12); --dirty-ink: #B45309;
+  --mini-frame: #EEF0F4; --mini-ink: #5D6478; --mini-mask: rgba(26, 29, 41, .05); --mini-mask-line: rgba(26, 29, 41, .55);
   --cache-bg: #FBF4DC; --cache-line: #B8A36A; --cache-ink: #4A3D10; --cache-sel: #2563EB; --cache-halo: rgba(37, 99, 235, .3);
-  --mini-fill: rgba(255, 255, 255, .7); --mini-ink: #1F2433;
-  --mini-bg: #FFFFFF; --mini-mask: rgba(244, 245, 248, .7);
-  --font-ui: "Inter Tight", "Helvetica Neue", Arial, sans-serif;
 }
 
 [data-theme="dark"] {
-  --accent: #FF0072; --on-colour: #FFFFFF;
-  --page: #0A1220; --card: #0E1828; --card-2: #122036;
-  --board-bg: #0C1628; --board-dot: #2A4166;
-  --line: #1E3050; --line-2: #2A4166; --line-3: #3A5380;
-  --ink: #E6EEF8; --ink-2: #B4C2D8; --muted: #8193AE; --faint: #5A6B86;
-  --frame-bg: rgba(14, 24, 40, .55); --frame-head: rgba(18, 32, 54, .92);
-  --sh-frame: 0 1px 2px rgba(0, 0, 0, .4), 0 18px 40px -24px rgba(0, 0, 0, .8);
-  --sh-frame-sel: 0 0 0 4px rgba(255, 0, 114, .22), 0 18px 40px -24px rgba(0, 0, 0, .8);
-  --sh-node: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px -12px rgba(0, 0, 0, .8);
-  --sh-node-sel: 0 0 0 3px rgba(255, 0, 114, .22), 0 14px 32px -12px rgba(0, 0, 0, .8);
-  --sh-bar: 0 6px 18px -8px rgba(0, 0, 0, .8);
-  --sh-tool: 0 10px 28px -10px rgba(0, 0, 0, .8);
-  --tool-bg: #1E3050; --tool-ink: #E6EEF8; --tool-danger: #F87171;
-  --hover: rgba(125, 211, 252, .16); --hover-2: rgba(125, 211, 252, .10);
-  --ico-bg: #2A4166; --ico-ink: #E6EEF8;
-  --ok: #22C55E; --warn: #F5B841; --err: #F87171; --err-ink: #F87171;
-  --go: #1E8E5A; --stop: #C93A3A;
-  --warn-ink: #F5B841; --warn-bg: rgba(245, 184, 65, .14); --warn-line: rgba(245, 184, 65, .5); --amber: #F5B841; --amber-bg: rgba(245, 184, 65, .14); --lock: #F5B841;
-  --cache-bg: #2A2410; --cache-line: #7A6A30; --cache-ink: #E8DCA8; --cache-sel: #60A5FA; --cache-halo: rgba(96, 165, 250, .35);
-  --mini-fill: rgba(14, 24, 40, .8); --mini-ink: #E6EEF8;
-  --mini-bg: #0E1828; --mini-mask: rgba(10, 18, 32, .7);
-  --font-ui: "Inter Tight", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --sans: "Inter Tight", "Helvetica Neue", Arial, sans-serif;
+  --page: #111318; --ink: #ECEEF4; --muted: #9AA1B4; --line: #2A2E3A; --card: #1A1D25; --card-2: #20242E;
+  --accent: #FF4D9A; --accent-soft: rgba(255, 77, 154, .18); --on-colour: #FFFFFF;
+  --ok: #22C55E; --warn: #F5B841; --idle: #94A3B8; --danger: #F87171; --warn-ink: #F5B841;
+  --paper: #15181F; --dot: #2E3340;
+  --bar: #ECEEF4; --bar-ink: #111318; --bar-danger: #C81E1E; --bar-hover: rgba(127, 127, 127, .22);
+  --sh-bar: 0 8px 22px -8px rgba(0, 0, 0, .45);
+  --sh-multi: 0 10px 28px -10px rgba(255, 0, 114, .45);
+  --go: #16A34A; --go-hover: #15803D; --stop: #DC2626; --stop-hover: #B91C1C;
+  --b-ink: #1A1D29; --b-muted: #6B7186; --b-faint: #8A90A3;
+  --b-frame-line: #D9DCE5; --b-frame-bg: rgba(255, 255, 255, .55); --b-frame-head: rgba(255, 255, 255, .9); --b-head-line: #E6E8EE;
+  --b-node: #FFFFFF; --b-node-line: #E3E5EC; --b-soft: #F4F5F8; --b-line-3: #C9CCD6; --b-handle: #9AA0B4; --b-ctl-line: #EEF0F4;
+  --sh-frame: 0 1px 2px rgba(20, 24, 40, .05), 0 18px 40px -24px rgba(20, 24, 40, .25);
+  --sh-frame-sel: 0 18px 40px -24px rgba(20, 24, 40, .3);
+  --sh-node: 0 1px 2px rgba(20, 24, 40, .06), 0 8px 24px -12px rgba(20, 24, 40, .18);
+  --sh-node-hover: 0 1px 2px rgba(20, 24, 40, .08), 0 14px 32px -12px rgba(20, 24, 40, .28);
+  --sh-ctl: 0 4px 12px -6px rgba(20, 24, 40, .2);
+  --run-bg: rgba(22, 163, 74, .13); --run-ink: #15803D; --halt-bg: rgba(220, 38, 38, .11); --halt-ink: #B91C1C;
+  --dirty-bg: rgba(217, 119, 6, .12); --dirty-ink: #B45309;
+  --mini-frame: #EEF0F4; --mini-ink: #5D6478; --mini-mask: rgba(26, 29, 41, .05); --mini-mask-line: rgba(26, 29, 41, .55);
+  --cache-bg: #FBF4DC; --cache-line: #B8A36A; --cache-ink: #4A3D10; --cache-sel: #2563EB; --cache-halo: rgba(37, 99, 235, .3);
 }
 
-html, body { background: var(--page); color: var(--ink); }
+html, body { height: 100%; margin: 0; background: var(--page); color: var(--ink); font-family: var(--sans); font-size: 14px; }
+* { box-sizing: border-box; }
