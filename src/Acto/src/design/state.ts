@@ -21,6 +21,8 @@ export interface WorkflowState {
   fields: { name: string; version: string; description: string | null; cronExpression: string | null };
   steps: Record<Id, StepState>; caches: Record<Id, CacheState>; assignments: Record<Id, AssignmentState>;
   deletedSteps: Record<Id, string | null>; frame: Rect;
+  /** The entry steps the base stored (what BaseAPI runs first today); the designer only derives them. */
+  storedEntry?: Id[];
 }
 
 const NO_AUDIT: Audit = { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null };
@@ -54,6 +56,7 @@ export function stateOf(bw: BoardWorkflow): WorkflowState {
     workflowId: w.id, isNew: false, updatedAt: w.updatedAt,
     fields: { name: w.name, version: w.version, description: w.description, cronExpression: w.cronExpression },
     steps, caches, assignments, deletedSteps: {}, frame: { ...bw.frame },
+    storedEntry: [...w.entryStepIds],
   };
 }
 
