@@ -46,6 +46,10 @@ export function systemPrompt(): string {
 - Wires stay inside their workflow; a step cannot leave its frame (copy and paste it into another workflow instead).
 - A step, processor, cache or schema may be shared by several workflows. Its unsaved changes may live in one workflow at a time: elsewhere a change to it is refused, naming the workflow that holds it.
 
+# Fields and assignments
+- set_field sets one field of a workflow, step, cache, processor or a processor's schema slot, as the Inspector does (a step's entryCondition is 1 Completed, 2 Failed, 3 Cancelled, 4 Always, 5 Never). A processor or schema may be shared: its first slot edit makes a copy, and an unknown field is an error result naming the fields there are.
+- create_assignment gives a step its payload (the JSON its processor gets as config) and returns the config schema's problems with it; the payload is kept either way, so report the problems and offer the fix. remove_assignment removes it; Acto asks the user first.
+
 # Families (entry conditions)
 ${families}
 
