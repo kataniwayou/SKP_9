@@ -65,4 +65,30 @@ describe('runWorkflow', () => {
     run();
     expect(texts(o).at(-1)).toEqual(['error', 'orders: Stop accepted, but it is still not stopped after 30 s']);
   });
+  it('a Start overtaken by a Stop before its timer says nothing about the Start', async () => {
+    const live = liveStub(); live.known([]);
+    const { api } = apiOf(ok); const o = createOutputStore(null);
+    const runs: (() => void)[] = [];
+    await runWorkflow(api, storeOf(entry('orders', {})), o, live, 'w1', 'start', (r) => { runs.push(r); });
+    await runWorkflow(api, storeOf(entry('orders', {})), o, live, 'w1', 'stop', (r) => { runs.push(r); });
+    runs.forEach((r) => r());
+    expect(texts(o).filter(([level]) => level === 'error')).toEqual([]);
+  });
+  it('a press on another workflow does not silence this one', async () => {
+    const live = liveStub(); live.known([]);
+    const { api } = apiOf(ok); const o = createOutputStore(null);
+    const runs: (() => void)[] = [];
+    await runWorkflow(api, storeOf(entry('orders', {})), o, live, 'w1', 'start', (r) => { runs.push(r); });
+    await runWorkflow(api, storeOf(entry('billing', {})), o, live, 'w2', 'stop', (r) => { runs.push(r); });
+    runs.forEach((r) => r());
+    expect(texts(o).filter(([level]) => level === 'error')).toEqual([['error', 'orders: Start accepted, but it is still not running after 30 s']]);
+  });
+  it.each([['checking'], ['unknown']] as const)('a live set still %s by then says it could not be confirmed', async (k) => {
+    const live = liveStub(); live.known([]);
+    const { api } = apiOf(ok); const o = createOutputStore(null);
+    let run: () => void = () => undefined;
+    await runWorkflow(api, storeOf(entry('orders', {})), o, live, 'w1', 'start', (r) => { run = r; });
+    live.set({ workflows: k }); run();
+    expect(texts(o).at(-1)).toEqual(['error', 'orders: Start accepted, but it could not be confirmed after 30 s']);
+  });
 });

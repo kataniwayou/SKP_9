@@ -172,12 +172,15 @@ export function App(props: AppProps) {
 
   const picksRef = useRef(picks);
   picksRef.current = picks;
+  // a nudge session: a press and the repeats of its held key; a new press or a pick change starts the next one
+  const nudgeSeq = useRef(0);
   const persist = useCallback((ps: Pick[]) => {
     const v = viewport.current;
     if (v) writeView(storage, { ...v, selection: lastPick(ps) });
   }, [storage]);
   const setAllPicks = useCallback((ps: Pick[]) => {
     picksRef.current = ps; setPicks(ps); persist(ps);
+    nudgeSeq.current++;
     // a pick change drops a pending delete confirm (and a still-running preparation) silently
     removeToken.current++; pendingRef.current = null; setPending(null);
   }, [persist]);
@@ -204,11 +207,13 @@ export function App(props: AppProps) {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [store, output, session, setAllPicks]);
-  // arrows nudge picked steps (or a picked frame) by 8 px: one history step per workflow while the keys repeat
+  // arrows nudge picked steps (or a picked frame) by 8 px: one history step per workflow while a key repeats
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const d = nudgeKey(e);
       if (!d) return;
+      if (!e.repeat) nudgeSeq.current++;
+      const seq = nudgeSeq.current;
       const byWf = new Map<string, { steps: string[]; frame: boolean }>();
       for (const p of picksRef.current) {
         if (p.kind !== 'step' && p.kind !== 'workflow') continue;
@@ -219,13 +224,15 @@ export function App(props: AppProps) {
       if (byWf.size === 0) return;
       e.preventDefault();
       for (const [wf, g] of byWf) {
+        // the first press says the workflow is saving; its repeats need not say it again
+        if (e.repeat && store.entry(wf)?.saving) continue;
         store.edit(wf, (s) => moveMany(s, {
           steps: g.steps.flatMap((id) => {
             const st = s.steps[id];
             return st ? [{ id, at: { x: Math.max(FRAME_PAD, st.at.x + d.dx), y: Math.max(FRAME_PAD, st.at.y + d.dy) } }] : [];
           }),
           ...(g.frame ? { frame: { x: s.frame.x + d.dx, y: s.frame.y + d.dy } } : {}),
-        }), `nudge:${wf}`);
+        }), `nudge:${wf}:${seq}`);
       }
     };
     // capture, so it runs before the board stops the arrow reaching React Flow's own node movement

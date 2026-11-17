@@ -199,17 +199,43 @@ describe('App', () => {
     };
     const frame = () => { const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec((document.querySelector('.react-flow__node-workflow') as HTMLElement).style.transform)!; return { x: Number(m[1]), y: Number(m[2]) }; };
 
-    it('moves every picked step 8 px per press, as one undo step', async () => {
+    it('moves every picked step 8 px per press, a held key as one undo step', async () => {
       render(<App api={two()} live={liveStub()} storage={view()} />);
       fireEvent.click(await screen.findByText('a-name', { selector: '.sn' }));
       fireEvent.click(screen.getByText('b-name', { selector: '.sn' }), { ctrlKey: true });
       const a0 = pos('a-name'); const b0 = pos('b-name');
-      for (let i = 0; i < 3; i++) fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+      for (let i = 0; i < 3; i++) fireEvent.keyDown(document.body, { key: 'ArrowRight', repeat: i > 0 });
       await vi.waitFor(() => expect(pos('a-name').x).toBe(a0.x + 24));
       expect(pos('b-name')).toEqual({ x: b0.x + 24, y: b0.y });
       fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
       await vi.waitFor(() => expect(pos('a-name')).toEqual(a0));
       expect(pos('b-name')).toEqual(b0);
+    });
+    it('separate presses are separate undo steps, and so is a nudge of another pick', async () => {
+      render(<App api={two()} live={liveStub()} storage={view()} />);
+      fireEvent.click(await screen.findByText('a-name', { selector: '.sn' }));
+      const a0 = pos('a-name');
+      fireEvent.keyDown(document.body, { key: 'ArrowRight' }); fireEvent.keyUp(document.body, { key: 'ArrowRight' });
+      fireEvent.keyDown(document.body, { key: 'ArrowRight' }); fireEvent.keyUp(document.body, { key: 'ArrowRight' });
+      fireEvent.click(screen.getByText('b-name', { selector: '.sn' }));
+      const b0 = pos('b-name');
+      fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+      await vi.waitFor(() => expect(pos('b-name').x).toBe(b0.x + 8));
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+      await vi.waitFor(() => expect(pos('b-name')).toEqual(b0));
+      expect(pos('a-name')).toEqual({ x: a0.x + 16, y: a0.y });
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+      await vi.waitFor(() => expect(pos('a-name')).toEqual({ x: a0.x + 8, y: a0.y }));
+    });
+    it('holding an arrow on a workflow that is saving says so once', async () => {
+      const api = Object.assign(two(), { saveDesign: vi.fn(() => new Promise(() => undefined)) }) as StudioApi;
+      render(<App api={api} live={liveStub()} storage={view()} />);
+      fireEvent.click(await screen.findByText('w1-name', { selector: '.nm' }));
+      fireEvent.click(await screen.findByText('Save'));
+      await screen.findByText('Saving…');
+      fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+      for (let i = 0; i < 5; i++) fireEvent.keyDown(document.body, { key: 'ArrowDown', repeat: true });
+      expect(screen.getAllByText('w1-name is saving — wait for it to finish')).toHaveLength(1);
     });
     it('moves a picked frame', async () => {
       render(<App api={two()} live={liveStub()} storage={view()} />);
