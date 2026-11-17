@@ -27,14 +27,16 @@ export default defineConfig({
   server: {
     port: 5174,
     // ws: the liveness hub (/api/hubs/liveness) is a WebSocket
-    // ai: the chat's model (above): /ai/... goes to KIMI_BASE_URL/..., with the key
+    // ai: the chat's model (above): only what nginx lets through goes on with the key — POST /ai/chat/completions to
+    // KIMI_BASE_URL/chat/completions (/ai/config is answered above); any other /ai path is not proxied, another method 404s
     proxy: {
       '/api': { target: process.env.SKP_API ?? 'http://localhost:18080', ws: true },
       ...(aiBase ? {
-        '/ai': {
+        '^/ai/chat/completions$': {
           target: aiBase.origin, changeOrigin: true,
           rewrite: (p: string) => p.replace(/^\/ai\//, `${aiBase.pathname.replace(/\/+$/, '')}/`),
           headers: { Authorization: `Bearer ${aiKey}` },
+          bypass: (req) => (req.method === 'POST' ? undefined : false),
         },
       } : {}),
     },

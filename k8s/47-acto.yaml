@@ -56,9 +56,10 @@ spec:
             # pod does not start (nginx: invalid number of arguments in "proxy_pass").
             - name: BASEAPI_URL
               value: "http://baseapi-service:8080"
-            # The chat's model for nginx's /ai/ route. The key comes from the dev Secret (01-secret.yaml, KIMI_API_KEY;
-            # committed empty, filled in the cluster only): optional, so a cluster without it still starts and /ai answers
-            # 503 ("The chat is not configured"). Env is read at start: changing one rolls the pod.
+            # The chat's model for nginx's /ai/ route. The key comes from skp-dev-secrets (key KIMI_API_KEY), set once by
+            # hand with kubectl patch (see k8s/README.md); 01-secret.yaml deliberately omits it. Optional, so a cluster
+            # without it still starts and /ai answers 503 ("The chat is not configured"). Env is read at start: changing
+            # one rolls the pod.
             - name: KIMI_BASE_URL
               value: "https://api.moonshot.ai/v1"
             - name: KIMI_MODEL_ID
