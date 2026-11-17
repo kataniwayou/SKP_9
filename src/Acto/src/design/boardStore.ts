@@ -8,7 +8,7 @@ import { readDrafts, writeDrafts, type Drafts } from './drafts';
 import { commit, historyOf, redo, undo, type History } from './history';
 import { applyStored } from './request';
 import { changedEntities, entityLabel, holders, type EntityKey } from './shared';
-import { boardWorkflowOf, sameState, stateOf, type CacheState, type StepState, type WorkflowState } from './state';
+import { boardWorkflowOf, deepEqual, sameState, stateOf, type CacheState, type StepState, type WorkflowState } from './state';
 
 export interface BoardEntry { base: WorkflowState | null; history: History; unsaved: boolean;
   /** The stored layout the workflow had when loaded (opaque JSON), to spot a change made elsewhere. */
@@ -22,7 +22,10 @@ export interface BoardStore {
   load(board: BoardLoad, processors: Processor[]): void;
   setProcessors(processors: Processor[]): void;
   boards(): BoardWorkflow[];
-  /** A processor as stored (without any edit of the designs), what a processor edit is diffed against. */
+  /**
+   * A processor as last read from BaseAPI (the processor list, refreshed by every re-read after a save), without any
+   * unsaved edit of the designs: what a processor edit is diffed against.
+   */
   processor(id: Id, workflowId: Id): Processor | null;
   /** A schema as stored in the workflow's loaded graph. */
   schema(id: Id, workflowId: Id): Schema | null;
@@ -148,6 +151,16 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       output.log(`${a.name} is shared with ${names}: changing its wires changes what ${names} run${others.length === 1 ? 's' : ''} too`, 'warn');
     }
   };
+  /** A fresher read of these processors (a re-read after a save) replaces what the processor list said. */
+  const learnProcessors = (ps: Iterable<Processor>) => {
+    let next: Map<Id, Processor> | null = null;
+    for (const p of ps) {
+      if (deepEqual(processors.get(p.id), p)) continue;
+      next ??= new Map(processors);
+      next.set(p.id, p);
+    }
+    if (next) { processors = next; procVersion++; }
+  };
   const setHistory = (id: Id, r: Rec, h: History) => {
     if (h === r.history || !allowed(id, r, h.present)) return;
     announceWiring(id, r.history.present, h.present);
@@ -245,7 +258,10 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     adoptPresent(id) {
       const r = recs.get(id);
       if (!r) return;
-      const next = make(boardWorkflowOf(r.history.present, r.baseBw, processors));
+      const built = boardWorkflowOf(r.history.present, r.baseBw, processors);
+      // what was just saved is what BaseAPI holds now, the processors this workflow changed included
+      learnProcessors(built.graph.processors.values());
+      const next = make(built);
       next.view = { ...next.view, saving: r.view.saving, layout: r.view.layout };
       recs.set(id, next);
       changed();
@@ -257,6 +273,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       notify();
     },
     replace(id, bw) {
+      learnProcessors(bw.graph.processors.values());
       const next = make(bw);
       next.view = { ...next.view, saving: recs.get(id)?.view.saving ?? false };
       recs.set(id, next);
@@ -277,11 +294,10 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
         };
       };
 
-      for (const key of keys) {
-        if (!key.startsWith('processor:')) continue;
-        const p = bw.graph.processors.get(key.slice('processor:'.length));
-        if (p) { processors = new Map(processors).set(p.id, p); procVersion++; }
-      }
+      learnProcessors([...keys].flatMap((key) => {
+        const p = key.startsWith('processor:') ? bw.graph.processors.get(key.slice('processor:'.length)) : undefined;
+        return p ? [p] : [];
+      }));
       const rebased = (s: WorkflowState): WorkflowState => {
         let steps = s.steps;
         let caches = s.caches;

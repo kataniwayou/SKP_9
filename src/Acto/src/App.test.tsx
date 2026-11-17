@@ -51,6 +51,26 @@ describe('App', () => {
   const saved = (selection: unknown) => memoryStorage({ 'acto.view': JSON.stringify({ x: 0, y: 0, zoom: 1, selection }) });
   const inspector = () => within(document.querySelector('[data-panel="inspector"]') as HTMLElement);
 
+  it('re-lists the processors for the toolbox after saving a processor change', async () => {
+    const listProcessors = vi.fn()
+      .mockResolvedValueOnce({ ok: true, value: [processorDto('p1', { name: 'Cruncher' })] })
+      .mockResolvedValue({ ok: true, value: [processorDto('p1', { name: 'Crunched' })] });
+    const api = {
+      ...fakeApi({ workflows: [wf('w1')] }), listProcessors,
+      saveDesign: vi.fn().mockResolvedValue({ ok: true, value: { applied: true, errors: [] } }),
+      validateWorkflow: vi.fn().mockResolvedValue({ ok: true, value: { valid: true, problems: [] } }),
+    } as StudioApi;
+    renderApp(api, saved({ kind: 'step', workflowId: 'w1', stepId: 's1' }));
+    expect(await screen.findByText('Cruncher')).toBeInTheDocument();
+    fireEvent.change(await inspector().findByLabelText('Processor name'), { target: { value: 'Crunched' } });
+    fireEvent.click(document.querySelector('.react-flow__node-workflow') as HTMLElement);
+    fireEvent.click(await screen.findByText('Save'));
+    expect(await screen.findByText('w1-name saved')).toBeInTheDocument();
+    const toolbox = within(document.querySelector('[data-panel="toolbox"]') as HTMLElement);
+    expect(await toolbox.findByText('Crunched')).toBeInTheDocument();
+    expect(toolbox.queryByText('Cruncher')).toBeNull();
+    expect(listProcessors).toHaveBeenCalledTimes(2);
+  });
   it('restores a saved selection into the inspector', async () => {
     renderApp(fakeApi({ workflows: [wf('w1')] }), saved({ kind: 'workflow', workflowId: 'w1' }));
     expect(await inspector().findByText('Wires')).toBeInTheDocument();

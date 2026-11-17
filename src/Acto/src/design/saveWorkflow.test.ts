@@ -5,7 +5,9 @@ import type { DesignSaveRequest } from './request';
 import { createOutputStore } from '../output/outputStore';
 import { createBoardStore } from './boardStore';
 import { bwFull, proc } from './fixtures';
-import { moveStep, removeStep, setStepField } from './state';
+import { moveStep, removeStep, setProcessorField, setSlotField, setStepField } from './state';
+import { processorDto, schemaDto } from '../api/fixtures';
+import { AUDIT } from '../model/fixtures';
 import { bw } from '../board/fixtures';
 import { saveWorkflow } from './saveWorkflow';
 
@@ -208,5 +210,50 @@ describe('re-reading the workflows that share what a save changed', () => {
     await saveWorkflow(api, store, output, 'w1');
     expect(texts()).toContain('warn:billing: could not re-read after orders saved — Network error: down');
     expect(store.entry('w2')).toBe(before);
+  });
+});
+
+describe('a saved processor change', () => {
+  /** w1 'orders' [a → b] on p1 'Analyst' (input schema s0), the processor list holding the same. */
+  function procSetup(stored: { name?: string; inputSchemaId?: string; schemas?: ReturnType<typeof schemaDto>[] }) {
+    const output = createOutputStore(null, () => '00:00:00');
+    const store = createBoardStore(output, null);
+    const p1 = { ...proc('p1', 'Analyst'), inputSchemaId: 's0' };
+    const w = bwFull();
+    w.graph.processors = new Map([['p1', p1]]);
+    w.graph.schemas = new Map([['s0', { id: 's0', name: 'in', version: '1.0.0', description: null, definition: '{"s0":1}', audit: AUDIT }]]);
+    store.load({ listed: true, workflows: [w], failures: [] }, [p1]);
+    const g = graphWith({ entry: ['a'], steps: { a: ['b'], b: [] } });
+    g.processors = [processorDto('p1', { name: stored.name ?? 'Analyst', inputSchemaId: stored.inputSchemaId ?? 's0' })];
+    g.schemas = stored.schemas ?? [schemaDto('s0', { name: 'in', definition: '{"s0":1}' })];
+    const api = fakeApi({ workflows: [{ ...wf('w1'), name: 'orders' }], graph: g });
+    Object.assign(api, {
+      saveDesign: vi.fn().mockResolvedValue({ ok: true, value: { applied: true, errors: [] } }),
+      validateWorkflow: vi.fn().mockResolvedValue({ ok: true, value: { valid: true, problems: [] } }),
+    });
+    return { api: api as StudioApi, store, output };
+  }
+  const shownP1 = (store: ReturnType<typeof createBoardStore>) => store.boards().find((b) => b.graph.workflow.id === 'w1')!.graph.processors.get('p1')!;
+
+  it('shows the saved processor in the saving workflow afterwards', async () => {
+    const { api, store, output } = procSetup({ name: 'New' });
+    store.edit('w1', (s) => setProcessorField(s, store.processor('p1', 'w1')!, 'name', 'New'));
+    expect(await saveWorkflow(api, store, output, 'w1')).toBe('saved');
+    expect(shownP1(store).name).toBe('New');
+    expect(store.processor('p1', 'w1')!.name).toBe('New');
+    expect(store.entry('w1')!.unsaved).toBe(false);
+  });
+  it('a second slot edit after a save starts from the saved copy, not the schema it replaced', async () => {
+    const { api, store, output } = procSetup({ inputSchemaId: 'c1', schemas: [schemaDto('c1', { name: 'in', definition: '{"c1":1}' })] });
+    const slotEdit = (key: 'definition' | 'name', v: string, id: string) => store.edit('w1', (s) => {
+      const base = store.processor('p1', 'w1')!;
+      return setSlotField(s, base, 'input', base.inputSchemaId ? store.schema(base.inputSchemaId, 'w1') : null, key, v, () => id);
+    });
+    slotEdit('definition', '{"c1":1}', 'c1');
+    expect(await saveWorkflow(api, store, output, 'w1')).toBe('saved');
+    expect(shownP1(store).inputSchemaId).toBe('c1');
+    slotEdit('name', 'in-2', 'c2');
+    const e = store.entry('w1')!.history.present.processors!.p1!.slots.input!;
+    expect('copy' in e && e.copy).toMatchObject({ id: 'c2', name: 'in-2', definition: '{"c1":1}' });
   });
 });

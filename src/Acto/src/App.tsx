@@ -11,7 +11,7 @@ import { addCache, addStep, addWire, deleteParts, linkCache, moveFrame, moveMany
 import { dropVerdict, type DropItem } from './board/dropTarget';
 import { newId } from './design/ids';
 import { saveWorkflow } from './design/saveWorkflow';
-import { stepSharing } from './design/shared';
+import { changedEntities, stepSharing } from './design/shared';
 import type { ToolbarActions } from './board/nodes/boardContext';
 import { createBoardStore, useBoard, type BoardStore } from './design/boardStore';
 import { nudgeKey, pasteKey, undoRedoKey } from './design/keys';
@@ -110,25 +110,32 @@ export function App(props: AppProps) {
     return () => { cancelled = true; };
   }, [api, output, store]);
 
+  const listProcessors = useCallback(async (cancelled: () => boolean = () => false) => {
+    try {
+      const r = await api.listProcessors?.();
+      if (cancelled() || !r) return;
+      if (r.ok) {
+        const ps = r.value.map(processorFromDto);
+        processorsRef.current = ps;
+        setProcessors(ps);
+        store.setProcessors(ps);
+      }
+      else output.log(`Could not list the processors: ${describeError(r.error)}`, 'error');
+    } catch (e) {
+      if (!cancelled()) output.log(`Could not list the processors: ${message(e)}`, 'error');
+    }
+  }, [api, output, store]);
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const r = await api.listProcessors?.();
-        if (cancelled || !r) return;
-        if (r.ok) {
-          const ps = r.value.map(processorFromDto);
-          processorsRef.current = ps;
-          setProcessors(ps);
-          store.setProcessors(ps);
-        }
-        else output.log(`Could not list the processors: ${describeError(r.error)}`, 'error');
-      } catch (e) {
-        if (!cancelled) output.log(`Could not list the processors: ${message(e)}`, 'error');
-      }
-    })();
+    void listProcessors(() => cancelled);
     return () => { cancelled = true; };
-  }, [api, output, store]);
+  }, [listProcessors]);
+  /** A save that changed a processor changed what the toolbox lists too. */
+  const save = useCallback(async (id: string) => {
+    const e = store.entry(id);
+    const procChanged = e !== null && [...changedEntities(e.base, e.history.present)].some((k) => k.startsWith('processor:'));
+    if (await saveWorkflow(api, store, output, id) === 'saved' && procChanged) await listProcessors();
+  }, [api, store, output, listProcessors]);
 
   useEffect(() => {
     let cancelled = false;
@@ -261,7 +268,7 @@ export function App(props: AppProps) {
   }, [store, output, session]);
 
   const toolbar = useMemo<ToolbarActions>(() => ({
-    save: (wf) => { void saveWorkflow(api, store, output, wf); },
+    save: (wf) => { void save(wf); },
     start: (wf) => { void runWorkflow(api, store, output, live, wf, 'start'); },
     stop: (wf) => { void runWorkflow(api, store, output, live, wf, 'stop'); },
     copy: (wf, step) => copyPicks({ wf, step }),
@@ -306,7 +313,7 @@ export function App(props: AppProps) {
       const e = store.entry(wf);
       return { unsaved: e?.unsaved ?? false, problems: e?.problems ?? 0, saving: e?.saving ?? false, run: statusOf(live.getState(), wf) };
     },
-  }), [api, store, output, live, onSelect, setAllPicks, pending, copyPicks]);
+  }), [api, store, output, live, onSelect, setAllPicks, pending, copyPicks, save]);
 
   const barActions = useMemo<BarActions>(() => ({
     copy: () => copyPicks(),
@@ -338,9 +345,9 @@ export function App(props: AppProps) {
     },
     start: (ids: string[]) => { for (const id of ids) void runWorkflow(api, store, output, live, id, 'start'); },
     stop: (ids: string[]) => { for (const id of ids) void runWorkflow(api, store, output, live, id, 'stop'); },
-    save: (ids: string[]) => { void (async () => { for (const id of ids) await saveWorkflow(api, store, output, id); })(); },
+    save: (ids: string[]) => { void (async () => { for (const id of ids) await save(id); })(); },
     deleteWorkflows: () => toolbar.remove([...new Set(picksRef.current.filter((p) => p.kind === 'workflow').map((p) => p.workflowId))]),
-  }), [api, store, output, live, toolbar, copyPicks, setAllPicks]);
+  }), [api, store, output, live, toolbar, copyPicks, setAllPicks, save]);
 
   const workflowsRef = useRef(workflows);
   workflowsRef.current = workflows;
