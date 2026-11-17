@@ -93,3 +93,10 @@ export function placeFrames(
   }
   return out;
 }
+
+/** Where a new, empty frame goes: the first free slot among the frames on the board, as placeFrames finds it. */
+export function freeSlot(frames: readonly Rect[]): Point {
+  const items = frames.map((r, i) => ({ id: `taken-${i}`, createdAt: '', stored: r, size: { w: r.w, h: r.h } }));
+  const slot = placeFrames([...items, { id: 'new', createdAt: '', stored: null, size: frameSizeOf(new Map()) }]).get('new')!;
+  return { x: slot.x, y: slot.y };
+}

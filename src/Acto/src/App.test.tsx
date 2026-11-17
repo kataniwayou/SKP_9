@@ -386,3 +386,15 @@ describe('App', () => {
     expect(st.getItem('acto.theme')).toBe('light');
   });
 });
+
+describe('App chat', () => {
+  it('shows the chat pane in its panel; a chat that is not configured leaves the board loading as usual', async () => {
+    const aiFetch = vi.fn(async () => new Response('{}', { status: 503 })) as unknown as typeof fetch;
+    render(<App api={fakeApi({ workflows: [wf('w1')] })} live={liveStub()} storage={memoryStorage()} session={memoryStorage()} aiFetch={aiFetch} />);
+    const chat = document.querySelector('[data-panel="chat"]') as HTMLElement;
+    expect(within(chat).getByRole('button', { name: 'New chat' })).toBeInTheDocument();
+    expect(await within(chat).findByText(/^The chat is not configured/)).toBeInTheDocument();
+    expect(await screen.findByText('Board loaded: 1 workflow')).toBeInTheDocument();
+    expect(await screen.findByTestId('rf__node-wf:w1')).toBeInTheDocument();
+  });
+});

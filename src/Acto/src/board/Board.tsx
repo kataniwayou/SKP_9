@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { applyNodeChanges, Background, BackgroundVariant, Controls, Panel, ReactFlow, useStore, type EdgeChange, type EdgeTypes, type Node, type NodeChange, type NodeTypes, type Viewport } from '@xyflow/react';
 import { HEADER_H, ZOOM_DETAIL } from './geometry';
 import type { BoardWorkflow } from './loadBoard';
@@ -7,6 +7,7 @@ import { toFlow } from './toFlow';
 import { LinkWire } from './edges/LinkWire';
 import { CacheChip } from './nodes/CacheChip';
 import { dropVerdictItem, stepAt, type DropItem } from './dropTarget';
+import { focusBounds } from './focus';
 import { StepCard } from './nodes/StepCard';
 import { WorkflowFrame } from './nodes/WorkflowFrame';
 import { BoardMiniMap } from './BoardMiniMap';
@@ -56,11 +57,35 @@ export interface BoardProps {
   bar?: ReactNode;
   /** False while workflows are still arriving: the first fit of every frame waits until it turns true. */
   settled?: boolean;
+  /**
+   * Filled by the board with its pan: centres the view on a workflow's frame (or, given, its steps) at the current zoom.
+   * The chat's `focus` command calls it; it changes nothing else.
+   */
+  focusRef?: MutableRefObject<BoardFocus | null>;
 }
 
-export function Board({ workflows, picks, onPick, initialZoom, initialView, onViewChange, onEdit, toolbar, onDropItem, bar, settled = true }: BoardProps) {
+/** Pans the board to a workflow (and, given, steps in it); a workflow not on the board is ignored. */
+export type BoardFocus = (workflowId: string, stepIds?: string[]) => void;
+
+export function Board({ workflows, picks, onPick, initialZoom, initialView, onViewChange, onEdit, toolbar, onDropItem, bar, settled = true, focusRef }: BoardProps) {
   const fitAtMount = useRef(settled);
-  const flow = useRef<{ getViewport: () => Viewport; fitView: () => unknown; screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number } } | null>(null);
+  const flow = useRef<{
+    getViewport: () => Viewport; fitView: () => unknown; screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number };
+    setCenter: (x: number, y: number, o?: { zoom?: number; duration?: number }) => unknown;
+  } | null>(null);
+  const workflowsNow = useRef(workflows);
+  workflowsNow.current = workflows;
+  useEffect(() => {
+    if (!focusRef) return;
+    focusRef.current = (workflowId, stepIds) => {
+      const w = workflowsNow.current.find((x) => x.graph.workflow.id === workflowId);
+      const rf = flow.current;
+      if (!w || !rf) return;
+      const b = focusBounds(w.frame, w.stepAt, stepIds);
+      void rf.setCenter(b.x + b.w / 2, b.y + b.h / 2, { zoom: rf.getViewport().zoom, duration: 300 });
+    };
+    return () => { focusRef.current = null; };
+  }, [focusRef]);
   // the first fit waited for the last workflow: fit once it is in (a saved view or a given zoom is never fitted over)
   useEffect(() => {
     if (!settled || fitAtMount.current) return;

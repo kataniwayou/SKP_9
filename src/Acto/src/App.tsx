@@ -2,13 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createApi, type StudioApi } from './api/client';
 import { describeError } from './api/describeError';
 import { cacheFromDto, processorFromDto } from './api/toModel';
-import { Board, type BoardEdit } from './board/Board';
+import { Board, type BoardEdit, type BoardFocus } from './board/Board';
 import { SelectionBar, type BarActions } from './board/SelectionBarView';
 import { barOf } from './board/selectionBar';
 import { loadBoard } from './board/loadBoard';
 import { lastPick, livePicks, togglePick, type Pick } from './board/picks';
 import { addCache, addStep, addWire, deleteParts, linkCache, moveFrame, moveMany, newWorkflowState, removeStepHere, removeWire, resizeFrame, swapProcessor, unlinkCache } from './design/state';
 import { dropVerdict, type DropItem } from './board/dropTarget';
+import { freeSlot } from './board/placement';
+import { ChatHost } from './chat/ChatHost';
+import { createChatStore, type ChatStore } from './chat/chatStore';
+import type { ToolContext } from './chat/toolTypes';
 import { newId } from './design/ids';
 import { saveWorkflow } from './design/saveWorkflow';
 import { changedEntities, stepSharing } from './design/shared';
@@ -34,7 +38,9 @@ import { applyTheme, saveTheme, savedTheme, type Theme } from './shell/theme';
 import { ToolboxPanel } from './toolbox/ToolboxPanel';
 import './app.css';
 
-export interface AppProps { api?: StudioApi; live?: LiveStore; storage?: Storage | null; session?: Storage | null }
+export interface AppProps { api?: StudioApi; live?: LiveStore; storage?: Storage | null; session?: Storage | null;
+  /** The chat's fetch for /ai (tests); the browser's by default. */
+  aiFetch?: typeof fetch }
 
 function browserStorage(): Storage | null {
   try { return window.localStorage; } catch { return null; }
@@ -65,6 +71,8 @@ export function App(props: AppProps) {
   const [session] = useState<Storage | null>(() => (props.session === undefined ? browserSession() : props.session));
   const [store] = useState<BoardStore>(() => createBoardStore(output, session));
   const [saved] = useState<SavedView | null>(() => readView(storage));
+  // the chat: this tab's sessionStorage, mirrored to localStorage (a new tab picks the conversation up)
+  const [chat] = useState<ChatStore>(() => createChatStore(session, storage));
 
   const [theme, setTheme] = useState<Theme>(() => savedTheme(storage));
   const toggleTheme = useCallback(() => {
@@ -76,6 +84,9 @@ export function App(props: AppProps) {
   const workflows = useBoard(store);
   const [processors, setProcessors] = useState<Processor[]>([]);
   const [caches, setCaches] = useState<Cache[]>([]);
+  const cachesRef = useRef<Cache[]>([]);
+  cachesRef.current = caches;
+  const boardFocus = useRef<BoardFocus | null>(null);
   const processorsRef = useRef<Processor[]>([]);
   const [picks, setPicks] = useState<Pick[]>(() => (saved?.selection ? [saved.selection] : []));
   const [pending, setPending] = useState<DeletePlan | null>(null);
@@ -410,6 +421,19 @@ export function App(props: AppProps) {
     }
   }, [store, output, onSelect, caches]);
 
+  // what the chat's tools act on: the same store, histories and picks as the user's own gestures
+  const chatCtx = useMemo<ToolContext>(() => ({
+    store, api, output, live, session, newId,
+    processors: () => processorsRef.current,
+    caches: () => cachesRef.current,
+    commands: {
+      focus: (workflowId, stepIds) => boardFocus.current?.(workflowId, stepIds),
+      setPicks: setAllPicks,
+      picks: () => picksRef.current,
+      newWorkflowAt: () => freeSlot(workflowsRef.current.map((w) => w.frame)),
+    },
+  }), [store, api, output, live, session, setAllPicks]);
+
   return (
     <LiveStoreProvider value={live}>
       <OutputProvider store={output}>
@@ -424,11 +448,11 @@ export function App(props: AppProps) {
               ? <div className="board-wait">Loading the board…</div>
               : <Board workflows={workflows} picks={picks} onPick={onPick} settled={loaded}
                   {...(saved ? { initialView: { x: saved.x, y: saved.y, zoom: saved.zoom } } : {})}
-                  onViewChange={onViewChange} onEdit={onEdit} toolbar={toolbar} onDropItem={onDropItem}
+                  onViewChange={onViewChange} onEdit={onEdit} toolbar={toolbar} onDropItem={onDropItem} focusRef={boardFocus}
                   bar={<PickBar picks={picks} status={toolbar.status} actions={barActions} pending={pending} onConfirm={toolbar.confirmRemove} onCancel={toolbar.cancelRemove} />} />}
             inspector={<InspectorPanel workflows={workflows} picks={picks} store={store} />}
             output={<OutputPanel />}
-            chat={<div className="ph"><span>Chat</span></div>}
+            chat={<ChatHost chat={chat} ctx={chatCtx} {...(props.aiFetch ? { fetchFn: props.aiFetch } : {})} />}
           />
         </div>
       </OutputProvider>

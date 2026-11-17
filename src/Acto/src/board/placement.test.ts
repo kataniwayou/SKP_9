@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { defaultStepPositions, frameSizeOf, placeFrames } from './placement';
+import { FRAME_GAP } from './geometry';
+import { defaultStepPositions, frameSizeOf, freeSlot, placeFrames } from './placement';
 
 describe('placement', () => {
   it('keeps stored rects and places the rest by creation time without overlap', () => {
@@ -35,5 +36,17 @@ describe('placement', () => {
     const b = placeFrames([mk('c'), mk('a'), mk('b')]);
     for (const id of ['a', 'b', 'c']) expect(a.get(id)).toEqual(b.get(id));
     expect(a.get('a')).toEqual({ x: 0, y: 0, w: 500, h: 300 });
+  });
+});
+
+describe('freeSlot', () => {
+  it('is the first place a new empty frame fits clear of every frame on the board', () => {
+    const size = frameSizeOf(new Map());
+    expect(freeSlot([])).toEqual({ x: 0, y: 0 });
+    const taken = [{ x: 0, y: 0, w: 600, h: 300 }];
+    const at = freeSlot(taken);
+    const r = { ...at, ...size };
+    expect(r.x >= 600 + FRAME_GAP || r.y >= 300 + FRAME_GAP).toBe(true);
+    expect(at).toEqual({ x: 600 + FRAME_GAP, y: 0 });
   });
 });
