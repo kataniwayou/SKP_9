@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { BoardWorkflow } from '../board/loadBoard';
-import { lastPick, type Pick } from '../board/picks';
+import { lastPick, pickKey, type Pick } from '../board/picks';
 import { useLive, useLiveStore, useProcessorLive } from '../live/LiveContext';
 import { livenessText, statusOf } from '../live/liveState';
 import { cronText } from '../model/cronText';
@@ -203,7 +203,7 @@ function PickList({ picks, workflows }: { picks: Pick[]; workflows: BoardWorkflo
       <ol className="in-picks">
         {picks.map((p) => {
           const n = pickName(p, workflows);
-          return n === null ? null : <li key={`${p.kind}:${p.workflowId}:${'stepId' in p ? p.stepId : 'wireId' in p ? p.wireId : 'cacheId' in p ? p.cacheId : ''}`} data-kind={p.kind}>{n}</li>;
+          return n === null ? null : <li key={pickKey(p)} data-kind={p.kind}>{n}</li>;
         })}
       </ol>
     </>

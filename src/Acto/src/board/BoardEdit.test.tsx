@@ -22,29 +22,39 @@ const stepNode = (wfId: string, id: string, x: number, y: number): Node =>
   ({ id: `st:${wfId}:${id}`, type: 'step', position: { x, y }, data: { workflowId: wfId, stepId: id } });
 
 describe('Board editing', () => {
-  it('commits one moveStep at drag end, with y relative to the frame content', async () => {
-    const onEdit = { moveStep: vi.fn(), moveFrame: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+  it('commits one moveMany at drag end, with y relative to the frame content', async () => {
+    const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
     render(<Board workflows={[bw('w1', ['a'])]} picks={[]} onPick={() => {}} initialZoom={1} onEdit={onEdit} />);
     await screen.findByText('a-name');
     act(() => seen.props!.onNodeDragStop!({}, stepNode('w1', 'a', 100, 90 + HEADER_H)));
-    expect(onEdit.moveStep).toHaveBeenCalledTimes(1);
-    expect(onEdit.moveStep).toHaveBeenCalledWith('w1', 'a', { x: 100, y: 90 });
+    expect(onEdit.moveMany).toHaveBeenCalledTimes(1);
+    expect(onEdit.moveMany).toHaveBeenCalledWith('w1', { steps: [{ id: 'a', at: { x: 100, y: 90 } }] });
+  });
+  it('commits a multi-node drag as one moveMany per workflow', async () => {
+    const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    render(<Board workflows={[bw('w1', ['a', 'b']), bw('w2', ['c'], [], { x: 600, y: 0 })]} picks={[]} onPick={() => {}} initialZoom={1} onEdit={onEdit} />);
+    await screen.findByText('a-name');
+    const all = [stepNode('w1', 'a', 100, 90 + HEADER_H), stepNode('w1', 'b', 300, 90 + HEADER_H), stepNode('w2', 'c', 100, 90 + HEADER_H)];
+    act(() => seen.props!.onNodeDragStop!({}, all[0]!, all));
+    expect(onEdit.moveMany).toHaveBeenCalledTimes(2);
+    expect(onEdit.moveMany).toHaveBeenCalledWith('w1', { steps: [{ id: 'a', at: { x: 100, y: 90 } }, { id: 'b', at: { x: 300, y: 90 } }] });
+    expect(onEdit.moveMany).toHaveBeenCalledWith('w2', { steps: [{ id: 'c', at: { x: 100, y: 90 } }] });
   });
   it('commits nothing when the drag ends where the step already was', async () => {
-    const onEdit = { moveStep: vi.fn(), moveFrame: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
     const w = bw('w1', ['a']);
     render(<Board workflows={[w]} picks={[]} onPick={() => {}} initialZoom={1} onEdit={onEdit} />);
     await screen.findByText('a-name');
     const p = w.stepAt.get('a')!;
     act(() => seen.props!.onNodeDragStop!({}, stepNode('w1', 'a', p.x, p.y + HEADER_H)));
-    expect(onEdit.moveStep).not.toHaveBeenCalled();
+    expect(onEdit.moveMany).not.toHaveBeenCalled();
   });
   it('commits a frame move at drag end', async () => {
-    const onEdit = { moveStep: vi.fn(), moveFrame: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
     render(<Board workflows={[bw('w1', ['a'])]} picks={[]} onPick={() => {}} initialZoom={1} onEdit={onEdit} />);
     await screen.findByText('a-name');
     act(() => seen.props!.onNodeDragStop!({}, { id: 'wf:w1', type: 'workflow', position: { x: 40, y: 50 }, data: { workflowId: 'w1' } }));
-    expect(onEdit.moveFrame).toHaveBeenCalledWith('w1', { x: 40, y: 50 });
+    expect(onEdit.moveMany).toHaveBeenCalledWith('w1', { steps: [], frame: { x: 40, y: 50 } });
   });
   it('stays read-only without onEdit', async () => {
     render(<Board workflows={[bw('w1', ['a'])]} picks={[]} onPick={() => {}} initialZoom={1} />);
@@ -53,7 +63,7 @@ describe('Board editing', () => {
     expect(seen.props!.nodesDraggable).toBe(false);
   });
   it('shows the resizer only on the selected frame', async () => {
-    const onEdit = { moveStep: vi.fn(), moveFrame: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
     const { rerender } = render(<Board workflows={[bw('w1', ['a'])]} picks={[]} onPick={() => {}} initialZoom={1} onEdit={onEdit} />);
     await screen.findByText('a-name');
     expect(document.querySelector('.react-flow__resize-control')).toBeNull();
@@ -61,7 +71,7 @@ describe('Board editing', () => {
     expect(document.querySelector('.react-flow__resize-control')).not.toBeNull();
   });
   it('resizes only from the right edge, the bottom edge and their corner', async () => {
-    const onEdit = { moveStep: vi.fn(), moveFrame: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
     render(<Board workflows={[bw('w1', ['a'])]} picks={[{ kind: 'workflow', workflowId: 'w1' }]} onPick={() => {}} initialZoom={1} onEdit={onEdit} />);
     await screen.findByText('a-name');
     const controls = [...document.querySelectorAll('.react-flow__resize-control')];
@@ -69,7 +79,7 @@ describe('Board editing', () => {
     expect(controls.map((c) => [...c.classList].filter((k) => k === 'right' || k === 'bottom').join(' ')).sort()).toEqual(['bottom', 'bottom right', 'right']);
   });
   it('connects a wire dropped on the body of a step', async () => {
-    const onEdit = { moveStep: vi.fn(), moveFrame: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
     const w = bw('w1', ['a', 'b']);
     render(<Board workflows={[w]} picks={[]} onPick={() => {}} initialZoom={1} onEdit={onEdit} />);
     await screen.findByText('a-name');
@@ -79,7 +89,7 @@ describe('Board editing', () => {
     expect(onEdit.connect).toHaveBeenCalledWith('w1', 'b', 'w1', 'a');
   });
   it('connects a wire dropped on the wrong handle of a step to that step', async () => {
-    const onEdit = { moveStep: vi.fn(), moveFrame: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
     render(<Board workflows={[bw('w1', ['a', 'b'])]} picks={[]} onPick={() => {}} initialZoom={1} onEdit={onEdit} />);
     await screen.findByText('a-name');
     act(() => seen.props!.onConnectEnd!({ clientX: 5000, clientY: 5000 },

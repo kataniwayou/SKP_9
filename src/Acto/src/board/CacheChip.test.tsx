@@ -12,7 +12,7 @@ describe('cache chips', () => {
     w.graph.caches.set('c1', { id: 'c1', name: 'orders', version: '1', description: null, root: '', items: '{}', audit: w.graph.workflow.audit });
     const deleteCache = vi.fn();
     const toolbar = { save: vi.fn(), deleteStep: vi.fn(), deleteWire: vi.fn(), deleteCache, status: () => ({ unsaved: false, problems: 0, saving: false }) };
-    const onEdit = { moveStep: vi.fn(), moveFrame: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
     render(<LiveStoreProvider value={liveStub()}>
       <Board workflows={[w]} picks={[{ kind: 'cache', workflowId: 'w1', cacheId: 'c1' }]} onPick={() => {}} initialZoom={1} onEdit={onEdit} toolbar={toolbar} />
     </LiveStoreProvider>);

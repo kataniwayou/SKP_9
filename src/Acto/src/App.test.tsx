@@ -135,6 +135,8 @@ describe('App', () => {
       mouse(window, 'mousemove', 140, 130);
       mouse(window, 'mouseup', 140, 130);
       expect(await inspector().findByText('2 selected')).toBeInTheDocument();
+      // jsdom measures nothing, so d3-drag moves no node here: the committed multi-node path is covered by
+      // BoardEdit.test (one moveMany per workflow) and boardStore.test (one undo restores every step)
     });
     it('keyboard selection (Enter on a focused node) reaches the inspector', async () => {
       renderApp(two(), view());

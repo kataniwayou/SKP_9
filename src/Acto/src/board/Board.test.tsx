@@ -85,7 +85,7 @@ describe('Board', () => {
   });
   describe('picks', () => {
     const toolbar = { save: vi.fn(), deleteStep: vi.fn(), deleteWire: vi.fn(), deleteCache: vi.fn(), status: () => ({ unsaved: false, problems: 0, saving: false }) };
-    const onEdit = { moveStep: vi.fn(), moveFrame: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
     const a = { kind: 'step', workflowId: 'w1', stepId: 'a' } as const;
     const b = { kind: 'step', workflowId: 'w1', stepId: 'b' } as const;
     it('reports a Ctrl+click on two step cards as additive picks', async () => {

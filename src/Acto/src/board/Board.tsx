@@ -26,8 +26,8 @@ function FarWatch({ onFar }: { onFar: (far: boolean) => void }) {
 }
 
 export interface BoardEdit {
-  moveStep(wf: string, step: string, at: { x: number; y: number }): void;
-  moveFrame(wf: string, at: { x: number; y: number }): void;
+  /** Everything one drag moved inside `wf`: step positions (frame-local) and/or the frame, as one history step. */
+  moveMany(wf: string, moved: { steps: { id: string; at: { x: number; y: number } }[]; frame?: { x: number; y: number } }): void;
   /** `at` is given when the resize also moved the frame's top-left corner (one history step for both). */
   resizeFrame(wf: string, size: { w: number; h: number }, at?: { x: number; y: number }): void;
   /** `to` is null when the wire was dropped on nothing (or on something that is not a step). */
@@ -116,26 +116,25 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
   };
   const dataOf = (n: Node) => n.data as unknown as NodeData;
 
-  const dragStop = (n: Node, dragged?: Node[]) => {
+  /** One edit per workflow, however many nodes React Flow dragged together. */
+  const dragStop = (n: Node, all?: Node[]) => {
     if (!onEdit) return;
-    // React Flow drags every selected node together; commit each one that moved
-    if (dragged && dragged.length > 1) { for (const m of dragged) commitMove(m); setDragged(derivedRef.current); return; }
-    commitMove(n);
-    setDragged(derivedRef.current); // a refused or unchanged drag snaps back
-  };
-  const commitMove = (n: Node) => {
-    if (!onEdit) return;
-    const d = dataOf(n);
-    const w = byId.get(d.workflowId);
-    if (w) {
-      if (n.type === 'step' && d.stepId !== undefined) {
+    const moved = new Map<string, { steps: { id: string; at: { x: number; y: number } }[]; frame?: { x: number; y: number } }>();
+    for (const m of all && all.length > 1 ? all : [n]) {
+      const d = dataOf(m);
+      const w = byId.get(d.workflowId);
+      if (!w) continue;
+      const entry = () => { let e = moved.get(d.workflowId); if (!e) { e = { steps: [] }; moved.set(d.workflowId, e); } return e; };
+      if (m.type === 'step' && d.stepId !== undefined) {
         const cur = w.stepAt.get(d.stepId);
-        const at = { x: n.position.x, y: n.position.y - HEADER_H };
-        if (!cur || cur.x !== at.x || cur.y !== at.y) onEdit.moveStep(d.workflowId, d.stepId, at);
-      } else if (n.type === 'workflow') {
-        if (w.frame.x !== n.position.x || w.frame.y !== n.position.y) onEdit.moveFrame(d.workflowId, { x: n.position.x, y: n.position.y });
+        const at = { x: m.position.x, y: m.position.y - HEADER_H };
+        if (!cur || cur.x !== at.x || cur.y !== at.y) entry().steps.push({ id: d.stepId, at });
+      } else if (m.type === 'workflow') {
+        if (w.frame.x !== m.position.x || w.frame.y !== m.position.y) entry().frame = { x: m.position.x, y: m.position.y };
       }
     }
+    for (const [wf, e] of moved) onEdit.moveMany(wf, e);
+    setDragged(derivedRef.current); // a refused or unchanged drag snaps back
   };
   const nodeById = (id: string) => nodes.find((x) => x.id === id);
 
@@ -143,7 +142,7 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
     <BoardContext.Provider value={byId}>
       <EditContext.Provider value={onEdit ?? null}>
       <ToolbarContext.Provider value={editable ? toolbar ?? null : null}>
-      <div className="board" onKeyDownCapture={(e) => { if (e.key === 'Enter' || e.key === ' ') { keySelect.current = true; queueMicrotask(() => { keySelect.current = false; }); } }}>
+      <div className="board" onKeyDownCapture={(e) => { keySelect.current = e.key === 'Enter' || e.key === ' '; }} onKeyDown={() => { keySelect.current = false; }} onKeyUp={() => { keySelect.current = false; }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -154,6 +153,7 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
           {...(editable ? {
             onNodesChange,
             onNodeDragStop: (_: unknown, n: Node, all?: Node[]) => dragStop(n, all),
+
             onConnect: (c: { source: string; target: string }) => {
               if (!onEdit) return;
               const a = nodeById(c.source);
@@ -194,6 +194,7 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
           onInit={(rf) => { flow.current = rf; }}
           onMoveEnd={(_, v) => onViewChange?.(v)}
           multiSelectionKeyCode={null}
+          selectionKeyCode={null}
           onEdgesChange={onEdgesChange}
           {...(!editable ? { onNodesChange } : {})}
           onNodeClick={(ev, n) => { keySelect.current = false; select(nodePick(n), ev.ctrlKey || ev.metaKey); }}

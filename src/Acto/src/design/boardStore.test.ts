@@ -4,7 +4,7 @@ import { createOutputStore } from '../output/outputStore';
 import { createBoardStore } from './boardStore';
 import { bwFull, proc } from './fixtures';
 import { canUndo } from './history';
-import { addWire, moveStep, newWorkflowState } from './state';
+import { addWire, moveMany, moveStep, newWorkflowState } from './state';
 import { memoryStorage } from '../test/memoryStorage';
 
 function storeWith(bw: BoardWorkflow, session: Storage | null = null) {
@@ -23,6 +23,17 @@ describe('board store', () => {
     st.edit('w1', (s) => moveStep(s, 'a', { x: 99, y: 99 }));
     expect(st.entry('w1')!.unsaved).toBe(true);
     st.undo('w1'); expect(st.entry('w1')!.unsaved).toBe(false);
+  });
+  it('a multi-step drag is one undo step that restores every moved step', () => {
+    const st = storeWith(bwFull());
+    const at = (id: string) => st.boards()[0]!.stepAt.get(id)!;
+    const before = { a: { ...at('a') }, b: { ...at('b') } };
+    st.edit('w1', (s) => moveMany(s, { steps: [{ id: 'a', at: { x: 500, y: 500 } }, { id: 'b', at: { x: 600, y: 500 } }], frame: { x: 40, y: 50 } }));
+    expect(st.entry('w1')!.history.past).toHaveLength(1);
+    st.undo('w1');
+    expect({ a: at('a'), b: at('b') }).toEqual(before);
+    expect(st.boards()[0]!.frame).toMatchObject({ x: 0, y: 0 });
+    expect(st.entry('w1')!.history.past).toHaveLength(0);
   });
   it('logs a refused edit and records no step', () => {
     const st = storeWith(bwFull()); st.editOrRefuse('w1', (s) => addWire(s, 'a', 'a'));

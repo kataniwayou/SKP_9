@@ -5,7 +5,7 @@ import { cacheFromDto, processorFromDto } from './api/toModel';
 import { Board, type BoardEdit } from './board/Board';
 import { loadBoard } from './board/loadBoard';
 import { lastPick, livePicks, togglePick, type Pick } from './board/picks';
-import { addCache, addStep, addWire, linkCache, moveFrame, moveStep, newWorkflowState, removeStep, removeWire, resizeFrame, swapProcessor, unlinkCache } from './design/state';
+import { addCache, addStep, addWire, linkCache, moveFrame, moveMany, newWorkflowState, removeStep, removeWire, resizeFrame, swapProcessor, unlinkCache } from './design/state';
 import { dropVerdict, type DropItem } from './board/dropTarget';
 import { newId } from './design/ids';
 import { saveWorkflow } from './design/saveWorkflow';
@@ -156,8 +156,7 @@ export function App(props: AppProps) {
   }, [persist]);
 
   const onEdit = useMemo<BoardEdit>(() => ({
-    moveStep: (wf, step, at) => store.edit(wf, (s) => moveStep(s, step, at)),
-    moveFrame: (wf, at) => store.edit(wf, (s) => moveFrame(s, at)),
+    moveMany: (wf, m) => store.edit(wf, (s) => moveMany(s, m)),
     resizeFrame: (wf, size, at) => store.edit(wf, (s) => resizeFrame(at ? moveFrame(s, at) : s, size)),
     connect: (fromWf, from, toWf, to) => {
       if (to === null || toWf === null) { output.log('A wire must end on a step', 'warn'); return; }

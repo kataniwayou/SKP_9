@@ -137,6 +137,13 @@ export function moveFrame(s: WorkflowState, at: Point): WorkflowState {
   return { ...s, frame: { ...s.frame, x: at.x, y: at.y } };
 }
 
+/** What one drag moved in a workflow: the frame and/or steps, as one new state (so one history step). */
+export function moveMany(s: WorkflowState, m: { steps: { id: Id; at: Point }[]; frame?: Point }): WorkflowState {
+  let next = m.frame ? moveFrame(s, m.frame) : s;
+  for (const x of m.steps) next = moveStep(next, x.id, x.at);
+  return next;
+}
+
 export function resizeFrame(s: WorkflowState, size: { w: number; h: number }): WorkflowState {
   const min = minFrameSize(stepAtOf(s), Object.keys(s.caches).length);
   const w = Math.max(size.w, min.w);
