@@ -76,7 +76,10 @@
 /* handles: 10 px circles on both sides that grow on hover */
 .node .react-flow__handle { width: 10px; height: 10px; min-width: 0; min-height: 0; border-radius: 50%; background: var(--b-node); border: 2px solid var(--b-handle);
   transition: transform .12s, border-color .12s; }
-.node:hover .react-flow__handle { border-color: var(--accent); transform: translate(-50%, -50%) scale(1.3); }
+/* grow in place: each side keeps React Flow's own centring translate (left -50%, right +50%), so the handle stays under the pointer */
+.node:hover .react-flow__handle { border-color: var(--accent); }
+.node:hover .react-flow__handle-left { transform: translate(-50%, -50%) scale(1.3); }
+.node:hover .react-flow__handle-right { transform: translate(50%, -50%) scale(1.3); }
 .node .react-flow__handle.source { cursor: crosshair; }
 .node .react-flow__handle.connectionindicator { pointer-events: all; }
 
