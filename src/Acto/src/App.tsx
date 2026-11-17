@@ -45,7 +45,7 @@ export function App(props: AppProps) {
         const board = await loadBoard(api);
         if (cancelled) return;
         const n = board.workflows.length;
-        output.log(`Board loaded: ${n} workflows`, 'ok');
+        output.log(`Board loaded: ${n} workflow${n === 1 ? '' : 's'}`, 'ok');
         for (const f of board.failures) output.log(`Could not load ${f.name}: ${f.detail}`, 'error');
         for (const w of board.workflows) {
           const name = (id: string) => w.graph.steps.get(id)?.name ?? id;
