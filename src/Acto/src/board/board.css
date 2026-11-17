@@ -99,6 +99,9 @@
 
 /* toolbars: one dark bar above the selected thing, with its little arrow */
 .toolbar { position: relative; display: flex; gap: 2px; padding: 4px; background: var(--bar); border-radius: 9px; box-shadow: var(--sh-bar); white-space: nowrap; }
+/* a wire's toolbar lies inside its frame: React Flow draws the edge labels before the nodes, so it is lifted over every
+   node (a picked one is raised by 1000), else the frame covers it and takes its clicks */
+.board .wire-toolbar { z-index: 5000; }
 .toolbar-arrow { position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px; margin-left: -5px; background: var(--bar); transform: rotate(45deg); }
 .toolbar .confirm-text { color: var(--bar-ink); font: 12.5px var(--sans); padding: 6px 8px; align-self: center; }
 .toolbar button { font: 500 12.5px var(--sans); color: var(--bar-ink); background: none; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; position: relative; z-index: 1; }

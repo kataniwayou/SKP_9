@@ -140,11 +140,8 @@ test.describe('wires', () => {
   });
 
   test('a picked wire\'s toolbar Delete removes it and picks its workflow', async ({ page }) => {
-    // APP BUG: the wire toolbar (rendered by EdgeLabelRenderer) is drawn UNDER the workflow frame: in the viewport
-    // .react-flow__edgelabel-renderer comes before .react-flow__nodes with the same z-index, and the wire always lies
-    // inside its frame, so the frame covers the toolbar and a click on its Delete lands on the frame ("<div class="frame
-    // is-off"> … intercepts pointer events"). The wire cannot be deleted from its toolbar.
-    test.fail();
+    // Was an app bug (fixed 2026-11-18): the wire toolbar (EdgeLabelRenderer) was drawn UNDER the workflow frame, since
+    // .react-flow__edgelabel-renderer comes before .react-flow__nodes, so a click on its Delete landed on the frame.
     await openEmptyBoard(page);
     const f = await throwaway(page, 2);
     await drawWire(page, f.steps[0]!, f.steps[1]!);

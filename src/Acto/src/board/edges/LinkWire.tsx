@@ -41,7 +41,7 @@ export function LinkWire({ id, data, selected }: EdgeProps) {
       )}
       {selected && pick?.solo && tb && (
         <EdgeLabelRenderer>
-          <div style={{ position: 'absolute', transform: `translate(-50%, calc(-100% - 10px)) translate(${mx}px, ${my - 4}px)`, pointerEvents: 'all' }}>
+          <div className="wire-toolbar" style={{ position: 'absolute', transform: `translate(-50%, calc(-100% - 10px)) translate(${mx}px, ${my - 4}px)`, pointerEvents: 'all' }}>
             <Toolbar selection={{ kind: 'wire' }} actions={{ onDelete: () => tb.deleteWire(workflowId, wireId) }} />
           </div>
         </EdgeLabelRenderer>
