@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { memoryStorage } from '../test/memoryStorage';
 import { describe, expect, it } from 'vitest';
 import { toFlow } from '../board/toFlow';
@@ -98,6 +98,16 @@ describe('inspector editing', () => {
       expect(btn('Redo').disabled).toBe(false);
       fireEvent.click(btn('Redo'));
       expect(stepName(st)).toBe('ab');
+    });
+    it('names the kind of the pick next to the panel name', () => {
+      setup(A);
+      expect(header().querySelector('.cnt')).toHaveTextContent(/^step$/);
+    });
+    it('counts the unsaved workflows in the board summary', () => {
+      const st = setup(null);
+      expect(screen.getByText(/0 unsaved\./)).toBeInTheDocument();
+      act(() => { st.edit('w1', (s) => setStepField(s, 'a', 'name', 'ab')); });
+      expect(screen.getByText(/1 unsaved\./)).toBeInTheDocument();
     });
     it('does not offer Undo/Redo without a store', () => {
       render(<LiveStoreProvider value={liveStub()}><InspectorPanel workflows={[bwFull()]} picks={[A]} /></LiveStoreProvider>);

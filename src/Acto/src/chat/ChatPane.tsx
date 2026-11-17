@@ -25,8 +25,8 @@ export interface ChatPaneProps {
 
 function Entry({ entry }: { entry: ChatEntry }) {
   switch (entry.kind) {
-    case 'user': return <div className="chat-e chat-user">{entry.text}</div>;
-    case 'model': return <div className="chat-e chat-model">{entry.text}</div>;
+    case 'user': return <div className="chat-e chat-user msg me">{entry.text}</div>;
+    case 'model': return <div className="chat-e chat-model msg ai">{entry.text}</div>;
     case 'action': return <div className={entry.ok ? 'chat-e chat-action' : 'chat-e chat-action err'}>{entry.text}</div>;
     case 'output':
       return <div className={entry.level === 'error' ? 'chat-e chat-output err' : 'chat-e chat-output'} data-level={entry.level}><b>{entry.name}</b> {entry.text}</div>;
@@ -110,12 +110,12 @@ export function ChatPane({ chat, onSend, onAnswer, onStop, onNewChat, status, co
       </div>
       <div
         ref={setLog}
-        className="chat-log"
+        className="pb chat-log"
         role="log"
         aria-label="Chat"
         onScroll={(e) => { const el = e.currentTarget; following.current = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_END; }}
       >
-        {chat.entries.length === 0 && !blocked && <div className="chat-empty">Ask for a change to a workflow, and watch it happen on the board.</div>}
+        {chat.entries.length === 0 && !blocked && <p className="none chat-empty">Ask for a change to a workflow, and watch it happen on the board.</p>}
         {chat.entries.map((e, i) => <Entry key={i} entry={e} />)}
         {blocked && <div className="chat-e chat-note err" data-level="error">{NOT_CONFIGURED}</div>}
         {!ready && !blocked && <div className="chat-e chat-note" data-level="info">Loading the board…</div>}
@@ -134,17 +134,20 @@ export function ChatPane({ chat, onSend, onAnswer, onStop, onNewChat, status, co
           <StatusLine seconds={status.seconds} prompt={status.prompt} tokens={status.tokens} activity={status.activity} />
         </div>
       )}
-      <textarea
-        ref={input}
-        className="chat-input"
-        aria-label="Message"
-        rows={2}
-        placeholder={chat.busy ? 'Working…' : 'Write a message'}
-        value={text}
-        disabled={chat.busy || closed}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={onKeyDown}
-      />
+      <div className="ask">
+        <textarea
+          ref={input}
+          className="chat-input"
+          aria-label="Message"
+          rows={1}
+          placeholder={chat.busy ? 'Working…' : 'Ask about or change a workflow…'}
+          value={text}
+          disabled={chat.busy || closed}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+        />
+        <button type="button" disabled={chat.busy || closed} onClick={send}>Send</button>
+      </div>
     </div>
   );
 }

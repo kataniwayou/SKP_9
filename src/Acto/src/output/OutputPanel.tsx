@@ -26,11 +26,11 @@ export function OutputPanel() {
         </span>
         <button type="button" className="pbtn" onClick={() => store.clear()}>Clear all</button>
       </div>
-      <div className="pb" ref={body}>
-        {lines.length === 0 ? <div className="out-empty">No messages.</div> : (
-          <div className="log" role="list">
+      <div className="pb log" ref={body}>
+        {lines.length === 0 ? <p className="none">No messages.</p> : (
+          <div role="list">
             {shown.map((l, i) => (
-              <div role="listitem" key={newestFirst ? lines.length - i : i}>
+              <div className="row" role="listitem" key={newestFirst ? lines.length - i : i}>
                 <time>{l.at}</time><span className={KIND[l.level]}>{l.text}</span>
               </div>
             ))}

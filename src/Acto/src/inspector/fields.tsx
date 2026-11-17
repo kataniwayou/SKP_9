@@ -2,10 +2,17 @@ import type { ReactNode } from 'react';
 import type { BoardStore } from '../design/boardStore';
 import type { EntityKey } from '../design/shared';
 
-/** A labelled field. Controlled from the store: a refused edit shows the store value again. */
+/** A labelled field (the mock's .fld: the label above the input). Controlled from the store: a refused edit shows the store value again. */
 export function Field({ label, children }: { label: string; children: ReactNode }) {
-  return <label className="in-row"><span className="in-k">{label}</span><span className="in-v">{children}</span></label>;
+  return <label className="fld"><span>{label}</span>{children}</label>;
 }
+
+/** Read-outs (the mock's .ro): a list of Rows. */
+export const Ro = ({ children }: { children: ReactNode }) => <dl className="ro">{children}</dl>;
+/** One read-out: its term, then its value (the next sibling). */
+export const Row = ({ k, children }: { k: string; children: ReactNode }) => <><dt>{k}</dt><dd>{children}</dd></>;
+/** A section heading (the mock's .sec). */
+export const Sec = ({ children }: { children: ReactNode }) => <div className="sec">{children}</div>;
 
 export function TextField({ label, value, onChange, disabled }: { label: string; value: string | null; onChange: (v: string) => void; disabled?: boolean }) {
   return <Field label={label}><input className="in-in" value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value)} /></Field>;

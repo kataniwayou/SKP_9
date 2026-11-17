@@ -50,11 +50,33 @@ describe('ChatPane header', () => {
   });
 });
 
+describe('ChatPane ask row', () => {
+  it('Send sends what is written, trimmed, and empties the box', () => {
+    const { box, type, onSend } = pane();
+    type('  add a step  ');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(onSend).toHaveBeenCalledWith('add a step');
+    expect(box.value).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
+  it('Send is closed while answering', () => {
+    shown({ chat: { ...idle, busy: true } });
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+  });
+  it('shows the user on the right in the accent bubble and the model on the left', () => {
+    shown({ chat: { ...idle, entries: [{ kind: 'user', text: 'hi' }, { kind: 'model', text: 'hello' }] } });
+    expect(screen.getByText('hi')).toHaveClass('msg', 'me');
+    expect(screen.getByText('hello')).toHaveClass('msg', 'ai');
+  });
+});
+
 describe('ChatPane content', () => {
   it('not configured: the not-configured line, and the box is closed', () => {
     const p = shown({ configured: false });
     expect(screen.getByText(NOT_CONFIGURED)).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Message' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(p.onSend).not.toHaveBeenCalled();
   });
 
