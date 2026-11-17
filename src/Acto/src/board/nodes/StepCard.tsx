@@ -18,7 +18,16 @@ export function StepCard({ data, selected }: NodeProps) {
   const info = useBoardWorkflow(workflowId);
   const far = useStore((s) => s.transform[2] < ZOOM_DETAIL);
   const tb = useToolbarActions();
-  if (far || !info) return null;
+  if (!info) return null;
+  // far out the card is not drawn, but its handles stay (invisible) so React Flow can always place the wires
+  if (far) {
+    return (
+      <div style={{ visibility: 'hidden' }} aria-hidden>
+        <Handle type="target" position={Position.Left} />
+        <Handle type="source" position={Position.Right} />
+      </div>
+    );
+  }
   const step = info.graph.steps.get(stepId);
   const proc = step?.processorId ? info.graph.processors.get(step.processorId)?.name : undefined;
   return (

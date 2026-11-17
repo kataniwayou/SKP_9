@@ -3,12 +3,15 @@ import { test, expect } from '@playwright/test';
 test('every workflow BaseAPI holds has a frame, with its state badge', async ({ page, request }) => {
   const workflows = (await (await request.get('/api/v1/workflows')).json()) as { name: string }[];
   expect(workflows.length).toBeGreaterThan(0);
+  const unplaced: string[] = [];
+  page.on('console', (m) => { if (m.text().includes("Couldn't create edge")) unplaced.push(m.text()); });
   await page.goto('/');
   for (const w of workflows) {
     await expect(page.locator('.react-flow__node-workflow', { hasText: w.name }).first()).toBeVisible();
   }
   await expect(page.locator('.react-flow__node-workflow .state-badge').first()).toHaveText(/Running|Stopped|Checking…/);
   await expect(page.getByText(/Board loaded: \d+ workflows?/)).toBeVisible();
+  expect(unplaced, 'React Flow could place every wire').toEqual([]);
 });
 
 test('panels resize and remember their size', async ({ page }) => {
