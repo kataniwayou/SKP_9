@@ -5,8 +5,21 @@ import { runWorkflow, type RunOp } from '../../operate/runWorkflow';
 import type { ToolContext, ToolDef, ToolOutcome } from '../toolTypes';
 import { done, fail, target, textOf, withOutput, WORKFLOW_ID } from './common';
 
-/** The confirm text each delete question was asked with, per board and workflow: what an answer is checked against. */
-const asked = new WeakMap<object, Map<string, string>>();
+/**
+ * A delete question's pin: the workflow and the confirm text it was asked with (JSON), what an answer is checked
+ * against. It is stored with the question, so it outlives a refresh. A bare id (a chat stored before) has no text: asked again.
+ */
+function deletePin(pin: string | undefined): { w: string; text: string | null } | undefined {
+  if (pin === undefined) return undefined;
+  try {
+    const v: unknown = JSON.parse(pin);
+    if (typeof v === 'object' && v !== null && typeof (v as { w?: unknown }).w === 'string') {
+      const { w, text } = v as { w: string; text?: unknown };
+      return { w, text: typeof text === 'string' ? text : null };
+    }
+  } catch { /* not JSON: a bare workflow id */ }
+  return { w: pin, text: null };
+}
 
 const ARG = { type: 'object', properties: { workflow_id: WORKFLOW_ID }, required: ['workflow_id'], additionalProperties: false };
 
@@ -83,21 +96,18 @@ const deleteWorkflow: ToolDef = {
   description: 'Delete the workflow (a saved one goes from BaseAPI with its steps and assignments; a never-saved one is discarded). The user is asked first. Refused while it runs or saves.',
   parameters: ARG,
   async run(ctx, args, answer, pin) {
-    const t = target(ctx, args, 'delete workflow', answer === undefined ? undefined : pin);
+    const pinned = answer === undefined ? undefined : deletePin(pin);
+    const t = target(ctx, args, 'delete workflow', pinned?.w);
     if ('out' in t) return t.out;
     if (answer !== undefined && answer !== 'Delete') return fail('the user declined', `user declined: delete ${t.name}`);
     const prepared = await withOutput(ctx, t.name, () => prepareDelete(ctx.api, ctx.store, ctx.output, [t.id]));
     const plan = prepared.value;
     if (plan === null) return fail(`${t.name} was not deleted: ${textOf(prepared.lines, 'refused')}`, `delete ${t.name} refused`, prepared.entries);
     const text = confirmText(plan);
-    const memory = asked.get(ctx.store) ?? new Map<string, string>();
-    asked.set(ctx.store, memory);
     // what the user confirmed is what is deleted: a plan that changed since the question is asked again
-    if (answer === undefined || memory.get(t.id) !== text) {
-      memory.set(t.id, text);
-      return { kind: 'ask', question: { text, choices: ['Delete', 'Cancel'], pin: t.id } };
+    if (answer === undefined || pinned?.text !== text) {
+      return { kind: 'ask', question: { text, choices: ['Delete', 'Cancel'], pin: JSON.stringify({ w: t.id, text }) } };
     }
-    memory.delete(t.id);
     const ran = await withOutput(ctx, t.name, () => commitDelete(ctx.api, ctx.store, ctx.output, plan));
     if (ran.value.includes(t.id)) return done(true, `deleted ${t.name}. ${textOf(ran.lines)}`, `deleted ${t.name}`, ran.entries);
     return fail(`${t.name} was not deleted: ${textOf(ran.lines, 'refused')}`, `delete ${t.name} failed`, ran.entries);

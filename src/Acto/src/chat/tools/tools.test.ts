@@ -211,15 +211,16 @@ describe('workflow tools', () => {
     live.known([]);
     api.listLive = vi.fn().mockResolvedValue({ ok: true, value: [] });
     const asked = await call(ctx, 'delete_workflow', { workflow_id: 'w1' });
-    expect(asked).toMatchObject({ kind: 'ask', question: { text: '2 steps, 1 assignment go. Delete orders?', choices: ['Delete', 'Cancel'], pin: 'w1' } });
+    const pin = JSON.stringify({ w: 'w1', text: '2 steps, 1 assignment go. Delete orders?' });
+    expect(asked).toMatchObject({ kind: 'ask', question: { text: '2 steps, 1 assignment go. Delete orders?', choices: ['Delete', 'Cancel'], pin } });
     expect(api.deleteWorkflow).toHaveBeenCalledTimes(1); // the dry run only
     api.deleteWorkflow.mockClear(); api.listLive.mockClear();
-    const declined = done(await call(ctx, 'delete_workflow', { workflow_id: 'w1' }, 'Cancel', 'w1'));
+    const declined = done(await call(ctx, 'delete_workflow', { workflow_id: 'w1' }, 'Cancel', pin));
     expect(declined.ok).toBe(false);
     expect(api.deleteWorkflow).not.toHaveBeenCalled();
     expect(api.listLive).not.toHaveBeenCalled();
     expect(store.entry('w1')).not.toBeNull();
-    const gone = done(await call(ctx, 'delete_workflow', {}, 'Delete', 'w1'));
+    const gone = done(await call(ctx, 'delete_workflow', {}, 'Delete', pin));
     expect(gone.ok).toBe(true);
     expect(api.deleteWorkflow).toHaveBeenLastCalledWith('w1', false);
     expect(store.entry('w1')).toBeNull();
@@ -230,15 +231,40 @@ describe('workflow tools', () => {
     live.known([]);
     const first = await call(ctx, 'delete_workflow', { workflow_id: 'w1' });
     expect(first).toMatchObject({ kind: 'ask', question: { text: '2 steps, 1 assignment go. Delete orders?' } });
+    if (first.kind !== 'ask') throw new Error('not asked');
     api.deleteWorkflow.mockClear();
     api.deleteWorkflow.mockResolvedValue({ ok: true, value: { applied: true, errors: [], steps: 5, assignments: 3, caches: 0, processors: 0 } });
-    const again = await call(ctx, 'delete_workflow', {}, 'Delete', 'w1');
-    expect(again).toMatchObject({ kind: 'ask', question: { text: '5 steps, 3 assignments go. Delete orders?', pin: 'w1' } });
+    const again = await call(ctx, 'delete_workflow', {}, 'Delete', first.question.pin);
+    expect(again).toMatchObject({ kind: 'ask', question: { text: '5 steps, 3 assignments go. Delete orders?', pin: JSON.stringify({ w: 'w1', text: '5 steps, 3 assignments go. Delete orders?' }) } });
+    if (again.kind !== 'ask') throw new Error('not asked');
     expect(api.deleteWorkflow).not.toHaveBeenCalledWith('w1', false);
     expect(store.entry('w1')).not.toBeNull();
     // answered against the new text, it goes
-    expect(done(await call(ctx, 'delete_workflow', {}, 'Delete', 'w1')).ok).toBe(true);
+    expect(done(await call(ctx, 'delete_workflow', {}, 'Delete', again.question.pin)).ok).toBe(true);
     expect(store.entry('w1')).toBeNull();
+  });
+
+  it('delete_workflow restored after a refresh: the pin carries the confirm text, so one Delete deletes an unchanged plan (S3)', async () => {
+    const before = setup();
+    before.live.known([]);
+    const asked = await call(before.ctx, 'delete_workflow', { workflow_id: 'w1' });
+    if (asked.kind !== 'ask') throw new Error('not asked');
+    // the page is reloaded: a new board store (nothing in memory), the question and its pin restored from the chat
+    const { ctx, api, store, live } = setup();
+    live.known([]);
+    const gone = done(await call(ctx, 'delete_workflow', {}, 'Delete', asked.question.pin));
+    expect(gone.ok).toBe(true);
+    expect(api.deleteWorkflow).toHaveBeenLastCalledWith('w1', false);
+    expect(store.entry('w1')).toBeNull();
+  });
+
+  it('delete_workflow answered with a pin of the old shape (a bare id) asks again and deletes nothing', async () => {
+    const { ctx, api, store, live } = setup();
+    live.known([]);
+    const o = await call(ctx, 'delete_workflow', {}, 'Delete', 'w1');
+    expect(o).toMatchObject({ kind: 'ask', question: { text: '2 steps, 1 assignment go. Delete orders?' } });
+    expect(api.deleteWorkflow).not.toHaveBeenCalledWith('w1', false);
+    expect(store.entry('w1')).not.toBeNull();
   });
 
   it('delete_workflow on a workflow that is saving is refused naming why, without asking', async () => {
