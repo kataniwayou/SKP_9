@@ -4,7 +4,7 @@ import { bwFull, proc } from './fixtures';
 import { applyStored, designRequest } from './request';
 import {
   addCache, addStep, addWire, linkCache, moveStep, newWorkflowState, removeAssignment, removeStep, removeWire, setCacheField,
-  setPayload, setStepField, stateOf, swapProcessor, unlinkCache,
+  clearSlot, setPayload, setProcessorField, setSlotField, setStepField, stateOf, swapProcessor, unlinkCache,
 } from './state';
 
 describe('design request', () => {
@@ -117,5 +117,29 @@ describe('design request', () => {
     const base = { ...stateOf(bwFull()), storedEntry: ['b'] };
     expect(designRequest(base, base, null).workflow!.entryStepIds).toEqual(['a']);
     expect(designRequest(stateOf(bwFull()), stateOf(bwFull()), null).workflow!.entryStepIds).toBeUndefined();
+  });
+  describe('processor edits', () => {
+    const P = { ...proc('p1', 'Analyst'), configSchemaId: 'sc1' };
+    const SC = { id: 'sc1', name: 'cfg', version: '1', description: null, audit: AUDIT, definition: '{}' };
+    it('sends a renamed field with a config copy, and the copy as a schema', () => {
+      const base = stateOf(bwFull());
+      const cur = setSlotField(setProcessorField(base, P, 'name', 'N'), P, 'config', SC, 'definition', '{"a":1}', () => 'copy1');
+      const r = designRequest(base, cur, null);
+      expect(r.processors).toEqual([{ id: 'p1', fields: { name: 'N' }, slots: { config: 'copy1' } }]);
+      expect(r.schemas).toEqual([{ id: 'copy1', name: 'cfg', version: '1', description: null, definition: '{"a":1}' }]);
+    });
+    it('sends a cleared slot as a null schema id, and nothing when no processor changed', () => {
+      const base = stateOf(bwFull());
+      const r = designRequest(base, clearSlot(base, { ...P, inputSchemaId: 'si' }, 'input'), null);
+      expect(r.processors).toEqual([{ id: 'p1', fields: { inputSchemaId: null }, slots: {} }]);
+      expect(r.schemas).toBeUndefined();
+      expect(designRequest(base, base, null).processors).toBeUndefined();
+    });
+    it('restores the same edit from a stored design', () => {
+      const base = stateOf(bwFull());
+      const cur = clearSlot(setSlotField(setProcessorField(base, P, 'description', 'd'), P, 'config', SC, 'name', 'cfg2', () => 'copy1'), { ...P, inputSchemaId: 'si' }, 'input');
+      const stored = JSON.parse(JSON.stringify(designRequest(base, cur, null)));
+      expect(applyStored(base, stored).processors).toEqual(cur.processors);
+    });
   });
 });

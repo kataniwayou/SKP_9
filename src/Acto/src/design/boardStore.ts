@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { BoardLoad, BoardWorkflow } from '../board/loadBoard';
-import type { Id, Processor } from '../model/graph';
+import type { Id, Processor, Schema } from '../model/graph';
 import type { OutputStore } from '../output/outputStore';
 import { readDrafts, writeDrafts, type Drafts } from './drafts';
 import { commit, historyOf, redo, undo, type History } from './history';
@@ -19,6 +19,10 @@ export interface BoardStore {
   load(board: BoardLoad, processors: Processor[]): void;
   setProcessors(processors: Processor[]): void;
   boards(): BoardWorkflow[];
+  /** A processor as stored (without any edit of the designs), what a processor edit is diffed against. */
+  processor(id: Id, workflowId: Id): Processor | null;
+  /** A schema as stored in the workflow's loaded graph. */
+  schema(id: Id, workflowId: Id): Schema | null;
   entry(id: Id): BoardEntry | null;
   edit(id: Id, fn: (s: WorkflowState) => WorkflowState, merge?: string): void;
   editOrRefuse(id: Id, fn: (s: WorkflowState) => { state: WorkflowState } | { refused: string }): void;
@@ -142,6 +146,8 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       });
       return cached;
     },
+    processor: (id, wf) => processors.get(id) ?? recs.get(wf)?.baseBw?.graph.processors.get(id) ?? null,
+    schema: (id, wf) => recs.get(wf)?.baseBw?.graph.schemas.get(id) ?? null,
     entry: (id) => recs.get(id)?.view ?? null,
     edit(id, fn, merge) {
       const r = recs.get(id);

@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { bw } from '../board/fixtures';
 import { frameSizeOf } from '../board/placement';
+import { AUDIT } from '../model/fixtures';
 import { bwFull, proc, procs } from './fixtures';
 import {
   addCache, addStep, addWire, boardWorkflowOf, deleteParts, linkCache, moveFrame, moveStep, newWorkflowState, removeAssignment,
   removeStep, removeWire, resizeFrame, sameState, setCacheField, setPayload, setStepField, setWorkflowField,
-  stateOf, swapProcessor, unlinkCache,
+  clearSlot, setProcessorField, setSlotField, stateOf, swapProcessor, unlinkCache,
 } from './state';
 
 describe('workflow edit model', () => {
@@ -114,5 +115,43 @@ describe('workflow edit model', () => {
     const w = deleteParts(s, [], [['a', 'b']]);
     expect(w).toEqual(removeWire(s, 'a', 'b'));
     expect(deleteParts(s, ['b'], [['a', 'b']]).steps.a!.nextStepIds).not.toContain('b');
+  });
+const P = { ...proc('p1', 'Analyst'), configSchemaId: 'sc1', inputSchemaId: null };
+const SC = { id: 'sc1', name: 'cfg', version: '1', description: null, audit: AUDIT, definition: '{"type":"object"}' };
+  describe('processor edits', () => {
+    const ids = () => { let n = 0; return () => `copy${++n}`; };
+    it('the first definition edit makes one copy with the original name and version; the next edits the same copy', () => {
+      const base = stateOf(bwFull());
+      const a = setSlotField(base, P, 'config', SC, 'definition', '{', ids());
+      const b = setSlotField(a, P, 'config', SC, 'definition', '{}', ids());
+      expect(b.processors!.p1!.slots.config).toEqual({ copy: { id: 'copy1', name: 'cfg', version: '1', description: null, definition: '{}' } });
+      expect(Object.keys(b.processors!.p1!.slots)).toEqual(['config']);
+    });
+    it('a copy typed back to the original is removed, and so is a field typed back', () => {
+      const base = stateOf(bwFull());
+      const a = setSlotField(base, P, 'config', SC, 'definition', 'x', ids());
+      expect(sameState(setSlotField(a, P, 'config', SC, 'definition', SC.definition, ids()), base)).toBe(true);
+      const f = setProcessorField(base, P, 'name', 'N');
+      expect(f.processors!.p1!.fields).toEqual({ name: 'N' });
+      expect(sameState(setProcessorField(f, P, 'name', 'Analyst'), base)).toBe(true);
+    });
+    it('treats an absent map and an empty one as the same state', () => {
+      const base = stateOf(bwFull());
+      expect(sameState(base, { ...base, processors: {} })).toBe(true);
+    });
+    it('clearSlot marks the slot cleared (a slot with none is left alone)', () => {
+      const base = stateOf(bwFull());
+      expect(clearSlot(base, P, 'config').processors!.p1!.slots.config).toEqual({ cleared: true });
+      expect(clearSlot(base, P, 'input')).toBe(base);
+    });
+    it('shows the edited fields and the copy as the processor schema', () => {
+      const b = bwFull();
+      const s = setSlotField(setProcessorField(stateOf(b), P, 'name', 'N'), P, 'config', SC, 'definition', 'x', ids());
+      const shown = boardWorkflowOf(s, b, new Map([['p1', P]]));
+      expect(shown.graph.processors.get('p1')!.name).toBe('N');
+      expect(shown.graph.processors.get('p1')!.configSchemaId).toBe('copy1');
+      expect(shown.graph.schemas.get('copy1')!.definition).toBe('x');
+      expect(boardWorkflowOf(clearSlot(stateOf(b), P, 'config'), b, new Map([['p1', P]])).graph.processors.get('p1')!.configSchemaId).toBeNull();
+    });
   });
 });

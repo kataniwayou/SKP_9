@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { toFlow } from '../board/toFlow';
 import { createBoardStore, useBoard, type BoardStore } from '../design/boardStore';
 import { bwFull, proc } from '../design/fixtures';
+import { AUDIT } from '../model/fixtures';
 import { createOutputStore } from '../output/outputStore';
 import { LiveStoreProvider } from '../live/LiveContext';
 import { liveStub } from '../test/liveStub';
@@ -97,6 +98,56 @@ describe('inspector editing', () => {
     it('does not offer Undo/Redo without a store', () => {
       render(<LiveStoreProvider value={liveStub()}><InspectorPanel workflows={[bwFull()]} picks={[A]} /></LiveStoreProvider>);
       expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+    });
+  });
+
+  describe('processor section', () => {
+    const withSchema = (def: string | null) => (b: ReturnType<typeof bwFull>) => {
+      b.graph.schemas.set('s1', { id: 's1', name: 'cfg', version: '1', description: null, audit: AUDIT, ...(def === null ? {} : { definition: def }) });
+    };
+    const defn = () => screen.getByLabelText('Config schema definition') as HTMLTextAreaElement;
+    it('shows the processor fields and the three slots', () => {
+      setup(A, withSchema('{"type":"object"}'));
+      expect(screen.getByLabelText('Processor name')).toHaveProperty('value', 'Analyst');
+      expect(screen.getByLabelText('Processor version')).toBeTruthy();
+      expect(screen.getByLabelText('Processor description')).toBeTruthy();
+      expect(screen.getByText('In schema').nextSibling).toHaveTextContent('none');
+      expect(screen.getByText('Out schema').nextSibling).toHaveTextContent('none');
+      expect(screen.getByLabelText('Config schema name')).toHaveProperty('value', 'cfg');
+      expect(screen.getByLabelText('Config schema version')).toHaveProperty('value', '1');
+      expect(defn().value).toBe('{"type":"object"}');
+    });
+    it('typing the processor name is one undo step and the step card follows', () => {
+      const st = setup(A, withSchema('{}'));
+      fireEvent.change(screen.getByLabelText('Processor name'), { target: { value: 'A' } });
+      fireEvent.change(screen.getByLabelText('Processor name'), { target: { value: 'An' } });
+      expect(st.boards()[0]!.graph.processors.get('p1')!.name).toBe('An');
+      expect(st.entry('w1')!.history.past).toHaveLength(1);
+      st.undo('w1');
+      expect(st.boards()[0]!.graph.processors.get('p1')!.name).toBe('Analyst');
+      expect(st.entry('w1')!.unsaved).toBe(false);
+    });
+    it('a definition edit makes one copy, re-checks the payload against it, and Clear then Undo restores', () => {
+      const st = setup(A, withSchema('{}'));
+      fireEvent.change(screen.getByLabelText(/Payload/), { target: { value: '{"y":1}' } });
+      expect(document.querySelectorAll('.in-problem')).toHaveLength(0);
+      fireEvent.change(defn(), { target: { value: '{"type":"object","required":["x"]}' } });
+      fireEvent.change(defn(), { target: { value: '{"type":"object","required":["x"],"a":1}' } });
+      const ps = st.entry('w1')!.history.present.processors!;
+      expect(Object.keys(ps)).toEqual(['p1']);
+      expect((ps.p1!.slots.config as { copy: { name: string } }).copy.name).toBe('cfg');
+      expect(document.querySelectorAll('.in-problem').length).toBeGreaterThan(0);
+      const before = st.entry('w1')!.history.present;
+      fireEvent.click(screen.getByRole('button', { name: 'Clear Config' }));
+      expect(screen.getByText('Config schema').nextSibling).toHaveTextContent('none');
+      st.undo('w1');
+      expect(st.entry('w1')!.history.present).toBe(before);
+    });
+    it('reads a schema without a loaded definition as read-only', () => {
+      setup(A, withSchema(null));
+      expect(screen.getByText(/definition not loaded/)).toBeTruthy();
+      expect(screen.queryByLabelText('Config schema definition')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Clear Config' })).toBeNull();
     });
   });
 });

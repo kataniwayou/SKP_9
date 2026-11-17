@@ -1,4 +1,4 @@
-import type { Cache, Graph, Id, Processor, Step, Workflow, Assignment, Audit } from '../model/graph';
+import type { Cache, Graph, Id, Processor, Schema, Step, Workflow, Assignment, Audit } from '../model/graph';
 import type { Point, Rect } from '../model/geometry';
 import type { BoardWorkflow } from '../board/loadBoard';
 import { frameSizeOf, minFrameSize } from '../board/placement';
@@ -19,6 +19,18 @@ export interface AssignmentState {
   id: Id; stepId: Id; name: string; version: string; description: string | null; payload: string;
   updatedAt: string | null; isNew: boolean;
 }
+export type Slot = 'input' | 'output' | 'config';
+export interface SchemaCopy { id: Id; name: string; version: string; description: string | null; definition: string }
+export interface ProcessorEdit {
+  fields: Partial<{ name: string; version: string; description: string | null }>;
+  slots: Partial<Record<Slot, { copy: SchemaCopy } | { cleared: true }>>;
+}
+/** The processor field that holds a slot's schema id (the same keys WorkflowStudio sends). */
+export const SLOT_FIELD: Readonly<Record<Slot, 'inputSchemaId' | 'outputSchemaId' | 'configSchemaId'>> = {
+  input: 'inputSchemaId', output: 'outputSchemaId', config: 'configSchemaId',
+};
+export const SLOTS: readonly Slot[] = ['input', 'output', 'config'];
+
 export interface WorkflowState {
   workflowId: Id; isNew: boolean; updatedAt: string | null;
   fields: { name: string; version: string; description: string | null; cronExpression: string | null };
@@ -26,6 +38,8 @@ export interface WorkflowState {
   deletedSteps: Record<Id, string | null>; frame: Rect;
   /** The entry steps the base stored (what BaseAPI runs first today); the designer only derives them. */
   storedEntry?: Id[];
+  /** Edits to processors and their schema slots (shared entities, last write wins); absent means none. */
+  processors?: Record<Id, ProcessorEdit>;
 }
 
 const NO_AUDIT: Audit = { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null };
@@ -88,11 +102,23 @@ export function boardWorkflowOf(
     });
   }
   const procs = new Map<Id, Processor>();
+  const schemas = new Map(base?.graph.schemas ?? []);
   for (const st of Object.values(state.steps)) {
     const pid = st.processorId;
     if (!pid) continue;
     const p = processors.get(pid) ?? base?.graph.processors.get(pid);
-    if (p) procs.set(pid, p);
+    if (!p) continue;
+    const edit = state.processors?.[pid];
+    if (!edit) { procs.set(pid, p); continue; }
+    const shown: Processor = { ...p, ...edit.fields };
+    for (const slot of SLOTS) {
+      const e = edit.slots[slot];
+      if (!e) continue;
+      if ('cleared' in e) { shown[SLOT_FIELD[slot]] = null; continue; }
+      shown[SLOT_FIELD[slot]] = e.copy.id;
+      schemas.set(e.copy.id, { ...e.copy, audit: NO_AUDIT });
+    }
+    procs.set(pid, shown);
   }
   const wires = wiresOf(stepIds, steps);
   const roles = stepRoles(stepIds, wires);
@@ -115,7 +141,7 @@ export function boardWorkflowOf(
     updatedAt: state.updatedAt ?? '', audit: base?.graph.workflow.audit ?? NO_AUDIT,
   };
   const graph: Graph = {
-    workflow, steps, processors: procs, schemas: base?.graph.schemas ?? new Map(), assignments, caches,
+    workflow, steps, processors: procs, schemas, assignments, caches,
     layout: base?.graph.layout ?? null, design: base?.graph.design ?? null,
   };
   const size = minFrameSize(stepAt, caches.size);
@@ -271,6 +297,53 @@ export function setCacheField(
   return { ...s, caches: { ...s.caches, [cacheId]: { ...c, [key]: v } } };
 }
 
+function putEdit(s: WorkflowState, id: Id, e: ProcessorEdit): WorkflowState {
+  const old = s.processors?.[id];
+  const empty = Object.keys(e.fields).length === 0 && Object.keys(e.slots).length === 0;
+  if (empty ? !old : old && deepEqual(old, e)) return s;
+  const map = { ...s.processors };
+  if (empty) delete map[id]; else map[id] = e;
+  return { ...s, processors: map };
+}
+const editOf = (s: WorkflowState, id: Id): ProcessorEdit => s.processors?.[id] ?? { fields: {}, slots: {} };
+
+export function setProcessorField(
+  s: WorkflowState, base: Processor, key: 'name' | 'version' | 'description', v: string | null,
+): WorkflowState {
+  const e = editOf(s, base.id);
+  const fields = { ...e.fields };
+  if (v === base[key]) delete fields[key];
+  else (fields as Record<string, string | null>)[key] = v;
+  return putEdit(s, base.id, { ...e, fields });
+}
+
+/** The first edit of a slot makes a copy of the original (new id); the original is never rewritten. */
+export function setSlotField(
+  s: WorkflowState, base: Processor, slot: Slot, original: Schema | null,
+  key: 'name' | 'version' | 'description' | 'definition', v: string | null, newId: () => Id,
+): WorkflowState {
+  const e = editOf(s, base.id);
+  const cur = e.slots[slot];
+  const was: SchemaCopy = cur && 'copy' in cur ? cur.copy : {
+    id: newId(), name: original?.name ?? '', version: original?.version ?? '',
+    description: original?.description ?? null, definition: original?.definition ?? '',
+  };
+  const changed: SchemaCopy = key === 'description' ? { ...was, description: v } : { ...was, [key]: v ?? '' };
+  const slots = { ...e.slots };
+  const typedBack = original !== null && changed.name === original.name && changed.version === original.version
+    && (changed.description ?? null) === (original.description ?? null) && changed.definition === (original.definition ?? '');
+  if (typedBack) delete slots[slot]; else slots[slot] = { copy: changed };
+  return putEdit(s, base.id, { ...e, slots });
+}
+
+/** Leaves the slot with no schema: its copy goes and Save sends the processor's `<slot>SchemaId` as null. */
+export function clearSlot(s: WorkflowState, base: Processor, slot: Slot): WorkflowState {
+  const e = editOf(s, base.id);
+  const slots = { ...e.slots };
+  if (base[SLOT_FIELD[slot]] === null) delete slots[slot]; else slots[slot] = { cleared: true };
+  return putEdit(s, base.id, { ...e, slots });
+}
+
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeof a !== 'object' || typeof b !== 'object' || !a || !b) return false;
@@ -282,5 +355,5 @@ function deepEqual(a: unknown, b: unknown): boolean {
 }
 
 export function sameState(a: WorkflowState, b: WorkflowState): boolean {
-  return deepEqual(a, b);
+  return deepEqual({ ...a, processors: a.processors ?? {} }, { ...b, processors: b.processors ?? {} });
 }

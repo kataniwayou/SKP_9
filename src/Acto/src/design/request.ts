@@ -4,8 +4,8 @@ import { cacheChipAt } from '../board/cacheChips';
 import { FRAME_PAD, STEP_H } from '../board/geometry';
 import { derivedEntrySteps, stepRoles } from '../board/roles';
 import { wiresOf } from '../board/wires';
-import type { AssignmentState, CacheFields, CacheState, StepState, WorkflowState } from './state';
-import { removeStep } from './state';
+import type { AssignmentState, CacheFields, CacheState, ProcessorEdit, SchemaCopy, StepState, WorkflowState } from './state';
+import { removeStep, SLOT_FIELD, SLOTS } from './state';
 
 export type DesignSaveRequest = components['schemas']['DesignSaveRequest'];
 type Fields = Record<string, unknown>;
@@ -103,6 +103,23 @@ export function designRequest(base: WorkflowState | null, cur: WorkflowState, st
   }
   req.caches = caches;
   if (newCaches.length) req.newCaches = newCaches;
+
+  const edits = Object.entries(cur.processors ?? {}).sort(([a], [b]) => (a < b ? -1 : 1));
+  if (edits.length) {
+    const copies: SchemaCopy[] = [];
+    req.processors = edits.map(([id, e]) => {
+      const fields: Fields = { ...e.fields };
+      const slots: Record<string, string> = {};
+      for (const slot of SLOTS) {
+        const x = e.slots[slot];
+        if (!x) continue;
+        if ('cleared' in x) fields[SLOT_FIELD[slot]] = null;
+        else { slots[slot] = x.copy.id; copies.push(x.copy); }
+      }
+      return { id, fields, slots };
+    });
+    if (copies.length) req.schemas = copies.map((c) => ({ ...c }));
+  }
 
   req.layout = layoutOf(cur, storedLayout);
   return req;
@@ -228,6 +245,28 @@ export function applyStored(
       s = { ...s, assignments: { ...s.assignments, [o.stepId]: made } };
     }
   }
+
+  const copies = new Map<string, SchemaCopy>();
+  for (const e of list(d.schemas)) {
+    const o = obj(e);
+    if (!o || !str(o.id) || !str(o.name) || !str(o.version) || !str(o.definition)) continue;
+    copies.set(o.id, { id: o.id, name: o.name, version: o.version, description: nullableStr(o.description), definition: o.definition });
+  }
+  const restored: Record<Id, ProcessorEdit> = {};
+  for (const e of list(d.processors)) {
+    const o = obj(e);
+    if (!o || !str(o.id)) continue;
+    const edit: ProcessorEdit = { fields: pickFields({}, o.fields, { name: 'string', version: 'string', description: 'nstring' }), slots: {} };
+    const sent = obj(o.slots);
+    const sentFields = obj(o.fields);
+    for (const slot of SLOTS) {
+      const copy = sent && str(sent[slot]) ? copies.get(sent[slot] as string) : undefined;
+      if (copy) edit.slots[slot] = { copy };
+      else if (sentFields && sentFields[SLOT_FIELD[slot]] === null) edit.slots[slot] = { cleared: true };
+    }
+    if (Object.keys(edit.fields).length || Object.keys(edit.slots).length) restored[o.id] = edit;
+  }
+  if (Object.keys(restored).length) s = { ...s, processors: restored };
 
   const changed = new Map<string, unknown>();
   for (const e of list(d.caches)) { const o = obj(e); if (o && str(o.id)) changed.set(o.id, o.fields); }

@@ -11,6 +11,7 @@ import { canRedo, canUndo } from '../design/history';
 import { newId } from '../design/ids';
 import { removeAssignment, setCacheField, setPayload, setStepField, setWorkflowField } from '../design/state';
 import { AreaField, SelectField, TextField } from './fields';
+import { ProcessorSection } from './ProcessorSection';
 
 const Row = ({ k, children }: { k: string; children: ReactNode }) => (
   <div className="in-row"><span className="in-k">{k}</span><span className="in-v">{children}</span></div>
@@ -135,7 +136,6 @@ function EditStep({ w, stepId, workflows, store }: { w: BoardWorkflow; stepId: s
     store.edit(wf, (s) => setStepField(s, stepId, key, v), `field:${stepId}:${key}`);
   const assignment = w.graph.assignments.find((a) => a.stepId === stepId);
   const payload = assignment?.payload ?? '';
-  const processor = step.processorId ? w.graph.processors.get(step.processorId) : undefined;
   const sharing = workflows.filter((x) => x.stepIds.includes(stepId));
   return (
     <>
@@ -144,7 +144,7 @@ function EditStep({ w, stepId, workflows, store }: { w: BoardWorkflow; stepId: s
       <TextField key={`${stepId}:description`} label="Description" value={step.description} onChange={(v) => set('description', orNull(v))} />
       <SelectField key={`${stepId}:entryCondition`} label="Entry condition · colours every wire into this step" value={step.entryCondition}
         options={CONDITIONS.map((c) => ({ value: c.value, label: `${c.letter} ${c.name}` }))} onChange={(v) => set('entryCondition', v)} />
-      <Row k="Processor">{!step.processorId ? 'none' : processor?.name ?? step.processorId}</Row>
+      {step.processorId ? <ProcessorSection w={w} store={store} processorId={step.processorId} /> : <Row k="Processor">none</Row>}
       {step.processorId && <ProcessorLine processorId={step.processorId} />}
       <Row k="Role">{w.roles.get(stepId) ?? 'reached'}</Row>
       {sharing.length > 1 && <Row k="Shared">{`shared · ${sharing.length}: ${sharing.map((x) => x.graph.workflow.name).join(', ')}`}</Row>}
