@@ -3,7 +3,7 @@ import { bw } from '../board/fixtures';
 import { frameSizeOf } from '../board/placement';
 import { bwFull, proc, procs } from './fixtures';
 import {
-  addCache, addStep, addWire, boardWorkflowOf, linkCache, moveFrame, moveStep, newWorkflowState, removeAssignment,
+  addCache, addStep, addWire, boardWorkflowOf, deleteParts, linkCache, moveFrame, moveStep, newWorkflowState, removeAssignment,
   removeStep, removeWire, resizeFrame, sameState, setCacheField, setPayload, setStepField, setWorkflowField,
   stateOf, swapProcessor, unlinkCache,
 } from './state';
@@ -106,5 +106,13 @@ describe('workflow edit model', () => {
     expect(out.frame).toMatchObject({ x: 5, y: 6 });
     expect(out.frame.w).toBeGreaterThanOrEqual(420);
     expect(out.graph.processors.get('p1')!.name).toBe('Analyst');
+  });
+  it('deleteParts removes steps like removeStep, and wires', () => {
+    const s = stateOf(bwFull());
+    const out = deleteParts(s, ['b'], []);
+    expect(out).toEqual(removeStep(s, 'b'));
+    const w = deleteParts(s, [], [['a', 'b']]);
+    expect(w).toEqual(removeWire(s, 'a', 'b'));
+    expect(deleteParts(s, ['b'], [['a', 'b']]).steps.a!.nextStepIds).not.toContain('b');
   });
 });

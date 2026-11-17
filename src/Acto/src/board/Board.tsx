@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { applyNodeChanges, Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useStore, type EdgeChange, type EdgeTypes, type Node, type NodeChange, type NodeTypes, type Viewport } from '@xyflow/react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { applyNodeChanges, Background, BackgroundVariant, Controls, MiniMap, Panel, ReactFlow, useStore, type EdgeChange, type EdgeTypes, type Node, type NodeChange, type NodeTypes, type Viewport } from '@xyflow/react';
 import { HEADER_H, ZOOM_DETAIL } from './geometry';
 import type { BoardWorkflow } from './loadBoard';
 import { pickKey, type Pick } from './picks';
@@ -54,9 +54,11 @@ export interface BoardProps {
   toolbar?: ToolbarActions;
   /** A toolbox item was dropped; `at` is in board coordinates. */
   onDropItem?: (item: DropItem, at: { x: number; y: number }) => void;
+  /** Pinned top-centre of the board (the selection bar). */
+  bar?: ReactNode;
 }
 
-export function Board({ workflows, picks, onPick, initialZoom, initialView, onViewChange, onEdit, toolbar, onDropItem }: BoardProps) {
+export function Board({ workflows, picks, onPick, initialZoom, initialView, onViewChange, onEdit, toolbar, onDropItem, bar }: BoardProps) {
   const flow = useRef<{ getViewport: () => Viewport; screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number } } | null>(null);
   const select = (s: Pick | null, additive = false) => {
     if (flow.current) onViewChange?.(flow.current.getViewport());
@@ -207,6 +209,7 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
           proOptions={{ hideAttribution: true }}
         >
           <FarWatch onFar={setFar} />
+          {bar && <Panel position="top-center">{bar}</Panel>}
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
           <MiniMap pannable zoomable nodeStrokeColor={(n) => {
             if (n.type !== 'workflow') return 'transparent';

@@ -186,6 +186,14 @@ export function removeStep(s: WorkflowState, stepId: Id): WorkflowState {
   return { ...s, steps, assignments, deletedSteps };
 }
 
+/** Several steps and wires at once, as one state (each step goes as `removeStep` does). */
+export function deleteParts(s: WorkflowState, stepIds: Id[], wires: [Id, Id][]): WorkflowState {
+  let out = s;
+  for (const [from, to] of wires) out = removeWire(out, from, to);
+  for (const id of stepIds) out = removeStep(out, id);
+  return out;
+}
+
 export function addWire(s: WorkflowState, from: Id, to: Id): { state: WorkflowState } | { refused: string } {
   if (from === to) return { refused: 'A step cannot wire to itself' };
   const src = s.steps[from];

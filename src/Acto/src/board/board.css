@@ -77,3 +77,14 @@
   font: 600 11px "Inter Tight", "Helvetica Neue", Arial, sans-serif; display: grid; place-items: center; z-index: 5; pointer-events: none;
   transform-origin: center; }
 .pick-no.inline { position: static; }
+
+/* selection bar (several picks) */
+.selbar { display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: #fff; border: 1px solid #FF0072; border-radius: 9px; box-shadow: 0 6px 18px -8px rgba(20,24,40,.35); font: 500 12.5px "Inter Tight", "Helvetica Neue", Arial, sans-serif; color: #1A1D29; }
+.selbar-pill { background: #FF0072; color: #fff; border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 600; letter-spacing: .04em; white-space: nowrap; }
+.selbar-text { padding: 4px 8px; white-space: nowrap; color: #5B6076; }
+.selbar button { font: inherit; color: #1A1D29; background: none; border: 1px solid #D9DBE3; border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+.selbar button:hover { background: rgba(127,127,127,.15); }
+.selbar button.primary { background: #FF0072; border-color: #FF0072; color: #fff; }
+.selbar button.go { background: #1E8E5A; border-color: #1E8E5A; color: #fff; }
+.selbar button.stop { background: #C93A3A; border-color: #C93A3A; color: #fff; }
+.selbar button.danger { color: #C93A3A; }

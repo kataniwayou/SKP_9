@@ -3,9 +3,11 @@ import { createApi, type StudioApi } from './api/client';
 import { describeError } from './api/describeError';
 import { cacheFromDto, processorFromDto } from './api/toModel';
 import { Board, type BoardEdit } from './board/Board';
+import { SelectionBar, type BarActions } from './board/SelectionBarView';
+import { barOf } from './board/selectionBar';
 import { loadBoard } from './board/loadBoard';
 import { lastPick, livePicks, togglePick, type Pick } from './board/picks';
-import { addCache, addStep, addWire, linkCache, moveFrame, moveMany, newWorkflowState, removeStep, removeWire, resizeFrame, swapProcessor, unlinkCache } from './design/state';
+import { addCache, addStep, addWire, deleteParts, linkCache, moveFrame, moveMany, newWorkflowState, removeStep, removeWire, resizeFrame, swapProcessor, unlinkCache } from './design/state';
 import { dropVerdict, type DropItem } from './board/dropTarget';
 import { newId } from './design/ids';
 import { saveWorkflow } from './design/saveWorkflow';
@@ -15,9 +17,9 @@ import { pasteKey, undoRedoKey } from './design/keys';
 import { copyClip, copyMessage, pasteClip, readClip, writeClip } from './operate/clipboard';
 import { InspectorPanel } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
-import { LiveStoreProvider } from './live/LiveContext';
+import { LiveStoreProvider, useLive } from './live/LiveContext';
 import { statusOf } from './live/liveState';
-import { commitDelete, prepareDelete, type DeletePlan } from './operate/deleteWorkflow';
+import { commitDelete, confirmText, prepareDelete, type DeletePlan } from './operate/deleteWorkflow';
 import { runWorkflow } from './operate/runWorkflow';
 import { watchTransitions } from './operate/transitions';
 import { signalRHub } from './live/signalrHub';
@@ -40,6 +42,17 @@ function browserSession(): Storage | null {
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** The selection bar for several picks; re-reads the run status when the live set changes. */
+function PickBar({ picks, status, actions, pending, onConfirm, onCancel }: {
+  picks: Pick[]; status: ToolbarActions['status']; actions: BarActions; pending: DeletePlan | null; onConfirm: () => void; onCancel: () => void;
+}) {
+  useLive((st) => st.running);
+  useLive((st) => st.workflows);
+  const bar = barOf(picks, (wf) => { const s = status(wf); return { run: s.run, unsaved: s.unsaved }; });
+  if (!bar) return null;
+  return <SelectionBar bar={bar} actions={actions} {...(pending && bar.kind === 'workflows' ? { confirm: { text: confirmText(pending), onConfirm, onCancel } } : {})} />;
+}
 
 export function App(props: AppProps) {
   const [api] = useState<StudioApi>(() => props.api ?? createApi());
@@ -202,22 +215,26 @@ export function App(props: AppProps) {
     },
   }), [store, output]);
 
+  const copyPicks = useCallback((extra?: { wf: string; step: string }) => {
+    const ids = new Map<string, Set<string>>();
+    const add = (wf: string, step: string) => (ids.get(wf) ?? ids.set(wf, new Set()).get(wf)!).add(step);
+    if (extra) add(extra.wf, extra.step);
+    for (const p of picksRef.current) if (p.kind === 'step') add(p.workflowId, p.stepId);
+    const parts = [...ids].flatMap(([id, set]) => {
+      const state = store.entry(id)?.history.present;
+      return state ? [{ state, stepIds: [...set] }] : [];
+    });
+    const clip = copyClip(parts);
+    if (!clip) { output.log('Nothing to copy — pick steps', 'warn'); return; }
+    writeClip(session, clip);
+    output.log(copyMessage(clip), 'ok');
+  }, [store, output, session]);
+
   const toolbar = useMemo<ToolbarActions>(() => ({
     save: (wf) => { void saveWorkflow(api, store, output, wf); },
     start: (wf) => { void runWorkflow(api, store, output, live, wf, 'start'); },
     stop: (wf) => { void runWorkflow(api, store, output, live, wf, 'stop'); },
-    copy: (wf, step) => {
-      const ids = new Map<string, Set<string>>([[wf, new Set([step])]]);
-      for (const p of picksRef.current) if (p.kind === 'step') (ids.get(p.workflowId) ?? ids.set(p.workflowId, new Set()).get(p.workflowId)!).add(p.stepId);
-      const parts = [...ids].flatMap(([id, set]) => {
-        const state = store.entry(id)?.history.present;
-        return state ? [{ state, stepIds: [...set] }] : [];
-      });
-      const clip = copyClip(parts);
-      if (!clip) { output.log('Nothing to copy — pick steps', 'warn'); return; }
-      writeClip(session, clip);
-      output.log(copyMessage(clip), 'ok');
-    },
+    copy: (wf, step) => copyPicks({ wf, step }),
     deleteStep: (wf, step) => {
       store.editOrRefuse(wf, (s) => ({ state: removeStep(s, step) }));
       onSelect({ kind: 'workflow', workflowId: wf });
@@ -258,7 +275,33 @@ export function App(props: AppProps) {
       const e = store.entry(wf);
       return { unsaved: e?.unsaved ?? false, problems: e?.problems ?? 0, saving: e?.saving ?? false, run: statusOf(live.getState(), wf) };
     },
-  }), [api, store, output, live, session, onSelect, setAllPicks, pending]);
+  }), [api, store, output, live, onSelect, setAllPicks, pending, copyPicks]);
+
+  const barActions = useMemo<BarActions>(() => ({
+    copy: () => copyPicks(),
+    deleteParts: () => {
+      const ps = picksRef.current;
+      const last = lastPick(ps);
+      const per = new Map<string, { steps: string[]; wires: [string, string][]; caches: string[] }>();
+      for (const p of ps) {
+        if (p.kind === 'workflow') continue;
+        const e = per.get(p.workflowId) ?? { steps: [], wires: [], caches: [] };
+        per.set(p.workflowId, e);
+        if (p.kind === 'step') e.steps.push(p.stepId);
+        else if (p.kind === 'wire') { const i = p.wireId.indexOf('>'); e.wires.push([p.wireId.slice(0, i), p.wireId.slice(i + 1)]); }
+        else e.caches.push(p.cacheId);
+      }
+      // one edit (one undo step) per workflow
+      for (const [wf, e] of per) {
+        store.editOrRefuse(wf, (st) => ({ state: e.caches.reduce(unlinkCache, deleteParts(st, e.steps, e.wires)) }));
+      }
+      if (last) setAllPicks([{ kind: 'workflow', workflowId: last.workflowId }]);
+    },
+    start: (ids: string[]) => { for (const id of ids) void runWorkflow(api, store, output, live, id, 'start'); },
+    stop: (ids: string[]) => { for (const id of ids) void runWorkflow(api, store, output, live, id, 'stop'); },
+    save: (ids: string[]) => { void (async () => { for (const id of ids) await saveWorkflow(api, store, output, id); })(); },
+    deleteWorkflows: () => toolbar.remove([...new Set(picksRef.current.filter((p) => p.kind === 'workflow').map((p) => p.workflowId))]),
+  }), [api, store, output, live, toolbar, copyPicks, setAllPicks]);
 
   const workflowsRef = useRef(workflows);
   workflowsRef.current = workflows;
@@ -319,7 +362,8 @@ export function App(props: AppProps) {
               ? <div className="board-wait">Loading the board…</div>
               : <Board workflows={workflows} picks={picks} onPick={onPick}
                   {...(saved ? { initialView: { x: saved.x, y: saved.y, zoom: saved.zoom } } : {})}
-                  onViewChange={onViewChange} onEdit={onEdit} toolbar={toolbar} onDropItem={onDropItem} />}
+                  onViewChange={onViewChange} onEdit={onEdit} toolbar={toolbar} onDropItem={onDropItem}
+                  bar={<PickBar picks={picks} status={toolbar.status} actions={barActions} pending={pending} onConfirm={toolbar.confirmRemove} onCancel={toolbar.cancelRemove} />} />}
             inspector={<InspectorPanel workflows={workflows} picks={picks} store={store} />}
             output={<OutputPanel />}
             chat={<div className="ph"><span>Chat</span></div>}
