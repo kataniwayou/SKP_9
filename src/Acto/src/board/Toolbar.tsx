@@ -1,13 +1,19 @@
+import type { RunOp } from '../operate/runWorkflow';
+
 export interface ToolbarSelection { kind: 'workflow' | 'step' | 'wire' | 'cache' }
 export interface ToolbarButtons { onSave?: () => void; onDelete?: () => void }
+export interface ToolbarRun { op: RunOp; enabled: boolean; onRun: () => void }
 
 /** The dark bar with its little arrow. Position it with NodeToolbar or EdgeLabelRenderer. */
-export function Toolbar({ selection, actions, unsaved = false, saving = false }:
-  { selection: ToolbarSelection; actions: ToolbarButtons; unsaved?: boolean; saving?: boolean }) {
+export function Toolbar({ selection, actions, unsaved = false, saving = false, run }:
+  { selection: ToolbarSelection; actions: ToolbarButtons; unsaved?: boolean; saving?: boolean; run?: ToolbarRun }) {
   return (
     <div className="toolbar nodrag nopan" role="toolbar" onClick={(e) => e.stopPropagation()} aria-label={`${selection.kind} actions`}>
       {selection.kind === 'workflow'
-        ? <button type="button" className={unsaved ? 'primary' : undefined} disabled={saving} onClick={actions.onSave}>{saving ? 'Saving…' : 'Save'}</button>
+        ? <>
+          {run && <button type="button" className={run.op === 'start' ? 'go' : 'stop'} disabled={!run.enabled} onClick={run.onRun}>{run.op === 'start' ? '▶ Start' : '■ Stop'}</button>}
+          <button type="button" className={unsaved ? 'primary' : undefined} disabled={saving} onClick={actions.onSave}>{saving ? 'Saving…' : 'Save'}</button>
+        </>
         : <button type="button" className="danger" onClick={actions.onDelete}>Delete</button>}
       <span className="toolbar-arrow" />
     </div>

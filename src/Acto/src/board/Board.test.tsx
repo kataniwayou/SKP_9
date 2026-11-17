@@ -84,7 +84,7 @@ describe('Board', () => {
     expect(document.querySelector('.node.sel')).toBeNull();
   });
   describe('picks', () => {
-    const toolbar = { save: vi.fn(), deleteStep: vi.fn(), deleteWire: vi.fn(), deleteCache: vi.fn(), status: () => ({ unsaved: false, problems: 0, saving: false }) };
+    const toolbar = { save: vi.fn(), start: vi.fn(), stop: vi.fn(), deleteStep: vi.fn(), deleteWire: vi.fn(), deleteCache: vi.fn(), status: () => ({ unsaved: false, problems: 0, saving: false, run: 'stopped' as const }) };
     const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
     const a = { kind: 'step', workflowId: 'w1', stepId: 'a' } as const;
     const b = { kind: 'step', workflowId: 'w1', stepId: 'b' } as const;

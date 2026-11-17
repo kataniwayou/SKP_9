@@ -15,6 +15,9 @@ import { undoRedoKey } from './design/keys';
 import { InspectorPanel } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
 import { LiveStoreProvider } from './live/LiveContext';
+import { statusOf } from './live/liveState';
+import { runWorkflow } from './operate/runWorkflow';
+import { watchTransitions } from './operate/transitions';
 import { signalRHub } from './live/signalrHub';
 import type { Cache, Processor } from './model/graph';
 import { OutputPanel } from './output/OutputPanel';
@@ -53,6 +56,7 @@ export function App(props: AppProps) {
   const viewport = useRef<{ x: number; y: number; zoom: number } | null>(saved && { x: saved.x, y: saved.y, zoom: saved.zoom });
 
   useEffect(() => { live.start(); return () => live.stop(); }, [live]);
+  useEffect(() => watchTransitions(live, output, (id) => store.entry(id)?.history.present.fields.name ?? null), [live, output, store]);
 
   useEffect(() => {
     let cancelled = false;
@@ -167,6 +171,8 @@ export function App(props: AppProps) {
 
   const toolbar = useMemo<ToolbarActions>(() => ({
     save: (wf) => { void saveWorkflow(api, store, output, wf); },
+    start: (wf) => { void runWorkflow(api, store, output, live, wf, 'start'); },
+    stop: (wf) => { void runWorkflow(api, store, output, live, wf, 'stop'); },
     deleteStep: (wf, step) => {
       store.editOrRefuse(wf, (s) => ({ state: removeStep(s, step) }));
       onSelect({ kind: 'workflow', workflowId: wf });
@@ -182,9 +188,9 @@ export function App(props: AppProps) {
     },
     status: (wf) => {
       const e = store.entry(wf);
-      return { unsaved: e?.unsaved ?? false, problems: e?.problems ?? 0, saving: e?.saving ?? false };
+      return { unsaved: e?.unsaved ?? false, problems: e?.problems ?? 0, saving: e?.saving ?? false, run: statusOf(live.getState(), wf) };
     },
-  }), [api, store, output, onSelect]);
+  }), [api, store, output, live, onSelect]);
 
   const workflowsRef = useRef(workflows);
   workflowsRef.current = workflows;

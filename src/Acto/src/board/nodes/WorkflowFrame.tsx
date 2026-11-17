@@ -40,7 +40,8 @@ export function WorkflowFrame({ data, selected }: NodeProps) {
       <PickBadge pick={pick} />
       {selected && pick?.solo && tb && st && (
         <NodeToolbar isVisible position={Position.Top} offset={10}>
-          <Toolbar selection={{ kind: 'workflow' }} actions={{ onSave: () => tb.save(workflowId) }} unsaved={st.unsaved} saving={st.saving} />
+          <Toolbar selection={{ kind: 'workflow' }} actions={{ onSave: () => tb.save(workflowId) }} unsaved={st.unsaved} saving={st.saving}
+            run={status === 'running' ? { op: 'stop', enabled: true, onRun: () => tb.stop(workflowId) } : { op: 'start', enabled: status === 'stopped', onRun: () => tb.start(workflowId) }} />
         </NodeToolbar>
       )}
       <div className="fh" style={{ boxShadow: `inset 0 4px 0 ${STATE_COLOUR[status]}` }}>

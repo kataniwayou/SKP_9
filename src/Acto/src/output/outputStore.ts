@@ -4,6 +4,7 @@ export type Level = 'info' | 'ok' | 'warn' | 'error';
 export interface OutputLine { at: string; text: string; level: Level }
 
 const ORDER_KEY = 'acto.outputNewestFirst';
+export const OUTPUT_LIMIT = 500;
 
 const clockNow = (): string => new Date().toTimeString().slice(0, 8);
 
@@ -24,7 +25,7 @@ export function createOutputStore(storage: Storage | null, clock: () => string =
   const emit = () => subs.forEach((f) => f());
   return {
     lines: () => lines,
-    log(text, level = 'info') { lines = [...lines, { at: clock(), text, level }]; emit(); },
+    log(text, level = 'info') { lines = [...lines, { at: clock(), text, level }].slice(-OUTPUT_LIMIT); emit(); },
     clear() { lines = []; emit(); },
     newestFirst: () => newestFirst,
     setNewestFirst(b) {

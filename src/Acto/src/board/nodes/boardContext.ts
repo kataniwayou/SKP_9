@@ -10,10 +10,13 @@ export interface FrameEdit { resizeFrame(wf: string, size: { w: number; h: numbe
 export const EditContext = createContext<FrameEdit | null>(null);
 export const useBoardEdit = () => useContext(EditContext);
 
-export interface BlockStatus { unsaved: boolean; problems: number; saving: boolean }
+import type { LiveStatus } from '../../api/liveStatus';
+export interface BlockStatus { unsaved: boolean; problems: number; saving: boolean; run: LiveStatus }
 /** What the toolbars call and what the frame header shows; present only while the board is editable. */
 export interface ToolbarActions {
   save(wf: string): void;
+  start(wf: string): void;
+  stop(wf: string): void;
   deleteStep(wf: string, step: string): void;
   deleteWire(wf: string, wireId: string): void;
   /** Unlinks the cache (a cache created here and never saved is simply removed). */

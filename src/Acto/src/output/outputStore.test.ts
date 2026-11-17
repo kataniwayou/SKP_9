@@ -19,4 +19,12 @@ describe('outputStore', () => {
     off(); o.clear(); expect(fn).toHaveBeenCalledTimes(1);
     expect(o.newestFirst()).toBe(false);
   });
+
+  it('keeps the newest 500 lines', () => {
+    const o = createOutputStore(null);
+    for (let i = 1; i <= 501; i++) o.log(`l${i}`);
+    expect(o.lines()).toHaveLength(500);
+    expect(o.lines()[0]!.text).toBe('l2');
+    expect(o.lines()[499]!.text).toBe('l501');
+  });
 });

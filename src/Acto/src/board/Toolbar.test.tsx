@@ -19,6 +19,20 @@ describe('Toolbar', () => {
       unmount();
     }
   });
+  it('shows Start or Stop before Save by the workflow status', () => {
+    const onRun = vi.fn();
+    const { rerender } = render(<Toolbar selection={{ kind: 'workflow' }} actions={{}} run={{ op: 'start', enabled: true, onRun }} />);
+    expect(labels()).toEqual(['▶ Start', 'Save']);
+    expect(screen.getByText('▶ Start')).toBeEnabled();
+    expect(screen.getByText('▶ Start').className).toContain('go');
+    fireEvent.click(screen.getByText('▶ Start'));
+    expect(onRun).toHaveBeenCalledTimes(1);
+    rerender(<Toolbar selection={{ kind: 'workflow' }} actions={{}} run={{ op: 'stop', enabled: true, onRun }} />);
+    expect(labels()).toEqual(['■ Stop', 'Save']);
+    expect(screen.getByText('■ Stop').className).toContain('stop');
+    rerender(<Toolbar selection={{ kind: 'workflow' }} actions={{}} run={{ op: 'start', enabled: false, onRun }} />);
+    expect(screen.getByText('▶ Start')).toBeDisabled();
+  });
   it('highlights Save only when unsaved, and disables it while saving', () => {
     const { rerender } = render(<Toolbar selection={{ kind: 'workflow' }} actions={{}} />);
     expect(screen.getByText('Save').className).not.toContain('primary');

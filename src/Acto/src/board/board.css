@@ -60,6 +60,8 @@
 .toolbar button:disabled { opacity: .5; cursor: default; background: none; }
 .toolbar button.primary { background: #FF0072; }
 .toolbar button.danger { color: #FF8A8A; }
+.toolbar button.go { background: #1E8E5A; }
+.toolbar button.stop { background: #C93A3A; }
 .fh .unsaved-tag { font: 600 10px ui-monospace, Consolas, monospace; letter-spacing: .05em; text-transform: uppercase; color: #B45309; background: rgba(217,119,6,.12); border-radius: 5px; padding: 1px 6px; }
 .fh .warn-mark { font: 600 11px ui-monospace, Consolas, monospace; color: #B45309; }
 
