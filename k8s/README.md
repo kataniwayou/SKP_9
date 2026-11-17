@@ -44,6 +44,8 @@ kubectl apply -f k8s/31-workflow-studio.yaml
 Its AI drawing wand takes three plain environment variables in `k8s/31-workflow-studio.yaml`, not a
 Secret: `KIMI_BASE_URL`, `KIMI_MODEL_ID` and `KIMI_API_KEY`. The key is committed empty, which turns the
 wand off ("AI drawing is not configured"); put the key in your working copy only and never commit it.
+Acto (its replacement) builds the same way (`docker build -f src/Acto/Dockerfile -t acto:local .`, `k8s/47-acto.yaml`,
+`http://localhost:18083`); its model key is `KIMI_API_KEY` in `skp-dev-secrets` (committed empty).
 To build and deploy the Studio or Valence by hand on an offline machine, see
 `Studio-offline/README.md` and `Valence-offline/README.md`.
 

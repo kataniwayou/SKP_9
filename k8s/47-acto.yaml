@@ -1,0 +1,88 @@
+# Acto: the workflow board (React Flow), the replacement for WorkflowStudio (31-workflow-studio.yaml).
+#
+# A static React build served by nginx. nginx also proxies /api/ to baseapi-service (one origin: BaseApi has no
+# CORS policy) and /ai/ to the chat's model.
+#
+# Build and load (from the repo root; the kind cluster is named "desktop"):
+#   docker build -f src/Acto/Dockerfile -t acto:local .
+#   kind load docker-image acto:local --name desktop
+#   kubectl apply -f k8s/47-acto.yaml
+# Reach it through k8s/port-forward-realstack.ps1: http://localhost:18083
+apiVersion: v1
+kind: Service
+metadata:
+  name: acto
+  namespace: skp
+  labels:
+    app: acto
+    app.kubernetes.io/part-of: skp
+spec:
+  selector:
+    app: acto
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: acto
+  namespace: skp
+  labels:
+    app: acto
+    app.kubernetes.io/part-of: skp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: acto
+  template:
+    metadata:
+      labels:
+        app: acto
+    spec:
+      containers:
+        - name: acto
+          image: acto:local
+          # Read the local image store, as the other :local images do.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            # BaseApi's address (2026-10-18): where nginx sends /api/. Scheme, host and port only — no path and no trailing
+            # slash, which would change the paths BaseApi receives. The host is looked up when the pod starts, so it must
+            # exist then (in the cluster: the BaseApi Service's name, in this namespace or as <name>.<namespace>). Empty: the
+            # pod does not start (nginx: invalid number of arguments in "proxy_pass").
+            - name: BASEAPI_URL
+              value: "http://baseapi-service:8080"
+            # The chat's model for nginx's /ai/ route. The key comes from the dev Secret (01-secret.yaml, KIMI_API_KEY;
+            # committed empty, filled in the cluster only): optional, so a cluster without it still starts and /ai answers
+            # 503 ("The chat is not configured"). Env is read at start: changing one rolls the pod.
+            - name: KIMI_BASE_URL
+              value: "https://api.moonshot.ai/v1"
+            - name: KIMI_MODEL_ID
+              value: "kimi-k3"
+            - name: KIMI_API_KEY
+              valueFrom:
+                secretKeyRef: { name: skp-dev-secrets, key: KIMI_API_KEY, optional: true }
+          startupProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 2
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests: { memory: "32Mi" }
+            limits:   { memory: "128Mi" }

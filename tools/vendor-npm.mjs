@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 const APPS = {
   studio: { source: 'src/WorkflowStudio', kit: 'Studio-offline' },
+  acto: { source: 'src/Acto', kit: 'Studio-offline' },
   valence: { source: 'src/Valence', kit: 'Valence-offline' },
 };
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
