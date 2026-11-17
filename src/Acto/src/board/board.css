@@ -49,3 +49,4 @@
   .state-badge .sb-dot.pulse { animation: none; }
   .link-wire .wire.running { animation: none; stroke-dasharray: none; }
 }
+.fh .diff-tag { font: 600 10px ui-monospace, Consolas, monospace; letter-spacing: .05em; text-transform: uppercase; color: #92590A; background: #FEF3C7; border: 1px solid #F5B841; border-radius: 5px; padding: 1px 6px; }

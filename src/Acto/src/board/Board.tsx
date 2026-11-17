@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, type EdgeTypes, type NodeTypes } from '@xyflow/react';
+import { useMemo, useRef } from 'react';
+import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, type EdgeTypes, type NodeTypes, type Viewport } from '@xyflow/react';
 import type { BoardWorkflow } from './loadBoard';
 import type { Selection } from './selection';
 import { toFlow } from './toFlow';
@@ -21,9 +21,18 @@ export interface BoardProps {
   onSelect: (s: Selection | null) => void;
   /** Tests and view restore: start at this zoom instead of fitting every frame. */
   initialZoom?: number;
+  /** View restore: start here instead of fitting every frame. */
+  initialView?: { x: number; y: number; zoom: number };
+  /** The viewport after each pan or zoom, and when something is selected. */
+  onViewChange?: (view: { x: number; y: number; zoom: number }) => void;
 }
 
-export function Board({ workflows, selection, onSelect, initialZoom }: BoardProps) {
+export function Board({ workflows, selection, onSelect, initialZoom, initialView, onViewChange }: BoardProps) {
+  const flow = useRef<{ getViewport: () => Viewport } | null>(null);
+  const select = (s: Selection | null) => {
+    if (flow.current) onViewChange?.(flow.current.getViewport());
+    onSelect(s);
+  };
   const live = useLiveStore();
   useLive((st) => st.running); // re-render the minimap strokes when a workflow starts or stops
   useLive((st) => st.workflows);
@@ -55,18 +64,21 @@ export function Board({ workflows, selection, onSelect, initialZoom }: BoardProp
           elementsSelectable
           minZoom={0.05}
           maxZoom={2}
-          {...(initialZoom === undefined ? { fitView: true } : { defaultViewport: { x: 0, y: 0, zoom: initialZoom } })}
+          {...(initialView !== undefined ? { defaultViewport: initialView }
+            : initialZoom !== undefined ? { defaultViewport: { x: 0, y: 0, zoom: initialZoom } } : { fitView: true })}
+          onInit={(rf) => { flow.current = rf; }}
+          onMoveEnd={(_, v) => onViewChange?.(v)}
           onNodeClick={(_, n) => {
             const d = n.data as { workflowId: string; stepId?: string };
-            onSelect(n.type === 'step' && d.stepId !== undefined
+            select(n.type === 'step' && d.stepId !== undefined
               ? { kind: 'step', workflowId: d.workflowId, stepId: d.stepId }
               : { kind: 'workflow', workflowId: d.workflowId });
           }}
           onEdgeClick={(_, e) => {
             const d = e.data as { workflowId: string; wireId: string };
-            onSelect({ kind: 'wire', workflowId: d.workflowId, wireId: d.wireId });
+            select({ kind: 'wire', workflowId: d.workflowId, wireId: d.wireId });
           }}
-          onPaneClick={() => onSelect(null)}
+          onPaneClick={() => select(null)}
           proOptions={{ hideAttribution: true }}
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} />

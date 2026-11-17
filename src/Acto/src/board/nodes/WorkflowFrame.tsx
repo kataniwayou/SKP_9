@@ -21,6 +21,7 @@ export function WorkflowFrame({ data, selected }: NodeProps) {
       <div className="fh" style={{ boxShadow: `inset 0 4px 0 ${STATE_COLOUR[status]}` }}>
         <span className="nm">{workflow.name}</span>
         {!far && <span className="meta">{workflow.version} · {schedule}</span>}
+        {!far && info.entryDiff.stops.length + info.entryDiff.starts.length > 0 && <span className="diff-tag">first steps differ</span>}
         <span className="sp" />
         <span className="state-slot"><StateBadge status={status} /></span>
       </div>
