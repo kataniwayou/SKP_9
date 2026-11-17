@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
-import { applyNodeChanges, Background, BackgroundVariant, Controls, Panel, ReactFlow, useStore, type EdgeChange, type EdgeTypes, type Node, type NodeChange, type NodeTypes, type Viewport } from '@xyflow/react';
-import { CLICK_SLOP, HEADER_H, ZOOM_DETAIL } from './geometry';
+import { applyNodeChanges, Background, BackgroundVariant, Controls, Panel, ReactFlow, type EdgeChange, type EdgeTypes, type Node, type NodeChange, type NodeTypes, type Viewport } from '@xyflow/react';
+import { CLICK_SLOP, HEADER_H } from './geometry';
 import type { BoardWorkflow } from './loadBoard';
 import { pickKey, type Pick } from './picks';
 import { toFlow } from './toFlow';
@@ -16,13 +16,6 @@ import './board.css';
 
 const nodeTypes: NodeTypes = { workflow: WorkflowFrame, step: StepCard, cache: CacheChip };
 const edgeTypes: EdgeTypes = { link: LinkWire };
-
-/** Inside the flow: reports when the zoom crosses ZOOM_DETAIL (the selector is a boolean, so only then). */
-function FarWatch({ onFar }: { onFar: (far: boolean) => void }) {
-  const far = useStore((s) => s.transform[2] < ZOOM_DETAIL);
-  useEffect(() => { onFar(far); }, [far, onFar]);
-  return null;
-}
 
 export interface BoardEdit {
   /** Everything one drag moved inside `wf`: step positions (frame-local) and/or the frame, as one history step. */
@@ -108,8 +101,6 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
   // React Flow's own selection is off: picks decide. Only a keyboard select (Enter/Space on a focused node) comes from it.
   const keySelect = useRef(false);
   const picked = useMemo(() => new Set(picks.map(pickKey)), [picks]);
-  // Far out the step cards render nothing; their wrappers must not catch clicks meant for the frame.
-  const [far, setFar] = useState(false);
   const byId = useMemo(() => new Map(workflows.map((w) => [w.graph.workflow.id, w])), [workflows]);
   const editable = onEdit !== undefined;
   const { nodes: derived, edges } = useMemo(() => {
@@ -121,13 +112,11 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
         ...n,
         data: { ...n.data, ...(pickOf(n.id) ? { pick: pickOf(n.id) } : {}), ...(editable && n.type === 'workflow' ? { editable: true } : {}) },
         ...(editable && n.type !== 'cache' ? { draggable: true } : {}),
-        ...(far && n.type === 'step' ? { style: { ...n.style, pointerEvents: 'none' as const } } : {}),
         selected: order.has(n.id),
       })),
-      // far out the step cards draw no handles: React Flow would warn for every wire it cannot place
-      edges: flow.edges.map((e) => ({ ...e, hidden: far, selected: order.has(e.id), data: { ...e.data, ...(pickOf(e.id) ? { pick: pickOf(e.id) } : {}) } })),
+      edges: flow.edges.map((e) => ({ ...e, selected: order.has(e.id), data: { ...e.data, ...(pickOf(e.id) ? { pick: pickOf(e.id) } : {}) } })),
     };
-  }, [workflows, picks, far, editable]);
+  }, [workflows, picks, editable]);
 
   // Editing: React Flow needs the nodes in state so a drag moves them before anything is committed.
   const [dragged, setDragged] = useState<Node[]>(derived);
@@ -279,7 +268,6 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
           onPaneClick={(ev) => select(null, ev.ctrlKey || ev.metaKey)}
           proOptions={{ hideAttribution: true }}
         >
-          <FarWatch onFar={setFar} />
           {bar && <Panel position="top-center">{bar}</Panel>}
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
           <BoardMiniMap picked={picked} />

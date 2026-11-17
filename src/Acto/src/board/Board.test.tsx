@@ -11,23 +11,27 @@ describe('Board', () => {
     expect(screen.getByText('Empty workflow')).toBeInTheDocument();
     expect(document.querySelector('.react-flow__minimap')).not.toBeNull();
   });
-  it('shows only name and step count when zoomed far out', async () => {
-    render(<Board workflows={[bw('w1', ['a', 'b'])]} picks={[]} onPick={() => {}} initialZoom={0.3} />);
-    expect(await screen.findByText('2 steps')).toBeInTheDocument();
-    expect(screen.queryByText('a-name')).toBeNull();
+  it('draws every step card at every zoom, far out too (no far mode)', async () => {
+    render(<Board workflows={[bw('w1', ['a', 'b'])]} picks={[]} onPick={() => {}} initialZoom={0.1} />);
+    expect(await screen.findByText('a-name')).toBeInTheDocument();
+    expect(screen.getByText('b-name')).toBeInTheDocument();
+    expect(screen.queryByText('2 steps')).toBeNull();
   });
-  it('keeps invisible handles on a far step, so a wire drawn before the zoom is known can still be placed', async () => {
-    render(<Board workflows={[bw('w1', ['a'])]} picks={[]} onPick={() => {}} initialZoom={0.3} />);
-    await screen.findByText('1 step');
+  it('keeps a far step card visible with both handles', async () => {
+    render(<Board workflows={[bw('w1', ['a'])]} picks={[]} onPick={() => {}} initialZoom={0.1} />);
+    await screen.findByText('a-name');
     const node = document.querySelector('.react-flow__node-step') as HTMLElement;
     expect(node.querySelectorAll('.react-flow__handle')).toHaveLength(2);
-    expect((node.firstElementChild as HTMLElement).style.visibility).toBe('hidden');
+    expect(node.querySelector('.node')).not.toBeNull();
+    expect((node.firstElementChild as HTMLElement).style.visibility).not.toBe('hidden');
   });
-  it('lets a click at far zoom fall through the hidden steps to the frame', async () => {
-    render(<Board workflows={[bw('w1', ['a'])]} picks={[]} onPick={() => {}} initialZoom={0.3} />);
-    await screen.findByText('1 step');
-    const node = document.querySelector('.react-flow__node-step') as HTMLElement;
-    expect(node.style.pointerEvents).toBe('none');
+  it('picks a step clicked far out', async () => {
+    const onPick = vi.fn();
+    render(<Board workflows={[bw('w1', ['a'])]} picks={[]} onPick={onPick} initialZoom={0.1} />);
+    const name = await screen.findByText('a-name');
+    expect((document.querySelector('.react-flow__node-step') as HTMLElement).style.pointerEvents).not.toBe('none');
+    fireEvent.click(name);
+    expect(onPick).toHaveBeenCalledWith({ kind: 'step', workflowId: 'w1', stepId: 'a' }, false);
   });
   it('reports a click on a step as a step selection', async () => {
     const onPick = vi.fn();

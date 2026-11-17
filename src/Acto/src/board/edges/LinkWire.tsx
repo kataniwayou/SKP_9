@@ -1,9 +1,8 @@
-import { EdgeLabelRenderer, useStore, type EdgeProps } from '@xyflow/react';
+import { EdgeLabelRenderer, type EdgeProps } from '@xyflow/react';
 import { useWorkflowStatus } from '../../live/LiveContext';
 import { conditionStyle } from '../wires';
 import { wirePath } from '../wirePath';
 import type { Point } from '../../model/geometry';
-import { ZOOM_DETAIL } from '../geometry';
 import { Toolbar } from '../Toolbar';
 import { useToolbarActions } from '../nodes/boardContext';
 import { PickBadge, type PickInfo } from '../nodes/PickBadge';
@@ -11,9 +10,7 @@ import { PickBadge, type PickInfo } from '../nodes/PickBadge';
 export function LinkWire({ id, data, selected }: EdgeProps) {
   const workflowId = (data as { workflowId?: string } | undefined)?.workflowId ?? '';
   const running = useWorkflowStatus(workflowId) === 'running';
-  const far = useStore((s) => s.transform[2] < ZOOM_DETAIL);
   const tb = useToolbarActions();
-  if (far) return null;
   const { condition, out, in: inn, wireId, pick } = data as { condition: number; out: Point; in: Point; wireId: string; pick?: PickInfo };
   const style = conditionStyle(condition);
   const { d, pill } = wirePath(out, inn);

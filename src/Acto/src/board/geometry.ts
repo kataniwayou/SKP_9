@@ -11,5 +11,3 @@ export const BOARD_ROW_W = 2400;
  * when it clicks, and a frame or step it picks must not move by them (2026-11-18).
  */
 export const CLICK_SLOP = 6;
-/** Below this zoom a frame shows only its name, state and step count. */
-export const ZOOM_DETAIL = 0.4;

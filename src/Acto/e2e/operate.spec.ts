@@ -76,10 +76,10 @@ test('operate the board: save two, copy and paste a step, delete both', async ({
     await page.waitForTimeout(300);
   };
   const widthBefore = (await a.frame.boundingBox())!.width;
-  let zooms = 0;
-  while (zooms < 20 && (await a.frame.locator('.far-body').count()) > 0) { await wheel(-300, 1); zooms++; }
-  await wheel(-300, 2); zooms += 2;
   const stepA = page.locator(`.react-flow__node-step[data-id*=":${a.id}:"]`);
+  // step cards show at every zoom; zoom in until A's is big enough to click comfortably
+  let zooms = 0;
+  while (zooms < 20 && ((await stepA.boundingBox())?.width ?? 0) < 150) { await wheel(-300, 1); zooms++; }
   await stepA.click();
   await page.getByRole('button', { name: 'Copy', exact: true }).click();
   await wheel(300, zooms);

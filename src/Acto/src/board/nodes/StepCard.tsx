@@ -1,8 +1,7 @@
 import { useContext } from 'react';
-import { Handle, NodeToolbar, Position, useStore, type NodeProps } from '@xyflow/react';
+import { Handle, NodeToolbar, Position, type NodeProps } from '@xyflow/react';
 import type { StepRole } from '../roles';
 import { conditionStyle } from '../wires';
-import { ZOOM_DETAIL } from '../geometry';
 import { HealthDot } from '../live/HealthDot';
 import { BoardContext, useBoardWorkflow, useToolbarActions } from './boardContext';
 import { Toolbar } from '../Toolbar';
@@ -30,19 +29,9 @@ export function processorColour(name: string): string {
 export function StepCard({ data, selected }: NodeProps) {
   const { workflowId, stepId, role, pick } = data as { workflowId: string; stepId: string; role: StepRole; pick?: PickInfo };
   const info = useBoardWorkflow(workflowId);
-  const far = useStore((s) => s.transform[2] < ZOOM_DETAIL);
   const tb = useToolbarActions();
   const sharedIn = useSharedCount(stepId);
   if (!info) return null;
-  // far out the card is not drawn, but its handles stay (invisible) so React Flow can always place the wires
-  if (far) {
-    return (
-      <div style={{ visibility: 'hidden' }} aria-hidden>
-        <Handle type="target" position={Position.Left} />
-        <Handle type="source" position={Position.Right} />
-      </div>
-    );
-  }
   const step = info.graph.steps.get(stepId);
   const proc = step?.processorId ? info.graph.processors.get(step.processorId)?.name : undefined;
   return (

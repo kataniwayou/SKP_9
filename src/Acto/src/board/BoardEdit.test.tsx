@@ -195,11 +195,11 @@ describe('Board editing', () => {
       { isValid: false, fromNode: stepNode('w1', 'b', 0, 0), toNode: stepNode('w1', 'a', 0, 0) }));
     expect(onEdit.connect).toHaveBeenCalledWith('w1', 'b', 'w1', 'a');
   });
-  it('hides the wires when zoomed far out, where the steps draw no handles', async () => {
+  it('keeps the wires when zoomed far out, where the steps keep their handles', async () => {
     render(<Board workflows={[bw('w1', ['a', 'b'], [{ id: 'a>b', from: 'a', to: 'b', condition: 1 }])]} picks={[]} onPick={() => {}} initialZoom={0.2} />);
-    await screen.findByText('2 steps');
+    await screen.findByText('a-name');
     const edges = () => seen.props!.edges as unknown as { hidden?: boolean }[];
-    await waitFor(() => expect(edges().map((e) => e.hidden)).toEqual([true]));
+    await waitFor(() => expect(edges().map((e) => e.hidden ?? false)).toEqual([false]));
   });
 });
 
