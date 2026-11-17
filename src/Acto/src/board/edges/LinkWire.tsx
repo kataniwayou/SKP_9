@@ -1,6 +1,7 @@
 import { useStore, type EdgeProps } from '@xyflow/react';
 import { useWorkflowStatus } from '../../live/LiveContext';
 import { conditionStyle } from '../wires';
+import { wirePath } from '../wirePath';
 import type { Point } from '../../model/geometry';
 import { ZOOM_DETAIL } from '../geometry';
 
@@ -11,14 +12,9 @@ export function LinkWire({ id, data, selected }: EdgeProps) {
   if (far) return null;
   const { condition, out, in: inn } = data as { condition: number; out: Point; in: Point };
   const style = conditionStyle(condition);
-  const tx = inn.x - 9;
-  const dx = Math.max(40, Math.abs(tx - out.x) / 2);
-  const d = `M ${out.x} ${out.y} C ${out.x + dx} ${out.y}, ${tx - dx} ${inn.y}, ${tx} ${inn.y}`;
-  // the letter pill sits about 24 px before the target, on the curve
-  const t = 1 - 24 / Math.max(48, Math.hypot(tx - out.x, inn.y - out.y));
-  const u = 1 - t;
-  const px = u ** 3 * out.x + 3 * u * u * t * (out.x + dx) + 3 * u * t * t * (tx - dx) + t ** 3 * tx;
-  const py = u ** 3 * out.y + 3 * u * u * t * out.y + 3 * u * t * t * inn.y + t ** 3 * inn.y;
+  const { d, pill } = wirePath(out, inn);
+  const px = pill.x;
+  const py = pill.y;
   const marker = `arrow-${id}`;
   return (
     <g className={`link-wire${selected ? ' sel' : ''}`} data-condition={style.name}>
