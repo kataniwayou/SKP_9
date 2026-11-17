@@ -61,3 +61,9 @@
 .toolbar button.danger { color: #FF8A8A; }
 .fh .unsaved-tag { font: 600 10px ui-monospace, Consolas, monospace; letter-spacing: .05em; text-transform: uppercase; color: #B45309; background: rgba(217,119,6,.12); border-radius: 5px; padding: 1px 6px; }
 .fh .warn-mark { font: 600 11px ui-monospace, Consolas, monospace; color: #B45309; }
+
+.cache-chip { display: flex; align-items: center; gap: 6px; width: 100%; height: 100%; box-sizing: border-box; padding: 0 8px;
+  border: 1px solid #b8a36a; border-radius: 14px; background: #fbf4dc; color: #4a3d10; font-size: 12px; overflow: hidden; }
+.cache-chip.sel { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, .3); }
+.cache-chip .cache-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cache-chip .cache-ico { font-weight: 700; }

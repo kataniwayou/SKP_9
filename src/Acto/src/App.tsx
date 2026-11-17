@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createApi, type StudioApi } from './api/client';
 import { describeError } from './api/describeError';
-import { processorFromDto } from './api/toModel';
+import { cacheFromDto, processorFromDto } from './api/toModel';
 import { Board, type BoardEdit } from './board/Board';
 import { loadBoard } from './board/loadBoard';
 import type { Selection } from './board/selection';
-import { addWire, moveFrame, moveStep, removeStep, removeWire, resizeFrame } from './design/state';
+import { addCache, addStep, addWire, linkCache, moveFrame, moveStep, newWorkflowState, removeStep, removeWire, resizeFrame, swapProcessor, unlinkCache } from './design/state';
+import { dropVerdict, type DropItem } from './board/dropTarget';
+import { newId } from './design/ids';
 import { saveWorkflow } from './design/saveWorkflow';
 import type { ToolbarActions } from './board/nodes/boardContext';
 import { createBoardStore, useBoard, type BoardStore } from './design/boardStore';
@@ -13,7 +15,7 @@ import { InspectorPanel } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
 import { LiveStoreProvider } from './live/LiveContext';
 import { signalRHub } from './live/signalrHub';
-import type { Processor } from './model/graph';
+import type { Cache, Processor } from './model/graph';
 import { OutputPanel } from './output/OutputPanel';
 import { createOutputStore, OutputProvider, type OutputStore } from './output/outputStore';
 import { keepExistingSelection, readView, writeView, type SavedView } from './session/view';
@@ -44,6 +46,7 @@ export function App(props: AppProps) {
   const [loaded, setLoaded] = useState(false);
   const workflows = useBoard(store);
   const [processors, setProcessors] = useState<Processor[]>([]);
+  const [caches, setCaches] = useState<Cache[]>([]);
   const processorsRef = useRef<Processor[]>([]);
   const [selection, setSelection] = useState<Selection | null>(saved?.selection ?? null);
   const viewport = useRef<{ x: number; y: number; zoom: number } | null>(saved && { x: saved.x, y: saved.y, zoom: saved.zoom });
@@ -101,6 +104,21 @@ export function App(props: AppProps) {
     return () => { cancelled = true; };
   }, [api, output, store]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.listCaches?.();
+        if (cancelled || !r) return;
+        if (r.ok) setCaches(r.value.map(cacheFromDto));
+        else output.log(`Could not list the caches: ${describeError(r.error)}`, 'error');
+      } catch (e) {
+        if (!cancelled) output.log(`Could not list the caches: ${message(e)}`, 'error');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [api, output]);
+
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   const persist = useCallback((sel: Selection | null) => {
@@ -135,11 +153,61 @@ export function App(props: AppProps) {
       store.editOrRefuse(wf, (s) => ({ state: removeWire(s, wireId.slice(0, i), wireId.slice(i + 1)) }));
       onSelect({ kind: 'workflow', workflowId: wf });
     },
+    deleteCache: (wf, cacheId) => {
+      store.editOrRefuse(wf, (s) => ({ state: unlinkCache(s, cacheId) }));
+      onSelect({ kind: 'workflow', workflowId: wf });
+    },
     status: (wf) => {
       const e = store.entry(wf);
       return { unsaved: e?.unsaved ?? false, problems: e?.problems ?? 0, saving: e?.saving ?? false };
     },
   }), [api, store, output, onSelect]);
+
+  const workflowsRef = useRef(workflows);
+  workflowsRef.current = workflows;
+  const onDropItem = useCallback((item: DropItem, at: { x: number; y: number }) => {
+    const boards = workflowsRef.current;
+    const v = dropVerdict(item, at, boards);
+    if ('refused' in v) { output.log(v.refused, 'warn'); return; }
+    switch (v.do) {
+      case 'newWorkflow': {
+        const taken = new Set(boards.map((b) => b.graph.workflow.name));
+        let n = 1;
+        while (taken.has(`new-workflow-${n}`)) n++;
+        const name = `new-workflow-${n}`;
+        const state = newWorkflowState(newId(), name, v.at);
+        store.addWorkflow(state);
+        onSelect({ kind: 'workflow', workflowId: state.workflowId });
+        output.log(`${name} created — it is saved only when you press Save`, 'ok');
+        return;
+      }
+      case 'addStep': {
+        const p = processorsRef.current.find((x) => x.id === (item as { processorId: string }).processorId);
+        if (!p) { output.log('That processor is no longer listed', 'warn'); return; }
+        store.edit(v.workflowId, (s) => addStep(s, p, v.at, newId()));
+        return;
+      }
+      case 'swap': {
+        const p = processorsRef.current.find((x) => x.id === (item as { processorId: string }).processorId);
+        if (!p) { output.log('That processor is no longer listed', 'warn'); return; }
+        store.edit(v.workflowId, (s) => swapProcessor(s, v.stepId, p));
+        return;
+      }
+      case 'newCache': {
+        const taken = new Set(boards.flatMap((b) => [...b.graph.caches.values()].map((c) => c.name)));
+        let n = 1;
+        while (taken.has(`new-cache-${n}`)) n++;
+        store.edit(v.workflowId, (s) => addCache(s, { id: newId(), name: `new-cache-${n}`, version: '1.0.0', description: null, root: '', items: '{}', isNew: true }));
+        return;
+      }
+      case 'linkCache': {
+        const c = caches.find((x) => x.id === v.cacheId);
+        if (!c) { output.log('That cache is no longer listed', 'warn'); return; }
+        store.edit(v.workflowId, (s) => linkCache(s, c));
+        return;
+      }
+    }
+  }, [store, output, onSelect, caches]);
 
   return (
     <LiveStoreProvider value={live}>
@@ -148,12 +216,12 @@ export function App(props: AppProps) {
           <header className="topbar"><span className="brand">Acto</span></header>
           <Shell
             storage={storage}
-            toolbox={<ToolboxPanel processors={processors} />}
+            toolbox={<ToolboxPanel processors={processors} caches={caches} />}
             board={!loaded
               ? <div className="board-wait">Loading the board…</div>
               : <Board workflows={workflows} selection={selection} onSelect={onSelect}
                   {...(saved ? { initialView: { x: saved.x, y: saved.y, zoom: saved.zoom } } : {})}
-                  onViewChange={onViewChange} onEdit={onEdit} toolbar={toolbar} />}
+                  onViewChange={onViewChange} onEdit={onEdit} toolbar={toolbar} onDropItem={onDropItem} />}
             inspector={<InspectorPanel workflows={workflows} selection={selection} />}
             output={<OutputPanel />}
             chat={<div className="ph"><span>Chat</span></div>}

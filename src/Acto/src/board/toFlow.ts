@@ -1,4 +1,5 @@
 import { Position, type Edge, type Node } from '@xyflow/react';
+import { CHIP_H, CHIP_W, cacheChipAt } from './cacheChips';
 import { HEADER_H, STEP_H, STEP_W } from './geometry';
 import type { BoardWorkflow } from './loadBoard';
 import { landings } from './wires';
@@ -28,6 +29,15 @@ export function toFlow(workflows: BoardWorkflow[]): { nodes: Node[]; edges: Edge
         data: { workflowId: wfId, stepId, role: w.roles.get(stepId) ?? 'reached' },
       });
     }
+    w.graph.workflow.cacheIds.forEach((cacheId, i) => {
+      if (!w.graph.caches.has(cacheId)) return;
+      const c = cacheChipAt(i, w.frame);
+      nodes.push({
+        id: `ca:${wfId}:${cacheId}`, type: 'cache', parentId: parent, extent: 'parent', position: { x: c.x, y: c.y + HEADER_H },
+        style: { width: CHIP_W, height: CHIP_H }, width: CHIP_W, height: CHIP_H, draggable: false,
+        data: { workflowId: wfId, cacheId },
+      });
+    });
     const boxOf = (id: string) => {
       const p = w.stepAt.get(id);
       return p ? { x: w.frame.x + p.x, y: w.frame.y + HEADER_H + p.y, w: STEP_W, h: STEP_H } : null;

@@ -5,6 +5,8 @@ import type { BoardWorkflow } from './loadBoard';
 import type { Selection } from './selection';
 import { toFlow } from './toFlow';
 import { LinkWire } from './edges/LinkWire';
+import { CacheChip } from './nodes/CacheChip';
+import { dropVerdictItem, type DropItem } from './dropTarget';
 import { StepCard } from './nodes/StepCard';
 import { WorkflowFrame } from './nodes/WorkflowFrame';
 import { useLive, useLiveStore } from '../live/LiveContext';
@@ -13,7 +15,7 @@ import { STATE_COLOUR } from './live/StateBadge';
 import { BoardContext, EditContext, ToolbarContext, type ToolbarActions } from './nodes/boardContext';
 import './board.css';
 
-const nodeTypes: NodeTypes = { workflow: WorkflowFrame, step: StepCard };
+const nodeTypes: NodeTypes = { workflow: WorkflowFrame, step: StepCard, cache: CacheChip };
 const edgeTypes: EdgeTypes = { link: LinkWire };
 
 /** Inside the flow: reports when the zoom crosses ZOOM_DETAIL (the selector is a boolean, so only then). */
@@ -32,7 +34,7 @@ export interface BoardEdit {
   connect(fromWf: string, from: string, toWf: string | null, to: string | null): void;
 }
 
-interface NodeData { workflowId: string; stepId?: string }
+interface NodeData { workflowId: string; stepId?: string; cacheId?: string }
 
 export interface BoardProps {
   workflows: BoardWorkflow[];
@@ -48,10 +50,12 @@ export interface BoardProps {
   onEdit?: BoardEdit;
   /** Save, Delete and the unsaved/problems status; without it no toolbars show. */
   toolbar?: ToolbarActions;
+  /** A toolbox item was dropped; `at` is in board coordinates. */
+  onDropItem?: (item: DropItem, at: { x: number; y: number }) => void;
 }
 
-export function Board({ workflows, selection, onSelect, initialZoom, initialView, onViewChange, onEdit, toolbar }: BoardProps) {
-  const flow = useRef<{ getViewport: () => Viewport } | null>(null);
+export function Board({ workflows, selection, onSelect, initialZoom, initialView, onViewChange, onEdit, toolbar, onDropItem }: BoardProps) {
+  const flow = useRef<{ getViewport: () => Viewport; screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number } } | null>(null);
   const select = (s: Selection | null) => {
     if (flow.current) onViewChange?.(flow.current.getViewport());
     onSelect(s);
@@ -69,12 +73,13 @@ export function Board({ workflows, selection, onSelect, initialZoom, initialView
     return {
       nodes: flow.nodes.map((n) => ({
         ...n,
-        ...(editable ? { draggable: true } : {}),
+        ...(editable && n.type !== 'cache' ? { draggable: true } : {}),
         ...(editable && n.type === 'workflow' ? { data: { ...n.data, editable: true } } : {}),
         ...(far && n.type === 'step' ? { style: { ...n.style, pointerEvents: 'none' as const } } : {}),
         selected: sel !== null && (
           (sel.kind === 'workflow' && n.id === `wf:${sel.workflowId}`) ||
-          (sel.kind === 'step' && n.id === `st:${sel.workflowId}:${sel.stepId}`)),
+          (sel.kind === 'step' && n.id === `st:${sel.workflowId}:${sel.stepId}`) ||
+          (sel.kind === 'cache' && n.id === `ca:${sel.workflowId}:${sel.cacheId}`)),
       })),
       edges: flow.edges.map((e) => ({ ...e, selected: sel?.kind === 'wire' && e.id === `wi:${sel.workflowId}:${sel.wireId}` })),
     };
@@ -140,11 +145,20 @@ export function Board({ workflows, selection, onSelect, initialZoom, initialView
           maxZoom={2}
           {...(initialView !== undefined ? { defaultViewport: initialView }
             : initialZoom !== undefined ? { defaultViewport: { x: 0, y: 0, zoom: initialZoom } } : { fitView: true })}
+          onDragOver={(e) => { if (editable && onDropItem) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }}
+          onDrop={(e) => {
+            if (!editable || !onDropItem || !flow.current) return;
+            const item = dropVerdictItem(e.dataTransfer.getData('application/acto'));
+            if (!item) return;
+            e.preventDefault();
+            onDropItem(item, flow.current.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
+          }}
           onInit={(rf) => { flow.current = rf; }}
           onMoveEnd={(_, v) => onViewChange?.(v)}
           onNodeClick={(_, n) => {
-            const d = n.data as { workflowId: string; stepId?: string };
-            select(n.type === 'step' && d.stepId !== undefined
+            const d = n.data as unknown as NodeData;
+            select(n.type === 'cache' && d.cacheId !== undefined ? { kind: 'cache', workflowId: d.workflowId, cacheId: d.cacheId }
+              : n.type === 'step' && d.stepId !== undefined
               ? { kind: 'step', workflowId: d.workflowId, stepId: d.stepId }
               : { kind: 'workflow', workflowId: d.workflowId });
           }}

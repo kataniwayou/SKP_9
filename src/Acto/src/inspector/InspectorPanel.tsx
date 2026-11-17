@@ -77,6 +77,19 @@ function WireView({ w, wireId }: { w: BoardWorkflow; wireId: string }) {
   );
 }
 
+function CacheView({ w, cacheId }: { w: BoardWorkflow; cacheId: string }) {
+  const cache = w.graph.caches.get(cacheId);
+  if (!cache) return null;
+  return (
+    <>
+      <div className="in-title">{cache.name}</div>
+      <Row k="Version">{cache.version}</Row>
+      <Row k="Description">{cache.description || 'none'}</Row>
+      <Row k="Root">{cache.root || 'none'}</Row>
+    </>
+  );
+}
+
 /** Read-only in Plan 1: what the selection is, as the loaded board knows it. */
 export function InspectorPanel({ workflows, selection }: { workflows: BoardWorkflow[]; selection: Selection | null }) {
   const w = selection === null ? undefined : workflows.find((x) => x.graph.workflow.id === selection.workflowId);
@@ -87,6 +100,7 @@ export function InspectorPanel({ workflows, selection }: { workflows: BoardWorkf
         {selection === null || !w ? <BoardSummary workflows={workflows} />
           : selection.kind === 'workflow' ? <WorkflowView w={w} />
           : selection.kind === 'step' ? <StepView w={w} stepId={selection.stepId} workflows={workflows} />
+          : selection.kind === 'cache' ? <CacheView w={w} cacheId={selection.cacheId} />
           : <WireView w={w} wireId={selection.wireId} />}
       </div>
     </>

@@ -16,6 +16,8 @@ export interface ToolbarActions {
   save(wf: string): void;
   deleteStep(wf: string, step: string): void;
   deleteWire(wf: string, wireId: string): void;
+  /** Unlinks the cache (a cache created here and never saved is simply removed). */
+  deleteCache(wf: string, cacheId: string): void;
   status(wf: string): BlockStatus;
 }
 export const ToolbarContext = createContext<ToolbarActions | null>(null);

@@ -14,6 +14,7 @@ function parseSelection(v: unknown): Selection | null {
   if (s.kind === 'workflow') return { kind: 'workflow', workflowId: s.workflowId };
   if (s.kind === 'step' && isStr(s.stepId)) return { kind: 'step', workflowId: s.workflowId, stepId: s.stepId };
   if (s.kind === 'wire' && isStr(s.wireId)) return { kind: 'wire', workflowId: s.workflowId, wireId: s.wireId };
+  if (s.kind === 'cache' && isStr(s.cacheId)) return { kind: 'cache', workflowId: s.workflowId, cacheId: s.cacheId };
   return null;
 }
 
@@ -40,5 +41,6 @@ export function keepExistingSelection(sel: Selection | null, workflows: BoardWor
   if (!w) return null;
   if (sel.kind === 'step') return w.stepIds.includes(sel.stepId) ? sel : null;
   if (sel.kind === 'wire') return w.wires.some((x) => x.id === sel.wireId) ? sel : null;
+  if (sel.kind === 'cache') return w.graph.workflow.cacheIds.includes(sel.cacheId) ? sel : null;
   return sel;
 }

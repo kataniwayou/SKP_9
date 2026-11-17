@@ -1,6 +1,8 @@
 import type { Cache, Graph, Id, Processor, Step, Workflow, Assignment, Audit } from '../model/graph';
 import type { Point, Rect } from '../model/geometry';
 import type { BoardWorkflow } from '../board/loadBoard';
+import { CHIP_GAP, CHIP_W } from '../board/cacheChips';
+import { FRAME_PAD } from '../board/geometry';
 import { frameSizeOf } from '../board/placement';
 import { derivedEntrySteps, entryDiff, stepRoles } from '../board/roles';
 import { wiresOf } from '../board/wires';
@@ -116,6 +118,11 @@ export function boardWorkflowOf(
     layout: base?.graph.layout ?? null, design: base?.graph.design ?? null,
   };
   const size = frameSizeOf(stepAt);
+  const n = caches.size;
+  if (n > 0) {
+    size.h += 44;
+    size.w = Math.max(size.w, 2 * FRAME_PAD + n * CHIP_W + (n - 1) * CHIP_GAP);
+  }
   return {
     graph, stepIds, stepAt, roles, wires,
     frame: { x: state.frame.x, y: state.frame.y, w: Math.max(state.frame.w, size.w), h: Math.max(state.frame.h, size.h) },
