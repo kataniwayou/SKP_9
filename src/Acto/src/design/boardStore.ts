@@ -48,6 +48,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
   let procVersion = 0;
   let bwProcVersion = 0;
   let cached: BoardWorkflow[] | null = null;
+  let draftsFailed = false;
   const subs = new Set<() => void>();
 
   const viewOf = (base: WorkflowState | null, history: History, layout: unknown = null, problems = 0, saving = false): BoardEntry => ({
@@ -65,7 +66,11 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     for (const [id, r] of recs) {
       if (r.view.unsaved) drafts[id] = { updatedAt: r.baseBw ? r.baseBw.graph.workflow.updatedAt : null, history: r.history };
     }
-    writeDrafts(session, drafts);
+    const failed = writeDrafts(session, drafts);
+    if (failed !== null && !draftsFailed) {
+      draftsFailed = true;
+      output.log(`Unsaved work is no longer kept across refresh: ${failed}`, 'warn');
+    }
     notify();
   };
   const locked = (r: Rec): boolean => {
@@ -97,8 +102,10 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
         if (draft) output.log(`${name}: unsaved work from before the refresh was dropped because the workflow changed`, 'warn');
         if (bw.graph.design != null) {
           const applied = applyStored(rec.base!, bw.graph.design, bw.graph.layout, bw.designCaches);
-          recs.set(id, withHistory(rec, historyOf(applied)));
-          if (!sameState(applied, rec.base!)) output.log(`${name}: loaded unsaved work from a save that failed`, 'warn');
+          if (sameState(applied, rec.base!)) { recs.set(id, rec); continue; }
+          // one step on from the saved workflow, so Undo goes back to it
+          recs.set(id, withHistory(rec, commit(rec.history, applied)));
+          output.log(`${name}: loaded unsaved work from a save that failed`, 'warn');
           continue;
         }
         recs.set(id, rec);

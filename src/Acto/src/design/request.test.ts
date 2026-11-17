@@ -59,6 +59,14 @@ describe('design request', () => {
     expect(applyStored(base, stored, { steps: { n1: { x: 321, y: 123 } } }).steps.n1!.at).toEqual({ x: 321, y: 123 });
     expect(applyStored(base, stored, { steps: { n1: 'bad' } }).steps.n1!.at.x).toBe(28);
   });
+  it('places a restored new step with the same shift the loaded steps were given', () => {
+    const base = stateOf(bwFull());
+    const a = base.steps.a!.at;
+    const stored = JSON.parse(JSON.stringify(designRequest(base, addStep(base, proc('p1', 'Analyst'), { x: 9, y: 9 }, 'n1'), null)));
+    // stored in canvas coordinates: a sat at (-100, -240) and was shifted to `a` when loaded
+    const back = applyStored(base, stored, { steps: { a: { x: -100, y: -240 }, n1: { x: 0, y: -200 } } });
+    expect(back.steps.n1!.at).toEqual({ x: 0 + a.x + 100, y: -200 + a.y + 240 });
+  });
   it('sends assignment create and update', () => {
     const base = stateOf(bwFull());
     const upd = designRequest(base, setPayload(base, 'a', '{"y":2}', () => 'zz'), null);

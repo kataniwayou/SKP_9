@@ -5,12 +5,15 @@ const KEY = 'acto.drafts';
 export interface Draft { updatedAt: string | null; history: History }
 export type Drafts = Record<string, Draft>;
 
-/** Unsaved workflows only; an empty set removes the key. */
-export function writeDrafts(session: Storage | null, entries: Drafts): void {
+/** Unsaved workflows only; an empty set removes the key. Answers why the write failed (a full storage), or null. */
+export function writeDrafts(session: Storage | null, entries: Drafts): string | null {
   try {
     if (Object.keys(entries).length === 0) session?.removeItem(KEY);
     else session?.setItem(KEY, JSON.stringify(entries));
-  } catch { /* no persistence */ }
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);

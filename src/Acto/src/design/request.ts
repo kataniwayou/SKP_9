@@ -185,6 +185,13 @@ export function applyStored(
 
   // positions are in the stored layout; without one a new step stacks down the frame
   const laid = obj(obj(storedLayout)?.steps);
+  // loading may have shifted the stored positions into the frame (a WorkflowStudio layout): a restored new
+  // step takes the same shift, read off any step the base and the layout share
+  let shift = { x: 0, y: 0 };
+  for (const [id, st] of Object.entries(base.steps)) {
+    const p = laid?.[id];
+    if (isPoint(p)) { shift = { x: st.at.x - p.x, y: st.at.y - p.y }; break; }
+  }
   for (const e of list(d.newSteps)) {
     const o = obj(e);
     if (!o || !str(o.id) || s.steps[o.id]) continue;
@@ -193,7 +200,8 @@ export function applyStored(
     const st: StepState = pickFields({
       id: o.id, name: o.id, version: '1.0.0', description: null, entryCondition: 1,
       processorId: nullableStr(o.processorId), nextStepIds: list(o.nextStepIds).filter(str),
-      at: isPoint(p) ? { x: p.x, y: p.y } : { x: FRAME_PAD, y: FRAME_PAD + n * (STEP_H + 40) }, updatedAt: null, isNew: true,
+      at: isPoint(p) ? { x: Math.max(0, p.x + shift.x), y: Math.max(0, p.y + shift.y) } : { x: FRAME_PAD, y: FRAME_PAD + n * (STEP_H + 40) },
+      updatedAt: null, isNew: true,
     }, o.fields, { name: 'string', version: 'string', description: 'nstring', entryCondition: 'number' });
     s = { ...s, steps: { ...s.steps, [st.id]: st } };
   }

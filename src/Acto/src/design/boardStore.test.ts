@@ -60,6 +60,24 @@ describe('board store', () => {
     expect(st.entry('w1')!.unsaved).toBe(true);
     expect(lastLine(st)).toEqual({ text: 'orders: loaded unsaved work from a save that failed', level: 'warn' });
   });
+  it('lets Undo go back from a stored server design to the saved workflow', () => {
+    const bw = bwFull();
+    bw.graph.design = { workflow: { updatedAt: 'x', fields: { name: 'renamed' } } };
+    const st = storeWith(bw);
+    expect(canUndo(st.entry('w1')!.history)).toBe(true);
+    st.undo('w1');
+    expect(st.entry('w1')!.history.present.fields.name).toBe('orders');
+    expect(st.entry('w1')!.unsaved).toBe(false);
+  });
+  it('says once when unsaved work can no longer be kept across a refresh', () => {
+    const full = memoryStorage();
+    full.setItem = () => { throw new Error('QuotaExceededError'); };
+    const st = storeWith(bwFull(), full);
+    st.edit('w1', (s) => moveStep(s, 'a', { x: 5, y: 5 }));
+    st.edit('w1', (s) => moveStep(s, 'a', { x: 6, y: 6 }));
+    const warned = st.output.lines().filter((l) => l.text.startsWith('Unsaved work is no longer kept across refresh'));
+    expect(warned.map((l) => [l.level, l.text])).toEqual([['warn', 'Unsaved work is no longer kept across refresh: QuotaExceededError']]);
+  });
   it('a new workflow is unsaved and notifies subscribers', () => {
     const st = storeWith(bwFull()); let n = 0; st.subscribe(() => n++);
     st.addWorkflow(newWorkflowState('w2', 'fresh', { x: 0, y: 0 }));

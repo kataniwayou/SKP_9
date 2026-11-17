@@ -72,7 +72,9 @@ test('design a workflow on the board, save it, and find it again after a reload'
   const fb = (await frame.boundingBox())!;
   await dragOnto(page, page.getByTestId('toolbox-step').first(), fb.x + fb.width / 2, fb.y + fb.height * 0.6);
   const frameId = (await frame.getAttribute('data-id'))!.replace(/^wf:/, '');
-  await expect(page.locator(`.react-flow__node-step[data-id*=":${frameId}:"]`)).toHaveCount(1);
+  const step = page.locator(`.react-flow__node-step[data-id*=":${frameId}:"]`);
+  await expect(step).toHaveCount(1);
+  const drawn = (await step.boundingBox())!;
 
   // select the frame, press Save in its toolbar
   await frame.locator('.fh').click();
@@ -87,6 +89,11 @@ test('design a workflow on the board, save it, and find it again after a reload'
   await expect(frame.locator('.unsaved-tag')).toHaveCount(0);
 
   const before = (await frame.boundingBox())!;
+  // the step stays where it was drawn: through the save, and through the reload
+  const near = (a: { x: number; y: number }, b: { x: number; y: number }, what: string) => {
+    for (const k of ['x', 'y'] as const) expect(Math.abs(a[k] - b[k]), `${what} ${k}`).toBeLessThanOrEqual(1);
+  };
+  near((await step.boundingBox())!, drawn, 'step after save');
 
   await page.reload();
   await expect(page.getByText(/Board loaded: \d+ workflows?/)).toBeVisible();
@@ -95,6 +102,9 @@ test('design a workflow on the board, save it, and find it again after a reload'
   await expect(again.locator('.unsaved-tag')).toHaveCount(0);
   const after = (await again.boundingBox())!;
   for (const k of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(after[k] - before[k]), k).toBeLessThanOrEqual(1);
+  const stepAgain = page.locator(`.react-flow__node-step[data-id*=":${frameId}:"]`);
+  await expect(stepAgain).toHaveCount(1);
+  near((await stepAgain.boundingBox())!, drawn, 'step after reload');
 
   const svg = await request.get(`/api/v1/workflows/${createdId}.svg`);
   expect(svg.status()).toBe(200);
