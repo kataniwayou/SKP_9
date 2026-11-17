@@ -22,10 +22,10 @@ function FrameMini({ id, x, y, width, height, onClick }: MiniMapNodeProps) {
   return (
     <g data-mini-frame={workflowId} style={{ cursor: 'pointer' }} onClick={onClick ? (e: ReactMouseEvent<SVGGElement>) => onClick(e, id) : undefined}>
       <title>{name}</title>
-      <rect x={x} y={y} width={width} height={height} rx={l.stroke * 2} fill={on ? 'rgba(255,0,114,.08)' : 'rgba(255,255,255,.7)'}
+      <rect x={x} y={y} width={width} height={height} rx={l.stroke * 2} style={{ fill: on ? 'rgba(255,0,114,.08)' : 'var(--mini-fill)' }}
         stroke={on ? ACCENT : STATE_COLOUR[status]} strokeWidth={l.stroke} />
       {l.text && (
-        <text x={x + l.fontSize * 0.4} y={y + l.fontSize * 1.3} fontSize={l.fontSize} fontWeight={600} fill="#1f2433" style={{ pointerEvents: 'none' }}>
+        <text x={x + l.fontSize * 0.4} y={y + l.fontSize * 1.3} fontSize={l.fontSize} fontWeight={600} style={{ pointerEvents: 'none', fill: 'var(--mini-ink)' }}>
           {l.text}
         </text>
       )}

@@ -30,6 +30,7 @@ import { OutputPanel } from './output/OutputPanel';
 import { createOutputStore, OutputProvider, type OutputStore } from './output/outputStore';
 import { readView, writeView, type SavedView } from './session/view';
 import { Shell } from './shell/Shell';
+import { applyTheme, saveTheme, savedTheme, type Theme } from './shell/theme';
 import { ToolboxPanel } from './toolbox/ToolboxPanel';
 import './app.css';
 
@@ -64,6 +65,12 @@ export function App(props: AppProps) {
   const [session] = useState<Storage | null>(() => (props.session === undefined ? browserSession() : props.session));
   const [store] = useState<BoardStore>(() => createBoardStore(output, session));
   const [saved] = useState<SavedView | null>(() => readView(storage));
+
+  const [theme, setTheme] = useState<Theme>(() => savedTheme(storage));
+  const toggleTheme = useCallback(() => {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next); applyTheme(next); saveTheme(next, storage);
+  }, [theme, storage]);
 
   const [loaded, setLoaded] = useState(false);
   const workflows = useBoard(store);
@@ -408,6 +415,7 @@ export function App(props: AppProps) {
       <OutputProvider store={output}>
         <div className="acto">
           <header className="topbar"><span className="brand">Acto</span>
+            <button type="button" className="theme-toggle" onClick={toggleTheme}>{theme === 'dark' ? 'Light' : 'Dark'}</button>
           </header>
           <Shell
             storage={storage}

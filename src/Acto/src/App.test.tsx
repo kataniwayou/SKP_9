@@ -134,7 +134,7 @@ describe('App', () => {
     it('keeps Undo/Redo out of the top bar', async () => {
       renderApp(fakeApi({ workflows: [wf('w1')] }), selectedStep);
       await inspector().findByDisplayValue('s1-name');
-      expect(document.querySelector('.topbar')!.querySelectorAll('button')).toHaveLength(0);
+      expect([...document.querySelector('.topbar')!.querySelectorAll('button')].map((x) => x.textContent)).toEqual(['Dark']);
       expect(inspector().getByRole('button', { name: 'Undo' })).toBeInTheDocument();
     });
   });
@@ -371,5 +371,18 @@ describe('App', () => {
       fireEvent.keyDown(input, { key: 'v', ctrlKey: true });
       expect(cards()).toBe(2);
     });
+  });
+
+  it('switches theme from the topbar button and remembers it', async () => {
+    const st = memoryStorage();
+    renderApp(fakeApi({ workflows: [] }), st);
+    const btn = await screen.findByRole('button', { name: 'Dark' });
+    fireEvent.click(btn);
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(st.getItem('acto.theme')).toBe('dark');
+    expect(screen.getByRole('button', { name: 'Light' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Light' }));
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(st.getItem('acto.theme')).toBe('light');
   });
 });
