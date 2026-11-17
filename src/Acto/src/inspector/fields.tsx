@@ -27,7 +27,7 @@ export function SelectField({ label, value, options, onChange, disabled }: {
   );
 }
 
-/** The workflow holding an unsaved change to a shared entity, by name; null when this workflow may change it. */
+/** The workflow holding an unsaved change to a shared entity, by name; null when this workflow may change it (`lockedBy`). */
 export function lockerName(store: BoardStore, key: EntityKey, workflowId: string): string | null {
   const other = store.lockedBy(key, workflowId);
   return other === null ? null : store.entry(other)?.history.present.fields.name ?? other;

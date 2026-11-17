@@ -3,7 +3,7 @@ import { bw } from '../board/fixtures';
 import { AUDIT } from '../model/fixtures';
 import { bwFull, proc } from './fixtures';
 import { changedEntities, entityLabel, holders } from './shared';
-import { addWire, linkCache, moveStep, newWorkflowState, setCacheField, setProcessorField, setStepField, stateOf, unlinkCache } from './state';
+import { addCache, addStep, addWire, linkCache, moveStep, newWorkflowState, setCacheField, setProcessorField, setStepField, stateOf, swapProcessor, unlinkCache } from './state';
 
 const base = () => stateOf(bwFull());
 
@@ -41,6 +41,17 @@ describe('changedEntities', () => {
   it('a new workflow changes only what it holds', () => {
     const s = newWorkflowState('w9', 'fresh', { x: 0, y: 0 });
     expect([...changedEntities(null, s)]).toEqual([]);
+    const withStep = addStep(s, proc('p1', 'Analyst'), { x: 46, y: 46 }, 'n1');
+    expect([...changedEntities(null, withStep)]).toEqual(['step:n1']);
+  });
+  it('a step given another processor changes the step', () => {
+    const b = base();
+    expect([...changedEntities(b, swapProcessor(b, 'a', proc('p2', 'Other')))]).toEqual(['step:a']);
+  });
+  it('a new unsaved cache is a cache change', () => {
+    const b = base();
+    const c = { id: 'c9', name: 'fresh', version: '1.0.0', description: null, root: '', items: '{}', isNew: true };
+    expect([...changedEntities(b, addCache(b, c))]).toEqual(['cache:c9']);
   });
 });
 

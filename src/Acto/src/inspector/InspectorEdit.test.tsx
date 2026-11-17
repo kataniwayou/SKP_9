@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { memoryStorage } from '../test/memoryStorage';
 import { describe, expect, it } from 'vitest';
 import { toFlow } from '../board/toFlow';
 import { createBoardStore, useBoard, type BoardStore } from '../design/boardStore';
@@ -159,7 +160,7 @@ describe('inspector editing', () => {
 
 describe('the shared-entity lock', () => {
   /** w1 'orders' and w2 'billing' share step s1 (processor p-s1) and cache c1; w2's s1 is picked. */
-  function sharedSetup(lockIn: (st: BoardStore) => void, pick: Pick) {
+  function sharedSetup(lockIn: (st: BoardStore) => void, pick: Pick, session: Storage | null = null) {
     const cache = { id: 'c1', name: 'rates', version: '1', description: null, root: 'r', items: '{}', audit: AUDIT };
     const mk = (id: string, name: string) => {
       const b = bw(id, ['s1']);
@@ -167,7 +168,7 @@ describe('the shared-entity lock', () => {
       b.graph.caches = new Map([['c1', cache]]);
       return b;
     };
-    const store = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
+    const store = createBoardStore(createOutputStore(null, () => '00:00:00'), session);
     store.load({ listed: true, workflows: [mk('w1', 'orders'), mk('w2', 'billing')], failures: [] }, []);
     lockIn(store);
     function Harness({ s }: { s: BoardStore }) {
@@ -200,6 +201,22 @@ describe('the shared-entity lock', () => {
     expect(screen.getByText('being changed in orders')).toBeInTheDocument();
     expect(input('Root').disabled).toBe(true);
     expect(input('Root').value).toBe('r');
+  });
+  it('leaves the fields open in both workflows when drafts brought both back changing the step', () => {
+    const draftOf = (wf: 'w1' | 'w2', name: string) => {
+      const session = memoryStorage();
+      sharedSetup((st) => st.edit(wf, (s) => setStepField(s, 's1', 'name', name)), { kind: 'workflow', workflowId: wf }, session);
+      cleanup();
+      return JSON.parse(session.getItem('acto.drafts')!) as Record<string, unknown>;
+    };
+    const both = memoryStorage({ 'acto.drafts': JSON.stringify({ ...draftOf('w1', 'one'), ...draftOf('w2', 'two') }) });
+    for (const wf of ['w1', 'w2']) {
+      const st = sharedSetup(() => {}, { kind: 'step', workflowId: wf, stepId: 's1' }, both);
+      expect(st.entry(wf)!.unsaved).toBe(true);
+      expect(screen.queryByText(/being changed in/)).toBeNull();
+      expect(input('Name').disabled).toBe(false);
+      cleanup();
+    }
   });
   it('leaves the fields open in the workflow making the change', () => {
     sharedSetup((st) => st.edit('w1', (s) => setStepField(s, 's1', 'name', 'renamed')), { kind: 'step', workflowId: 'w1', stepId: 's1' });

@@ -176,6 +176,22 @@ describe('the shared-entity lock', () => {
     expect(lastLine(st).text).toBe('step extract is being changed in orders — save or undo it there first');
     expect(st.entry('w2')!.history.past).toHaveLength(2);
   });
+  it('releases the lock when the holder saves, adopts its present, or goes away', () => {
+    const release: Record<string, (st: ReturnType<typeof shared>) => void> = {
+      replace: (st) => st.replace('w1', st.boards()[0]!),
+      adoptPresent: (st) => st.adoptPresent('w1'),
+      remove: (st) => st.remove('w1'),
+    };
+    for (const [how, fn] of Object.entries(release)) {
+      const st = shared();
+      st.edit('w1', rename('one'));
+      expect(st.lockedBy('step:s1', 'w2')).toBe('w1');
+      fn(st);
+      expect([how, st.lockedBy('step:s1', 'w2')]).toEqual([how, null]);
+      st.edit('w2', rename('two'));
+      expect([how, st.entry('w2')!.history.present.steps.s1!.name]).toEqual([how, 'two']);
+    }
+  });
   it('a move of a shared step is never locked', () => {
     const st = shared();
     st.edit('w1', rename('one'));
@@ -214,6 +230,7 @@ describe('the shared-entity lock', () => {
     const st = createBoardStore(createOutputStore(null, () => '00:00:00'), both);
     st.load({ listed: true, workflows: shared().boards(), failures: [] }, []);
     expect([st.entry('w1')!.unsaved, st.entry('w2')!.unsaved]).toEqual([true, true]);
+    expect([st.lockedBy('step:s1', 'w1'), st.lockedBy('step:s1', 'w2')]).toEqual([null, null]);
     st.undo('w2');
     st.undo('w1');
     expect([st.entry('w1')!.unsaved, st.entry('w2')!.unsaved]).toEqual([false, false]);

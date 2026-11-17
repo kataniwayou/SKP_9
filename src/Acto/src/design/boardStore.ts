@@ -39,7 +39,10 @@ export interface BoardStore {
   adoptPresent(id: Id): void;
   /** BaseAPI stored this layout (it does on every save it reads, applied or not): what the next save compares against. */
   setLayout(id: Id, layout: unknown): void;
-  /** The other workflow holding an unsaved change to this step, processor or cache; null when none (or only `except`). */
+  /**
+   * The other workflow holding an unsaved change to this step, processor or cache; null when none, or when `except`
+   * holds one too (drafts or a failed save brought both back: refusing it would only block the way out).
+   */
   lockedBy(key: EntityKey, except: Id): Id | null;
   subscribe(fn: () => void): () => void;
 }
@@ -102,18 +105,14 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     return keys;
   };
   const lockedBy = (key: EntityKey, except: Id): Id | null => {
+    const own = recs.get(except);
+    if (own && changedOf(own).has(key)) return null;
     for (const [id, r] of recs) if (id !== except && changedOf(r).has(key)) return id;
     return null;
   };
-  /** A change another workflow holds is refused; a first wiring change out of a shared step is announced. */
+  /** False (and says why) when the change touches a step, processor or cache another workflow is changing. */
   const allowed = (id: Id, r: Rec, next: WorkflowState): boolean => {
-    const cur = r.history.present;
-    if (next === cur) return true;
-    const keys = changedEntities(cur, next);
-    const mine = changedOf(r);
-    for (const key of keys) {
-      // already changed here too (drafts or a failed save brought both back): refusing would only block the way out
-      if (mine.has(key)) continue;
+    for (const key of changedEntities(r.history.present, next)) {
       const other = lockedBy(key, id);
       if (other === null) continue;
       const own = store.boards().filter((b) => b.graph.workflow.id === id);
@@ -121,16 +120,18 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       output.log(`${label} is being changed in ${recs.get(other)!.history.present.fields.name} — save or undo it there first`, 'warn');
       return false;
     }
+    return true;
+  };
+  /** The first wiring change out of a shared step (per workflow, until it is back to its base) names who else runs it. */
+  const announceWiring = (id: Id, cur: WorkflowState, next: WorkflowState) => {
     let held: Map<EntityKey, Id[]> | null = null;
-    for (const key of keys) {
-      if (!key.startsWith('step:')) continue;
-      const stepId = key.slice(5);
+    for (const stepId of Object.keys(next.steps)) {
       const a = cur.steps[stepId];
       const b = next.steps[stepId];
-      if (!a || !b || (a.nextStepIds.length === b.nextStepIds.length && a.nextStepIds.every((n, i) => n === b.nextStepIds[i]))) continue;
+      if (!a || !b || a === b || (a.nextStepIds.length === b.nextStepIds.length && a.nextStepIds.every((n, i) => n === b.nextStepIds[i]))) continue;
       if (warned.get(id)?.has(stepId)) continue;
       held ??= holders(store.boards());
-      const others = (held.get(key) ?? []).filter((w) => w !== id).map((w) => recs.get(w)?.history.present.fields.name ?? w);
+      const others = (held.get(`step:${stepId}`) ?? []).filter((w) => w !== id).map((w) => recs.get(w)?.history.present.fields.name ?? w);
       if (others.length === 0) continue;
       const set = warned.get(id) ?? new Set<Id>();
       set.add(stepId);
@@ -138,10 +139,10 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       const names = others.join(', ');
       output.log(`${a.name} is shared with ${names}: changing its wires changes what ${names} run${others.length === 1 ? 's' : ''} too`, 'warn');
     }
-    return true;
   };
   const setHistory = (id: Id, r: Rec, h: History) => {
     if (h === r.history || !allowed(id, r, h.present)) return;
+    announceWiring(id, r.history.present, h.present);
     recs.set(id, withHistory(r, h));
     changed();
   };
