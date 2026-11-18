@@ -1,158 +1,125 @@
 import { test, expect } from './fixtures';
-import { frameOf, LOADED, openBoard, outLine, pickFrame, waitLoaded, zoomOf } from './helpers';
+import { allCaches, allSteps, allWorkflows, caNode, centre, entryEdge, openAt, openFitted, stNode, wfNode, wireEdge, cacheEdge, zoomOf } from './helpers';
+import { seed } from './seed';
+import { getJson, type Row } from './stack';
 
-// Features 1 (the board) and 3 (the minimap). Read-only: the pre-existing workflows are only looked at, picked and
-// centred (the guard refuses any write).
+// Spec §5: the board shows every row; triangles with arrows from the tip and dashed lines from the back; minimap, theme, Fit.
+// The seeded rows are throwaway (e2e-); the counts are checked against what BaseAPI holds right now, real rows included.
 
-test('every workflow BaseAPI holds has a frame, with the state badge the live set says', async ({ page, request }) => {
-  const workflows = (await (await request.get('/api/v1/workflows')).json()) as { id: string; name: string; version: string }[];
-  const live = new Set(((await (await request.get('/api/v1/orchestration/live')).json()) as string[]).map((x) => x.toLowerCase()));
-  expect(workflows.length).toBeGreaterThan(0);
-  const unplaced: string[] = [];
-  page.on('console', (m) => { if (m.text().includes("Couldn't create edge")) unplaced.push(m.text()); });
-  await openBoard(page);
-  await expect(outLine(page, `Board loaded: ${workflows.length} workflow${workflows.length === 1 ? '' : 's'}`)).toHaveCount(1);
-  await expect(page.locator('.react-flow__node-workflow')).toHaveCount(workflows.length);
-  for (const w of workflows) {
-    const f = frameOf(page, w.id);
-    await expect(f).toBeVisible();
-    await expect(f.locator('.nm')).toHaveText(w.name);
-    await expect(f.locator('.meta')).toContainText(w.version);
-    const want = live.has(w.id.toLowerCase()) ? 'Running' : 'Stopped';
-    await expect(f.locator('.state-badge'), `${w.name} state`).toHaveText(want);
-    await expect(f.locator('.frame')).toHaveClass(want === 'Running' ? /is-on/ : /is-off/);
-  }
-  expect(unplaced, 'React Flow could place every wire').toEqual([]);
+const SEED = {
+  steps: [
+    { key: 's1', name: 'e2e-board-first', at: { x: 260, y: 0 }, next: ['s2'] },
+    { key: 's2', name: 'e2e-board-second', at: { x: 560, y: 0 } },
+    { key: 'orphan', name: 'e2e-board-orphan', at: { x: 560, y: 220 } },
+  ],
+  caches: [{ key: 'c1', name: 'e2e-board-cache', at: { x: 40, y: 220 } }],
+  workflows: [{ key: 'w1', name: 'e2e-board-wf', at: { x: 0, y: 0 }, entry: ['s1'], caches: ['c1'] }],
+} as const;
+
+test('the board loads every step (orphans too), every triangle and cache, and one arrow, wire or line per link', async ({ page }) => {
+  const ids = await seed(SEED);
+  const [workflows, steps, caches] = await Promise.all([getJson<Row[]>('/workflows'), getJson<Row[]>('/steps'), getJson<Row[]>('/caches')]);
+  await openAt(page);
+  await expect(allWorkflows(page)).toHaveCount(workflows.length);
+  await expect(allSteps(page)).toHaveCount(steps.length);
+  await expect(allCaches(page)).toHaveCount(caches.length);
+  // orphans: the e2e orphan is on the board, and so is every real step no workflow reaches
+  await expect(stNode(page, ids.orphan!)).toBeVisible();
+  const entries = workflows.reduce((n, w) => n + new Set(w.entryStepIds as string[]).size, 0);
+  const lines = workflows.reduce((n, w) => n + new Set(w.cacheIds as string[]).size, 0);
+  const wires = steps.reduce((n, s) => n + new Set(s.nextStepIds as string[]).size, 0);
+  await expect(page.locator('.react-flow__edge-entry, .react-flow__edge[data-id^="entry:"]')).toHaveCount(entries);
+  await expect(page.locator('.react-flow__edge[data-id^="cache:"]')).toHaveCount(lines);
+  await expect(page.locator('.react-flow__edge[data-id^="wire:"]')).toHaveCount(wires);
+  await expect(page.locator('.react-flow__node-workflow .tri-nm', { hasText: 'e2e-board-wf' })).toBeVisible();
+  await expect(page.locator('[data-panel="inspector"]')).toContainText(`Board: ${workflows.length} workflows`);
 });
 
-test('step cards show at the first fit, every one inside its frame below the header', async ({ page, request }) => {
-  const workflows = (await (await request.get('/api/v1/workflows')).json()) as { id: string }[];
-  let graphSteps = 0;
-  for (const w of workflows) graphSteps += ((await (await request.get(`/api/v1/workflows/${w.id}/graph`)).json()) as { steps: unknown[] }).steps.length;
-  await openBoard(page);
-  const steps = page.locator('.react-flow__node-step');
-  // the graphs' steps, plus parked steps their layouts list
-  expect(await steps.count()).toBeGreaterThanOrEqual(graphSteps);
-  const report = await page.evaluate(() => {
-    const pane = document.querySelector('.react-flow')!.getBoundingClientRect();
-    const zoom = Number(/scale\(([\d.]+)\)/.exec((document.querySelector('.react-flow__viewport') as HTMLElement).style.transform)?.[1] ?? 1);
-    const all = [...document.querySelectorAll<HTMLElement>('.react-flow__node-step')];
-    const hidden: string[] = [];
-    const outside: string[] = [];
-    for (const n of all) {
-      const s = n.getBoundingClientRect();
-      const style = getComputedStyle(n);
-      const card = n.querySelector('.node')?.getBoundingClientRect();
-      if (s.width <= 0 || s.height <= 0 || !card || card.width <= 0 || style.visibility === 'hidden' || style.display === 'none'
-        || s.right < pane.left || s.left > pane.right || s.bottom < pane.top || s.top > pane.bottom) hidden.push(n.dataset.id!);
-      const [, wf] = (n.dataset.id ?? '').split(':');
-      const f = document.querySelector<HTMLElement>(`.react-flow__node-workflow[data-id="wf:${wf}"]`);
-      if (!f) { outside.push(`${n.dataset.id}: no frame`); continue; }
-      const r = f.getBoundingClientRect();
-      const tol = 1;
-      if (s.left < r.left - tol || s.right > r.right + tol || s.bottom > r.bottom + tol || s.top < r.top + 46 * zoom - tol) outside.push(n.dataset.id!);
-    }
-    return { total: all.length, hidden, outside };
+test('a triangle\'s solid arrow leaves its tip, its dashed line leaves its back, and a wire is a step\'s own', async ({ page }) => {
+  const ids = await seed(SEED);
+  await openAt(page);
+  const tri = (await wfNode(page, ids.w1!).locator('.tri-shape').boundingBox())!;
+  const entry = entryEdge(page, ids.w1!, ids.s1!);
+  const line = cacheEdge(page, ids.w1!, ids.c1!);
+  await expect(entry).toBeVisible();
+  await expect(line).toBeVisible();
+  // where each path starts, in screen px
+  const from = async (sel: string, edge: typeof entry) => edge.locator(sel).evaluate((el) => {
+    const p = el as SVGPathElement;
+    const pt = p.getPointAtLength(0);
+    const m = p.getScreenCTM()!;
+    return { x: pt.x * m.a + pt.y * m.c + m.e, y: pt.x * m.b + pt.y * m.d + m.f };
   });
-  expect(report.hidden, 'step cards not shown at the first fit').toEqual([]);
-  expect(report.outside, 'step cards outside their frame or in its header').toEqual([]);
+  const e = await from('path.entry-line', entry);
+  const c = await from('path.cache-line', line);
+  // the tip is the middle of the shape's right edge, the back the middle of its left edge
+  expect(Math.abs(e.x - (tri.x + tri.width)), 'entry arrow starts at the tip').toBeLessThan(14);
+  expect(Math.abs(e.y - (tri.y + tri.height / 2))).toBeLessThan(14);
+  expect(Math.abs(c.x - tri.x), 'cache line starts at the back').toBeLessThan(14);
+  expect(Math.abs(c.y - (tri.y + tri.height / 2))).toBeLessThan(14);
+  // solid vs dashed
+  expect(await entry.locator('path.entry-line').evaluate((el) => getComputedStyle(el).strokeDasharray)).toMatch(/^(none|)$/);
+  expect(await line.locator('path.cache-line').evaluate((el) => getComputedStyle(el).strokeDasharray)).not.toMatch(/^(none|)$/);
+  // the step-to-step wire has its letter pill and is not drawn from the triangle
+  await expect(wireEdge(page, ids.s1!, ids.s2!).locator('.pill')).toBeVisible();
+  // no arrow into the orphan, no arrow from the second step's workflow
+  await expect(entryEdge(page, ids.w1!, ids.orphan!)).toHaveCount(0);
+  await expect(page.locator(`.react-flow__edge[data-id$=":${ids.orphan}"]`)).toHaveCount(0);
 });
 
-test('frames arrive as their graphs do, then the board settles with no frame over another', async ({ page, request }) => {
-  const workflows = (await (await request.get('/api/v1/workflows')).json()) as { id: string; name: string }[];
-  test.skip(workflows.length < 2, 'needs two workflows');
-  const slow = workflows[workflows.length - 1]!;
-  let release!: () => void;
-  const held = new Promise<void>((r) => { release = r; });
-  await page.route(`**/api/v1/workflows/${slow.id}/graph`, async (route) => { await held; await route.fallback(); });
-  await page.goto('/');
-  // the others are in while one graph is held back; the board is not loaded yet
-  for (const w of workflows.slice(0, -1)) await expect(frameOf(page, w.id)).toBeVisible();
-  await expect(frameOf(page, slow.id)).toHaveCount(0);
-  await expect(outLine(page, LOADED)).toHaveCount(0);
-  release();
-  await waitLoaded(page);
-  await expect(frameOf(page, slow.id)).toBeVisible();
-  const boxes = await page.locator('.react-flow__node-workflow').evaluateAll((ns) => ns.map((n) => {
+test('the minimap marks every triangle, step and cache, and a click on a mark jumps there', async ({ page }) => {
+  const ids = await seed(SEED);
+  const [workflows, steps, caches] = await Promise.all([getJson<Row[]>('/workflows'), getJson<Row[]>('/steps'), getJson<Row[]>('/caches')]);
+  await openFitted(page);
+  const mini = page.locator('.react-flow__minimap');
+  await expect(mini).toBeVisible();
+  await expect(mini.locator('[data-mini-triangle]')).toHaveCount(workflows.length);
+  await expect(mini.locator('[data-mini-step]')).toHaveCount(steps.length);
+  await expect(mini.locator('[data-mini-cache]')).toHaveCount(caches.length);
+  await expect(mini.locator(`[data-mini-triangle="${ids.w1}"]`)).toHaveCount(1);
+  // zoom in on the throwaway triangle through the minimap: a click centres the board on it
+  const before = await page.evaluate(() => (document.querySelector('.react-flow__viewport') as HTMLElement).style.transform);
+  await mini.locator(`[data-mini-triangle="${ids.w1}"]`).click({ force: true });
+  await expect.poll(() => page.evaluate(() => (document.querySelector('.react-flow__viewport') as HTMLElement).style.transform)).not.toBe(before);
+  const pane = (await page.locator('.react-flow__pane').boundingBox())!;
+  const tri = await centre(wfNode(page, ids.w1!));
+  expect(Math.abs(tri.x - (pane.x + pane.width / 2)), 'centred across').toBeLessThan(pane.width / 4);
+  expect(Math.abs(tri.y - (pane.y + pane.height / 2)), 'centred down').toBeLessThan(pane.height / 4);
+});
+
+test('Fit puts everything on the board in view', async ({ page }) => {
+  await seed(SEED);
+  await openAt(page, { x: 0, y: 0 }, 1);
+  // zoomed in on the throwaway corner, most of the board is out of view
+  const pane = (await page.locator('.react-flow__pane').boundingBox())!;
+  const outside = async () => page.evaluate((p) => [...document.querySelectorAll('.react-flow__node')].filter((n) => {
     const r = n.getBoundingClientRect();
-    return { id: (n as HTMLElement).dataset.id!, x: r.x, y: r.y, w: r.width, h: r.height };
-  }));
-  const overlaps: string[] = [];
-  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
-    const a = boxes[i]!, b = boxes[j]!;
-    if (a.x < b.x + b.w - 0.5 && b.x < a.x + a.w - 0.5 && a.y < b.y + b.h - 0.5 && b.y < a.y + a.h - 0.5) overlaps.push(`${a.id} / ${b.id}`);
-  }
-  expect(overlaps).toEqual([]);
+    return r.left < p.x - 2 || r.top < p.y - 2 || r.right > p.x + p.width + 2 || r.bottom > p.y + p.height + 2;
+  }).length, pane);
+  expect(await outside()).toBeGreaterThan(0);
+  const z0 = await zoomOf(page);
+  // a press while React Flow is still measuring the nodes fits nothing: press again until the view changes
+  await expect(async () => {
+    await page.locator('.react-flow__controls-fitview').click();
+    await expect.poll(() => zoomOf(page), { timeout: 2000 }).toBeLessThan(z0);
+  }).toPass({ timeout: 15_000 });
+  await expect.poll(outside).toBe(0);
+  // and the controls zoom in and out
+  const z1 = await zoomOf(page);
+  await page.locator('.react-flow__controls-zoomin').click();
+  await expect.poll(() => zoomOf(page)).toBeGreaterThan(z1);
+  await page.locator('.react-flow__controls-zoomout').click();
+  await expect.poll(() => zoomOf(page)).toBeCloseTo(z1, 1);
 });
 
-test('a fresh board is unsaved only where a stored design left work, and a wobbly click on a frame picks it and moves nothing', async ({ page, stack }) => {
-  await openBoard(page);
-  const unsaved = () => page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.react-flow__node-workflow')]
-    .filter((n) => n.querySelector('.unsaved-tag')).map((n) => n.dataset.id!.slice(3)).sort());
-  expect(await unsaved()).toEqual([...stack.designed].sort());
-  for (const id of stack.designed) {
-    const name = stack.workflows.find((w) => w.id === id)!.name;
-    await expect(outLine(page, `${name}: loaded unsaved work from a save that failed`)).toHaveCount(1);
-  }
-  // a click whose pointer wobbles a few pixels picks the frame and moves nothing
-  const target = stack.workflows.find((w) => !stack.designed.includes(w.id))!;
-  const frame = frameOf(page, target.id);
-  const before = await frame.evaluate((n) => (n as HTMLElement).style.transform);
-  const b = (await frame.locator('.nm').boundingBox())!;
-  const x = b.x + b.width / 2, y = b.y + b.height / 2;
-  for (let i = 0; i < 3; i++) {
-    await page.mouse.move(x, y);
-    await page.mouse.down();
-    for (let k = 1; k <= 3; k++) await page.mouse.move(x - k, y - k);
-    await page.mouse.up();
-  }
-  expect(await unsaved()).toEqual([...stack.designed].sort());
-  expect(await frame.evaluate((n) => (n as HTMLElement).style.transform)).toBe(before);
-  await expect(page.locator('.react-flow__node-workflow.selected')).toHaveCount(1);
-  await expect(frame).toHaveClass(/selected/);
-});
-
-test.describe('minimap', () => {
-  test('names every frame; a click on one centres it at the same zoom; a picked frame is drawn in the accent', async ({ page, stack }) => {
-    await openBoard(page);
-    const mini = page.locator('.react-flow__minimap');
-    await expect(mini).toBeVisible();
-    const frames = mini.locator('g[data-mini-frame]');
-    await expect(frames).toHaveCount(stack.workflows.length);
-    for (const w of stack.workflows) await expect(mini.locator(`g[data-mini-frame="${w.id}"] title`)).toHaveText(w.name);
-    // names are written on the frames that have room (shortened with … when long)
-    expect(await mini.locator('g[data-mini-frame] text').count()).toBeGreaterThan(0);
-
-    // pick the frame farthest from the middle of the view, then jump to it from the minimap
-    const pane = (await page.locator('.react-flow').boundingBox())!;
-    const mid = { x: pane.x + pane.width / 2, y: pane.y + pane.height / 2 };
-    let far = stack.workflows[0]!, dist = -1;
-    for (const w of stack.workflows) {
-      const r = (await frameOf(page, w.id).boundingBox())!;
-      const d = Math.hypot(r.x + r.width / 2 - mid.x, r.y + r.height / 2 - mid.y);
-      if (d > dist) { dist = d; far = w; }
-    }
-    const zoom = await zoomOf(page);
-    await mini.locator(`g[data-mini-frame="${far.id}"] rect`).click();
-    await expect.poll(async () => {
-      const r = (await frameOf(page, far.id).boundingBox())!;
-      return Math.round(Math.hypot(r.x + r.width / 2 - mid.x, r.y + r.height / 2 - mid.y));
-    }).toBeLessThanOrEqual(3);
-    expect(Math.abs((await zoomOf(page)) - zoom)).toBeLessThan(0.001);
-
-    // the picked frame's outline is the theme's accent (the --accent token: #FF0072 in the light theme)
-    const rect = mini.locator(`g[data-mini-frame="${far.id}"] rect`);
-    const accent = await page.evaluate(() => {
-      const probe = document.createElement('div');
-      probe.style.color = 'var(--accent)';
-      document.body.appendChild(probe);
-      const c = getComputedStyle(probe).color;
-      probe.remove();
-      return c;
-    });
-    expect(accent).toBe('rgb(255, 0, 114)');
-    await expect(rect).not.toHaveCSS('stroke', accent);
-    await pickFrame(frameOf(page, far.id));
-    await expect(rect).toHaveCSS('stroke', accent);
-  });
+test('every item is a React Flow node of its own kind: triangles, steps and caches, none a frame', async ({ page }) => {
+  const ids = await seed(SEED);
+  await openAt(page);
+  await expect(wfNode(page, ids.w1!).locator('svg.tri-shape')).toBeVisible();
+  await expect(wfNode(page, ids.w1!).locator('.tri-st')).toHaveText(/Stopped|Checking…|Unknown/);
+  await expect(stNode(page, ids.s1!).locator('.sn')).toHaveText('e2e-board-first');
+  await expect(stNode(page, ids.s1!).locator('.sp2')).toHaveText('archive-expander');
+  await expect(caNode(page, ids.c1!).locator('.cache-nm')).toHaveText('e2e-board-cache');
+  await expect(page.locator('.react-flow__node-frame, .frame, .react-flow__node-group')).toHaveCount(0);
+  await expect(page.getByText(/^(FIRST|PARKED)$/)).toHaveCount(0);
 });

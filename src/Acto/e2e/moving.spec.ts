@@ -1,144 +1,158 @@
-import type { Locator, Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { dragBy, inspector, openEmptyBoard, pickFrame, pickStep, throwaway } from './helpers';
+import { caNode, dragBy, flowPos, inspector, openAt, pickCache, pickStep, pickWorkflow, save, stNode, wfNode } from './helpers';
+import { seed } from './seed';
+import { getJson, type Row } from './stack';
 
-// Feature 7: moving steps and frames, resizing, arrow-key nudges, Esc. Throwaway frames, never saved: nothing is sent.
+// Spec §5: dragging a triangle, step or cache moves only that item and changes only its location; several picked items drag together as one
+// undo step; a click with a wobbling hand is a click. Real mouse gestures at zoom 1.
 
-/** A node's board position as React Flow draws it (absolute, for steps too). */
-const pos = (n: Locator) => n.evaluate((el) => {
-  const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec((el as HTMLElement).style.transform);
-  return { x: Number(m?.[1]), y: Number(m?.[2]) };
-});
-/** A step's position inside its frame (the header included, as React Flow holds it). */
-const rel = async (s: Locator, f: Locator) => { const a = await pos(s); const b = await pos(f); return { x: a.x - b.x, y: a.y - b.y }; };
-const size = (n: Locator) => n.evaluate((el) => ({ w: (el as HTMLElement).offsetWidth, h: (el as HTMLElement).offsetHeight }));
-const undo = (page: Page) => inspector(page).getByRole('button', { name: 'Undo', exact: true }).click();
-const readout = (page: Page, k: string) => inspector(page).locator('dt', { hasText: new RegExp(`^${k}$`) }).locator('xpath=following-sibling::dd[1]');
-/**
- * How far a drag got from where the pointer went: React Flow starts a drag only once the pointer has moved CLICK_SLOP
- * (6 px), and the node follows from there, so it may trail the pointer by the first move (one 10th of the drag here).
- */
-const SLACK = 14;
-const near = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+const SEED = {
+  steps: [
+    { key: 's1', name: 'e2e-mov-first', at: { x: 300, y: 120 } },
+    { key: 's2', name: 'e2e-mov-second', at: { x: 600, y: 120 } },
+  ],
+  caches: [{ key: 'c1', name: 'e2e-mov-cache', at: { x: 40, y: 380 } }],
+  workflows: [{ key: 'w', name: 'e2e-mov-wf', at: { x: 0, y: 30 }, entry: ['s1'], caches: ['c1'] }],
+} as const;
 
-test('a step drags inside its frame, never into the header band, and one drag is one undo step', async ({ page }) => {
-  await openEmptyBoard(page);
-  const f = await throwaway(page, 2);
-  const s = f.steps[0]!;
-  const p0 = await rel(s, f.frame);
-  await dragBy(page, s, 120, 40);
-  await expect.poll(async () => near(await rel(s, f.frame), { x: p0.x + 120, y: p0.y + 40 })).toBeLessThanOrEqual(SLACK);
-  const p1 = await rel(s, f.frame);
-  expect(p1.x).toBeGreaterThan(p0.x + 90);
-  // dragged up past the header: it stops at the header's bottom (46 px)
-  await dragBy(page, s, 0, -400);
-  await expect.poll(async () => (await rel(s, f.frame)).y).toBe(46);
-  const fb = (await f.frame.boundingBox())!;
-  expect((await s.boundingBox())!.y).toBeGreaterThanOrEqual(fb.y + 46 - 1);
-  // each drag was one history step
-  await pickStep(s);
-  await undo(page);
-  await expect.poll(() => rel(s, f.frame)).toEqual(p1);
-  await undo(page);
-  await expect.poll(() => rel(s, f.frame)).toEqual(p0);
-});
+/** A drag moves the item by the mouse's travel less what the click slop swallowed before the drag began (up to CLICK_SLOP + a step of the move). */
+const travelled = (got: number, want: number) => {
+  expect(Math.abs(got), `moved ${got} for a drag of ${want}`).toBeLessThanOrEqual(Math.abs(want));
+  expect(Math.abs(got), `moved ${got} for a drag of ${want}`).toBeGreaterThanOrEqual(Math.abs(want) - 14);
+  expect(Math.sign(got)).toBe(Math.sign(want));
+};
 
-test('the frame drags by its body and its steps go with it', async ({ page }) => {
-  await openEmptyBoard(page);
-  const f = await throwaway(page, 1);
-  await pickFrame(f.frame);
-  const f0 = await pos(f.frame);
-  await expect(readout(page, 'Position')).toHaveText(`${Math.round(f0.x)}, ${Math.round(f0.y)}`);
-  const s0 = await rel(f.steps[0]!, f.frame);
-  const b = (await f.frame.boundingBox())!;
-  // grab the body below the step, not the header
-  await dragBy(page, f.frame, 90, 40, { x: b.width - 30, y: b.height - 15 });
-  await expect.poll(async () => near(await pos(f.frame), { x: f0.x + 90, y: f0.y + 40 })).toBeLessThanOrEqual(SLACK);
-  const f1 = await pos(f.frame);
-  expect(f1.x).toBeGreaterThan(f0.x + 60);
-  // the step stayed where it was in its frame
-  expect(await rel(f.steps[0]!, f.frame)).toEqual(s0);
-  await expect(readout(page, 'Position')).toHaveText(`${Math.round(f1.x)}, ${Math.round(f1.y)}`);
-});
+const undoBtn = (page: import('@playwright/test').Page) => inspector(page).getByRole('button', { name: 'Undo', exact: true });
 
-test('a picked frame resizes from its right edge, bottom edge and corner only, never below its content', async ({ page }) => {
-  await openEmptyBoard(page);
-  const f = await throwaway(page, 1);
-  await pickFrame(f.frame);
-  const controls = page.locator(`.react-flow__node-workflow[data-id="wf:${f.id}"] .react-flow__resize-control`);
-  await expect(controls).toHaveCount(3);
-  const classes = await controls.evaluateAll((ns) => ns.map((n) => n.className));
-  expect(classes.some((c) => /\b(top|left)\b/.test(c))).toBe(false);
-  const right = controls.and(page.locator('.line.right'));
-  const bottom = controls.and(page.locator('.line.bottom'));
-  const corner = controls.and(page.locator('.handle.bottom.right'));
-  await expect(right).toHaveCount(1); await expect(bottom).toHaveCount(1); await expect(corner).toHaveCount(1);
+test('dragging a triangle, a step and a cache moves each alone; the Inspector\'s location and the unsaved mark follow; Undo puts it back', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  const at = async () => ({ w: await flowPos(wfNode(page, id.w!)), s1: await flowPos(stNode(page, id.s1!)), s2: await flowPos(stNode(page, id.s2!)), c: await flowPos(caNode(page, id.c1!)) });
+  const start = await at();
 
-  const z0 = await size(f.frame);
-  const p0 = await pos(f.frame);
-  await dragBy(page, right, 120, 0, { x: 1, y: 40 });
-  await expect.poll(() => size(f.frame)).toEqual({ w: z0.w + 120, h: z0.h });
-  await dragBy(page, bottom, 0, 80, { x: 60, y: 1 });
-  await expect.poll(() => size(f.frame)).toEqual({ w: z0.w + 120, h: z0.h + 80 });
-  await dragBy(page, corner, 40, 30);
-  await expect.poll(() => size(f.frame)).toEqual({ w: z0.w + 160, h: z0.h + 110 });
-  await expect(readout(page, 'Size')).toHaveText(`${z0.w + 160} × ${z0.h + 110}`);
-  // its top-left never moved
-  expect(await pos(f.frame)).toEqual(p0);
-  // shrunk hard: it stops at its content (the step's right and bottom edge plus the 28 px pad)
-  const sp = await rel(f.steps[0]!, f.frame);
-  await dragBy(page, corner, -900, -900);
-  await expect.poll(async () => (await size(f.frame)).w).toBe(Math.max(420, sp.x + 210 + 28));
-  await expect.poll(async () => (await size(f.frame)).h).toBe(Math.max(196, sp.y + 92 + 28));
+  // the triangle: grabbed on its body, not a handle
+  await dragBy(page, wfNode(page, id.w!), 40, 60, { x: 60, y: 30 });
+  const a = await at();
+  travelled(a.w.x - start.w.x, 40);
+  travelled(a.w.y - start.w.y, 60);
+  expect(a.s1).toEqual(start.s1); expect(a.s2).toEqual(start.s2); expect(a.c).toEqual(start.c);
+  await expect(wfNode(page, id.w!).locator('.unsaved-mark')).toBeVisible();
+  await expect(stNode(page, id.s1!).locator('.unsaved-mark')).toHaveCount(0);
+  await pickWorkflow(page, id.w!);
+  await expect(inspector(page).locator('dt', { hasText: 'Location' }).locator('xpath=following-sibling::dd[1]'))
+    .toHaveText(`${Math.round(a.w.x)}, ${Math.round(a.w.y)}`);
+
+  // the step (by its name line, so the grab is not on a handle)
+  await dragBy(page, stNode(page, id.s2!), -70, 90, { x: 100, y: 25 });
+  const b = await at();
+  travelled(b.s2.x - a.s2.x, -70);
+  travelled(b.s2.y - a.s2.y, 90);
+  expect(b.w).toEqual(a.w); expect(b.s1).toEqual(a.s1); expect(b.c).toEqual(a.c);
+  await expect(stNode(page, id.s2!).locator('.unsaved-mark')).toBeVisible();
+
+  // the cache
+  await dragBy(page, caNode(page, id.c1!), 120, -40, { x: 80, y: 28 });
+  const c = await at();
+  travelled(c.c.x - b.c.x, 120);
+  travelled(c.c.y - b.c.y, -40);
+  expect(c.w).toEqual(b.w); expect(c.s2).toEqual(b.s2);
+  await expect(caNode(page, id.c1!).locator('.unsaved-mark')).toBeVisible();
+
+  // three drags, three undo steps, newest first
+  await undoBtn(page).click();
+  expect(await flowPos(caNode(page, id.c1!))).toEqual(b.c);
+  await undoBtn(page).click();
+  expect(await flowPos(stNode(page, id.s2!))).toEqual(a.s2);
+  await undoBtn(page).click();
+  expect(await flowPos(wfNode(page, id.w!))).toEqual(start.w);
+  await expect(page.locator('.unsaved-mark')).toHaveCount(0);
+  await expect(undoBtn(page)).toBeDisabled();
 });
 
-test('arrow keys nudge a picked step 8 px; a held key is one undo step', async ({ page }) => {
-  await openEmptyBoard(page);
-  const f = await throwaway(page, 1);
-  const s = f.steps[0]!;
-  await pickStep(s);
-  const p0 = await rel(s, f.frame);
-  await page.keyboard.press('ArrowRight');
-  await expect.poll(() => rel(s, f.frame)).toEqual({ x: p0.x + 8, y: p0.y });
-  await page.keyboard.press('ArrowDown');
-  await expect.poll(() => rel(s, f.frame)).toEqual({ x: p0.x + 8, y: p0.y + 8 });
-  // a held key: its first press, then the browser's repeats
-  await page.keyboard.down('ArrowRight');
-  for (let i = 0; i < 4; i++) {
-    await page.evaluate(() => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', repeat: true, bubbles: true, cancelable: true })));
+test('picked steps and caches drag together by the same amount, and that is one undo step; a triangle never joins', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  const at = async () => ({ w: await flowPos(wfNode(page, id.w!)), s1: await flowPos(stNode(page, id.s1!)), s2: await flowPos(stNode(page, id.s2!)), c: await flowPos(caNode(page, id.c1!)) });
+  const start = await at();
+  await pickStep(page, id.s1!);
+  await pickStep(page, id.s2!, true);
+  await pickCache(page, id.c1!, true);
+  await dragBy(page, stNode(page, id.s1!), 50, 70, { x: 100, y: 25 });
+  const moved = await at();
+  for (const k of ['s1', 's2', 'c'] as const) {
+    travelled(moved[k].x - start[k].x, 50);
+    travelled(moved[k].y - start[k].y, 70);
+    // the same amount for every one of them
+    expect(moved[k].x - start[k].x).toBe(moved.s1.x - start.s1.x);
+    expect(moved[k].y - start[k].y).toBe(moved.s1.y - start.s1.y);
   }
-  await page.keyboard.up('ArrowRight');
-  await expect.poll(() => rel(s, f.frame)).toEqual({ x: p0.x + 48, y: p0.y + 8 });
-  await undo(page);
-  await expect.poll(() => rel(s, f.frame)).toEqual({ x: p0.x + 8, y: p0.y + 8 });
-  await undo(page);
-  await expect.poll(() => rel(s, f.frame)).toEqual({ x: p0.x + 8, y: p0.y });
-  await undo(page);
-  await expect.poll(() => rel(s, f.frame)).toEqual(p0);
-  // a picked frame nudges too
-  await pickFrame(f.frame);
-  const fp = await pos(f.frame);
-  await page.keyboard.press('ArrowLeft');
-  await expect.poll(() => pos(f.frame)).toEqual({ x: fp.x - 8, y: fp.y });
+  expect(moved.w).toEqual(start.w);
+  // all three picked, one step to undo
+  await expect(page.locator('.pick-no')).toHaveCount(3);
+  await undoBtn(page).click();
+  expect(await at()).toEqual(start);
+  await expect(undoBtn(page)).toBeDisabled();
 });
 
-test('Esc during a drag puts the step back and records nothing', async ({ page }) => {
-  await openEmptyBoard(page);
-  const f = await throwaway(page, 1);
-  const s = f.steps[0]!;
-  await pickStep(s);
-  const p0 = await pos(s);
-  const undoBtn = inspector(page).getByRole('button', { name: 'Undo', exact: true });
-  await dragBy(page, s, 150, 70, undefined, false);
-  await expect.poll(async () => (await pos(s)).x).toBeGreaterThan(p0.x + 100);
+test('a click that wobbles a few pixels is a click: it picks and moves nothing; a drag past the slop moves', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  const start = await flowPos(stNode(page, id.s1!));
+  // 5 px of wobble, down and up on the step
+  await dragBy(page, stNode(page, id.s1!), 3, 4, { x: 100, y: 25 });
+  expect(await flowPos(stNode(page, id.s1!))).toEqual(start);
+  await expect(stNode(page, id.s1!).locator('.unsaved-mark')).toHaveCount(0);
+  await expect(inspector(page).locator('.ph .cnt')).toHaveText('step');
+  await expect(undoBtn(page)).toBeDisabled();
+  // the same on a triangle and a cache
+  const w0 = await flowPos(wfNode(page, id.w!));
+  await dragBy(page, wfNode(page, id.w!), 2, 3, { x: 60, y: 30 });
+  expect(await flowPos(wfNode(page, id.w!))).toEqual(w0);
+  await expect(inspector(page).locator('.ph .cnt')).toHaveText('workflow');
+  const c0 = await flowPos(caNode(page, id.c1!));
+  await dragBy(page, caNode(page, id.c1!), 3, 2, { x: 80, y: 28 });
+  expect(await flowPos(caNode(page, id.c1!))).toEqual(c0);
+  await expect(page.locator('.unsaved-mark')).toHaveCount(0);
+  // past the slop it moves
+  await dragBy(page, stNode(page, id.s1!), 20, 0, { x: 100, y: 25 });
+  travelled((await flowPos(stNode(page, id.s1!))).x - start.x, 20);
+});
+
+test('Esc during a drag puts the item back; the arrow keys nudge what is picked by 8 px, one undo step while a key repeats', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  const start = await flowPos(stNode(page, id.s2!));
+  await dragBy(page, stNode(page, id.s2!), 80, 80, { x: 100, y: 25 }, false);
   await page.keyboard.press('Escape');
-  await expect.poll(() => pos(s)).toEqual(p0);
-  const b = (await s.boundingBox())!;
-  await page.mouse.move(b.x + 200, b.y + 120, { steps: 4 });
   await page.mouse.up();
-  await expect.poll(() => pos(s)).toEqual(p0);
-  // the last undo step is still the drop of the step, not a move: Undo takes the step away
-  await undo(page);
-  await expect(page.locator(`.react-flow__node-step[data-id^="st:${f.id}:"]`)).toHaveCount(0);
-  await expect(undoBtn).toBeDisabled();
+  await expect.poll(() => flowPos(stNode(page, id.s2!))).toEqual(start);
+  await expect(page.locator('.unsaved-mark')).toHaveCount(0);
+
+  await pickStep(page, id.s2!);
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowDown');
+  const n = await flowPos(stNode(page, id.s2!));
+  expect(n.x - start.x).toBe(8);
+  expect(n.y - start.y).toBe(8);
+  await undoBtn(page).click();
+  await undoBtn(page).click();
+  expect(await flowPos(stNode(page, id.s2!))).toEqual(start);
+});
+
+test('Save keeps where things were dragged: BaseAPI holds the new locations and a reload shows them there', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  const was = { w: await flowPos(wfNode(page, id.w!)), s1: await flowPos(stNode(page, id.s1!)) };
+  await dragBy(page, wfNode(page, id.w!), 30, 100, { x: 60, y: 30 });
+  await dragBy(page, stNode(page, id.s1!), -20, 50, { x: 100, y: 25 });
+  const now = { w: await flowPos(wfNode(page, id.w!)), s1: await flowPos(stNode(page, id.s1!)) };
+  await save(page);
+  const w = await getJson<Row>(`/workflows/${id.w}`);
+  const s1 = await getJson<Row>(`/steps/${id.s1}`);
+  expect([w.boardX, w.boardY]).toEqual([now.w.x, now.w.y]);
+  expect([s1.boardX, s1.boardY]).toEqual([now.s1.x, now.s1.y]);
+  travelled(now.w.y - was.w.y, 100);
+  await page.reload();
+  expect(await flowPos(wfNode(page, id.w!))).toEqual(now.w);
+  expect(await flowPos(stNode(page, id.s1!))).toEqual(now.s1);
 });

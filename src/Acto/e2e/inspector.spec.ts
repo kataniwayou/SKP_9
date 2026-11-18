@@ -1,242 +1,198 @@
-import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import {
-  cachesOf, cacheTool, dragOnto, drawWire, field, inspector, openEmptyBoard, outLine, pickFrame, pickStep, PROC_A, throwaway, toolbar,
-  wiresOf,
-} from './helpers';
+import { caNode, field, inspector, openAt, pickCache, pickStep, pickWorkflow, saveButton, stNode, wfNode, wireEdge } from './helpers';
+import { seed } from './seed';
 
-// Feature 8: the Inspector's editors, Undo/Redo. Throwaway frames; only the "Undo back to saved" test saves one (a
-// throwaway with no processor edit). Processor and schema-slot fields are edited and undone, never saved (the guard
-// refuses a save that carries one).
+// Spec §6–§7: every field of a triangle, a step and a cache edits through the Inspector; the payload check; one undo history for the whole
+// board. Nothing is saved: edits are on the board only, and the guard would fail the test on any write.
 
-const undoBtn = (page: Page) => inspector(page).getByRole('button', { name: 'Undo', exact: true });
-const redoBtn = (page: Page) => inspector(page).getByRole('button', { name: 'Redo', exact: true });
-/** Focus off the fields (Ctrl+Z / Ctrl+Y are the browser's own while typing in one). */
-const blur = (page: Page) => inspector(page).locator('.ins-title').click();
+const SEED = {
+  steps: [
+    { key: 's1', name: 'e2e-ins-first', at: { x: 260, y: 100 }, next: ['s2'] },
+    { key: 's2', name: 'e2e-ins-second', at: { x: 560, y: 100 } },
+  ],
+  caches: [{ key: 'c1', name: 'e2e-ins-cache', at: { x: 40, y: 380 } }],
+  payloads: [
+    { key: 'p1', step: 's1', payload: '{"first":1}' },
+    { key: 'p2', step: 's2', payload: '{"second":2}' },
+  ],
+  workflows: [
+    { key: 'wa', name: 'e2e-ins-a', at: { x: 0, y: 40 }, entry: ['s1'], caches: ['c1'], payloads: ['p1', 'p2'], cron: '0 0 * * * *' },
+    { key: 'wb', name: 'e2e-ins-b', at: { x: 0, y: 220 }, entry: ['s2'] },
+  ],
+} as const;
 
-test('workflow fields: name, version, cron (with its text), description; typing in a field is one undo step', async ({ page }) => {
-  await openEmptyBoard(page);
-  const f = await throwaway(page, 2);
-  await drawWire(page, f.steps[0]!, f.steps[1]!);
-  await pickFrame(f.frame);
+const undo = (page: import('@playwright/test').Page) => inspector(page).getByRole('button', { name: 'Undo', exact: true });
+const redo = (page: import('@playwright/test').Page) => inspector(page).getByRole('button', { name: 'Redo', exact: true });
+
+test('a triangle\'s Inspector: name, version, cron with its reading, description, entry steps, caches, location and assignments', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  await pickWorkflow(page, id.wa!);
   await expect(inspector(page).locator('.ph .cnt')).toHaveText('workflow');
-  await expect(inspector(page).locator('.ins-title small')).toContainText('unsaved');
-  const name = field(page, 'Name');
-  await expect(name).toHaveValue(f.name);
-  await expect(undoBtn(page)).toBeEnabled();
-  await expect(redoBtn(page)).toBeDisabled();
+  await expect(inspector(page).locator('.ins-title b')).toHaveText('e2e-ins-a');
+  await expect(field(page, 'Name')).toHaveValue('e2e-ins-a');
+  await expect(field(page, 'Version')).toHaveValue('1.0.0');
+  await expect(field(page, 'Cron')).toHaveValue('0 0 * * * *');
+  await expect(inspector(page)).toContainText(/every hour|hourly|at minute 0|hour/i);
+  await expect(inspector(page).locator('dt', { hasText: 'Entry step' })).toHaveCount(1);
+  await expect(inspector(page).locator('dd', { hasText: 'e2e-ins-first' })).toBeVisible();
+  await expect(inspector(page).locator('dd', { hasText: 'e2e-ins-cache' })).toBeVisible();
+  await expect(inspector(page).locator('dt', { hasText: 'Location' }).locator('xpath=following-sibling::dd[1]')).toHaveText(/^-?\d+, -?\d+$/);
+  // its assignments, each naming the step it references
+  const asg = inspector(page).getByTestId('assignments');
+  await expect(asg.locator('.in-assign')).toHaveCount(2);
+  expect([...(await asg.locator('.in-assign b').allInnerTexts())].sort()).toEqual(['e2e-ins-first', 'e2e-ins-second']);
 
-  // several keystrokes in one field: one undo step
-  await name.click();
-  await name.press('End');
-  await name.pressSequentially('-renamed');
-  await expect(f.frame.locator('.nm')).toHaveText(`${f.name}-renamed`);
-  await expect(inspector(page).locator('.ph .hw')).toHaveText(`${f.name}-renamed`);
-  await undoBtn(page).click();
-  await expect(f.frame.locator('.nm')).toHaveText(f.name);
-  await expect(name).toHaveValue(f.name);
-  await expect(redoBtn(page)).toBeEnabled();
-  await redoBtn(page).click();
-  await expect(f.frame.locator('.nm')).toHaveText(`${f.name}-renamed`);
-  // the keys do the same, off the fields
-  await blur(page);
-  await page.keyboard.press('Control+z');
-  await expect(f.frame.locator('.nm')).toHaveText(f.name);
-  await page.keyboard.press('Control+y');
-  await expect(f.frame.locator('.nm')).toHaveText(`${f.name}-renamed`);
-  await page.keyboard.press('Control+z');
-  await page.keyboard.press('Control+Shift+z');
-  await expect(f.frame.locator('.nm')).toHaveText(`${f.name}-renamed`);
-
-  await field(page, 'Version').fill('2.3.4');
-  await expect(f.frame.locator('.meta')).toHaveText('2.3.4 · not scheduled');
-  await expect(inspector(page).locator('.in-note')).toHaveText('not scheduled');
+  // every field edits, each marking the triangle unsaved
+  await expect(wfNode(page, id.wa!).locator('.unsaved-mark')).toHaveCount(0);
+  await field(page, 'Name').fill('e2e-ins-a-renamed');
+  await expect(wfNode(page, id.wa!).locator('.tri-nm')).toHaveText('e2e-ins-a-renamed');
+  await expect(wfNode(page, id.wa!).locator('.unsaved-mark')).toBeVisible();
+  await field(page, 'Version').fill('2.5.1');
+  await field(page, 'Description').fill('an e2e description');
   await field(page, 'Cron').fill('0 */5 * * * *');
-  const note = inspector(page).locator('.in-note');
-  await expect(note).not.toHaveText('not scheduled');
-  await expect(note).not.toHaveText('0 */5 * * * *');
-  await expect(note).toContainText(/5 minutes/);
-  await expect(f.frame.locator('.meta')).toHaveText(`2.3.4 · ${await note.innerText()}`);
-  await field(page, 'Description').fill('made by the e2e suite');
-  await expect(field(page, 'Description')).toHaveValue('made by the e2e suite');
-  // the read-outs
-  const ro = (k: string) => inspector(page).locator('dt', { hasText: new RegExp(`^${k}$`) }).locator('xpath=following-sibling::dd[1]');
-  await expect(ro('Steps')).toHaveText('2');
-  await expect(ro('Wires')).toHaveText('1');
-  // emptying the cron unschedules it
+  await expect(inspector(page)).toContainText(/5 minutes/i);
+  await field(page, 'Cron').fill('not a cron');
+  await expect(inspector(page).locator('.in-note')).not.toContainText('not scheduled');
   await field(page, 'Cron').fill('');
-  await expect(f.frame.locator('.meta')).toHaveText('2.3.4 · not scheduled');
+  await expect(inspector(page)).toContainText('not scheduled');
+  await expect(field(page, 'Version')).toHaveValue('2.5.1');
+  await expect(field(page, 'Description')).toHaveValue('an e2e description');
+  await expect(saveButton(page)).toContainText('Save ·');
+
+  // an entry step and a cache can be removed from here: the arrow and the line go
+  await inspector(page).getByRole('button', { name: 'Remove entry e2e-ins-first' }).click();
+  await expect(page.locator(`.react-flow__edge[data-id="entry:${id.wa}:${id.s1}"]`)).toHaveCount(0);
+  await inspector(page).getByRole('button', { name: 'Remove cache e2e-ins-cache' }).click();
+  await expect(page.locator(`.react-flow__edge[data-id="cache:${id.wa}:${id.c1}"]`)).toHaveCount(0);
+  await expect(inspector(page).locator('dt', { hasText: 'Entry step' })).toHaveCount(0);
 });
 
-test('step fields: name, version, description, entry condition (every wire into it follows)', async ({ page }) => {
-  await openEmptyBoard(page);
-  const f = await throwaway(page, 2);
-  await drawWire(page, f.steps[0]!, f.steps[1]!);
-  const b = f.steps[1]!;
-  await pickStep(b);
+test('a step\'s Inspector: shared name, version, description and entry condition (which colours its wires); the processor is shown, not edited', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  await pickStep(page, id.s2!);
   await expect(inspector(page).locator('.ph .cnt')).toHaveText('step');
-  await expect(inspector(page).locator('.ins-title small')).toHaveText(`in ${f.name}`);
-  const name = field(page, 'Name');
-  await name.fill('e2e-step');
-  await expect(b.locator('.sn')).toHaveText('e2e-step');
-  await field(page, 'Version').fill('9.9.9');
-  await expect(b.locator('.nf .mt')).toHaveText('9.9.9');
-  await field(page, 'Description').fill('a step of the e2e suite');
-  await expect(field(page, 'Description')).toHaveValue('a step of the e2e suite');
+  await expect(field(page, 'Name')).toHaveValue('e2e-ins-second');
+  await expect(field(page, 'Version')).toHaveValue('1.0.0');
+  await expect(field(page, 'Description')).toHaveValue('');
+  await expect(field(page, /^Entry condition/)).toHaveValue('1');
+  // the processor section and its liveness are there (never edited by the suite)
+  await expect(inspector(page).getByText('Processor · live')).toBeVisible();
+  await expect(field(page, 'Processor name')).toHaveValue('archive-expander');
+  await expect(inspector(page).locator('dt', { hasText: 'Liveness' })).toBeVisible();
 
-  const wire = wiresOf(page, f.id).first();
-  await expect(wire.locator('g.link-wire')).toHaveAttribute('data-condition', 'Completed');
-  const cond = field(page, 'Entry condition · colours every wire into this step');
-  await expect(cond.locator('option')).toHaveText(['C · Completed', 'F · Failed', 'X · Cancelled', 'A · Always', 'N · Never']);
-  await cond.selectOption({ label: 'F · Failed' });
-  await expect(wire.locator('g.link-wire')).toHaveAttribute('data-condition', 'Failed');
-  await expect(wire.locator('text.pilltx')).toHaveText('F');
-  await expect(wire.locator('path.wire')).toHaveAttribute('stroke', '#E0482F');
-  await cond.selectOption({ label: 'A · Always' });
-  await expect(wire.locator('text.pilltx')).toHaveText('A');
-  // two changes in a row to the same field are one undo step, like typing
-  await undoBtn(page).click();
-  await expect(wire.locator('text.pilltx')).toHaveText('C');
-  await expect(cond).toHaveValue('1');
-  await redoBtn(page).click();
-  await expect(wire.locator('text.pilltx')).toHaveText('A');
-});
-
-/** A throwaway with one step, saved (so its graph, the processor's schemas with it, is read back), the step picked. */
-async function savedWithStep(page: Page) {
-  await openEmptyBoard(page);
-  const f = await throwaway(page, 1);
-  await pickFrame(f.frame);
-  const name = `e2e-insp-${Date.now()}`;
-  await field(page, 'Name').fill(name);
-  await toolbar(page, 'workflow').getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(outLine(page, `${name}: Kibana diagram published`)).toHaveCount(1);
-  await expect(f.frame.locator('.unsaved-tag')).toHaveCount(0);
-  const s = page.locator(`.react-flow__node-step[data-id^="st:${f.id}:"]`).first();
-  await pickStep(s);
-  return { ...f, name, step: s };
-}
-
-test('assignment payload: a payload the config schema refuses shows its problems and is kept; Remove assignment takes it away', async ({ page }) => {
-  const f = await savedWithStep(page);
-  const payload = field(page, 'Payload · JSON');
-  await expect(payload).toHaveValue('');
-  await expect(inspector(page).getByRole('button', { name: 'Remove assignment' })).toHaveCount(0);
-  // archive-expander-config: { maxDepth: integer >= 1 }
-  await payload.fill('{"maxDepth": 0}');
-  await expect(inspector(page).locator('.in-problem')).toContainText([/\/maxDepth: must be >= 1/]);
-  await expect(inspector(page).getByRole('button', { name: 'Remove assignment' })).toBeVisible();
-  await expect(f.frame.locator('.unsaved-tag')).toBeVisible();
-  // kept: away and back, it is still there with its problem
-  await pickFrame(f.frame);
-  await pickStep(f.step);
-  await expect(field(page, 'Payload · JSON')).toHaveValue('{"maxDepth": 0}');
-  await expect(inspector(page).locator('.in-problem').first()).toBeVisible();
-  await field(page, 'Payload · JSON').fill('{"maxDepth": 2}');
-  await expect(inspector(page).locator('.in-problem')).toHaveCount(0);
-  await inspector(page).getByRole('button', { name: 'Remove assignment' }).click();
-  await expect(field(page, 'Payload · JSON')).toHaveValue('');
-  await expect(inspector(page).getByRole('button', { name: 'Remove assignment' })).toHaveCount(0);
-  // the payload was one undo step (typing in one field), Remove assignment another: two undos are back to saved
-  await undoBtn(page).click();
-  await expect(field(page, 'Payload · JSON')).toHaveValue('{"maxDepth": 2}');
-  await undoBtn(page).click();
-  await expect(f.frame.locator('.unsaved-tag')).toHaveCount(0);
-});
-
-test('a payload that is not JSON says so, and is kept', async ({ page }) => {
-  // Was an app bug (fixed 2026-11-18): text that is not JSON showed nothing at all under the payload field.
-  const f = await savedWithStep(page);
-  await field(page, 'Payload · JSON').fill('{"maxDepth": ');
-  await pickFrame(f.frame);
-  await pickStep(f.step);
-  await expect(field(page, 'Payload · JSON')).toHaveValue('{"maxDepth": ');
-  await expect(inspector(page).locator('.in-problem, .in-note').filter({ hasText: /JSON/ })).toBeVisible({ timeout: 3000 });
-});
-
-test("a step just dropped from the toolbox has its payload checked against the processor's config schema", async ({ page }) => {
-  // Was an app bug (fixed 2026-11-18): a step added from the toolbox showed its processor's schema slots as "definition
-  // not loaded" and checked no payload until its workflow was saved; the schemas now come from BaseAPI's schema list.
-  await openEmptyBoard(page);
-  const f = await throwaway(page, 1);
-  await pickStep(f.steps[0]!);
-  // the same payload a saved workflow's step shows a problem for (the test above)
-  await field(page, 'Payload · JSON').fill('{"maxDepth": 0}');
-  await expect(inspector(page).locator('.in-problem').first()).toBeVisible({ timeout: 3000 });
-});
-
-test('cache fields: name, version, description, root, items', async ({ page }) => {
-  await openEmptyBoard(page);
-  const f = await throwaway(page, 0);
-  const fb = (await f.frame.boundingBox())!;
-  await dragOnto(page, cacheTool(page), fb.x + fb.width / 2, fb.y + fb.height / 2);
-  const chip = cachesOf(page, f.id).first();
-  await chip.click();
-  await expect(inspector(page).locator('.ph .cnt')).toHaveText('cache');
-  await expect(inspector(page).locator('.ins-title small')).toHaveText(`cache · in ${f.name}`);
-  await field(page, 'Name').fill('e2e-cache');
-  await expect(chip.locator('.cache-nm')).toHaveText('e2e-cache');
+  await field(page, 'Name').fill('e2e-ins-second-renamed');
+  await expect(stNode(page, id.s2!).locator('.sn')).toHaveText('e2e-ins-second-renamed');
   await field(page, 'Version').fill('3.0.0');
-  await field(page, 'Description').fill('a cache of the e2e suite');
-  await field(page, 'Root').fill('$.root');
-  await field(page, 'Items').fill('{"k": 1}');
-  for (const [k, v] of [['Version', '3.0.0'], ['Description', 'a cache of the e2e suite'], ['Root', '$.root'], ['Items', '{"k": 1}']] as const) {
-    await expect(field(page, k)).toHaveValue(v);
-  }
-  await expect(toolbar(page, 'cache')).toBeVisible();
+  await expect(stNode(page, id.s2!).locator('.nf .mt')).toHaveText('3.0.0');
+  await field(page, 'Description').fill('step description');
+  // the wire into this step takes the colour and letter of its entry condition
+  const pill = wireEdge(page, id.s1!, id.s2!).locator('.pilltx');
+  const was = await pill.textContent();
+  await field(page, /^Entry condition/).selectOption({ index: 2 });
+  await expect(pill).not.toHaveText(was!);
+  await expect(stNode(page, id.s2!).locator('.unsaved-mark')).toBeVisible();
+  await expect(field(page, 'Description')).toHaveValue('step description');
 });
 
-test('processor and schema-slot fields edit, and Undo takes the edit back (never saved)', async ({ page }) => {
-  const f = await savedWithStep(page);
-  const s = f.step;
-  const pname = field(page, 'Processor name');
-  await expect(pname).toHaveValue(PROC_A);
-  await pname.fill(`${PROC_A}-e2e`);
-  await expect(s.locator('.sp2')).toHaveText(`${PROC_A}-e2e`);
-  await expect(f.frame.locator('.unsaved-tag')).toBeVisible();
-  await undoBtn(page).click();
-  await expect(s.locator('.sp2')).toHaveText(PROC_A);
-  await expect(field(page, 'Processor name')).toHaveValue(PROC_A);
-  const desc = await field(page, 'Processor description').inputValue();
-  await field(page, 'Processor description').fill('changed and undone');
-  await undoBtn(page).click();
-  await expect(field(page, 'Processor description')).toHaveValue(desc);
-
-  // the Config slot: its schema's fields
-  const slot = field(page, 'Config schema name');
-  await expect(slot).toBeVisible();
-  const was = await slot.inputValue();
-  await slot.fill(`${was}-e2e`);
-  await expect(field(page, 'Config schema name')).toHaveValue(`${was}-e2e`);
-  await expect(f.frame.locator('.unsaved-tag')).toBeVisible();
-  await undoBtn(page).click();
-  await expect(field(page, 'Config schema name')).toHaveValue(was);
-  await expect(field(page, 'Config schema definition')).toBeVisible();
-  await expect(inspector(page).getByRole('button', { name: 'Clear Config' })).toBeVisible();
-  // every edit undone: back to what was saved, nothing to save
-  await expect(f.frame.locator('.unsaved-tag')).toHaveCount(0);
-  await expect(undoBtn(page)).toBeDisabled();
+test('a cache\'s Inspector: name, version, description, root and items', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  await pickCache(page, id.c1!);
+  await expect(inspector(page).locator('.ph .cnt')).toHaveText('cache');
+  await expect(field(page, 'Name')).toHaveValue('e2e-ins-cache');
+  await expect(field(page, 'Root')).toHaveValue('e2e');
+  await expect(field(page, 'Items')).toHaveValue('{}');
+  await expect(inspector(page)).toContainText('cache · e2e-ins-a');
+  await field(page, 'Name').fill('e2e-ins-cache-renamed');
+  await expect(caNode(page, id.c1!).locator('.cache-nm')).toHaveText('e2e-ins-cache-renamed');
+  await field(page, 'Version').fill('1.2.0');
+  await field(page, 'Description').fill('cache description');
+  await field(page, 'Root').fill('e2e-root');
+  await field(page, 'Items').fill('{"k": "v"}');
+  await expect(caNode(page, id.c1!).locator('.unsaved-mark')).toBeVisible();
+  await expect(field(page, 'Root')).toHaveValue('e2e-root');
+  await expect(field(page, 'Items')).toHaveValue('{"k": "v"}');
 });
 
-test('Undo back to the saved state clears the unsaved tag', async ({ page }) => {
-  await openEmptyBoard(page);
-  const f = await throwaway(page, 1);
-  await pickFrame(f.frame);
-  const name = `e2e-undo-${Date.now()}`;
-  await field(page, 'Name').fill(name);
-  await toolbar(page, 'workflow').getByRole('button', { name: 'Save', exact: true }).click();
-  // the save is done (an edit made while it runs is refused) once the diagram is published
-  await expect(outLine(page, `${name}: Kibana diagram published`)).toHaveCount(1);
-  await expect(f.frame.locator('.unsaved-tag')).toHaveCount(0);
-  await expect(undoBtn(page)).toBeDisabled();
-  await field(page, 'Description').fill('an edit to undo');
-  await expect(f.frame.locator('.unsaved-tag')).toBeVisible();
-  await expect(inspector(page).locator('.ins-title small')).toContainText('unsaved');
-  await undoBtn(page).click();
-  await expect(f.frame.locator('.unsaved-tag')).toHaveCount(0);
-  await expect(inspector(page).locator('.ins-title small')).not.toContainText('unsaved');
-  await redoBtn(page).click();
-  await expect(f.frame.locator('.unsaved-tag')).toBeVisible();
-  await undoBtn(page).click();
-  await expect(f.frame.locator('.unsaved-tag')).toHaveCount(0);
+test('the payload field checks JSON as it is typed; an assignment in the triangle\'s list edits and deletes', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  await pickWorkflow(page, id.wa!);
+  const asg = inspector(page).getByTestId('assignments');
+  const first = asg.locator('.in-assign').filter({ has: page.locator('b', { hasText: 'e2e-ins-first' }) });
+  const box = first.locator('textarea');
+  await expect(box).toHaveValue('{"first":1}');
+  await box.fill('{"first": ');
+  await expect(first.locator('.in-problem')).toContainText('Not valid JSON');
+  await box.fill('{"first": 2}');
+  await expect(first.locator('.in-problem').filter({ hasText: 'Not valid JSON' })).toHaveCount(0);
+  await expect(wfNode(page, id.wa!).locator('.unsaved-mark')).toBeVisible();
+
+  // the same payload through the step with the triangle selected
+  await pickStep(page, id.s1!);
+  await expect(field(page, 'Payload · JSON')).toHaveValue('{"first": 2}');
+  await expect(stNode(page, id.s1!).locator('.nf .mt')).toHaveText('1 key');
+  await field(page, 'Payload · JSON').fill('nope');
+  await expect(inspector(page).locator('.in-problem')).toContainText('Not valid JSON');
+  await field(page, 'Payload · JSON').fill('{"a":1,"b":2,"c":3}');
+  await expect(stNode(page, id.s1!).locator('.nf .mt')).toHaveText('3 keys');
+  // Remove assignment unlinks it
+  await inspector(page).getByRole('button', { name: 'Remove assignment' }).click();
+  await expect(stNode(page, id.s1!).locator('.nf .mt')).toHaveText('no payload');
+  await pickWorkflow(page, id.wa!);
+  await expect(asg.locator('.in-assign')).toHaveCount(1);
+  await asg.getByRole('button', { name: 'Delete' }).click();
+  await expect(inspector(page)).toContainText('No assignments.');
+});
+
+test('one undo history for the whole board: edits across two workflows undo and redo in order, from the buttons and from Ctrl+Z / Ctrl+Y', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  await expect(undo(page)).toBeDisabled();
+  await expect(redo(page)).toBeDisabled();
+  await pickWorkflow(page, id.wa!);
+  await field(page, 'Description').fill('edit one, in A');
+  await pickWorkflow(page, id.wb!);
+  await field(page, 'Description').fill('edit two, in B');
+  await pickCache(page, id.c1!);
+  await field(page, 'Root').fill('edit-three');
+  await expect(undo(page)).toBeEnabled();
+
+  // the buttons: the last edit first, whichever item it was in
+  await undo(page).click();
+  await expect(field(page, 'Root')).toHaveValue('e2e');
+  await expect(redo(page)).toBeEnabled();
+  await pickWorkflow(page, id.wb!);
+  await expect(field(page, 'Description')).toHaveValue('edit two, in B');
+  await undo(page).click();
+  await expect(field(page, 'Description')).toHaveValue('');
+  await expect(wfNode(page, id.wb!).locator('.unsaved-mark')).toHaveCount(0);
+  await pickWorkflow(page, id.wa!);
+  await expect(field(page, 'Description')).toHaveValue('edit one, in A');
+
+  // Ctrl+Z with the focus on the board (the browser keeps it while typing in a field): A's edit goes too
+  await pickWorkflow(page, id.wa!);
+  await page.keyboard.press('Control+z');
+  await expect(field(page, 'Description')).toHaveValue('');
+  await expect(undo(page)).toBeDisabled();
+  await expect(saveButton(page).or(page.locator('button.save-board'))).toBeVisible();
+
+  // and forward again: Ctrl+Y, then Ctrl+Shift+Z
+  await page.keyboard.press('Control+y');
+  await expect(field(page, 'Description')).toHaveValue('edit one, in A');
+  await page.keyboard.press('Control+y');
+  await pickWorkflow(page, id.wb!);
+  await expect(field(page, 'Description')).toHaveValue('edit two, in B');
+  await page.keyboard.press('Control+Shift+z');
+  await expect(redo(page)).toBeDisabled();
+  await pickCache(page, id.c1!);
+  await expect(field(page, 'Root')).toHaveValue('edit-three');
+
+  // a new edit after an undo drops the redo branch
+  await undo(page).click();
+  await expect(redo(page)).toBeEnabled();
+  await field(page, 'Description').fill('a new branch');
+  await expect(redo(page)).toBeDisabled();
 });

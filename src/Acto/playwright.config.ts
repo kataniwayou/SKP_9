@@ -1,10 +1,12 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// End-to-end tests (spec §9) run against the Vite dev server, which proxies /api to the live
-// BaseApi on localhost:18080 (k8s/port-forward-realstack.ps1). The stack is shared and real: every spec goes through
-// e2e/fixtures.ts, whose guard lets a write through only to a throwaway workflow the run created, never Start/Stop and
-// never a processor or schema edit; global-teardown.ts deletes whatever throwaway is left. Port 5180, so a dev server you
-// already run on 5174 is left alone.
+// End-to-end tests run against the Vite dev server, which proxies /api to the live BaseApi on localhost:18080
+// (kubectl -n skp port-forward svc/baseapi-service 18080:8080). The stack is shared and real: every row a spec makes is named
+// e2e-..., and every spec goes through e2e/fixtures.ts, whose guard lets a write through only as a board Save (/model/apply) that
+// creates e2e- rows, changes or deletes the run's own rows, or writes nothing but a real row's location; never Start/Stop, never a
+// processor or schema edit. global-setup.ts snapshots every real row; global-teardown.ts deletes whatever e2e- row is left and fails
+// the run if one remains or a real row differs from the snapshot beyond its location. Port 5180, so a dev server you already run
+// on 5174 is left alone.
 //
 // Watch it: `npm run e2e:watch` (scripts/e2e-watch.mjs) runs headed with ACTO_SLOWMO=350 ms between actions.
 const PORT = 5180;

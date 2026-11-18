@@ -1,30 +1,23 @@
-import { API, baseline, THROWAWAY_NAME } from './stack';
+import { baseline, deleteE2eRows, isE2e, readAll, realDifferences, TABLES } from './stack';
 
 /**
- * The safety net after every spec's own cleanup: a workflow that was not there when the run began, carries a throwaway
- * name and was created during the run is deleted (a 404 is fine). Pre-existing workflows are never touched. Then the
- * run says, on the console, whether the stack is back as it was.
+ * After every spec's own cleanup: every e2e- row still there is deleted through /model/apply, then the run fails loudly if
+ * any remain or if any real row differs from the baseline in a field other than its location (boardX, boardY, updatedAt).
  */
 export default async function globalTeardown() {
   const b = baseline();
-  const before = new Set(b.workflows.map((w) => w.id));
-  const list = await fetch(`${API}/workflows`);
-  if (!list.ok) { console.warn(`[acto e2e] teardown could not list workflows (${list.status})`); return; }
-  const now = (await list.json()) as { id: string; name: string; createdAt?: string }[];
-  for (const w of now) {
-    if (before.has(w.id) || !THROWAWAY_NAME.test(w.name) || (w.createdAt && w.createdAt < b.startedAt)) continue;
-    const r = await fetch(`${API}/workflows/${w.id}/delete`, { method: 'POST' });
-    console.warn(`[acto e2e] teardown deleted leftover throwaway ${w.name} (${w.id}): ${r.status}`);
+  const gone = await deleteE2eRows();
+  if (gone > 0) console.warn(`[acto e2e] teardown deleted ${gone} leftover e2e- rows`);
+  const after = await readAll();
+  const remain = TABLES.flatMap((t) => after[t].filter((r) => isE2e(r.name)).map((r) => `${t} ${r.name}`));
+  const diffs = realDifferences(b.snapshot, after);
+  const placed = TABLES.reduce((n, t) => n + after[t].filter((r) => !isE2e(r.name)).filter((r) => {
+    const was = b.snapshot[t].find((x) => x.id === r.id);
+    return was && (was.boardX !== r.boardX || was.boardY !== r.boardY);
+  }).length, 0);
+  console.log(`[acto e2e] teardown: ${TABLES.map((t) => `${after[t].length} ${t}`).join(', ')}; e2e- rows left: ${remain.length}; `
+    + `real rows changed beyond location: ${diffs.length}; real rows whose location Acto wrote: ${placed}`);
+  if (remain.length > 0 || diffs.length > 0) {
+    throw new Error(`[acto e2e] the stack is not as the run found it:\n${[...remain.map((r) => `left behind: ${r}`), ...diffs].join('\n')}`);
   }
-  const after = (await (await fetch(`${API}/workflows`)).json()) as { id: string; name: string }[];
-  const extra = after.filter((w) => !before.has(w.id));
-  const missing = b.workflows.filter((w) => !after.some((a) => a.id === w.id));
-  const designed: string[] = [];
-  for (const w of after) {
-    const g = await fetch(`${API}/workflows/${w.id}/graph`);
-    if (g.ok && ((await g.json()) as { design?: unknown }).design != null) designed.push(w.name);
-  }
-  console.log(`[acto e2e] after the run: ${after.length} workflows (${after.map((w) => w.name).join(', ')}); `
-    + `extra: ${extra.length === 0 ? 'none' : extra.map((w) => w.name).join(', ')}; missing: ${missing.length === 0 ? 'none' : missing.map((w) => w.name).join(', ')}; `
-    + `with a stored design: ${designed.length === 0 ? 'none' : designed.join(', ')}`);
 }
