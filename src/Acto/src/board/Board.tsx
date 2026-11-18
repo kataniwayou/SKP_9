@@ -83,7 +83,7 @@ function pickOfEdge(e: Edge): Pick | null {
 export function Board({ state, view, onPick, onMove, onConnect, toolbar, initialZoom, initialView, onViewChange, onDropData, bar, settled = true, focusRef, stateNow }: BoardProps) {
   const fitAtMount = useRef(settled);
   const flow = useRef<{
-    getViewport: () => Viewport; fitView: () => unknown; screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number };
+    getViewport: () => Viewport; fitView: (o?: { nodes: { id: string }[] }) => unknown; screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number };
     setCenter: (x: number, y: number, o?: { zoom?: number; duration?: number }) => unknown;
   } | null>(null);
   const stateRef = useRef(state);
@@ -105,7 +105,7 @@ export function Board({ state, view, onPick, onMove, onConnect, toolbar, initial
     if (!settled || fitAtMount.current) return;
     if (initialView !== undefined || initialZoom !== undefined) { fitAtMount.current = true; return; }
     // let React Flow measure the nodes that just arrived first
-    const raf = requestAnimationFrame(() => { fitAtMount.current = true; void flow.current?.fitView(); });
+    const raf = requestAnimationFrame(() => { fitAtMount.current = true; void flow.current?.fitView(fitOptions()); });
     return () => cancelAnimationFrame(raf);
   }, [settled, initialView, initialZoom]);
   const select = (s: Pick | null, additive = false) => {
@@ -120,6 +120,12 @@ export function Board({ state, view, onPick, onMove, onConnect, toolbar, initial
 
   // Editing: React Flow needs the nodes in state so a drag moves them before anything is committed.
   const [dragged, setDragged] = useState<Node[]>(derived);
+  // the fit looks at real items only: a ghost is not framed
+  const fitViewOptions = useMemo(() => {
+    const real = derived.filter((n) => !(n.className ?? '').split(' ').includes('ghost')).map((n) => ({ id: n.id }));
+    return real.length > 0 ? { nodes: real } : undefined;
+  }, [derived]);
+  const fitOptions = () => fitViewOptions;
   const derivedRef = useRef(derived);
   derivedRef.current = derived;
   useEffect(() => { setDragged(derived); }, [derived]);
@@ -213,6 +219,7 @@ export function Board({ state, view, onPick, onMove, onConnect, toolbar, initial
             onConnect: connect,
           } : {})}
           elementsSelectable
+          {...(fitViewOptions ? { fitViewOptions } : {})}
           minZoom={0.05}
           maxZoom={2}
           {...(initialView !== undefined ? { defaultViewport: initialView }

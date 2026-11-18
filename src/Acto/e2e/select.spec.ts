@@ -52,14 +52,14 @@ test('a triangle selects alone: it lights what it reaches and links, dims the re
   const realStep = page.locator('.react-flow__node-step').filter({ hasNotText: 'e2e-' }).first();
   await dimmed(realStep);
   // the footers: A's payload has two keys, the step after has none
-  await expect(stNode(page, id.s1!).locator('.nf .mt')).toHaveText('2 keys');
-  await expect(stNode(page, id.s2!).locator('.nf .mt')).toHaveText('no payload');
+  await expect(stNode(page, id.s1!).locator('.key-chip')).toContainText('2 key');
+  await expect(stNode(page, id.s2!).locator('.key-chip')).toHaveCount(0);
 
   // B: the same step, B's payload, and the step only A reaches dims
   await pickWorkflow(page, id.wb!);
   await expect(field(page, 'Name')).toHaveValue('e2e-sel-b');
   await lit(stNode(page, id.s1!));
-  await expect(stNode(page, id.s1!).locator('.nf .mt')).toHaveText('1 key');
+  await expect(stNode(page, id.s1!).locator('.key-chip')).toContainText('1 key');
   await lit(stNode(page, id.s2!)); // reached through the wire out of the shared step
   await dimmed(caNode(page, id.c1!));
   await dimmed(wfNode(page, id.wa!));
@@ -68,7 +68,6 @@ test('a triangle selects alone: it lights what it reaches and links, dims the re
   await clickEmptyBoard(page);
   await expect(page.locator('.react-flow__node.dim')).toHaveCount(0);
   await expect(inspector(page)).toContainText('Select a workflow, step or wire');
-  await expect(stNode(page, id.s1!).locator('.nf .mt')).toHaveText('1.0.0');
 });
 
 test('a step shows its shared fields, and with a triangle selected that triangle\'s payload; clicking a step keeps the triangle', async ({ page }) => {

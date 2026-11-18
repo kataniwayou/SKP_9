@@ -6,7 +6,7 @@ import { EdgeExtras } from './EdgeExtras';
 
 /** One wire (edge type `wire`): a 2.2 px curve in the target's entry colour, its arrowhead, the letter pill just before it. Dashes move while it runs. */
 export function LinkWire({ id, data, selected, sourceX, sourceY, targetX, targetY }: EdgeProps) {
-  const { condition, from, to, running, pick } = data as { condition: number; from: string; to: string; running: boolean; pick?: PickInfo };
+  const { condition, from, to, running, ghost = false, pick } = data as { condition: number; from: string; to: string; running: boolean; ghost?: boolean; pick?: PickInfo };
   const style = conditionStyle(condition);
   const { d, pill } = wirePath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
   // the curve's middle (its control points are symmetric): where a wire's pick number and toolbar sit
@@ -14,7 +14,7 @@ export function LinkWire({ id, data, selected, sourceX, sourceY, targetX, target
   const my = (sourceY + targetY) / 2;
   const marker = `arrow-${id}`;
   return (
-    <g className={`link-wire${selected ? ' sel' : ''}`} data-condition={style.name}>
+    <g className={`link-wire${selected ? ' sel' : ''}${ghost ? ' ghost' : ''}`} data-condition={style.name}>
       <defs>
         <marker id={marker} viewBox="0 0 10 10" refX="1" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">
           <path d="M 0 0 L 10 5 L 0 10 z" fill={style.colour} />

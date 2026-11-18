@@ -48,10 +48,10 @@ describe('live state', () => {
     };
     render(<LiveStoreProvider value={stub}><Live /></LiveStoreProvider>);
     await screen.findByText('fetch-orders');
-    expect(screen.getByText('Running')).toBeInTheDocument();
+    expect(screen.getByText('● running')).toBeInTheDocument();
     expect(document.querySelector('.wire.running')).not.toBeNull();
     act(() => stub.known([], {}));
-    expect(await screen.findAllByText('Stopped')).toHaveLength(2);
+    expect(await screen.findAllByText('■ stopped')).toHaveLength(2);
     expect(document.querySelector('.wire.running')).toBeNull();
   });
 });

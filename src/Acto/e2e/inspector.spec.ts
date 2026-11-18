@@ -85,7 +85,6 @@ test('a step\'s Inspector: shared name, version, description and entry condition
   await field(page, 'Name').fill('e2e-ins-second-renamed');
   await expect(stNode(page, id.s2!).locator('.sn')).toHaveText('e2e-ins-second-renamed');
   await field(page, 'Version').fill('3.0.0');
-  await expect(stNode(page, id.s2!).locator('.nf .mt')).toHaveText('3.0.0');
   await field(page, 'Description').fill('step description');
   // the wire into this step takes the colour and letter of its entry condition
   const pill = wireEdge(page, id.s1!, id.s2!).locator('.pilltx');
@@ -133,14 +132,14 @@ test('the payload field checks JSON as it is typed; an assignment in the triangl
   // the same payload through the step with the triangle selected
   await pickStep(page, id.s1!);
   await expect(field(page, 'Payload · JSON')).toHaveValue('{"first": 2}');
-  await expect(stNode(page, id.s1!).locator('.nf .mt')).toHaveText('1 key');
+  await expect(stNode(page, id.s1!).locator('.key-chip')).toContainText('1 key');
   await field(page, 'Payload · JSON').fill('nope');
   await expect(inspector(page).locator('.in-problem')).toContainText('Not valid JSON');
   await field(page, 'Payload · JSON').fill('{"a":1,"b":2,"c":3}');
-  await expect(stNode(page, id.s1!).locator('.nf .mt')).toHaveText('3 keys');
+  await expect(stNode(page, id.s1!).locator('.key-chip')).toContainText('3 key');
   // Remove assignment unlinks it
   await inspector(page).getByRole('button', { name: 'Remove assignment' }).click();
-  await expect(stNode(page, id.s1!).locator('.nf .mt')).toHaveText('no payload');
+  await expect(stNode(page, id.s1!).locator('.key-chip')).toHaveCount(0);
   await pickWorkflow(page, id.wa!);
   await expect(asg.locator('.in-assign')).toHaveCount(1);
   await asg.getByRole('button', { name: 'Delete' }).click();

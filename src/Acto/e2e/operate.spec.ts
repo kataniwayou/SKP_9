@@ -78,7 +78,7 @@ test('Start and Stop: a real workflow\'s toolbar offers the right one for its st
   const running = real.find((w) => w.running);
   if (stopped) {
     await pickWorkflow(page, stopped.id);
-    await expect(wfNode(page, stopped.id).locator('.tri-st')).toHaveText('Stopped');
+    await expect(wfNode(page, stopped.id).locator('.tri-st')).toHaveText('■ stopped');
     await expect(tb.getByRole('button', { name: '▶ Start', exact: true })).toBeEnabled();
     await expect(tb.getByRole('button', { name: '■ Stop', exact: true })).toHaveCount(0);
     await expect(tb.getByRole('button', { name: 'Delete', exact: true })).toBeVisible();
@@ -86,7 +86,7 @@ test('Start and Stop: a real workflow\'s toolbar offers the right one for its st
   } else test.info().annotations.push({ type: 'skipped', description: 'no stopped workflow on the stack' });
   if (running) {
     await pickWorkflow(page, running.id);
-    await expect(wfNode(page, running.id).locator('.tri-st')).toHaveText('Running');
+    await expect(wfNode(page, running.id).locator('.tri-st')).toHaveText('● running');
     await expect(tb.getByRole('button', { name: '■ Stop', exact: true })).toBeEnabled();
     await expect(tb.getByRole('button', { name: '▶ Start', exact: true })).toHaveCount(0);
   } else test.info().annotations.push({ type: 'skipped', description: 'no running workflow on the stack' });

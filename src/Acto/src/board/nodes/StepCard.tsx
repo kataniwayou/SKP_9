@@ -13,15 +13,21 @@ export function processorColour(name: string): string {
   return PALETTE[h % PALETTE.length]!;
 }
 
-/** A step: processor icon, name, processor; the footer is its version, or (with a triangle selected) that workflow's payload. */
+/**
+ * A step, React Flow UI's BaseNode look: a header row (processor square, processor name, entry-condition pill, health dot)
+ * over a border, the step's name as the body. Key chips of the selected workflows hang under the card; a running
+ * workflow reaching it draws the green ring.
+ */
 export function StepCard({ data, selected }: NodeProps) {
-  const { stepId, name, processor, processorId, running = false, chips = [], failed = false, unsaved, pick } = data as {
-    stepId: string; name: string; processor: string | null; processorId: string | null; running?: boolean; chips?: StepChip[]; failed?: boolean; unsaved?: boolean; pick?: PickInfo;
+  const { stepId, name, processor, processorId, condition = 1, running = false, chips = [], ghost = false, failed = false, unsaved, pick } = data as {
+    stepId: string; name: string; processor: string | null; processorId: string | null; condition?: number; running?: boolean; chips?: StepChip[];
+    ghost?: boolean; failed?: boolean; unsaved?: boolean; pick?: PickInfo;
   };
   const self = { kind: 'step', id: stepId } as const;
   const toolbar = useHasToolbar(self);
+  const cond = conditionStyle(condition);
   return (
-    <div className={`node${selected ? ' sel' : ''}${running ? ' running' : ''}${failed ? ' failed' : ''}`}>
+    <div className={`node${selected ? ' sel' : ''}${running ? ' running' : ''}${failed ? ' failed' : ''}${ghost ? ' ghost' : ''}`}>
       <PickBadge pick={pick} />
       <UnsavedMark on={unsaved} />
       {selected && pick?.solo && toolbar && (
@@ -29,14 +35,19 @@ export function StepCard({ data, selected }: NodeProps) {
       )}
       <Handle id="in" type="target" position={Position.Left} />
       <Handle id="out" type="source" position={Position.Right} />
-      <div className="nh">
+      <div className="bn-header">
         <span className="ico" style={{ background: processorColour(processor ?? '') }}>{(processor ?? '?').charAt(0).toUpperCase()}</span>
-        <div>
-          <div className="sn">{name}</div>
-          <div className="sp2">{processor ?? 'no processor'}</div>
-        </div>
+        <span className="sp2">{processor ?? 'no processor'}</span>
+        <span className="cond-pill" style={{ background: cond.colour }} title={cond.name}>{cond.letter}</span>
+        {!ghost && <HealthDot processorId={processorId} />}
       </div>
-      <div className="nf"><span className="mt">{chips.map((c) => <span key={c.hue} className="pay" style={{ color: c.hue, marginRight: 6 }}>{c.text}</span>)}</span><HealthDot processorId={processorId} /></div>
+      <div className="bn-body"><span className="sn">{name}</span></div>
+      {ghost && <span className="ghost-tag">deleted · ghost</span>}
+      {chips.length > 0 && (
+        <div className="key-chips">
+          {chips.map((c, i) => <span key={`${i}:${c.text}`} className="key-chip" style={{ borderColor: c.hue }}>{c.text}</span>)}
+        </div>
+      )}
     </div>
   );
 }

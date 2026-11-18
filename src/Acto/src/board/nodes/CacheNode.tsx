@@ -9,19 +9,20 @@ export const CACHE_TONE = 'var(--cache-line)';
 
 /** A cache: a block on the board. Workflows join it with a dashed line from their back (handle `in`, on top). */
 export function CacheNode({ data, selected }: NodeProps) {
-  const { cacheId, name, failed = false, unsaved, pick } = data as { cacheId: string; name: string; failed?: boolean; unsaved?: boolean; pick?: PickInfo };
+  const { cacheId, name, ghost = false, failed = false, unsaved, pick } = data as { cacheId: string; name: string; ghost?: boolean; failed?: boolean; unsaved?: boolean; pick?: PickInfo };
   const self = { kind: 'cache', id: cacheId } as const;
   const toolbar = useHasToolbar(self);
   return (
-    <div className={`cache-chip${selected ? ' sel' : ''}${failed ? ' failed' : ''}`} title={name}>
+    <div className={`cache-chip${selected ? ' sel' : ''}${failed ? ' failed' : ''}${ghost ? ' ghost' : ''}`} title={name}>
       <PickBadge pick={pick} />
       <UnsavedMark on={unsaved} />
       {selected && pick?.solo && toolbar && (
         <NodeToolbar isVisible position={Position.Top} offset={10}><ItemToolbar pick={self} /></NodeToolbar>
       )}
       <Handle id="in" type="target" position={Position.Top} />
-      <span className="cache-ico" aria-hidden="true">C</span>
+      <span className="cache-ico" aria-hidden="true">⛁</span>
       <span className="cache-nm">{name}</span>
+      {ghost && <span className="ghost-tag">deleted · ghost</span>}
     </div>
   );
 }

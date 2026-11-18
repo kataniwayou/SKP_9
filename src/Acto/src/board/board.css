@@ -34,45 +34,47 @@
 .state.checking { background: var(--dirty-bg); color: var(--dirty-ink); }
 @keyframes pulse { 50% { opacity: .3; } }
 
-/* triangle: a white shape, tip right, with the run dot inside and the name and state under it */
+/* triangle: a shape tip right (stopped = S1 slate with a ■, running = green ▶ in a spinning dashed ring), name and state under it */
 .tri { position: relative; width: 100%; height: 100%; cursor: grab; color: var(--b-ink); font-family: var(--sans); }
 .react-flow__node-workflow.dragging .tri { cursor: grabbing; }
 .tri-shape { display: block; overflow: visible; }
 .tri-body { fill: var(--b-node); stroke: var(--b-ink); stroke-width: 2.2; stroke-linejoin: round; }
+.tri.stopped .tri-body { fill: var(--stop-fill); stroke: var(--stop-line); }
 .tri-halo { fill: var(--accent-soft); }
 .tri.sel .tri-body { stroke: var(--accent); }
-.tri-dot.on { fill: var(--st-on); }
-.tri-dot.off { fill: var(--st-off); }
-.tri-dot.wait { fill: var(--st-wait); }
+.tri-stop { fill: var(--stop-line); }
+.tri-play { fill: var(--ring-run); }
+.tri-ring { fill: none; stroke: var(--ring-run); stroke-width: 2; stroke-linejoin: round; stroke-dasharray: 14 6; animation: ring-spin 1.2s linear infinite; pointer-events: none; }
+@keyframes ring-spin { to { stroke-dashoffset: -40; } }
 .tri-nm { margin-top: 8px; font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.tri-st { font: 10.5px var(--mono); }
-.tri-st.on { color: var(--run-ink); }
-.tri-st.off { color: var(--halt-ink); }
-.tri-st.wait { color: var(--dirty-ink); }
-.tri .react-flow__handle { width: 10px; height: 10px; min-width: 0; min-height: 0; border-radius: 50%; background: var(--b-node); border: 2px solid var(--b-handle); }
+.tri-st { display: inline-block; font: 10px var(--mono); border-radius: 999px; padding: 1px 8px; }
+.tri-st.on { color: var(--ink-run); padding-left: 0; }
+.tri-st.off { color: var(--stop-pill-ink); background: var(--stop-pill-bg); }
+.tri-st.wait { color: var(--stop-pill-ink); background: var(--stop-pill-bg); }
+.tri .react-flow__handle { width: 10px; height: 10px; min-width: 0; min-height: 0; border-radius: 50%; background: var(--handle-dark); border: 2px solid var(--b-node); }
 .tri:hover .react-flow__handle { border-color: var(--accent); }
 .tri .react-flow__handle { cursor: crosshair; pointer-events: all; }
 
-.react-flow__node, .react-flow__edge { transition: opacity .15s; }
-
-/* step */
-.node { position: relative; width: 100%; height: 100%; background: var(--b-node); border: 1px solid var(--b-node-line); border-radius: 12px; padding: 11px 13px; cursor: grab;
+/* step: React Flow UI's BaseNode: header row over a border, the step's name as the body */
+.node { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; background: var(--b-node); border: 1px solid var(--card-line); border-radius: 8px; cursor: grab;
   box-shadow: var(--sh-node); transition: box-shadow .15s; color: var(--b-ink); font-family: var(--sans); }
 .node:hover { box-shadow: var(--sh-node-hover); }
 .node.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--sh-node-hover); }
+.node.running { box-shadow: 0 0 0 3px var(--ring-run), var(--sh-node); }
+.node.running.sel { box-shadow: 0 0 0 3px var(--ring-run), 0 0 0 6px var(--accent-soft), var(--sh-node-hover); }
 .react-flow__node-step.dragging .node { cursor: grabbing; }
-.nh { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.nh > div { min-width: 0; }
-.ico { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--on-colour); font: 600 13px var(--mono); flex: none; }
+.bn-header { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 8px; border-bottom: 1px solid var(--card-line); }
+.bn-body { flex: 1; display: flex; align-items: center; min-width: 0; padding: 0 12px; }
+.ico { width: 16px; height: 16px; border-radius: 4px; display: grid; place-items: center; color: var(--on-colour); font: 600 10px var(--mono); flex: none; }
+.sp2 { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: var(--b-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sn { font-weight: 600; font-size: 14px; color: var(--b-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sp2 { font-size: 12px; color: var(--b-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.nf { margin-top: 9px; padding-top: 7px; border-top: 1px dashed var(--b-node-line); display: flex; justify-content: space-between; align-items: center;
-  font: 11px var(--mono); color: var(--b-muted); }
-.nf .health-dot { width: 8px; height: 8px; }
-.nf .mt.pay { color: var(--accent); }
+.cond-pill { flex: none; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px; display: grid; place-items: center; color: var(--on-colour); font: 700 10.5px var(--mono); }
+.bn-header .health-dot { width: 8px; height: 8px; flex: none; }
+.key-chips { position: absolute; left: 0; top: calc(100% + 6px); display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%; pointer-events: none; }
+.key-chip { font: 10px var(--mono); color: var(--b-ink); background: var(--b-node); border: 1px solid var(--card-line); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
 
 /* handles: 10 px circles on both sides that grow on hover */
-.node .react-flow__handle { width: 10px; height: 10px; min-width: 0; min-height: 0; border-radius: 50%; background: var(--b-node); border: 2px solid var(--b-handle);
+.node .react-flow__handle { width: 10px; height: 10px; min-width: 0; min-height: 0; border-radius: 50%; background: var(--handle-dark); border: 2px solid var(--b-node);
   transition: transform .12s, border-color .12s; }
 /* grow in place: each side keeps React Flow's own centring translate (left -50%, right +50%), so the handle stays under the pointer */
 .node:hover .react-flow__handle { border-color: var(--accent); }
@@ -91,7 +93,7 @@
 .link-wire .pilltx { font: 600 10px var(--mono); fill: var(--on-colour); pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
   .state.on::before { animation: none; }
-  .link-wire .wire.running { animation: none; }
+  .link-wire .wire.running, .entry-line.running, .tri-ring { animation: none; }
   .node { transition: none; }
 }
 
@@ -131,23 +133,40 @@
 .pick-no.inline { position: static; display: inline-block; }
 
 /* caches: blocks on the board */
-.cache-chip { display: flex; align-items: center; gap: 6px; width: 100%; height: 100%; padding: 0 8px; position: relative;
-  border: 1px solid var(--cache-line); border-radius: 14px; background: var(--cache-bg); color: var(--cache-ink); font-size: 12px; }
-.cache-chip.sel { border-color: var(--cache-sel); box-shadow: 0 0 0 2px var(--cache-halo); }
-.cache-chip .cache-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cache-chip .cache-ico { font-weight: 700; font-family: var(--mono); }
+.cache-chip { display: flex; align-items: center; gap: 6px; width: 100%; height: 100%; padding: 0 12px; position: relative; cursor: grab;
+  border: 1px solid var(--card-line); border-radius: 8px; background: var(--b-node); box-shadow: var(--sh-node); color: var(--b-ink); font-size: 13px; }
+.cache-chip.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--sh-node-hover); }
+.cache-chip .cache-nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cache-chip .cache-ico { font-family: var(--mono); color: var(--cache-line); }
 
 /* the cache block's own handle, on top */
-.cache-chip .react-flow__handle { width: 10px; height: 10px; min-width: 0; min-height: 0; border-radius: 50%; background: var(--b-node); border: 2px solid var(--b-handle); }
+.cache-chip .react-flow__handle { width: 10px; height: 10px; min-width: 0; min-height: 0; border-radius: 50%; background: var(--handle-dark); border: 2px solid var(--b-node); }
 
 /* entry arrows (solid, from the tip), cache lines (dashed, from the back) */
 .entry-edge .edge-hit, .cache-edge .edge-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; pointer-events: stroke; }
 .entry-line { stroke: var(--b-ink); stroke-width: 1.6; pointer-events: none; }
+.entry-line.running { stroke-dasharray: 7 4; animation: wire-flow .6s linear infinite; }
 .entry-head { fill: var(--b-ink); }
-.entry-edge.on .entry-line { stroke: var(--accent); stroke-width: 2.6; }
-.entry-edge.on .entry-head { fill: var(--accent); }
-.cache-line { stroke: var(--cache-line); stroke-width: 1.6; stroke-dasharray: 6 4; pointer-events: none; }
-.cache-edge.on .cache-line { stroke: var(--accent); stroke-width: 2.4; }
+.entry-edge.on .entry-line { stroke: var(--hue, var(--accent)); stroke-width: 2.6; }
+.entry-edge.on .entry-head { fill: var(--hue, var(--accent)); }
+.cache-line { stroke: var(--b-ink); stroke-width: 1.6; stroke-dasharray: 6 4; pointer-events: none; }
+.cache-edge.on .cache-line { stroke: var(--hue, var(--accent)); stroke-width: 2.4; }
+
+/* ghosts: an item deleted earlier this page session, at its last place: faded, dashed grey outline, struck-through name, a tag; wires grey and dotted */
+.react-flow__node.ghost, .react-flow__edge.ghost { opacity: .32; }
+.ghost .node, .ghost.node, .ghost .cache-chip, .ghost.cache-chip { border: 1px dashed var(--ghost-line); box-shadow: none; }
+.ghost .tri-body { fill: var(--b-node); stroke: var(--ghost-line); stroke-dasharray: 4 3; }
+.ghost .tri-stop, .ghost .tri-play { fill: var(--ghost-line); }
+.ghost .ico, .ghost .cond-pill { background: var(--ghost-line) !important; }
+.ghost .bn-body, .ghost .tri-nm, .ghost .cache-nm, .ghost .sn { text-decoration: line-through; }
+.ghost-tag { position: absolute; right: 6px; bottom: 4px; font: 9px var(--mono); color: var(--ghost-tag-ink); background: var(--ghost-tag-bg); border-radius: 999px; padding: 0 7px; white-space: nowrap; pointer-events: none; }
+.tri .ghost-tag { position: static; display: inline-block; margin-top: 2px; }
+.ghost .tri-st { display: none; }
+.link-wire.ghost .wire { stroke: var(--ghost-line); stroke-dasharray: 2 4; stroke-linecap: round; animation: none; }
+.link-wire.ghost marker path { fill: var(--ghost-line); }
+.link-wire.ghost .pill { fill: var(--ghost-line); }
+.entry-edge.ghost .entry-line, .cache-edge.ghost .cache-line { stroke: var(--ghost-line); stroke-dasharray: 2 4; stroke-linecap: round; animation: none; }
+.entry-edge.ghost .entry-head { fill: var(--ghost-line); }
 
 /* The unsaved mark: a dot in the unsaved colours, top-left inside the item */
 .unsaved-mark { position: absolute; left: 6px; top: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--dirty-ink); box-shadow: 0 0 0 3px var(--dirty-bg); z-index: 2; pointer-events: none; }

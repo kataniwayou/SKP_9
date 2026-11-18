@@ -45,4 +45,10 @@ describe('Board minimap', () => {
     fireEvent.click(mini('[data-mini-cache]')[0]!);
     expect(setCenter).toHaveBeenCalledWith(0 + 160 / 2, -100 + 56 / 2, { zoom: 0.5 });
   });
+
+  it('draws no mark for a ghost', async () => {
+    const row = { ...board().steps.lonely!, id: 'gone', name: 'gone', at: { x: 5, y: 6 } };
+    render(<Board state={board()} view={view({ ghosts: [{ key: 'step:gone', kind: 'step', row }] })} onPick={() => {}} />);
+    await vi.waitFor(() => expect(mini('[data-mini-step]')).toHaveLength(3));
+  });
 });

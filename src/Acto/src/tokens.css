@@ -32,6 +32,11 @@
   --st-on: #16A34A; --st-off: #DC2626; --st-wait: #D97706;
   --mini-frame: #EEF0F4; --mini-ink: #5D6478; --mini-mask: rgba(26, 29, 41, .05); --mini-mask-line: rgba(26, 29, 41, .55);
   --cache-bg: #FBF4DC; --cache-line: #B8A36A; --cache-ink: #4A3D10; --cache-sel: #2563EB; --cache-halo: rgba(37, 99, 235, .3);
+  /* step cards (React Flow UI BaseNode), the stopped triangle (S1), the running ring, ghosts: the board keeps its look in both themes */
+  --b-ink-2: #3F3F46; --hue: var(--accent); /* --hue: a selected workflow's colour, set inline on its arrows */
+  --card-line: #D4D4D8; --handle-dark: #1A192B; --ring-run: #22C55E; --ink-run: #15803D;
+  --stop-fill: #F1F3F7; --stop-line: #64748B; --stop-pill-bg: #E2E8F0; --stop-pill-ink: #334155;
+  --ghost-line: #94A3B8; --ghost-tag-bg: #F1F5F9; --ghost-tag-ink: #475569;
 }
 
 [data-theme="dark"] {
@@ -59,6 +64,11 @@
   --st-on: #16A34A; --st-off: #DC2626; --st-wait: #D97706;
   --mini-frame: #EEF0F4; --mini-ink: #5D6478; --mini-mask: rgba(26, 29, 41, .05); --mini-mask-line: rgba(26, 29, 41, .55);
   --cache-bg: #FBF4DC; --cache-line: #B8A36A; --cache-ink: #4A3D10; --cache-sel: #2563EB; --cache-halo: rgba(37, 99, 235, .3);
+  /* step cards (React Flow UI BaseNode), the stopped triangle (S1), the running ring, ghosts: the board keeps its look in both themes */
+  --b-ink-2: #3F3F46; --hue: var(--accent); /* --hue: a selected workflow's colour, set inline on its arrows */
+  --card-line: #D4D4D8; --handle-dark: #1A192B; --ring-run: #22C55E; --ink-run: #15803D;
+  --stop-fill: #F1F3F7; --stop-line: #64748B; --stop-pill-bg: #E2E8F0; --stop-pill-ink: #334155;
+  --ghost-line: #94A3B8; --ghost-tag-bg: #F1F5F9; --ghost-tag-ink: #475569;
 }
 
 html, body { height: 100%; margin: 0; background: var(--page); color: var(--ink); font-family: var(--sans); font-size: 14px; }

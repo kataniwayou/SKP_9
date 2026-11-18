@@ -116,7 +116,7 @@ test('every item is a React Flow node of its own kind: triangles, steps and cach
   const ids = await seed(SEED);
   await openAt(page);
   await expect(wfNode(page, ids.w1!).locator('svg.tri-shape')).toBeVisible();
-  await expect(wfNode(page, ids.w1!).locator('.tri-st')).toHaveText(/Stopped|Checking…|Unknown/);
+  await expect(wfNode(page, ids.w1!).locator('.tri-st')).toHaveText(/■ stopped|checking…/);
   await expect(stNode(page, ids.s1!).locator('.sn')).toHaveText('e2e-board-first');
   await expect(stNode(page, ids.s1!).locator('.sp2')).toHaveText('archive-expander');
   await expect(caNode(page, ids.c1!).locator('.cache-nm')).toHaveText('e2e-board-cache');

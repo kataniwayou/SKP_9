@@ -24,7 +24,7 @@ describe('Board', () => {
     show();
     const tri = (await screen.findByText('daily', { selector: '.tri-nm' })).closest('.react-flow__node') as HTMLElement;
     expect(tri).toHaveClass('react-flow__node-workflow');
-    expect(tri.querySelector('.tri-st')).toHaveTextContent('Stopped');
+    expect(tri.querySelector('.tri-st')).toHaveTextContent('■ stopped');
     expect([...tri.querySelectorAll('.react-flow__handle')].map((h) => h.getAttribute('data-handleid'))).toEqual(['tip', 'back']);
     const cache = screen.getByText('c1').closest('.react-flow__node') as HTMLElement;
     expect(cache).toHaveClass('react-flow__node-cache');
@@ -54,19 +54,80 @@ describe('Board', () => {
     show({ view: view({ workflows: ['daily'], picks: [{ kind: 'workflow', id: 'daily' }] }) });
     await screen.findByText('fetch-orders');
     expect(document.querySelectorAll('.react-flow__node.dim, .react-flow__edge.dim')).toHaveLength(0);
-    expect(screen.getByText('◆ 0 keys')).toHaveClass('pay');
+    expect(screen.getByText('◆ 0 keys')).toHaveClass('key-chip');
     expect(document.querySelector('.tri.sel')).not.toBeNull();
   });
   it('shows the run state on the triangle', async () => {
     show({ view: view({ live: (id) => (id === 'daily' ? 'running' : 'unknown') }) });
     await screen.findByText('daily', { selector: '.tri-nm' });
-    expect(screen.getByText('Running')).toBeInTheDocument();
-    expect(screen.getByText('Unknown')).toBeInTheDocument();
+    expect(screen.getByText('● running')).toBeInTheDocument();
+    expect(screen.getByText('checking…')).toBeInTheDocument();
   });
   it('marks a running workflow\'s wire as flowing', async () => {
     show({ view: view({ live: (id) => (id === 'daily' ? 'running' : 'stopped') }) });
     await screen.findByText('fetch-orders');
     expect(document.querySelector('.wire.running')).not.toBeNull();
+  });
+
+  describe('the React Flow look', () => {
+    it('draws a step as a header (processor, condition pill) over the step name, with no ring unless it runs', async () => {
+      show();
+      await screen.findByText('fetch-orders');
+      const card = screen.getByText('fetch-orders').closest('.node') as HTMLElement;
+      expect(card.querySelector('.bn-header')).toHaveTextContent('proc');
+      expect(card.querySelector('.bn-header .cond-pill')).toHaveTextContent('C');
+      expect(card.querySelector('.bn-body')).toHaveTextContent('fetch-orders');
+      expect(card).not.toHaveClass('running');
+    });
+    it('rings the steps a running workflow reaches, and animates only its entry arrows and wires', async () => {
+      show({ view: view({ live: (id) => (id === 'daily' ? 'running' : 'stopped') }) });
+      await screen.findByText('fetch-orders');
+      expect(screen.getByText('fetch-orders').closest('.node')).toHaveClass('running');
+      expect(document.querySelectorAll('.entry-line.running')).toHaveLength(1);
+      expect(document.querySelector('.cache-line.running')).toBeNull();
+      expect(document.querySelector('.wire.running')).not.toBeNull();
+    });
+    it('draws a running triangle with a ring and "● running", a stopped one S1 with a stop square, an unknown one "checking…"', async () => {
+      show({ view: view({ live: (id) => (id === 'daily' ? 'running' : id === 'hourly' ? 'stopped' : 'unknown') }) });
+      await screen.findByText('daily', { selector: '.tri-nm' });
+      const tri = (id: string) => document.querySelector(`[data-workflow="${id}"]`) as HTMLElement;
+      expect(tri('daily')).toHaveClass('running');
+      expect(tri('daily').querySelector('.tri-ring')).not.toBeNull();
+      expect(tri('daily').querySelector('.tri-st')).toHaveTextContent('● running');
+      expect(tri('hourly')).toHaveClass('stopped');
+      expect(tri('hourly').querySelector('.tri-stop')).not.toBeNull();
+      expect(tri('hourly').querySelector('.tri-ring')).toBeNull();
+      expect(tri('hourly').querySelector('.tri-st')).toHaveTextContent('■ stopped');
+    });
+    it('shows no run state "checking…" as a stopped shape', async () => {
+      show({ view: view({ live: () => 'unknown' }) });
+      await screen.findByText('daily', { selector: '.tri-nm' });
+      const t = document.querySelector('[data-workflow="daily"]') as HTMLElement;
+      expect(t).toHaveClass('stopped');
+      expect(t.querySelector('.tri-st')).toHaveTextContent('checking…');
+    });
+    it('draws a key chip with its workflow colour as border', async () => {
+      show({ view: view({ workflows: ['daily'], picks: [{ kind: 'workflow', id: 'daily' }] }) });
+      await screen.findByText('fetch-orders');
+      const chip = document.querySelector('.key-chip') as HTMLElement;
+      expect(chip).toHaveTextContent('◆ 0 keys');
+      expect(chip.style.borderColor).not.toBe('');
+    });
+    it('draws ghosts faded with their tag, and a ghost wire with the ghost class', async () => {
+      const row = { ...board().steps.lonely!, id: 'gone', name: 'gone-step', at: { x: 5, y: 6 } };
+      const ghosts = [
+        { key: 'step:gone', kind: 'step' as const, row },
+        { key: 'wire:fetch:gone', kind: 'wire' as const, from: 'fetch', to: 'gone', condition: 2 },
+      ];
+      show({ view: view({ ghosts }) });
+      const name = await screen.findByText('gone-step');
+      const g = name.closest('.react-flow__node') as HTMLElement;
+      expect(g).toHaveClass('ghost');
+      expect(g.querySelector('.bn-body')).toBeTruthy();
+      expect(g).toHaveTextContent('deleted · ghost');
+      expect(document.querySelector('.link-wire.ghost')).not.toBeNull();
+      expect(document.querySelector('.react-flow__edge.ghost')).not.toBeNull();
+    });
   });
 
   describe('picking', () => {
