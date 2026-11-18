@@ -258,6 +258,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/Caches/{id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional correlation ID for request tracking. If absent, the server generates a new 32-char hex value and echoes it on the response header. */
+                    "X-Correlation-Id"?: string;
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CacheItemsUpdateDto"];
+                    "text/json": components["schemas"]["CacheItemsUpdateDto"];
+                    "application/*+json": components["schemas"]["CacheItemsUpdateDto"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CacheReadDto"];
+                        "application/json": components["schemas"]["CacheReadDto"];
+                        "text/json": components["schemas"]["CacheReadDto"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ValidationProblemDetails"];
+                        "application/json": components["schemas"]["ValidationProblemDetails"];
+                        "text/json": components["schemas"]["ValidationProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/Caches": {
         parameters: {
             query?: never;
@@ -507,6 +577,267 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model/fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional correlation ID for request tracking. If absent, the server generates a new 32-char hex value and echoes it on the response header. */
+                    "X-Correlation-Id"?: string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ModelFieldsDto"];
+                        "application/json": components["schemas"]["ModelFieldsDto"];
+                        "text/json": components["schemas"]["ModelFieldsDto"];
+                    };
+                };
+                /** @description Not Modified */
+                304: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional correlation ID for request tracking. If absent, the server generates a new 32-char hex value and echoes it on the response header. */
+                    "X-Correlation-Id"?: string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ModelChangesDto"];
+                    "text/json": components["schemas"]["ModelChangesDto"];
+                    "application/*+json": components["schemas"]["ModelChangesDto"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ModelValidateResultDto"];
+                        "application/json": components["schemas"]["ModelValidateResultDto"];
+                        "text/json": components["schemas"]["ModelValidateResultDto"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional correlation ID for request tracking. If absent, the server generates a new 32-char hex value and echoes it on the response header. */
+                    "X-Correlation-Id"?: string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ModelChangesDto"];
+                    "text/json": components["schemas"]["ModelChangesDto"];
+                    "application/*+json": components["schemas"]["ModelChangesDto"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ModelApplyResultDto"];
+                        "application/json": components["schemas"]["ModelApplyResultDto"];
+                        "text/json": components["schemas"]["ModelApplyResultDto"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model/relations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional correlation ID for request tracking. If absent, the server generates a new 32-char hex value and echoes it on the response header. */
+                    "X-Correlation-Id"?: string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ModelRelationsDto"];
+                        "application/json": components["schemas"]["ModelRelationsDto"];
+                        "text/json": components["schemas"]["ModelRelationsDto"];
+                    };
+                };
+                /** @description Not Modified */
+                304: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workflows/{id}/molecule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional correlation ID for request tracking. If absent, the server generates a new 32-char hex value and echoes it on the response header. */
+                    "X-Correlation-Id"?: string;
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["MoleculeDto"];
+                        "application/json": components["schemas"]["MoleculeDto"];
+                        "text/json": components["schemas"]["MoleculeDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2429,6 +2760,15 @@ export interface components {
             description?: string | null;
             root?: string | null;
             items?: string | null;
+            /** Format: double */
+            boardX?: number | null;
+            /** Format: double */
+            boardY?: number | null;
+        };
+        CacheItemsUpdateDto: {
+            items?: {
+                [key: string]: string;
+            } | null;
         };
         CacheReadDto: {
             /** Format: uuid */
@@ -2444,6 +2784,10 @@ export interface components {
             updatedAt?: string;
             createdBy?: string | null;
             updatedBy?: string | null;
+            /** Format: double */
+            boardX?: number | null;
+            /** Format: double */
+            boardY?: number | null;
         };
         CacheUpdateDto: {
             name?: string | null;
@@ -2451,6 +2795,10 @@ export interface components {
             description?: string | null;
             root?: string | null;
             items?: string | null;
+            /** Format: double */
+            boardX?: number | null;
+            /** Format: double */
+            boardY?: number | null;
         };
         DesignAssignmentDto: {
             op?: string | null;
@@ -2623,6 +2971,120 @@ export interface components {
             /** Format: date-time */
             updatedAt?: string;
         };
+        ModelApplyResultDto: {
+            ok?: boolean;
+            applied?: boolean;
+            results?: components["schemas"]["ModelChangeResultDto"][] | null;
+            made?: {
+                [key: string]: string;
+            } | null;
+        };
+        ModelChangeDto: {
+            op?: string | null;
+            table?: string | null;
+            /** Format: uuid */
+            id?: string;
+            row?: unknown;
+            /** Format: date-time */
+            updatedAt?: string | null;
+        };
+        ModelChangeResultDto: {
+            /** Format: int32 */
+            index?: number;
+            op?: string | null;
+            table?: string | null;
+            /** Format: uuid */
+            id?: string;
+            ok?: boolean;
+            /** Format: int32 */
+            status?: number;
+            problem?: unknown;
+        };
+        ModelChangesDto: {
+            changes?: components["schemas"]["ModelChangeDto"][] | null;
+        };
+        ModelEntityFieldsDto: {
+            table?: string | null;
+            fields?: components["schemas"]["ModelFieldDto"][] | null;
+            unique?: components["schemas"]["ModelUniqueDto"][] | null;
+        };
+        ModelEnumValueDto: {
+            /** Format: int64 */
+            value?: number;
+            name?: string | null;
+        };
+        ModelFieldDto: {
+            field?: string | null;
+            column?: string | null;
+            type?: string | null;
+            nullable?: boolean;
+            storeType?: string | null;
+            rules?: components["schemas"]["ModelRuleDto"][] | null;
+            values?: components["schemas"]["ModelEnumValueDto"][] | null;
+        };
+        ModelFieldsDto: {
+            entities?: components["schemas"]["ModelEntityFieldsDto"][] | null;
+        };
+        ModelRelationDto: {
+            constraint?: string | null;
+            owner?: string | null;
+            column?: string | null;
+            target?: string | null;
+            onDelete?: string | null;
+            nullable?: boolean;
+            /** Format: int32 */
+            bond?: number;
+            linkSide?: string | null;
+        };
+        ModelRelationsDto: {
+            tables?: components["schemas"]["ModelTableDto"][] | null;
+            relations?: components["schemas"]["ModelRelationDto"][] | null;
+        };
+        ModelRuleDto: {
+            kind?: string | null;
+            value?: string | null;
+            message?: string | null;
+            conditional?: boolean;
+        };
+        ModelTableDto: {
+            table?: string | null;
+            kind?: string | null;
+            label?: string | null;
+        };
+        ModelUniqueDto: {
+            index?: string | null;
+            fields?: string[] | null;
+            filter?: string | null;
+        };
+        ModelValidateResultDto: {
+            ok?: boolean;
+            results?: components["schemas"]["ModelChangeResultDto"][] | null;
+        };
+        MoleculeAtomDto: {
+            table?: string | null;
+            /** Format: uuid */
+            id?: string;
+            label?: string | null;
+            columns?: {
+                [key: string]: unknown;
+            } | null;
+            omitted?: string[] | null;
+        };
+        MoleculeBondDto: {
+            constraint?: string | null;
+            link?: string | null;
+            /** Format: uuid */
+            from?: string;
+            /** Format: uuid */
+            to?: string;
+            constraints?: string[] | null;
+        };
+        MoleculeDto: {
+            /** Format: uuid */
+            workflowId?: string;
+            atoms?: components["schemas"]["MoleculeAtomDto"][] | null;
+            bonds?: components["schemas"]["MoleculeBondDto"][] | null;
+        };
         ProblemDetails: {
             type?: string | null;
             title?: string | null;
@@ -2731,6 +3193,10 @@ export interface components {
             processorId?: string;
             nextStepIds?: string[] | null;
             entryCondition?: components["schemas"]["StepEntryCondition"];
+            /** Format: double */
+            boardX?: number | null;
+            /** Format: double */
+            boardY?: number | null;
         };
         /**
          * Format: int32
@@ -2753,6 +3219,10 @@ export interface components {
             updatedAt?: string;
             createdBy?: string | null;
             updatedBy?: string | null;
+            /** Format: double */
+            boardX?: number | null;
+            /** Format: double */
+            boardY?: number | null;
         };
         StepUpdateDto: {
             name?: string | null;
@@ -2762,6 +3232,10 @@ export interface components {
             processorId?: string;
             nextStepIds?: string[] | null;
             entryCondition?: components["schemas"]["StepEntryCondition"];
+            /** Format: double */
+            boardX?: number | null;
+            /** Format: double */
+            boardY?: number | null;
         };
         ValidationProblemDetails: {
             type?: string | null;
@@ -2784,6 +3258,10 @@ export interface components {
             assignmentIds?: string[] | null;
             cacheIds?: string[] | null;
             cronExpression?: string | null;
+            /** Format: double */
+            boardX?: number | null;
+            /** Format: double */
+            boardY?: number | null;
         };
         WorkflowDeleteOutcomeDto: {
             applied?: boolean;
@@ -2831,6 +3309,10 @@ export interface components {
             updatedAt?: string;
             createdBy?: string | null;
             updatedBy?: string | null;
+            /** Format: double */
+            boardX?: number | null;
+            /** Format: double */
+            boardY?: number | null;
         };
         WorkflowUpdateDto: {
             name?: string | null;
@@ -2840,6 +3322,10 @@ export interface components {
             assignmentIds?: string[] | null;
             cacheIds?: string[] | null;
             cronExpression?: string | null;
+            /** Format: double */
+            boardX?: number | null;
+            /** Format: double */
+            boardY?: number | null;
         };
         WorkflowValidationDto: {
             valid?: boolean;

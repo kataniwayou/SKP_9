@@ -24,3 +24,10 @@ export type DesignOutcomeDto = Schemas['DesignOutcomeDto'];
 export type WorkflowDeleteOutcomeDto = Schemas['WorkflowDeleteOutcomeDto'];
 export type DesignErrorDto = Schemas['DesignErrorDto'];
 export type WorkflowValidationDto = Schemas['WorkflowValidationDto'];
+
+// The board-wide model save (BaseApi /model/validate and /model/apply).
+export type ModelChangesDto = Schemas['ModelChangesDto'];
+export type ModelChangeDto = Schemas['ModelChangeDto'];
+export type ModelChangeResultDto = Schemas['ModelChangeResultDto'];
+export type ModelApplyResultDto = Schemas['ModelApplyResultDto'];
+export type ModelValidateResultDto = Schemas['ModelValidateResultDto'];
