@@ -179,10 +179,10 @@ describe('deleting several triangles', () => {
     expect(t.store.state().workflows.hourly).toBeUndefined();
   });
 
-  it('an assignment only workflows of this delete share goes once, with the last that links it; one shared outside stays', async () => {
-    // daily and hourly share a-shared; weekly (outside the set) shares a-out with hourly only
+  // daily and hourly share a-shared; weekly (outside the set) shares a-out with hourly only
+  const sharedSet = (): BoardState => {
     const b = shared();
-    const start: BoardState = {
+    return {
       ...b,
       assignments: { ...b.assignments, 'a-out': { ...b.assignments['a-shared']!, id: 'a-out', name: 'out-assignment' } },
       workflows: {
@@ -191,21 +191,49 @@ describe('deleting several triangles', () => {
         weekly: { ...b.workflows.hourly!, id: 'weekly', name: 'weekly', assignmentIds: ['a-out'] },
       },
     };
-    const t = setup(start);
+  };
+  type Change = { table: string; id: string };
+  const appliedCalls = (t: ReturnType<typeof setup>) => t.api.applyModel.mock.calls.map((c) => (c as unknown as [Change[]])[0].map((x) => `${x.table}/${x.id}`));
+
+  it('(a) the dry runs carry no shared assignment; the confirm lists it under the last workflow linking it', async () => {
+    const t = setup(sharedSet());
     const plans = await prepareDeletes(t.studio, t.store, t.output, ['daily', 'hourly']);
-    expect(plans.map((p) => p.changes.map((c) => `${c.table}/${c.id}`))).toEqual([
-      ['workflows/daily'],
-      ['workflows/hourly', 'assignments/a-shared'],
-    ]);
+    const dry = t.api.validateModel.mock.calls.map((c) => (c as unknown as [Change[]])[0].map((x) => `${x.table}/${x.id}`));
+    expect(dry).toEqual([['workflows/daily'], ['workflows/hourly']]);
+    expect(plans.map((p) => p.changes.map((c) => `${c.table}/${c.id}`))).toEqual([['workflows/daily'], ['workflows/hourly']]);
     expect(plans.map((p) => p.lines)).toEqual([['workflow daily'], ['workflow hourly', 'assignment fetch-assignment']]);
-    expect(plans[1]!.assignmentIds).toEqual(['a-shared']);
+    expect(plans[1]!.shared!.map((x) => [x.id, x.with])).toEqual([['a-shared', ['daily']]]);
+    // the unshared-only rule is unchanged: a-out, which weekly (outside the set) links, is in no plan
+    expect(JSON.stringify(plans)).not.toContain('a-out');
+  });
+
+  it('(b) both deleted: the last apply carries the shared assignment, deleted exactly once', async () => {
+    const t = setup(sharedSet());
+    const plans = await prepareDeletes(t.studio, t.store, t.output, ['daily', 'hourly']);
     expect(await commitDeletes(t.studio, t.store, t.output, plans)).toEqual(['daily', 'hourly']);
-    const applied = t.api.applyModel.mock.calls.flatMap((c) => (c as unknown as [{ table: string; id: string }[]])[0]);
-    expect(applied.filter((c) => c.table === 'assignments').map((c) => c.id)).toEqual(['a-shared']);
-    expect((t.api.applyModel.mock.calls.at(-1) as unknown as [{ id: string }[]])[0].map((c) => c.id)).toContain('a-shared');
+    expect(appliedCalls(t)).toEqual([['workflows/daily'], ['workflows/hourly', 'assignments/a-shared']]);
     expect(t.store.state().assignments['a-shared']).toBeUndefined();
+    expect(t.store.base().assignments['a-shared']).toBeUndefined();
     expect(t.store.state().assignments['a-out']).toBeDefined();
     expect(t.store.state().workflows.weekly!.assignmentIds).toEqual(['a-out']);
+    expect(texts(t.output)).toContain('Deleted workflow hourly, assignment fetch-assignment. Its steps and caches stay');
+  });
+
+  it('(c) the first delete refused: the second apply leaves the shared assignment (still linked) and succeeds', async () => {
+    const t = setup(sharedSet());
+    const plans = await prepareDeletes(t.studio, t.store, t.output, ['daily', 'hourly']);
+    t.api.applyModel.mockResolvedValueOnce({ ok: true, value: { ok: false, applied: false, made: {}, results: [
+      { index: 0, op: 'delete', table: 'workflows', id: 'daily', ok: false, status: 409, problem: {} },
+    ] } } as never);
+    const before = t.output.lines().filter((l) => l.level === 'error').length;
+    expect(await commitDeletes(t.studio, t.store, t.output, plans)).toEqual(['hourly']);
+    expect(appliedCalls(t)).toEqual([['workflows/daily'], ['workflows/hourly']]);
+    expect(t.store.state().workflows.daily!.assignmentIds).toEqual(['a-shared']);
+    expect(t.store.state().assignments['a-shared']).toBeDefined();
+    expect(texts(t.output)).toContain('Deleted workflow hourly. Its steps and caches stay');
+    // only daily's refusal is an error; nothing about the assignment left behind
+    const errors = t.output.lines().filter((l) => l.level === 'error').slice(before).map((l) => l.text);
+    expect(errors.some((x) => x.includes('fetch-assignment'))).toBe(false);
   });
 
   it('a shared assignment stays when the later workflow is refused by its dry run', async () => {
