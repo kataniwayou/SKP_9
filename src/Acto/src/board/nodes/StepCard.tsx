@@ -46,7 +46,7 @@ export function StepCard({ data, selected }: NodeProps) {
       {ghost && <span className="ghost-tag">deleted · ghost</span>}
       {chips.length > 0 && (
         <div className="key-chips">
-          {chips.map((c, i) => <span key={`${i}:${c.text}`} className="key-chip" style={{ borderColor: c.hue }}>{c.text}</span>)}
+          {chips.map((c, i) => <span key={`${i}:${c.text}`} className="key-chip" style={{ borderColor: c.hue }} title={c.text}>{c.text}</span>)}
         </div>
       )}
     </div>

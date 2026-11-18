@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Pick, SelectionState } from '../board/selection';
 import { board } from '../design/boardFixtures';
 import type { GhostItem } from '../design/ghosts';
-import { activeTab, focusKey, formatInstant, tabsOf } from './tabs';
+import { activeTab, focusKey, formatInstant, keepChosen, tabsOf } from './tabs';
 
 const b = board();
 const noGhosts = { get: (): GhostItem | undefined => undefined };
@@ -50,6 +50,15 @@ describe('tabsOf', () => {
     expect(ids({ workflows: ['daily'], picks: [{ kind: 'workflow', id: 'daily' }, step('fetch')] })).toEqual(['step', 'processor', 'assignment:daily']);
   });
   it('nothing picked: no tabs', () => expect(ids({ workflows: [], picks: [] })).toEqual([]));
+});
+
+describe('keepChosen', () => {
+  it('keeps the chosen tab for the same pick key and drops it for any other', () => {
+    const chosen = { key: 'st:fetch', tab: 'processor' as const };
+    expect(keepChosen(chosen, 'st:fetch')).toBe(chosen);
+    expect(keepChosen(chosen, 'wf:daily')).toBeNull();
+    expect(keepChosen(null, 'st:fetch')).toBeNull();
+  });
 });
 
 describe('activeTab', () => {

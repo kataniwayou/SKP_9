@@ -65,10 +65,8 @@ test('the three tab sets: a step alone, a triangle then the step, and two Ctrl+c
   await expect(inspector(page)).toContainText('No assignment yet');
 });
 
-// BUG (Plan 6, Task 9): spec §5 "the first one opens on a new click, the chosen tab is kept while the same item stays picked". The
-// Inspector remembers the chosen tab by the focused item's key only (inspector/tabs.ts activeTab + InspectorPanel's `chosen` state), so a
-// tab chosen on a step comes back when that step is clicked again after another item was picked in between: observed Processor, expected Step.
-test.fixme('a new click on a step opens its first tab, even after a tab was chosen on it before another item was picked', async ({ page }) => {
+// Fix round 1 (B1), spec §5: the chosen tab is kept only while the same pick stays; a new pick opens the first tab.
+test('a new click on a step opens its first tab, even after a tab was chosen on it before another item was picked', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
   await pickStep(page, id.s1!);

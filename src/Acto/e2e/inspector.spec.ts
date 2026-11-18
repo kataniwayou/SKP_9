@@ -140,8 +140,7 @@ test('the payload field checks JSON as it is typed; an assignment in the triangl
   await expect(inspector(page).locator('.in-problem')).toContainText('Not valid JSON');
   await field(page, 'Payload').fill('{"a":1,"b":2,"c":3}');
   await expect(stNode(page, id.s1!).locator('.key-chip')).toContainText('3 key');
-  // Remove assignment unlinks it (the field is left first: see the fixme below)
-  await field(page, 'Payload').blur();
+  // Remove assignment unlinks it
   await inspector(page).getByRole('button', { name: 'Remove assignment' }).click();
   await expect(stNode(page, id.s1!).locator('.key-chip')).toHaveCount(0);
   await pickWorkflow(page, id.wa!);
@@ -200,11 +199,8 @@ test('one undo history for the whole board: edits across two workflows undo and 
   await expect(redo(page)).toBeDisabled();
 });
 
-// BUG (Plan 6, Task 9): JsonField shows the typed text while it has the focus and the pretty layout once it loses it, and its height follows
-// the line count. Typing a one-line payload and then clicking the button under it ("Remove assignment") blurs the field on mousedown, the
-// textarea grows to the pretty layout, the button moves down under the pointer, and the click lands on the textarea: nothing is removed.
-// Expected: the first click on Remove assignment removes the assignment.
-test.fixme('a click on Remove assignment right after typing a one-line payload removes it', async ({ page }) => {
+// Fix round 1 (B2): a click on the button right under a JSON field just typed in lands on the button (the field keeps its height on blur).
+test('a click on Remove assignment right after typing a one-line payload removes it', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
   await pickWorkflow(page, id.wa!);

@@ -60,6 +60,15 @@ describe('InspectorPanel', () => {
       rerender({ workflows: ['daily'], picks: [step('expand')] });
       expect(selectedTab()).toBe('Step');
     });
+    it('a step picked again after another pick opens on its first tab: step → triangle → the same step', () => {
+      const { rerender } = setup({ workflows: [], picks: [step('fetch')] });
+      openTab('Processor');
+      expect(selectedTab()).toBe('Processor');
+      rerender({ workflows: ['daily'], picks: [{ kind: 'workflow', id: 'daily' }] });
+      expect(selectedTab()).toBe('Workflow');
+      rerender({ workflows: ['daily'], picks: [step('fetch')] });
+      expect(selectedTab()).toBe('Step');
+    });
     it('triangles only: the Workflow tab of the last one clicked', () => {
       setup({ workflows: ['daily', 'hourly'], picks: [{ kind: 'workflow', id: 'daily' }, { kind: 'workflow', id: 'hourly' }] });
       expect(tabNames()).toEqual(['Workflow']);

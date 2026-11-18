@@ -6,7 +6,7 @@ import type { BoardStore } from '../design/boardStore';
 import type { GhostStore } from '../design/ghosts';
 import { useLive, useLiveStore } from '../live/LiveContext';
 import { statusOf } from '../live/liveState';
-import { activeTab, focusKey, focusOf, tabsOf, type Tab, type TabId } from './tabs';
+import { activeTab, focusKey, focusOf, keepChosen, tabsOf, type Tab, type TabId } from './tabs';
 import { AssignmentTab } from './tabs/AssignmentTab';
 import { CacheTab } from './tabs/CacheTab';
 import { GhostTab, ghostName } from './tabs/GhostTab';
@@ -108,6 +108,13 @@ export function InspectorPanel({ store, selection, ghosts }: { store: BoardStore
   const edit: Edit = (fn, merge) => store.edit(fn, merge);
   const focus = focusOf(selection);
   const key = focusKey(selection);
+  // a new pick forgets the chosen tab, so the item opens on its first tab even when it was picked before (spec §5)
+  const [seen, setSeen] = useState<string | null>(key);
+  if (seen !== key) {
+    setSeen(key);
+    const kept = keepChosen(chosen, key);
+    if (kept !== chosen) setChosen(kept);
+  }
   const tabs = tabsOf(selection, state, ghosts);
   const tab = activeTab(tabs, key, chosen);
   const list = selection.picks.filter((p) => p.kind !== 'workflow').length > 1;

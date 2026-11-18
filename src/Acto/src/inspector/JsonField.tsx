@@ -14,7 +14,9 @@ export function JsonField({ label, value, saved, onChange, disabled }: {
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const shown = draft !== null && sameJson(draft, value) ? draft : prettyJson(value);
-  const lines = shown.split('\n').length;
+  // as tall as the larger of what is shown and the pretty layout, so leaving the field (typed text → pretty) does not
+  // change its height and move what is under it (a click on the button below would land on the field)
+  const lines = Math.max(shown.split('\n').length, prettyJson(value).split('\n').length);
   const type = (t: string) => {
     setDraft(t);
     const next = saved !== undefined && sameJson(t, saved) ? saved : t;

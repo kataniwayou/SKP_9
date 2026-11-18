@@ -103,7 +103,8 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
     for (const w of selected) {
       const a = assignmentOf(b, w, s.id);
       if (!a) continue;
-      const suffix = selected.length > 1 ? ` · ${b.workflows[w]!.name.split('-')[0]}` : '';
+      // the full workflow name (R10): the card's width truncates it with an ellipsis, the chip's title holds it whole
+      const suffix = selected.length > 1 ? ` · ${b.workflows[w]!.name}` : '';
       chips.push({ text: chipText(a.payload, suffix), hue: hue(w)! });
     }
     nodes.push({

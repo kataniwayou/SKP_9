@@ -71,7 +71,9 @@
 .cond-pill { flex: none; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px; display: grid; place-items: center; color: var(--on-colour); font: 700 10.5px var(--mono); }
 .bn-header .health-dot { width: 8px; height: 8px; flex: none; }
 .key-chips { position: absolute; left: 0; top: calc(100% + 6px); display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%; pointer-events: none; }
-.key-chip { font: 10px var(--mono); color: var(--b-ink); background: var(--b-node); border: 1px solid var(--card-line); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.key-chip { font: 10px var(--mono); color: var(--b-ink); background: var(--b-node); border: 1px solid var(--card-line); border-radius: 999px; padding: 1px 8px; white-space: nowrap;
+  /* a long workflow name is cut at the card's width; the title shows it whole (hover reaches the chip) */
+  min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; pointer-events: auto; }
 
 /* handles: 10 px circles on both sides that grow on hover */
 .node .react-flow__handle { width: 10px; height: 10px; min-width: 0; min-height: 0; border-radius: 50%; background: var(--handle-dark); border: 2px solid var(--b-node);

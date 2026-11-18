@@ -53,6 +53,14 @@ export function tabsOf(sel: SelectionState, b: BoardState, ghosts: GhostLookup):
   }
 }
 
+/**
+ * The chosen tab as the pick moves on: kept while the same thing stays picked, dropped as soon as the pick key changes, so
+ * coming back to an item later (step → triangle → the same step) is a new pick that opens its first tab.
+ */
+export function keepChosen<C extends { key: string | null }>(chosen: C | null, key: string | null): C | null {
+  return chosen && chosen.key === key ? chosen : null;
+}
+
 /** The tab shown: the chosen one while the same thing stays picked and the tab is still there, else the first. */
 export function activeTab(tabs: readonly Tab[], key: string | null, chosen: { key: string | null; tab: TabId } | null): TabId | null {
   if (chosen && chosen.key === key && tabs.some((t) => t.id === chosen.tab)) return chosen.tab;

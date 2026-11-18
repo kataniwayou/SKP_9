@@ -57,6 +57,10 @@ describe('toFlow', () => {
     expect(chips(view())).toEqual([]);
     expect(chips(view({ workflows: ['daily'] }))).toEqual([{ text: '◆ 2 keys', hue: '#FF0072' }]);
     expect(chips(view({ workflows: ['daily', 'hourly'] }))).toEqual([{ text: '◆ 2 keys · daily', hue: '#FF0072' }, { text: '◆ payload · hourly', hue: '#7C3AED' }]);
+    // the full workflow name, dashes and all (R10)
+    const dashed = { ...c, workflows: { ...c.workflows, daily: { ...c.workflows.daily!, name: 'daily-orders-run' } } };
+    expect((toFlow(dashed, view({ workflows: ['daily', 'hourly'] })).nodes.find((n) => n.id === 'st:fetch')!.data as { chips: { text: string }[] }).chips[0]!.text)
+      .toBe('◆ 2 keys · daily-orders-run');
     const none = toFlow(c, view({ workflows: ['daily'] })).nodes.find((n) => n.id === 'st:expand')!.data as { chips: unknown };
     expect(none.chips).toEqual([]);
   });

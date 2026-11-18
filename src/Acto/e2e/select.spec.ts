@@ -67,8 +67,10 @@ test('a triangle selects with its hue: its key chips show on the steps holding i
   await expect(page.locator('.react-flow__node-workflow .tri.sel')).toHaveCount(2);
   expect(await strokeOf(wfNode(page, id.wb!).locator('.tri-body'))).toBe(PURPLE);
   await expect(chips(page, id.s1!)).toHaveCount(2);
-  await expect(chips(page, id.s1!).nth(0)).toContainText('◆ 2 keys');
-  await expect(chips(page, id.s1!).nth(1)).toContainText('◆ 1 key');
+  // each chip names its workflow in full (R10), whole in its title
+  await expect(chips(page, id.s1!).nth(0)).toHaveText('◆ 2 keys · e2e-sel-a');
+  await expect(chips(page, id.s1!).nth(1)).toHaveText('◆ 1 key · e2e-sel-b');
+  await expect(chips(page, id.s1!).nth(1)).toHaveAttribute('title', '◆ 1 key · e2e-sel-b');
   expect(await borderOf(chips(page, id.s1!).nth(1))).toBe(PURPLE);
   await nothingFaded(page);
   // Ctrl+click B again takes it out
