@@ -124,7 +124,7 @@ unsaved].
   - **Remove** drops the ghost from the board for this session ("eliminate permanently") [user]. It changes nothing
     in BaseAPI. Remove is not an undo step [call].
 - Undo of a delete brings the real item back, so its ghost disappears by itself.
-- Ghosts are not in the Save count, the Kibana SVG, the minimap's fit or the chat's board read [call].
+- Ghosts are not in the Save count, the Kibana SVG, the minimap's marks, Fit or the chat's board read [call]. The minimap's extent may still reach a ghost: React Flow's `<MiniMap>` bounds skip only hidden nodes, and hiding a ghost would take it off the board [call, 2026-11-18].
 
 ## 7. Testing
 

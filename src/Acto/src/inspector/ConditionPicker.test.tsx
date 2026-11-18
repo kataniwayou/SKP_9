@@ -39,6 +39,14 @@ describe('ConditionPicker', () => {
     });
   });
 
+  it('a press on the list padding inside a field label keeps the list open', () => {
+    render(<label><span>Entry condition</span><ConditionPicker id="ec2" label="Entry condition" value="1" onChange={() => {}} /></label>);
+    fireEvent.click(screen.getByRole('combobox'));
+    const list = screen.getByRole('listbox');
+    fireEvent.mouseDown(list);
+    fireEvent.click(list);
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+  });
   it('picks with a click and closes', () => {
     const onChange = vi.fn();
     render(<Harness onChange={onChange} />);

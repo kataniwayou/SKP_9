@@ -86,7 +86,9 @@ export function ConditionPicker({ id, label, value, invalid, onChange }: {
         <span className="cp-chev" aria-hidden="true">▾</span>
       </button>
       {open && (
-        <div role="listbox" id={listId} className="cp-list" aria-label="Entry conditions">
+        <div role="listbox" id={listId} className="cp-list" aria-label="Entry conditions"
+          // a press on the list's padding keeps the button's focus, and (inside a field's label) sends it no click
+          onMouseDown={(e) => e.preventDefault()} onClick={(e) => e.preventDefault()}>
           {CONDITIONS.map((c, i) => (
             <div
               key={c.value}

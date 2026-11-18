@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { Pick } from '../board/selection';
 import { createBoardStore, type BoardStore } from '../design/boardStore';
 import { createGhostStore, type GhostStore } from '../design/ghosts';
@@ -28,6 +28,9 @@ const step = (id: string): Pick => ({ kind: 'step', id });
 // getByDisplayValue collapses whitespace: the pretty payload as it matches
 const SHARED = '{ "shared": true }';
 const payloadOf = (s: BoardStore, wf: string) => s.state().assignments[s.state().workflows[wf]!.assignmentIds[0]!]!.payload;
+
+// the show-all toggle is remembered in sessionStorage: each test starts closed
+afterEach(() => sessionStorage.clear());
 
 describe('InspectorPanel', () => {
   it('summarises the board when nothing is selected', () => {
