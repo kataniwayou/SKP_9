@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore } from 'react';
 import { pickKey } from '../board/picks';
 import type { Pick } from '../board/selection';
-import type { BoardState } from '../design/board';
+import type { BoardState, Slot } from '../design/board';
 import type { BoardStore } from '../design/boardStore';
 import type { GhostStore } from '../design/ghosts';
 import { useLive, useLiveStore } from '../live/LiveContext';
@@ -12,6 +12,7 @@ import { CacheTab } from './tabs/CacheTab';
 import { GhostTab, ghostName } from './tabs/GhostTab';
 import { LinkTab } from './tabs/LinkTab';
 import { ProcessorTab } from './tabs/ProcessorTab';
+import { SchemaTab } from './tabs/SchemaTab';
 import { stepName, type Edit } from './tabs/shared';
 import { StepTab } from './tabs/StepTab';
 import { WorkflowTab } from './tabs/WorkflowTab';
@@ -92,6 +93,7 @@ function TabBody({ tab, focus, state, base, edit, ghosts }: { tab: TabId; focus:
   if (focus.kind !== 'step') return null;
   if (tab === 'step') return <StepTab {...ctx} id={focus.id} />;
   if (tab === 'processor') return <ProcessorTab {...ctx} stepId={focus.id} />;
+  if (tab === 'schema:input' || tab === 'schema:output' || tab === 'schema:config') return <SchemaTab {...ctx} stepId={focus.id} slot={tab.slice('schema:'.length) as Slot} />;
   if (tab.startsWith('assignment:')) return <AssignmentTab {...ctx} stepId={focus.id} workflowId={tab.slice('assignment:'.length)} />;
   return null;
 }

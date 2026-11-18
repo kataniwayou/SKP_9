@@ -2,11 +2,18 @@ import { hueOf } from '../board/hues';
 import { pickKey } from '../board/picks';
 import type { Pick as BoardPick, SelectionState } from '../board/selection';
 import type { BoardState } from '../design/board';
-import { reachOf } from '../design/board';
+import { reachOf, SLOT_FIELD, type Slot } from '../design/board';
 import type { GhostStore } from '../design/ghosts';
 
-/** One Inspector tab (spec §5). `assignment:<workflow id>` is that workflow's payload on the picked step. */
-export type TabId = 'workflow' | 'step' | 'processor' | 'cache' | 'link' | 'ghost' | `assignment:${string}`;
+/**
+ * One Inspector tab (spec §5). `schema:<slot>` is the schema in that slot of the picked step's processor;
+ * `assignment:<workflow id>` is that workflow's payload on the picked step.
+ */
+export type TabId = 'workflow' | 'step' | 'processor' | 'cache' | 'link' | 'ghost' | `schema:${Slot}` | `assignment:${string}`;
+
+/** The processor's slots in tab order, and their tab labels. */
+export const SLOTS: readonly Slot[] = ['input', 'output', 'config'];
+export const SLOT_LABEL: Readonly<Record<Slot, string>> = { input: 'Input schema', output: 'Output schema', config: 'Config schema' };
 export interface Tab { id: TabId; label: string; hue?: string }
 
 type GhostLookup = Pick<GhostStore, 'get'>;
@@ -43,6 +50,10 @@ export function tabsOf(sel: SelectionState, b: BoardState, ghosts: GhostLookup):
     case 'step': {
       if (!b.steps[f.id]) return [];
       const tabs: Tab[] = [{ id: 'step', label: 'Step' }, { id: 'processor', label: 'Processor' }];
+      // a schema tab per slot of the step's processor that holds a schema [user, 2026-11-18]
+      const pid = b.steps[f.id]!.processorId;
+      const processor = pid === null ? undefined : b.processors[pid];
+      if (processor) for (const slot of SLOTS) if (processor[SLOT_FIELD[slot]] !== null) tabs.push({ id: `schema:${slot}`, label: SLOT_LABEL[slot] });
       for (const wf of sel.workflows) {
         const w = b.workflows[wf];
         if (!w || !reachOf(b, wf).has(f.id)) continue;

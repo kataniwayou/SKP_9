@@ -25,6 +25,16 @@ describe('tabsOf', () => {
     expect(tabsOf({ workflows: ['daily', 'hourly'], picks: [step('expand')] }, cut, noGhosts).map((t) => t.id))
       .toEqual(['step', 'processor', 'assignment:daily']);
   });
+  it('a step whose processor holds input and config schemas: a schema tab for each, after Processor [user, 2026-11-18]', () => {
+    const withSlots = { ...b, processors: { p1: { ...b.processors.p1!, inputSchemaId: 's-in', configSchemaId: 's-cfg' } } };
+    const tabs = tabsOf({ workflows: ['daily', 'hourly'], picks: [step('fetch')] }, withSlots, noGhosts);
+    expect(tabs.map((t) => t.id)).toEqual(['step', 'processor', 'schema:input', 'schema:config', 'assignment:daily', 'assignment:hourly']);
+    expect(tabs.slice(2, 4).map((t) => [t.label, t.hue])).toEqual([['Input schema', undefined], ['Config schema', undefined]]);
+  });
+  it('a step without a processor: Step and Processor only', () => {
+    const bare = { ...b, steps: { ...b.steps, fetch: { ...b.steps.fetch!, processorId: null } } };
+    expect(tabsOf({ workflows: [], picks: [step('fetch')] }, bare, noGhosts).map((t) => t.id)).toEqual(['step', 'processor']);
+  });
   it('triangles only: the Workflow tab, for the last one clicked', () => {
     const sel: SelectionState = { workflows: ['daily', 'hourly'], picks: [{ kind: 'workflow', id: 'daily' }, { kind: 'workflow', id: 'hourly' }] };
     expect(ids(sel)).toEqual(['workflow']);

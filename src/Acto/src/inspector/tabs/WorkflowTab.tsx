@@ -7,10 +7,9 @@ import { useWorkflowStatus } from '../../live/LiveContext';
 import { payloadKeyCount } from '../../model/assignments';
 import { cronText } from '../../model/cronText';
 import type { Id } from '../../model/graph';
-import { AreaField, Ro, Row, Sec, TextField } from '../fields';
+import { Ro, Row, Sec, TextField } from '../fields';
 import { JsonField } from '../JsonField';
-import { MetaToggle } from '../MetaToggle';
-import { EntityHead, metaOfRow, orNull, PayloadCheckNote, stepName, type Ctx } from './shared';
+import { EntityBase, locationText, metaOfRow, orNull, PayloadCheckNote, stepName, type Ctx } from './shared';
 
 const keysText = (payload: string) => {
   const n = payloadKeyCount(payload);
@@ -33,13 +32,11 @@ export function WorkflowTab({ state, base, edit, id }: Ctx & { id: Id }) {
   });
   return (
     <>
-      <EntityHead name={`${w.name} ${w.version}`} kind={`workflow · ${run}`} />
-      <TextField key={`${id}:name`} label="Name" value={w.name} onChange={(v) => set('name', v)} />
-      <TextField key={`${id}:version`} label="Version" value={w.version} onChange={(v) => set('version', v)} />
-      <MetaToggle meta={metaOfRow(w)} />
-      <AreaField key={`${id}:description`} label="Description" rows={2} value={w.description ?? ''} onChange={(v) => set('description', orNull(v))} />
+      <EntityBase head={`${w.name} ${w.version}`} kind={`workflow · ${run}`} k={id} row={w} meta={metaOfRow(w)} set={set} />
       <TextField key={`${id}:cron`} label="Cron" value={w.cronExpression} onChange={(v) => set('cronExpression', orNull(v))} />
       <p className="in-note sub">{parsed === null ? 'not scheduled' : 'text' in parsed ? parsed.text : w.cronExpression}</p>
+      <Sec>Related</Sec>
+      <Ro><Row k="Location">{locationText(w.at)}</Row></Ro>
       <Sec>Entry steps</Sec>
       <div className="chips">
         {w.entryStepIds.length === 0 && <span className="none">none</span>}
@@ -60,7 +57,6 @@ export function WorkflowTab({ state, base, edit, id }: Ctx & { id: Id }) {
         ))}
       </div>
       <p className="in-note">Drag from the triangle&apos;s back to any cache to link another; ✕ unlinks.</p>
-      <Ro><Row k="Location">{w.at ? `${Math.round(w.at.x)}, ${Math.round(w.at.y)}` : 'not placed'}</Row></Ro>
       <Sec>Assignments</Sec>
       <div data-testid="assignments">
         {assignments.length === 0 && <p className="none">No assignments.</p>}

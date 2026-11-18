@@ -2,7 +2,8 @@ import { test, expect } from './fixtures';
 import { field, inspector, openAt, payloadOf, pickStep, pickWorkflow, stNode, tab, tabLabels, wfNode, wireEdge } from './helpers';
 import { seed } from './seed';
 
-// Plan 6 (inspector-tabs spec §5): the Inspector's tabs follow what is picked: a step alone has Step · Processor; with selected workflows a
+// Plan 6 (inspector-tabs spec §5): the Inspector's tabs follow what is picked: a step alone has Step · Processor · a tab per schema its
+// processor holds; with selected workflows a
 // tab per workflow whose stream holds the step. "▸ show all" reveals the five metadata rows; JSON is shown pretty; the entry condition is
 // Studio's picker. Nothing is saved (the guard fails the test on any write): processor and schema fields are only read.
 
@@ -27,9 +28,9 @@ test('the three tab sets: a step alone, a triangle then the step, and two Ctrl+c
   const id = await seed(SEED);
   await openAt(page);
 
-  // a step alone: Step · Processor, Step open
+  // a step alone: Step · Processor · its three schemas, Step open
   await pickStep(page, id.s1!);
-  await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'Input schema', 'Output schema', 'Config schema']);
   await expect(tab(page, 'Step')).toHaveAttribute('aria-selected', 'true');
   await expect(field(page, 'Name')).toHaveValue('e2e-tab-shared');
   await tab(page, 'Processor').click();
@@ -40,7 +41,7 @@ test('the three tab sets: a step alone, a triangle then the step, and two Ctrl+c
   await pickWorkflow(page, id.wa!);
   await expect(tabLabels(page)).toHaveText(['Workflow']);
   await pickStep(page, id.s1!);
-  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'e2e-tab-a']);
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'Input schema', 'Output schema', 'Config schema', 'e2e-tab-a']);
   expect(await tab(page, 'e2e-tab-a').locator('.dot').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(255, 0, 114)');
   await expect(await payloadOf(page, 'e2e-tab-a')).toHaveValue(JSON.stringify({ from: 'a', n: 1 }, null, 2));
   await expect(inspector(page).locator('.kind')).toHaveText('assignment · belongs to e2e-tab-a');
@@ -52,7 +53,7 @@ test('the three tab sets: a step alone, a triangle then the step, and two Ctrl+c
   await expect(tabLabels(page)).toHaveText(['Workflow']); // the last triangle clicked
   await expect(field(page, 'Name')).toHaveValue('e2e-tab-b');
   await pickStep(page, id.s1!);
-  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'e2e-tab-a', 'e2e-tab-b']);
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'Input schema', 'Output schema', 'Config schema', 'e2e-tab-a', 'e2e-tab-b']);
   expect(await tab(page, 'e2e-tab-b').locator('.dot').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(124, 58, 237)');
   await expect(await payloadOf(page, 'e2e-tab-a')).toHaveValue(JSON.stringify({ from: 'a', n: 1 }, null, 2));
   await expect(await payloadOf(page, 'e2e-tab-b')).toHaveValue(JSON.stringify({ only: 'b' }, null, 2));
@@ -60,7 +61,7 @@ test('the three tab sets: a step alone, a triangle then the step, and two Ctrl+c
   await expect(tab(page, 'e2e-tab-b')).toHaveAttribute('aria-selected', 'true');
   // the step after it is in both streams too, but holds no assignment: both tabs, an empty payload that would make one
   await pickStep(page, id.s2!);
-  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'e2e-tab-a', 'e2e-tab-b']);
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'Input schema', 'Output schema', 'Config schema', 'e2e-tab-a', 'e2e-tab-b']);
   await expect(await payloadOf(page, 'e2e-tab-a')).toHaveValue('');
   await expect(inspector(page)).toContainText('No assignment yet');
 });
@@ -103,13 +104,21 @@ test('payload and schema definitions are pretty JSON', async ({ page }) => {
   await pickStep(page, id.s1!);
   const payload = await payloadOf(page, 'e2e-tab-a');
   expect(await payload.inputValue()).toMatch(PRETTY);
-  // the Processor tab: the three schemas one under another, each definition laid out (archive-expander has all three)
-  await tab(page, 'Processor').click();
+  // each schema has its own tab after Processor (archive-expander has all three), its Definition laid out [user, 2026-11-18]
   for (const slot of ['Input', 'Output', 'Config']) {
-    await expect(inspector(page).locator('.sec', { hasText: new RegExp(`^${slot} schema · `) })).toHaveCount(1);
-    const def = field(page, `${slot} schema definition`);
+    await tab(page, `${slot} schema`).click();
+    await expect(inspector(page).locator('.kind')).toHaveText(`schema · ${slot.toLowerCase()} of archive-expander`);
+    const def = field(page, 'Definition');
     await expect(def).toHaveCount(1);
     expect(await def.inputValue(), `${slot} schema definition`).toMatch(PRETTY);
+  }
+  // the Processor tab: Source hash and Instance id, the slots as read-only rows, no schema editors
+  await tab(page, 'Processor').click();
+  await expect(field(page, 'Source hash')).toHaveValue(/\S/);
+  await expect(field(page, 'Instance id')).toHaveCount(1);
+  await expect(field(page, 'Definition')).toHaveCount(0);
+  for (const slot of ['Input', 'Output', 'Config']) {
+    await expect(inspector(page).locator('dt', { hasText: `${slot} schema` }).locator('xpath=following-sibling::dd[1]')).not.toHaveText('none');
   }
   // no In/Out/Config buttons
   await expect(inspector(page).getByRole('button', { name: /^(In|Out|Config)$/ })).toHaveCount(0);

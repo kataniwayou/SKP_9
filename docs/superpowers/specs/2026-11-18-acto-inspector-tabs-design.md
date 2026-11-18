@@ -64,8 +64,8 @@ The Inspector shows tabs; the first one opens on a new click, the chosen tab is 
 | What is picked | Tabs |
 |---|---|
 | a triangle (one or several selected, no step) | **Workflow** (the last one clicked) |
-| a step, no workflow selected | **Step** · **Processor** — no assignment [user] |
-| a step, workflows selected | **Step** · **Processor** · one tab per selected workflow **whose stream contains the step**, named after the workflow, with its colour dot [user + call] |
+| a step, no workflow selected | **Step** · **Processor** · **Input schema** · **Output schema** · **Config schema** — no assignment [user]; a schema tab only for a slot of the step's processor that holds a schema (ids `schema:input`/`schema:output`/`schema:config`); no processor: Step · Processor only [user, 2026-11-18] |
+| a step, workflows selected | **Step** · **Processor** · the schema tabs as above · one tab per selected workflow **whose stream contains the step**, named after the workflow, with its colour dot [user + call] |
 | a cache | **Cache** |
 | a wire / entry arrow / cache line | **Link** (as today's link view) |
 | a ghost | **Deleted** (read-only snapshot) |
@@ -78,15 +78,33 @@ Every tab follows Studio's entity form [user: "show/hide all metadata of entity 
   the whole Inspector, remembered for the session [call: Studio has one global toggle];
 - then Description and the kind's own fields.
 
+**One entity form for every tab** [user, 2026-11-18: "make the inspector consistent to all entities"]: Workflow, Step,
+Processor, Schema, Assignment and Cache tabs all render, with the same components (`EntityBase` in tabs/shared.tsx):
+1. the head (`EntityHead`): unique name `name version` and the kind line (`workflow · running`, `step · shared by a, b`,
+   `processor · used by 2 steps`, `schema · config of FileFetcher`, `assignment · belongs to daily`, `cache · used by a`);
+2. Name, Version; 3. "▸ show all"; 4. Description (multiline, as Studio's; blank = null);
+5. the kind's own fields in Studio's FIELDS order: workflow Cron (+ reading); step Entry condition; assignment Payload
+   (+ check note); processor Source hash, Instance id; schema Definition; cache Root, Items;
+6. a **Related** separator and the related items, read-only or with their existing actions: workflow → Location, Entry
+   steps, Caches, Assignments, Payload keys; step → Used by, Location; processor → Liveness, Input/Output/Config schema
+   rows, Used by (its steps); cache → Used by, Location.
+**Location** stays, and every board-item tab (Workflow, Step, Cache) shows it under Related [call, 2026-11-18].
+Link and Deleted tabs use the same head and two-column read-only rows (no fields); the Link tab's icon title is gone.
+
 **Step tab**: Name, Version, show all, Description, **Entry condition** with **Studio's picker** [user: item 5] — a
 select-only combobox whose button and options show the letter pill + a short wire in the condition colour + the name,
 ✓ on the current one, keyboard as Studio's (Up/Down/Home/End/Enter/Space/Escape/Tab, a condition's letter picks it).
 Then a read-only "Used by" line (workflows whose stream contains it).
 
-**Processor tab**: the processor's Name, Version, show all, Description, Liveness; then the **three schemas one under
-another** — "Input schema · name version", "Output schema · …", "Config schema · …" — each with its own show all,
-name/version/description and its **definition** as pretty JSON; "none" for an empty slot. **No In/Out/Config
-buttons** [user]. Editing the processor and its schema copies works as today (ProcessorSection logic).
+**Processor tab** [user, 2026-11-18]: the processor's Name, Version, show all, Description, **Source hash** (text) and
+**Instance id** (text, blank = null), editable as in Studio; then Related: Liveness, the slots as read-only rows
+"Input schema" / "Output schema" / "Config schema" → `name version` or `none`, and "Used by" (the steps using it).
+No schema editors here any more, and **no In/Out/Config buttons** [user].
+
+**Schema tab** (Input schema / Output schema / Config schema) [user, 2026-11-18]: that schema's entity form — head
+`name version`, kind line `schema · input of <processor name>` (output/config likewise), Name, Version, show all,
+Description, **Definition** (pretty JSON, compared with its saved value). Every edit goes to the processor's own copy
+(`setSlotSchema`, unchanged). A schema whose definition is not read yet is shown, not edited.
 
 **Workflow-named tab (assignment)**: the assignment of that workflow on this step — Name, Version, show all,
 Description, **Payload** (pretty JSON), the config-schema check note ("✓ checked against … ; Save checks it again" or

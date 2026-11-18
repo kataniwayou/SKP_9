@@ -157,8 +157,9 @@ export function withoutWorkflow(b: BoardState, wf: Id): BoardState {
   return { ...b, workflows, assignments };
 }
 
+/** A processor's own field (Studio's FIELDS.processor). sourceHash is never null; a blank instanceId is null. */
 export function setProcessorField(
-  b: BoardState, processorId: Id, field: 'name' | 'version' | 'description', value: string | null,
+  b: BoardState, processorId: Id, field: 'name' | 'version' | 'description' | 'sourceHash' | 'instanceId', value: string | null,
 ): BoardState {
   const p = b.processors[processorId];
   if (!p || p[field] === value) return b;

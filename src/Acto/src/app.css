@@ -25,11 +25,6 @@
 .tool .health-dot { margin-left: auto; }
 
 /* inspector */
-.ins-title { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.ins-title .ico { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: var(--on-colour); font: 600 12px var(--mono); flex: none; }
-.ins-title > div { min-width: 0; }
-.ins-title b { font-size: 15px; display: block; overflow-wrap: anywhere; }
-.ins-title small { color: var(--muted); font-size: 12px; }
 .fld { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px; align-items: center; margin: 5px 0; }
 .fld.tall { align-items: start; }
 .fld.tall > span { padding-top: 5px; }

@@ -82,6 +82,10 @@ test('a step\'s Inspector: shared name, version, description and entry condition
   await tab(page, 'Processor').click();
   await expect(field(page, 'Name')).toHaveValue('archive-expander');
   await expect(inspector(page).locator('dt', { hasText: 'Liveness' })).toBeVisible();
+  await expect(field(page, 'Source hash')).toHaveValue(/^\S+$/);
+  // its input schema has a tab of its own, the definition pretty JSON [user, 2026-11-18]
+  await tab(page, 'Input schema').click();
+  await expect(field(page, 'Definition')).toHaveValue(/\n {2}"/);
   await tab(page, 'Step').click();
 
   await field(page, 'Name').fill('e2e-ins-second-renamed');

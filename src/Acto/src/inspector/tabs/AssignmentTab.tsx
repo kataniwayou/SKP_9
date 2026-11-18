@@ -1,10 +1,8 @@
 import { newId } from '../../design/ids';
 import { assignmentOf, removeAssignment, setAssignmentField, setPayload } from '../../design/payloads';
 import type { Id } from '../../model/graph';
-import { TextField } from '../fields';
 import { JsonField } from '../JsonField';
-import { MetaToggle } from '../MetaToggle';
-import { EntityHead, metaOfRow, orNull, PayloadCheckNote, stepName, type Ctx } from './shared';
+import { EntityBase, EntityHead, metaOfRow, PayloadCheckNote, stepName, type Ctx } from './shared';
 
 /**
  * The workflow's assignment on the picked step: its fields, its payload (pretty JSON) and the config-schema check.
@@ -25,15 +23,15 @@ export function AssignmentTab({ state, base, edit, stepId, workflowId }: Ctx & {
     }, `field:${k}:${key}`);
   return (
     <>
-      <EntityHead name={`${stepName(state, stepId)} · ${wf.name}`} kind={`assignment · belongs to ${wf.name}`} />
       {assignment ? (
+        <EntityBase head={`${assignment.name} ${assignment.version}`} kind={`assignment · belongs to ${wf.name}`} k={k} row={assignment}
+          meta={metaOfRow(assignment)} set={set} />
+      ) : (
         <>
-          <TextField key={`${k}:name`} label="Name" value={assignment.name} onChange={(v) => set('name', v)} />
-          <TextField key={`${k}:version`} label="Version" value={assignment.version} onChange={(v) => set('version', v)} />
-          <MetaToggle meta={metaOfRow(assignment)} />
-          <TextField key={`${k}:description`} label="Description" value={assignment.description} onChange={(v) => set('description', orNull(v))} />
+          <EntityHead name={`${stepName(state, stepId)} · ${wf.name}`} kind={`assignment · belongs to ${wf.name}`} />
+          <p className="none">{`No assignment yet: typing a payload makes one for ${wf.name}.`}</p>
         </>
-      ) : <p className="none">{`No assignment yet: typing a payload makes one for ${wf.name}.`}</p>}
+      )}
       <JsonField key={`${k}:payload`} label="Payload" value={payload} saved={assignmentOf(base, workflowId, stepId)?.payload}
         onChange={(v) => { if (v === '' && !assignment) return; edit((b) => setPayload(b, workflowId, stepId, v, newId), `field:${k}:payload`); }} />
       {assignment && <PayloadCheckNote state={state} stepId={stepId} payload={payload} />}
