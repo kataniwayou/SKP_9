@@ -143,6 +143,20 @@ describe('InspectorPanel', () => {
       expect(s.workflows.hourly!.assignmentIds).toEqual(['a-shared']);
       expect(s.assignments[s.workflows.daily!.assignmentIds[0]!]!.payload).toBe('{"d":1}');
     });
+    it('typing into a shared payload in the list keeps the same focused textarea and is one undo step', () => {
+      const { store } = setup(sel, shared());
+      const list = screen.getByTestId('assignments');
+      const area = within(list).getByDisplayValue('{"shared":true}');
+      area.focus();
+      fireEvent.change(area, { target: { value: '{"shared":tru' } });
+      expect(document.activeElement).toBe(area);
+      fireEvent.change(area, { target: { value: '{"d":1}' } });
+      expect(document.activeElement).toBe(area);
+      expect(within(screen.getByTestId('assignments')).getByDisplayValue('{"d":1}')).toBe(area);
+      act(() => store.undo());
+      expect(store.state().workflows.daily!.assignmentIds).toEqual(['a-shared']);
+      expect(store.canUndo()).toBe(false);
+    });
     it('a bad payload in the list shows the JSON check', () => {
       setup(sel);
       fireEvent.change(within(screen.getByTestId('assignments')).getByDisplayValue('{}'), { target: { value: 'nope' } });

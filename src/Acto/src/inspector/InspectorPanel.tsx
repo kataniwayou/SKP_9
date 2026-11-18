@@ -109,11 +109,11 @@ function EditWorkflow({ state, edit, id }: Ctx & { id: Id }) {
       <Sec>Assignments</Sec>
       <div data-testid="assignments">
         {assignments.length === 0 && <p className="none">No assignments.</p>}
-        {assignments.map((a) => (
-          <div key={a.id} className="in-assign">
+        {assignments.map((a, i) => (
+          <div key={`${id}:${i}`} className="in-assign">
             <b>{stepName(state, a.stepId)}</b>
-            <AreaField key={`${a.id}:payload`} label="Payload · JSON" value={a.payload}
-              onChange={(v) => edit((b) => setAssignmentPayload(b, id, a.id, v, newId), `field:${id}:${a.id}:payload`)} />
+            <AreaField key={`${id}:${i}:payload`} label="Payload · JSON" value={a.payload}
+              onChange={(v) => edit((b) => { const cur = b.workflows[id]?.assignmentIds[i]; return cur ? setAssignmentPayload(b, id, cur, v, newId) : b; }, `field:${id}:${i}:payload`)} />
             <PayloadCheckNote state={state} stepId={a.stepId} payload={a.payload} />
             <button type="button" className="pbtn in-act" onClick={() => edit((b) => removeAssignment(b, id, a.id))}>Delete</button>
           </div>
