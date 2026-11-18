@@ -33,6 +33,9 @@ export interface BoardStore {
   unsaved(): Set<string>;
   saving(): boolean;
   setSaving(on: boolean): void;
+  /** Save's outcome is unknown (its answer was lost): Save is refused and no draft is kept until the next load. */
+  saveBlocked(): boolean;
+  blockSave(): void;
   /** base = present = fresh; history and draft cleared; failures cleared. */
   saved(fresh: BoardState): void;
   /** withoutWorkflow on base and every history state; consecutive equal states merged. With `deletedAssignments` the base loses exactly those assignment rows. */
@@ -118,6 +121,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
   let problems = new Map<Id, number>();
   let failures = new Map<string, string>();
   let draftFailed = false;
+  let blocked = false;
   let unsavedFor: { base: BoardState; present: BoardState; keys: Set<string> } | null = null;
   const subs = new Set<() => void>();
 
@@ -125,7 +129,8 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
   /** The draft is `{ base, present }` while the board has unsaved changes, and no key when it is clean. */
   const writeDraft = () => {
     try {
-      if (store.unsaved().size === 0) session?.removeItem(KEY);
+      // while Save's outcome is unknown, a reload must start from BaseAPI's rows: no draft that could re-send the creates
+      if (blocked || store.unsaved().size === 0) session?.removeItem(KEY);
       else session?.setItem(KEY, JSON.stringify({ base, present: history.present } satisfies Draft));
     } catch (e) {
       // a draft that could not be written must not leave an older one behind to be restored
@@ -155,6 +160,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       base = start.base;
       history = historyOf(start.present);
       unsavedFor = null;
+      blocked = false;
       // no draft: nothing of the designer's to keep (placement is redone on every load); a stale or old-shaped key goes
       if (draft) writeDraft(); else dropDraft();
       notify();
@@ -183,8 +189,11 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     },
     saving: () => saving,
     setSaving(on) { if (saving !== on) { saving = on; notify(); } },
+    saveBlocked: () => blocked,
+    blockSave() { blocked = true; dropDraft(); notify(); },
     saved(fresh) {
       base = fresh;
+      blocked = false;
       history = historyOf(fresh);
       failures = new Map();
       unsavedFor = null;

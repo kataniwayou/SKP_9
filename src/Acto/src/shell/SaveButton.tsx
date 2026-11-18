@@ -4,10 +4,12 @@ export function saveLabel(unsaved: number, saving: boolean): string {
   return unsaved === 0 ? 'Save' : `Save · ${unsaved}`;
 }
 
-/** The one board-wide Save (spec §8), in the top bar: disabled when nothing changed or while saving. */
-export function SaveButton({ unsaved, saving, onSave }: { unsaved: number; saving: boolean; onSave: () => void }) {
+/** The one board-wide Save (spec §8), in the top bar: disabled when nothing changed, while saving, or while blocked (outcome unknown). */
+export function SaveButton({ unsaved, saving, blocked = false, onSave }: { unsaved: number; saving: boolean; blocked?: boolean; onSave: () => void }) {
+  const off = unsaved === 0 || saving || blocked;
   return (
-    <button type="button" className={`pbtn save-board${unsaved > 0 && !saving ? ' primary' : ''}`} disabled={unsaved === 0 || saving} onClick={onSave}>
+    <button type="button" className={`pbtn save-board${!off ? ' primary' : ''}`} disabled={off} onClick={onSave}
+      title={blocked ? 'Save outcome unknown — reload before saving again' : undefined}>
       {saveLabel(unsaved, saving)}
     </button>
   );

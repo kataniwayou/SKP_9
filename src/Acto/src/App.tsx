@@ -308,7 +308,7 @@ export function App(props: AppProps) {
       <OutputProvider store={output}>
         <div className="acto">
           <header className="topbar"><span className="brand">Act<span>o</span></span>
-            <SaveButton unsaved={store.unsaved().size} saving={store.saving()} onSave={() => { void saveBoard(api, store, output); }} />
+            <SaveButton unsaved={store.unsaved().size} saving={store.saving()} blocked={store.saveBlocked()} onSave={() => { void saveBoard(api, store, output); }} />
             <button type="button" className="pbtn theme-toggle" onClick={toggleTheme}>{theme === 'dark' ? 'Light' : 'Dark'}</button>
           </header>
           <Shell

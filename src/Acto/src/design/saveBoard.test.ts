@@ -4,6 +4,7 @@ import { createOutputStore } from '../output/outputStore';
 import { board, shared } from './boardFixtures';
 import { createBoardStore } from './boardStore';
 import { saveBoard } from './saveBoard';
+import { memoryStorage } from '../test/memoryStorage';
 
 vi.mock('../board/loadBoard', () => ({ loadBoard: vi.fn() }));
 import { loadBoard } from '../board/loadBoard';
@@ -123,5 +124,51 @@ describe('saveBoard', () => {
     t.api.applyModel.mockRejectedValue(new Error('boom'));
     await expect(saveBoard(t.studio, t.store, t.output)).rejects.toThrow('boom');
     expect(t.store.saving()).toBe(false);
+  });
+
+  describe('a lost /model/apply answer', () => {
+    const lost = async (error: object) => {
+      const output = createOutputStore(null, () => '00:00:00');
+      const session = memoryStorage();
+      const store = createBoardStore(output, session);
+      store.load(board());
+      store.edit((b) => ({ ...b, caches: { ...b.caches, n1: { ...b.caches.c1!, id: 'n1', name: 'new-cache-1', root: 'n', updatedAt: null } } }));
+      const applyModel = vi.fn(async () => ({ ok: false as const, error }));
+      const api = { applyModel } as unknown as StudioApi;
+      const first = await saveBoard(api, store, output);
+      return { output, session, store, api, applyModel, first };
+    };
+
+    it('a transport error: outcome unknown, Save blocked (no second apply) until a reload', async () => {
+      const t = await lost({ kind: 'network', message: 'Failed to fetch' });
+      expect(t.first).toBe('refused');
+      expect(texts(t.output)).toContain('Save outcome unknown — reload before saving again');
+      expect(t.store.saveBlocked()).toBe(true);
+      expect(t.store.saving()).toBe(false);
+      // a reload must not restore the creates that may already be saved
+      expect(t.session.getItem('acto.board')).toBeNull();
+      expect(await saveBoard(t.api, t.store, t.output)).toBe('refused');
+      expect(t.applyModel).toHaveBeenCalledTimes(1);
+      expect(texts(t.output).at(-1)).toBe('Save outcome unknown — reload before saving again');
+      t.store.load(board());
+      expect(t.store.saveBlocked()).toBe(false);
+    });
+
+    it('an unreadable or 5xx answer is unknown too; a 4xx refusal is not', async () => {
+      expect((await lost({ kind: 'http', status: 0, detail: 'Unreadable response' })).store.saveBlocked()).toBe(true);
+      expect((await lost({ kind: 'http', status: 504, detail: 'Gateway Timeout' })).store.saveBlocked()).toBe(true);
+      const known = await lost({ kind: 'badRequest', status: 400, detail: 'too many changes', errors: {} });
+      expect(known.store.saveBlocked()).toBe(false);
+      expect(texts(known.output)).toContain('Save failed: 400: too many changes');
+    });
+  });
+
+  it('is refused while a delete (or another save) holds the board, with the saving warning', async () => {
+    const t = setup();
+    rename(t.store, 'daily', 'daily-2');
+    t.store.setSaving(true);
+    expect(await saveBoard(t.studio, t.store, t.output)).toBe('refused');
+    expect(t.api.applyModel).not.toHaveBeenCalled();
+    expect(t.output.lines().at(-1)).toMatchObject({ level: 'warn', text: 'Saving — wait for it to finish' });
   });
 });

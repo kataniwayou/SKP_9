@@ -18,4 +18,8 @@ describe('SaveButton', () => {
     rerender(<SaveButton unsaved={2} saving onSave={onSave} />);
     expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
   });
+  it('is disabled while Save is blocked (outcome unknown)', () => {
+    render(<SaveButton unsaved={2} saving={false} blocked onSave={vi.fn()} />);
+    expect(screen.getByRole('button')).toBeDisabled();
+  });
 });

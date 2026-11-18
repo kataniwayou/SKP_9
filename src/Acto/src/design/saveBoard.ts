@@ -5,7 +5,7 @@ import { loadBoard } from '../board/loadBoard';
 import type { Id } from '../model/graph';
 import type { OutputStore } from '../output/outputStore';
 import type { BoardState } from './board';
-import type { BoardStore } from './boardStore';
+import { SAVING_REFUSAL, type BoardStore } from './boardStore';
 import { affectedWorkflows, boardChanges, type Table } from './changes';
 import { diagramSvg } from './diagramSvg';
 
@@ -74,9 +74,14 @@ export function remapIds(b: BoardState, made: Record<string, string>): BoardStat
 
 const transport = (e: ApiError) => describeError(e);
 
+export const OUTCOME_UNKNOWN = 'Save outcome unknown — reload before saving again';
+/** No answer we can read (network, unreadable body, a gateway's 5xx): BaseAPI may have committed. A 4xx is a refusal. */
+const outcomeUnknown = (e: ApiError) => e.kind === 'network' || e.status === 0 || e.status >= 500;
+
 /** Board-wide Save through /model/apply: all or nothing; the dry run and Kibana follow per affected workflow. */
 export async function saveBoard(api: StudioApi, store: BoardStore, output: OutputStore): Promise<'nothing' | 'refused' | 'saved'> {
-  if (store.saving()) return 'nothing';
+  if (store.saving()) { output.log(SAVING_REFUSAL, 'warn'); return 'refused'; }
+  if (store.saveBlocked()) { output.log(OUTCOME_UNKNOWN, 'error'); return 'refused'; }
   const base = store.base();
   const present = store.state();
   const changes = boardChanges(base, present);
@@ -85,7 +90,12 @@ export async function saveBoard(api: StudioApi, store: BoardStore, output: Outpu
   try {
     const res = await api.applyModel(changes);
     if (!res.ok) {
-      output.log(`Save failed: ${transport(res.error)}`, 'error');
+      if (outcomeUnknown(res.error)) {
+        // a second Save would re-send every create: blocked until a reload shows what BaseAPI kept
+        output.log(`Save failed: ${transport(res.error)}`, 'error');
+        output.log(OUTCOME_UNKNOWN, 'error');
+        store.blockSave();
+      } else output.log(`Save failed: ${transport(res.error)}`, 'error');
       return 'refused';
     }
     if (res.value.applied !== true) {
