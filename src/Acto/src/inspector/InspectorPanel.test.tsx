@@ -77,6 +77,30 @@ describe('InspectorPanel', () => {
       expect(selectedChild('Step')).toBeNull();
       expect(screen.getByLabelText('Name')).toHaveValue('fetch-orders');
     });
+    it('each parent keeps its own child while the pick stays: Step child, Processor, back to Step', () => {
+      const b0 = board();
+      const slots = { ...b0, processors: { p1: { ...b0.processors.p1!, configSchemaId: 's-cfg' } },
+        schemas: { 's-cfg': { id: 's-cfg', name: 'cfg', version: '1.0.0', description: null, definition: '{}', audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, updatedAt: null } } };
+      const { rerender } = setup({ workflows: ['daily'], picks: [step('fetch')] }, slots);
+      openTab('daily');
+      openTab('Processor');
+      expect(selectedChild('Processor')).toBeNull();
+      openTab('Config schema');
+      openTab('Step');
+      expect(selectedChild('Step')).toBe('daily');
+      expect(screen.getByText('assignment · belongs to daily')).toBeInTheDocument();
+      openTab('Processor');
+      expect(selectedChild('Processor')).toBe('Config schema');
+      // the shown parent clicked again: its own fields; Step keeps its child
+      openTab('Processor');
+      expect(selectedChild('Processor')).toBeNull();
+      openTab('Step');
+      expect(selectedChild('Step')).toBe('daily');
+      // a new pick forgets them
+      rerender({ workflows: ['daily'], picks: [step('expand')] });
+      rerender({ workflows: ['daily'], picks: [step('fetch')] });
+      expect(selectedChild('Step')).toBeNull();
+    });
     it('the first tab, no child, on a new pick; the chosen tab and child kept while the same pick stays and they exist', () => {
       const { rerender } = setup({ workflows: ['daily'], picks: [step('fetch')] });
       expect(selectedTab()).toBe('Step');

@@ -64,8 +64,9 @@ NodeStatusIndicator components [user].
     `workflows`.
   - A plain click on an unselected triangle selects it alone; on an unselected step, cache, wire or ghost it replaces
     the other picks and keeps the selected workflows (an entry arrow or cache line selects its workflow alone).
-  - The empty board clears everything. A drag never counts as a click (CLICK_SLOP), and a NodeToolbar button press
-    is not a click on its node (the toolbar stops the click).
+  - The empty board clears everything. A drag never counts as a click (CLICK_SLOP), a NodeToolbar button press
+    is not a click on its node (the toolbar stops the click), and a click on a node's handle (a connection gesture)
+    is never a pick or an unpick [review, 2026-11-18].
   The chat's `pick` tool (`withPicks`) is unchanged: it sets the picks, it does not toggle.
 
 ## 5. Inspector — tabs [user: items 1–4]
@@ -88,7 +89,9 @@ tabs") holds only its children: under Step the assignment tabs, under Processor 
 schema / Config schema, only filled slots). No "Step" or "Processor" child tab. No child is chosen at first; a child
 shows that assignment or schema; a click on the parent tab returns to its own fields. A child row with no tabs is not
 drawn, and the top row never holds an assignment tab. Memory: a new pick opens Step with no child; the chosen parent
-and child are kept while the same pick stays and they still exist.
+and child are kept while the same pick stays and they still exist; each parent keeps its own child, so Step's chosen
+child is still chosen after a visit to Processor (a click on the parent already shown returns it to its own fields)
+[review, 2026-11-18].
 
 Every tab follows Studio's entity form [user: "show/hide all metadata of entity same as studio"]:
 - the unique name (`name version`) and a kind line ("step · shared by a, b"; "assignment · belongs to daily");

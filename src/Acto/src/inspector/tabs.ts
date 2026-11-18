@@ -99,8 +99,27 @@ export function keepChosen<C extends { key: string | null }>(chosen: C | null, k
   return chosen && chosen.key === key ? chosen : null;
 }
 
-/** What the designer chose: a top tab and, under a parent, a child (null = the parent's own fields). */
-export interface Chosen { key: string | null; tab: TabId; child: ChildId | null }
+/** A parent tab: the tabs with a child row. */
+export type Parent = 'step' | 'processor';
+const isParent = (t: TabId | null): t is Parent => t === 'step' || t === 'processor';
+
+/**
+ * What the designer chose for the current pick: a top tab and, per parent, its child (absent or null = the parent's own
+ * fields). Each parent keeps its own child while the same pick stays, so Step's child survives a visit to Processor.
+ */
+export interface Chosen { key: string | null; tab: TabId; children: Partial<Record<Parent, ChildId | null>> }
+
+/** A click on top tab `t` while `active` shows: a click on the shown parent returns it to its own fields; another tab keeps every child. */
+export function chooseTab(chosen: Chosen | null, key: string | null, active: TabId | null, t: TabId): Chosen {
+  const children = chosen && chosen.key === key ? chosen.children : {};
+  return { key, tab: t, children: t === active && isParent(t) ? { ...children, [t]: null } : children };
+}
+
+/** A click on child `c` of the shown parent `tab`. */
+export function chooseChild(chosen: Chosen | null, key: string | null, tab: Parent, c: ChildId): Chosen {
+  const children = chosen && chosen.key === key ? chosen.children : {};
+  return { key, tab, children: { ...children, [tab]: c } };
+}
 
 /** The top tab shown: the chosen one while the same thing stays picked and the tab is still there, else the first. */
 export function activeTab(tabs: readonly Tab[], key: string | null, chosen: Chosen | null): TabId | null {
@@ -108,10 +127,11 @@ export function activeTab(tabs: readonly Tab[], key: string | null, chosen: Chos
   return tabs[0]?.id ?? null;
 }
 
-/** The child shown under the active parent: the chosen one while the pick, the parent and the child all stay; else none. */
+/** The child shown under the shown parent: its chosen one while the pick stays and the child still exists; else none. */
 export function activeChild(children: readonly ChildTab[], key: string | null, tab: TabId | null, chosen: Chosen | null): ChildId | null {
-  if (!chosen || chosen.key !== key || chosen.tab !== tab || chosen.child === null) return null;
-  return children.some((c) => c.id === chosen.child) ? chosen.child : null;
+  if (!chosen || chosen.key !== key || !isParent(tab)) return null;
+  const c = chosen.children[tab] ?? null;
+  return c !== null && children.some((x) => x.id === c) ? c : null;
 }
 
 const NONE = '—';

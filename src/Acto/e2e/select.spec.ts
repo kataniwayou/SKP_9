@@ -175,6 +175,31 @@ test('a plain click on a selected step unpicks it and keeps the triangle; on a s
   await expect(field(page, 'Name')).toHaveValue('e2e-sel-b');
 });
 
+// review 2026-11-18: a click on a handle is a connection gesture, never a pick or an unpick
+test('a click on a selected step\'s out handle or a selected triangle\'s tip leaves it selected and draws nothing', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  const wires0 = await page.locator('.react-flow__edge').count();
+
+  await pickStep(page, id.s1!);
+  await expect(stNode(page, id.s1!).locator('.node')).toHaveClass(/\bsel\b/);
+  await stNode(page, id.s1!).locator('.react-flow__handle[data-handleid="out"]').click();
+  await expect(stNode(page, id.s1!).locator('.node')).toHaveClass(/\bsel\b/);
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
+
+  await pickWorkflow(page, id.wa!);
+  await expect(wfNode(page, id.wa!).locator('.tri')).toHaveClass(/\bsel\b/);
+  await wfNode(page, id.wa!).locator('.react-flow__handle[data-handleid="tip"]').click();
+  await expect(wfNode(page, id.wa!).locator('.tri')).toHaveClass(/\bsel\b/);
+  await expect(tabLabels(page)).toHaveText(['Workflow']);
+  await wfNode(page, id.wa!).locator('.react-flow__handle[data-handleid="back"]').click();
+  await expect(wfNode(page, id.wa!).locator('.tri')).toHaveClass(/\bsel\b/);
+
+  // nothing was connected by those clicks
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.react-flow__edge')).toHaveCount(wires0);
+});
+
 test('Ctrl+click multi-selects steps, caches and wires with the light bar and numbered badges; two triangles get Start · Stop · Delete', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);

@@ -6,7 +6,7 @@ import type { BoardStore } from '../design/boardStore';
 import type { GhostStore } from '../design/ghosts';
 import { useLive, useLiveStore } from '../live/LiveContext';
 import { statusOf } from '../live/liveState';
-import { activeChild, activeTab, focusKey, focusOf, keepChosen, listOf, processorTabsOf, stepTabsOf, tabsOf, type ChildId, type Chosen, type TabId } from './tabs';
+import { activeChild, activeTab, chooseChild, chooseTab, focusKey, focusOf, keepChosen, listOf, processorTabsOf, stepTabsOf, tabsOf, type ChildId, type Chosen, type TabId } from './tabs';
 import { AssignmentTab } from './tabs/AssignmentTab';
 import { CacheTab } from './tabs/CacheTab';
 import { GhostTab, ghostName } from './tabs/GhostTab';
@@ -155,11 +155,11 @@ export function InspectorPanel({ store, selection, ghosts }: { store: BoardStore
   return (
     <>
       <Header store={store} kind={list ? `${list.length} selected` : tab !== null && focus ? focus.kind : ''} />
-      {!list && tab !== null && focus && <TabBar tabs={tabs} active={tab} choose={(t) => setChosen({ key, tab: t, child: null })} />}
+      {!list && tab !== null && focus && <TabBar tabs={tabs} active={tab} choose={(t) => setChosen(chooseTab(chosen, key, tab, t))} />}
       <div className="pb" {...(!list && tab !== null ? { role: 'tabpanel', id: 'ins-tabpanel', 'aria-labelledby': `ins-tab-${tab}` } : {})}>
         {list ? <PickList picks={list} state={state} ghosts={ghosts} />
           : tab !== null && focus ? <TabBody key={`${key}|${tab}|${child ?? ''}`} tab={tab} focus={focus} state={state} base={store.base()} edit={edit} ghosts={ghosts}
-            sel={selection} child={child} choose={(c) => setChosen({ key, tab, child: c })} />
+            sel={selection} child={child} choose={(c) => { if (tab === 'step' || tab === 'processor') setChosen(chooseChild(chosen, key, tab, c)); }} />
           : <BoardSummary state={state} />}
       </div>
     </>

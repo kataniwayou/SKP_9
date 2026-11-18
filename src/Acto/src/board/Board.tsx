@@ -85,6 +85,9 @@ function pickOfEdge(e: Edge): Pick | null {
 
 const isGhost = (n: Node) => (n.className ?? '').split(' ').includes('ghost');
 
+/** Whether a click landed on a node's handle: a connection, not a pick. */
+export const onHandle = (t: EventTarget | null): boolean => t instanceof Element && t.closest('.react-flow__handle') !== null;
+
 export function Board({ state, view, onPick, onMove, onConnect, toolbar, initialZoom, initialView, onViewChange, onDropData, bar, settled = true, focusRef, stateNow }: BoardProps) {
   const fitAtMount = useRef(settled);
   const flow = useRef<{
@@ -252,7 +255,13 @@ export function Board({ state, view, onPick, onMove, onConnect, toolbar, initial
           deleteKeyCode={null}
           onEdgesChange={onEdgesChange}
           {...(!editable ? { onNodesChange } : {})}
-          onNodeClick={(ev, n) => { keySelect.current = false; const p = pickOfNode(n); if (p) select(p, ev.ctrlKey || ev.metaKey); }}
+          onNodeClick={(ev, n) => {
+            keySelect.current = false;
+            // a press on a handle (or a connection drag let go on its own node) is a connection, never a pick or an unpick
+            if (onHandle(ev.target)) return;
+            const p = pickOfNode(n);
+            if (p) select(p, ev.ctrlKey || ev.metaKey);
+          }}
           onEdgeClick={(ev, e) => { keySelect.current = false; const p = pickOfEdge(e); if (p) select(p, ev.ctrlKey || ev.metaKey); }}
           onPaneClick={(ev) => select(null, ev.ctrlKey || ev.metaKey)}
           proOptions={{ hideAttribution: true }}

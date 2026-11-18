@@ -168,6 +168,27 @@ describe('Board', () => {
       fireEvent.click(document.querySelector('.react-flow__pane')!);
       expect(onPick.mock.calls).toEqual([[{ kind: 'step', id: 'fetch' }, true], [{ kind: 'step', id: 'expand' }, true], [null, false]]);
     });
+    it('a click on a handle is no pick and no unpick: the step’s out handle, the triangle’s tip, picked or not', async () => {
+      const onPick = vi.fn();
+      show({ onPick, view: view({ workflows: ['daily'], picks: [{ kind: 'step', id: 'fetch' }, { kind: 'workflow', id: 'daily' }] }) });
+      const stepNode = (await screen.findByText('fetch-orders')).closest('.react-flow__node') as HTMLElement;
+      const triNode = screen.getByText('daily', { selector: '.tri-nm' }).closest('.react-flow__node') as HTMLElement;
+      const handles = [...stepNode.querySelectorAll('.react-flow__handle'), ...triNode.querySelectorAll('.react-flow__handle')];
+      expect(handles.length).toBeGreaterThan(2);
+      // React Flow's click-to-connect looks under the pointer; jsdom has no layout
+      const had = Object.prototype.hasOwnProperty.call(document, 'elementFromPoint');
+      Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => null });
+      try {
+        for (const h of handles) fireEvent.click(h);
+        fireEvent.click(screen.getByText('expand').closest('.react-flow__node')!.querySelector('.react-flow__handle')!);
+      } finally {
+        if (!had) delete (document as { elementFromPoint?: unknown }).elementFromPoint;
+      }
+      expect(onPick).not.toHaveBeenCalled();
+      // the body of the same node still picks
+      fireEvent.click(screen.getByText('fetch-orders'));
+      expect(onPick.mock.calls).toEqual([[{ kind: 'step', id: 'fetch' }, false]]);
+    });
     it('marks the picked step, cache and wire as selected', async () => {
       const picks: Pick[] = [{ kind: 'step', id: 'fetch' }, { kind: 'wire', from: 'fetch', to: 'expand' }];
       show({ view: view({ picks }) });

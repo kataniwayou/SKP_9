@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Pick, SelectionState } from '../board/selection';
 import { board } from '../design/boardFixtures';
 import type { GhostItem } from '../design/ghosts';
-import { activeChild, activeTab, focusKey, formatInstant, keepChosen, listOf, processorTabsOf, stepTabsOf, tabsOf } from './tabs';
+import { activeChild, activeTab, chooseChild, chooseTab, focusKey, formatInstant, keepChosen, listOf, processorTabsOf, stepTabsOf, tabsOf, type Chosen } from './tabs';
 
 const b = board();
 const noGhosts = { get: (): GhostItem | undefined => undefined };
@@ -88,32 +88,54 @@ describe("processorTabsOf (Processor's children)", () => {
 
 describe('keepChosen', () => {
   it('keeps the chosen tab for the same pick key and drops it for any other', () => {
-    const chosen = { key: 'st:fetch', tab: 'processor' as const, child: null };
+    const chosen: Chosen = { key: 'st:fetch', tab: 'processor', children: {} };
     expect(keepChosen(chosen, 'st:fetch')).toBe(chosen);
     expect(keepChosen(chosen, 'wf:daily')).toBeNull();
     expect(keepChosen(null, 'st:fetch')).toBeNull();
   });
 });
 
-describe('activeTab and activeChild', () => {
+describe('activeTab, activeChild, chooseTab, chooseChild', () => {
   const sel: SelectionState = { workflows: ['daily'], picks: [step('fetch')] };
   const tabs = tabsOf(sel, b, noGhosts);
   const kids = stepTabsOf(sel, b, 'fetch');
+  const schemaKids = processorTabsOf(withSlots, 'p1');
   it('a new pick: Step, no child', () => {
     expect(activeTab(tabs, 'st:fetch', null)).toBe('step');
     expect(activeChild(kids, 'st:fetch', 'step', null)).toBeNull();
   });
   it('the chosen tab and child while the same pick stays and they exist', () => {
-    const c = { key: 'st:fetch', tab: 'step' as const, child: 'assignment:daily' as const };
+    const c = chooseChild(null, 'st:fetch', 'step', 'assignment:daily');
     expect(activeTab(tabs, 'st:fetch', c)).toBe('step');
     expect(activeChild(kids, 'st:fetch', 'step', c)).toBe('assignment:daily');
-    expect(activeChild(kids, 'st:fetch', 'step', { ...c, child: 'assignment:hourly' })).toBeNull();
+    expect(activeChild(kids, 'st:fetch', 'step', chooseChild(null, 'st:fetch', 'step', 'assignment:hourly'))).toBeNull();
     expect(activeChild(kids, 'st:expand', 'step', c)).toBeNull();
     expect(activeChild(kids, 'st:fetch', 'processor', c)).toBeNull();
-    expect(activeTab(tabs, 'st:expand', { key: 'st:fetch', tab: 'processor', child: null })).toBe('step');
+    expect(activeTab(tabs, 'st:expand', { key: 'st:fetch', tab: 'processor', children: {} })).toBe('step');
+  });
+  it('each parent keeps its own child while the pick stays: Step child, Processor child, back to Step [review, 2026-11-18]', () => {
+    let c = chooseChild(null, 'st:fetch', 'step', 'assignment:daily');
+    c = chooseTab(c, 'st:fetch', 'step', 'processor');
+    expect(activeChild(schemaKids, 'st:fetch', 'processor', c)).toBeNull();
+    c = chooseChild(c, 'st:fetch', 'processor', 'schema:config');
+    c = chooseTab(c, 'st:fetch', 'processor', 'step');
+    expect(activeTab(tabs, 'st:fetch', c)).toBe('step');
+    expect(activeChild(kids, 'st:fetch', 'step', c)).toBe('assignment:daily');
+    c = chooseTab(c, 'st:fetch', 'step', 'processor');
+    expect(activeChild(schemaKids, 'st:fetch', 'processor', c)).toBe('schema:config');
+  });
+  it('a click on the shown parent returns it to its own fields and keeps the other parent\'s child', () => {
+    let c = chooseChild(null, 'st:fetch', 'step', 'assignment:daily');
+    c = chooseChild(chooseTab(c, 'st:fetch', 'step', 'processor'), 'st:fetch', 'processor', 'schema:input');
+    c = chooseTab(c, 'st:fetch', 'processor', 'processor');
+    expect(activeChild(schemaKids, 'st:fetch', 'processor', c)).toBeNull();
+    expect(activeChild(kids, 'st:fetch', 'step', chooseTab(c, 'st:fetch', 'processor', 'step'))).toBe('assignment:daily');
+  });
+  it('a new pick forgets every child', () => {
+    const c = chooseChild(null, 'st:fetch', 'step', 'assignment:daily');
+    expect(chooseTab(c, 'st:expand', 'step', 'processor').children).toEqual({});
   });
 });
-
 describe('formatInstant', () => {
   it('YYYY-MM-DD HH:MM:SS.mmm UTC; — when absent', () => {
     expect(formatInstant('2026-10-05T12:00:00.123456Z')).toBe('2026-10-05 12:00:00.123 UTC');
