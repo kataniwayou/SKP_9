@@ -1,11 +1,14 @@
+import type { BoardState, Edit } from '../../design/board';
 import type { Id } from '../../model/graph';
 import type { OutputLine } from '../../output/outputStore';
 import type { ChatEntry } from '../chatStore';
-import { workflowArg, type ToolContext, type ToolDef, type ToolOutcome } from '../toolTypes';
+import { workflowArg, type ToolContext, type ToolOutcome } from '../toolTypes';
 
-export const done = (ok: boolean, result: string, action: string, entries: ChatEntry[] = []): ToolOutcome =>
+/** A tool run that came to an answer. */
+export type Done = Extract<ToolOutcome, { kind: 'done' }>;
+export const done = (ok: boolean, result: string, action: string, entries: ChatEntry[] = []): Done =>
   ({ kind: 'done', ok, result, action, entries });
-export const fail = (result: string, action: string, entries: ChatEntry[] = []): ToolOutcome => done(false, result, action, entries);
+export const fail = (result: string, action: string, entries: ChatEntry[] = []): Done => done(false, result, action, entries);
 
 export const WORKFLOW_ID = { type: 'string', description: 'The id of the workflow (list_workflows gives it).' };
 export const NO_ARGS = { type: 'object', properties: {}, additionalProperties: false };
@@ -44,15 +47,38 @@ export async function withOutput<T>(ctx: ToolContext, name: string, fn: () => T 
 /** The lines as one text for the model; `fallback` when there were none. */
 export const textOf = (lines: OutputLine[], fallback = ''): string => (lines.length === 0 ? fallback : lines.map((l) => l.text).join('; '));
 
+export const STEP_ID = { type: 'string', description: 'The id of the step (read_board gives it).' };
+export const CACHE_ID = { type: 'string', description: 'The id of the cache (read_board or list_caches gives it).' };
+
+/** A text argument; '' when it is missing or not text. */
+export const text = (args: Record<string, unknown>, key: string): string => (typeof args[key] === 'string' ? (args[key] as string) : '');
+
+/** The id a tool argument names as a thing of the board, or the failed outcome (`no <what> <id> on the board`). */
+export function onBoard(ctx: ToolContext, what: 'step' | 'cache' | 'workflow', id: string, action: string): { id: Id } | { out: ToolOutcome } {
+  const table = what === 'step' ? ctx.store.state().steps : what === 'cache' ? ctx.store.state().caches : ctx.store.state().workflows;
+  return id !== '' && table[id] ? { id } : { out: fail(`no ${what} ${id === '' ? '(none given)' : id} on the board`, action) };
+}
+
 /**
- * A tool that is not there yet: the edit tools are rewritten for the triangle board in Plan 5 Task 13. It keeps its
- * name (the prompt still names it) and answers, doing nothing, that it is not available.
+ * Applies an edit that may refuse as one board edit (one history step, no merge key). A refusal is the edit's own text
+ * (also in Output, as the user's own gesture would show it); so is the board's, while it saves. Nothing done = failed.
  */
-export function notYet(name: string, what: string): ToolDef {
-  return {
-    name,
-    description: `${what} Not available yet: the chat's edit tools are being rewritten for the triangle board. It answers so and does nothing.`,
-    parameters: { type: 'object', properties: {}, additionalProperties: true },
-    run: async () => fail(`${name} is not available yet: the chat's edit tools are being rewritten for the triangle board. Ask the user to make this change on the board.`, `${name} not available yet`),
-  };
+export function applyEdit(ctx: ToolContext, fn: (b: BoardState) => Edit, action: string, okText: string): Done {
+  const before = ctx.store.state();
+  const res = fn(before);
+  if ('refused' in res) {
+    ctx.store.editOrRefuse(() => res);
+    return fail(res.refused, `${action} refused`);
+  }
+  return applyState(ctx, () => res.state, action, okText);
+}
+
+/** Applies an edit that cannot refuse; failed only when the board did not change (it is saving, or nothing differed). */
+export function applyState(ctx: ToolContext, fn: (b: BoardState) => BoardState, action: string, okText: string): Done {
+  const before = ctx.store.state();
+  const mark = ctx.output.lines().at(-1);
+  ctx.store.edit(fn);
+  if (ctx.store.state() !== before) return done(true, okText, action);
+  const lines = linesSince(ctx, mark).map((l) => l.text);
+  return fail(lines.join('; ') || 'nothing changed: the board already is so', `${action}: no change`);
 }

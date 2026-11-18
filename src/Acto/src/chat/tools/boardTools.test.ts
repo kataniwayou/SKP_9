@@ -1,0 +1,205 @@
+import { describe, expect, it } from 'vitest';
+import { shared } from '../../design/boardFixtures';
+import { moveItems } from '../../design/edits';
+import { call, done, setup } from './testContext';
+
+describe('graph edit tools', () => {
+  it('add_step makes one unsaved step of the named processor, one history step; an unknown processor fails naming it', async () => {
+    const { ctx, store } = setup();
+    expect(done(await call(ctx, 'add_step', { processor_id: 'p1' }))).toMatchObject({ ok: true, result: expect.stringContaining('id n1') });
+    expect(store.state().steps.n1).toMatchObject({ name: 'proc', processorId: 'p1', updatedAt: null, nextStepIds: [] });
+    store.undo();
+    expect(store.state().steps.n1).toBeUndefined();
+    expect(done(await call(ctx, 'add_step', { processor_id: 'ghost' }))).toMatchObject({ ok: false, result: 'no processor ghost' });
+  });
+
+  it('add_step with x and y puts the step there; add_cache makes new-cache-1', async () => {
+    const { ctx, store } = setup();
+    await call(ctx, 'add_step', { processor_id: 'p1', name: 'mine', x: 1000, y: 1000 });
+    expect(store.state().steps.n1).toMatchObject({ name: 'mine', at: { x: 1000, y: 1000 } });
+    expect(done(await call(ctx, 'add_cache')).result).toContain('new-cache-1');
+    expect(store.state().caches.n2).toMatchObject({ name: 'new-cache-1', version: '1.0.0' });
+  });
+
+  it('connect wires; a duplicate is the edit\'s own refusal; an unknown id fails naming it; disconnect removes', async () => {
+    const { ctx, store, output } = setup();
+    expect(done(await call(ctx, 'connect', { from: 'expand', to: 'lonely' })).ok).toBe(true);
+    expect(store.state().steps.expand!.nextStepIds).toEqual(['lonely']);
+    expect(done(await call(ctx, 'connect', { from: 'expand', to: 'lonely' }))).toMatchObject({ ok: false, result: 'That wire already exists' });
+    expect(output.lines().at(-1)).toMatchObject({ text: 'That wire already exists', level: 'warn' });
+    expect(done(await call(ctx, 'connect', { from: 'expand', to: 'ghost' }))).toMatchObject({ ok: false, result: 'no step ghost on the board' });
+    expect(done(await call(ctx, 'disconnect', { from: 'expand', to: 'lonely' })).ok).toBe(true);
+    expect(store.state().steps.expand!.nextStepIds).toEqual([]);
+    expect(done(await call(ctx, 'disconnect', { from: 'expand', to: 'lonely' })).ok).toBe(false);
+  });
+
+  it('set_entry, remove_entry, link_cache and unlink_cache change the triangle', async () => {
+    const { ctx, store } = setup();
+    expect(done(await call(ctx, 'set_entry', { workflow_id: 'daily', step_id: 'lonely' })).ok).toBe(true);
+    expect(store.state().workflows.daily!.entryStepIds).toEqual(['fetch', 'lonely']);
+    expect(done(await call(ctx, 'set_entry', { workflow_id: 'daily', step_id: 'lonely' }))).toMatchObject({ ok: false, result: 'daily already starts at lonely' });
+    expect(done(await call(ctx, 'remove_entry', { workflow_id: 'daily', step_id: 'lonely' })).ok).toBe(true);
+    expect(done(await call(ctx, 'remove_entry', { workflow_id: 'daily', step_id: 'lonely' })).ok).toBe(false);
+    expect(done(await call(ctx, 'link_cache', { workflow_id: 'hourly', cache_id: 'c1' })).ok).toBe(true);
+    expect(done(await call(ctx, 'link_cache', { workflow_id: 'hourly', cache_id: 'c1' }))).toMatchObject({ ok: false, result: 'hourly already uses c1' });
+    expect(done(await call(ctx, 'unlink_cache', { workflow_id: 'hourly', cache_id: 'c1' })).ok).toBe(true);
+    expect(store.state().workflows.hourly!.cacheIds).toEqual([]);
+    expect(done(await call(ctx, 'set_entry', { workflow_id: 'daily', step_id: 'ghost' })).result).toBe('no step ghost on the board');
+    expect(done(await call(ctx, 'link_cache', { workflow_id: 'daily', cache_id: 'ghost' })).result).toBe('no cache ghost on the board');
+  });
+
+  it('set_processor changes a step\'s processor', async () => {
+    const { ctx, store } = setup();
+    expect(done(await call(ctx, 'set_processor', { step_id: 'lonely', processor_id: 'ghost' })).result).toBe('no processor ghost');
+    expect(done(await call(ctx, 'set_processor', { step_id: 'ghost', processor_id: 'p1' })).result).toBe('no step ghost on the board');
+    expect(done(await call(ctx, 'set_processor', { step_id: 'lonely', processor_id: 'p1' })).ok).toBe(true);
+    expect(store.state().steps.lonely!.processorId).toBe('p1');
+  });
+
+  it('move_blocks moves steps, caches and triangles in one history step', async () => {
+    const { ctx, store } = setup();
+    const o = done(await call(ctx, 'move_blocks', { blocks: [{ kind: 'step', id: 'lonely', x: 1, y: 2 }, { kind: 'workflow', id: 'daily', x: 3, y: 4 }] }));
+    expect(o.ok).toBe(true);
+    expect(store.state().steps.lonely!.at).toEqual({ x: 1, y: 2 });
+    expect(store.state().workflows.daily!.at).toEqual({ x: 3, y: 4 });
+    store.undo();
+    expect(store.state().steps.lonely!.at).toEqual({ x: 600, y: 200 });
+    expect(done(await call(ctx, 'move_blocks', { blocks: [{ kind: 'step', id: 'ghost', x: 1, y: 2 }] })).result).toBe('no step ghost on the board');
+  });
+});
+
+describe('field and payload tools', () => {
+  it('set_field sets a field of each kind as the Inspector does, one undo step each; a bad field or id is named', async () => {
+    const { ctx, store } = setup();
+    expect(done(await call(ctx, 'set_field', { kind: 'workflow', id: 'daily', field: 'cronExpression', value: '0 * * * *' })).ok).toBe(true);
+    expect(store.state().workflows.daily!.cronExpression).toBe('0 * * * *');
+    expect(done(await call(ctx, 'set_field', { kind: 'step', id: 'fetch', field: 'entryCondition', value: 2 })).ok).toBe(true);
+    expect(store.state().steps.fetch!.entryCondition).toBe(2);
+    expect(done(await call(ctx, 'set_field', { kind: 'cache', id: 'c1', field: 'root', value: 'x' })).ok).toBe(true);
+    expect(store.state().caches.c1!.root).toBe('x');
+    expect(done(await call(ctx, 'set_field', { kind: 'processor', id: 'p1', field: 'version', value: '2.0.0' })).ok).toBe(true);
+    expect(store.state().processors.p1!.version).toBe('2.0.0');
+    store.undo();
+    expect(store.state().processors.p1!.version).toBe('1.0.0');
+    expect(store.state().caches.c1!.root).toBe('x');
+    expect(done(await call(ctx, 'set_field', { kind: 'step', id: 'fetch', field: 'colour', value: 'x' })).result).toContain('name, version, description, entryCondition');
+    expect(done(await call(ctx, 'set_field', { kind: 'step', id: 'ghost', field: 'name', value: 'x' })).result).toBe('no step ghost on the board');
+    expect(done(await call(ctx, 'set_field', { kind: 'step', id: 'fetch', field: 'entryCondition', value: 9 })).ok).toBe(false);
+  });
+
+  it('set_payload sets this workflow\'s payload in place; on a shared row it copies for this workflow only', async () => {
+    const { ctx, store } = setup();
+    expect(done(await call(ctx, 'set_payload', { workflow_id: 'daily', step_id: 'fetch', payload: '{"a":1}' })).ok).toBe(true);
+    expect(store.state().assignments['a-daily-fetch']!.payload).toBe('{"a":1}');
+    const sh = setup();
+    sh.store.load(shared());
+    expect(done(await call(sh.ctx, 'set_payload', { workflow_id: 'daily', step_id: 'fetch', payload: '{"d":1}' })).ok).toBe(true);
+    const b = sh.store.state();
+    expect(b.assignments['a-shared']!.payload).toBe('{"shared":true}');
+    expect(b.workflows.daily!.assignmentIds).toEqual(['n1']);
+    expect(b.workflows.hourly!.assignmentIds).toEqual(['a-shared']);
+    expect(done(await call(sh.ctx, 'set_payload', { workflow_id: 'daily', step_id: 'ghost', payload: '{}' })).result).toBe('no step ghost on the board');
+  });
+
+  it('remove_assignment asks first and pins the workflow and the assignment; Cancel does nothing, Remove unlinks', async () => {
+    const { ctx, store } = setup();
+    const asked = await call(ctx, 'remove_assignment', { workflow_id: 'daily', assignment_id: 'a-daily-fetch' });
+    expect(asked).toMatchObject({ kind: 'ask', question: { choices: ['Remove', 'Cancel'] } });
+    const pin = (asked as { question: { pin: string } }).question.pin;
+    expect(JSON.parse(pin)).toEqual({ w: 'daily', a: 'a-daily-fetch' });
+    expect(done(await call(ctx, 'remove_assignment', {}, 'Cancel', pin)).ok).toBe(false);
+    expect(store.state().assignments['a-daily-fetch']).toBeDefined();
+    // the pin wins over what the arguments say now
+    expect(done(await call(ctx, 'remove_assignment', { workflow_id: 'hourly', assignment_id: 'a-hourly-fetch' }, 'Remove', pin)).ok).toBe(true);
+    expect(store.state().workflows.daily!.assignmentIds).toEqual([]);
+    expect(store.state().workflows.hourly!.assignmentIds).toEqual(['a-hourly-fetch']);
+    expect(done(await call(ctx, 'remove_assignment', { workflow_id: 'daily', assignment_id: 'nope' })).result).toBe('workflow daily has no assignment nope');
+  });
+});
+
+describe('picks, clipboard and delete_picked', () => {
+  it('pick sets the page\'s picks; a triangle goes alone; a thing that is not there fails naming it', async () => {
+    const { ctx } = setup();
+    expect(done(await call(ctx, 'pick', { items: [{ kind: 'step', id: 'fetch' }, { kind: 'wire', from: 'fetch', to: 'expand' }, { kind: 'entry', workflow_id: 'daily', step_id: 'fetch' }] })).ok).toBe(true);
+    expect(ctx.commands.picks()).toEqual([{ kind: 'step', id: 'fetch' }, { kind: 'wire', from: 'fetch', to: 'expand' }, { kind: 'entry', workflowId: 'daily', stepId: 'fetch' }]);
+    expect(done(await call(ctx, 'pick', { items: [{ kind: 'workflow', id: 'daily' }, { kind: 'step', id: 'fetch' }] })).ok).toBe(false);
+    expect(done(await call(ctx, 'pick', { items: [{ kind: 'workflow', id: 'daily' }] })).ok).toBe(true);
+    expect(done(await call(ctx, 'pick', { items: [{ kind: 'wire', from: 'expand', to: 'fetch' }] })).result).toBe('no wire expand > fetch on the board');
+    expect(done(await call(ctx, 'pick', { items: [{ kind: 'step', id: 'ghost' }] })).result).toBe('no step ghost on the board');
+    expect(done(await call(ctx, 'pick', { items: [] })).ok).toBe(true);
+    expect(ctx.commands.picks()).toEqual([]);
+  });
+
+  it('copy and paste: pasted steps are new, unsaved, one history step, and picked', async () => {
+    const { ctx, store } = setup();
+    expect(done(await call(ctx, 'paste')).ok).toBe(false);
+    expect(done(await call(ctx, 'copy', { step_ids: ['ghost'] })).result).toBe('no step ghost on the board');
+    expect(done(await call(ctx, 'copy', { step_ids: ['fetch', 'expand'] })).ok).toBe(true);
+    expect(done(await call(ctx, 'paste')).ok).toBe(true);
+    const made = Object.values(store.state().steps).filter((s) => s.updatedAt === null);
+    expect(made.map((s) => s.name).sort()).toEqual(['expand-2', 'fetch-orders-2']);
+    expect(ctx.commands.picks()).toEqual(made.map((s) => ({ kind: 'step', id: s.id })));
+    store.undo();
+    expect(Object.keys(store.state().steps)).toHaveLength(3);
+  });
+
+  it('copy without step_ids copies the picked steps', async () => {
+    const { ctx } = setup();
+    ctx.commands.setPicks([{ kind: 'step', id: 'lonely' }]);
+    expect(done(await call(ctx, 'copy')).ok).toBe(true);
+    expect(done(await call(ctx, 'paste')).ok).toBe(true);
+  });
+
+  it('delete_picked asks first, pins exactly the picks it named, and deletes those in one history step', async () => {
+    const { ctx, store } = setup();
+    expect(done(await call(ctx, 'delete_picked')).ok).toBe(false);
+    ctx.commands.setPicks([{ kind: 'step', id: 'lonely' }, { kind: 'wire', from: 'fetch', to: 'expand' }]);
+    const asked = await call(ctx, 'delete_picked');
+    expect(asked).toMatchObject({ kind: 'ask', question: { choices: ['Delete', 'Cancel'] } });
+    const pin = (asked as { question: { pin: string } }).question.pin;
+    expect(store.state().steps.lonely).toBeDefined();
+    ctx.commands.setPicks([{ kind: 'step', id: 'expand' }]);   // the picks change after the question: the pin wins
+    expect(done(await call(ctx, 'delete_picked', {}, 'Cancel', pin)).ok).toBe(false);
+    expect(store.state().steps.lonely).toBeDefined();
+    expect(done(await call(ctx, 'delete_picked', {}, 'Delete', pin)).ok).toBe(true);
+    expect(store.state().steps.lonely).toBeUndefined();
+    expect(store.state().steps.expand).toBeDefined();
+    expect(store.state().steps.fetch!.nextStepIds).toEqual([]);
+    store.undo();
+    expect(store.state().steps.lonely).toBeDefined();
+    expect(store.state().steps.fetch!.nextStepIds).toEqual(['expand']);
+  });
+
+  it('delete_picked refuses a picked triangle: that is delete_workflow', async () => {
+    const { ctx } = setup();
+    ctx.commands.setPicks([{ kind: 'workflow', id: 'daily' }]);
+    expect(done(await call(ctx, 'delete_picked')).result).toContain('delete_workflow');
+  });
+});
+
+describe('save', () => {
+  it('with nothing unsaved says so and asks nothing', async () => {
+    const { ctx, api } = setup();
+    expect(done(await call(ctx, 'save'))).toMatchObject({ ok: true, result: expect.stringContaining('nothing to save') });
+    expect(api.applyModel).not.toHaveBeenCalled();
+  });
+
+  it('asks first with the number of changes; Cancel sends nothing; Save runs saveBoard and reports Output', async () => {
+    const { ctx, store, api } = setup();
+    store.edit((b) => moveItems(b, [{ ref: { kind: 'step', id: 'expand' }, at: { x: 5, y: 5 } }]));
+    expect(await call(ctx, 'save')).toMatchObject({ kind: 'ask', question: { choices: ['Save', 'Cancel'], text: expect.stringContaining('1 change') } });
+    expect(api.applyModel).not.toHaveBeenCalled();
+    expect(done(await call(ctx, 'save', {}, 'Cancel')).ok).toBe(false);
+    expect(api.applyModel).not.toHaveBeenCalled();
+    const o = done(await call(ctx, 'save', {}, 'Save'));
+    expect(api.applyModel).toHaveBeenCalledTimes(1);
+    expect(o.result).toContain('Saved 1 change');
+  });
+});
+
+describe('the removed tools', () => {
+  it('create_assignment, read_design and anything about frames are gone', async () => {
+    const { ctx } = setup();
+    for (const t of ['create_assignment', 'read_design', 'open_workflow']) expect(done(await call(ctx, t)).ok).toBe(false);
+  });
+});

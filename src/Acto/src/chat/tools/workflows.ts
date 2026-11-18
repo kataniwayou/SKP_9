@@ -1,9 +1,11 @@
 import { confirmText } from '../../board/Toolbar';
+import { boardChanges } from '../../design/changes';
 import { addWorkflow, setWorkflowField } from '../../design/edits';
+import { saveBoard } from '../../design/saveBoard';
 import { commitDelete, prepareDelete } from '../../operate/deleteWorkflow';
 import { runWorkflow, type RunOp } from '../../operate/runWorkflow';
 import type { ToolContext, ToolDef, ToolOutcome } from '../toolTypes';
-import { done, fail, notYet, target, textOf, withOutput, WORKFLOW_ID } from './common';
+import { done, fail, linesSince, NO_ARGS, target, textOf, withOutput, WORKFLOW_ID } from './common';
 
 /**
  * A delete question's pin: the workflow and the confirm text it was asked with (JSON), what an answer is checked
@@ -42,8 +44,26 @@ const newWorkflow: ToolDef = {
   },
 };
 
-// Save is board-wide now and asks first (spec §9: save_board); Task 13 brings it.
-const save = notYet('save', 'Save the board.');
+const save: ToolDef = {
+  name: 'save',
+  description: "Save the whole board in one go (all or nothing): every unsaved change of every workflow, step, cache, payload and processor goes to BaseAPI; then the dry run reports each affected workflow's problems in Output. The report never blocks or undoes the save. The user is asked first.",
+  parameters: NO_ARGS,
+  async run(ctx, _args, answer) {
+    const base = ctx.store.base();
+    const n = boardChanges(base, ctx.store.state()).length;
+    if (n === 0) return done(true, 'nothing to save: the board has no unsaved changes', 'save: nothing to save');
+    if (answer === undefined) return { kind: 'ask', question: { text: `Save the board: ${n} change${n === 1 ? '' : 's'}?`, choices: ['Save', 'Cancel'] } };
+    if (answer !== 'Save') return fail('the user declined', 'user declined: save');
+    const before = ctx.output.lines().at(-1);
+    const r = await saveBoard(ctx.api, ctx.store, ctx.output);
+    const lines = linesSince(ctx, before);
+    const entries = lines.map((l) => ({ kind: 'output' as const, text: l.text, level: l.level, name: 'board' }));
+    const said = textOf(lines, r);
+    const problems = Object.values(ctx.store.state().workflows).flatMap((w) => (ctx.store.problems(w.id) > 0 ? [`${w.name}: ${ctx.store.problems(w.id)} problem(s)`] : []));
+    if (r === 'saved') return done(true, `saved. ${said}${problems.length ? ` Dry run: ${problems.join('; ')}.` : ''}`, 'saved the board', entries);
+    return fail(`the board was not saved (${r}): ${said}`, 'save failed', entries);
+  },
+};
 
 async function press(ctx: ToolContext, id: string, name: string, op: RunOp): Promise<ToolOutcome> {
   ctx.commands.focus(id);

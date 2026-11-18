@@ -16,16 +16,32 @@ describe('systemPrompt', () => {
     expect(prompt).toMatch(/asks the user/);
   });
 
-  it('teaches Acto\'s board', () => {
-    expect(prompt).toMatch(/one board/i);
-    expect(prompt).toMatch(/frame/);
+  it('teaches the shared graph and the triangle in three sentences, then the tools', () => {
+    const model = prompt.split('\n').find((l) => /shared graph/i.test(l)) ?? '';
+    expect(model.match(/[.!?](\s|$)/g)).toHaveLength(3);
+    expect(prompt).toMatch(/triangle/i);
+    expect(prompt).toMatch(/entry steps/i);
+    expect(prompt).toMatch(/Save is board-wide/);
+    expect(prompt).toMatch(/dry run/);
+    expect(prompt).toMatch(/Start refuses/);
     expect(prompt).toMatch(/always has a processor/);
-    expect(prompt).toMatch(/first steps?[^.\n]*derived from the wires/i);
-    expect(prompt).toMatch(/one wire per link/i);
     expect(prompt).toMatch(/entry condition/);
     expect(prompt).toMatch(/workflow_id/);
-    expect(prompt).toMatch(/Save saves one workflow/);
-    expect(prompt).toMatch(/Start runs the saved version/);
+  });
+
+  it('names every tool', () => {
+    for (const t of TOOL_DEFS) expect(prompt).toContain(t.name);
+    for (const name of ['list_workflows', 'read_board', 'read_entity', 'read_output', 'list_processors', 'list_caches', 'list_schemas', 'new_workflow', 'add_step', 'add_cache', 'connect', 'disconnect', 'set_entry', 'remove_entry', 'link_cache', 'unlink_cache', 'set_field', 'set_payload', 'remove_assignment', 'set_processor', 'move_blocks', 'pick', 'copy', 'paste', 'delete_picked', 'delete_workflow', 'save', 'undo', 'redo', 'start', 'stop']) {
+      expect(TOOL_DEFS.map((t) => t.name)).toContain(name);
+      expect(prompt).toContain(name);
+    }
+    expect(TOOL_DEFS).toHaveLength(31);
+  });
+
+  it('has no wording of the frame era', () => {
+    for (const word of ['frame', 'parked', 'locked', 'read_design', 'create_assignment']) expect(prompt.toLowerCase()).not.toContain(word);
+    expect(prompt).not.toMatch(/lock/i);
+    expect(prompt).not.toMatch(/Save saves one workflow/);
   });
 
   it('names no tool that does not exist (every snake_case word is a tool or an argument of one)', () => {
@@ -35,7 +51,4 @@ describe('systemPrompt', () => {
     expect([...words].filter((w) => !known.has(w))).toEqual([]);
   });
 
-  it('describes the field and assignment tools', () => {
-    for (const name of ['set_field', 'create_assignment', 'remove_assignment']) expect(prompt).toContain(name);
-  });
 });

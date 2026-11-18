@@ -4,11 +4,11 @@ import type { EntityKind } from '../../api/entities';
 import { livenessText, statusOf, type LiveState } from '../../live/liveState';
 import { reachOf } from '../../design/board';
 import { affectedWorkflows } from '../../design/changes';
-import { assignmentOf } from '../../design/payloads';
+import { assignmentsOf, linkedBy } from '../../design/payloads';
 import { conditionInfo } from '../../model/entryConditions';
 import type { Id } from '../../model/graph';
 import type { ToolContext, ToolDef } from '../toolTypes';
-import { done, fail, NO_ARGS, target, WORKFLOW_ID } from './common';
+import { done, fail, NO_ARGS } from './common';
 
 const json = (value: unknown, action: string) => done(true, JSON.stringify(value), action);
 const KINDS: EntityKind[] = ['workflow', 'step', 'processor', 'schema', 'assignment', 'cache'];
@@ -82,34 +82,31 @@ const listSchemas: ToolDef = {
   },
 };
 
-const readDesign: ToolDef = {
-  name: 'read_design',
-  description: 'Read one workflow as the board shows it now, unsaved edits included: its fields, entry steps, the steps it reaches (id, name, version, processor with health, entry condition, next step ids, position, its payload on the step), caches, the problems count of the last dry run and whether unsaved changes touch it.',
-  parameters: { type: 'object', properties: { workflow_id: WORKFLOW_ID }, required: ['workflow_id'], additionalProperties: false },
-  async run(ctx, args) {
-    const t = target(ctx, args, 'read design');
-    if ('out' in t) return t.out;
+const readBoard: ToolDef = {
+  name: 'read_board',
+  description: 'Read the whole board as it is now, unsaved edits included: every step (id, name, version, processor with health, entry condition, next step ids = wires, position), every cache, and every workflow triangle (fields, cron, Running or Stopped, unsaved and saved flags, problems of the last dry run, entry steps, the steps it reaches, linked caches, and its payloads: assignment id, step id, payload, and the other workflows sharing that payload).',
+  parameters: NO_ARGS,
+  async run(ctx) {
     const b = ctx.store.state();
     const base = ctx.store.base();
-    const w = b.workflows[t.id]!;
     const live = ctx.live.getState();
-    const steps = [...reachOf(b, t.id)].flatMap((id) => {
-      const st = b.steps[id];
-      if (!st) return [];
+    const touched = new Set(affectedWorkflows(base, b));
+    const steps = Object.values(b.steps).map((st) => {
       const p = st.processorId ? b.processors[st.processorId] : undefined;
-      return [{
-        id, name: st.name, version: st.version,
+      return {
+        id: st.id, name: st.name, version: st.version,
         processor: st.processorId ? { id: st.processorId, name: p?.name ?? null, version: p?.version ?? null, health: healthOf(live, st.processorId) } : null,
         entryCondition: conditionInfo(st.entryCondition).name, next: st.nextStepIds, at: st.at,
-        payload: assignmentOf(b, t.id, id)?.payload ?? null,
-      }];
+      };
     });
-    return json({
-      id: t.id, fields: { name: w.name, version: w.version, description: w.description, cronExpression: w.cronExpression },
-      status: runWord(ctx, t.id), unsaved: affectedWorkflows(base, b).includes(t.id), saved: !!base.workflows[t.id],
-      problems: ctx.store.problems(t.id), entrySteps: w.entryStepIds, steps,
-      caches: w.cacheIds.flatMap((id) => { const c = b.caches[id]; return c ? [{ id: c.id, name: c.name, version: c.version, root: c.root }] : []; }),
-    }, `read design of ${w.name}`);
+    const caches = Object.values(b.caches).map((c) => ({ id: c.id, name: c.name, version: c.version, root: c.root, at: c.at }));
+    const workflows = Object.values(b.workflows).map((w) => ({
+      id: w.id, name: w.name, version: w.version, description: w.description, cronExpression: w.cronExpression,
+      status: runWord(ctx, w.id), unsaved: touched.has(w.id), saved: !!base.workflows[w.id], problems: ctx.store.problems(w.id),
+      entrySteps: w.entryStepIds, steps: [...reachOf(b, w.id)], caches: w.cacheIds, at: w.at,
+      payloads: assignmentsOf(b, w.id).map((a) => ({ assignmentId: a.id, stepId: a.stepId, payload: a.payload, sharedWith: linkedBy(b, a.id).filter((x) => x !== w.id) })),
+    }));
+    return json({ steps, caches, workflows }, `read board (${workflows.length} workflows)`);
   },
 };
 
@@ -143,4 +140,4 @@ const readOutput: ToolDef = {
   },
 };
 
-export const READ_TOOLS: ToolDef[] = [listWorkflows, listProcessors, listCaches, listSchemas, readDesign, readEntity, readOutput];
+export const READ_TOOLS: ToolDef[] = [listWorkflows, listProcessors, listCaches, listSchemas, readBoard, readEntity, readOutput];

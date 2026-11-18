@@ -1,37 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { StudioApi } from '../../api/client';
-import { fakeApi } from '../../board/testApi';
-import { board } from '../../design/boardFixtures';
-import { createBoardStore } from '../../design/boardStore';
 import { moveItems } from '../../design/edits';
-import { createOutputStore } from '../../output/outputStore';
 import { liveStub } from '../../test/liveStub';
-import { runTool } from '../runTool';
-import type { ToolContext, ToolOutcome } from '../toolTypes';
-import '../tools';
-
-function setup(live: ReturnType<typeof liveStub> = liveStub()) {
-  const output = createOutputStore(null, () => '00:00:00');
-  const store = createBoardStore(output, null);
-  store.load(board());
-  const api = fakeApi();
-  Object.assign(api, {
-    startWorkflow: vi.fn().mockResolvedValue({ ok: true, value: null }),
-    stopWorkflow: vi.fn().mockResolvedValue({ ok: true, value: null }),
-  });
-  let n = 0;
-  const focus = vi.fn();
-  const ctx: ToolContext = {
-    store, api: api as StudioApi, output, live,
-    commands: { focus, setPicks: vi.fn(), picks: () => [], newWorkflowAt: () => ({ x: 700, y: 40 }) },
-    processors: () => Object.values(store.state().processors), caches: () => [], session: null, newId: () => `n${++n}`,
-  };
-  return { ctx, live, api: api as unknown as Record<string, ReturnType<typeof vi.fn>>, store, output, focus };
-}
-
-const call = (ctx: ToolContext, name: string, args: object = {}, answer?: string, pin?: string) =>
-  runTool(ctx, { id: 'c', name, arguments: JSON.stringify(args) }, answer, pin);
-const done = (o: ToolOutcome) => { if (o.kind !== 'done') throw new Error('asked'); return o; };
+import { call, done, setup } from './testContext';
 
 afterEach(() => { vi.useRealTimers(); });
 
@@ -47,14 +17,15 @@ describe('reading tools', () => {
     ]);
   });
 
-  it('read_design gives the entry steps, the reached steps with this workflow\'s payload, and its caches', async () => {
+  it('read_board gives the graph: steps, wires, caches and the triangles with entry steps, caches, cron, state and payloads', async () => {
     const { ctx } = setup();
-    const d = JSON.parse(done(await call(ctx, 'read_design', { workflow_id: 'daily' })).result);
-    expect(d.entrySteps).toEqual(['fetch']);
-    expect(d.steps.map((s: { id: string; next: string[]; payload: string | null }) => [s.id, s.next, s.payload])).toEqual([['fetch', ['expand'], '{}'], ['expand', [], null]]);
+    const d = JSON.parse(done(await call(ctx, 'read_board')).result);
+    expect(d.steps.map((s: { id: string; next: string[] }) => [s.id, s.next])).toEqual([['fetch', ['expand']], ['expand', []], ['lonely', []]]);
     expect(d.steps[0].processor).toMatchObject({ id: 'p1', name: 'proc' });
-    expect(d.caches).toEqual([{ id: 'c1', name: 'c1', version: '1.0.0', root: 'r' }]);
-    expect(d.unsaved).toBe(false);
+    expect(d.caches).toEqual([{ id: 'c1', name: 'c1', version: '1.0.0', root: 'r', at: { x: 0, y: -100 } }]);
+    const daily = d.workflows.find((w: { id: string }) => w.id === 'daily');
+    expect(daily).toMatchObject({ entrySteps: ['fetch'], caches: ['c1'], cronExpression: null, unsaved: false, saved: true, steps: ['fetch', 'expand'] });
+    expect(daily.payloads).toEqual([{ assignmentId: 'a-daily-fetch', stepId: 'fetch', payload: '{}', sharedWith: [] }]);
   });
 
   it('read_output gives the newest lines', async () => {
@@ -67,8 +38,8 @@ describe('reading tools', () => {
 describe('workflow tools', () => {
   it('an unknown workflow_id fails naming it and calls nothing', async () => {
     const { ctx, api, focus } = setup();
-    for (const tool of ['read_design', 'start', 'stop', 'delete_workflow']) {
-      expect(done(await call(ctx, tool, { workflow_id: 'ghost' }))).toMatchObject({ ok: false, result: 'no workflow ghost on the board' });
+    for (const tool of ['start', 'stop', 'delete_workflow', 'set_entry', 'link_cache', 'set_payload']) {
+      expect(done(await call(ctx, tool, { workflow_id: 'ghost', step_id: 'fetch', cache_id: 'c1', payload: '{}' }))).toMatchObject({ ok: false, result: 'no workflow ghost on the board' });
     }
     expect(api.startWorkflow).not.toHaveBeenCalled();
     expect(api.applyModel).not.toHaveBeenCalled();
@@ -133,17 +104,7 @@ describe('workflow tools', () => {
   });
 });
 
-describe('tools not there yet (Plan 5 Task 13)', () => {
-  it('every stubbed edit tool answers so and changes nothing', async () => {
-    const { ctx, store } = setup();
-    const before = store.state();
-    for (const tool of ['save', 'add_step', 'set_processor', 'add_cache', 'connect', 'disconnect', 'move_blocks', 'pick', 'copy', 'paste', 'delete_picked', 'set_field', 'create_assignment', 'remove_assignment']) {
-      const o = done(await call(ctx, tool, { workflow_id: 'daily' }));
-      expect(o).toMatchObject({ ok: false, result: expect.stringContaining(`${tool} is not available yet`) });
-    }
-    expect(store.state()).toBe(before);
-  });
-
+describe('history tools', () => {
   it('undo and redo act on the one board history', async () => {
     const { ctx, store } = setup();
     expect(done(await call(ctx, 'undo')).ok).toBe(false);

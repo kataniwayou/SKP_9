@@ -53,7 +53,7 @@ describe('the tool list', () => {
   it('is empty with none added, and the destructive ones are named', () => {
     expect(TOOL_DEFS).toEqual([]);
     expect(toolsForModel()).toEqual([]);
-    expect([...DESTRUCTIVE].sort()).toEqual(['delete_picked', 'delete_workflow', 'remove_assignment', 'stop']);
+    expect([...DESTRUCTIVE].sort()).toEqual(['delete_picked', 'delete_workflow', 'remove_assignment', 'save', 'stop']);
   });
 
   it('is sent to the model as it is at the time, OpenAI style', () => {
