@@ -11,7 +11,7 @@ export function Field({ label, children, tall }: { label: string; children: Reac
 /** Read-outs (the mock's .ro): a list of Rows. */
 export const Ro = ({ children }: { children: ReactNode }) => <dl className="ro">{children}</dl>;
 /** One read-out: its term, then its value (the next sibling). */
-export const Row = ({ k, children }: { k: string; children: ReactNode }) => <><dt>{k}</dt><dd>{children}</dd></>;
+export const Row = ({ k, children, className }: { k: string; children: ReactNode; className?: string }) => <><dt>{k}</dt><dd className={className}>{children}</dd></>;
 /** A section heading (the mock's .sec). */
 export const Sec = ({ children }: { children: ReactNode }) => <div className="sec">{children}</div>;
 

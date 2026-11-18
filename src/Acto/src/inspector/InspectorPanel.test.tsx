@@ -38,8 +38,6 @@ const openTab = (name: string) => {
 const selectedTab = () => topTabs().find((t) => t.getAttribute('aria-selected') === 'true')?.textContent;
 const selectedChild = (row: 'Step' | 'Processor') => rowTabs(`${row} tabs`).find((t) => t.getAttribute('aria-selected') === 'true')?.textContent ?? null;
 const step = (id: string): Pick => ({ kind: 'step', id });
-// getByDisplayValue collapses whitespace: the pretty payload as it matches
-const SHARED = '{ "shared": true }';
 const payloadOf = (s: BoardStore, wf: string) => s.state().assignments[s.state().workflows[wf]!.assignmentIds[0]!]!.payload;
 
 // the show-all toggle is remembered in sessionStorage: each test starts closed
@@ -354,60 +352,17 @@ describe('InspectorPanel', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Remove cache c1' }));
       expect(store.state().workflows.daily!.cacheIds).toEqual([]);
     });
-    it('lists every assignment, including one on a step it does not reach, editable and deletable', () => {
+    it('lists every assignment read-only, including one on a step it does not reach: no Delete, no payload textbox, its keys shown', () => {
       const { store } = setup(sel);
-      act(() => store.edit((b) => setPayload(b, 'daily', 'lonely', '{"x":1}', () => 'new-a')));
+      act(() => store.edit((b) => setPayload(b, 'daily', 'lonely', '{"x":1,"y":2}', () => 'new-a')));
       const list = screen.getByTestId('assignments');
-      expect(within(list).getByText('lonely')).toBeInTheDocument();
-      expect(within(list).getByText('fetch-orders')).toBeInTheDocument();
-      fireEvent.change(within(list).getByDisplayValue('{ "x": 1 }'), { target: { value: '{"x":2}' } });
-      expect(store.state().assignments['new-a']!.payload).toBe('{"x":2}');
-      fireEvent.click(within(list).getAllByRole('button', { name: 'Delete' })[1]!);
-      expect(store.state().workflows.daily!.assignmentIds).toEqual(['a-daily-fetch']);
-      expect(store.state().assignments['new-a']).toBeUndefined();
-    });
-    it('two assignments of one workflow on the same step are each editable by their own id', () => {
-      const b0 = board();
-      const b: BoardState = { ...b0,
-        assignments: { ...b0.assignments, a2: { ...b0.assignments['a-daily-fetch']!, id: 'a2', payload: '{"second":1}' } },
-        workflows: { ...b0.workflows, daily: { ...b0.workflows.daily!, assignmentIds: ['a-daily-fetch', 'a2'] } } };
-      const { store } = setup(sel, b);
-      fireEvent.change(within(screen.getByTestId('assignments')).getByDisplayValue('{ "second": 1 }'), { target: { value: '{"second":2}' } });
-      expect(store.state().assignments.a2!.payload).toBe('{"second":2}');
-      expect(store.state().assignments['a-daily-fetch']!.payload).toBe('{}');
-    });
-    it('a list edit of a row another workflow links copies it for this one', () => {
-      const { store } = setup(sel, shared());
-      fireEvent.change(within(screen.getByTestId('assignments')).getByDisplayValue(SHARED), { target: { value: '{"d":1}' } });
-      const s = store.state();
-      expect(s.assignments['a-shared']!.payload).toBe('{"shared":true}');
-      expect(s.workflows.hourly!.assignmentIds).toEqual(['a-shared']);
-      expect(s.assignments[s.workflows.daily!.assignmentIds[0]!]!.payload).toBe('{"d":1}');
-    });
-    it('typing into a shared payload in the list keeps the same focused textarea and is one undo step', () => {
-      const { store } = setup(sel, shared());
-      const list = screen.getByTestId('assignments');
-      const area = within(list).getByDisplayValue(SHARED);
-      area.focus();
-      fireEvent.change(area, { target: { value: '{"shared":tru' } });
-      expect(document.activeElement).toBe(area);
-      fireEvent.change(area, { target: { value: '{"d":1}' } });
-      expect(document.activeElement).toBe(area);
-      expect(within(screen.getByTestId('assignments')).getByDisplayValue('{"d":1}')).toBe(area);
-      act(() => store.undo());
-      expect(store.state().workflows.daily!.assignmentIds).toEqual(['a-shared']);
-      expect(store.canUndo()).toBe(false);
-    });
-    it('a bad payload in the list shows the JSON check', () => {
-      setup(sel);
-      fireEvent.change(within(screen.getByTestId('assignments')).getByDisplayValue('{}'), { target: { value: 'nope' } });
-      expect(document.querySelector('.in-problem')).not.toBeNull();
-    });
-    it('the payload keys in its stream, one line per step with a payload', () => {
-      const { store } = setup(sel);
-      act(() => store.edit((b) => setPayload(b, 'daily', 'fetch', '{"a":1,"b":2}', () => 'n')));
-      expect(screen.getByText('Payload keys in its stream')).toBeInTheDocument();
-      expect(screen.getAllByText('fetch-orders').at(-1)!.nextSibling).toHaveTextContent('◆ 2 keys');
+      expect(screen.getByText('Assignments')).toBeInTheDocument();
+      expect(list.querySelectorAll('.in-assign')).toHaveLength(2);
+      expect(within(list).queryByRole('button', { name: 'Delete' })).toBeNull();
+      expect(within(list).queryByRole('textbox')).toBeNull();
+      expect(within(list).getByText('fetch-orders').nextSibling).toHaveTextContent('◆ 0 keys');
+      expect(within(list).getByText('lonely').nextSibling).toHaveTextContent('◆ 2 keys · not in its stream');
+      expect(screen.queryByText('Payload keys in its stream')).toBeNull();
     });
     it('caches are chips with a count', () => {
       setup(sel);

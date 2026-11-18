@@ -139,8 +139,10 @@ the problems). No assignment yet: an empty Payload editor that creates one on fi
 
 **Workflow tab**: Name, Version, show all, Description, Cron (+ its reading), entry steps as chips (✕ removes the
 arrow), **caches as chips** (✕ unlinks; several allowed [user: "add multiple cache to workflow"] — linking is the
-existing drag from the triangle's back to a cache, repeated per cache), its assignments list (as today, pretty JSON),
-and "Payload keys in its stream" (step → ◆ N keys).
+existing drag from the triangle's back to a cache, repeated per cache), and one read-only **Assignments** section
+[user, 2026-11-18: assignments are listed read-only; delete and payload edits only via Step › <workflow>]: one
+two-column row per assignment the workflow links, label = the step name, value = `◆ N keys` / `◆ payload`, plus
+` · not in its stream` when the workflow does not reach that step. No Delete, no payload editor (one trigger per action).
 
 **Cache tab**: Name, Version, show all, Description, Root, Items (pretty JSON when it parses), Used by.
 

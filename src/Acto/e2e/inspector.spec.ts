@@ -41,7 +41,8 @@ test('a triangle\'s Inspector: name, version, cron with its reading, description
   // its assignments, each naming the step it references
   const asg = inspector(page).getByTestId('assignments');
   await expect(asg.locator('.in-assign')).toHaveCount(2);
-  expect([...(await asg.locator('.in-assign b').allInnerTexts())].sort()).toEqual(['e2e-ins-first', 'e2e-ins-second']);
+  expect([...(await asg.locator('dt').allInnerTexts())].sort()).toEqual(['e2e-ins-first', 'e2e-ins-second']);
+  await expect(asg.locator('.in-assign').first()).toHaveText(/^◆ \d+ keys?$/);
 
   // every field edits, each marking the triangle unsaved
   await expect(wfNode(page, id.wa!).locator('.unsaved-mark')).toHaveCount(0);
@@ -123,23 +124,28 @@ test('a cache\'s Inspector: name, version, description, root and items', async (
   await expect(itemValue(page, 1)).toHaveValue('v');
 });
 
-test('the payload field checks JSON as it is typed; an assignment in the triangle\'s list edits and deletes', async ({ page }) => {
+test('the payload field checks JSON as it is typed; the triangle lists its assignments read-only, and the step edits and removes them', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
   await selectWorkflowAlone(page, id.wa!);
   const asg = inspector(page).getByTestId('assignments');
-  const first = asg.locator('.in-assign').filter({ has: page.locator('b', { hasText: 'e2e-ins-first' }) });
-  const box = first.locator('textarea');
+  // one trigger per action: the triangle's list has no payload editor and no Delete
+  await expect(asg.locator('.in-assign')).toHaveCount(2);
+  await expect(asg.locator('textarea')).toHaveCount(0);
+  await expect(asg.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await expect(asg.locator('.in-assign').first()).toHaveText(/^◆ 1 key$/);
+
+  // the payload is edited through the step with the triangle selected
+  await pickStep(page, id.s1!);
+  const box = await payloadOf(page, 'e2e-ins-a');
   await expect(box).toHaveValue(pretty('{"first":1}'));
   await box.fill('{"first": ');
-  await expect(first.locator('.in-problem')).toContainText('Not valid JSON');
+  await expect(inspector(page).locator('.in-problem')).toContainText('Not valid JSON');
   await box.fill('{"first": 2}');
-  await expect(first.locator('.in-problem').filter({ hasText: 'Not valid JSON' })).toHaveCount(0);
+  await expect(inspector(page).locator('.in-problem').filter({ hasText: 'Not valid JSON' })).toHaveCount(0);
   await expect(wfNode(page, id.wa!).locator('.unsaved-mark')).toBeVisible();
-
-  // the same payload through the step with the triangle selected
-  await pickStep(page, id.s1!);
-  await expect(await payloadOf(page, 'e2e-ins-a')).toHaveValue(pretty('{"first": 2}'));
+  // more edits through the same step tab
+  await expect(field(page, 'Payload')).toHaveValue('{"first": 2}');
   await expect(stNode(page, id.s1!).locator('.key-chip')).toContainText('1 key');
   await field(page, 'Payload').fill('nope');
   await expect(inspector(page).locator('.in-problem')).toContainText('Not valid JSON');
@@ -150,7 +156,10 @@ test('the payload field checks JSON as it is typed; an assignment in the triangl
   await expect(stNode(page, id.s1!).locator('.key-chip')).toHaveCount(0);
   await selectWorkflowAlone(page, id.wa!);
   await expect(asg.locator('.in-assign')).toHaveCount(1);
-  await asg.getByRole('button', { name: 'Delete' }).click();
+  await pickStep(page, id.s2!);
+  await payloadOf(page, 'e2e-ins-a');
+  await inspector(page).getByRole('button', { name: 'Remove assignment' }).click();
+  await selectWorkflowAlone(page, id.wa!);
   await expect(inspector(page)).toContainText('No assignments.');
 });
 

@@ -1,23 +1,21 @@
 import { conditionStyle } from '../../board/wires';
 import { reachOf } from '../../design/board';
 import { removeEntries, setWorkflowField, unlinkCaches } from '../../design/edits';
-import { newId } from '../../design/ids';
-import { assignmentOf, assignmentsOf, removeAssignment, setAssignmentPayload } from '../../design/payloads';
+import { assignmentsOf } from '../../design/payloads';
 import { useWorkflowStatus } from '../../live/LiveContext';
 import { payloadKeyCount } from '../../model/assignments';
 import { cronText } from '../../model/cronText';
 import type { Id } from '../../model/graph';
 import { Ro, Row, Sec, TextField } from '../fields';
-import { JsonField } from '../JsonField';
-import { EntityBase, locationText, metaOfRow, orNull, PayloadCheckNote, stepName, type Ctx } from './shared';
+import { EntityBase, locationText, metaOfRow, orNull, stepName, type Ctx } from './shared';
 
 const keysText = (payload: string) => {
   const n = payloadKeyCount(payload);
   return n === null ? '◆ payload' : `◆ ${n} key${n === 1 ? '' : 's'}`;
 };
 
-/** A workflow: its fields, entry steps and caches as chips (✕ removes), its assignments, and the payload keys in its stream. */
-export function WorkflowTab({ state, base, edit, id }: Ctx & { id: Id }) {
+/** A workflow: its fields, entry steps and caches as chips (✕ removes), and its assignments (read-only: the step's keys, and whether the workflow reaches it). */
+export function WorkflowTab({ state, edit, id }: Ctx & { id: Id }) {
   const status = useWorkflowStatus(id);
   const w = state.workflows[id];
   if (!w) return null;
@@ -26,10 +24,7 @@ export function WorkflowTab({ state, base, edit, id }: Ctx & { id: Id }) {
   const parsed = w.cronExpression ? cronText(w.cronExpression) : null;
   const assignments = assignmentsOf(state, id);
   const run = status === 'running' ? 'running' : status === 'stopped' ? 'stopped' : 'checking…';
-  const stream = [...reachOf(state, id)].flatMap((sid) => {
-    const a = assignmentOf(state, id, sid);
-    return a ? [{ sid, a }] : [];
-  });
+  const reach = reachOf(state, id);
   return (
     <>
       <EntityBase head={`${w.name} ${w.version}`} kind={`workflow · ${run}`} k={id} row={w} meta={metaOfRow(w)} set={set} />
@@ -59,21 +54,16 @@ export function WorkflowTab({ state, base, edit, id }: Ctx & { id: Id }) {
       <p className="in-note">Drag from the triangle&apos;s back to any cache to link another; ✕ unlinks.</p>
       <Sec>Assignments</Sec>
       <div data-testid="assignments">
-        {assignments.length === 0 && <p className="none">No assignments.</p>}
-        {assignments.map((a, i) => (
-          <div key={`${id}:${i}`} className="in-assign">
-            <b>{stepName(state, a.stepId)}</b>
-            <JsonField key={`${id}:${i}:payload`} label={`Payload · ${stepName(state, a.stepId)}`} value={a.payload} saved={base.assignments[a.id]?.payload}
-              onChange={(v) => edit((b) => { const cur = b.workflows[id]?.assignmentIds[i]; return cur ? setAssignmentPayload(b, id, cur, v, newId) : b; }, `field:${id}:${i}:payload`)} />
-            <PayloadCheckNote state={state} stepId={a.stepId} payload={a.payload} />
-            <button type="button" className="pbtn in-act" onClick={() => edit((b) => removeAssignment(b, id, a.id))}>Delete</button>
-          </div>
-        ))}
+        {assignments.length === 0 ? <p className="none">No assignments.</p> : (
+          <Ro>
+            {assignments.map((a, i) => (
+              <Row key={`${id}:${i}`} k={stepName(state, a.stepId)} className="in-assign">
+                {keysText(a.payload)}{reach.has(a.stepId) ? '' : ' · not in its stream'}
+              </Row>
+            ))}
+          </Ro>
+        )}
       </div>
-      <Sec>Payload keys in its stream</Sec>
-      {stream.length === 0 ? <p className="none">No payloads in its stream.</p> : (
-        <Ro>{stream.map(({ sid, a }) => <Row key={sid} k={stepName(state, sid)}>{keysText(a.payload)}</Row>)}</Ro>
-      )}
     </>
   );
 }
