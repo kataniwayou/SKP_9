@@ -1,0 +1,127 @@
+import type { ApiError, StudioApi } from '../api/client';
+import { describeError } from '../api/describeError';
+import type { ModelApplyResultDto } from '../api/types';
+import { loadBoard } from '../board/loadBoard';
+import type { Id } from '../model/graph';
+import type { OutputStore } from '../output/outputStore';
+import type { BoardState } from './board';
+import type { BoardStore } from './boardStore';
+import { affectedWorkflows, boardChanges, type Table } from './changes';
+import { diagramSvg } from './diagramSvg';
+
+type Result = NonNullable<ModelApplyResultDto['results']>[number];
+
+const KIND: Record<string, string> = {
+  workflows: 'workflow', steps: 'step', caches: 'cache', assignments: 'assignment', processors: 'processor', schemas: 'schema',
+};
+export const kindOf = (table: string): string => KIND[table] ?? table;
+
+/** The row's name on the first board that holds it; its id otherwise. */
+export function nameOf(boards: BoardState[], table: string, id: Id): string {
+  for (const b of boards) {
+    const row = (b[table as Table] as Record<Id, { name?: string }> | undefined)?.[id];
+    if (row?.name) return row.name;
+  }
+  return id;
+}
+
+/** BaseAPI's problem JSON as one line: detail, else the joined field errors, else title. */
+export function problemMessage(problem: unknown): string {
+  if (!problem || typeof problem !== 'object') return typeof problem === 'string' && problem ? problem : 'refused';
+  const p = problem as { title?: unknown; detail?: unknown; errors?: unknown };
+  if (typeof p.detail === 'string' && p.detail) return p.detail;
+  if (p.errors && typeof p.errors === 'object') {
+    const all = Object.values(p.errors as Record<string, unknown>).flatMap((v) => (Array.isArray(v) ? v : [v]))
+      .filter((m): m is string => typeof m === 'string' && m !== '');
+    if (all.length) return all.join('; ');
+  }
+  return typeof p.title === 'string' && p.title ? p.title : 'refused';
+}
+
+/** The Output line for one failed change result. */
+export function failureText(r: Result, boards: BoardState[]): string {
+  const name = nameOf(boards, r.table ?? '', r.id ?? '');
+  if (r.status === 409) return `${name} changed elsewhere — undo your changes to it, or reload`;
+  return `${kindOf(r.table ?? '')} ${name}: ${problemMessage(r.problem)}`;
+}
+
+/** Logs every failed result; returns changedKeys-style key to message. */
+export function reportFailures(results: ModelApplyResultDto['results'], boards: BoardState[], output: OutputStore): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const r of (results ?? []).filter((x) => x.ok === false)) {
+    const text = failureText(r, boards);
+    output.log(text, 'error');
+    map.set(`${kindOf(r.table ?? '')}:${r.id}`, text);
+  }
+  return map;
+}
+
+/** Created rows take BaseAPI's ids: keys, own ids and every reference. */
+export function remapIds(b: BoardState, made: Record<string, string>): BoardState {
+  const m = (id: Id) => made[id] ?? id;
+  const mo = (id: Id | null) => (id === null ? null : m(id));
+  const rekey = <T extends { id: Id }>(rows: Record<Id, T>, f: (r: T) => T): Record<Id, T> =>
+    Object.fromEntries(Object.values(rows).map((r) => { const n = f({ ...r, id: m(r.id) }); return [n.id, n]; }));
+  return {
+    workflows: rekey(b.workflows, (w) => ({ ...w, entryStepIds: w.entryStepIds.map(m), assignmentIds: w.assignmentIds.map(m), cacheIds: w.cacheIds.map(m) })),
+    steps: rekey(b.steps, (s) => ({ ...s, nextStepIds: s.nextStepIds.map(m), processorId: mo(s.processorId) })),
+    caches: rekey(b.caches, (c) => c),
+    assignments: rekey(b.assignments, (a) => ({ ...a, stepId: m(a.stepId) })),
+    processors: rekey(b.processors, (p) => ({ ...p, inputSchemaId: mo(p.inputSchemaId), outputSchemaId: mo(p.outputSchemaId), configSchemaId: mo(p.configSchemaId) })),
+    schemas: rekey(b.schemas, (s) => s),
+  };
+}
+
+const transport = (e: ApiError) => describeError(e);
+
+/** Board-wide Save through /model/apply: all or nothing; the dry run and Kibana follow per affected workflow. */
+export async function saveBoard(api: StudioApi, store: BoardStore, output: OutputStore): Promise<'nothing' | 'refused' | 'saved'> {
+  if (store.saving()) return 'nothing';
+  const base = store.base();
+  const present = store.state();
+  const changes = boardChanges(base, present);
+  if (changes.length === 0) return 'nothing';
+  store.setSaving(true);
+  try {
+    const res = await api.applyModel(changes);
+    if (!res.ok) {
+      output.log(`Save failed: ${transport(res.error)}`, 'error');
+      return 'refused';
+    }
+    if (res.value.applied !== true) {
+      const map = reportFailures(res.value.results, [present, base], output);
+      if (map.size === 0) output.log('Save refused: BaseAPI gave no reason', 'error');
+      store.setFailures(map);
+      return 'refused';
+    }
+    const made = res.value.made ?? {};
+    const affected = affectedWorkflows(base, present).map((id) => made[id] ?? id);
+    output.log(`Saved ${changes.length} change${changes.length === 1 ? '' : 's'}`, 'ok');
+
+    const fresh = await loadBoard(api);
+    let after: BoardState;
+    if (fresh.ok) after = fresh.value;
+    else {
+      after = remapIds(present, made);
+      output.log(`Saved, but the board could not be read back (${transport(fresh.error)}). Reload before editing further`, 'warn');
+    }
+    store.saved(after);
+
+    for (const id of affected) {
+      const wf = after.workflows[id];
+      if (!wf) continue;
+      const v = await api.validateWorkflow(id);
+      if (v.ok) {
+        const problems = v.value.problems ?? [];
+        for (const p of problems) output.log(`${wf.name}: ${p.title ?? p.gate ?? 'problem'} — ${p.detail ?? ''}`, 'warn');
+        store.setProblems(id, problems.length);
+      } else output.log(`${wf.name}: could not validate — ${transport(v.error)}`, 'warn');
+      const pub = await api.publishDiagram(id, diagramSvg(after, id));
+      if (pub.ok) output.log(`${wf.name}: Kibana diagram published`, 'ok');
+      else output.log(`${wf.name}: Kibana diagram not published — ${transport(pub.error)}`, 'warn');
+    }
+    return 'saved';
+  } finally {
+    store.setSaving(false);
+  }
+}

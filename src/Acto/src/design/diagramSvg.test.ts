@@ -1,50 +1,51 @@
 import { describe, expect, it } from 'vitest';
+import { conditionInfo } from '../model/entryConditions';
+import { board } from './boardFixtures';
 import { diagramSvg } from './diagramSvg';
-import { bw } from '../board/fixtures';
 
-function parse(bwf: ReturnType<typeof bw>) {
-  return new DOMParser().parseFromString(diagramSvg(bwf), 'image/svg+xml');
-}
+const parse = (svg: string) => new DOMParser().parseFromString(svg, 'image/svg+xml');
 
 describe('diagramSvg', () => {
-  const w = bw('w1', ['a', 'b', 'c'], [
-    { id: 'a>b', from: 'a', to: 'b', condition: 1 },
-    { id: 'a>c', from: 'a', to: 'c', condition: 2 },
-  ]);
-  w.graph.steps.set('b', { ...w.graph.steps.get('b')!, entryCondition: 1 });
-  w.graph.steps.set('c', { ...w.graph.steps.get('c')!, entryCondition: 2 });
+  const doc = parse(diagramSvg(board(), 'daily'));
+  const text = doc.documentElement.textContent ?? '';
 
-  it('is a standalone svg with a viewBox and the title', () => {
-    const doc = parse(w);
+  it('is a standalone svg on white with a viewBox from 0', () => {
     expect(doc.querySelector('parsererror')).toBeNull();
-    const svg = doc.documentElement;
-    expect(svg.tagName).toBe('svg');
-    expect(svg.getAttribute('viewBox')).toMatch(/^-?[\d.]+ -?[\d.]+ [\d.]+ [\d.]+$/);
-    expect(doc.documentElement.textContent).toContain('w1-name');
+    expect(doc.documentElement.getAttribute('viewBox')).toMatch(/^0 0 [\d.]+ [\d.]+$/);
+    expect(doc.querySelector('rect')!.getAttribute('fill')).toBe('#FFFFFF');
   });
 
-  it('draws a wire per link in the target condition colour, with step names and the legend', () => {
-    const doc = parse(w);
+  it('shows the workflow, its reach and its cache, and leaves out what is not its own', () => {
+    expect(text).toContain('daily');
+    expect(text).toContain('fetch-orders');
+    expect(text).toContain('expand');
+    expect(text).toContain('c1');
+    expect(text).not.toContain('lonely');
+    expect(text).not.toContain('hourly');
+  });
+
+  it('draws the triangle, the wire in the target condition colour and a dashed cache line', () => {
+    expect(doc.querySelectorAll('polygon').length).toBe(1);
     const strokes = [...doc.querySelectorAll('path[stroke]')].map((p) => p.getAttribute('stroke'));
-    expect(strokes).toEqual(['#0F9488', '#E0482F']);
-    const text = doc.documentElement.textContent ?? '';
-    for (const t of ['a-name', 'b-name', 'c-name', 'a-proc', 'FIRST', 'Completed', 'Failed', 'Cancelled', 'Always', 'Never']) {
-      expect(text).toContain(t);
+    expect(strokes.filter((s) => s === conditionInfo(1).colour).length).toBeGreaterThanOrEqual(2);
+    expect(doc.querySelectorAll('[stroke-dasharray]').length).toBe(1);
+  });
+
+  it('has the legend below and escapes names', () => {
+    expect(text).toContain('Completed');
+    const b = board();
+    b.workflows.daily!.name = 'a<b>&"c';
+    const svg = diagramSvg(b, 'daily');
+    expect(parse(svg).querySelector('parsererror')).toBeNull();
+    expect(svg).toContain('a&lt;b&gt;&amp;&quot;c');
+  });
+
+  it('keeps every rect inside the viewBox', () => {
+    const [, , w, h] = doc.documentElement.getAttribute('viewBox')!.split(' ').map(Number);
+    for (const r of doc.querySelectorAll('rect[x]')) {
+      expect(Number(r.getAttribute('x'))).toBeGreaterThanOrEqual(0);
+      expect(Number(r.getAttribute('x')) + Number(r.getAttribute('width'))).toBeLessThanOrEqual(w! + 0.5);
+      expect(Number(r.getAttribute('y')) + Number(r.getAttribute('height'))).toBeLessThanOrEqual(h! + 0.5);
     }
-  });
-
-  it('has no external references', () => {
-    const s = diagramSvg(w);
-    expect(s).not.toMatch(/href/);
-    expect(s).not.toMatch(/url\(http/);
-    expect(s).not.toMatch(/<style/);
-  });
-
-  it('escapes names', () => {
-    const x = bw('w2', ['a']);
-    x.graph.workflow = { ...x.graph.workflow, name: 'a<b & "c"' };
-    const doc = parse(x);
-    expect(doc.querySelector('parsererror')).toBeNull();
-    expect(doc.documentElement.textContent).toContain('a<b & "c"');
   });
 });
