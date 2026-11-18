@@ -1,4 +1,5 @@
 using BaseApi.Service.Features.Assignment;
+using BaseApi.Service.Features.Board;
 using BaseApi.Service.Features.Cache;
 using BaseApi.Service.Features.Liveness;
 using BaseApi.Service.Features.Molecule;
@@ -36,6 +37,8 @@ internal static class AppFeatures
         services.AddOrchestrationFeature();
         services.AddMoleculeFeature();
         services.AddLivenessFeature(cfg);
+        // Waits for the migration runner's flag, then fills missing board locations from old layouts once.
+        services.AddHostedService<LocationFillService>();
         return services;
     }
 }
