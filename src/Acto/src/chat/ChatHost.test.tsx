@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { fakeApi } from '../board/testApi';
 import { createBoardStore } from '../design/boardStore';
-import { newWorkflowState } from '../design/state';
+import { oneWorkflow } from '../design/boardFixtures';
 import { createOutputStore } from '../output/outputStore';
 import { liveStub } from '../test/liveStub';
 import { ChatHost } from './ChatHost';
@@ -13,7 +13,7 @@ import type { ToolContext } from './toolTypes';
 function context(): ToolContext {
   const output = createOutputStore(null);
   const store = createBoardStore(output, null);
-  store.addWorkflow(newWorkflowState('wf1', 'orders', { x: 0, y: 0 }));
+  store.load(oneWorkflow());
   return {
     store, api: fakeApi(), output, live: liveStub(),
     commands: { focus: vi.fn(), setPicks: vi.fn(), picks: () => [], newWorkflowAt: () => ({ x: 0, y: 0 }) },
@@ -34,7 +34,7 @@ describe('ChatHost', () => {
     fireEvent.change(box, { target: { value: 'hi' } });
     fireEvent.keyDown(box, { key: 'Enter' });
     expect((fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0])).toEqual(['/ai/config']);
-    expect(ctx.store.boards()).toHaveLength(1);
+    expect(Object.keys(ctx.store.state().workflows)).toHaveLength(1);
   });
 
   it('Stop aborts the request in flight: the fetch sees the abort', async () => {

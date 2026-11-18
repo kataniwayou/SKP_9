@@ -1,8 +1,7 @@
 import type { Id } from '../../model/graph';
 import type { OutputLine } from '../../output/outputStore';
-import type { WorkflowState } from '../../design/state';
 import type { ChatEntry } from '../chatStore';
-import { workflowArg, type ToolContext, type ToolOutcome } from '../toolTypes';
+import { workflowArg, type ToolContext, type ToolDef, type ToolOutcome } from '../toolTypes';
 
 export const done = (ok: boolean, result: string, action: string, entries: ChatEntry[] = []): ToolOutcome =>
   ({ kind: 'done', ok, result, action, entries });
@@ -46,26 +45,14 @@ export async function withOutput<T>(ctx: ToolContext, name: string, fn: () => T 
 export const textOf = (lines: OutputLine[], fallback = ''): string => (lines.length === 0 ? fallback : lines.map((l) => l.text).join('; '));
 
 /**
- * One edit of a workflow, through the store the user edits (Plan 4 Review Focus 1). `fn` returns the next state, or
- * `{ refused }` for a rule of its own. The store may still refuse (the workflow is saving, an entity is being changed
- * in another workflow): the state is then unchanged, and the Output line the store logged comes back as the failed
- * result. `merge` is the history's merge key (the chat's own: `chat:...`). Used by the design and field tools too.
+ * A tool that is not there yet: the edit tools are rewritten for the triangle board in Plan 5 Task 13. It keeps its
+ * name (the prompt still names it) and answers, doing nothing, that it is not available.
  */
-export async function edit(
-  ctx: ToolContext, workflowId: Id, fn: (s: WorkflowState) => WorkflowState | { refused: string }, merge?: string,
-): Promise<{ ok: boolean; result: string; lines: OutputLine[]; entries: ChatEntry[] }> {
-  const before = ctx.store.entry(workflowId);
-  if (!before) return { ok: false, result: `no workflow ${workflowId} on the board`, lines: [], entries: [] };
-  const name = before.history.present.fields.name;
-  // the edit is synchronous: every line logged during it is the store's own (a refusal names its own entity)
-  const mark = ctx.output.lines().at(-1);
-  const res = fn(before.history.present);
-  if ('refused' in res) ctx.store.editOrRefuse(workflowId, () => res);
-  else ctx.store.edit(workflowId, () => res, merge);
-  const lines = linesSince(ctx, mark);
-  const entries = lines.map((l) => entryOf(l, name));
-  const now = ctx.store.entry(workflowId);
-  if (now !== null && now.history.present !== before.history.present) return { ok: true, result: textOf(lines, 'done'), lines, entries };
-  if (res && !('refused' in res) && res === before.history.present) return { ok: true, result: 'nothing to change', lines, entries };
-  return { ok: false, result: textOf(lines, `${name}: the edit was refused`), lines, entries };
+export function notYet(name: string, what: string): ToolDef {
+  return {
+    name,
+    description: `${what} Not available yet: the chat's edit tools are being rewritten for the triangle board. It answers so and does nothing.`,
+    parameters: { type: 'object', properties: {}, additionalProperties: true },
+    run: async () => fail(`${name} is not available yet: the chat's edit tools are being rewritten for the triangle board. Ask the user to make this change on the board.`, `${name} not available yet`),
+  };
 }

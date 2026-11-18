@@ -2,6 +2,9 @@ import type { ApiResult } from '../../api/client';
 import { describeError } from '../../api/describeError';
 import type { EntityKind } from '../../api/entities';
 import { livenessText, statusOf, type LiveState } from '../../live/liveState';
+import { reachOf } from '../../design/board';
+import { affectedWorkflows } from '../../design/changes';
+import { assignmentOf } from '../../design/payloads';
 import { conditionInfo } from '../../model/entryConditions';
 import type { Id } from '../../model/graph';
 import type { ToolContext, ToolDef } from '../toolTypes';
@@ -31,18 +34,16 @@ async function listOf(call: (() => Promise<ApiResult<Row[]>>) | undefined, fallb
 
 const listWorkflows: ToolDef = {
   name: 'list_workflows',
-  description: 'List every workflow on the board: id, name, version, Running or Stopped, whether it has unsaved changes (and whether it was ever saved), and its step count.',
+  description: 'List every workflow on the board: id, name, version, Running or Stopped, whether the board has unsaved changes that touch it (and whether it was ever saved), and how many steps it reaches.',
   parameters: NO_ARGS,
   async run(ctx) {
-    const rows = ctx.store.boards().map((b) => {
-      const id = b.graph.workflow.id;
-      const e = ctx.store.entry(id);
-      const s = e?.history.present;
-      return {
-        id, name: s?.fields.name ?? b.graph.workflow.name, version: s?.fields.version ?? b.graph.workflow.version,
-        status: runWord(ctx, id), unsaved: e?.unsaved ?? false, saved: e ? e.base !== null : true, steps: s ? Object.keys(s.steps).length : b.stepIds.length,
-      };
-    });
+    const b = ctx.store.state();
+    const base = ctx.store.base();
+    const touched = new Set(affectedWorkflows(base, b));
+    const rows = Object.values(b.workflows).map((w) => ({
+      id: w.id, name: w.name, version: w.version, status: runWord(ctx, w.id), unsaved: touched.has(w.id),
+      saved: !!base.workflows[w.id], steps: reachOf(b, w.id).size,
+    }));
     return json(rows, `list workflows (${rows.length})`);
   },
 };
@@ -83,30 +84,32 @@ const listSchemas: ToolDef = {
 
 const readDesign: ToolDef = {
   name: 'read_design',
-  description: 'Read one workflow as the board shows it now, unsaved edits included: its fields, steps (id, name, version, processor with health, entry condition, role first/parked/reached, next step ids, position), caches, assignments, the problems count of the last save and whether it has unsaved changes.',
+  description: 'Read one workflow as the board shows it now, unsaved edits included: its fields, entry steps, the steps it reaches (id, name, version, processor with health, entry condition, next step ids, position, its payload on the step), caches, the problems count of the last dry run and whether unsaved changes touch it.',
   parameters: { type: 'object', properties: { workflow_id: WORKFLOW_ID }, required: ['workflow_id'], additionalProperties: false },
   async run(ctx, args) {
     const t = target(ctx, args, 'read design');
     if ('out' in t) return t.out;
-    const bw = ctx.store.boards().find((b) => b.graph.workflow.id === t.id);
-    const e = ctx.store.entry(t.id);
-    if (!bw || !e) return fail(`no workflow ${t.id} on the board`, 'read design');
-    const s = e.history.present;
+    const b = ctx.store.state();
+    const base = ctx.store.base();
+    const w = b.workflows[t.id]!;
     const live = ctx.live.getState();
-    const steps = bw.stepIds.map((id) => {
-      const st = s.steps[id]!;
-      const p = st.processorId ? bw.graph.processors.get(st.processorId) : undefined;
-      return {
+    const steps = [...reachOf(b, t.id)].flatMap((id) => {
+      const st = b.steps[id];
+      if (!st) return [];
+      const p = st.processorId ? b.processors[st.processorId] : undefined;
+      return [{
         id, name: st.name, version: st.version,
         processor: st.processorId ? { id: st.processorId, name: p?.name ?? null, version: p?.version ?? null, health: healthOf(live, st.processorId) } : null,
-        entryCondition: conditionInfo(st.entryCondition).name, role: bw.roles.get(id) ?? 'parked', next: st.nextStepIds, at: st.at,
-      };
+        entryCondition: conditionInfo(st.entryCondition).name, next: st.nextStepIds, at: st.at,
+        payload: assignmentOf(b, t.id, id)?.payload ?? null,
+      }];
     });
     return json({
-      id: t.id, fields: s.fields, status: runWord(ctx, t.id), unsaved: e.unsaved, saved: e.base !== null, problems: e.problems, steps,
-      caches: Object.values(s.caches).map((c) => ({ id: c.id, name: c.name, version: c.version, root: c.root })),
-      assignments: Object.values(s.assignments).map((a) => ({ id: a.id, stepId: a.stepId, name: a.name, version: a.version })),
-    }, `read design of ${s.fields.name}`);
+      id: t.id, fields: { name: w.name, version: w.version, description: w.description, cronExpression: w.cronExpression },
+      status: runWord(ctx, t.id), unsaved: affectedWorkflows(base, b).includes(t.id), saved: !!base.workflows[t.id],
+      problems: ctx.store.problems(t.id), entrySteps: w.entryStepIds, steps,
+      caches: w.cacheIds.flatMap((id) => { const c = b.caches[id]; return c ? [{ id: c.id, name: c.name, version: c.version, root: c.root }] : []; }),
+    }, `read design of ${w.name}`);
   },
 };
 

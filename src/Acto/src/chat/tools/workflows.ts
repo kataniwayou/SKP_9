@@ -1,9 +1,9 @@
-import { saveWorkflow } from '../../design/saveWorkflow';
-import { newWorkflowState } from '../../design/state';
-import { commitDelete, confirmText, prepareDelete } from '../../operate/deleteWorkflow';
+import { confirmText } from '../../board/Toolbar';
+import { addWorkflow, setWorkflowField } from '../../design/edits';
+import { commitDelete, prepareDelete } from '../../operate/deleteWorkflow';
 import { runWorkflow, type RunOp } from '../../operate/runWorkflow';
 import type { ToolContext, ToolDef, ToolOutcome } from '../toolTypes';
-import { done, fail, target, textOf, withOutput, WORKFLOW_ID } from './common';
+import { done, fail, notYet, target, textOf, withOutput, WORKFLOW_ID } from './common';
 
 /**
  * A delete question's pin: the workflow and the confirm text it was asked with (JSON), what an answer is checked
@@ -25,39 +25,25 @@ const ARG = { type: 'object', properties: { workflow_id: WORKFLOW_ID }, required
 
 const newWorkflow: ToolDef = {
   name: 'new_workflow',
-  description: 'Make a new, blank workflow as a frame on free board, named `name` or new-workflow-N. It exists only on the board until it is saved. Answers its id.',
+  description: 'Make a new triangle on free board, named `name` or new-workflow-N (version 1.0.0, no cron, no entry arrows). It exists only on the board until the board is saved. Answers its id.',
   parameters: { type: 'object', properties: { name: { type: 'string' } }, additionalProperties: false },
   async run(ctx, args) {
-    let name = typeof args.name === 'string' ? args.name.trim() : '';
-    if (name === '') {
-      const taken = new Set(ctx.store.boards().map((b) => b.graph.workflow.name));
-      let n = 1;
-      while (taken.has(`new-workflow-${n}`)) n++;
-      name = `new-workflow-${n}`;
-    }
     const id = ctx.newId();
-    ctx.store.addWorkflow(newWorkflowState(id, name, ctx.commands.newWorkflowAt()));
+    const wanted = typeof args.name === 'string' ? args.name.trim() : '';
+    ctx.store.edit((b) => {
+      const made = addWorkflow(b, ctx.commands.newWorkflowAt(), id);
+      return wanted === '' ? made : setWorkflowField(made, id, 'name', wanted);
+    });
+    const name = ctx.store.state().workflows[id]?.name;
+    if (!name) return fail('the board refused the new workflow (it is saving)', 'new workflow failed');
     ctx.output.log(`${name} created — it is saved only when you press Save`, 'ok');
     ctx.commands.focus(id);
     return done(true, `made workflow ${name} (id ${id}); it is not saved yet`, `new workflow ${name}`);
   },
 };
 
-const save: ToolDef = {
-  name: 'save',
-  description: 'Save one workflow (what its Save button does): the design goes to BaseAPI, which applies it or reports its errors. Answers what Output said.',
-  parameters: ARG,
-  async run(ctx, args) {
-    const t = target(ctx, args, 'save');
-    if ('out' in t) return t.out;
-    ctx.commands.focus(t.id);
-    const { value, lines, entries } = await withOutput(ctx, t.name, () => saveWorkflow(ctx.api, ctx.store, ctx.output, t.id));
-    const e = ctx.store.entry(t.id);
-    const problems = e && e.problems > 0 ? `; ${e.problems} problem${e.problems === 1 ? '' : 's'} found` : '';
-    if (value === 'saved') return done(true, `saved ${t.name}${problems}. ${textOf(lines)}`, `saved ${t.name}`, entries);
-    return fail(`${t.name} was not saved: ${textOf(lines, value)}`, `save ${t.name} failed`, entries);
-  },
-};
+// Save is board-wide now and asks first (spec §9: save_board); Task 13 brings it.
+const save = notYet('save', 'Save the board.');
 
 async function press(ctx: ToolContext, id: string, name: string, op: RunOp): Promise<ToolOutcome> {
   ctx.commands.focus(id);
@@ -93,14 +79,14 @@ const stop: ToolDef = {
 
 const deleteWorkflow: ToolDef = {
   name: 'delete_workflow',
-  description: 'Delete the workflow (a saved one goes from BaseAPI with its steps and assignments; a never-saved one is discarded). The user is asked first. Refused while it runs or saves.',
+  description: 'Delete the workflow (BaseAPI deletes it with the payloads no other workflow uses; its steps and caches stay; a never-saved one is discarded). The user is asked first. Refused while it runs or the board saves.',
   parameters: ARG,
   async run(ctx, args, answer, pin) {
     const pinned = answer === undefined ? undefined : deletePin(pin);
     const t = target(ctx, args, 'delete workflow', pinned?.w);
     if ('out' in t) return t.out;
     if (answer !== undefined && answer !== 'Delete') return fail('the user declined', `user declined: delete ${t.name}`);
-    const prepared = await withOutput(ctx, t.name, () => prepareDelete(ctx.api, ctx.store, ctx.output, [t.id]));
+    const prepared = await withOutput(ctx, t.name, () => prepareDelete(ctx.api, ctx.store, ctx.output, t.id));
     const plan = prepared.value;
     if (plan === null) return fail(`${t.name} was not deleted: ${textOf(prepared.lines, 'refused')}`, `delete ${t.name} refused`, prepared.entries);
     const text = confirmText(plan);
@@ -109,7 +95,7 @@ const deleteWorkflow: ToolDef = {
       return { kind: 'ask', question: { text, choices: ['Delete', 'Cancel'], pin: JSON.stringify({ w: t.id, text }) } };
     }
     const ran = await withOutput(ctx, t.name, () => commitDelete(ctx.api, ctx.store, ctx.output, plan));
-    if (ran.value.includes(t.id)) return done(true, `deleted ${t.name}. ${textOf(ran.lines)}`, `deleted ${t.name}`, ran.entries);
+    if (ran.value) return done(true, `deleted ${t.name}. ${textOf(ran.lines)}`, `deleted ${t.name}`, ran.entries);
     return fail(`${t.name} was not deleted: ${textOf(ran.lines, 'refused')}`, `delete ${t.name} failed`, ran.entries);
   },
 };

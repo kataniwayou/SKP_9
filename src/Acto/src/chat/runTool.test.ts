@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeApi } from '../board/testApi';
 import { createBoardStore } from '../design/boardStore';
-import { newWorkflowState } from '../design/state';
+import { oneWorkflow } from '../design/boardFixtures';
 import { createOutputStore } from '../output/outputStore';
 import { liveStub } from '../test/liveStub';
 import { runTool } from './runTool';
@@ -11,7 +11,7 @@ import { workflowArg, type ToolContext, type ToolOutcome } from './toolTypes';
 function context(): ToolContext {
   const output = createOutputStore(null);
   const store = createBoardStore(output, null);
-  store.addWorkflow(newWorkflowState('wf1', 'orders', { x: 0, y: 0 }));
+  store.load(oneWorkflow());
   return {
     store, api: fakeApi(), output, live: liveStub(),
     commands: { focus: vi.fn(), setPicks: vi.fn(), picks: () => [], newWorkflowAt: () => ({ x: 0, y: 0 }) },
@@ -28,9 +28,9 @@ describe('workflowArg', () => {
 
   it('a workflow id that is gone or never existed is an error naming it, with no side effect (Review Focus 3)', () => {
     const ctx = context();
-    const before = ctx.store.boards();
+    const before = Object.keys(ctx.store.state().workflows);
     expect(workflowArg(ctx, { workflow_id: 'nope' })).toEqual({ error: 'no workflow nope on the board' });
-    ctx.store.remove('wf1');
+    ctx.store.dropWorkflow('wf1');
     expect(workflowArg(ctx, { workflow_id: 'wf1' })).toEqual({ error: 'no workflow wf1 on the board' });
     expect(before).toHaveLength(1);
   });

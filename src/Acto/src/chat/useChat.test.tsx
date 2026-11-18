@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeApi } from '../board/testApi';
 import { createBoardStore } from '../design/boardStore';
-import { newWorkflowState } from '../design/state';
+import { oneWorkflow } from '../design/boardFixtures';
 import { createOutputStore } from '../output/outputStore';
 import { liveStub } from '../test/liveStub';
 import { createChatStore, type ChatState } from './chatStore';
@@ -71,7 +71,7 @@ const TEST_TOOLS: ToolDef[] = [
 function setup(...answers: Scripted[]) {
   const output = createOutputStore(null);
   const store = createBoardStore(output, null);
-  store.addWorkflow(newWorkflowState('wf1', 'orders', { x: 0, y: 0 }));
+  store.load(oneWorkflow());
   const ctx: ToolContext = {
     store, api: fakeApi(), output, live: liveStub(),
     commands: { focus: vi.fn(), setPicks: vi.fn(), picks: () => [], newWorkflowAt: () => ({ x: 0, y: 0 }) },

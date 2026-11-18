@@ -3,7 +3,8 @@ import type { Pick } from '../board/picks';
 import type { BoardStore } from '../design/boardStore';
 import type { LiveStore } from '../live/liveClient';
 import type { Point } from '../model/geometry';
-import type { Cache, Id, Processor } from '../model/graph';
+import type { CacheRow } from '../design/board';
+import type { Id, Processor } from '../model/graph';
 import type { OutputStore } from '../output/outputStore';
 import type { ChatEntry, Question } from './chatStore';
 
@@ -13,7 +14,7 @@ export interface ActoCommands {
   focus(workflowId: Id, stepIds?: Id[]): void;
   setPicks(picks: Pick[]): void;
   picks(): Pick[];
-  newWorkflowAt(): Point;            // the first free board slot (placement), for new_workflow
+  newWorkflowAt(): Point;            // a free spot on the board, for new_workflow
 }
 
 /**
@@ -21,7 +22,7 @@ export interface ActoCommands {
  * page's commands, the processor and cache lists as last read, the tab's session storage (the clipboard) and new ids.
  */
 export interface ToolContext { store: BoardStore; api: StudioApi; output: OutputStore; live: LiveStore;
-  commands: ActoCommands; processors(): Processor[]; caches(): Cache[]; session: Storage | null; newId: () => Id }
+  commands: ActoCommands; processors(): Processor[]; caches(): CacheRow[]; session: Storage | null; newId: () => Id }
 
 /** What a tool run came to: an answer for the model and the chat, or a question for the user first. */
 export type ToolOutcome =
@@ -45,7 +46,7 @@ export function workflowArg(ctx: ToolContext, args: Record<string, unknown>): { 
   const raw = args.workflow_id;
   if (raw === undefined || raw === null || raw === '') return { error: 'no workflow (none given) on the board' };
   const id = typeof raw === 'string' ? raw : String(raw);
-  const entry = typeof raw === 'string' ? ctx.store.entry(id) : null;
-  if (!entry) return { error: `no workflow ${id} on the board` };
-  return { id, name: entry.history.present.fields.name };
+  const row = typeof raw === 'string' ? ctx.store.state().workflows[id] : undefined;
+  if (!row) return { error: `no workflow ${id} on the board` };
+  return { id, name: row.name };
 }
