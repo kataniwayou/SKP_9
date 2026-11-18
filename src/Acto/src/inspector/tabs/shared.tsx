@@ -4,7 +4,8 @@ import { checkPayload, payloadJsonProblem } from '../../model/payloadCheck';
 import type { Meta } from '../MetaToggle';
 
 export type Edit = (fn: (b: BoardState) => BoardState, merge?: string) => void;
-export interface Ctx { state: BoardState; edit: Edit }
+/** `base`: the board as BaseAPI last gave it (the saved values JSON is compared with). */
+export interface Ctx { state: BoardState; base: BoardState; edit: Edit }
 
 export const orNull = (v: string) => (v === '' ? null : v);
 export const stepName = (b: BoardState, id: Id) => b.steps[id]?.name ?? id;
@@ -26,10 +27,10 @@ export function PayloadCheckNote({ state, stepId, payload }: { state: BoardState
   const schema = processor?.configSchemaId ? state.schemas[processor.configSchemaId] : undefined;
   // text that is not JSON says so whether or not there is a schema to check it against
   const notJson = payloadJsonProblem(payload);
-  if (notJson !== null) return <p className="in-problem">{notJson}</p>;
+  if (notJson !== null) return <p className="in-problem sub">{notJson}</p>;
   if (!schema?.definition) return null;
   const r = checkPayload(schema.definition, payload);
-  if ('unchecked' in r) return <p className="in-note">{r.unchecked}</p>;
-  if (r.problems.length === 0) return <p className="in-note">{`✓ checked against ${schema.name} ${schema.version}; Save checks it again`}</p>;
-  return <>{r.problems.map((p, i) => <p key={i} className="in-problem">{p}</p>)}</>;
+  if ('unchecked' in r) return <p className="in-note sub">{r.unchecked}</p>;
+  if (r.problems.length === 0) return <p className="in-note sub">{`✓ checked against ${schema.name} ${schema.version}; Save checks it again`}</p>;
+  return <>{r.problems.map((p, i) => <p key={i} className="in-problem sub">{p}</p>)}</>;
 }

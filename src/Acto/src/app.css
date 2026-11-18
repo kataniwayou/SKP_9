@@ -30,16 +30,19 @@
 .ins-title > div { min-width: 0; }
 .ins-title b { font-size: 15px; display: block; overflow-wrap: anywhere; }
 .ins-title small { color: var(--muted); font-size: 12px; }
-.fld { display: grid; gap: 4px; margin-bottom: 10px; }
-.fld > span { font: 500 10.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-.fld input, .fld select, .fld textarea { font: 13px var(--sans); color: var(--ink); background: var(--card-2); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; width: 100%; }
-.fld textarea { font: 12px/1.45 var(--mono); min-height: 110px; resize: vertical; }
+.fld { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px; align-items: center; margin: 5px 0; }
+.fld.tall { align-items: start; }
+.fld.tall > span { padding-top: 5px; }
+.fld > span { font: 500 11px var(--sans); color: var(--muted); overflow-wrap: anywhere; }
+.fld input, .fld select, .fld textarea { font: 13px var(--sans); color: var(--ink); background: var(--card-2); border: 1px solid var(--line); border-radius: 7px; padding: 4px 7px; width: 100%; min-width: 0; }
+.fld textarea { font: 12px/1.45 var(--mono); resize: vertical; }
 .fld input:focus, .fld select:focus, .fld textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
 .fld :disabled { opacity: .6; }
-.ro { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12.5px; margin: 4px 0 12px; }
-.ro dt { color: var(--muted); } .ro dd { margin: 0; font-family: var(--mono); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+.ro { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 4px 6px; font-size: 12.5px; margin: 5px 0 10px; }
+.ro dt { color: var(--muted); font: 500 11px var(--sans); overflow-wrap: anywhere; } .ro dd { margin: 0; font-family: var(--mono); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
 .sec { font: 500 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 14px 0 8px; padding-top: 10px; border-top: 1px solid var(--line); }
 .in-note { margin: -4px 0 10px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.in-note.sub, .in-problem.sub { margin: 3px 0 8px 98px; }
 .in-lock { color: var(--warn-ink); font-weight: 600; margin-top: 0; }
 .in-problem { color: var(--danger); font-size: 12px; margin: 2px 0; }
 .in-act { margin: 0 0 10px; }
@@ -62,7 +65,7 @@
 .meta { background: var(--card-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; margin: 0 0 10px; }
 .meta .ro { margin: 2px 0; }
 .fld textarea.json { min-height: 0; white-space: pre; overflow: auto; }
-pre.json { margin: 0 0 10px; border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; background: var(--card-2); font: 11.5px/1.5 var(--mono); white-space: pre; overflow: auto; }
+pre.json { margin: 0; border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; background: var(--card-2); font: 11.5px/1.5 var(--mono); white-space: pre; overflow: auto; }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; }
 .chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 4px 1px 8px; font-size: 12px; background: var(--card); }
 .chip i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }

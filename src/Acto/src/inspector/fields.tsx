@@ -1,8 +1,11 @@
 import type { ReactNode } from 'react';
 
-/** A labelled field (the mock's .fld: the label above the input). Controlled from the store: a refused edit shows the store value again. */
-export function Field({ label, children }: { label: string; children: ReactNode }) {
-  return <label className="fld"><span>{label}</span>{children}</label>;
+/**
+ * A labelled field: one row, the label left and the value right (the mock's .f; `tall` tops the label, for JSON and
+ * long text). Controlled from the store: a refused edit shows the store value again.
+ */
+export function Field({ label, children, tall }: { label: string; children: ReactNode; tall?: boolean }) {
+  return <label className={tall ? 'fld tall' : 'fld'}><span>{label}</span>{children}</label>;
 }
 
 /** Read-outs (the mock's .ro): a list of Rows. */
@@ -17,7 +20,7 @@ export function TextField({ label, value, onChange, disabled }: { label: string;
 }
 
 export function AreaField({ label, value, onChange, rows = 5, disabled }: { label: string; value: string; onChange: (v: string) => void; rows?: number; disabled?: boolean }) {
-  return <Field label={label}><textarea className="in-in" rows={rows} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} /></Field>;
+  return <Field label={label} tall><textarea className="in-in" rows={rows} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} /></Field>;
 }
 
 export function SelectField({ label, value, options, onChange, disabled }: {

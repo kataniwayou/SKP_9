@@ -175,6 +175,43 @@ describe('InspectorPanel', () => {
       fireEvent.change(screen.getByLabelText('Payload'), { target: { value: '{"z":1}' } });
       expect(payloadOf(store, 'daily')).toBe('{"z":1}');
     });
+    it('changed, then typed back to the saved JSON in another layout: nothing unsaved (the saved text itself is written)', () => {
+      const b0 = board();
+      const b: BoardState = { ...b0, assignments: { ...b0.assignments, 'a-daily-fetch': { ...b0.assignments['a-daily-fetch']!, payload: '{"a":1}' } } };
+      const { store } = opened({ workflows: ['daily'], picks: [step('fetch')] }, b);
+      const area = screen.getByLabelText('Payload');
+      fireEvent.change(area, { target: { value: '{"a":2}' } });
+      expect(store.unsaved().size).toBe(1);
+      fireEvent.change(area, { target: { value: '{ "a" : 1 }' } });
+      expect(payloadOf(store, 'daily')).toBe('{"a":1}');
+      expect(store.unsaved().size).toBe(0);
+      expect(area).toHaveValue('{ "a" : 1 }');
+    });
+    it('Name, Version and Description edit the assignment row, one undo step while typing', () => {
+      const { store } = opened({ workflows: ['daily'], picks: [step('fetch')] });
+      fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'f' } });
+      fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'fx' } });
+      fireEvent.change(screen.getByLabelText('Version'), { target: { value: '2.0.0' } });
+      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'd' } });
+      expect(store.state().assignments['a-daily-fetch']).toMatchObject({ name: 'fx', version: '2.0.0', description: 'd' });
+      expect(store.state().assignments['a-hourly-fetch']!.name).toBe('fetch-assignment');
+      fireEvent.change(screen.getByLabelText('Description'), { target: { value: '' } });
+      expect(store.state().assignments['a-daily-fetch']!.description).toBeNull();
+      act(() => { store.undo(); store.undo(); store.undo(); });
+      expect(store.state().assignments['a-daily-fetch']!.name).toBe('fetch-assignment');
+    });
+    it('a field edit of a row both workflows link copies it for its own workflow once, then edits the copy', () => {
+      const { store } = opened({ workflows: ['daily'], picks: [step('fetch')] }, shared());
+      fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'd' } });
+      fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'da' } });
+      const s = store.state();
+      expect(s.assignments['a-shared']!.name).toBe('fetch-assignment');
+      expect(s.workflows.hourly!.assignmentIds).toEqual(['a-shared']);
+      const copy = s.workflows.daily!.assignmentIds[0]!;
+      expect(copy).not.toBe('a-shared');
+      expect(s.assignments[copy]).toMatchObject({ name: 'da', payload: '{"shared":true}', updatedAt: null });
+      expect(Object.keys(s.assignments)).toHaveLength(2);
+    });
     it('a payload on a row both workflows link is copied for its own workflow, as a new row', () => {
       const { store } = opened({ workflows: ['daily'], picks: [step('fetch')] }, shared());
       fireEvent.change(screen.getByLabelText('Payload'), { target: { value: '{"d":1}' } });

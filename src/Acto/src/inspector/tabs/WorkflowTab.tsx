@@ -18,7 +18,7 @@ const keysText = (payload: string) => {
 };
 
 /** A workflow: its fields, entry steps and caches as chips (✕ removes), its assignments, and the payload keys in its stream. */
-export function WorkflowTab({ state, edit, id }: Ctx & { id: Id }) {
+export function WorkflowTab({ state, base, edit, id }: Ctx & { id: Id }) {
   const status = useWorkflowStatus(id);
   const w = state.workflows[id];
   if (!w) return null;
@@ -39,7 +39,7 @@ export function WorkflowTab({ state, edit, id }: Ctx & { id: Id }) {
       <MetaToggle meta={metaOfRow(w)} />
       <AreaField key={`${id}:description`} label="Description" rows={2} value={w.description ?? ''} onChange={(v) => set('description', orNull(v))} />
       <TextField key={`${id}:cron`} label="Cron" value={w.cronExpression} onChange={(v) => set('cronExpression', orNull(v))} />
-      <p className="in-note">{parsed === null ? 'not scheduled' : 'text' in parsed ? parsed.text : w.cronExpression}</p>
+      <p className="in-note sub">{parsed === null ? 'not scheduled' : 'text' in parsed ? parsed.text : w.cronExpression}</p>
       <Sec>Entry steps</Sec>
       <div className="chips">
         {w.entryStepIds.length === 0 && <span className="none">none</span>}
@@ -67,7 +67,7 @@ export function WorkflowTab({ state, edit, id }: Ctx & { id: Id }) {
         {assignments.map((a, i) => (
           <div key={`${id}:${i}`} className="in-assign">
             <b>{stepName(state, a.stepId)}</b>
-            <JsonField key={`${id}:${i}:payload`} label={`Payload · ${stepName(state, a.stepId)}`} value={a.payload}
+            <JsonField key={`${id}:${i}:payload`} label={`Payload · ${stepName(state, a.stepId)}`} value={a.payload} saved={base.assignments[a.id]?.payload}
               onChange={(v) => edit((b) => { const cur = b.workflows[id]?.assignmentIds[i]; return cur ? setAssignmentPayload(b, id, cur, v, newId) : b; }, `field:${id}:${i}:payload`)} />
             <PayloadCheckNote state={state} stepId={a.stepId} payload={a.payload} />
             <button type="button" className="pbtn in-act" onClick={() => edit((b) => removeAssignment(b, id, a.id))}>Delete</button>

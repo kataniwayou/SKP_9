@@ -6,7 +6,7 @@ import { MetaToggle } from '../MetaToggle';
 import { EntityHead, metaOfRow, orNull, type Ctx } from './shared';
 
 /** A cache: its fields, its items as pretty JSON (as typed when they do not parse) and who uses it. */
-export function CacheTab({ state, edit, id }: Ctx & { id: Id }) {
+export function CacheTab({ state, base, edit, id }: Ctx & { id: Id }) {
   const cache = state.caches[id];
   if (!cache) return null;
   const set = (key: 'name' | 'version' | 'description' | 'root' | 'items', v: string | null) =>
@@ -20,7 +20,7 @@ export function CacheTab({ state, edit, id }: Ctx & { id: Id }) {
       <MetaToggle meta={metaOfRow(cache)} />
       <TextField key={`${id}:description`} label="Description" value={cache.description} onChange={(v) => set('description', orNull(v))} />
       <TextField key={`${id}:root`} label="Root" value={cache.root} onChange={(v) => set('root', v)} />
-      <JsonField key={`${id}:items`} label="Items" value={cache.items} onChange={(v) => set('items', v)} />
+      <JsonField key={`${id}:items`} label="Items" value={cache.items} saved={base.caches[id]?.items} onChange={(v) => set('items', v)} />
       <Ro><Row k="Used by">{users.length ? users.join(', ') : 'no workflow'}</Row></Ro>
     </>
   );

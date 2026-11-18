@@ -19,7 +19,7 @@ const schemaMeta = (s: SchemaRow): Meta => (s.updatedAt === null
   : { id: s.id, createdAt: s.audit.createdAt, createdBy: s.audit.createdBy, updatedAt: s.audit.updatedAt, updatedBy: s.audit.updatedBy });
 
 /** One slot: its heading, show all, name/version/description and definition (pretty JSON). Edits go to the processor's own copy. */
-function SlotEditor({ state, edit, processorId, slot }: { state: BoardState; edit: Edit; processorId: Id; slot: Slot }) {
+function SlotEditor({ state, base, edit, processorId, slot }: { state: BoardState; base: BoardState; edit: Edit; processorId: Id; slot: Slot }) {
   const label = SLOT_LABEL[slot];
   const processor = state.processors[processorId];
   if (!processor) return null;
@@ -32,6 +32,9 @@ function SlotEditor({ state, edit, processorId, slot }: { state: BoardState; edi
   if (schema.definition === null || schema.definition === undefined) {
     return <>{heading}<MetaToggle meta={schemaMeta(schema)} /><p className="none">definition not loaded</p></>;
   }
+  // the slot's schema as BaseAPI has it: typed back to its definition, a copy holds the saved text itself
+  const savedId = base.processors[processorId]?.[SLOT_FIELD[slot]] ?? null;
+  const saved = savedId === null ? undefined : base.schemas[savedId]?.definition ?? undefined;
   const set = (key: 'name' | 'version' | 'description' | 'definition', v: string | null) =>
     edit((b) => {
       const cur = b.schemas[schemaId];
@@ -46,7 +49,7 @@ function SlotEditor({ state, edit, processorId, slot }: { state: BoardState; edi
       <TextField key={`${k}:version`} label={`${label} version`} value={schema.version} onChange={(v) => set('version', v)} />
       <MetaToggle meta={schemaMeta(schema)} />
       <TextField key={`${k}:description`} label={`${label} description`} value={schema.description} onChange={(v) => set('description', orNull(v))} />
-      <JsonField key={`${k}:definition`} label={`${label} definition`} value={schema.definition} onChange={(v) => set('definition', v)} />
+      <JsonField key={`${k}:definition`} label={`${label} definition`} value={schema.definition} saved={saved} onChange={(v) => set('definition', v)} />
     </>
   );
 }
@@ -57,7 +60,7 @@ function Liveness({ processorId }: { processorId: Id }) {
 }
 
 /** The picked step's processor (shared by every step that uses it) and its three schemas, one under another. */
-export function ProcessorTab({ state, edit, stepId }: Ctx & { stepId: Id }) {
+export function ProcessorTab({ state, base, edit, stepId }: Ctx & { stepId: Id }) {
   const processorId = state.steps[stepId]?.processorId ?? null;
   if (processorId === null) return <Ro><Row k="Processor">none</Row></Ro>;
   const processor = state.processors[processorId];
@@ -74,7 +77,7 @@ export function ProcessorTab({ state, edit, stepId }: Ctx & { stepId: Id }) {
       <MetaToggle meta={{ id: processor.id, createdAt: audit.createdAt, createdBy: audit.createdBy, updatedAt: audit.updatedAt, updatedBy: audit.updatedBy }} />
       <TextField key={`${processorId}:pdescription`} label="Description" value={processor.description} onChange={(v) => set('description', orNull(v))} />
       <Liveness processorId={processorId} />
-      {SLOTS.map((slot) => <SlotEditor key={slot} state={state} edit={edit} processorId={processorId} slot={slot} />)}
+      {SLOTS.map((slot) => <SlotEditor key={slot} state={state} base={base} edit={edit} processorId={processorId} slot={slot} />)}
     </>
   );
 }

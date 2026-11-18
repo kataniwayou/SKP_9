@@ -23,7 +23,7 @@ export function StepTab({ state, edit, id }: Ctx & { id: Id }) {
       {/* Task 7 puts Studio's condition picker here */}
       <SelectField key={`${id}:entryCondition`} label="Entry condition" value={step.entryCondition}
         options={CONDITIONS.map((c) => ({ value: c.value, label: `${c.letter} · ${c.name}` }))} onChange={(v) => set('entryCondition', v)} />
-      <p className="in-note">Colours every wire into this step.</p>
+      <p className="in-note sub">Colours every wire into this step.</p>
       <Ro><Row k="Used by">{users.length > 0 ? users.join(', ') : 'no workflow'}</Row></Ro>
     </>
   );

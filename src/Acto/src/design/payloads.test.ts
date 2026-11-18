@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { board, shared } from './boardFixtures';
 import { clearSlot, removeWires, setProcessorField, setSlotSchema, withoutWorkflow } from './edits';
-import { assignmentOf, assignmentsOf, linkedBy, removeAssignment, setAssignmentPayload, setPayload } from './payloads';
+import { assignmentOf, assignmentsOf, linkedBy, removeAssignment, setAssignmentField, setAssignmentPayload, setPayload } from './payloads';
 
 describe('payloads', () => {
   it('edits a payload in place when only this workflow links the row', () => {
@@ -99,5 +99,24 @@ describe('setAssignmentPayload', () => {
     const b = board();
     expect(setAssignmentPayload(b, 'daily', 'a-hourly-fetch', 'x', () => 'n')).toBe(b);
     expect(setAssignmentPayload(b, 'nope', 'a-daily-fetch', 'x', () => 'n')).toBe(b);
+  });
+});
+
+describe('setAssignmentField', () => {
+  it('edits the row in place when only this workflow links it', () => {
+    const b = setAssignmentField(board(), 'daily', 'a-daily-fetch', 'name', 'renamed', () => 'n');
+    expect(b.assignments['a-daily-fetch']!.name).toBe('renamed');
+    expect(b.workflows.daily!.assignmentIds).toEqual(['a-daily-fetch']);
+    expect(setAssignmentField(board(), 'daily', 'a-daily-fetch', 'description', null, () => 'n')).toEqual(board());
+  });
+  it('copies a row another workflow links, for this workflow only', () => {
+    const b = setAssignmentField(shared(), 'daily', 'a-shared', 'version', '2.0.0', () => 'copy');
+    expect(b.assignments['a-shared']!.version).toBe('1.0.0');
+    expect(b.assignments.copy).toMatchObject({ version: '2.0.0', payload: '{"shared":true}', updatedAt: null, createdAt: null });
+    expect(b.workflows.daily!.assignmentIds).toEqual(['copy']);
+    expect(b.workflows.hourly!.assignmentIds).toEqual(['a-shared']);
+  });
+  it('a row the workflow does not link is left alone', () => {
+    expect(setAssignmentField(board(), 'hourly', 'a-daily-fetch', 'name', 'x', () => 'n')).toEqual(board());
   });
 });

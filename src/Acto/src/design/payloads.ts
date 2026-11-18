@@ -77,3 +77,25 @@ export function setAssignmentPayload(b: BoardState, wf: Id, assignmentId: Id, pa
     workflows: { ...b.workflows, [wf]: { ...w, assignmentIds: w.assignmentIds.map((x) => (x === assignmentId ? id : x)) } },
   };
 }
+
+/**
+ * Sets the name, version or description of one assignment the workflow links, by its row id. Same copy-on-write rule
+ * as setAssignmentPayload: a row another workflow also links is copied for this workflow only.
+ */
+export function setAssignmentField(
+  b: BoardState, wf: Id, assignmentId: Id, key: 'name' | 'version' | 'description', value: string | null, newId: () => Id,
+): BoardState {
+  const w = b.workflows[wf];
+  const cur = b.assignments[assignmentId];
+  if (!w || !cur || !w.assignmentIds.includes(assignmentId)) return b;
+  if (linkedBy(b, assignmentId).every((x) => x === wf)) {
+    if (cur[key] === value) return b;
+    return { ...b, assignments: { ...b.assignments, [assignmentId]: { ...cur, [key]: value } } };
+  }
+  const id = newId();
+  return {
+    ...b,
+    assignments: { ...b.assignments, [id]: { ...cur, id, [key]: value, updatedAt: null, ...NO_AUDIT } },
+    workflows: { ...b.workflows, [wf]: { ...w, assignmentIds: w.assignmentIds.map((x) => (x === assignmentId ? id : x)) } },
+  };
+}

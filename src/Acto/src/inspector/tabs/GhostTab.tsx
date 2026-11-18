@@ -72,7 +72,7 @@ export function GhostTab({ state, ghosts, item }: { state: BoardState; ghosts: L
         {item.kind === 'workflow' && <Row k="Assignments">{String(item.assignments.length)}</Row>}
         {item.kind === 'cache' && <Row k="Root">{item.row.root}</Row>}
       </Ro>
-      {item.kind === 'cache' && <JsonView value={item.row.items} />}
+      {item.kind === 'cache' && <JsonView label="Items" value={item.row.items} />}
       {note}
     </>
   );

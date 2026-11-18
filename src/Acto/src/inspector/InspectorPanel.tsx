@@ -80,18 +80,19 @@ function TabBar({ tabs, active, choose }: { tabs: readonly Tab[]; active: TabId;
   );
 }
 
-function TabBody({ tab, focus, state, edit, ghosts }: { tab: TabId; focus: Pick; state: BoardState; edit: Edit; ghosts: Ghosts }) {
-  if (tab === 'workflow' && focus.kind === 'workflow') return <WorkflowTab state={state} edit={edit} id={focus.id} />;
-  if (tab === 'cache' && focus.kind === 'cache') return <CacheTab state={state} edit={edit} id={focus.id} />;
+function TabBody({ tab, focus, state, base, edit, ghosts }: { tab: TabId; focus: Pick; state: BoardState; base: BoardState; edit: Edit; ghosts: Ghosts }) {
+  const ctx = { state, base, edit };
+  if (tab === 'workflow' && focus.kind === 'workflow') return <WorkflowTab {...ctx} id={focus.id} />;
+  if (tab === 'cache' && focus.kind === 'cache') return <CacheTab {...ctx} id={focus.id} />;
   if (tab === 'link' && (focus.kind === 'wire' || focus.kind === 'entry' || focus.kind === 'cacheLink')) return <LinkTab state={state} pick={focus} />;
   if (tab === 'ghost' && focus.kind === 'ghost') {
     const g = ghosts.get(focus.key);
     return g ? <GhostTab state={state} ghosts={ghosts} item={g} /> : null;
   }
   if (focus.kind !== 'step') return null;
-  if (tab === 'step') return <StepTab state={state} edit={edit} id={focus.id} />;
-  if (tab === 'processor') return <ProcessorTab state={state} edit={edit} stepId={focus.id} />;
-  if (tab.startsWith('assignment:')) return <AssignmentTab state={state} edit={edit} stepId={focus.id} workflowId={tab.slice('assignment:'.length)} />;
+  if (tab === 'step') return <StepTab {...ctx} id={focus.id} />;
+  if (tab === 'processor') return <ProcessorTab {...ctx} stepId={focus.id} />;
+  if (tab.startsWith('assignment:')) return <AssignmentTab {...ctx} stepId={focus.id} workflowId={tab.slice('assignment:'.length)} />;
   return null;
 }
 
@@ -116,7 +117,7 @@ export function InspectorPanel({ store, selection, ghosts }: { store: BoardStore
       {tab !== null && focus && <TabBar tabs={tabs} active={tab} choose={(t) => setChosen({ key, tab: t })} />}
       <div className="pb" {...(tab !== null ? { role: 'tabpanel', id: 'ins-tabpanel', 'aria-labelledby': `ins-tab-${tab}` } : {})}>
         {list ? <PickList picks={selection.picks} state={state} ghosts={ghosts} />
-          : tab !== null && focus ? <TabBody key={`${key}|${tab}`} tab={tab} focus={focus} state={state} edit={edit} ghosts={ghosts} />
+          : tab !== null && focus ? <TabBody key={`${key}|${tab}`} tab={tab} focus={focus} state={state} base={store.base()} edit={edit} ghosts={ghosts} />
           : <BoardSummary state={state} />}
       </div>
     </>
