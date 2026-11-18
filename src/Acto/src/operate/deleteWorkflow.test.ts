@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from '../api/client';
 import { board, shared } from '../design/boardFixtures';
+import { boardChanges } from '../design/changes';
 import { createBoardStore } from '../design/boardStore';
 import { createOutputStore } from '../output/outputStore';
 import { commitDelete, prepareDelete } from './deleteWorkflow';
@@ -73,5 +74,19 @@ describe('deleting a triangle', () => {
     ] } } as never);
     expect(await commitDelete(t.studio, t.store, t.output, plan)).toBe(false);
     expect(t.store.state().workflows.daily).toBeDefined();
+  });
+
+  it('keeps a row that an unsaved edit linked to another workflow: no delete for it, and the next save does not touch a missing row', async () => {
+    const t = setup();
+    // unsaved: hourly also links daily's only-in-base row
+    t.store.edit((b) => ({ ...b, workflows: { ...b.workflows, hourly: { ...b.workflows.hourly!, assignmentIds: ['a-hourly-fetch', 'a-daily-fetch'] } } }));
+    const plan = (await prepareDelete(t.studio, t.store, t.output, 'daily'))!;
+    expect(plan.changes.map((c) => `${c.table}:${c.id}`)).toEqual(['workflows:daily']);
+    expect(await commitDelete(t.studio, t.store, t.output, plan)).toBe(true);
+    expect(t.store.base().assignments['a-daily-fetch']).toBeDefined();
+    expect(t.store.state().assignments['a-daily-fetch']).toBeDefined();
+    const next = boardChanges(t.store.base(), t.store.state());
+    expect(next.map((c) => `${c.op} ${c.table}:${c.id}`)).toEqual(['update workflows:hourly']);
+    expect(next.some((c) => c.id === 'a-daily-fetch')).toBe(false);
   });
 });

@@ -28,8 +28,8 @@ export interface BoardStore {
   setSaving(on: boolean): void;
   /** base = present = fresh; history and draft cleared; failures cleared. */
   saved(fresh: BoardState): void;
-  /** withoutWorkflow on base and every history state; consecutive equal states merged. */
-  dropWorkflow(id: Id): void;
+  /** withoutWorkflow on base and every history state; consecutive equal states merged. With `deletedAssignments` the base loses exactly those assignment rows. */
+  dropWorkflow(id: Id, deletedAssignments?: Id[]): void;
   problems(wf: Id): number;
   setProblems(wf: Id, n: number): void;
   /** Key as changedKeys → BaseAPI's message. */
@@ -140,8 +140,20 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       writeDraft();
       notify();
     },
-    dropWorkflow(id) {
-      const drop = (s: BoardState) => withoutWorkflow(s, id);
+    dropWorkflow(id, deletedAssignments) {
+      // with an explicit list the board loses exactly the rows BaseAPI deleted (plus this workflow's own never-saved rows no
+      // other workflow links); a row another workflow still links in a state stays there
+      const gone = deletedAssignments ? new Set(deletedAssignments) : null;
+      const drop = (s: BoardState): BoardState => {
+        if (!gone) return withoutWorkflow(s, id);
+        const w = s.workflows[id];
+        const workflows = { ...s.workflows };
+        delete workflows[id];
+        const mine = new Set(w?.assignmentIds ?? []);
+        const keep = Object.fromEntries(Object.entries(s.assignments).filter(([k, a]) =>
+          !gone.has(k) && !(mine.has(k) && a.updatedAt === null && !Object.values(workflows).some((o) => o.assignmentIds.includes(k)))));
+        return { ...s, workflows, assignments: keep };
+      };
       base = drop(base);
       setHistory(compact({ past: history.past.map(drop), present: drop(history.present), future: history.future.map(drop), merge: history.merge }));
       // base may have changed even when the history did not

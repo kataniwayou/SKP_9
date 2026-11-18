@@ -7,7 +7,7 @@ import { nameOf, reportFailures } from '../design/saveBoard';
 import type { Id } from '../model/graph';
 import type { OutputStore } from '../output/outputStore';
 
-export interface DeletePlan { workflowId: Id; changes: ModelChange[]; lines: string[] }
+export interface DeletePlan { workflowId: Id; changes: ModelChange[]; lines: string[]; assignmentIds: Id[] }
 
 /**
  * Delete up to the confirm: `delete workflows/<id>` plus each assignment no other workflow links, put to BaseAPI's dry run.
@@ -21,16 +21,20 @@ export async function prepareDelete(api: StudioApi, store: BoardStore, output: O
   const row = base.workflows[wf];
   const changes: ModelChange[] = [];
   const lines: string[] = [`workflow ${name}`];
+  const assignmentIds: Id[] = [];
+  const present = store.state();
   if (row) {
     changes.push({ op: 'delete', table: 'workflows', id: wf, ...(row.updatedAt ? { updatedAt: row.updatedAt } : {}) });
     for (const a of row.assignmentIds) {
       const ar = base.assignments[a];
-      if (!ar || !linkedBy(base, a).every((x) => x === wf)) continue;
+      // in use while any other workflow links it, in base or in the unsaved board
+      if (!ar || !linkedBy(base, a).every((x) => x === wf) || !linkedBy(present, a).every((x) => x === wf)) continue;
+      assignmentIds.push(a);
       changes.push({ op: 'delete', table: 'assignments', id: a, ...(ar.updatedAt ? { updatedAt: ar.updatedAt } : {}) });
       lines.push(`assignment ${ar.name}`);
     }
   }
-  const plan: DeletePlan = { workflowId: wf, changes, lines };
+  const plan: DeletePlan = { workflowId: wf, changes, lines, assignmentIds };
   if (changes.length === 0) return plan; // never saved: nothing for BaseAPI to refuse
   const dry = await api.validateModel(changes);
   if (!dry.ok) { output.log(`${name}: not deleted — ${describeError(dry.error)}`, 'error'); return null; }
@@ -57,7 +61,7 @@ export async function commitDelete(api: StudioApi, store: BoardStore, output: Ou
     }
   }
   // dropWorkflow takes the workflow and its unshared assignments out of the base rows as well as every history state
-  store.dropWorkflow(plan.workflowId);
+  store.dropWorkflow(plan.workflowId, plan.assignmentIds);
   output.log(`Deleted ${plan.lines.join(', ')}. Its steps and caches stay`, 'ok');
   return true;
 }
