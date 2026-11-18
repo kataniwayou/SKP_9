@@ -1,174 +1,66 @@
-import type { BoardWorkflow } from '../board/loadBoard';
-import { lastPick, pickKey, type Pick } from '../board/picks';
+import { useSyncExternalStore } from 'react';
+import { lastPick, pickKey } from '../board/picks';
+import type { Pick } from '../board/selection';
 import { processorColour } from '../board/nodes/StepCard';
-import { CACHE_TONE } from '../board/nodes/CacheChip';
+import { CACHE_TONE } from '../board/nodes/CacheNode';
 import { conditionStyle } from '../board/wires';
+import type { BoardState } from '../design/board';
+import { reachOf } from '../design/board';
+import type { BoardStore } from '../design/boardStore';
+import { removeEntries, setCacheField, setStepField, setWorkflowField, unlinkCaches } from '../design/edits';
+import { newId } from '../design/ids';
+import { assignmentOf, assignmentsOf, removeAssignment, setPayload } from '../design/payloads';
 import { useLive, useLiveStore, useProcessorLive, useWorkflowStatus } from '../live/LiveContext';
 import { livenessText, statusOf } from '../live/liveState';
 import { cronText } from '../model/cronText';
 import { CONDITIONS, conditionInfo } from '../model/entryConditions';
 import { checkPayload, payloadJsonProblem } from '../model/payloadCheck';
-import { useEntry, type BoardStore } from '../design/boardStore';
-import { canRedo, canUndo } from '../design/history';
-import { newId } from '../design/ids';
-import { removeAssignment, setCacheField, setPayload, setStepField, setWorkflowField } from '../design/state';
-import { AreaField, LockNote, lockerName, Ro, Row, Sec, SelectField, TextField } from './fields';
+import { AreaField, Ro, Row, Sec, SelectField, TextField } from './fields';
 import { ProcessorSection } from './ProcessorSection';
+
+type Id = string;
+export interface InspectorSelection { workflow: Id | null; picks: Pick[] }
+
+const orNull = (v: string) => (v === '' ? null : v);
 
 /** The mock's .ins-title: an icon, the bold name and a small line under it. */
 const Title = ({ tone, letter, name, sub }: { tone: string; letter: string; name: string; sub: string }) => (
   <div className="ins-title"><span className="ico" style={{ background: tone }}>{letter}</span><div><b>{name}</b><small>{sub}</small></div></div>
 );
 
-function WorkflowTitle({ w, unsaved = false }: { w: BoardWorkflow; unsaved?: boolean }) {
-  const status = useWorkflowStatus(w.graph.workflow.id);
+type Edit = (fn: (b: BoardState) => BoardState, merge?: string) => void;
+interface Ctx { state: BoardState; edit: Edit }
+
+const stepName = (b: BoardState, id: Id) => b.steps[id]?.name ?? id;
+
+function WorkflowTitle({ state, id }: { state: BoardState; id: Id }) {
+  const status = useWorkflowStatus(id);
   const run = status === 'running' ? 'Running' : status === 'stopped' ? 'Stopped' : 'Checking…';
-  return <Title tone="var(--accent)" letter="W" name={w.graph.workflow.name} sub={`${run}${unsaved ? ' · unsaved' : ''}`} />;
+  return <Title tone="var(--accent)" letter="W" name={state.workflows[id]?.name ?? id} sub={run} />;
 }
 
-function StepTitle({ w, stepId }: { w: BoardWorkflow; stepId: string }) {
-  const step = w.graph.steps.get(stepId);
-  const proc = step?.processorId ? w.graph.processors.get(step.processorId)?.name : undefined;
-  return <Title tone={processorColour(proc ?? '')} letter={(proc ?? '?').charAt(0).toUpperCase()} name={step?.name ?? stepId} sub={`in ${w.graph.workflow.name}`} />;
+function StepTitle({ state, id, sub }: { state: BoardState; id: Id; sub: string }) {
+  const step = state.steps[id];
+  const proc = step?.processorId ? state.processors[step.processorId]?.name : undefined;
+  return <Title tone={processorColour(proc ?? '')} letter={(proc ?? '?').charAt(0).toUpperCase()} name={step?.name ?? id} sub={sub} />;
 }
 
-function BoardSummary({ workflows, store }: { workflows: BoardWorkflow[]; store?: BoardStore | undefined }) {
+function BoardSummary({ state }: { state: BoardState }) {
   const live = useLiveStore();
   useLive((s) => s.running);
   useLive((s) => s.workflows);
-  const running = workflows.filter((w) => statusOf(live.getState(), w.graph.workflow.id) === 'running').length;
-  const unsaved = store ? workflows.filter((w) => store.entry(w.graph.workflow.id)?.unsaved).length : null;
+  const ids = Object.keys(state.workflows);
+  const running = ids.filter((id) => statusOf(live.getState(), id) === 'running').length;
   return (
     <p className="none">Select a workflow, step or wire to see and edit it here.<br /><br />
-      <span>{`Board: ${workflows.length} workflow${workflows.length === 1 ? '' : 's'}, ${running} running`}</span>{unsaved !== null ? `, ${unsaved} unsaved.` : '.'}</p>
+      <span>{`Board: ${ids.length} workflow${ids.length === 1 ? '' : 's'}, ${running} running`}</span>.</p>
   );
 }
 
-function WorkflowView({ w }: { w: BoardWorkflow }) {
-  const { workflow } = w.graph;
-  const cron = workflow.cronExpression;
-  const parsed = cron ? cronText(cron) : null;
-  const schedule = parsed === null ? 'not scheduled' : 'text' in parsed ? parsed.text : cron;
-  return (
-    <>
-      <WorkflowTitle w={w} />
-      <Ro>
-        <Row k="Version">{workflow.version}</Row>
-        <Row k="Description">{workflow.description || 'none'}</Row>
-        <Row k="Cron">{schedule}</Row>
-      </Ro>
-      <OnTheBoard w={w} />
-    </>
-  );
-}
-
-function OnTheBoard({ w }: { w: BoardWorkflow }) {
-  const { x, y, w: fw, h } = w.frame;
-  return (
-    <>
-      <Sec>On the board</Sec>
-      <Ro>
-        <Row k="Steps">{w.stepIds.length}</Row>
-        <Row k="Wires">{w.wires.length}</Row>
-        <Row k="Position">{`${Math.round(x)}, ${Math.round(y)}`}</Row>
-        <Row k="Size">{`${Math.round(fw)} × ${Math.round(h)}`}</Row>
-      </Ro>
-    </>
-  );
-}
-
-function ProcessorLine({ processorId }: { processorId: string }) {
-  const { known, processor } = useProcessorLive(processorId);
-  return <Row k="Liveness">{livenessText(known, processor)}</Row>;
-}
-
-function StepView({ w, stepId, workflows }: { w: BoardWorkflow; stepId: string; workflows: BoardWorkflow[] }) {
-  const step = w.graph.steps.get(stepId);
-  if (!step) return null;
-  const cond = conditionInfo(step.entryCondition);
-  const processor = step.processorId ? w.graph.processors.get(step.processorId) : undefined;
-  const sharing = workflows.filter((x) => x.stepIds.includes(stepId));
-  return (
-    <>
-      <StepTitle w={w} stepId={stepId} />
-      <Ro>
-        <Row k="Version">{step.version}</Row>
-        <Row k="Entry condition">{`${cond.letter} ${cond.name}`}</Row>
-        <Row k="Role">{w.roles.get(stepId) ?? 'reached'}</Row>
-        {sharing.length > 1 && <Row k="Shared">{`shared · ${sharing.length}: ${sharing.map((x) => x.graph.workflow.name).join(', ')}`}</Row>}
-      </Ro>
-      <Sec>Processor · live</Sec>
-      <Ro>
-        <Row k="Processor">{!step.processorId ? 'none' : processor?.name ?? step.processorId}</Row>
-        {step.processorId && <ProcessorLine processorId={step.processorId} />}
-      </Ro>
-    </>
-  );
-}
-
-function WireView({ w, wireId }: { w: BoardWorkflow; wireId: string }) {
-  const wire = w.wires.find((x) => x.id === wireId);
-  if (!wire) return null;
-  const name = (id: string) => w.graph.steps.get(id)?.name ?? id;
-  const c = conditionStyle(wire.condition);
-  return (
-    <>
-      <Title tone={c.colour} letter={c.letter} name={`${name(wire.from)} → ${name(wire.to)}`} sub={`in ${w.graph.workflow.name}`} />
-      <Ro>
-        <Row k="From">{name(wire.from)}</Row>
-        <Row k="To">{name(wire.to)}</Row>
-        <Row k="Runs when">{conditionInfo(wire.condition).name}</Row>
-      </Ro>
-      <p className="none">{`The colour is the entry condition of ${name(wire.to)}. Change it on that step; every wire into it follows.`}</p>
-    </>
-  );
-}
-
-function CacheTitle({ w, name }: { w: BoardWorkflow; name: string }) {
-  return <Title tone={CACHE_TONE} letter="C" name={name} sub={`cache · in ${w.graph.workflow.name}`} />;
-}
-
-function CacheView({ w, cacheId }: { w: BoardWorkflow; cacheId: string }) {
-  const cache = w.graph.caches.get(cacheId);
-  if (!cache) return null;
-  return (
-    <>
-      <CacheTitle w={w} name={cache.name} />
-      <Ro>
-        <Row k="Version">{cache.version}</Row>
-        <Row k="Description">{cache.description || 'none'}</Row>
-        <Row k="Root">{cache.root || 'none'}</Row>
-      </Ro>
-    </>
-  );
-}
-
-const orNull = (v: string) => (v === '' ? null : v);
-
-function EditWorkflow({ w, store }: { w: BoardWorkflow; store: BoardStore }) {
-  const { workflow } = w.graph;
-  const id = workflow.id;
-  const entry = useEntry(store, id);
-  const set = (key: 'name' | 'version' | 'description' | 'cronExpression', v: string | null) =>
-    store.edit(id, (s) => setWorkflowField(s, key, v), `field:${id}:${key}`);
-  const parsed = workflow.cronExpression ? cronText(workflow.cronExpression) : null;
-  return (
-    <>
-      <WorkflowTitle w={w} unsaved={entry?.unsaved ?? false} />
-      <TextField key={`${id}:name`} label="Name" value={workflow.name} onChange={(v) => set('name', v)} />
-      <TextField key={`${id}:version`} label="Version" value={workflow.version} onChange={(v) => set('version', v)} />
-      <TextField key={`${id}:cron`} label="Cron" value={workflow.cronExpression} onChange={(v) => set('cronExpression', orNull(v))} />
-      <p className="in-note">{parsed === null ? 'not scheduled' : 'text' in parsed ? parsed.text : workflow.cronExpression}</p>
-      <AreaField key={`${id}:description`} label="Description" value={workflow.description ?? ''} onChange={(v) => set('description', orNull(v))} />
-      <OnTheBoard w={w} />
-    </>
-  );
-}
-
-function PayloadCheckNote({ w, stepId, payload }: { w: BoardWorkflow; stepId: string; payload: string }) {
-  const step = w.graph.steps.get(stepId);
-  const processor = step?.processorId ? w.graph.processors.get(step.processorId) : undefined;
-  const schema = processor?.configSchemaId ? w.graph.schemas.get(processor.configSchemaId) : undefined;
+function PayloadCheckNote({ state, stepId, payload }: { state: BoardState; stepId: Id; payload: string }) {
+  const processorId = state.steps[stepId]?.processorId;
+  const processor = processorId ? state.processors[processorId] : undefined;
+  const schema = processor?.configSchemaId ? state.schemas[processor.configSchemaId] : undefined;
   // text that is not JSON says so whether or not there is a schema to check it against
   const notJson = payloadJsonProblem(payload);
   if (notJson !== null) return <p className="in-problem">{notJson}</p>;
@@ -178,121 +70,200 @@ function PayloadCheckNote({ w, stepId, payload }: { w: BoardWorkflow; stepId: st
   return <>{r.problems.map((p, i) => <p key={i} className="in-problem">{p}</p>)}</>;
 }
 
-function EditStep({ w, stepId, workflows, store }: { w: BoardWorkflow; stepId: string; workflows: BoardWorkflow[]; store: BoardStore }) {
-  const step = w.graph.steps.get(stepId);
-  if (!step) return null;
-  const wf = w.graph.workflow.id;
-  const set = (key: 'name' | 'version' | 'description' | 'entryCondition', v: string | number | null) =>
-    store.edit(wf, (s) => setStepField(s, stepId, key, v), `field:${stepId}:${key}`);
-  const assignment = w.graph.assignments.find((a) => a.stepId === stepId);
-  const payload = assignment?.payload ?? '';
-  const sharing = workflows.filter((x) => x.stepIds.includes(stepId));
-  // another workflow is changing this step: its saved value shows here, read-only
-  const by = lockerName(store, `step:${stepId}`, wf);
-  const locked = by !== null;
-  return (
-    <>
-      <StepTitle w={w} stepId={stepId} />
-      <LockNote by={by} />
-      <TextField key={`${stepId}:name`} label="Name" value={step.name} disabled={locked} onChange={(v) => set('name', v)} />
-      <TextField key={`${stepId}:version`} label="Version" value={step.version} disabled={locked} onChange={(v) => set('version', v)} />
-      <TextField key={`${stepId}:description`} label="Description" value={step.description} disabled={locked} onChange={(v) => set('description', orNull(v))} />
-      <SelectField key={`${stepId}:entryCondition`} label="Entry condition · colours every wire into this step" value={step.entryCondition} disabled={locked}
-        options={CONDITIONS.map((c) => ({ value: c.value, label: `${c.letter} · ${c.name}` }))} onChange={(v) => set('entryCondition', v)} />
-      <Ro>
-        <Row k="Role">{w.roles.get(stepId) ?? 'reached'}</Row>
-        {sharing.length > 1 && <Row k="Shared">{`shared · ${sharing.length}: ${sharing.map((x) => x.graph.workflow.name).join(', ')}`}</Row>}
-      </Ro>
-      <Sec>Processor · live</Sec>
-      {step.processorId ? <ProcessorSection w={w} store={store} processorId={step.processorId} /> : <Ro><Row k="Processor">none</Row></Ro>}
-      {step.processorId && <Ro><ProcessorLine processorId={step.processorId} /></Ro>}
-      <Sec>Assignment (config payload)</Sec>
-      <AreaField key={`${stepId}:payload`} label="Payload · JSON" value={payload}
-        onChange={(v) => { if (v === '' && !assignment) return; store.edit(wf, (s) => setPayload(s, stepId, v, newId), `field:${stepId}:payload`); }} />
-      {assignment && <PayloadCheckNote w={w} stepId={stepId} payload={payload} />}
-      {assignment && <button type="button" className="pbtn in-act" onClick={() => store.edit(wf, (s) => removeAssignment(s, stepId))}>Remove assignment</button>}
-    </>
-  );
+function ProcessorLine({ processorId }: { processorId: Id }) {
+  const { known, processor } = useProcessorLive(processorId);
+  return <Row k="Liveness">{livenessText(known, processor)}</Row>;
 }
 
-function EditCache({ w, cacheId, store }: { w: BoardWorkflow; cacheId: string; store: BoardStore }) {
-  const cache = w.graph.caches.get(cacheId);
-  if (!cache) return null;
-  const wf = w.graph.workflow.id;
-  const set = (key: 'name' | 'version' | 'description' | 'root' | 'items', v: string | null) =>
-    store.edit(wf, (s) => setCacheField(s, cacheId, key, v), `field:${cacheId}:${key}`);
-  const by = lockerName(store, `cache:${cacheId}`, wf);
-  const locked = by !== null;
-  return (
-    <>
-      <CacheTitle w={w} name={cache.name} />
-      <LockNote by={by} />
-      <TextField key={`${cacheId}:name`} label="Name" value={cache.name} disabled={locked} onChange={(v) => set('name', v)} />
-      <TextField key={`${cacheId}:version`} label="Version" value={cache.version} disabled={locked} onChange={(v) => set('version', v)} />
-      <TextField key={`${cacheId}:description`} label="Description" value={cache.description} disabled={locked} onChange={(v) => set('description', orNull(v))} />
-      <TextField key={`${cacheId}:root`} label="Root" value={cache.root} disabled={locked} onChange={(v) => set('root', v)} />
-      <AreaField key={`${cacheId}:items`} label="Items" value={cache.items} disabled={locked} onChange={(v) => set('items', v)} />
-    </>
-  );
-}
-
-/** The kind of the selection, or how many things are picked, next to the panel's name. */
-const kindOf = (picks: Pick[]) => (picks.length > 1 ? `${picks.length} selected` : lastPick(picks)?.kind ?? '');
-
-function Header({ store, workflowId, name, kind }: { store: BoardStore; workflowId: string | null; name: string | null; kind: string }) {
-  const entry = useEntry(store, workflowId ?? '');
-  return (
-    <div className="ph"><span>Inspector</span><span className="cnt">{kind}</span><span className="sp" />
-      {name !== null && <span className="hw" title={name}>{name}</span>}
-      <button type="button" className="pbtn" disabled={!entry || !canUndo(entry.history)} onClick={() => workflowId && store.undo(workflowId)}>Undo</button>
-      <button type="button" className="pbtn" disabled={!entry || !canRedo(entry.history)} onClick={() => workflowId && store.redo(workflowId)}>Redo</button>
-    </div>
-  );
-}
-
-function pickName(p: Pick, workflows: BoardWorkflow[]): string | null {
-  const w = workflows.find((x) => x.graph.workflow.id === p.workflowId);
+function EditWorkflow({ state, edit, id }: Ctx & { id: Id }) {
+  const w = state.workflows[id];
   if (!w) return null;
-  if (p.kind === 'workflow') return w.graph.workflow.name;
-  if (p.kind === 'step') return w.graph.steps.get(p.stepId)?.name ?? null;
-  if (p.kind === 'cache') return w.graph.caches.get(p.cacheId)?.name ?? null;
-  const wire = w.wires.find((x) => x.id === p.wireId);
-  if (!wire) return null;
-  const name = (id: string) => w.graph.steps.get(id)?.name ?? id;
-  return `${name(wire.from)} → ${name(wire.to)}`;
+  const set = (key: 'name' | 'version' | 'description' | 'cronExpression', v: string | null) =>
+    edit((b) => setWorkflowField(b, id, key, v), `field:${id}:${key}`);
+  const parsed = w.cronExpression ? cronText(w.cronExpression) : null;
+  const assignments = assignmentsOf(state, id);
+  return (
+    <>
+      <WorkflowTitle state={state} id={id} />
+      <TextField key={`${id}:name`} label="Name" value={w.name} onChange={(v) => set('name', v)} />
+      <TextField key={`${id}:version`} label="Version" value={w.version} onChange={(v) => set('version', v)} />
+      <TextField key={`${id}:cron`} label="Cron" value={w.cronExpression} onChange={(v) => set('cronExpression', orNull(v))} />
+      <p className="in-note">{parsed === null ? 'not scheduled' : 'text' in parsed ? parsed.text : w.cronExpression}</p>
+      <AreaField key={`${id}:description`} label="Description" value={w.description ?? ''} onChange={(v) => set('description', orNull(v))} />
+      <Sec>Entry steps and caches</Sec>
+      <Ro>
+        {w.entryStepIds.map((sid) => (
+          <Row key={`e:${sid}`} k="Entry step">
+            {stepName(state, sid)}{' '}
+            <button type="button" className="pbtn in-act" aria-label={`Remove entry ${stepName(state, sid)}`} onClick={() => edit((b) => removeEntries(b, [[id, sid]]))}>Remove</button>
+          </Row>
+        ))}
+        {w.cacheIds.map((cid) => (
+          <Row key={`c:${cid}`} k="Cache">
+            {state.caches[cid]?.name ?? cid}{' '}
+            <button type="button" className="pbtn in-act" aria-label={`Remove cache ${state.caches[cid]?.name ?? cid}`} onClick={() => edit((b) => unlinkCaches(b, [[id, cid]]))}>Remove</button>
+          </Row>
+        ))}
+      </Ro>
+      <Ro><Row k="Location">{w.at ? `${Math.round(w.at.x)}, ${Math.round(w.at.y)}` : 'not placed'}</Row></Ro>
+      <Sec>Assignments</Sec>
+      <div data-testid="assignments">
+        {assignments.length === 0 && <p className="none">No assignments.</p>}
+        {assignments.map((a, i) => (
+          <div key={`${id}:${i}`} className="in-assign">
+            <b>{stepName(state, a.stepId)}</b>
+            <AreaField key={`${id}:${i}:payload`} label="Payload · JSON" value={a.payload}
+              onChange={(v) => edit((b) => setPayload(b, id, a.stepId, v, newId), `field:${id}:${i}:payload`)} />
+            <PayloadCheckNote state={state} stepId={a.stepId} payload={a.payload} />
+            <button type="button" className="pbtn in-act" onClick={() => edit((b) => removeAssignment(b, id, a.id))}>Delete</button>
+          </div>
+        ))}
+      </div>
+    </>
+  );
 }
 
-function PickList({ picks, workflows, undoIn }: { picks: Pick[]; workflows: BoardWorkflow[]; undoIn: string | null }) {
+function EditStep({ state, edit, id, workflow }: Ctx & { id: Id; workflow: Id | null }) {
+  const step = state.steps[id];
+  if (!step) return null;
+  const set = (key: 'name' | 'version' | 'description' | 'entryCondition', v: string | number | null) =>
+    edit((b) => setStepField(b, id, key, v as never), `field:${id}:${key}`);
+  const wf = workflow ? state.workflows[workflow] : undefined;
+  const reached = wf && workflow ? reachOf(state, workflow).has(id) : false;
+  const assignment = wf && workflow ? assignmentOf(state, workflow, id) : null;
+  const payload = assignment?.payload ?? '';
+  const users = Object.values(state.workflows).filter((x) => reachOf(state, x.id).has(id));
+  return (
+    <>
+      <StepTitle state={state} id={id} sub={wf ? `in ${wf.name}` : 'step'} />
+      <p className="in-note">{users.length > 0 ? `shared fields · used by ${users.map((x) => x.name).join(', ')}` : 'shared fields · used by no workflow'}</p>
+      <TextField key={`${id}:name`} label="Name" value={step.name} onChange={(v) => set('name', v)} />
+      <TextField key={`${id}:version`} label="Version" value={step.version} onChange={(v) => set('version', v)} />
+      <TextField key={`${id}:description`} label="Description" value={step.description} onChange={(v) => set('description', orNull(v))} />
+      <SelectField key={`${id}:entryCondition`} label="Entry condition · colours every wire into this step" value={step.entryCondition}
+        options={CONDITIONS.map((c) => ({ value: c.value, label: `${c.letter} · ${c.name}` }))} onChange={(v) => set('entryCondition', v)} />
+      <Sec>Processor · live</Sec>
+      {step.processorId ? <ProcessorSection state={state} edit={edit} processorId={step.processorId} /> : <Ro><Row k="Processor">none</Row></Ro>}
+      {step.processorId && <Ro><ProcessorLine processorId={step.processorId} /></Ro>}
+      {wf && workflow && (
+        reached ? (
+          <>
+            <Sec>{`Payload · ${wf.name}`}</Sec>
+            <AreaField key={`${workflow}:${id}:payload`} label="Payload · JSON" value={payload}
+              onChange={(v) => { if (v === '' && !assignment) return; edit((b) => setPayload(b, workflow, id, v, newId), `field:${workflow}:${id}:payload`); }} />
+            {assignment && <PayloadCheckNote state={state} stepId={id} payload={payload} />}
+            {assignment && <button type="button" className="pbtn in-act" onClick={() => edit((b) => removeAssignment(b, workflow, assignment.id))}>Remove assignment</button>}
+          </>
+        ) : <p className="none">{`not in ${wf.name}`}</p>
+      )}
+    </>
+  );
+}
+
+function EditCache({ state, edit, id }: Ctx & { id: Id }) {
+  const cache = state.caches[id];
+  if (!cache) return null;
+  const set = (key: 'name' | 'version' | 'description' | 'root' | 'items', v: string | null) =>
+    edit((b) => setCacheField(b, id, key, v as never), `field:${id}:${key}`);
+  const users = Object.values(state.workflows).filter((w) => w.cacheIds.includes(id)).map((w) => w.name);
+  return (
+    <>
+      <Title tone={CACHE_TONE} letter="C" name={cache.name} sub={users.length ? `cache · ${users.join(', ')}` : 'cache'} />
+      <TextField key={`${id}:name`} label="Name" value={cache.name} onChange={(v) => set('name', v)} />
+      <TextField key={`${id}:version`} label="Version" value={cache.version} onChange={(v) => set('version', v)} />
+      <TextField key={`${id}:description`} label="Description" value={cache.description} onChange={(v) => set('description', orNull(v))} />
+      <TextField key={`${id}:root`} label="Root" value={cache.root} onChange={(v) => set('root', v)} />
+      <AreaField key={`${id}:items`} label="Items" value={cache.items} onChange={(v) => set('items', v)} />
+    </>
+  );
+}
+
+/** A wire, an entry arrow or a cache line: from, to and, for a step target, when it runs. */
+function LinkView({ state, pick }: { state: BoardState; pick: Extract<Pick, { kind: 'wire' | 'entry' | 'cacheLink' }> }) {
+  if (pick.kind === 'cacheLink') {
+    const from = state.workflows[pick.workflowId]?.name ?? pick.workflowId;
+    const to = state.caches[pick.cacheId]?.name ?? pick.cacheId;
+    return (
+      <>
+        <Title tone={CACHE_TONE} letter="C" name={`${from} → ${to}`} sub="cache line" />
+        <Ro><Row k="From">{from}</Row><Row k="To">{to}</Row></Ro>
+        <p className="none">{`${from} uses the cache ${to}.`}</p>
+      </>
+    );
+  }
+  const toId = pick.kind === 'wire' ? pick.to : pick.stepId;
+  const from = pick.kind === 'wire' ? stepName(state, pick.from) : state.workflows[pick.workflowId]?.name ?? pick.workflowId;
+  const to = stepName(state, toId);
+  const c = conditionStyle(state.steps[toId]?.entryCondition ?? 0);
+  return (
+    <>
+      <Title tone={c.colour} letter={c.letter} name={`${from} → ${to}`} sub={pick.kind === 'wire' ? 'wire' : 'entry arrow'} />
+      <Ro>
+        <Row k="From">{from}</Row>
+        <Row k="To">{to}</Row>
+        <Row k="Runs when">{conditionInfo(state.steps[toId]?.entryCondition ?? 0).name}</Row>
+      </Ro>
+      <p className="none">{`The colour is the entry condition of ${to}. Change it on that step; every wire into it follows.`}</p>
+    </>
+  );
+}
+
+function pickName(p: Pick, b: BoardState): string | null {
+  switch (p.kind) {
+    case 'workflow': return b.workflows[p.id]?.name ?? null;
+    case 'step': return b.steps[p.id]?.name ?? null;
+    case 'cache': return b.caches[p.id]?.name ?? null;
+    case 'wire': return `${stepName(b, p.from)} → ${stepName(b, p.to)}`;
+    case 'entry': return `${b.workflows[p.workflowId]?.name ?? p.workflowId} → ${stepName(b, p.stepId)}`;
+    case 'cacheLink': return `${b.workflows[p.workflowId]?.name ?? p.workflowId} → ${b.caches[p.cacheId]?.name ?? p.cacheId}`;
+  }
+}
+
+function PickList({ picks, state }: { picks: Pick[]; state: BoardState }) {
   return (
     <>
       <p className="none">{`${picks.length} things are selected. The toolbar acts on all of them; pick one alone to edit it here.`}</p>
       <ol className="in-picks">
         {picks.map((p) => {
-          const n = pickName(p, workflows);
+          const n = pickName(p, state);
           return n === null ? null : <li key={pickKey(p)} data-kind={p.kind}>{n}</li>;
         })}
       </ol>
-      {undoIn !== null && <p className="none">Undo and Redo act on <b>{undoIn}</b>, the workflow of the last one picked.</p>}
     </>
   );
 }
 
-/** What the selection is, as the loaded board knows it; editable when given the store. */
-export function InspectorPanel({ workflows, picks, store }: { workflows: BoardWorkflow[]; picks: Pick[]; store?: BoardStore }) {
-  const selection = lastPick(picks);
-  const w = selection === null ? undefined : workflows.find((x) => x.graph.workflow.id === selection.workflowId);
-  const kind = kindOf(picks);
+const kindOf = (picks: Pick[]) => (picks.length > 1 ? `${picks.length} selected` : lastPick(picks)?.kind ?? '');
+
+function Header({ store, kind }: { store: BoardStore; kind: string }) {
+  return (
+    <div className="ph"><span>Inspector</span><span className="cnt">{kind}</span><span className="sp" />
+      <button type="button" className="pbtn" disabled={!store.canUndo()} onClick={() => store.undo()}>Undo</button>
+      <button type="button" className="pbtn" disabled={!store.canRedo()} onClick={() => store.redo()}>Redo</button>
+    </div>
+  );
+}
+
+/**
+ * What the selection is, read from and edited through the board store (one state, one history). `selection.workflow`
+ * is the selected triangle: it decides whether a step shows a payload.
+ */
+export function InspectorPanel({ store, selection }: { store: BoardStore; selection: InspectorSelection }) {
+  const state = useSyncExternalStore(store.subscribe, store.state);
+  const edit: Edit = (fn, merge) => store.edit(fn, merge);
+  const { picks, workflow } = selection;
+  const one = picks.length === 1 ? picks[0]! : null;
+  const target = one ?? (picks.length === 0 && workflow ? { kind: 'workflow', id: workflow } as const : null);
   return (
     <>
-      {store ? <Header store={store} workflowId={w ? w.graph.workflow.id : null} name={w ? w.graph.workflow.name : null} kind={kind} />
-        : <div className="ph"><span>Inspector</span><span className="cnt">{kind}</span></div>}
+      <Header store={store} kind={kindOf(picks.length === 0 && target ? [target] : picks)} />
       <div className="pb">
-        {picks.length > 1 ? <PickList picks={picks} workflows={workflows} undoIn={store && w ? w.graph.workflow.name : null} />
-          : selection === null || !w ? <BoardSummary workflows={workflows} store={store} />
-          : selection.kind === 'workflow' ? (store ? <EditWorkflow w={w} store={store} /> : <WorkflowView w={w} />)
-          : selection.kind === 'step' ? (store ? <EditStep w={w} stepId={selection.stepId} workflows={workflows} store={store} /> : <StepView w={w} stepId={selection.stepId} workflows={workflows} />)
-          : selection.kind === 'cache' ? (store ? <EditCache w={w} cacheId={selection.cacheId} store={store} /> : <CacheView w={w} cacheId={selection.cacheId} />)
-          : <WireView w={w} wireId={selection.wireId} />}
+        {picks.length > 1 ? <PickList picks={picks} state={state} />
+          : target === null ? <BoardSummary state={state} />
+          : target.kind === 'workflow' ? <EditWorkflow state={state} edit={edit} id={target.id} />
+          : target.kind === 'step' ? <EditStep state={state} edit={edit} id={target.id} workflow={workflow} />
+          : target.kind === 'cache' ? <EditCache state={state} edit={edit} id={target.id} />
+          : <LinkView state={state} pick={target} />}
       </div>
     </>
   );
