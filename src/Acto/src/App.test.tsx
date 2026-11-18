@@ -406,6 +406,22 @@ describe('App', () => {
     expect(saveButton()).toHaveTextContent('Save · 1');
   });
 
+  it('a drop selects only the new item, whatever was selected before', async () => {
+    renderApp();
+    await loaded();
+    // a step is selected: a click on a triangle would keep it, a drop must not
+    fireEvent.click(card('expand'));
+    expect(await inspector().findByDisplayValue('expand')).toBeInTheDocument();
+    const pane = document.querySelector('.react-flow') as HTMLElement;
+    const data = { getData: (k: string) => (k === 'application/acto' ? '{"kind":"workflow"}' : ''), dropEffect: '' };
+    const at = (ev: Event) => { Object.defineProperties(ev, { clientX: { value: 500 }, clientY: { value: 300 }, dataTransfer: { value: data } }); return ev; };
+    fireEvent(pane, at(createEvent.dragOver(pane)));
+    fireEvent(pane, at(createEvent.drop(pane)));
+    expect(await inspector().findByDisplayValue('new-workflow-1')).toBeInTheDocument();
+    expect(inspector().queryByDisplayValue('expand')).toBeNull();
+    await waitFor(() => expect(card('expand').closest('.node')).not.toHaveClass('sel'));
+  });
+
   it('switches theme from the topbar button and remembers it', async () => {
     const st = memoryStorage();
     renderApp(fakeApi(), { storage: st });

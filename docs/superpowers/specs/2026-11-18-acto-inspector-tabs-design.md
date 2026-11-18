@@ -59,6 +59,7 @@ NodeStatusIndicator components [user].
   - **Ctrl+click** on any item toggles it in or out;
   - a plain click on an **already selected** item removes only that item;
   - a click on the **empty board** clears everything.
+  - a **drop** from the toolbox selects only the new item, whatever was selected before, so the Inspector is on it at once [user, 2026-11-18].
   Unchanged: a drag never counts as a click (CLICK_SLOP), a NodeToolbar button press is not a click on its node,
   and a click on a node's handle (a connection gesture) is never a pick or an unpick [review, 2026-11-18].
   The chat's `pick` tool (`withPicks`) takes the list it is given as it is; its triangles are the selected workflows.

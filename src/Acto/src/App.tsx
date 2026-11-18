@@ -303,7 +303,8 @@ export function App(props: AppProps) {
     store.edit(() => r.state);
     if (store.state() !== r.state) return; // refused while saving
     if (r.pick.kind === 'workflow') output.log(`${r.state.workflows[r.pick.id]!.name} created — it is saved only when you press Save`, 'ok');
-    setSelection(selectPick(selRef.current, r.pick, false));
+    // a drop selects only the new item, so the Inspector is on it at once (it is named next)
+    setSelection(withPicks(selRef.current, [r.pick]));
   }, [store, output, setSelection]);
 
   const unsavedKeys = store.unsaved();
