@@ -246,8 +246,8 @@ function Header({ store, kind }: { store: BoardStore; kind: string }) {
 }
 
 /**
- * What the selection is, read from and edited through the board store (one state, one history). `selection.workflow`
- * is the selected triangle: it decides whether a step shows a payload.
+ * What the selection is, read from and edited through the board store (one state, one history). `selection.workflows`
+ * (its last is the one a step's payload is shown for): it decides whether a step shows a payload.
  */
 export function InspectorPanel({ store, selection }: { store: BoardStore; selection: InspectorSelection }) {
   const state = useSyncExternalStore(store.subscribe, store.state);

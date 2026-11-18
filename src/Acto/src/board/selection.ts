@@ -1,6 +1,6 @@
 import type { Id } from '../model/graph';
 
-/** One picked thing on the board (spec §6). Task 11 adds the behaviour (selectPick); this is the shape. */
+/** One picked thing on the board (spec §4); `selectPick` below is the behaviour. */
 export type Pick =
   | { kind: 'workflow'; id: Id }
   | { kind: 'step'; id: Id }
@@ -25,8 +25,11 @@ export function selectPick(prev: SelectionState, p: Pick | null, additive: boole
   const toggled = (): Pick[] => (prev.picks.some((x) => same(x, p)) ? prev.picks.filter((x) => !same(x, p)) : [...prev.picks, p]);
   if (p.kind === 'workflow') {
     if (!additive) return { workflows: [p.id], picks: [p] };
-    const workflows = prev.workflows.includes(p.id) ? prev.workflows.filter((x) => x !== p.id) : [...prev.workflows, p.id];
-    return { workflows, picks: toggled() };
+    // one decision for both lists, so they cannot diverge
+    if (prev.workflows.includes(p.id)) {
+      return { workflows: prev.workflows.filter((x) => x !== p.id), picks: prev.picks.filter((x) => !same(x, p)) };
+    }
+    return { workflows: [...prev.workflows, p.id], picks: prev.picks.some((x) => same(x, p)) ? prev.picks : [...prev.picks, p] };
   }
   if (!additive) {
     const workflows = p.kind === 'entry' || p.kind === 'cacheLink' ? [p.workflowId] : prev.workflows;

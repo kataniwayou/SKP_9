@@ -17,6 +17,12 @@ describe('selectPick', () => {
     expect(two).toEqual({ workflows: ['a', 'b'], picks: [wf('a'), wf('b')] });
     expect(selectPick(two, wf('a'), true)).toEqual({ workflows: ['b'], picks: [wf('b')] });
   });
+  it('ctrl+click on a triangle decides by workflows, so the lists cannot diverge', () => {
+    const removed = selectPick({ workflows: ['a'], picks: [st('s')] }, wf('a'), true);
+    expect(removed).toEqual({ workflows: [], picks: [st('s')] });
+    expect(selectPick(removed, wf('a'), true)).toEqual({ workflows: ['a'], picks: [st('s'), wf('a')] });
+    expect(selectPick({ workflows: ['a'], picks: [st('s'), wf('a')] }, wf('a'), true)).toEqual({ workflows: [], picks: [st('s')] });
+  });
   it('a step click keeps the selected workflows', () => {
     expect(selectPick({ workflows: ['a', 'b'], picks: [wf('a'), wf('b')] }, st('s'), false)).toEqual({ workflows: ['a', 'b'], picks: [st('s')] });
     expect(selectPick({ workflows: ['a'], picks: [] }, ghost('g'), false)).toEqual({ workflows: ['a'], picks: [ghost('g')] });

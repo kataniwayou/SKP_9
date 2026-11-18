@@ -44,3 +44,27 @@ describe('picks', () => {
     expect(deletePicks(b0, [g])).toBe(b0);
   });
 });
+
+describe('deletePicks', () => {
+  it('deletes a step, a cache, a wire, an entry arrow and a cache line in one state', () => {
+    const s = deletePicks(board(), [
+      { kind: 'step', id: 'lonely' }, { kind: 'cache', id: 'c1' }, { kind: 'wire', from: 'fetch', to: 'expand' },
+      { kind: 'entry', workflowId: 'hourly', stepId: 'fetch' },
+    ]);
+    expect(s.steps.lonely).toBeUndefined();
+    expect(s.caches.c1).toBeUndefined();
+    expect(s.workflows.daily!.cacheIds).toEqual([]);
+    expect(s.steps.fetch!.nextStepIds).toEqual([]);
+    expect(s.workflows.hourly!.entryStepIds).toEqual([]);
+    expect(s.workflows.daily!.entryStepIds).toEqual(['fetch']);
+  });
+  it('a cache line alone unlinks only that workflow; a step takes its payloads with it', () => {
+    expect(deletePicks(board(), [{ kind: 'cacheLink', workflowId: 'daily', cacheId: 'c1' }]).caches.c1).toBeDefined();
+    const s = deletePicks(board(), [{ kind: 'step', id: 'fetch' }]);
+    expect(Object.keys(s.assignments)).toEqual([]);
+    expect(s.workflows.daily!.entryStepIds).toEqual([]);
+  });
+  it('leaves triangles alone', () => {
+    expect(deletePicks(board(), [{ kind: 'workflow', id: 'daily' }]).workflows.daily).toBeDefined();
+  });
+});
