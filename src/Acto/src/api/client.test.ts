@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createApi } from './client';
-import type { DesignSaveRequest } from './types';
 
 function respond(status: number, body?: unknown): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), {
@@ -14,9 +13,9 @@ describe('createApi', () => {
     const fetchImpl = vi.fn().mockResolvedValue(respond(200, { workflow: { id: 'wf1' } }));
     const api = createApi('/api/v1', fetchImpl);
 
-    const result = await api.getGraph('wf1');
+    const result = await api.getStep('wf1');
 
-    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/workflows/wf1/graph', expect.objectContaining({ method: 'GET' }));
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/steps/wf1', expect.objectContaining({ method: 'GET' }));
     expect(result).toEqual({ ok: true, value: { workflow: { id: 'wf1' } } });
   });
 
@@ -34,7 +33,7 @@ describe('createApi', () => {
     const api = createApi('/api/v1', vi.fn().mockResolvedValue(
       respond(409, { title: 'Graph is stale', detail: 'The step was changed.', kind: 'step', id: 's9' })));
 
-    expect(await api.getGraph('wf1')).toEqual({
+    expect(await api.getStep('wf1')).toEqual({
       ok: false,
       error: { kind: 'conflict', status: 409, detail: 'The step was changed.', entity: { kind: 'step', id: 's9' } },
     });
@@ -44,13 +43,13 @@ describe('createApi', () => {
     const api422 = createApi('/api/v1', vi.fn().mockResolvedValue(respond(422, { title: 'Unprocessable Entity' })));
     const api500 = createApi('/api/v1', vi.fn().mockResolvedValue(respond(500, { title: 'Boom', detail: 'db down' })));
 
-    expect(await api422.getGraph('wf1')).toEqual({ ok: false, error: { kind: 'unprocessable', status: 422, detail: 'Unprocessable Entity' } });
-    expect(await api500.getGraph('wf1')).toEqual({ ok: false, error: { kind: 'http', status: 500, detail: 'db down' } });
+    expect(await api422.getStep('wf1')).toEqual({ ok: false, error: { kind: 'unprocessable', status: 422, detail: 'Unprocessable Entity' } });
+    expect(await api500.getStep('wf1')).toEqual({ ok: false, error: { kind: 'http', status: 500, detail: 'db down' } });
   });
 
   it('maps a thrown fetch to a network error', async () => {
     const api = createApi('/api/v1', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
-    expect(await api.getGraph('wf1')).toEqual({ ok: false, error: { kind: 'network', message: 'Failed to fetch' } });
+    expect(await api.getStep('wf1')).toEqual({ ok: false, error: { kind: 'network', message: 'Failed to fetch' } });
   });
 
   it('escapes the id in the path', async () => {
@@ -59,19 +58,28 @@ describe('createApi', () => {
     expect(fetchImpl).toHaveBeenCalledWith('/api/v1/processors/a%2Fb', expect.anything());
   });
 
-  it('PUTs the design and returns the outcome (plan 8 §4.2)', async () => {
-    const outcome = { applied: false, errors: [{ kind: 'step', id: 's1', stage: 'steps', field: 'version', message: 'bad' }] };
-    const fetchImpl = vi.fn().mockResolvedValue(respond(200, outcome));
-    const body = { layout: { v: 1 } } as DesignSaveRequest;
+  it('POSTs the changes to /model/apply and /model/validate as { changes }', async () => {
+    const outcome = { applied: true, results: [] };
+    const changes = [{ op: 'delete' as const, table: 'steps' as const, id: 's1', updatedAt: '2026-11-01T00:00:00Z' }];
+    for (const [call, path] of [['applyModel', '/api/v1/model/apply'], ['validateModel', '/api/v1/model/validate']] as const) {
+      const fetchImpl = vi.fn().mockResolvedValue(respond(200, outcome));
+      const result = await createApi('/api/v1', fetchImpl)[call](changes);
+      expect(fetchImpl).toHaveBeenCalledWith(path, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changes }),
+      });
+      expect(result).toEqual({ ok: true, value: outcome });
+    }
+  });
 
-    const result = await createApi('/api/v1', fetchImpl).saveDesign('wf1', body);
-
-    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/workflows/wf1/design', {
-      method: 'PUT',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    expect(result).toEqual({ ok: true, value: outcome });
+  it('lists steps and assignments', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond(200, []));
+    const api = createApi('/api/v1', fetchImpl);
+    await api.listSteps();
+    await api.listAssignments();
+    expect(fetchImpl).toHaveBeenNthCalledWith(1, '/api/v1/steps', expect.objectContaining({ method: 'GET' }));
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, '/api/v1/assignments', expect.objectContaining({ method: 'GET' }));
   });
 
   it('GETs a schema by id', async () => {
@@ -138,12 +146,12 @@ describe('createApi', () => {
 
   it('keeps an empty field map for a 400 without errors', async () => {
     const api = createApi('/api/v1', vi.fn().mockResolvedValue(respond(400, { title: 'Bad' })));
-    expect(await api.getGraph('wf1')).toEqual({ ok: false, error: { kind: 'badRequest', status: 400, detail: 'Bad', errors: {} } });
+    expect(await api.getStep('wf1')).toEqual({ ok: false, error: { kind: 'badRequest', status: 400, detail: 'Bad', errors: {} } });
   });
 
   it('maps a 200 whose body is not JSON to an error result instead of rejecting', async () => {
     const api = createApi('/api/v1', vi.fn().mockResolvedValue(new Response('<html>', { status: 200 })));
-    const result = await api.getGraph('wf1');
+    const result = await api.getStep('wf1');
     expect(result.ok).toBe(false);
     expect(!result.ok && result.error).toMatchObject({ kind: 'http', status: 0 });
   });

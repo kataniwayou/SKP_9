@@ -1,5 +1,7 @@
 import type { Assignment, Audit, Cache, DesignError, Graph, Processor, Schema, Step, Workflow } from '../model/graph';
-import type { CacheReadDto, DesignOutcomeDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowDeleteOutcomeDto, WorkflowGraphDto, WorkflowReadDto } from './types';
+import type { Point } from '../model/geometry';
+import type { AssignmentRow, CacheRow, ProcessorRow, SchemaRow, StepRow, WorkflowRow } from '../design/board';
+import type { AssignmentReadDto, CacheReadDto, DesignOutcomeDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowDeleteOutcomeDto, WorkflowGraphDto, WorkflowReadDto } from './types';
 import type { DesignLogLine } from './designLog';
 
 // The generated DTO types mark almost every field optional (see api/types.ts). These helpers state
@@ -116,4 +118,51 @@ export function designLogFromDto(dto: DesignOutcomeDto | WorkflowDeleteOutcomeDt
     stage: text(l.stage), level: l.level === 'error' ? 'error' : 'info', kind: text(l.kind), id: optional(l.id), message: text(l.message),
     ...(l.rolledBack === true ? { rolledBack: true } : {}),
   }));
+}
+
+// ---- The board's rows (design/board.ts): a plain mirror of BaseAPI's CRUD lists ----
+
+/** A card's location: both coordinates or none. */
+function atOf(dto: { boardX?: number | null; boardY?: number | null }): Point | null {
+  return typeof dto.boardX === 'number' && typeof dto.boardY === 'number' ? { x: dto.boardX, y: dto.boardY } : null;
+}
+/** updatedAt exactly as received: it is the concurrency stamp sent back on Save. */
+const stamp = (dto: { updatedAt?: string }): string => text(dto.updatedAt);
+
+export function workflowRowFromDto(dto: WorkflowReadDto): WorkflowRow {
+  return {
+    id: required(dto.id, 'workflow id'), name: text(dto.name), version: text(dto.version), description: optional(dto.description),
+    cronExpression: optional(dto.cronExpression), entryStepIds: list(dto.entryStepIds), assignmentIds: list(dto.assignmentIds),
+    cacheIds: list(dto.cacheIds), at: atOf(dto), updatedAt: stamp(dto),
+  };
+}
+
+export function stepRowFromDto(dto: StepReadDto): StepRow {
+  return {
+    id: required(dto.id, 'step id'), name: text(dto.name), version: text(dto.version), description: optional(dto.description),
+    processorId: dto.processorId ? dto.processorId : null, nextStepIds: list(dto.nextStepIds),
+    entryCondition: typeof dto.entryCondition === 'number' ? dto.entryCondition : 0, at: atOf(dto), updatedAt: stamp(dto),
+  };
+}
+
+export function cacheRowFromDto(dto: CacheReadDto): CacheRow {
+  return {
+    id: required(dto.id, 'cache id'), name: text(dto.name), version: text(dto.version), description: optional(dto.description),
+    root: text(dto.root), items: text(dto.items), at: atOf(dto), updatedAt: stamp(dto),
+  };
+}
+
+export function assignmentRowFromDto(dto: AssignmentReadDto): AssignmentRow {
+  return {
+    id: required(dto.id, 'assignment id'), stepId: text(dto.stepId), name: text(dto.name), version: text(dto.version),
+    description: optional(dto.description), payload: text(dto.payload), updatedAt: stamp(dto),
+  };
+}
+
+export function processorRowFromDto(dto: ProcessorReadDto): ProcessorRow {
+  return { ...processorFromDto(dto), updatedAt: stamp(dto) };
+}
+
+export function schemaRowFromDto(dto: SchemaReadDto): SchemaRow {
+  return { ...schemaFromDto(dto), updatedAt: stamp(dto) };
 }

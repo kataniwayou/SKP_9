@@ -1,52 +1,78 @@
 import { describe, expect, it } from 'vitest';
-import { FRAME_GAP } from './geometry';
-import { defaultStepPositions, frameSizeOf, freeSlot, placeFrames } from './placement';
+import { board as fixture } from '../design/boardFixtures';
+import type { BoardState } from '../design/board';
+import { STEP_H, STEP_W } from './geometry';
+import { placeMissing } from './placement';
 
-describe('placement', () => {
-  it('keeps stored rects and places the rest by creation time without overlap', () => {
-    const r = placeFrames([
-      { id: 'b', createdAt: '2026-02-01', stored: null, size: { w: 500, h: 300 } },
-      { id: 'a', createdAt: '2026-01-01', stored: null, size: { w: 500, h: 300 } },
-      { id: 'k', createdAt: '2025-01-01', stored: { x: 0, y: 0, w: 600, h: 300 }, size: { w: 600, h: 300 } },
-    ]);
-    expect(r.get('k')).toEqual({ x: 0, y: 0, w: 600, h: 300 });
-    const a = r.get('a')!, b = r.get('b')!;
-    expect(a.y < b.y || (a.y === b.y && a.x < b.x)).toBe(true);
-    for (const [i, p] of [...r.values()].entries()) for (const q of [...r.values()].slice(i + 1))
-      expect(p.x + p.w + 79 < q.x || q.x + q.w + 79 < p.x || p.y + p.h + 79 < q.y || q.y + q.h + 79 < p.y).toBe(true);
-  });
-  it('sizes an empty frame at the minimum', () => expect(frameSizeOf(new Map())).toEqual({ w: 420, h: 196 }));
-  it('grows a frame to hold its steps', () => {
-    expect(frameSizeOf(new Map([['s', { x: 600, y: 300 }]]))).toEqual({ w: 600 + 210 + 28, h: 46 + 300 + 92 + 28 });
-  });
-  it('gives unplaced steps columns by depth', () => {
-    const steps = new Map([['e', { nextStepIds: ['m'] }], ['m', { nextStepIds: [] }], ['p', { nextStepIds: [] }]]);
-    const at = defaultStepPositions(['e'], steps, new Map());
-    expect(at.get('e')).toEqual({ x: 28, y: 28 });
-    expect(at.get('m')).toEqual({ x: 308, y: 28 });
-    expect(at.get('p')!.x).toBe(588);
-  });
-  it('skips placed steps', () => {
-    const steps = new Map([['e', { nextStepIds: [] }]]);
-    expect(defaultStepPositions(['e'], steps, new Map([['e', { x: 1, y: 2 }]])).size).toBe(0);
-  });
-  it('breaks equal createdAt ties by id whatever the input order', () => {
-    const mk = (id: string) => ({ id, createdAt: '2026-01-01', stored: null, size: { w: 500, h: 300 } });
-    const a = placeFrames([mk('b'), mk('a'), mk('c')]);
-    const b = placeFrames([mk('c'), mk('a'), mk('b')]);
-    for (const id of ['a', 'b', 'c']) expect(a.get(id)).toEqual(b.get(id));
-    expect(a.get('a')).toEqual({ x: 0, y: 0, w: 500, h: 300 });
-  });
-});
+/** The fixture with its cards moved well apart, so only the rule under test decides a position. */
+const board = (): BoardState => {
+  const b = fixture();
+  b.workflows.hourly!.at = { x: 0, y: -1000 };
+  b.caches.c1!.at = { x: 0, y: 1000 };
+  b.steps.lonely!.at = { x: 600, y: 1000 };
+  return b;
+};
 
-describe('freeSlot', () => {
-  it('is the first place a new empty frame fits clear of every frame on the board', () => {
-    const size = frameSizeOf(new Map());
-    expect(freeSlot([])).toEqual({ x: 0, y: 0 });
-    const taken = [{ x: 0, y: 0, w: 600, h: 300 }];
-    const at = freeSlot(taken);
-    const r = { ...at, ...size };
-    expect(r.x >= 600 + FRAME_GAP || r.y >= 300 + FRAME_GAP).toBe(true);
-    expect(at).toEqual({ x: 600 + FRAME_GAP, y: 0 });
+const clear = (b: BoardState, ...ids: string[]): BoardState => {
+  const out = structuredClone(b) as BoardState;
+  for (const id of ids) {
+    for (const t of ['workflows', 'steps', 'caches'] as const) {
+      const r = out[t][id] as { at: unknown } | undefined;
+      if (r) r.at = null;
+    }
+  }
+  return out;
+};
+
+describe('placeMissing', () => {
+  it('places a triangle 160 px left of its first entry step', () => {
+    const r = placeMissing(clear(board(), 'daily'));
+    expect(r.workflows.daily!.at).toEqual({ x: 200 - 160, y: 200 });
+  });
+
+  it('leaves placed items alone and returns the same board when nothing is missing', () => {
+    const b = board();
+    expect(placeMissing(b)).toBe(b);
+    const r = placeMissing(clear(b, 'daily'));
+    expect(r.steps).toEqual(b.steps);
+    expect(r.workflows.hourly).toEqual(b.workflows.hourly);
+    expect(r.caches).toEqual(b.caches);
+  });
+
+  it('puts a step 280 px right of its first wired-in source', () => {
+    const r = placeMissing(clear(board(), 'expand'));
+    expect(r.steps.expand!.at).toEqual({ x: 200 + 280, y: 200 });
+  });
+
+  it('puts a cache 120 px below its first linking triangle', () => {
+    const r = placeMissing(clear(board(), 'c1'));
+    expect(r.caches.c1!.at).toEqual({ x: 0, y: 120 });
+  });
+
+  it('places an unconnected step in a column 320 px right of everything placed', () => {
+    const r = placeMissing(clear(board(), 'lonely'));
+    // rightmost placed card: expand at 400 (+ STEP_W)
+    expect(r.steps.lonely!.at!.x).toBe(400 + STEP_W + 320);
+  });
+
+  it('keeps an orphan with nothing placed at all on the board', () => {
+    const b = clear(board(), 'daily', 'hourly', 'fetch', 'expand', 'lonely', 'c1');
+    const r = placeMissing(b);
+    const all = [...Object.values(r.workflows), ...Object.values(r.steps), ...Object.values(r.caches)];
+    expect(all.every((x) => x.at !== null)).toBe(true);
+  });
+
+  it('never overlaps two step cards', () => {
+    const b = clear(board(), 'expand', 'lonely');
+    b.steps.fetch!.nextStepIds = ['expand', 'lonely'];
+    const r = placeMissing(b);
+    const steps = Object.values(r.steps).map((s) => s.at!);
+    for (let i = 0; i < steps.length; i++) {
+      for (let j = i + 1; j < steps.length; j++) {
+        const a = steps[i]!, c = steps[j]!;
+        const apart = a.x + STEP_W <= c.x || c.x + STEP_W <= a.x || a.y + STEP_H <= c.y || c.y + STEP_H <= a.y;
+        expect(apart).toBe(true);
+      }
+    }
   });
 });

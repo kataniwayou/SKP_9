@@ -1,5 +1,6 @@
 import { ENTITY_PATH, type EntityKind, type ReadDtoOf, type UpdateDtoOf } from './entities';
-import type { AssignmentCreateDto, AssignmentReadDto, CacheReadDto, DesignOutcomeDto, DesignSaveRequest, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowDeleteOutcomeDto, WorkflowGraphDto, WorkflowReadDto, WorkflowValidationDto } from './types';
+import type { ModelChange } from '../design/changes';
+import type { AssignmentCreateDto, AssignmentReadDto, CacheReadDto, ModelApplyResultDto, ModelValidateResultDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowReadDto, WorkflowValidationDto } from './types';
 
 /**
  * Every way a request can fail, as data. The UI shows these in its status line (Output in plan 5);
@@ -17,11 +18,16 @@ export type ApiResult<T> = { ok: true; value: T } | { ok: false; error: ApiError
 
 export interface StudioApi {
   listWorkflows(): Promise<ApiResult<WorkflowReadDto[]>>;
-  getGraph(workflowId: string): Promise<ApiResult<WorkflowGraphDto>>;
   getStep(stepId: string): Promise<ApiResult<StepReadDto>>;
   getProcessor(processorId: string): Promise<ApiResult<ProcessorReadDto>>;
   getSchema(schemaId: string): Promise<ApiResult<SchemaReadDto>>;
   /** The Toolbox's lists (2026-10-11): every processor, cache and schema BaseApi holds. Optional: a test's fake may lack them. */
+  listSteps(): Promise<ApiResult<StepReadDto[]>>;
+  listAssignments(): Promise<ApiResult<AssignmentReadDto[]>>;
+  /** `POST /model/apply` with `{ changes }`: the whole board's Save, all or nothing. */
+  applyModel(changes: ModelChange[]): Promise<ApiResult<ModelApplyResultDto>>;
+  /** `POST /model/validate`: the same dry run, never applied. */
+  validateModel(changes: ModelChange[]): Promise<ApiResult<ModelValidateResultDto>>;
   listProcessors?(): Promise<ApiResult<ProcessorReadDto[]>>;
   listCaches?(): Promise<ApiResult<CacheReadDto[]>>;
   listSchemas?(): Promise<ApiResult<SchemaReadDto[]>>;
@@ -44,12 +50,6 @@ export interface StudioApi {
    */
   listLiveness(): Promise<ApiResult<unknown>>;
   /**
-   * Save (plan 8 §4): `PUT /workflows/{id}/design` with the whole design. BaseApi always stores it on the
-   * workflow, dry-runs it in one transaction and applies it to the real entities only when there are no
-   * errors. Answers `{ applied, errors }`.
-   */
-  saveDesign(workflowId: string, body: DesignSaveRequest): Promise<ApiResult<DesignOutcomeDto>>;
-  /**
    * Start (2026-10-09): `POST /orchestration/start` with the workflow id as the body. BaseApi checks the workflow it
    * holds (cycles, schema edges, payloads, processor liveness; a refusal is a 422 naming the gate) and queues the
    * start: 202 with no body. The workflow appears in `GET /orchestration/live` a moment later.
@@ -57,12 +57,6 @@ export interface StudioApi {
   startWorkflow(workflowId: string): Promise<ApiResult<null>>;
   /** Stop: `POST /orchestration/stop`, the same way; 202, and the workflow leaves the live set a moment later. */
   stopWorkflow(workflowId: string): Promise<ApiResult<null>>;
-  /**
-   * Delete a workflow (2026-10-10): `POST /workflows/{id}/delete[?dryRun=true]`. BaseApi reads the live set itself, then
-   * deletes the workflow with its own steps and assignments in one transaction (never its caches or processors); a dry
-   * run rolls back and says what would be deleted. Refusals (running, shared) are a 200 with `applied: false`.
-   */
-  deleteWorkflow(workflowId: string, dryRun: boolean): Promise<ApiResult<WorkflowDeleteOutcomeDto>>;
   /**
    * Publishes the workflow's drawing (2026-10-11): `PUT /workflows/{id}/diagram` with raw SVG, which the Kibana
    * dashboard's diagram panel shows (`GET /workflows/{id}.svg`). Leaves the workflow's `updatedAt` where it was. 204.
@@ -145,13 +139,16 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
 
   return {
     listWorkflows: () => get<WorkflowReadDto[]>('/workflows'),
-    getGraph: (workflowId) => get<WorkflowGraphDto>(`/workflows/${id(workflowId)}/graph`),
     getStep: (stepId) => get<StepReadDto>(`/steps/${id(stepId)}`),
     getProcessor: (processorId) => get<ProcessorReadDto>(`/processors/${id(processorId)}`),
     getSchema: (schemaId) => get<SchemaReadDto>(`/schemas/${id(schemaId)}`),
     listProcessors: () => get<ProcessorReadDto[]>('/processors'),
     listCaches: () => get<CacheReadDto[]>('/caches'),
     listSchemas: () => get<SchemaReadDto[]>('/schemas'),
+    listSteps: () => get<StepReadDto[]>('/steps'),
+    listAssignments: () => get<AssignmentReadDto[]>('/assignments'),
+    applyModel: (changes) => request<ModelApplyResultDto>('POST', '/model/apply', { changes }),
+    validateModel: (changes) => request<ModelValidateResultDto>('POST', '/model/validate', { changes }),
     getEntity<K extends EntityKind>(kind: K, entityId: string) {
       return get<ReadDtoOf[K]>(`/${ENTITY_PATH[kind]}/${id(entityId)}`);
     },
@@ -162,7 +159,6 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
     deleteAssignment: (assignmentId) => request<null>('DELETE', `/assignments/${id(assignmentId)}`),
     listLive: () => get<unknown>('/orchestration/live'),
     listLiveness: () => get<unknown>('/processors/liveness'),
-    saveDesign: (workflowId, body) => request<DesignOutcomeDto>('PUT', `/workflows/${id(workflowId)}/design`, body),
     startWorkflow: (workflowId) => request<null>('POST', '/orchestration/start', workflowId),
     stopWorkflow: (workflowId) => request<null>('POST', '/orchestration/stop', workflowId),
     publishDiagram: async (workflowId, svg) => {
@@ -175,6 +171,5 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
       return response.ok ? { ok: true, value: null } : { ok: false, error: await toError(response) };
     },
     validateWorkflow: (workflowId) => request<WorkflowValidationDto>('POST', `/workflows/${id(workflowId)}/validate`),
-    deleteWorkflow: (workflowId, dryRun) => request<WorkflowDeleteOutcomeDto>('POST', `/workflows/${id(workflowId)}/delete${dryRun ? '?dryRun=true' : ''}`),
   };
 }

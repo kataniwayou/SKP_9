@@ -1,102 +1,101 @@
-import type { Id, Step } from '../model/graph';
+import type { Id } from '../model/graph';
 import type { Point, Rect } from '../model/geometry';
-import { CHIP_GAP, CHIP_ROW_H, CHIP_W } from './cacheChips';
-import {
-  BOARD_ROW_W, FRAME_GAP, FRAME_MIN_BODY_H, FRAME_MIN_W, FRAME_PAD, HEADER_H, STEP_H, STEP_W,
-} from './geometry';
+import type { BoardState } from '../design/board';
+import { freeOffset } from '../operate/freeOffset';
+import { STEP_H, STEP_W } from './geometry';
 
-/** Content box of all steps plus padding, never smaller than the minimum frame. */
-export function frameSizeOf(stepAt: ReadonlyMap<Id, Point>): { w: number; h: number } {
-  let right = 0;
-  let bottom = 0;
-  for (const p of stepAt.values()) {
-    right = Math.max(right, p.x + STEP_W);
-    bottom = Math.max(bottom, p.y + STEP_H);
+/** Card sizes for no-overlap placement (a triangle and a cache chip are smaller than a step). */
+const TRIANGLE = { w: 120, h: 104 };
+const CACHE = { w: 160, h: 56 };
+const STEP = { w: STEP_W, h: STEP_H };
+const CACHE_BELOW = 120;
+const STEP_RIGHT = 280;
+const TRIANGLE_LEFT = 160;
+const COLUMN_GAP = 320;
+const COLUMN_STEP = 40;
+
+type Kind = 'workflows' | 'steps' | 'caches';
+const SIZE: Record<Kind, { w: number; h: number }> = { workflows: TRIANGLE, steps: STEP, caches: CACHE };
+
+/**
+ * Gives every row without a location (`at === null`) one: next to what connects to it, else in a column to the right of
+ * everything placed. Rows that already have a location stay where they are; no placed card is covered.
+ */
+export function placeMissing(b: BoardState): BoardState {
+  const at = new Map<string, Point>(); // key `${kind}:${id}`
+  const key = (k: Kind, id: Id) => `${k}:${id}`;
+  const missing: [Kind, Id][] = [];
+  for (const k of ['workflows', 'steps', 'caches'] as const) {
+    for (const [id, row] of Object.entries(b[k])) {
+      if (row.at) at.set(key(k, id), row.at);
+      else missing.push([k, id]);
+    }
   }
-  const hasSteps = stepAt.size > 0;
-  return {
-    w: Math.max(FRAME_MIN_W, hasSteps ? right + FRAME_PAD : 0),
-    h: Math.max(HEADER_H + FRAME_MIN_BODY_H, hasSteps ? HEADER_H + bottom + FRAME_PAD : 0),
+  if (missing.length === 0) return b;
+
+  const rects = (): Rect[] => [...at].map(([kk, p]) => ({ ...p, ...SIZE[kk.slice(0, kk.indexOf(':')) as Kind] }));
+  const put = (k: Kind, id: Id, want: Point) => {
+    const size = SIZE[k];
+    const d = freeOffset([{ ...want, ...size }], rects(), { x: 0, y: 0 });
+    at.set(key(k, id), { x: want.x + d.x, y: want.y + d.y });
   };
-}
 
-/** The smallest a frame may be: its steps, plus the cache chip row along the bottom when caches are linked. */
-export function minFrameSize(stepAt: ReadonlyMap<Id, Point>, cacheCount: number): { w: number; h: number } {
-  const size = frameSizeOf(stepAt);
-  if (cacheCount > 0) {
-    size.h += CHIP_ROW_H;
-    size.w = Math.max(size.w, 2 * FRAME_PAD + cacheCount * CHIP_W + (cacheCount - 1) * CHIP_GAP);
-  }
-  return size;
-}
-
-/** Positions for the steps not in `placed`: columns by BFS depth from the entry steps. */
-export function defaultStepPositions(
-  entryStepIds: Id[],
-  steps: ReadonlyMap<Id, Pick<Step, 'nextStepIds'>>,
-  placed: ReadonlyMap<Id, Point>,
-): Map<Id, Point> {
-  const depth = new Map<Id, number>();
-  let queue: Id[] = [];
-  for (const id of entryStepIds) {
-    if (steps.has(id) && !depth.has(id)) { depth.set(id, 0); queue.push(id); }
-  }
-  for (let d = 0; queue.length; d++) {
-    const next: Id[] = [];
-    for (const id of queue) {
-      for (const n of steps.get(id)?.nextStepIds ?? []) {
-        if (steps.has(n) && !depth.has(n)) { depth.set(n, d + 1); next.push(n); }
+  // where an item should sit, by what is already placed; null when nothing placed connects to it
+  const anchor = (k: Kind, id: Id): Point | null => {
+    if (k === 'caches') {
+      for (const w of Object.values(b.workflows)) {
+        const p = w.cacheIds.includes(id) ? at.get(key('workflows', w.id)) : undefined;
+        if (p) return { x: p.x, y: p.y + CACHE_BELOW };
+      }
+    } else if (k === 'steps') {
+      for (const s of Object.values(b.steps)) {
+        const p = s.nextStepIds.includes(id) ? at.get(key('steps', s.id)) : undefined;
+        if (p) return { x: p.x + STEP_RIGHT, y: p.y };
+      }
+      for (const w of Object.values(b.workflows)) {
+        const p = w.entryStepIds.includes(id) ? at.get(key('workflows', w.id)) : undefined;
+        if (p) return { x: p.x + STEP_RIGHT, y: p.y };
+      }
+    } else {
+      for (const sid of b.workflows[id]!.entryStepIds) {
+        const p = at.get(key('steps', sid));
+        if (p) return { x: p.x - TRIANGLE_LEFT, y: p.y };
+      }
+      for (const cid of b.workflows[id]!.cacheIds) {
+        const p = at.get(key('caches', cid));
+        if (p) return { x: p.x, y: p.y - CACHE_BELOW };
       }
     }
-    queue = next;
-  }
-  const deepest = depth.size ? Math.max(...depth.values()) : -1;
-  const rows = new Map<number, number>();
-  const out = new Map<Id, Point>();
-  for (const id of steps.keys()) {
-    if (placed.has(id)) continue;
-    const col = depth.get(id) ?? deepest + 1;
-    const row = rows.get(col) ?? 0;
-    rows.set(col, row + 1);
-    out.set(id, { x: FRAME_PAD + col * (STEP_W + 70), y: FRAME_PAD + row * (STEP_H + 40) });
-  }
-  return out;
-}
+    return null;
+  };
 
-const clashes = (a: Rect, b: Rect) =>
-  a.x < b.x + b.w + FRAME_GAP && b.x < a.x + a.w + FRAME_GAP &&
-  a.y < b.y + b.h + FRAME_GAP && b.y < a.y + a.h + FRAME_GAP;
-
-/** Stored rects stay; the rest go, oldest first, into the first free slot of rows BOARD_ROW_W wide. */
-export function placeFrames(
-  items: { id: Id; createdAt: string; stored: Rect | null; size: { w: number; h: number } }[],
-): Map<Id, Rect> {
-  const out = new Map<Id, Rect>();
-  for (const it of items) if (it.stored) out.set(it.id, { ...it.stored });
-  const rest = items
-    .filter((it) => !it.stored)
-    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  for (const it of rest) {
-    const taken = [...out.values()];
-    const ys = [0, ...taken.map((r) => r.y + r.h + FRAME_GAP)].sort((a, b) => a - b);
-    let found: Rect | null = null;
-    for (const y of ys) {
-      const xs = [0, ...taken.map((r) => r.x + r.w + FRAME_GAP)].sort((a, b) => a - b);
-      for (const x of xs) {
-        if (x > 0 && x + it.size.w > BOARD_ROW_W) continue;
-        const cand = { x, y, w: it.size.w, h: it.size.h };
-        if (!taken.some((t) => clashes(cand, t))) { found = cand; break; }
-      }
-      if (found) break;
+  let rest = missing;
+  let column: Point | null = null;
+  while (rest.length > 0) {
+    const stuck: [Kind, Id][] = [];
+    let progressed = false;
+    for (const [k, id] of rest) {
+      const want = anchor(k, id);
+      if (want) { put(k, id, want); progressed = true; } else stuck.push([k, id]);
     }
-    out.set(it.id, found ?? { x: 0, y: Math.max(0, ...taken.map((r) => r.y + r.h + FRAME_GAP)), ...it.size });
+    rest = stuck;
+    if (!progressed && rest.length > 0) {
+      const [k, id] = rest.shift()!;
+      if (!column) {
+        const right = Math.max(-COLUMN_GAP, ...rects().map((r) => r.x + r.w));
+        column = { x: right + COLUMN_GAP, y: Math.min(0, ...rects().map((r) => r.y)) };
+      }
+      put(k, id, column);
+      column = { x: column.x, y: column.y + SIZE[k].h + COLUMN_STEP };
+    }
   }
-  return out;
-}
 
-/** Where a new, empty frame goes: the first free slot among the frames on the board, as placeFrames finds it. */
-export function freeSlot(frames: readonly Rect[]): Point {
-  const items = frames.map((r, i) => ({ id: `taken-${i}`, createdAt: '', stored: r, size: { w: r.w, h: r.h } }));
-  const slot = placeFrames([...items, { id: 'new', createdAt: '', stored: null, size: frameSizeOf(new Map()) }]).get('new')!;
-  return { x: slot.x, y: slot.y };
+  const fill = <R extends { id: Id; at: Point | null }>(k: Kind, rows: Record<Id, R>): Record<Id, R> =>
+    Object.fromEntries(Object.entries(rows).map(([id, r]) => [id, r.at ? r : { ...r, at: at.get(key(k, id))! }]));
+  return {
+    ...b,
+    workflows: fill('workflows', b.workflows),
+    steps: fill('steps', b.steps),
+    caches: fill('caches', b.caches),
+  };
 }

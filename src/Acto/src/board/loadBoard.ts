@@ -1,185 +1,39 @@
 import type { ApiResult, StudioApi } from '../api/client';
-import { cacheFromDto, graphFromDto, processorFromDto, stepFromDto } from '../api/toModel';
-import type { Cache, Graph, Id } from '../model/graph';
-import type { Point, Rect } from '../model/geometry';
-import { reachableStepIds } from '../model/reachability';
-import { parseActoLayout } from './layoutDoc';
-import { describeError } from '../api/describeError';
-import { FRAME_PAD, STEP_H } from './geometry';
-import { defaultStepPositions, minFrameSize, placeFrames } from './placement';
-import { derivedEntrySteps, entryDiff, stepRoles, type StepRole } from './roles';
-import { wiresOf, type Wire } from './wires';
+import {
+  assignmentRowFromDto, cacheRowFromDto, processorRowFromDto, schemaRowFromDto, stepRowFromDto, workflowRowFromDto,
+} from '../api/toModel';
+import type { BoardState } from '../design/board';
+import type { Id } from '../model/graph';
 
-export interface BoardWorkflow {
-  graph: Graph;
-  stepIds: Id[];
-  stepAt: Map<Id, Point>;
-  frame: Rect;
-  roles: Map<Id, StepRole>;
-  wires: Wire[];
-  entryDiff: { stops: Id[]; starts: Id[] };
-  /** Existing caches a stored design (a save that failed) links that the workflow does not hold yet, by id. */
-  designCaches?: ReadonlyMap<Id, Cache>;
-}
-export interface BoardLoad {
-  /** False when the workflow list itself failed: nothing was loaded, and `failures` says why. */
-  listed: boolean;
-  workflows: BoardWorkflow[];
-  failures: { workflowId: Id; name: string; detail: string }[];
-  /**
-   * Frames that arrived in a provisional slot (no stored position) and ended elsewhere once every workflow was in:
-   * the one-shot layout, in creation order, which does not depend on which graph answered first.
-   */
-  finalFrames?: ReadonlyMap<Id, Rect>;
-}
-type Loaded = Omit<BoardWorkflow, 'frame'> & { storedFrame: Rect | null };
+const byId = <T extends { id: Id }>(rows: T[]): Record<Id, T> => Object.fromEntries(rows.map((r) => [r.id, r]));
 
 /**
- * One workflow for the board: the graph, then the parked steps its layout lists (not reachable, so
- * GET /graph omits them). A listed id the server no longer has is dropped; any other failure is
- * returned. Never rejects.
+ * The whole board from BaseAPI's six CRUD lists, fetched in parallel. Orphan steps and unlinked assignments are kept; any
+ * failed list returns its error (the first, in list order). Never rejects.
  */
-export async function loadWorkflow(api: StudioApi, workflowId: Id): Promise<ApiResult<Loaded>> {
+export async function loadBoard(api: StudioApi): Promise<ApiResult<BoardState>> {
   try {
-    return await load(api, workflowId);
+    const [workflows, steps, caches, assignments, processors, schemas] = await Promise.all([
+      api.listWorkflows(), api.listSteps(), api.listCaches!(), api.listAssignments(), api.listProcessors!(), api.listSchemas!(),
+    ]);
+    if (!workflows.ok) return workflows;
+    if (!steps.ok) return steps;
+    if (!caches.ok) return caches;
+    if (!assignments.ok) return assignments;
+    if (!processors.ok) return processors;
+    if (!schemas.ok) return schemas;
+    return {
+      ok: true,
+      value: {
+        workflows: byId(workflows.value.map(workflowRowFromDto)),
+        steps: byId(steps.value.map(stepRowFromDto)),
+        caches: byId(caches.value.map(cacheRowFromDto)),
+        assignments: byId(assignments.value.map(assignmentRowFromDto)),
+        processors: byId(processors.value.map(processorRowFromDto)),
+        schemas: byId(schemas.value.map(schemaRowFromDto)),
+      },
+    };
   } catch (e) {
-    return { ok: false, error: { kind: 'http', status: 0, detail: `Could not open the workflow: ${e instanceof Error ? e.message : String(e)}` } };
+    return { ok: false, error: { kind: 'http', status: 0, detail: `Could not load the board: ${e instanceof Error ? e.message : String(e)}` } };
   }
-}
-
-const DEFAULT_GAP = 40;
-
-/**
- * Acto stores frame-local positions with a `board` rectangle; those load as they are. A layout without
- * `board`, or with a negative position, is WorkflowStudio's canvas coordinates: shift it so the top-left-most
- * step sits at FRAME_PAD, keeping the steps' layout relative to each other.
- */
-function shiftedIntoFrame(stored: [Id, Point][], actoLayout: boolean): Map<Id, Point> {
-  if (stored.length === 0) return new Map();
-  if (actoLayout && stored.every(([, p]) => p.x >= 0 && p.y >= 0)) return new Map(stored.map(([id, p]) => [id, { ...p }]));
-  const dx = FRAME_PAD - Math.min(...stored.map(([, p]) => p.x));
-  const dy = FRAME_PAD - Math.min(...stored.map(([, p]) => p.y));
-  return new Map(stored.map(([id, p]) => [id, { x: p.x + dx, y: p.y + dy }]));
-}
-
-async function load(api: StudioApi, workflowId: Id): Promise<ApiResult<Loaded>> {
-  const loaded = await api.getGraph(workflowId);
-  if (!loaded.ok) return loaded;
-
-  const graph = graphFromDto(loaded.value);
-  const layout = parseActoLayout(graph.layout);
-  const stepIds = reachableStepIds(graph.workflow.entryStepIds, graph.steps);
-  const inFrame = new Set(stepIds);
-
-  for (const id of [...layout.parked, ...Object.keys(layout.steps)]) {
-    if (inFrame.has(id)) continue;
-    const step = await api.getStep(id);
-    if (!step.ok) {
-      if (step.error.kind === 'notFound') continue;
-      return step;
-    }
-    const model = stepFromDto(step.value);
-    graph.steps.set(id, model);
-    stepIds.push(id);
-    inFrame.add(id);
-    const pid = model.processorId;
-    if (pid && !graph.processors.has(pid)) {
-      const processor = await api.getProcessor(pid);
-      if (processor.ok) graph.processors.set(pid, processorFromDto(processor.value));
-      else if (processor.error.kind !== 'notFound') return processor;
-    }
-  }
-
-  const placed = shiftedIntoFrame(stepIds.filter((id) => layout.steps[id]).map((id) => [id, layout.steps[id]!]), layout.board !== null);
-  const stepAt = new Map<Id, Point>(placed);
-  const inFrameSteps = new Map(stepIds.map((id) => [id, graph.steps.get(id)!]));
-  // Defaults start at FRAME_PAD; push them below the stored steps so they never sit on top of them.
-  let below = 0;
-  for (const p of placed.values()) below = Math.max(below, p.y + STEP_H + DEFAULT_GAP - FRAME_PAD);
-  for (const [id, p] of defaultStepPositions(graph.workflow.entryStepIds, inFrameSteps, placed)) stepAt.set(id, { x: p.x, y: p.y + below });
-
-  const wires = wiresOf(stepIds, graph.steps);
-  const roles = stepRoles(stepIds, wires);
-  const diff = entryDiff(graph.workflow.entryStepIds, derivedEntrySteps(roles));
-  const designCaches = await designCachesOf(api, graph);
-  return { ok: true, value: { graph, stepIds, stepAt, roles, wires, entryDiff: diff, storedFrame: layout.board, ...(designCaches.size ? { designCaches } : {}) } };
-}
-
-/** Best effort: a cache that cannot be read is restored from the stored design alone. */
-async function designCachesOf(api: StudioApi, graph: Graph): Promise<Map<Id, Cache>> {
-  const out = new Map<Id, Cache>();
-  const design = graph.design as { workflow?: { cacheIds?: unknown } } | null;
-  const ids = Array.isArray(design?.workflow?.cacheIds) ? design.workflow.cacheIds : [];
-  for (const id of ids) {
-    if (typeof id !== 'string' || graph.caches.has(id) || out.has(id)) continue;
-    try {
-      const r = await api.getEntity('cache', id);
-      if (r.ok) out.set(id, cacheFromDto(r.value));
-    } catch { /* restored without it */ }
-  }
-  return out;
-}
-
-/**
- * Every workflow, `concurrency` at a time; one that fails is listed in `failures`, the rest still load.
- * `onWorkflow` is called as each graph arrives, with its frame already placed: a stored frame stays, any other goes
- * into the first free slot after the frames placed so far. The result lists the workflows in list order.
- */
-export async function loadBoard(api: StudioApi, concurrency = 4, onWorkflow?: (bw: BoardWorkflow) => void): Promise<BoardLoad> {
-  const list = await api.listWorkflows();
-  if (!list.ok) {
-    return { listed: false, workflows: [], failures: [{ workflowId: '', name: 'the workflow list', detail: describeError(list.error) }] };
-  }
-  const items = list.value.filter((w): w is typeof w & { id: string } => !!w.id).map((w) => ({ id: w.id, name: w.name ?? w.id }));
-  const results: (BoardWorkflow | { error: string } | undefined)[] = new Array(items.length);
-  const placed = new Map<Id, Rect>();
-  const arrived: ({ w: Loaded; size: { w: number; h: number } } | undefined)[] = new Array(items.length);
-  const place = (id: Id, w: Loaded): BoardWorkflow => {
-    const own = minFrameSize(w.stepAt, w.graph.caches.size);
-    const size = { w: Math.max(own.w, w.storedFrame?.w ?? 0), h: Math.max(own.h, w.storedFrame?.h ?? 0) };
-    const taken = [...placed].map(([tid, r]) => ({ id: tid, createdAt: '', stored: r, size: { w: r.w, h: r.h } }));
-    const frames = placeFrames([...taken, { id, createdAt: w.graph.workflow.audit.createdAt, stored: w.storedFrame && { ...w.storedFrame, ...size }, size }]);
-    const frame = frames.get(id)!;
-    placed.set(id, frame);
-    arrived[items.findIndex((x) => x.id === id)] = { w, size };
-    return { ...omitStored(w), frame };
-  };
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) {
-      const i = next++;
-      const r = await loadWorkflow(api, items[i].id);
-      if (!r.ok) { results[i] = { error: describeError(r.error) }; continue; }
-      const bw = place(items[i].id, r.value);
-      results[i] = bw;
-      onWorkflow?.(bw);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, worker));
-
-  // the one-shot layout: every stored frame is an obstacle, the rest go by creation time
-  const okAt = items.map((_, i) => i).filter((i) => arrived[i]);
-  const finals = placeFrames(okAt.map((i) => {
-    const { w, size } = arrived[i]!;
-    return { id: items[i].id, createdAt: w.graph.workflow.audit.createdAt, stored: w.storedFrame && { ...w.storedFrame, ...size }, size };
-  }));
-  const finalFrames = new Map<Id, Rect>();
-  for (const i of okAt) {
-    const r = results[i] as BoardWorkflow;
-    const f = finals.get(items[i].id)!;
-    if (!arrived[i]!.w.storedFrame && (f.x !== r.frame.x || f.y !== r.frame.y)) finalFrames.set(items[i].id, f);
-    results[i] = { ...r, frame: f };
-  }
-  const workflows: BoardWorkflow[] = [];
-  const failures: BoardLoad['failures'] = [];
-  results.forEach((r, i) => {
-    if (!r) return;
-    if ('error' in r) failures.push({ workflowId: items[i].id, name: items[i].name, detail: r.error });
-    else workflows.push(r);
-  });
-  return { listed: true, workflows, failures, finalFrames };
-}
-
-function omitStored({ storedFrame: _s, ...rest }: Loaded): Omit<BoardWorkflow, 'frame'> {
-  return rest;
 }
