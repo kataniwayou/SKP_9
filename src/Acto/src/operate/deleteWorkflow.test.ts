@@ -4,7 +4,7 @@ import { board, shared } from '../design/boardFixtures';
 import { boardChanges } from '../design/changes';
 import { createBoardStore } from '../design/boardStore';
 import { createOutputStore } from '../output/outputStore';
-import { commitDelete, prepareDelete } from './deleteWorkflow';
+import { commitDelete, commitDeletes, prepareDelete, prepareDeletes } from './deleteWorkflow';
 import { saveBoard } from '../design/saveBoard';
 
 function setup(start = board()) {
@@ -147,5 +147,43 @@ describe('deleting a triangle', () => {
       await saving;
       expect(t.store.state().workflows.daily).toBeDefined();
     });
+  });
+});
+
+describe('deleting several triangles', () => {
+  const refuse = (id: string) => ({ ok: true, value: { ok: false, results: [
+    { index: 0, op: 'delete', table: 'workflows', id, ok: false, status: 422, problem: { detail: 'running: stop it first' } },
+  ] } }) as never;
+
+  it('runs each dry run; a refused one is reported and left out, the rest are planned', async () => {
+    const t = setup();
+    t.api.validateModel.mockResolvedValueOnce(refuse('daily'));
+    const plans = await prepareDeletes(t.studio, t.store, t.output, ['daily', 'hourly']);
+    expect(t.api.validateModel).toHaveBeenCalledTimes(2);
+    expect(plans.map((p) => p.workflowId)).toEqual(['hourly']);
+    expect(texts(t.output)).toContain('workflow daily: running: stop it first');
+    expect(t.store.saving()).toBe(false);
+  });
+
+  it('deletes one by one: a refusal of one is reported and the rest still go', async () => {
+    const t = setup();
+    const plans = await prepareDeletes(t.studio, t.store, t.output, ['daily', 'hourly']);
+    expect(plans).toHaveLength(2);
+    t.api.applyModel.mockResolvedValueOnce({ ok: true, value: { ok: false, applied: false, made: {}, results: [
+      { index: 0, op: 'delete', table: 'workflows', id: 'daily', ok: false, status: 409, problem: {} },
+    ] } } as never);
+    expect(await commitDeletes(t.studio, t.store, t.output, plans)).toEqual(['hourly']);
+    expect(t.api.applyModel).toHaveBeenCalledTimes(2);
+    expect(t.store.state().workflows.daily).toBeDefined();
+    expect(t.store.state().workflows.hourly).toBeUndefined();
+  });
+
+  it('a thrown apply of one is reported and the rest still go', async () => {
+    const t = setup();
+    const plans = await prepareDeletes(t.studio, t.store, t.output, ['daily', 'hourly']);
+    t.api.applyModel.mockRejectedValueOnce(new Error('boom'));
+    expect(await commitDeletes(t.studio, t.store, t.output, plans)).toEqual(['hourly']);
+    expect(texts(t.output)).toContain('daily: not deleted — boom');
+    expect(t.store.saving()).toBe(false);
   });
 });

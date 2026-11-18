@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { LiveStatus } from '../api/liveStatus';
 import type { Pick } from './picks';
-import { confirmText, toolbarFor, type ToolbarDeps } from './Toolbar';
+import { confirmText, confirmTextMany, toolbarFor, type ToolbarDeps } from './Toolbar';
 
 const tri: Pick = { kind: 'workflow', id: 'w1' };
 function deps(over: Partial<ToolbarDeps> = {}): ToolbarDeps {
   return {
     picks: [tri], run: () => 'stopped' as LiveStatus, pending: null,
     start: vi.fn(), stop: vi.fn(), copy: vi.fn(), remove: vi.fn(), askDelete: vi.fn(), confirmDelete: vi.fn(), cancelDelete: vi.fn(),
+    restore: vi.fn(), removeGhosts: vi.fn(),
     ...over,
   };
 }
@@ -52,5 +53,18 @@ describe('toolbarFor', () => {
     expect(items[0]!.note).toBe(true);
     items[1]!.onClick(); items[2]!.onClick();
     expect(d.confirmDelete).toHaveBeenCalled(); expect(d.cancelDelete).toHaveBeenCalled();
+  });
+  it('a ghost has Restore · Remove, each acting on its key', () => {
+    const d = deps();
+    const g: Pick = { kind: 'ghost', key: 'step:s' };
+    expect(labels(g, d)).toEqual(['Restore', 'Remove']);
+    toolbarFor(g, d)![0]!.onClick(); expect(d.restore).toHaveBeenCalledWith(['step:s']);
+    toolbarFor(g, d)![1]!.onClick(); expect(d.removeGhosts).toHaveBeenCalledWith(['step:s']);
+  });
+  it('the confirm of several triangles lists every one; of one it is the lone confirm', () => {
+    const a = { workflowId: 'a', changes: [], lines: ['workflow a'], assignmentIds: [] };
+    const b = { workflowId: 'b', changes: [], lines: ['workflow b', 'assignment x'], assignmentIds: [] };
+    expect(confirmTextMany([a, b])).toBe('Delete workflow a, workflow b, assignment x? Their steps and caches stay.');
+    expect(confirmTextMany([a])).toBe(confirmText(a));
   });
 });

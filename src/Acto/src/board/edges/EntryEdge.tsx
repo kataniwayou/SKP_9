@@ -5,7 +5,7 @@ import { EdgeExtras } from './EdgeExtras';
 
 /** An entry arrow (edge type `entry`): solid ink from a triangle's tip to an entry step; accent while its workflow is selected or it is picked. */
 export function EntryEdge({ id, data, selected, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition }: EdgeProps) {
-  const { workflowId, stepId, hue, running = false, ghost = false, pick } = data as { workflowId: string; stepId: string; hue: string | null; running?: boolean; ghost?: boolean; pick?: PickInfo };
+  const { workflowId, stepId, hue, running = false, ghost = false, ghostKey, pick } = data as { workflowId: string; stepId: string; hue: string | null; running?: boolean; ghost?: boolean; ghostKey?: string; pick?: PickInfo };
   const [d, mx, my] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX: targetX - 2, targetY, targetPosition });
   const marker = `arrow-${id}`;
   return (
@@ -17,7 +17,7 @@ export function EntryEdge({ id, data, selected, sourceX, sourceY, targetX, targe
       </defs>
       <path className="edge-hit" d={d} />
       <path className={`entry-line${running ? ' running' : ''}`} d={d} fill="none" markerEnd={`url(#${marker})`} />
-      <EdgeExtras id={id} pick={pick} self={{ kind: 'entry', workflowId, stepId }} selected={selected} x={mx} y={my - 4} />
+      <EdgeExtras id={id} pick={pick} self={ghostKey ? { kind: 'ghost', key: ghostKey } : { kind: 'entry', workflowId, stepId }} selected={selected} x={mx} y={my - 4} />
     </g>
   );
 }

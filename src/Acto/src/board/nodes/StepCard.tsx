@@ -2,6 +2,7 @@ import { Handle, NodeToolbar, Position, type NodeProps } from '@xyflow/react';
 import { conditionStyle } from '../wires';
 import { HealthDot } from '../live/HealthDot';
 import { ItemToolbar, useHasToolbar } from '../ItemToolbar';
+import type { Pick } from '../selection';
 import type { PickInfo, StepChip } from '../toFlow';
 import { PickBadge } from './PickBadge';
 import { UnsavedMark } from './UnsavedMark';
@@ -19,11 +20,11 @@ export function processorColour(name: string): string {
  * workflow reaching it draws the green ring.
  */
 export function StepCard({ data, selected }: NodeProps) {
-  const { stepId, name, processor, processorId, condition = 1, running = false, chips = [], ghost = false, failed = false, unsaved, pick } = data as {
+  const { stepId, name, processor, processorId, condition = 1, running = false, chips = [], ghost = false, ghostKey, failed = false, unsaved, pick } = data as {
     stepId: string; name: string; processor: string | null; processorId: string | null; condition?: number; running?: boolean; chips?: StepChip[];
-    ghost?: boolean; failed?: boolean; unsaved?: boolean; pick?: PickInfo;
+    ghost?: boolean; ghostKey?: string; failed?: boolean; unsaved?: boolean; pick?: PickInfo;
   };
-  const self = { kind: 'step', id: stepId } as const;
+  const self: Pick = ghostKey ? { kind: 'ghost', key: ghostKey } : { kind: 'step', id: stepId };
   const toolbar = useHasToolbar(self);
   const cond = conditionStyle(condition);
   return (

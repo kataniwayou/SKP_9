@@ -10,7 +10,7 @@ import { placeMissing } from './board/placement';
 import { selectPick, type Pick, type SelectionState } from './board/selection';
 import { barOf } from './board/selectionBar';
 import { SelectionBar } from './board/SelectionBarView';
-import { toolbarFor } from './board/Toolbar';
+import { confirmTextMany, toolbarFor } from './board/Toolbar';
 import type { BoardView } from './board/toFlow';
 import { ChatHost } from './chat/ChatHost';
 import { createChatStore, type ChatStore } from './chat/chatStore';
@@ -21,6 +21,7 @@ import { addEntry, addWire, linkCache, moveItems } from './design/edits';
 import { newId } from './design/ids';
 import { nudgeKey, pasteKey, undoRedoKey } from './design/keys';
 import { unsavedMarks } from './design/changes';
+import { createGhostStore, restoreGhosts, type GhostItem, type GhostStore } from './design/ghosts';
 import { saveBoard, takeStored } from './design/saveBoard';
 import { InspectorPanel } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
@@ -30,7 +31,7 @@ import { signalRHub } from './live/signalrHub';
 import type { Point } from './model/geometry';
 import type { Id } from './model/graph';
 import { copyClip, copyMessage, pasteClip, readClip, writeClip } from './operate/clipboard';
-import { commitDelete, prepareDelete, type DeletePlan } from './operate/deleteWorkflow';
+import { commitDeletes, prepareDeletes, type DeletePlan } from './operate/deleteWorkflow';
 import { runWorkflow } from './operate/runWorkflow';
 import { watchTransitions } from './operate/transitions';
 import { OutputPanel } from './output/OutputPanel';
@@ -67,9 +68,13 @@ function freeTriangleSpot(b: BoardState): Point {
   return placed.workflows[probe]?.at ?? { x: 0, y: 0 };
 }
 
-/** The selection with whatever left the board taken out (the same object when nothing did). */
-function trimmed(s: SelectionState, b: BoardState): SelectionState {
-  const picks = livePicks(s.picks, b);
+/** A triangle delete waiting for its confirm: one plan (the triangle's toolbar) or several triangles' (the bar). */
+interface PendingDelete { plans: DeletePlan[]; many: boolean }
+
+/** The selection with whatever left the board (or the ghosts, restored or removed) taken out (the same object when nothing did). */
+function trimmed(s: SelectionState, b: BoardState, ghosts: readonly GhostItem[]): SelectionState {
+  const keys = new Set(ghosts.map((g) => g.key));
+  const picks = livePicks(s.picks, b).filter((p) => p.kind !== 'ghost' || keys.has(p.key));
   const workflows = s.workflows.filter((id) => b.workflows[id]);
   return picks.length === s.picks.length && workflows.length === s.workflows.length ? s : { workflows, picks };
 }
@@ -81,6 +86,8 @@ export function App(props: AppProps) {
   const [output] = useState<OutputStore>(() => createOutputStore(storage));
   const [session] = useState<Storage | null>(() => (props.session === undefined ? browserSession() : props.session));
   const [store] = useState<BoardStore>(() => createBoardStore(output, session));
+  // ghosts: what was on the board earlier in this page session and is not now (page memory only)
+  const [ghostStore] = useState<GhostStore>(() => createGhostStore(store));
   const [saved] = useState<SavedView | null>(() => readView(storage));
   // the chat: this tab's sessionStorage, mirrored to localStorage (a new tab picks the conversation up)
   const [chat] = useState<ChatStore>(() => createChatStore(session, storage));
@@ -96,13 +103,14 @@ export function App(props: AppProps) {
   const [tick, bump] = useReducer((n: number) => n + 1, 0);
   useEffect(() => store.subscribe(bump), [store]);
   const liveState = useSyncExternalStore(live.subscribe, live.getState);
+  const ghosts = useSyncExternalStore(ghostStore.subscribe, ghostStore.ghosts);
 
   const [loaded, setLoaded] = useState(false);
   const [sel, setSel] = useState<SelectionState>(() => saved?.selection ?? NONE);
   const selRef = useRef(sel);
   selRef.current = sel;
-  const [pending, setPending] = useState<DeletePlan | null>(null);
-  const pendingRef = useRef<DeletePlan | null>(null);
+  const [pending, setPending] = useState<PendingDelete | null>(null);
+  const pendingRef = useRef<PendingDelete | null>(null);
   const deleteToken = useRef(0);
   const viewport = useRef<{ x: number; y: number; zoom: number } | null>(saved && { x: saved.x, y: saved.y, zoom: saved.zoom });
   const boardFocus = useRef<BoardFocus | null>(null);
@@ -139,12 +147,12 @@ export function App(props: AppProps) {
     deleteToken.current++; pendingRef.current = null; setPending(null);
   }, [persist]);
 
-  // a picked thing that leaves the board (deleted, undone away) leaves the selection
+  // a picked thing that leaves the board (deleted, undone away) leaves the selection; so does a ghost restored or removed
   useEffect(() => {
     if (!loaded) return;
-    const s = trimmed(selRef.current, state);
+    const s = trimmed(selRef.current, state, ghosts);
     if (s !== selRef.current) { selRef.current = s; setSel(s); persist(s); }
-  }, [loaded, state, persist]);
+  }, [loaded, state, ghosts, persist]);
 
   const onPick = useCallback((p: Pick | null, additive: boolean) => setSelection(selectPick(selRef.current, p, additive)), [setSelection]);
   const onViewChange = useCallback((v: { x: number; y: number; zoom: number }) => {
@@ -218,20 +226,23 @@ export function App(props: AppProps) {
     if (store.state() !== before) setSelection({ workflows: selRef.current.workflows, picks: [] });
   }, [store, setSelection]);
 
-  const askDelete = useCallback((wf: Id) => {
+  /** A triangle's Delete (one id, its toolbar) or the bar's for several: every dry run first, then one confirm. */
+  const askDelete = useCallback((ids: Id[]) => {
     const token = ++deleteToken.current;
-    void prepareDelete(api, store, output, wf).then((plan) => {
-      if (!plan || token !== deleteToken.current) return;
-      pendingRef.current = plan; setPending(plan);
+    void prepareDeletes(api, store, output, ids).then((plans) => {
+      if (plans.length === 0 || token !== deleteToken.current) return;
+      const p: PendingDelete = { plans, many: ids.length > 1 };
+      pendingRef.current = p; setPending(p);
     });
   }, [api, store, output]);
   const confirmDelete = useCallback(() => {
-    const plan = pendingRef.current;
-    if (!plan) return;
+    const p = pendingRef.current;
+    if (!p) return;
     pendingRef.current = null; setPending(null);
     const token = ++deleteToken.current;
-    void commitDelete(api, store, output, plan).then((gone) => {
-      if (gone && token === deleteToken.current) setSelection(NONE);
+    void commitDeletes(api, store, output, p.plans).then((gone) => {
+      // all gone: nothing picked is left; some refused: the prune takes the deleted ones out and keeps the rest
+      if (gone.length === p.plans.length && token === deleteToken.current) setSelection(NONE);
     });
   }, [api, store, output, setSelection]);
   const cancelDelete = useCallback(() => {
@@ -240,22 +251,40 @@ export function App(props: AppProps) {
     output.log('Delete cancelled — nothing was sent');
   }, [output]);
 
+  /** Restore: the ghosts back as one board edit (one undo step); a refusal (`restore <name> first`) is an Output warning. */
+  const restore = useCallback((keys: string[]) => {
+    const items = keys.flatMap((k) => { const g = ghostStore.get(k); return g ? [g] : []; });
+    if (items.length === 0) return;
+    store.editOrRefuse((b) => restoreGhosts(b, store.base(), items, ghostStore.get));
+  }, [store, ghostStore]);
+  /** Remove: the ghosts leave the board for this page session; BaseAPI is not touched and it is no undo step. */
+  const removeGhosts = useCallback((keys: string[]) => ghostStore.remove(keys), [ghostStore]);
+
+  const run = useCallback((wf: Id, op: 'start' | 'stop') => { void runWorkflow(api, store, output, live, wf, op); }, [api, store, output, live]);
   const toolbar = useMemo<ToolbarActions>(() => (p) => toolbarFor(p, {
     picks: sel.picks,
     run: (wf) => statusOf(live.getState(), wf),
-    pending,
-    start: (wf) => { void runWorkflow(api, store, output, live, wf, 'start'); },
-    stop: (wf) => { void runWorkflow(api, store, output, live, wf, 'stop'); },
+    pending: pending && !pending.many ? pending.plans[0]! : null,
+    start: (wf) => run(wf, 'start'),
+    stop: (wf) => run(wf, 'stop'),
     copy: (id) => copySteps([id]),
     remove: (x) => removePicks([x]),
-    askDelete, confirmDelete, cancelDelete,
-  }), [sel.picks, pending, api, store, output, live, copySteps, removePicks, askDelete, confirmDelete, cancelDelete]);
+    askDelete: (wf) => askDelete([wf]), confirmDelete, cancelDelete,
+    restore, removeGhosts,
+  }), [sel.picks, pending, live, run, copySteps, removePicks, askDelete, confirmDelete, cancelDelete, restore, removeGhosts]);
 
   const bar = barOf(sel.picks);
+  const ghostKeys = () => selRef.current.picks.flatMap((p) => (p.kind === 'ghost' ? [p.key] : []));
+  const triangleIds = () => selRef.current.picks.flatMap((p) => (p.kind === 'workflow' ? [p.id] : []));
   const barView = bar && (
-    <SelectionBar bar={bar} actions={{
+    <SelectionBar bar={bar} confirm={pending?.many ? confirmTextMany(pending.plans) : null} actions={{
       copy: () => copySteps(selRef.current.picks.flatMap((p) => (p.kind === 'step' ? [p.id] : []))),
-      del: () => removePicks(selRef.current.picks),
+      del: () => { if (bar.run) askDelete(triangleIds()); else removePicks(selRef.current.picks); },
+      restore: () => restore(ghostKeys()),
+      remove: () => removeGhosts(ghostKeys()),
+      start: () => { for (const wf of triangleIds()) run(wf, 'start'); },
+      stop: () => { for (const wf of triangleIds()) run(wf, 'stop'); },
+      confirmDelete, cancelDelete,
     }} />
   );
 
@@ -284,15 +313,16 @@ export function App(props: AppProps) {
     problems: (wf) => store.problems(wf),
     failed: (key) => store.failures().has(key),
     unsaved: (key) => marks.has(key),
+    ghosts,
   // tick: the problems and failures are read through the store, so a change of theirs is a new view
-  }), [sel, liveState, store, tick, marks]);
+  }), [sel, liveState, store, tick, marks, ghosts]);
 
   const processors = useMemo(() => Object.values(state.processors).sort((a, b) => a.name.localeCompare(b.name)), [state.processors]);
   const stateNow = useCallback(() => store.state(), [store]);
 
   // what the chat's tools act on: the same store, history and picks as the user's own gestures
   const chatCtx = useMemo<ToolContext>(() => ({
-    store, api, output, live, session, newId,
+    store, api, output, live, session, newId, ghosts: ghostStore,
     processors: () => Object.values(store.state().processors),
     caches: () => Object.values(store.state().caches),
     commands: {
@@ -301,14 +331,14 @@ export function App(props: AppProps) {
       picks: () => selRef.current.picks,
       newWorkflowAt: () => freeTriangleSpot(store.state()),
     },
-  }), [store, api, output, live, session, setSelection]);
+  }), [store, api, output, live, session, ghostStore, setSelection]);
 
   return (
     <LiveStoreProvider value={live}>
       <OutputProvider store={output}>
         <div className="acto">
           <header className="topbar"><span className="brand">Act<span>o</span></span>
-            <SaveButton unsaved={store.unsaved().size} saving={store.saving()} blocked={store.saveBlocked()} onSave={() => { void saveBoard(api, store, output); }} />
+            <SaveButton unsaved={store.unsaved().size} saving={store.saving()} blocked={store.saveBlocked()} onSave={() => { void saveBoard(api, store, output, ghostStore); }} />
             <TakeStoredButton count={store.stale().length} saving={store.saving()} onTake={() => { void takeStored(api, store, output); }} />
             <button type="button" className="pbtn theme-toggle" onClick={toggleTheme}>{theme === 'dark' ? 'Light' : 'Dark'}</button>
           </header>

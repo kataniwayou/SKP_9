@@ -77,3 +77,30 @@ export async function commitDelete(api: StudioApi, store: BoardStore, output: Ou
   output.log(`Deleted ${plan.lines.join(', ')}. Its steps and caches stay`, 'ok');
   return true;
 }
+
+/**
+ * Delete of several triangles up to their one confirm: each dry run in turn (each holds the board like a Save). A
+ * refused one (a running workflow, say) is reported in Output by its own dry run and left out; the rest are planned.
+ */
+export async function prepareDeletes(api: StudioApi, store: BoardStore, output: OutputStore, ids: readonly Id[]): Promise<DeletePlan[]> {
+  const plans: DeletePlan[] = [];
+  for (const wf of ids) {
+    const plan = await prepareDelete(api, store, output, wf);
+    if (plan) plans.push(plan);
+  }
+  return plans;
+}
+
+/** The real runs, one by one: a refusal of one is reported in Output and the rest still go. The ids deleted. */
+export async function commitDeletes(api: StudioApi, store: BoardStore, output: OutputStore, plans: readonly DeletePlan[]): Promise<Id[]> {
+  const gone: Id[] = [];
+  for (const plan of plans) {
+    try {
+      if (await commitDelete(api, store, output, plan)) gone.push(plan.workflowId);
+    } catch (e) {
+      const name = nameOf([store.base(), store.state()], 'workflows', plan.workflowId);
+      output.log(`${name}: not deleted — ${e instanceof Error ? e.message : String(e)}`, 'error');
+    }
+  }
+  return gone;
+}

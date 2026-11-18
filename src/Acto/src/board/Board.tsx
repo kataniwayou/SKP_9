@@ -67,11 +67,14 @@ export type BoardFocus = (workflowId: string, stepIds?: string[]) => void;
 const refOf = (n: Node): ItemRef | null => { const i = itemOfNode(n.id); return i ? { kind: i.kind, id: i.id } : null; };
 
 /** What a node or edge of the flow stands for. */
+const GHOST_PREFIX = 'ghost:';
 function pickOfNode(n: Node): Pick | null {
+  if (n.id.startsWith(GHOST_PREFIX)) return { kind: 'ghost', key: n.id.slice(GHOST_PREFIX.length) };
   const i = itemOfNode(n.id);
   return i ? { kind: i.kind, id: i.id } : null;
 }
 function pickOfEdge(e: Edge): Pick | null {
+  if (e.id.startsWith(GHOST_PREFIX)) return { kind: 'ghost', key: e.id.slice(GHOST_PREFIX.length) };
   const d = e.data as Record<string, string> | undefined;
   if (!d) return null;
   if (e.type === 'wire') return { kind: 'wire', from: d.from!, to: d.to! };

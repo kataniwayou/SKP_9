@@ -21,14 +21,23 @@ export interface ToolbarDeps {
   askDelete(wf: Id): void;
   confirmDelete(): void;
   cancelDelete(): void;
+  /** Puts these ghosts back as one board edit (a refusal is an Output warning). */
+  restore(keys: string[]): void;
+  /** Drops these ghosts for this page session; not an undo step. */
+  removeGhosts(keys: string[]): void;
 }
 
 /** The confirm's question, from the dry run's list of what goes. */
 export const confirmText = (plan: DeletePlan) => `Delete ${plan.lines.join(', ')}? Its steps and caches stay.`;
 
+/** The one confirm of a delete of several triangles, listing every workflow (and assignment) that goes. */
+export const confirmTextMany = (plans: readonly DeletePlan[]) => plans.length === 1
+  ? confirmText(plans[0]!)
+  : `Delete ${plans.flatMap((p) => p.lines).join(', ')}? Their steps and caches stay.`;
+
 /**
  * The toolbar over a lone pick (spec §6): triangle Start/Stop · Delete (a pending delete shows its confirm instead);
- * step Copy · Delete; cache, wire, entry arrow and cache line Delete.
+ * step Copy · Delete; cache, wire, entry arrow and cache line Delete; ghost Restore · Remove.
  */
 export function toolbarFor(p: Pick, d: ToolbarDeps): ToolbarItem[] | null {
   const del: ToolbarItem = { label: 'Delete', tone: 'danger', onClick: () => d.remove(p) };
@@ -50,6 +59,9 @@ export function toolbarFor(p: Pick, d: ToolbarDeps): ToolbarItem[] | null {
     }
     case 'step': return [{ label: 'Copy', onClick: () => d.copy(p.id) }, del];
     case 'cache': case 'wire': case 'entry': case 'cacheLink': return [del];
-    case 'ghost': return null; // the ghost toolbar comes with Task 5
+    case 'ghost': return [
+      { label: 'Restore', onClick: () => d.restore([p.key]) },
+      { label: 'Remove', tone: 'danger', onClick: () => d.removeGhosts([p.key]) },
+    ];
   }
 }

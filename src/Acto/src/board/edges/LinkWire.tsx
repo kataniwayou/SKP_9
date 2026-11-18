@@ -6,7 +6,7 @@ import { EdgeExtras } from './EdgeExtras';
 
 /** One wire (edge type `wire`): a 2.2 px curve in the target's entry colour, its arrowhead, the letter pill just before it. Dashes move while it runs. */
 export function LinkWire({ id, data, selected, sourceX, sourceY, targetX, targetY }: EdgeProps) {
-  const { condition, from, to, running, ghost = false, pick } = data as { condition: number; from: string; to: string; running: boolean; ghost?: boolean; pick?: PickInfo };
+  const { condition, from, to, running, ghost = false, ghostKey, pick } = data as { condition: number; from: string; to: string; running: boolean; ghost?: boolean; ghostKey?: string; pick?: PickInfo };
   const style = conditionStyle(condition);
   const { d, pill } = wirePath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY });
   // the curve's middle (its control points are symmetric): where a wire's pick number and toolbar sit
@@ -24,7 +24,7 @@ export function LinkWire({ id, data, selected, sourceX, sourceY, targetX, target
       <path className={`wire${selected ? ' sel' : ''}${running ? ' running' : ''}`} d={d} stroke={style.colour} fill="none" markerEnd={`url(#${marker})`} />
       <circle className="pill" cx={pill.x} cy={pill.y} r={8} fill={style.colour} />
       <text className="pilltx" x={pill.x} y={pill.y + 3.5} textAnchor="middle">{style.letter}</text>
-      <EdgeExtras id={id} pick={pick} self={{ kind: 'wire', from, to }} selected={selected} x={mx} y={my - 4} />
+      <EdgeExtras id={id} pick={pick} self={ghostKey ? { kind: 'ghost', key: ghostKey } : { kind: 'wire', from, to }} selected={selected} x={mx} y={my - 4} />
     </g>
   );
 }

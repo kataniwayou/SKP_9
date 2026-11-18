@@ -1,5 +1,6 @@
 import { Handle, NodeToolbar, Position, type NodeProps } from '@xyflow/react';
 import { ItemToolbar, useHasToolbar } from '../ItemToolbar';
+import type { Pick } from '../selection';
 import type { PickInfo } from '../toFlow';
 import { PickBadge } from './PickBadge';
 import { UnsavedMark } from './UnsavedMark';
@@ -9,8 +10,8 @@ export const CACHE_TONE = 'var(--cache-line)';
 
 /** A cache: a block on the board. Workflows join it with a dashed line from their back (handle `in`, on top). */
 export function CacheNode({ data, selected }: NodeProps) {
-  const { cacheId, name, ghost = false, failed = false, unsaved, pick } = data as { cacheId: string; name: string; ghost?: boolean; failed?: boolean; unsaved?: boolean; pick?: PickInfo };
-  const self = { kind: 'cache', id: cacheId } as const;
+  const { cacheId, name, ghost = false, ghostKey, failed = false, unsaved, pick } = data as { cacheId: string; name: string; ghost?: boolean; ghostKey?: string; failed?: boolean; unsaved?: boolean; pick?: PickInfo };
+  const self: Pick = ghostKey ? { kind: 'ghost', key: ghostKey } : { kind: 'cache', id: cacheId };
   const toolbar = useHasToolbar(self);
   return (
     <div className={`cache-chip${selected ? ' sel' : ''}${failed ? ' failed' : ''}${ghost ? ' ghost' : ''}`} title={name}>

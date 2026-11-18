@@ -2,6 +2,7 @@ import { Handle, NodeToolbar, Position, type NodeProps } from '@xyflow/react';
 import type { LiveStatus } from '../../api/liveStatus';
 import { TRI_SHAPE_H, TRI_SHAPE_W } from '../geometry';
 import { ItemToolbar, useHasToolbar } from '../ItemToolbar';
+import type { Pick } from '../selection';
 import type { PickInfo } from '../toFlow';
 import { PickBadge } from './PickBadge';
 import { UnsavedMark } from './UnsavedMark';
@@ -17,13 +18,13 @@ const LABEL: Record<LiveStatus, string> = { running: '‚óè running', stopped: '‚ñ
  * last dry run's problems; a failure outline marks a Save BaseAPI refused on it.
  */
 export function TriangleNode({ data, selected }: NodeProps) {
-  const { workflowId, name, status, hue, problems = 0, ghost = false, failed = false, unsaved, pick } = data as {
-    workflowId: string; name: string; status: LiveStatus; hue: string | null; problems?: number; ghost?: boolean; failed?: boolean; unsaved?: boolean; pick?: PickInfo;
+  const { workflowId, name, status, hue, problems = 0, ghost = false, ghostKey, failed = false, unsaved, pick } = data as {
+    workflowId: string; name: string; status: LiveStatus; hue: string | null; problems?: number; ghost?: boolean; ghostKey?: string; failed?: boolean; unsaved?: boolean; pick?: PickInfo;
   };
   const tone = TONE[status];
   const run = status === 'running';
   const on = selected || hue !== null;
-  const self = { kind: 'workflow', id: workflowId } as const;
+  const self: Pick = ghostKey ? { kind: 'ghost', key: ghostKey } : { kind: 'workflow', id: workflowId };
   const toolbar = useHasToolbar(self);
   const W = TRI_SHAPE_W;
   const H = TRI_SHAPE_H;

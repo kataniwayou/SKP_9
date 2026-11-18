@@ -1,6 +1,7 @@
 import type { StudioApi } from '../api/client';
 import type { Pick } from '../board/picks';
 import type { BoardStore } from '../design/boardStore';
+import type { GhostStore } from '../design/ghosts';
 import type { LiveStore } from '../live/liveClient';
 import type { Point } from '../model/geometry';
 import type { CacheRow } from '../design/board';
@@ -22,7 +23,9 @@ export interface ActoCommands {
  * page's commands, the processor and cache lists as last read, the tab's session storage (the clipboard) and new ids.
  */
 export interface ToolContext { store: BoardStore; api: StudioApi; output: OutputStore; live: LiveStore;
-  commands: ActoCommands; processors(): Processor[]; caches(): CacheRow[]; session: Storage | null; newId: () => Id }
+  commands: ActoCommands; processors(): Processor[]; caches(): CacheRow[]; session: Storage | null; newId: () => Id;
+  /** The page's ghosts, for the chat's Save to remap their ids (saveBoard's `ghosts`). */
+  ghosts?: GhostStore }
 
 /** What a tool run came to: an answer for the model and the chat, or a question for the user first. */
 export type ToolOutcome =
