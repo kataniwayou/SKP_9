@@ -1,0 +1,145 @@
+import type { Id, Processor } from '../model/graph';
+import type { Point } from '../model/geometry';
+import type { BoardState, CacheRow, Edit, ItemRef, StepRow, WorkflowRow } from './board';
+
+const stepName = (b: BoardState, id: Id) => b.steps[id]?.name ?? id;
+
+function uniqueStepName(b: BoardState, base: string): string {
+  const taken = new Set(Object.values(b.steps).map((x) => x.name));
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
+}
+
+function freeNumbered(names: string[], prefix: string): string {
+  const taken = new Set(names);
+  for (let n = 1; ; n++) if (!taken.has(`${prefix}-${n}`)) return `${prefix}-${n}`;
+}
+
+export function addStep(b: BoardState, processor: Processor, at: Point, id: Id): BoardState {
+  const step: StepRow = {
+    id, name: uniqueStepName(b, processor.name), version: '1.0.0', description: null, processorId: processor.id,
+    nextStepIds: [], entryCondition: 1, at: { ...at }, updatedAt: null,
+  };
+  return { ...b, steps: { ...b.steps, [id]: step } };
+}
+
+export function addCache(b: BoardState, at: Point, id: Id): BoardState {
+  const cache: CacheRow = {
+    id, name: freeNumbered(Object.values(b.caches).map((c) => c.name), 'new-cache'), version: '1.0.0',
+    description: null, root: '', items: '{}', at: { ...at }, updatedAt: null,
+  };
+  return { ...b, caches: { ...b.caches, [id]: cache } };
+}
+
+export function addWorkflow(b: BoardState, at: Point, id: Id): BoardState {
+  const wf: WorkflowRow = {
+    id, name: freeNumbered(Object.values(b.workflows).map((w) => w.name), 'new-workflow'), version: '1.0.0',
+    description: null, cronExpression: null, entryStepIds: [], assignmentIds: [], cacheIds: [], at: { ...at }, updatedAt: null,
+  };
+  return { ...b, workflows: { ...b.workflows, [id]: wf } };
+}
+
+export function moveItems(b: BoardState, moved: { ref: ItemRef; at: Point }[]): BoardState {
+  const next: BoardState = { ...b, steps: { ...b.steps }, caches: { ...b.caches }, workflows: { ...b.workflows } };
+  for (const { ref, at } of moved) {
+    const table = ref.kind === 'step' ? next.steps : ref.kind === 'cache' ? next.caches : next.workflows;
+    const row = table[ref.id];
+    if (row) (table as Record<Id, unknown>)[ref.id] = { ...row, at: { ...at } };
+  }
+  return next;
+}
+
+export function addWire(b: BoardState, from: Id, to: Id): Edit {
+  const s = b.steps[from];
+  if (!s) return { state: b };
+  if (s.nextStepIds.includes(to)) return { refused: 'That wire already exists' };
+  return { state: { ...b, steps: { ...b.steps, [from]: { ...s, nextStepIds: [...s.nextStepIds, to] } } } };
+}
+
+export function removeWires(b: BoardState, wires: [Id, Id][]): BoardState {
+  const steps = { ...b.steps };
+  for (const [from, to] of wires) {
+    const s = steps[from];
+    if (s) steps[from] = { ...s, nextStepIds: s.nextStepIds.filter((x) => x !== to) };
+  }
+  return { ...b, steps };
+}
+
+export function addEntry(b: BoardState, wf: Id, step: Id): Edit {
+  const w = b.workflows[wf];
+  if (!w) return { state: b };
+  if (w.entryStepIds.includes(step)) return { refused: `${w.name} already starts at ${stepName(b, step)}` };
+  return { state: { ...b, workflows: { ...b.workflows, [wf]: { ...w, entryStepIds: [...w.entryStepIds, step] } } } };
+}
+
+export function removeEntries(b: BoardState, pairs: [Id, Id][]): BoardState {
+  const workflows = { ...b.workflows };
+  for (const [wf, step] of pairs) {
+    const w = workflows[wf];
+    if (w) workflows[wf] = { ...w, entryStepIds: w.entryStepIds.filter((x) => x !== step) };
+  }
+  return { ...b, workflows };
+}
+
+export function linkCache(b: BoardState, wf: Id, cache: Id): Edit {
+  const w = b.workflows[wf];
+  if (!w) return { state: b };
+  if (w.cacheIds.includes(cache)) return { refused: `${w.name} already uses ${b.caches[cache]?.name ?? cache}` };
+  return { state: { ...b, workflows: { ...b.workflows, [wf]: { ...w, cacheIds: [...w.cacheIds, cache] } } } };
+}
+
+export function unlinkCaches(b: BoardState, pairs: [Id, Id][]): BoardState {
+  const workflows = { ...b.workflows };
+  for (const [wf, cache] of pairs) {
+    const w = workflows[wf];
+    if (w) workflows[wf] = { ...w, cacheIds: w.cacheIds.filter((x) => x !== cache) };
+  }
+  return { ...b, workflows };
+}
+
+export function deleteSteps(b: BoardState, ids: Id[]): BoardState {
+  const gone = new Set(ids);
+  const steps: BoardState['steps'] = {};
+  for (const [id, s] of Object.entries(b.steps)) {
+    if (gone.has(id)) continue;
+    steps[id] = s.nextStepIds.some((x) => gone.has(x)) ? { ...s, nextStepIds: s.nextStepIds.filter((x) => !gone.has(x)) } : s;
+  }
+  const assignments: BoardState['assignments'] = {};
+  const goneAssign = new Set<Id>();
+  for (const [id, a] of Object.entries(b.assignments)) {
+    if (gone.has(a.stepId)) goneAssign.add(id); else assignments[id] = a;
+  }
+  const workflows: BoardState['workflows'] = {};
+  for (const [id, w] of Object.entries(b.workflows)) {
+    workflows[id] = {
+      ...w,
+      entryStepIds: w.entryStepIds.filter((x) => !gone.has(x)),
+      assignmentIds: w.assignmentIds.filter((x) => !goneAssign.has(x)),
+    };
+  }
+  return { ...b, steps, assignments, workflows };
+}
+
+export function deleteCaches(b: BoardState, ids: Id[]): BoardState {
+  const gone = new Set(ids);
+  const caches: BoardState['caches'] = {};
+  for (const [id, c] of Object.entries(b.caches)) if (!gone.has(id)) caches[id] = c;
+  const workflows: BoardState['workflows'] = {};
+  for (const [id, w] of Object.entries(b.workflows)) workflows[id] = { ...w, cacheIds: w.cacheIds.filter((x) => !gone.has(x)) };
+  return { ...b, caches, workflows };
+}
+
+type Fields<T> = Exclude<keyof T, 'id' | 'updatedAt' | 'at'>;
+
+export function setWorkflowField<K extends Fields<WorkflowRow>>(b: BoardState, id: Id, field: K, value: WorkflowRow[K]): BoardState {
+  const w = b.workflows[id];
+  return w ? { ...b, workflows: { ...b.workflows, [id]: { ...w, [field]: value } } } : b;
+}
+export function setStepField<K extends Fields<StepRow>>(b: BoardState, id: Id, field: K, value: StepRow[K]): BoardState {
+  const s = b.steps[id];
+  return s ? { ...b, steps: { ...b.steps, [id]: { ...s, [field]: value } } } : b;
+}
+export function setCacheField<K extends Fields<CacheRow>>(b: BoardState, id: Id, field: K, value: CacheRow[K]): BoardState {
+  const c = b.caches[id];
+  return c ? { ...b, caches: { ...b.caches, [id]: { ...c, [field]: value } } } : b;
+}
