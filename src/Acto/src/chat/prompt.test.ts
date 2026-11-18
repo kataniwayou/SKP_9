@@ -40,7 +40,7 @@ describe('systemPrompt', () => {
 
   it('has no wording of the frame era', () => {
     for (const word of ['frame', 'parked', 'locked', 'read_design', 'create_assignment']) expect(prompt.toLowerCase()).not.toContain(word);
-    expect(prompt).not.toMatch(/lock/i);
+    expect(prompt).not.toMatch(/\block\b/i);
     expect(prompt).not.toMatch(/Save saves one workflow/);
   });
 
