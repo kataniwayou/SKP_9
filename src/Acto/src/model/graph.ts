@@ -92,27 +92,3 @@ export interface Cache {
   items: string;
   audit: Audit;
 }
-
-/** One error BaseApi's design dry run reported (plan 8 §4.3). Only ever the answer to a Save; never stored. */
-export interface DesignError {
-  kind: string;
-  id: Id;
-  stage: string;
-  field: string | null;
-  message: string;
-  /** A short circuit of two wires lying on each other (kind `wire`): the other wire (studio only). */
-  other?: Id;
-}
-
-export interface Graph {
-  workflow: Workflow;
-  steps: Map<Id, Step>;
-  processors: Map<Id, Processor>;
-  schemas: Map<Id, Schema>;
-  assignments: Assignment[];
-  caches: Map<Id, Cache>;
-  /** The stored canvas layout exactly as the server returned it (opaque JSON), or null. */
-  layout: unknown;
-  /** The studio's stored design exactly as the server returned it (opaque JSON), or null (plan 8). */
-  design: unknown;
-}
