@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures';
 import {
-  addItem, caNode, cacheTool, clearOutput, drawCacheLink, drawEntry, drawWire, dropTool, entryEdge, field, openAt, out, outLine, payloadOf, pickEdge, pickStep, pickWorkflow, pretty, regionPoint,
+  addItem, caNode, cacheTool, clearOutput, drawCacheLink, drawEntry, drawWire, dropTool, entryEdge, field, openAt, out, outLine, payloadOf, pickEdge, pickStep, selectWorkflowAlone, pretty, regionPoint,
   renameTo, save, saveButton, stNode, toolboxStep, waitLoaded, wfNode, wireEdge, workflowTool, PROC_A, PROC_B,
 } from './helpers';
 import { seed } from './seed';
@@ -34,7 +34,7 @@ test('Save writes everything the board holds, and a reload shows it back where i
   await drawEntry(page, wfNode(page, wf), stNode(page, s1));
   await drawCacheLink(page, wfNode(page, wf), caNode(page, cache));
   // a payload on the first step, typed with the triangle selected
-  await pickWorkflow(page, wf);
+  await selectWorkflowAlone(page, wf);
   await pickStep(page, s1);
   await (await payloadOf(page, 'e2e-save-wf')).fill('{"saved": "yes"}');
   await expect(saveButton(page)).toHaveClass(/primary/);
@@ -86,7 +86,7 @@ test('Save writes everything the board holds, and a reload shows it back where i
   near((await wfNode(page, w.id as string).boundingBox())!, before.wf, 'triangle');
   near((await stNode(page, a.id as string).boundingBox())!, before.s1, 'step');
   near((await caNode(page, c.id as string).boundingBox())!, before.cache, 'cache');
-  await pickWorkflow(page, w.id as string);
+  await selectWorkflowAlone(page, w.id as string);
   await pickStep(page, a.id as string);
   await expect(await payloadOf(page, 'e2e-save-wf')).toHaveValue(pretty('{"saved": "yes"}'));
 });
@@ -139,10 +139,10 @@ test('a shared payload is copied on write: editing A\'s payload where the row is
     ],
   });
   await openAt(page);
-  await pickWorkflow(page, id.a!);
+  await selectWorkflowAlone(page, id.a!);
   await pickStep(page, id.s!);
   await (await payloadOf(page, 'e2e-share-a')).fill('{"owner": "a", "n": 1}');
-  await pickWorkflow(page, id.b!);
+  await selectWorkflowAlone(page, id.b!);
   await pickStep(page, id.s!);
   await (await payloadOf(page, 'e2e-share-b')).fill('{"owner": "b"}');
   await save(page);
@@ -162,13 +162,13 @@ test('a shared payload is copied on write: editing A\'s payload where the row is
   ]);
   await page.reload();
   await waitLoaded(page);
-  await pickWorkflow(page, id.b!);
+  await selectWorkflowAlone(page, id.b!);
   await pickStep(page, id.s!);
   await expect(await payloadOf(page, 'e2e-share-b')).toHaveValue(pretty('{"owner": "a", "n": 1}'));
   const sharedBefore = await getJson<Row>(`/assignments/${sharedId}`);
 
   // edit A's payload where the row is shared, then Save and reload
-  await pickWorkflow(page, id.a!);
+  await selectWorkflowAlone(page, id.a!);
   await pickStep(page, id.s!);
   await expect(await payloadOf(page, 'e2e-share-a')).toHaveValue(pretty('{"owner": "a", "n": 1}'));
   await field(page, 'Payload').fill('{"owner": "a", "n": 2, "edited": true}');
@@ -179,10 +179,10 @@ test('a shared payload is copied on write: editing A\'s payload where the row is
   await page.reload();
   await waitLoaded(page);
 
-  await pickWorkflow(page, id.b!);
+  await selectWorkflowAlone(page, id.b!);
   await pickStep(page, id.s!);
   await expect(await payloadOf(page, 'e2e-share-b'), 'B keeps the shared row as it was').toHaveValue(pretty('{"owner": "a", "n": 1}'));
-  await pickWorkflow(page, id.a!);
+  await selectWorkflowAlone(page, id.a!);
   await pickStep(page, id.s!);
   await expect(await payloadOf(page, 'e2e-share-a')).toHaveValue(pretty('{"owner": "a", "n": 2, "edited": true}'));
   // in BaseAPI: B still links the original row, untouched; A links a row of its own

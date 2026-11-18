@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { caNode, dragBy, flowPos, inspector, openAt, pickCache, pickStep, pickWorkflow, save, stNode, wfNode } from './helpers';
+import { caNode, dragBy, flowPos, inspector, openAt, pickCache, pickStep, selectWorkflowAlone, save, stNode, wfNode } from './helpers';
 import { seed } from './seed';
 import { getJson, type Row } from './stack';
 
@@ -38,7 +38,7 @@ test('dragging a triangle, a step and a cache moves each alone; the Inspector\'s
   expect(a.s1).toEqual(start.s1); expect(a.s2).toEqual(start.s2); expect(a.c).toEqual(start.c);
   await expect(wfNode(page, id.w!).locator('.unsaved-mark')).toBeVisible();
   await expect(stNode(page, id.s1!).locator('.unsaved-mark')).toHaveCount(0);
-  await pickWorkflow(page, id.w!);
+  await selectWorkflowAlone(page, id.w!);
   await expect(inspector(page).locator('dt', { hasText: 'Location' }).locator('xpath=following-sibling::dd[1]'))
     .toHaveText(`${Math.round(a.w.x)}, ${Math.round(a.w.y)}`);
 

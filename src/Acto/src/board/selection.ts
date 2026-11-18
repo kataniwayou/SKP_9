@@ -15,27 +15,29 @@ export interface SelectionState { workflows: Id[]; picks: Pick[] }
 const same = (a: Pick, b: Pick): boolean => JSON.stringify(a) === JSON.stringify(b);
 
 /**
- * What a click on `p` (null = the empty board) does to the selection (spec §4). A triangle click selects that workflow
- * alone; with Ctrl it toggles the workflow in `workflows` and its pick in `picks`. Any other click keeps `workflows`
- * and replaces the picks, or with Ctrl toggles `p` among them. An entry arrow or cache line click selects its
- * workflow alone.
+ * What a click on `p` (null = the empty board) does to the selection (spec §4, [user, 2026-11-18]):
+ * - Ctrl toggles `p` in or out (a triangle in `workflows` too);
+ * - a plain click on something already selected unselects only it: a triangle (selected = in `workflows`) leaves
+ *   `workflows` and the picks; anything else leaves the picks and the workflows stay selected;
+ * - a plain click on an unpicked triangle selects it alone; on anything else it replaces the other picks and keeps the
+ *   selected workflows (an entry arrow or a cache line selects its workflow alone);
+ * - the empty board clears everything.
  */
 export function selectPick(prev: SelectionState, p: Pick | null, additive: boolean): SelectionState {
   if (p === null) return { workflows: [], picks: [] };
-  const toggled = (): Pick[] => (prev.picks.some((x) => same(x, p)) ? prev.picks.filter((x) => !same(x, p)) : [...prev.picks, p]);
+  const picked = prev.picks.some((x) => same(x, p));
   if (p.kind === 'workflow') {
-    if (!additive) return { workflows: [p.id], picks: [p] };
-    // one decision for both lists, so they cannot diverge
-    if (prev.workflows.includes(p.id)) {
+    // selected = drawn selected, i.e. in `workflows`; one decision for both lists, so they cannot diverge
+    if (picked || prev.workflows.includes(p.id)) {
       return { workflows: prev.workflows.filter((x) => x !== p.id), picks: prev.picks.filter((x) => !same(x, p)) };
     }
-    return { workflows: [...prev.workflows, p.id], picks: prev.picks.some((x) => same(x, p)) ? prev.picks : [...prev.picks, p] };
+    if (!additive) return { workflows: [p.id], picks: [p] };
+    return { workflows: prev.workflows.includes(p.id) ? prev.workflows : [...prev.workflows, p.id], picks: [...prev.picks, p] };
   }
-  if (!additive) {
-    const workflows = p.kind === 'entry' || p.kind === 'cacheLink' ? [p.workflowId] : prev.workflows;
-    return { workflows, picks: [p] };
-  }
-  return { workflows: prev.workflows, picks: toggled() };
+  if (picked) return { workflows: prev.workflows, picks: prev.picks.filter((x) => !same(x, p)) };
+  if (additive) return { workflows: prev.workflows, picks: [...prev.picks, p] };
+  const workflows = p.kind === 'entry' || p.kind === 'cacheLink' ? [p.workflowId] : prev.workflows;
+  return { workflows, picks: [p] };
 }
 
 /**

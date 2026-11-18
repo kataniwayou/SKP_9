@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures';
 import {
-  caNode, cacheEdge, dropTool, entryEdge, field, inspector, openAt, outLine, pickCache, pickEdge, pickStep, pickWorkflow, regionPoint, save,
+  caNode, cacheEdge, dropTool, entryEdge, field, inspector, openAt, outLine, pickCache, pickEdge, pickStep, selectWorkflowAlone, regionPoint, save,
   saveButton, stNode, toolbar, toolboxStep, wfNode, wireEdge, workflowTool, PROC_A,
 } from './helpers';
 import { seed } from './seed';
@@ -30,7 +30,7 @@ const ids = async (table: string) => new Set((await getJson<Row[]>(`/${table}`))
 test('deleting a triangle asks with what goes; Cancel sends nothing; Delete removes the workflow and its own payloads, and its steps and caches stay', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
-  await pickWorkflow(page, id.a!);
+  await selectWorkflowAlone(page, id.a!);
   const tb = toolbar(page, 'workflow');
   await expect(tb.getByRole('button')).toHaveText(['▶ Start', 'Delete']);
 
@@ -53,7 +53,7 @@ test('deleting a triangle asks with what goes; Cancel sends nothing; Delete remo
   await tb.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(tb.locator('.confirm-text')).toBeVisible();
   await pickStep(page, id.s1!);
-  await pickWorkflow(page, id.a!);
+  await selectWorkflowAlone(page, id.a!);
   await expect(tb.locator('.confirm-text')).toHaveCount(0);
 
   await tb.getByRole('button', { name: 'Delete', exact: true }).click();
@@ -89,7 +89,7 @@ test('a never-saved triangle is discarded with no request, and the steps dropped
   const wf = await dropTool(page, workflowTool(page), 'workflow', await regionPoint(page, { x: 90, y: 130 }));
   const step = await dropTool(page, toolboxStep(page, PROC_A), 'step', await regionPoint(page, { x: 450, y: 130 }));
   const name = await wfNode(page, wf).locator('.tri-nm').innerText();
-  await pickWorkflow(page, wf);
+  await selectWorkflowAlone(page, wf);
   const tb = toolbar(page, 'workflow');
   await tb.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(tb.locator('.confirm-text')).toHaveText(`Delete workflow ${name}? Its steps and caches stay.`);
@@ -103,12 +103,12 @@ test('a never-saved triangle is discarded with no request, and the steps dropped
 test('deleting a triangle drops its own unsaved edits and keeps the unsaved edits of the steps it reached', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
-  await pickWorkflow(page, id.a!);
+  await selectWorkflowAlone(page, id.a!);
   await field(page, 'Description').fill('an unsaved edit of the triangle');
   await pickStep(page, id.s1!);
   await field(page, 'Name').fill('e2e-del-first-edited');
   await expect(wfNode(page, id.a!).locator('.unsaved-mark')).toBeVisible();
-  await pickWorkflow(page, id.a!);
+  await selectWorkflowAlone(page, id.a!);
   const tb = toolbar(page, 'workflow');
   await tb.getByRole('button', { name: 'Delete', exact: true }).click();
   await tb.getByRole('button', { name: 'Delete', exact: true }).click();
@@ -161,7 +161,7 @@ test('Delete on a step takes its wires, entry arrows and payloads with it; on a 
   await toolbar(page, 'step').getByRole('button', { name: 'Delete' }).click();
   await expect(stNode(page, id.s1!)).toHaveCount(0);
   await expect(entryEdge(page, id.a!, id.s1!)).toHaveCount(0);
-  await pickWorkflow(page, id.a!);
+  await selectWorkflowAlone(page, id.a!);
   // A's payload on that step is gone from its assignments
   await expect(inspector(page)).toContainText('No assignments.');
   // the cache goes with its (already removed) line

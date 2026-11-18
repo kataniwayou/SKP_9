@@ -21,13 +21,22 @@ function setup(selection: Sel, state: BoardState = board()) {
   const view = render(ui(selection));
   return { store, ghosts, rerender: (sel: Sel) => view.rerender(ui(sel)) };
 }
-// the top row only: the Processor tab's sub-tabs are a second tablist
-const topTabs = () => { const l = screen.queryByRole('tablist', { name: 'Inspector tabs' }); return l ? within(l).queryAllByRole('tab') : []; };
+/// the top row; Step's and Processor's children are second tablists
+const rowTabs = (name: string) => { const l = screen.queryByRole('tablist', { name }); return l ? within(l).queryAllByRole('tab') : []; };
+const topTabs = () => rowTabs('Inspector tabs');
 const tabNames = () => topTabs().map((t) => t.textContent);
-const openTab = (name: string) => fireEvent.click(topTabs().find((t) => t.textContent === name)!);
+const childNames = (row: 'Step' | 'Processor') => rowTabs(`${row} tabs`).map((t) => t.textContent);
+/** A top tab by its label, else a child of the open parent (a workflow's name under Step, a schema under Processor). */
+const openTab = (name: string) => {
+  const top = topTabs().find((t) => t.textContent === name);
+  if (top) { fireEvent.click(top); return; }
+  if (!rowTabs('Step tabs').some((t) => t.textContent === name) && !rowTabs('Processor tabs').some((t) => t.textContent === name)) {
+    fireEvent.click(topTabs().find((t) => t.textContent === 'Step')!);
+  }
+  fireEvent.click([...rowTabs('Step tabs'), ...rowTabs('Processor tabs')].find((t) => t.textContent === name)!);
+};
 const selectedTab = () => topTabs().find((t) => t.getAttribute('aria-selected') === 'true')?.textContent;
-const subTabs = () => within(screen.getByRole('tablist', { name: 'Processor tabs' })).getAllByRole('tab');
-const selectedSub = () => subTabs().find((t) => t.getAttribute('aria-selected') === 'true')?.textContent;
+const selectedChild = (row: 'Step' | 'Processor') => rowTabs(`${row} tabs`).find((t) => t.getAttribute('aria-selected') === 'true')?.textContent ?? null;
 const step = (id: string): Pick => ({ kind: 'step', id });
 // getByDisplayValue collapses whitespace: the pretty payload as it matches
 const SHARED = '{ "shared": true }';
@@ -44,55 +53,71 @@ describe('InspectorPanel', () => {
   });
 
   describe('tabs', () => {
-    it('a step with no workflow: Step and Processor; with workflows: one tab per workflow whose stream holds it', () => {
+    it("a step: Step and Processor on top; Step's children are the workflows whose stream holds it, in their hue [user, 2026-11-18]", () => {
       const { rerender } = setup({ workflows: [], picks: [step('fetch')] });
       expect(tabNames()).toEqual(['Step', 'Processor']);
+      expect(screen.queryByRole('tablist', { name: 'Step tabs' })).toBeNull(); // no children: no row
       rerender({ workflows: ['daily', 'hourly'], picks: [step('fetch')] });
-      expect(tabNames()).toEqual(['Step', 'Processor', 'daily', 'hourly']);
-      expect([...document.querySelectorAll('.ins-tab .dot')].map((d) => (d as HTMLElement).style.background)).toEqual(['rgb(255, 0, 114)', 'rgb(124, 58, 237)']);
+      expect(tabNames()).toEqual(['Step', 'Processor']);
+      expect(childNames('Step')).toEqual(['daily', 'hourly']);
+      expect(selectedChild('Step')).toBeNull();
+      expect([...document.querySelectorAll('.ins-subtab .dot')].map((d) => (d as HTMLElement).style.background)).toEqual(['rgb(255, 0, 114)', 'rgb(124, 58, 237)']);
+      expect(screen.getByLabelText('Name')).toHaveValue('fetch-orders'); // the step's own fields
       rerender({ workflows: ['daily'], picks: [step('lonely')] });
       expect(tabNames()).toEqual(['Step', 'Processor']);
+      expect(childNames('Step')).toEqual([]);
     });
-    it('the first tab opens on a new pick; a chosen tab is kept while the same pick stays', () => {
+    it('a child shows its assignment; the parent tab again shows its own fields', () => {
+      setup({ workflows: ['daily'], picks: [step('fetch')] });
+      openTab('daily');
+      expect(selectedTab()).toBe('Step');
+      expect(selectedChild('Step')).toBe('daily');
+      expect(screen.getByText('assignment · belongs to daily')).toBeInTheDocument();
+      openTab('Step');
+      expect(selectedChild('Step')).toBeNull();
+      expect(screen.getByLabelText('Name')).toHaveValue('fetch-orders');
+    });
+    it('the first tab, no child, on a new pick; the chosen tab and child kept while the same pick stays and they exist', () => {
       const { rerender } = setup({ workflows: ['daily'], picks: [step('fetch')] });
       expect(selectedTab()).toBe('Step');
       openTab('Processor');
-      expect(selectedTab()).toBe('Processor');
       rerender({ workflows: ['daily', 'hourly'], picks: [step('fetch')] });
       expect(selectedTab()).toBe('Processor');
+      openTab('Step');
       openTab('hourly');
-      rerender({ workflows: ['daily'], picks: [step('fetch')] }); // the hourly tab is gone
+      rerender({ workflows: ['daily', 'hourly'], picks: [step('fetch')] });
+      expect(selectedChild('Step')).toBe('hourly');
+      rerender({ workflows: ['daily'], picks: [step('fetch')] }); // the hourly child is gone: Step's own fields
       expect(selectedTab()).toBe('Step');
+      expect(selectedChild('Step')).toBeNull();
       openTab('Processor');
       rerender({ workflows: ['daily'], picks: [step('expand')] });
       expect(selectedTab()).toBe('Step');
     });
-    it('Processor sub-tabs: the first on a new pick; the chosen one kept while the pick stays and it exists [user, 2026-11-18]', () => {
+    it("Processor's children are its schemas; none chosen at first; the chosen one kept while the pick stays and it exists", () => {
       const b0 = board();
       const slots = { ...b0, processors: { p1: { ...b0.processors.p1!, configSchemaId: 's-cfg' } },
         schemas: { 's-cfg': { id: 's-cfg', name: 'cfg', version: '1.0.0', description: null, definition: '{}', audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, updatedAt: null } } };
       const { store, rerender } = setup({ workflows: [], picks: [step('fetch')] }, slots);
       openTab('Processor');
-      expect(subTabs().map((t) => t.textContent)).toEqual(['Processor', 'Config schema']);
-      expect(selectedSub()).toBe('Processor');
-      fireEvent.click(subTabs()[1]!);
-      expect(selectedSub()).toBe('Config schema');
+      expect(childNames('Processor')).toEqual(['Config schema']);
+      expect(selectedChild('Processor')).toBeNull();
+      openTab('Config schema');
+      expect(selectedChild('Processor')).toBe('Config schema');
       expect(screen.getByText('schema · config of proc')).toBeInTheDocument();
-      // the same pick, away to Step and back: the sub-tab is kept
-      openTab('Step');
-      openTab('Processor');
-      expect(selectedSub()).toBe('Config schema');
       rerender({ workflows: ['daily'], picks: [step('fetch')] });
-      expect(selectedSub()).toBe('Config schema');
-      // the slot emptied: the sub-tab is gone, the first one shows
+      expect(selectedChild('Processor')).toBe('Config schema');
+      // the slot emptied: no child row, the processor's own fields
       act(() => store.edit((b) => ({ ...b, processors: { p1: { ...b.processors.p1!, configSchemaId: null } } })));
-      expect(selectedSub()).toBe('Processor');
+      expect(screen.queryByRole('tablist', { name: 'Processor tabs' })).toBeNull();
+      expect(screen.getByLabelText('Source hash')).toBeInTheDocument();
       act(() => store.undo());
-      expect(selectedSub()).toBe('Config schema');
-      // a new pick opens the first sub-tab
+      expect(selectedChild('Processor')).toBe('Config schema');
+      // a new pick: Step, no child
       rerender({ workflows: [], picks: [step('expand')] });
+      expect(selectedTab()).toBe('Step');
       openTab('Processor');
-      expect(selectedSub()).toBe('Processor');
+      expect(selectedChild('Processor')).toBeNull();
     });
     it('a step picked again after another pick opens on its first tab: step → triangle → the same step', () => {
       const { rerender } = setup({ workflows: [], picks: [step('fetch')] });
@@ -103,14 +128,25 @@ describe('InspectorPanel', () => {
       rerender({ workflows: ['daily'], picks: [step('fetch')] });
       expect(selectedTab()).toBe('Step');
     });
-    it('triangles only: the Workflow tab of the last one clicked', () => {
-      setup({ workflows: ['daily', 'hourly'], picks: [{ kind: 'workflow', id: 'daily' }, { kind: 'workflow', id: 'hourly' }] });
+    it('exactly one triangle: its Workflow tab', () => {
+      setup({ workflows: ['hourly'], picks: [{ kind: 'workflow', id: 'hourly' }] });
       expect(tabNames()).toEqual(['Workflow']);
       expect(screen.getByLabelText('Name')).toHaveValue('hourly');
     });
-    it('workflows selected and nothing picked: the last selected workflow', () => {
-      setup({ workflows: ['hourly', 'daily'], picks: [] });
-      expect(screen.getByLabelText('Name')).toHaveValue('daily');
+    it('two or more triangles only: the numbered pick list of those workflows, not a workflow form [user, 2026-11-18]', () => {
+      const { rerender } = setup({ workflows: ['daily', 'hourly'], picks: [{ kind: 'workflow', id: 'daily' }, { kind: 'workflow', id: 'hourly' }] });
+      expect(tabNames()).toEqual([]);
+      expect(screen.queryByLabelText('Name')).toBeNull();
+      expect([...document.querySelectorAll('.in-picks li')].map((l) => l.textContent)).toEqual(['daily', 'hourly']);
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
+      rerender({ workflows: ['hourly', 'daily'], picks: [] }); // a step clicked off: the workflows stay
+      expect([...document.querySelectorAll('.in-picks li')].map((l) => l.textContent)).toEqual(['hourly', 'daily']);
+    });
+    it('two or more non-triangle picks: the pick list, triangles included', () => {
+      setup({ workflows: ['daily'], picks: [{ kind: 'workflow', id: 'daily' }, step('fetch'), { kind: 'cache', id: 'c1' }] });
+      expect(tabNames()).toEqual([]);
+      expect([...document.querySelectorAll('.in-picks li')].map((l) => l.getAttribute('data-kind'))).toEqual(['workflow', 'step', 'cache']);
+      expect(screen.getByText('3 selected')).toBeInTheDocument();
     });
   });
 

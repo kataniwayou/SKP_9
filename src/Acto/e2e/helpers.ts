@@ -87,15 +87,18 @@ export const inspector = (page: Page) => page.locator('[data-panel="inspector"]'
 export const field = (page: Page, label: string | RegExp) =>
   inspector(page).locator('label.fld', { has: page.locator('span', { hasText: typeof label === 'string' ? new RegExp(`^${escapeRe(label)}$`) : label }) }).locator('input, textarea, select, button[role=combobox]');
 const topRow = (page: Page) => inspector(page).getByRole('tablist', { name: 'Inspector tabs' });
-const subRow = (page: Page) => inspector(page).getByRole('tablist', { name: 'Processor tabs' });
-/** An Inspector tab by its label (Step, Processor, a workflow's name, Workflow, Cache, Link, Deleted): the top row only. */
+const childRow = (page: Page, parent: 'Step' | 'Processor') => inspector(page).getByRole('tablist', { name: `${parent} tabs` });
+/** A top Inspector tab by its label (Step, Processor, Workflow, Cache, Link, Deleted). */
 export const tab = (page: Page, name: string) => topRow(page).getByRole('tab', { name: new RegExp(`^${escapeRe(name)}$`) });
 /** The Inspector's top tab labels, in order. */
 export const tabLabels = (page: Page) => topRow(page).getByRole('tab');
-/** A sub-tab of the Processor tab by its label (Processor, Input schema, Output schema, Config schema). */
-export const subTab = (page: Page, name: string) => subRow(page).getByRole('tab', { name: new RegExp(`^${escapeRe(name)}$`) });
-/** The Processor tab's sub-tab labels, in order. */
-export const subTabLabels = (page: Page) => subRow(page).getByRole('tab');
+/**
+ * A child tab by its label [user, 2026-11-18]: under Step a selected workflow's name (its assignment), under Processor a
+ * schema (Input schema, Output schema, Config schema).
+ */
+export const childTab = (page: Page, parent: 'Step' | 'Processor', name: string) => childRow(page, parent).getByRole('tab', { name: new RegExp(`^${escapeRe(name)}$`) });
+/** A parent's child tab labels, in order (none: the row is not drawn). */
+export const childLabels = (page: Page, parent: 'Step' | 'Processor') => childRow(page, parent).getByRole('tab');
 /** A ghost node (a deleted step, cache or triangle drawn at its last place) by its name. */
 export const ghost = (page: Page, name: string) =>
   page.locator('.react-flow__node.ghost').filter({ has: page.locator('.sn, .cache-nm, .tri-nm', { hasText: new RegExp(`^${escapeRe(name)}$`) }) });
@@ -103,7 +106,9 @@ export const ghost = (page: Page, name: string) =>
 export const pretty = (json: string) => JSON.stringify(JSON.parse(json), null, 2);
 /** Opens the workflow-named tab of the picked step (its assignment) and answers its Payload field. */
 export async function payloadOf(page: Page, workflow: string) {
-  await tab(page, workflow).click();
+  // the workflow's assignment is a child of Step: open Step first unless its row is already shown
+  if (await childTab(page, 'Step', workflow).count() === 0) await tab(page, 'Step').click();
+  await childTab(page, 'Step', workflow).click();
   return field(page, 'Payload');
 }
 export const saveButton = (page: Page) => page.locator('button.save-board');
@@ -121,9 +126,30 @@ export async function centre(l: Locator) {
 
 /** Clicks a triangle on its name. */
 export const pickWorkflow = (page: Page, id: string) => wfNode(page, id).locator('.tri-nm').click();
+/**
+ * Makes the triangle the one selected workflow, whatever was selected before: a plain click on an already selected
+ * triangle unselects it [user, 2026-11-18], so the board is cleared first when it is drawn selected.
+ */
+export async function selectWorkflowAlone(page: Page, id: string) {
+  if (await wfNode(page, id).locator('.tri.sel').count() > 0) await clickEmptyBoard(page);
+  await pickWorkflow(page, id);
+  await expect(wfNode(page, id).locator('.tri.sel')).toHaveCount(1);
+}
 /** Clicks a step card on its name line, with Ctrl when `add`. */
 export const pickStep = (page: Page, id: string, add = false) => stNode(page, id).locator('.sn').click(add ? { modifiers: ['Control'] } : {});
 export const pickCache = (page: Page, id: string, add = false) => caNode(page, id).locator('.cache-nm').click(add ? { modifiers: ['Control'] } : {});
+/**
+ * Shows the step (or cache) in the Inspector: clicked only when it is not picked already, since a plain click on a picked
+ * item unpicks it [user, 2026-11-18] (a reload restores the last selection, say).
+ */
+export async function showStep(page: Page, id: string) {
+  if (await stNode(page, id).locator('.node.sel').count() === 0) await pickStep(page, id);
+  await expect(stNode(page, id).locator('.node.sel')).toHaveCount(1);
+}
+export async function showCache(page: Page, id: string) {
+  if (await caNode(page, id).locator('.cache-chip.sel').count() === 0) await pickCache(page, id);
+  await expect(caNode(page, id).locator('.cache-chip.sel')).toHaveCount(1);
+}
 
 /** Clicks an edge on the middle of its curve (its wide hit path), with Ctrl when `add`. */
 export async function pickEdge(page: Page, edge: Locator, add = false) {

@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { caNode, cacheEdge, drawCacheLink, inspector, openAt, pickWorkflow, save, saveButton, waitLoaded, wfNode } from './helpers';
+import { caNode, cacheEdge, drawCacheLink, inspector, openAt, selectWorkflowAlone, save, saveButton, waitLoaded, wfNode } from './helpers';
 import { seed } from './seed';
 import { getJson, type Row } from './stack';
 
@@ -20,7 +20,7 @@ test('one workflow linked to two caches by dragging from its back: saved, and af
   await drawCacheLink(page, wfNode(page, id.w!), caNode(page, id.c2!));
   await expect(cacheEdge(page, id.w!, id.c2!)).toHaveCount(1);
   await expect(cacheEdge(page, id.w!, id.c1!)).toHaveCount(1);
-  await pickWorkflow(page, id.w!);
+  await selectWorkflowAlone(page, id.w!);
   await expect(inspector(page).getByText('Caches · 2')).toBeVisible();
 
   const answer = await save(page);
@@ -37,7 +37,7 @@ test('one workflow linked to two caches by dragging from its back: saved, and af
     const dash = await cacheEdge(page, id.w!, c).locator('path.cache-line').evaluate((e) => getComputedStyle(e).strokeDasharray);
     expect(dash, 'a cache line is dashed').not.toBe('none');
   }
-  await pickWorkflow(page, id.w!);
+  await selectWorkflowAlone(page, id.w!);
   await expect(inspector(page).getByText('Caches · 2')).toBeVisible();
   await expect(inspector(page).locator('.chip', { hasText: 'e2e-cc-one' })).toHaveCount(1);
   await expect(inspector(page).locator('.chip', { hasText: 'e2e-cc-two' })).toHaveCount(1);

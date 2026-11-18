@@ -44,6 +44,32 @@ describe('selectPick', () => {
     const l: Pick = { kind: 'cacheLink', workflowId: 'd', cacheId: 'c' };
     expect(selectPick(none, l, false)).toEqual({ workflows: ['d'], picks: [l] });
   });
+  // [user, 2026-11-18]: a plain click on something already selected unselects only it
+  it('a plain click on the selected step unpicks it and keeps the workflows', () => {
+    expect(selectPick({ workflows: ['a', 'b'], picks: [st('s')] }, st('s'), false)).toEqual({ workflows: ['a', 'b'], picks: [] });
+    expect(selectPick({ workflows: [], picks: [st('s'), st('t')] }, st('t'), false)).toEqual({ workflows: [], picks: [st('s')] });
+  });
+  it('a plain click on a selected triangle unselects it, from the picks and from workflows', () => {
+    expect(selectPick({ workflows: ['a'], picks: [wf('a')] }, wf('a'), false)).toEqual(none);
+    expect(selectPick({ workflows: ['a', 'b'], picks: [wf('a'), wf('b')] }, wf('b'), false)).toEqual({ workflows: ['a'], picks: [wf('a')] });
+    // drawn selected (in workflows) while a step is picked: still a selected triangle
+    expect(selectPick({ workflows: ['a', 'b'], picks: [st('s')] }, wf('a'), false)).toEqual({ workflows: ['b'], picks: [st('s')] });
+  });
+  it('a plain click on a selected cache, wire, entry arrow, cache line or ghost unpicks only it', () => {
+    const items: Pick[] = [{ kind: 'cache', id: 'c' }, { kind: 'wire', from: 's', to: 't' }, { kind: 'entry', workflowId: 'a', stepId: 's' },
+      { kind: 'cacheLink', workflowId: 'a', cacheId: 'c' }, ghost('g')];
+    for (const p of items) expect(selectPick({ workflows: ['a'], picks: [st('s'), p] }, p, false)).toEqual({ workflows: ['a'], picks: [st('s')] });
+  });
+  it('a plain click on an unselected item replaces the other picks, keeping workflows; ctrl toggles every kind', () => {
+    expect(selectPick({ workflows: ['a'], picks: [st('s'), st('t')] }, { kind: 'cache', id: 'c' }, false)).toEqual({ workflows: ['a'], picks: [{ kind: 'cache', id: 'c' }] });
+    const items: Pick[] = [wf('z'), st('u'), { kind: 'cache', id: 'c' }, { kind: 'wire', from: 's', to: 't' }, { kind: 'entry', workflowId: 'a', stepId: 's' },
+      { kind: 'cacheLink', workflowId: 'a', cacheId: 'c' }, ghost('g')];
+    for (const p of items) {
+      const on = selectPick({ workflows: ['a'], picks: [st('s')] }, p, true);
+      expect(on.picks).toEqual([st('s'), p]);
+      expect(selectPick(on, p, true)).toEqual({ workflows: ['a'], picks: [st('s')] });
+    }
+  });
   it('the empty board clears everything', () => {
     expect(selectPick({ workflows: ['a'], picks: [st('s')] }, null, false)).toEqual(none);
     expect(selectPick({ workflows: ['a'], picks: [st('s')] }, null, true)).toEqual(none);

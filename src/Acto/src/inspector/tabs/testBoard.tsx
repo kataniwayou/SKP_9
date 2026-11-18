@@ -26,23 +26,29 @@ export function withSchemas(): BoardState {
   };
 }
 
-/** A top Inspector tab, or a sub-tab of the Processor tab, by its label. */
+/** A top Inspector tab by its label; a child tab of Step ("Step tabs") or of Processor ("Processor tabs"). */
 export const topTab = (name: string) => within(screen.getByRole('tablist', { name: 'Inspector tabs' })).getByRole('tab', { name });
-export const subTab = (name: string) => within(screen.getByRole('tablist', { name: 'Processor tabs' })).getByRole('tab', { name });
+export const childTab = (row: 'Step' | 'Processor', name: string) => within(screen.getByRole('tablist', { name: `${row} tabs` })).getByRole('tab', { name });
+export const childNames = (row: 'Step' | 'Processor') => {
+  const l = screen.queryByRole('tablist', { name: `${row} tabs` });
+  return l ? within(l).getAllByRole('tab').map((t) => t.textContent) : [];
+};
 
-/** A schema sub-tab's label: opened as Processor, then that sub-tab. */
-const SUB = new Set(['Input schema', 'Output schema', 'Config schema']);
+const TOP = new Set(['Workflow', 'Step', 'Processor', 'Cache', 'Link', 'Deleted']);
+const SCHEMA = new Set(['Input schema', 'Output schema', 'Config schema']);
 
-/** The Inspector on `fetch` with daily selected, `tab` opened (a schema label opens it inside the Processor tab). */
+/**
+ * The Inspector on `fetch` with daily selected, `tab` opened: a top tab by its label, a schema label as Processor then
+ * that child, any other label (a workflow's name) as Step then that assignment child.
+ */
 export function openOn(tab: string, picks: Pick[] = [{ kind: 'step', id: 'fetch' }], state: BoardState = withSchemas()) {
   const store = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
   store.load(state);
   render(<LiveStoreProvider value={liveStub()}>
     <InspectorPanel store={store} ghosts={createGhostStore(store)} selection={{ workflows: ['daily'], picks }} />
   </LiveStoreProvider>);
-  if (SUB.has(tab)) {
-    fireEvent.click(topTab('Processor'));
-    fireEvent.click(subTab(tab));
-  } else fireEvent.click(topTab(tab));
+  if (TOP.has(tab)) fireEvent.click(topTab(tab));
+  else if (SCHEMA.has(tab)) { fireEvent.click(topTab('Processor')); fireEvent.click(childTab('Processor', tab)); }
+  else { fireEvent.click(topTab('Step')); fireEvent.click(childTab('Step', tab)); }
   return store;
 }

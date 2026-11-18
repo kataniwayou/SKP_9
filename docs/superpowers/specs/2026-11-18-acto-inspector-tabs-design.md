@@ -56,6 +56,17 @@ NodeStatusIndicator components [user].
 - **Multi-select of steps, wires, caches and ghosts**: Ctrl+click as today, light bar + numbered badges [user: ghosts
   too]. The bar shows the actions common to everything picked. With 2+ triangles selected and nothing else picked,
   the bar shows **Start · Stop · Delete** for all of them (Delete confirms once, listing every workflow) [call].
+- **Click rules** [user, 2026-11-18] (`selectPick`):
+  - Ctrl+click toggles any item (triangle, step, cache, wire, entry arrow, cache line, ghost) in or out; a triangle
+    toggles in `workflows` too.
+  - A plain click on an item **already selected unselects only it**: a selected step (cache, wire, …) leaves the
+    picks and the selected workflows stay; a selected triangle (drawn selected = in `workflows`) leaves the picks and
+    `workflows`.
+  - A plain click on an unselected triangle selects it alone; on an unselected step, cache, wire or ghost it replaces
+    the other picks and keeps the selected workflows (an entry arrow or cache line selects its workflow alone).
+  - The empty board clears everything. A drag never counts as a click (CLICK_SLOP), and a NodeToolbar button press
+    is not a click on its node (the toolbar stops the click).
+  The chat's `pick` tool (`withPicks`) is unchanged: it sets the picks, it does not toggle.
 
 ## 5. Inspector — tabs [user: items 1–4]
 
@@ -63,13 +74,21 @@ The Inspector shows tabs; the first one opens on a new click, the chosen tab is 
 
 | What is picked | Tabs |
 |---|---|
-| a triangle (one or several selected, no step) | **Workflow** (the last one clicked) |
-| a step, no workflow selected | **Step** · **Processor** — no assignment [user]; the schemas are sub-tabs inside Processor, not top tabs [user, 2026-11-18] |
-| a step, workflows selected | **Step** · **Processor** · one tab per selected workflow **whose stream contains the step**, named after the workflow, with its colour dot [user + call] |
-| a cache | **Cache** |
-| a wire / entry arrow / cache line | **Link** (as today's link view) |
-| a ghost | **Deleted** (read-only snapshot) |
-| several steps/wires/caches/ghosts | the numbered pick list (as today) |
+| exactly one triangle selected, nothing else picked | **Workflow** |
+| two or more triangles, nothing else picked | the numbered pick list of those workflows [user, 2026-11-18] |
+| exactly one step (+ any selected workflows) | **Step** · **Processor** — both parents; Step's children are one assignment tab per selected workflow **whose stream contains the step** (its name and colour dot, in selection order), Processor's are its schemas [user, 2026-11-18] |
+| exactly one cache (+ any workflows) | **Cache** |
+| exactly one wire / entry arrow / cache line (+ any workflows) | **Link** (as today's link view) |
+| exactly one ghost (+ any workflows) | **Deleted** (read-only snapshot) |
+| two or more steps/wires/caches/ghosts | the numbered pick list, triangles in the pick listed too |
+
+**Parents and children** [user, 2026-11-18]: Step and Processor are the only parent tabs and work the same way. The
+parent tab shows its own fields directly. Under it, a second, lighter tab row (role tablist "Step tabs" / "Processor
+tabs") holds only its children: under Step the assignment tabs, under Processor the schema tabs (Input schema / Output
+schema / Config schema, only filled slots). No "Step" or "Processor" child tab. No child is chosen at first; a child
+shows that assignment or schema; a click on the parent tab returns to its own fields. A child row with no tabs is not
+drawn, and the top row never holds an assignment tab. Memory: a new pick opens Step with no child; the chosen parent
+and child are kept while the same pick stays and they still exist.
 
 Every tab follows Studio's entity form [user: "show/hide all metadata of entity same as studio"]:
 - the unique name (`name version`) and a kind line ("step · shared by a, b"; "assignment · belongs to daily");
@@ -96,25 +115,22 @@ select-only combobox whose button and options show the letter pill + a short wir
 ✓ on the current one, keyboard as Studio's (Up/Down/Home/End/Enter/Space/Escape/Tab, a condition's letter picks it).
 Then a read-only "Used by" line (workflows whose stream contains it).
 
-**Processor tab: sub-tabs** [user, 2026-11-18: "same as assignments are tabs in step, so schemas are tabs in
-processor"]: inside the Processor tab a second tab row (role tablist, named "Processor tabs"; smaller, lighter pills
-under the top tabs, same tokens in light and dark): **Processor** · **Input schema** · **Output schema** · **Config
-schema**, a schema sub-tab only when that slot holds a schema (ids `processor`, `schema:input`/`schema:output`/
-`schema:config`; `processorTabsOf` in tabs.ts). A step without a processor has no sub-tab row, only "Processor: none".
-Sub-tab memory follows the top tabs' rule: a new pick opens the first sub-tab (Processor); the chosen sub-tab is kept
-while the same pick stays — also across switching top tabs — and while it exists.
+**Processor's children** [user, 2026-11-18: "same as assignments are tabs in step, so schemas are tabs in
+processor"; then "remove the duplicate"]: the schema tabs only (ids `schema:input`/`schema:output`/`schema:config`;
+`processorTabsOf` in tabs.ts), smaller, lighter pills under the top tabs, same tokens in light and dark. A step
+without a processor (or a processor with no schemas) has no child row; no processor shows "Processor: none".
 
-**Processor sub-tab** [user, 2026-11-18]: the processor's Name, Version, show all, Description, **Source hash** (text) and
+**Processor tab (its own fields)** [user, 2026-11-18]: the processor's Name, Version, show all, Description, **Source hash** (text) and
 **Instance id** (text, blank = null), editable as in Studio; then Related: Liveness, the slots as read-only rows
 "Input schema" / "Output schema" / "Config schema" → `name version` or `none`, and "Used by" (the steps using it).
 No schema editors here any more, and **no In/Out/Config buttons** [user].
 
-**Schema sub-tab** (Input schema / Output schema / Config schema, inside Processor) [user, 2026-11-18]: that schema's entity form — head
+**Schema child tab** (Input schema / Output schema / Config schema, under Processor) [user, 2026-11-18]: that schema's entity form — head
 `name version`, kind line `schema · input of <processor name>` (output/config likewise), Name, Version, show all,
 Description, **Definition** (pretty JSON, compared with its saved value). Every edit goes to the processor's own copy
 (`setSlotSchema`, unchanged). A schema whose definition is not read yet is shown, not edited.
 
-**Workflow-named tab (assignment)**: the assignment of that workflow on this step — Name, Version, show all,
+**Workflow-named child tab of Step (assignment)** [user, 2026-11-18: a child of Step]: the assignment of that workflow on this step — Name, Version, show all,
 Description, **Payload** (pretty JSON), the config-schema check note ("✓ checked against … ; Save checks it again" or
 the problems). No assignment yet: an empty Payload editor that creates one on first typing (today's behaviour) and a
 "Remove assignment" action once it exists.

@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { addItem, inspector, itemKey, itemValue, openAt, pickCache, save, saveButton, waitLoaded } from './helpers';
+import { addItem, inspector, itemKey, itemValue, openAt, pickCache, showCache, save, saveButton, waitLoaded } from './helpers';
 import { seed } from './seed';
 import { getJson, type Row } from './stack';
 
@@ -38,7 +38,7 @@ test('a cache\'s items: add two, save, remove one, save, reload: BaseAPI and the
 
   await page.reload();
   await waitLoaded(page);
-  await pickCache(page, id.c!);
+  await showCache(page, id.c!); // the reload may restore it as picked: a plain click would unpick it
   await expect(inspector(page).getByText('1 item')).toBeVisible();
   await expect(itemKey(page, 1)).toHaveValue('usd');
   await expect(itemValue(page, 1)).toHaveValue('3.7');

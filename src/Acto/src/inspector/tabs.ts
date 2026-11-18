@@ -5,44 +5,52 @@ import type { BoardState } from '../design/board';
 import { reachOf, SLOT_FIELD, type Slot } from '../design/board';
 import type { GhostStore } from '../design/ghosts';
 
-/** One Inspector tab (spec §5). `assignment:<workflow id>` is that workflow's payload on the picked step. */
-export type TabId = 'workflow' | 'step' | 'processor' | 'cache' | 'link' | 'ghost' | `assignment:${string}`;
-
 /**
- * One sub-tab inside the Processor tab [user, 2026-11-18: "same as assignments are tabs in step, so schemas are tabs in
- * processor"]: the processor's own form, or the schema in one of its slots.
+ * One top Inspector tab (spec §5). Step and Processor are the only parents [user, 2026-11-18]: each shows its own fields
+ * and has a child row (Step: the assignments, Processor: the schemas).
  */
-export type SubTabId = 'processor' | `schema:${Slot}`;
-export interface SubTab { id: SubTabId; label: string }
+export type TabId = 'workflow' | 'step' | 'processor' | 'cache' | 'link' | 'ghost';
+export interface Tab { id: TabId; label: string }
+
+/** A child tab: `assignment:<workflow id>` (under Step) is that workflow's payload on the step; `schema:<slot>` (under Processor) the schema in that slot. */
+export type ChildId = `assignment:${string}` | `schema:${Slot}`;
+export interface ChildTab { id: ChildId; label: string; hue?: string }
 
 /** The processor's slots in tab order, and their tab labels. */
 export const SLOTS: readonly Slot[] = ['input', 'output', 'config'];
 export const SLOT_LABEL: Readonly<Record<Slot, string>> = { input: 'Input schema', output: 'Output schema', config: 'Config schema' };
 
-/** The Processor tab's sub-tabs: Processor, then a schema sub-tab per slot that holds a schema. Empty: no such processor. */
-export function processorTabsOf(b: BoardState, processorId: string | null): SubTab[] {
-  const p = processorId === null ? undefined : b.processors[processorId];
-  if (!p) return [];
-  const tabs: SubTab[] = [{ id: 'processor', label: 'Processor' }];
-  for (const slot of SLOTS) if (p[SLOT_FIELD[slot]] !== null) tabs.push({ id: `schema:${slot}`, label: SLOT_LABEL[slot] });
-  return tabs;
-}
-export interface Tab { id: TabId; label: string; hue?: string }
-
 type GhostLookup = Pick<GhostStore, 'get'>;
 
+/** The selected workflows: `workflows`, then any picked triangle not in it, once each. */
+function triangles(sel: SelectionState): string[] {
+  const ids = [...sel.workflows];
+  for (const p of sel.picks) if (p.kind === 'workflow' && !ids.includes(p.id)) ids.push(p.id);
+  return ids;
+}
+
 /**
- * The one thing the tabs are about: the single pick that is not a triangle, else (only triangles, or none with
- * workflows selected) the last clicked triangle. null: nothing, or several non-triangle picks (the pick list).
+ * The one thing the tabs are about (spec §5, [user, 2026-11-18]): the single pick that is not a triangle; else, with no
+ * such pick, the one selected workflow. null: nothing, or a pick list (see listOf).
  */
 export function focusOf(sel: SelectionState): BoardPick | null {
   const others = sel.picks.filter((p) => p.kind !== 'workflow');
   if (others.length > 1) return null;
   if (others.length === 1) return others[0]!;
-  const lastWf = [...sel.picks].reverse().find((p) => p.kind === 'workflow');
-  if (lastWf) return lastWf;
-  const wf = sel.workflows.at(-1);
-  return wf === undefined ? null : { kind: 'workflow', id: wf };
+  const wfs = triangles(sel);
+  return wfs.length === 1 ? { kind: 'workflow', id: wfs[0]! } : null;
+}
+
+/**
+ * The numbered pick list, or null when one thing (or nothing) is shown: two or more non-triangle picks list every pick,
+ * triangles included; only triangles, two or more of them, list those workflows [user, 2026-11-18].
+ */
+export function listOf(sel: SelectionState): BoardPick[] | null {
+  const others = sel.picks.filter((p) => p.kind !== 'workflow');
+  if (others.length > 1) return sel.picks;
+  if (others.length === 1) return null;
+  const wfs = triangles(sel);
+  return wfs.length > 1 ? wfs.map((id) => ({ kind: 'workflow', id })) : null;
 }
 
 /** A stable key of what the tabs are about; the chosen tab is kept while it stays the same. */
@@ -51,7 +59,7 @@ export const focusKey = (sel: SelectionState): string | null => {
   return f === null ? null : pickKey(f);
 };
 
-/** The tabs for a selection (spec §5 table). Empty: nothing to show, or several picks (the numbered pick list). */
+/** The top tabs for a selection (spec §5 table). Empty: nothing to show, or a pick list. */
 export function tabsOf(sel: SelectionState, b: BoardState, ghosts: GhostLookup): Tab[] {
   const f = focusOf(sel);
   if (f === null) return [];
@@ -60,17 +68,27 @@ export function tabsOf(sel: SelectionState, b: BoardState, ghosts: GhostLookup):
     case 'cache': return b.caches[f.id] ? [{ id: 'cache', label: 'Cache' }] : [];
     case 'wire': case 'entry': case 'cacheLink': return [{ id: 'link', label: 'Link' }];
     case 'ghost': return ghosts.get(f.key) ? [{ id: 'ghost', label: 'Deleted' }] : [];
-    case 'step': {
-      if (!b.steps[f.id]) return [];
-      const tabs: Tab[] = [{ id: 'step', label: 'Step' }, { id: 'processor', label: 'Processor' }];
-      for (const wf of sel.workflows) {
-        const w = b.workflows[wf];
-        if (!w || !reachOf(b, wf).has(f.id)) continue;
-        tabs.push({ id: `assignment:${wf}`, label: w.name, hue: hueOf(sel, wf) ?? undefined });
-      }
-      return tabs;
-    }
+    case 'step': return b.steps[f.id] ? [{ id: 'step', label: 'Step' }, { id: 'processor', label: 'Processor' }] : [];
   }
+}
+
+/** Step's children: one assignment tab per selected workflow whose stream holds the step, in selection order, with its hue. */
+export function stepTabsOf(sel: SelectionState, b: BoardState, stepId: string): ChildTab[] {
+  if (!b.steps[stepId]) return [];
+  const tabs: ChildTab[] = [];
+  for (const wf of sel.workflows) {
+    const w = b.workflows[wf];
+    if (!w || !reachOf(b, wf).has(stepId)) continue;
+    tabs.push({ id: `assignment:${wf}`, label: w.name, hue: hueOf(sel, wf) ?? undefined });
+  }
+  return tabs;
+}
+
+/** Processor's children: a schema tab per slot of the processor that holds a schema. Empty: none, or no such processor. */
+export function processorTabsOf(b: BoardState, processorId: string | null): ChildTab[] {
+  const p = processorId === null ? undefined : b.processors[processorId];
+  if (!p) return [];
+  return SLOTS.flatMap((slot): ChildTab[] => (p[SLOT_FIELD[slot]] !== null ? [{ id: `schema:${slot}`, label: SLOT_LABEL[slot] }] : []));
 }
 
 /**
@@ -81,10 +99,19 @@ export function keepChosen<C extends { key: string | null }>(chosen: C | null, k
   return chosen && chosen.key === key ? chosen : null;
 }
 
-/** The tab shown: the chosen one while the same thing stays picked and the tab is still there, else the first. Sub-tabs alike. */
-export function activeTab<T extends string>(tabs: readonly { id: T }[], key: string | null, chosen: { key: string | null; tab: T } | null): T | null {
+/** What the designer chose: a top tab and, under a parent, a child (null = the parent's own fields). */
+export interface Chosen { key: string | null; tab: TabId; child: ChildId | null }
+
+/** The top tab shown: the chosen one while the same thing stays picked and the tab is still there, else the first. */
+export function activeTab(tabs: readonly Tab[], key: string | null, chosen: Chosen | null): TabId | null {
   if (chosen && chosen.key === key && tabs.some((t) => t.id === chosen.tab)) return chosen.tab;
   return tabs[0]?.id ?? null;
+}
+
+/** The child shown under the active parent: the chosen one while the pick, the parent and the child all stay; else none. */
+export function activeChild(children: readonly ChildTab[], key: string | null, tab: TabId | null, chosen: Chosen | null): ChildId | null {
+  if (!chosen || chosen.key !== key || chosen.tab !== tab || chosen.child === null) return null;
+  return children.some((c) => c.id === chosen.child) ? chosen.child : null;
 }
 
 const NONE = '—';

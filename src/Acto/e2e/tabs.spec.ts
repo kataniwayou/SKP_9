@@ -1,10 +1,12 @@
 import { test, expect } from './fixtures';
-import { field, inspector, openAt, payloadOf, pickStep, pickWorkflow, stNode, subTab, subTabLabels, tab, tabLabels, wfNode, wireEdge } from './helpers';
+import { childLabels, childTab, field, inspector, openAt, payloadOf, pickStep, pickWorkflow, stNode, tab, tabLabels, wfNode, wireEdge } from './helpers';
 import { seed } from './seed';
 
-// Plan 6 (inspector-tabs spec §5): the Inspector's tabs follow what is picked: a step alone has Step · Processor (whose sub-tabs are
-// Processor and a tab per schema its processor holds); with selected workflows a tab per workflow whose stream holds the step. "▸ show all" reveals the five metadata rows; JSON is shown pretty; the entry condition is
-// Studio's picker. Nothing is saved (the guard fails the test on any write): processor and schema fields are only read.
+// Plan 6 (inspector-tabs spec §5), [user, 2026-11-18]: a picked step has two parent tabs, Step and Processor, each showing its own
+// fields; Step's child row holds one assignment tab per selected workflow whose stream holds the step, Processor's one tab per schema
+// its processor holds. No child is chosen at first; a child row with no tabs is not drawn. "▸ show all" reveals the five metadata
+// rows; JSON is shown pretty; the entry condition is Studio's picker. Nothing is saved (the guard fails the test on any write):
+// processor and schema fields are only read.
 
 const SEED = {
   steps: [
@@ -23,44 +25,59 @@ const SEED = {
 
 const PRETTY = /\n {2}"/; // one field to a line, two-space indent
 
-test('the three tab sets: a step alone, a triangle then the step, and two Ctrl+clicked triangles on their shared step', async ({ page }) => {
+test('a step alone, a triangle then the step, two triangles then their shared step: Step and Processor on top, the workflows as Step\'s children', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
+  const stepRow = inspector(page).getByRole('tablist', { name: 'Step tabs' });
 
-  // a step alone: Step · Processor, Step open
+  // a step alone: Step · Processor, Step open with its own fields, no child row (no workflow selected)
   await pickStep(page, id.s1!);
   await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
   await expect(tab(page, 'Step')).toHaveAttribute('aria-selected', 'true');
   await expect(field(page, 'Name')).toHaveValue('e2e-tab-shared');
+  await expect(stepRow).toHaveCount(0);
   await tab(page, 'Processor').click();
   await expect(tab(page, 'Processor')).toHaveAttribute('aria-selected', 'true');
   await expect(field(page, 'Name')).toHaveValue('archive-expander');
 
-  // a triangle: its Workflow tab; then the step: Step · Processor · the workflow, with the workflow's colour dot
+  // a triangle: its Workflow tab; then the step: Step · Processor on top, the workflow as Step's child with its colour dot, none chosen
   await pickWorkflow(page, id.wa!);
   await expect(tabLabels(page)).toHaveText(['Workflow']);
   await pickStep(page, id.s1!);
-  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'e2e-tab-a']);
-  expect(await tab(page, 'e2e-tab-a').locator('.dot').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(255, 0, 114)');
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
+  await expect(childLabels(page, 'Step')).toHaveText(['e2e-tab-a']);
+  await expect(childTab(page, 'Step', 'e2e-tab-a')).toHaveAttribute('aria-selected', 'false');
+  await expect(field(page, 'Name')).toHaveValue('e2e-tab-shared');
+  expect(await childTab(page, 'Step', 'e2e-tab-a').locator('.dot').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(255, 0, 114)');
   await expect(await payloadOf(page, 'e2e-tab-a')).toHaveValue(JSON.stringify({ from: 'a', n: 1 }, null, 2));
   await expect(inspector(page).locator('.kind')).toHaveText('assignment · belongs to e2e-tab-a');
+  await expect(tab(page, 'Step')).toHaveAttribute('aria-selected', 'true');
+  // the parent tab again: the step's own fields
+  await tab(page, 'Step').click();
+  await expect(field(page, 'Name')).toHaveValue('e2e-tab-shared');
+  await expect(childTab(page, 'Step', 'e2e-tab-a')).toHaveAttribute('aria-selected', 'false');
 
-  // Ctrl+click the second triangle, then the shared step: one tab per workflow, each with its own payload
-  await pickWorkflow(page, id.wa!);
+  // the step clicked again leaves the picks, the workflow stays: its Workflow tab; Ctrl+click the second triangle: the pick list of both
+  await pickStep(page, id.s1!);
+  await expect(tabLabels(page)).toHaveText(['Workflow']);
+  await expect(field(page, 'Name')).toHaveValue('e2e-tab-a');
   await wfNode(page, id.wb!).locator('.tri-nm').click({ modifiers: ['Control'] });
   await expect(page.locator('.react-flow__node-workflow .tri.sel')).toHaveCount(2);
-  await expect(tabLabels(page)).toHaveText(['Workflow']); // the last triangle clicked
-  await expect(field(page, 'Name')).toHaveValue('e2e-tab-b');
+  await expect(tabLabels(page)).toHaveCount(0);
+  await expect(inspector(page).locator('.in-picks li')).toHaveText(['e2e-tab-a', 'e2e-tab-b']);
+  // the shared step: one child per workflow, each with its own payload
   await pickStep(page, id.s1!);
-  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'e2e-tab-a', 'e2e-tab-b']);
-  expect(await tab(page, 'e2e-tab-b').locator('.dot').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(124, 58, 237)');
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
+  await expect(childLabels(page, 'Step')).toHaveText(['e2e-tab-a', 'e2e-tab-b']);
+  expect(await childTab(page, 'Step', 'e2e-tab-b').locator('.dot').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(124, 58, 237)');
   await expect(await payloadOf(page, 'e2e-tab-a')).toHaveValue(JSON.stringify({ from: 'a', n: 1 }, null, 2));
   await expect(await payloadOf(page, 'e2e-tab-b')).toHaveValue(JSON.stringify({ only: 'b' }, null, 2));
-  // the chosen tab is kept while the same step stays picked
-  await expect(tab(page, 'e2e-tab-b')).toHaveAttribute('aria-selected', 'true');
-  // the step after it is in both streams too, but holds no assignment: both tabs, an empty payload that would make one
+  // the chosen child is kept while the same step stays picked
+  await expect(childTab(page, 'Step', 'e2e-tab-b')).toHaveAttribute('aria-selected', 'true');
+  // the step after it is in both streams too, but holds no assignment: both children, an empty payload that would make one
   await pickStep(page, id.s2!);
-  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'e2e-tab-a', 'e2e-tab-b']);
+  await expect(childLabels(page, 'Step')).toHaveText(['e2e-tab-a', 'e2e-tab-b']);
+  await expect(field(page, 'Name')).toHaveValue('e2e-tab-next'); // a new pick: Step, no child
   await expect(await payloadOf(page, 'e2e-tab-a')).toHaveValue('');
   await expect(inspector(page)).toContainText('No assignment yet');
 });
@@ -103,36 +120,35 @@ test('payload and schema definitions are pretty JSON', async ({ page }) => {
   await pickStep(page, id.s1!);
   const payload = await payloadOf(page, 'e2e-tab-a');
   expect(await payload.inputValue()).toMatch(PRETTY);
-  // the schemas are sub-tabs of the Processor tab (archive-expander has all three), each Definition laid out [user, 2026-11-18]
+  // the schemas are Processor's children (archive-expander has all three), none chosen at first [user, 2026-11-18]
   await tab(page, 'Processor').click();
-  await expect(subTabLabels(page)).toHaveText(['Processor', 'Input schema', 'Output schema', 'Config schema']);
-  await expect(subTab(page, 'Processor')).toHaveAttribute('aria-selected', 'true');
-  for (const slot of ['Input', 'Output', 'Config']) {
-    await subTab(page, `${slot} schema`).click();
-    await expect(subTab(page, `${slot} schema`)).toHaveAttribute('aria-selected', 'true');
-    await expect(tab(page, 'Processor')).toHaveAttribute('aria-selected', 'true');
-    await expect(inspector(page).locator('.kind')).toHaveText(`schema · ${slot.toLowerCase()} of archive-expander`);
-    const def = field(page, 'Definition');
-    await expect(def).toHaveCount(1);
-    expect(await def.inputValue(), `${slot} schema definition`).toMatch(PRETTY);
-  }
-  // the chosen sub-tab is kept while the same step stays picked, also across the top tabs
-  await tab(page, 'Step').click();
-  await tab(page, 'Processor').click();
-  await expect(subTab(page, 'Config schema')).toHaveAttribute('aria-selected', 'true');
-  // a new pick opens the first sub-tab
-  await pickStep(page, id.s2!);
-  await tab(page, 'Processor').click();
-  await expect(subTab(page, 'Processor')).toHaveAttribute('aria-selected', 'true');
-  // the Processor sub-tab: Source hash and Instance id, the slots as read-only rows, no schema editors
+  await expect(childLabels(page, 'Processor')).toHaveText(['Input schema', 'Output schema', 'Config schema']);
+  for (const slot of ['Input', 'Output', 'Config']) await expect(childTab(page, 'Processor', `${slot} schema`)).toHaveAttribute('aria-selected', 'false');
+  // Processor's own fields: Source hash and Instance id, the slots as read-only rows, no schema editors
   await expect(field(page, 'Source hash')).toHaveValue(/\S/);
   await expect(field(page, 'Instance id')).toHaveCount(1);
   await expect(field(page, 'Definition')).toHaveCount(0);
   for (const slot of ['Input', 'Output', 'Config']) {
     await expect(inspector(page).locator('dt', { hasText: `${slot} schema` }).locator('xpath=following-sibling::dd[1]')).not.toHaveText('none');
   }
-  // no In/Out/Config buttons
   await expect(inspector(page).getByRole('button', { name: /^(In|Out|Config)$/ })).toHaveCount(0);
+  for (const slot of ['Input', 'Output', 'Config']) {
+    await childTab(page, 'Processor', `${slot} schema`).click();
+    await expect(childTab(page, 'Processor', `${slot} schema`)).toHaveAttribute('aria-selected', 'true');
+    await expect(tab(page, 'Processor')).toHaveAttribute('aria-selected', 'true');
+    await expect(inspector(page).locator('.kind')).toHaveText(`schema · ${slot.toLowerCase()} of archive-expander`);
+    const def = field(page, 'Definition');
+    await expect(def).toHaveCount(1);
+    expect(await def.inputValue(), `${slot} schema definition`).toMatch(PRETTY);
+  }
+  // the parent tab again: the processor's own fields, no child chosen
+  await tab(page, 'Processor').click();
+  await expect(field(page, 'Source hash')).toHaveCount(1);
+  await expect(childTab(page, 'Processor', 'Config schema')).toHaveAttribute('aria-selected', 'false');
+  // a new pick opens Step with no child
+  await pickStep(page, id.s2!);
+  await expect(tab(page, 'Step')).toHaveAttribute('aria-selected', 'true');
+  await expect(field(page, 'Name')).toHaveValue('e2e-tab-next');
 });
 
 test('the entry-condition picker opens by mouse, picks by a keyboard letter, and the card\'s pill letter changes', async ({ page }) => {

@@ -3,19 +3,27 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { board } from '../../design/boardFixtures';
 import { setPayload } from '../../design/payloads';
 import { prettyJson } from '../../model/json';
-import { openOn, REQUIRED, subTab } from './testBoard';
+import { childNames, childTab, openOn, REQUIRED, topTab } from './testBoard';
 
 afterEach(() => sessionStorage.clear());
 
 describe('SchemaTab', () => {
-  it('the schemas are sub-tabs of Processor, in a second, named row; the top tabs stay Step, Processor, the workflows', () => {
+  it('the schemas are children of Processor, in a second, named row, none chosen at first; the top row is Step, Processor', () => {
     openOn('Processor');
     const top = within(screen.getByRole('tablist', { name: 'Inspector tabs' })).getAllByRole('tab').map((t) => t.textContent);
-    expect(top).toEqual(['Step', 'Processor', 'daily']);
+    expect(top).toEqual(['Step', 'Processor']);
+    expect(childNames('Processor')).toEqual(['Input schema', 'Config schema']);
     const subs = within(screen.getByRole('tablist', { name: 'Processor tabs' })).getAllByRole('tab');
-    expect(subs.map((t) => t.textContent)).toEqual(['Processor', 'Input schema', 'Config schema']);
-    expect(subs[0]).toHaveAttribute('aria-selected', 'true');
+    expect(subs.every((t) => t.getAttribute('aria-selected') === 'false')).toBe(true);
     expect(subs[0]!.className).toContain('ins-subtab');
+    // the processor's own fields show until a child is chosen
+    expect(screen.getByLabelText('Source hash')).toBeInTheDocument();
+    fireEvent.click(childTab('Processor', 'Input schema'));
+    expect(screen.getByText('schema · input of proc')).toBeInTheDocument();
+    // the parent tab again: its own fields
+    fireEvent.click(topTab('Processor'));
+    expect(screen.getByLabelText('Source hash')).toBeInTheDocument();
+    expect(subs.every((t) => t.getAttribute('aria-selected') === 'false')).toBe(true);
   });
   it('the config schema\'s entity form: head, kind line, fields and its Definition as pretty JSON', () => {
     openOn('Config schema');
@@ -48,7 +56,7 @@ describe('SchemaTab', () => {
     fireEvent.change(screen.getByLabelText('Definition'), { target: { value: '{"type":"object","x":1}' } });
     expect(store.state().processors.p1!.configSchemaId).toBe(copyId);
     expect(Object.keys(store.state().schemas)).toHaveLength(3);
-    expect(subTab('Config schema')).toHaveAttribute('aria-selected', 'true');
+    expect(childTab('Processor', 'Config schema')).toHaveAttribute('aria-selected', 'true');
   });
   it('the schema name edits the copy too', () => {
     const store = openOn('Config schema');
@@ -57,16 +65,17 @@ describe('SchemaTab', () => {
     expect(store.state().schemas['s-cfg']!.name).toBe('cfg');
     expect(screen.getByLabelText('Unique name')).toHaveTextContent('renamed 1.0.0');
   });
-  it('the payload is checked against the config schema, in the workflow tab', () => {
+  it('the payload is checked against the config schema, in the workflow child tab of Step', () => {
     const store = openOn('daily');
     expect(document.querySelector('.in-problem')).not.toBeNull(); // '{}' lacks the required key
     act(() => store.edit((b) => setPayload(b, 'daily', 'fetch', '{"k":1}', () => 'n')));
     expect(document.querySelector('.in-problem')).toBeNull();
     expect(screen.getByText('✓ checked against cfg 1.0.0; Save checks it again')).toBeInTheDocument();
   });
-  it('a processor with no schemas: the Processor sub-tab alone', () => {
+  it('a processor with no schemas: no child row is drawn', () => {
     openOn('Processor', [{ kind: 'step', id: 'fetch' }], board());
-    expect(within(screen.getByRole('tablist', { name: 'Processor tabs' })).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Processor']);
+    expect(screen.queryByRole('tablist', { name: 'Processor tabs' })).toBeNull();
+    expect(screen.getByLabelText('Source hash')).toBeInTheDocument();
   });
   it('a step without a processor: no sub-tabs, "none"', () => {
     const b0 = board();

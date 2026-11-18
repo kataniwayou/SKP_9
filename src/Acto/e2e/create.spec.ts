@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures';
 import {
   caNode, cacheEdge, cacheTool, drawCacheLink, drawEntry, drawWire, dropTool, entryEdge, field, inspector, openAt, outLine, regionPoint, renameTo,
-  saveButton, stNode, toolbar, toolboxStep, PROC_A, PROC_B, wfNode, wireEdge, workflowTool, pickStep, pickWorkflow,
+  saveButton, stNode, toolbar, toolboxStep, PROC_A, PROC_B, wfNode, wireEdge, workflowTool, pickStep, selectWorkflowAlone,
 } from './helpers';
 
 // Spec §7: the toolbox drops (a triangle, a cache, a step), a wire, an entry arrow from the tip, a cache link from the back, and the
@@ -60,7 +60,7 @@ test('a wire from a step\'s right handle, an entry arrow from the triangle\'s ti
   const s1 = await dropTool(page, toolboxStep(page, PROC_A), 'step', await regionPoint(page, { x: 400, y: 130 }));
   const s2 = await dropTool(page, toolboxStep(page, PROC_B), 'step', await regionPoint(page, { x: 700, y: 130 }));
   const cache = await dropTool(page, cacheTool(page), 'cache', await regionPoint(page, { x: 200, y: 360 }));
-  await pickWorkflow(page, wf);
+  await selectWorkflowAlone(page, wf);
   await renameTo(page, 'e2e-create-wf');
   const n0 = await (async () => { const t = await saveButton(page).innerText(); return Number(/·\s*(\d+)/.exec(t)![1]); })();
 
@@ -72,7 +72,7 @@ test('a wire from a step\'s right handle, an entry arrow from the triangle\'s ti
   // the entry arrow, tip -> s1: solid, from the triangle
   await drawEntry(page, wfNode(page, wf), stNode(page, s1));
   await expect(entryEdge(page, wf, s1)).toHaveCount(1);
-  await pickWorkflow(page, wf);
+  await selectWorkflowAlone(page, wf);
   await expect(inspector(page)).toContainText('Entry step');
   await expect(inspector(page)).toContainText(/Entry steps\s*archive-expander/);
 

@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures';
 import {
-  allSteps, clearOutput, dropTool, field, inspector, openAt, openFitted, outLine, pickStep, pickWorkflow, regionPoint, selbar, stNode, tabLabels, toolbar, toolboxStep,
+  allSteps, clearOutput, dropTool, field, inspector, openAt, openFitted, outLine, pickStep, selectWorkflowAlone, regionPoint, selbar, stNode, tabLabels, toolbar, toolboxStep,
   wfNode, workflowTool, PROC_A,
 } from './helpers';
 import { seed } from './seed';
@@ -77,7 +77,7 @@ test('Start and Stop: a real workflow\'s toolbar offers the right one for its st
   const stopped = real.find((w) => !w.running);
   const running = real.find((w) => w.running);
   if (stopped) {
-    await pickWorkflow(page, stopped.id);
+    await selectWorkflowAlone(page, stopped.id);
     await expect(wfNode(page, stopped.id).locator('.tri-st')).toHaveText('■ stopped');
     await expect(tb.getByRole('button', { name: '▶ Start', exact: true })).toBeEnabled();
     await expect(tb.getByRole('button', { name: '■ Stop', exact: true })).toHaveCount(0);
@@ -85,14 +85,14 @@ test('Start and Stop: a real workflow\'s toolbar offers the right one for its st
     await expect(tb.getByRole('button', { name: 'Save' })).toHaveCount(0); // Save is the board's one button, not a triangle's
   } else test.info().annotations.push({ type: 'skipped', description: 'no stopped workflow on the stack' });
   if (running) {
-    await pickWorkflow(page, running.id);
+    await selectWorkflowAlone(page, running.id);
     await expect(wfNode(page, running.id).locator('.tri-st')).toHaveText('● running');
     await expect(tb.getByRole('button', { name: '■ Stop', exact: true })).toBeEnabled();
     await expect(tb.getByRole('button', { name: '▶ Start', exact: true })).toHaveCount(0);
   } else test.info().annotations.push({ type: 'skipped', description: 'no running workflow on the stack' });
   // Ctrl+click of a second triangle: both selected, the bar offers Start · Stop · Delete for both (looked at, never pressed)
   if (stopped && running) {
-    await pickWorkflow(page, stopped.id);
+    await selectWorkflowAlone(page, stopped.id);
     await wfNode(page, running.id).locator('.tri-nm').click({ modifiers: ['Control'] });
     await expect(selbar(page).getByRole('button')).toHaveText(['▶ Start', '■ Stop', 'Delete']);
     await page.keyboard.press('Escape');
@@ -107,7 +107,7 @@ test('Start on a never-saved workflow says it is not saved yet and sends nothing
   const step = await dropTool(page, toolboxStep(page, PROC_A), 'step', await regionPoint(page, { x: 450, y: 130 }));
   void step;
   const name = await wfNode(page, wf).locator('.tri-nm').innerText();
-  await pickWorkflow(page, wf);
+  await selectWorkflowAlone(page, wf);
   const start = toolbar(page, 'workflow').getByRole('button', { name: '▶ Start', exact: true });
   await expect(start).toBeVisible();
   await expect(toolbar(page, 'workflow').getByRole('button', { name: '■ Stop', exact: true })).toHaveCount(0);

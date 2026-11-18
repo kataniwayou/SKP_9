@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { openAt, openFitted, out, pickStep, pickWorkflow, selbar, waitLoaded } from './helpers';
+import { openAt, openFitted, out, pickStep, selectWorkflowAlone, selbar, waitLoaded } from './helpers';
 import { seed } from './seed';
 
 // Panels and theme, Output, and no keyboard hints. Nothing here writes to BaseAPI.
@@ -179,7 +179,7 @@ test('no keyboard hints anywhere: no Ctrl+ or ⌘ in any text, title, label or p
   });
   await openAt(page);
   expect(await hints(), 'fresh board').toEqual([]);
-  await pickWorkflow(page, id.w!);
+  await selectWorkflowAlone(page, id.w!);
   expect(await hints(), 'a triangle picked').toEqual([]);
   await pickStep(page, id.s1!);
   expect(await hints(), 'a step picked').toEqual([]);

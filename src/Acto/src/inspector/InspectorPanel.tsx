@@ -6,7 +6,7 @@ import type { BoardStore } from '../design/boardStore';
 import type { GhostStore } from '../design/ghosts';
 import { useLive, useLiveStore } from '../live/LiveContext';
 import { statusOf } from '../live/liveState';
-import { activeTab, focusKey, focusOf, keepChosen, processorTabsOf, tabsOf, type SubTabId, type TabId } from './tabs';
+import { activeChild, activeTab, focusKey, focusOf, keepChosen, listOf, processorTabsOf, stepTabsOf, tabsOf, type ChildId, type Chosen, type TabId } from './tabs';
 import { AssignmentTab } from './tabs/AssignmentTab';
 import { CacheTab } from './tabs/CacheTab';
 import { GhostTab, ghostName } from './tabs/GhostTab';
@@ -68,9 +68,9 @@ function Header({ store, kind }: { store: BoardStore; kind: string }) {
   );
 }
 
-/** A row of tabs: the Inspector's own (`ins-tab`) or the Processor tab's sub-tabs (`ins-subtab`, a lighter second row). */
+/** A row of tabs: the Inspector's own (`ins-tab`) or a parent's children (`ins-subtab`, a lighter second row; none chosen = null). */
 function TabBar<T extends string>({ tabs, active, choose, label = 'Inspector tabs', cls = 'ins-tab', panel = 'ins-tabpanel' }: {
-  tabs: readonly { id: T; label: string; hue?: string }[]; active: T; choose: (t: T) => void; label?: string; cls?: string; panel?: string;
+  tabs: readonly { id: T; label: string; hue?: string }[]; active: T | null; choose: (t: T) => void; label?: string; cls?: string; panel?: string;
 }) {
   return (
     <div className={`${cls}s`} role="tablist" aria-label={label}>
@@ -84,32 +84,34 @@ function TabBar<T extends string>({ tabs, active, choose, label = 'Inspector tab
   );
 }
 
-type Chosen<T> = { key: string | null; tab: T } | null;
-
 /**
- * The Processor tab: a second row of sub-tabs, Processor then a schema per filled slot [user, 2026-11-18], and the chosen
- * one's form. The sub-tab follows the top tabs' rule: the first on a new pick, the chosen one while the pick stays.
+ * Step and Processor, the two parents [user, 2026-11-18]: the parent's own fields, or the chosen child's (Step: an
+ * assignment, Processor: a schema). The child row is drawn only when it has tabs; none is chosen at first.
  */
-function ProcessorTabs({ ctx, stepId, pickKey: key, chosen, choose }: {
-  ctx: { state: BoardState; base: BoardState; edit: Edit }; stepId: string; pickKey: string | null; chosen: Chosen<SubTabId>; choose: (t: SubTabId) => void;
+function ParentTab({ tab, ctx, sel, stepId, child, choose }: {
+  tab: 'step' | 'processor'; ctx: { state: BoardState; base: BoardState; edit: Edit }; sel: InspectorSelection; stepId: string;
+  child: ChildId | null; choose: (c: ChildId) => void;
 }) {
-  const subs = processorTabsOf(ctx.state, ctx.state.steps[stepId]?.processorId ?? null);
-  const sub = activeTab(subs, key, chosen);
-  if (sub === null) return <ProcessorTab {...ctx} stepId={stepId} />;
+  const children = tab === 'step' ? stepTabsOf(sel, ctx.state, stepId) : processorTabsOf(ctx.state, ctx.state.steps[stepId]?.processorId ?? null);
+  const own = tab === 'step' ? <StepTab {...ctx} id={stepId} /> : <ProcessorTab {...ctx} stepId={stepId} />;
+  if (children.length === 0) return own;
   return (
     <>
-      <TabBar tabs={subs} active={sub} choose={choose} label="Processor tabs" cls="ins-subtab" panel="ins-subpanel" />
-      <div role="tabpanel" id="ins-subpanel" aria-labelledby={`ins-subtab-${sub}`}>
-        {sub === 'processor' ? <ProcessorTab key="processor" {...ctx} stepId={stepId} />
-          : <SchemaTab key={sub} {...ctx} stepId={stepId} slot={sub.slice('schema:'.length) as Slot} />}
-      </div>
+      <TabBar tabs={children} active={child} choose={choose} label={tab === 'step' ? 'Step tabs' : 'Processor tabs'} cls="ins-subtab" panel="ins-subpanel" />
+      {child === null ? own : (
+        <div role="tabpanel" id="ins-subpanel" aria-labelledby={`ins-subtab-${child}`}>
+          {child.startsWith('assignment:')
+            ? <AssignmentTab key={child} {...ctx} stepId={stepId} workflowId={child.slice('assignment:'.length)} />
+            : <SchemaTab key={child} {...ctx} stepId={stepId} slot={child.slice('schema:'.length) as Slot} />}
+        </div>
+      )}
     </>
   );
 }
 
-function TabBody({ tab, focus, state, base, edit, ghosts, sub }: {
+function TabBody({ tab, focus, state, base, edit, ghosts, sel, child, choose }: {
   tab: TabId; focus: Pick; state: BoardState; base: BoardState; edit: Edit; ghosts: Ghosts;
-  sub: { key: string | null; chosen: Chosen<SubTabId>; choose: (t: SubTabId) => void };
+  sel: InspectorSelection; child: ChildId | null; choose: (c: ChildId) => void;
 }) {
   const ctx = { state, base, edit };
   if (tab === 'workflow' && focus.kind === 'workflow') return <WorkflowTab {...ctx} id={focus.id} />;
@@ -119,23 +121,21 @@ function TabBody({ tab, focus, state, base, edit, ghosts, sub }: {
     const g = ghosts.get(focus.key);
     return g ? <GhostTab state={state} ghosts={ghosts} item={g} /> : null;
   }
-  if (focus.kind !== 'step') return null;
-  if (tab === 'step') return <StepTab {...ctx} id={focus.id} />;
-  if (tab === 'processor') return <ProcessorTabs ctx={ctx} stepId={focus.id} pickKey={sub.key} chosen={sub.chosen} choose={sub.choose} />;
-  if (tab.startsWith('assignment:')) return <AssignmentTab {...ctx} stepId={focus.id} workflowId={tab.slice('assignment:'.length)} />;
+  if (focus.kind === 'step' && (tab === 'step' || tab === 'processor')) {
+    return <ParentTab tab={tab} ctx={ctx} sel={sel} stepId={focus.id} child={child} choose={choose} />;
+  }
   return null;
 }
 
 /**
  * The Inspector (spec §5): tabs for what is picked, read from and edited through the board store (one state, one
- * history). The first tab opens on a new pick; the chosen tab is kept while the same thing stays picked. Several
- * non-triangle picks show the numbered pick list.
+ * history). A new pick opens its first tab with no child; the chosen tab and child are kept while the same thing stays
+ * picked and they still exist. Several picks (or only triangles, two or more) show the numbered pick list.
  */
 export function InspectorPanel({ store, selection, ghosts }: { store: BoardStore; selection: InspectorSelection; ghosts: Ghosts }) {
   const state = useSyncExternalStore(store.subscribe, store.state);
   useSyncExternalStore(ghosts.subscribe, ghosts.ghosts);
-  const [chosen, setChosen] = useState<Chosen<TabId>>(null);
-  const [chosenSub, setChosenSub] = useState<Chosen<SubTabId>>(null);
+  const [chosen, setChosen] = useState<Chosen | null>(null);
   const edit: Edit = (fn, merge) => store.edit(fn, merge);
   const focus = focusOf(selection);
   const key = focusKey(selection);
@@ -145,20 +145,21 @@ export function InspectorPanel({ store, selection, ghosts }: { store: BoardStore
     setSeen(key);
     const kept = keepChosen(chosen, key);
     if (kept !== chosen) setChosen(kept);
-    const keptSub = keepChosen(chosenSub, key);
-    if (keptSub !== chosenSub) setChosenSub(keptSub);
   }
+  const list = listOf(selection);
   const tabs = tabsOf(selection, state, ghosts);
   const tab = activeTab(tabs, key, chosen);
-  const list = selection.picks.filter((p) => p.kind !== 'workflow').length > 1;
+  const children = focus?.kind === 'step' && tab === 'step' ? stepTabsOf(selection, state, focus.id)
+    : focus?.kind === 'step' && tab === 'processor' ? processorTabsOf(state, state.steps[focus.id]?.processorId ?? null) : [];
+  const child = activeChild(children, key, tab, chosen);
   return (
     <>
-      <Header store={store} kind={list ? `${selection.picks.length} selected` : tab !== null && focus ? focus.kind : ''} />
-      {tab !== null && focus && <TabBar tabs={tabs} active={tab} choose={(t) => setChosen({ key, tab: t })} />}
-      <div className="pb" {...(tab !== null ? { role: 'tabpanel', id: 'ins-tabpanel', 'aria-labelledby': `ins-tab-${tab}` } : {})}>
-        {list ? <PickList picks={selection.picks} state={state} ghosts={ghosts} />
-          : tab !== null && focus ? <TabBody key={`${key}|${tab}`} tab={tab} focus={focus} state={state} base={store.base()} edit={edit} ghosts={ghosts}
-            sub={{ key, chosen: chosenSub, choose: (t) => setChosenSub({ key, tab: t }) }} />
+      <Header store={store} kind={list ? `${list.length} selected` : tab !== null && focus ? focus.kind : ''} />
+      {!list && tab !== null && focus && <TabBar tabs={tabs} active={tab} choose={(t) => setChosen({ key, tab: t, child: null })} />}
+      <div className="pb" {...(!list && tab !== null ? { role: 'tabpanel', id: 'ins-tabpanel', 'aria-labelledby': `ins-tab-${tab}` } : {})}>
+        {list ? <PickList picks={list} state={state} ghosts={ghosts} />
+          : tab !== null && focus ? <TabBody key={`${key}|${tab}|${child ?? ''}`} tab={tab} focus={focus} state={state} base={store.base()} edit={edit} ghosts={ghosts}
+            sel={selection} child={child} choose={(c) => setChosen({ key, tab, child: c })} />
           : <BoardSummary state={state} />}
       </div>
     </>

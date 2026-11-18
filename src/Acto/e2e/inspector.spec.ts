@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { addItem, caNode, field, itemKey, itemValue, inspector, openAt, payloadOf, pickCache, pickStep, pickWorkflow, pretty, saveButton, stNode, subTab, tab, wfNode, wireEdge } from './helpers';
+import { addItem, caNode, field, itemKey, itemValue, inspector, openAt, payloadOf, pickCache, pickStep, selectWorkflowAlone, pretty, saveButton, stNode, childTab, tab, wfNode, wireEdge } from './helpers';
 import { seed } from './seed';
 
 // Spec §6–§7: every field of a triangle, a step and a cache edits through the Inspector; the payload check; one undo history for the whole
@@ -27,7 +27,7 @@ const redo = (page: import('@playwright/test').Page) => inspector(page).getByRol
 test('a triangle\'s Inspector: name, version, cron with its reading, description, entry steps, caches, location and assignments', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
-  await pickWorkflow(page, id.wa!);
+  await selectWorkflowAlone(page, id.wa!);
   await expect(inspector(page).locator('.ph .cnt')).toHaveText('workflow');
   await expect(inspector(page).locator('[aria-label="Unique name"]')).toHaveText('e2e-ins-a 1.0.0');
   await expect(field(page, 'Name')).toHaveValue('e2e-ins-a');
@@ -83,8 +83,8 @@ test('a step\'s Inspector: shared name, version, description and entry condition
   await expect(field(page, 'Name')).toHaveValue('archive-expander');
   await expect(inspector(page).locator('dt', { hasText: 'Liveness' })).toBeVisible();
   await expect(field(page, 'Source hash')).toHaveValue(/^\S+$/);
-  // its input schema is a sub-tab of the Processor tab, the definition pretty JSON [user, 2026-11-18]
-  await subTab(page, 'Input schema').click();
+  // its input schema is a child tab of Processor, the definition pretty JSON [user, 2026-11-18]
+  await childTab(page, 'Processor', 'Input schema').click();
   await expect(field(page, 'Definition')).toHaveValue(/\n {2}"/);
   await tab(page, 'Step').click();
 
@@ -126,7 +126,7 @@ test('a cache\'s Inspector: name, version, description, root and items', async (
 test('the payload field checks JSON as it is typed; an assignment in the triangle\'s list edits and deletes', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
-  await pickWorkflow(page, id.wa!);
+  await selectWorkflowAlone(page, id.wa!);
   const asg = inspector(page).getByTestId('assignments');
   const first = asg.locator('.in-assign').filter({ has: page.locator('b', { hasText: 'e2e-ins-first' }) });
   const box = first.locator('textarea');
@@ -148,7 +148,7 @@ test('the payload field checks JSON as it is typed; an assignment in the triangl
   // Remove assignment unlinks it
   await inspector(page).getByRole('button', { name: 'Remove assignment' }).click();
   await expect(stNode(page, id.s1!).locator('.key-chip')).toHaveCount(0);
-  await pickWorkflow(page, id.wa!);
+  await selectWorkflowAlone(page, id.wa!);
   await expect(asg.locator('.in-assign')).toHaveCount(1);
   await asg.getByRole('button', { name: 'Delete' }).click();
   await expect(inspector(page)).toContainText('No assignments.');
@@ -159,9 +159,9 @@ test('one undo history for the whole board: edits across two workflows undo and 
   await openAt(page);
   await expect(undo(page)).toBeDisabled();
   await expect(redo(page)).toBeDisabled();
-  await pickWorkflow(page, id.wa!);
+  await selectWorkflowAlone(page, id.wa!);
   await field(page, 'Description').fill('edit one, in A');
-  await pickWorkflow(page, id.wb!);
+  await selectWorkflowAlone(page, id.wb!);
   await field(page, 'Description').fill('edit two, in B');
   await pickCache(page, id.c1!);
   await field(page, 'Root').fill('edit-three');
@@ -171,16 +171,16 @@ test('one undo history for the whole board: edits across two workflows undo and 
   await undo(page).click();
   await expect(field(page, 'Root')).toHaveValue('e2e');
   await expect(redo(page)).toBeEnabled();
-  await pickWorkflow(page, id.wb!);
+  await selectWorkflowAlone(page, id.wb!);
   await expect(field(page, 'Description')).toHaveValue('edit two, in B');
   await undo(page).click();
   await expect(field(page, 'Description')).toHaveValue('');
   await expect(wfNode(page, id.wb!).locator('.unsaved-mark')).toHaveCount(0);
-  await pickWorkflow(page, id.wa!);
+  await selectWorkflowAlone(page, id.wa!);
   await expect(field(page, 'Description')).toHaveValue('edit one, in A');
 
   // Ctrl+Z with the focus on the board (the browser keeps it while typing in a field): A's edit goes too
-  await pickWorkflow(page, id.wa!);
+  await selectWorkflowAlone(page, id.wa!);
   await page.keyboard.press('Control+z');
   await expect(field(page, 'Description')).toHaveValue('');
   await expect(undo(page)).toBeDisabled();
@@ -190,7 +190,7 @@ test('one undo history for the whole board: edits across two workflows undo and 
   await page.keyboard.press('Control+y');
   await expect(field(page, 'Description')).toHaveValue('edit one, in A');
   await page.keyboard.press('Control+y');
-  await pickWorkflow(page, id.wb!);
+  await selectWorkflowAlone(page, id.wb!);
   await expect(field(page, 'Description')).toHaveValue('edit two, in B');
   await page.keyboard.press('Control+Shift+z');
   await expect(redo(page)).toBeDisabled();
@@ -208,7 +208,7 @@ test('one undo history for the whole board: edits across two workflows undo and 
 test('a click on Remove assignment right after typing a one-line payload removes it', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
-  await pickWorkflow(page, id.wa!);
+  await selectWorkflowAlone(page, id.wa!);
   await pickStep(page, id.s1!);
   await (await payloadOf(page, 'e2e-ins-a')).fill('{"a":1,"b":2,"c":3}');
   await expect(stNode(page, id.s1!).locator('.key-chip')).toContainText('3 key');
