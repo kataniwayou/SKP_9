@@ -7,44 +7,42 @@ vi.mock('@xyflow/react', async (orig) => {
   return { ...m, useReactFlow: () => ({ ...m.useReactFlow(), setCenter }) };
 });
 
+import { board } from '../design/boardFixtures';
 import { Board } from './Board';
-import { bw } from './fixtures';
+import type { BoardView } from './toFlow';
 
-const frames = () => [...document.querySelectorAll('.react-flow__minimap [data-mini-frame]')] as SVGElement[];
+const view = (over: Partial<BoardView> = {}): BoardView => ({ workflow: null, picks: [], live: () => 'stopped', ...over });
+const mini = (sel: string) => [...document.querySelectorAll(`.react-flow__minimap ${sel}`)] as SVGElement[];
 
 describe('Board minimap', () => {
-  it('draws each frame with its name and only frames', async () => {
-    render(<Board workflows={[bw('w1', ['a']), bw('w2', [], [], { x: 700, y: 0 })]} picks={[]} onPick={() => {}} />);
-    await vi.waitFor(() => expect(frames()).toHaveLength(2));
-    expect(frames().map((f) => f.querySelector('text')?.textContent)).toEqual(['w1-name', 'w2-name']);
-    expect(document.querySelectorAll('.react-flow__minimap-node')).toHaveLength(0);
+  it('draws a mark per triangle, step and cache', async () => {
+    render(<Board state={board()} view={view()} onPick={() => {}} />);
+    await vi.waitFor(() => expect(mini('[data-mini-triangle]')).toHaveLength(2));
+    expect(mini('[data-mini-step]')).toHaveLength(3);
+    expect(mini('[data-mini-cache]')).toHaveLength(1);
   });
 
-  it('outlines a picked frame in the accent colour and the others by state', async () => {
-    render(<Board workflows={[bw('w1', ['a']), bw('w2', [], [], { x: 700, y: 0 })]}
-      picks={[{ kind: 'workflow', workflowId: 'w1' }]} onPick={() => {}} />);
-    await vi.waitFor(() => expect(frames()).toHaveLength(2));
-    // the theme's accent token, not a fixed pink; the others by their run state's token
-    const stroke = (i: number) => (frames()[i]!.querySelector('rect') as SVGRectElement).style.stroke;
-    expect(stroke(0)).toBe('var(--accent)');
-    expect(stroke(1)).toMatch(/^var\(--st-/);
+  it('colours triangles by run state, steps by processor and caches grey', async () => {
+    render(<Board state={board()} view={view({ live: (id) => (id === 'daily' ? 'running' : id === 'hourly' ? 'stopped' : 'unknown') })} onPick={() => {}} />);
+    await vi.waitFor(() => expect(mini('[data-mini-triangle]')).toHaveLength(2));
+    const fill = (id: string) => (mini(`[data-mini-triangle="${id}"]`)[0] as SVGElement).style.fill;
+    expect(fill('daily')).toBe('var(--st-on)');
+    expect(fill('hourly')).toBe('var(--st-off)');
+    expect(mini('[data-mini-cache]')[0]!.style.fill).toBe('var(--idle)');
+    expect(mini('[data-mini-step]')[0]!.style.fill).toMatch(/^(#|rgb)/);
   });
 
-  it('writes a frame name in the band above its steps, never over the step blocks', async () => {
-    render(<Board workflows={[bw('w1', ['a', 'b']), bw('w2', [], [], { x: 700, y: 0 })]} picks={[]} onPick={() => {}} />);
-    await vi.waitFor(() => expect(document.querySelectorAll('.react-flow__minimap [data-mini-step]').length).toBe(2));
-    const text = frames()[0]!.querySelector('text')!;
-    expect(text.textContent).toBe('w1-name');
-    const bottom = Number(text.getAttribute('y')) + 0.22 * Number(text.getAttribute('font-size'));
-    const tops = [...document.querySelectorAll('.react-flow__minimap [data-mini-step]')].map((r) => Number(r.getAttribute('y')));
-    expect(bottom).toBeLessThanOrEqual(Math.min(...tops));
+  it('outlines a picked item in the accent colour', async () => {
+    render(<Board state={board()} view={view({ picks: [{ kind: 'workflow', id: 'daily' }] })} onPick={() => {}} />);
+    await vi.waitFor(() => expect(mini('[data-mini-triangle]')).toHaveLength(2));
+    expect((mini('[data-mini-triangle="daily"]')[0] as SVGElement).style.stroke).toBe('var(--accent)');
+    expect((mini('[data-mini-triangle="hourly"]')[0] as SVGElement).style.stroke).toBe('none');
   });
 
-  it('centres the board on a clicked frame at the current zoom', async () => {
-    const w = bw('w1', ['a'], [], { x: 100, y: 200 });
-    render(<Board workflows={[w]} picks={[]} onPick={() => {}} initialZoom={0.5} />);
-    await vi.waitFor(() => expect(frames()).toHaveLength(1));
-    fireEvent.click(frames()[0]!.querySelector('rect')!);
-    expect(setCenter).toHaveBeenCalledWith(w.frame.x + w.frame.w / 2, w.frame.y + w.frame.h / 2, { zoom: 0.5 });
+  it('centres the board on a clicked mark at the current zoom', async () => {
+    render(<Board state={board()} view={view()} onPick={() => {}} initialZoom={0.5} />);
+    await vi.waitFor(() => expect(mini('[data-mini-cache]')).toHaveLength(1));
+    fireEvent.click(mini('[data-mini-cache]')[0]!);
+    expect(setCenter).toHaveBeenCalledWith(0 + 160 / 2, -100 + 56 / 2, { zoom: 0.5 });
   });
 });

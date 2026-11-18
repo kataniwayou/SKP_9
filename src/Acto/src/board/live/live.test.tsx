@@ -1,11 +1,12 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
 import { LiveStoreProvider } from '../../live/LiveContext';
 import type { LiveState } from '../../live/liveState';
 import { liveStub } from '../../test/liveStub';
 import { Board } from '../Board';
-import { bw } from '../fixtures';
+import { board } from '../../design/boardFixtures';
+import { useWorkflowStatus } from '../../live/LiveContext';
 import { HealthDot } from './HealthDot';
 import { StateBadge } from './StateBadge';
 
@@ -38,16 +39,19 @@ describe('live state', () => {
     renderWithLive(<HealthDot processorId="" />, { processorsKnown: 'known', processors: new Map() });
     expect(screen.getByTestId('health-dot')).toHaveAttribute('data-health', 'undetermined');
   });
-  it('marks a running workflow on the board: badge, wire class', async () => {
+  it('marks a running workflow on the board: triangle state, wire class', async () => {
     const stub = liveStub();
-    stub.known(['w1'], {});
-    const wires = [{ id: 'a>b', from: 'a', to: 'b', condition: 1 }];
-    render(<LiveStoreProvider value={stub}><Board workflows={[bw('w1', ['a', 'b'], wires)]} picks={[]} onPick={() => {}} initialZoom={1} /></LiveStoreProvider>);
-    await screen.findByText('a-name');
+    stub.known(['daily'], {});
+    const Live = () => {
+      const daily = useWorkflowStatus('daily');
+      return <Board state={board()} view={{ workflow: null, picks: [], live: (id) => (id === 'daily' ? daily : 'stopped') }} onPick={() => {}} initialZoom={1} />;
+    };
+    render(<LiveStoreProvider value={stub}><Live /></LiveStoreProvider>);
+    await screen.findByText('fetch-orders');
     expect(screen.getByText('Running')).toBeInTheDocument();
     expect(document.querySelector('.wire.running')).not.toBeNull();
-    stub.known([], {});
-    expect(await screen.findByText('Stopped')).toBeInTheDocument();
+    act(() => stub.known([], {}));
+    expect(await screen.findAllByText('Stopped')).toHaveLength(2);
     expect(document.querySelector('.wire.running')).toBeNull();
   });
 });

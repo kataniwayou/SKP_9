@@ -1,49 +1,68 @@
 import { describe, expect, it } from 'vitest';
-import { bw } from './fixtures';
-import { HEADER_H, STEP_H, STEP_W } from './geometry';
-import { toFlow } from './toFlow';
+import { board } from '../design/boardFixtures';
+import type { Pick } from './selection';
+import { toFlow, type BoardView } from './toFlow';
+
+const view = (over: Partial<BoardView> = {}): BoardView => ({ workflow: null, picks: [], live: () => 'stopped', ...over });
+const dim = (x: { className?: string | undefined }) => (x.className ?? '').split(' ').includes('dim');
 
 describe('toFlow', () => {
-  it('nests steps in their frame and gives shared steps one node per frame', () => {
-    const { nodes } = toFlow([bw('w1', ['a', 's']), bw('w2', ['s'])]);
-    expect(nodes.filter((n) => n.type === 'step').map((n) => [n.id, n.parentId])).toEqual([
-      ['st:w1:a', 'wf:w1'], ['st:w1:s', 'wf:w1'], ['st:w2:s', 'wf:w2']]);
+  const b = board();
+  it('makes one node per workflow, step and cache, with the handles React Flow wires', () => {
+    const { nodes } = toFlow(b, view());
+    expect(nodes.map((n) => n.id).sort()).toEqual(['ca:c1', 'st:expand', 'st:fetch', 'st:lonely', 'wf:daily', 'wf:hourly']);
+    const handles = (id: string) => nodes.find((n) => n.id === id)!.handles!.map((h) => `${h.type}:${h.id}:${h.position}`);
+    expect(handles('wf:daily')).toEqual(['source:tip:right', 'source:back:left']);
+    expect(handles('st:fetch')).toEqual(['target:in:left', 'source:out:right']);
+    expect(handles('ca:c1')).toEqual(['target:in:top']);
+    expect(nodes.find((n) => n.id === 'st:fetch')!.position).toEqual({ x: 200, y: 200 });
   });
-  it('makes one coloured edge per wire', () => {
-    const { edges } = toFlow([bw('w1', ['a', 'b'], [{ id: 'a>b', from: 'a', to: 'b', condition: 4 }])]);
-    expect(edges).toHaveLength(1);
-    expect(edges[0]!.data).toMatchObject({ condition: 4 });
+  it('makes one edge per wire, entry arrow and cache link', () => {
+    const { edges } = toFlow(b, view());
+    expect(edges.map((e) => [e.id, e.type, e.source, e.sourceHandle, e.target, e.targetHandle])).toEqual([
+      ['wire:fetch:expand', 'wire', 'st:fetch', 'out', 'st:expand', 'in'],
+      ['entry:daily:fetch', 'entry', 'wf:daily', 'tip', 'st:fetch', 'in'],
+      ['entry:hourly:fetch', 'entry', 'wf:hourly', 'tip', 'st:fetch', 'in'],
+      ['cache:daily:c1', 'cacheLink', 'wf:daily', 'back', 'ca:c1', 'in'],
+    ]);
   });
-  it('keeps one wire when a workflow lists the same wire twice', () => {
-    const w = { id: 'a>b', from: 'a', to: 'b', condition: 4 };
-    expect(toFlow([bw('w1', ['a', 'b'], [w, w])]).edges).toHaveLength(1);
+  it('takes the wire colour from the target step and runs it while a workflow reaching it runs', () => {
+    const w = (v: BoardView) => toFlow(b, v).edges.find((e) => e.id === 'wire:fetch:expand')!.data as { condition: number; running: boolean };
+    expect(w(view())).toMatchObject({ condition: 1, running: false });
+    expect(w(view({ live: (id) => (id === 'hourly' ? 'running' : 'stopped') })).running).toBe(true);
   });
-  it('offsets steps below the header and lands wires in board coordinates', () => {
-    const { nodes, edges } = toFlow([bw('w1', ['a', 'b'], [{ id: 'a>b', from: 'a', to: 'b', condition: 1 }])]);
-    expect(nodes.find((n) => n.id === 'st:w1:a')!.position.y).toBeGreaterThanOrEqual(46);
-    const d = edges[0]!.data as { out: { x: number }; in: { x: number } };
-    expect(d.in.x).toBeGreaterThan(d.out.x);
+  it("dims nothing with no workflow selected, and shows each step's version", () => {
+    const { nodes, edges } = toFlow(b, view());
+    expect([...nodes, ...edges].some(dim)).toBe(false);
+    expect((nodes.find((n) => n.id === 'st:fetch')!.data as { footer: unknown }).footer).toEqual({ text: '1.0.0', accent: false });
   });
-  it('places steps relative to a frame at (1000, 500) and lands wires in board coordinates', () => {
-    const w = bw('w1', ['a', 'b'], [{ id: 'a>b', from: 'a', to: 'b', condition: 1 }], { x: 1000, y: 500 });
-    const a = w.stepAt.get('a')!;
-    const b = w.stepAt.get('b')!;
-    const { nodes, edges } = toFlow([w]);
-    expect(nodes.find((n) => n.id === 'wf:w1')!.position).toEqual({ x: 1000, y: 500 });
-    expect(nodes.find((n) => n.id === 'st:w1:a')!.position).toEqual({ x: a.x, y: a.y + HEADER_H });
-    expect(nodes.find((n) => n.id === 'st:w1:b')!.position).toEqual({ x: b.x, y: b.y + HEADER_H });
-    expect(edges[0]!.data).toMatchObject({
-      out: { x: 1000 + a.x + STEP_W, y: 500 + HEADER_H + a.y + STEP_H / 2 },
-      in: { x: 1000 + b.x, y: 500 + HEADER_H + b.y + STEP_H / 2 },
-    });
+  it('with daily selected dims what it does not reach and shows its payload summary', () => {
+    const { nodes, edges } = toFlow(b, view({ workflow: 'daily' }));
+    const dimmed = [...nodes, ...edges].filter(dim).map((x) => x.id).sort();
+    expect(dimmed).toEqual(['entry:hourly:fetch', 'st:lonely', 'wf:hourly']);
+    const foot = (id: string) => (nodes.find((n) => n.id === id)!.data as { footer: unknown }).footer;
+    expect(foot('st:fetch')).toEqual({ text: '0 keys', accent: true });
+    expect(foot('st:expand')).toEqual({ text: 'no payload', accent: true });
+    expect(foot('st:lonely')).toEqual({ text: '1.0.0', accent: false });
   });
-  it('keeps a step below the header: its extent starts at the content origin', () => {
-    const w = bw('w1', ['a']);
-    const step = toFlow([w]).nodes.find((n) => n.id === 'st:w1:a')!;
-    expect(step.extent).toEqual([[0, HEADER_H], [w.frame.w, w.frame.h]]);
+  it("lights a workflow's caches and cache line", () => {
+    const { nodes, edges } = toFlow(b, view({ workflow: 'hourly' }));
+    expect(dim(nodes.find((n) => n.id === 'ca:c1')!)).toBe(true);
+    expect(dim(edges.find((e) => e.id === 'cache:daily:c1')!)).toBe(true);
+    expect(dim(toFlow(b, view({ workflow: 'daily' })).nodes.find((n) => n.id === 'ca:c1')!)).toBe(false);
   });
-  it('gives an empty workflow a frame at the minimum size', () => {
-    const frame = toFlow([bw('w2', [])]).nodes.find((n) => n.id === 'wf:w2')!;
-    expect(frame.style).toMatchObject({ width: 420, height: 196 });
+  it('marks picked items selected, in pick order, a lone pick without a number', () => {
+    const picks: Pick[] = [{ kind: 'step', id: 'expand' }, { kind: 'wire', from: 'fetch', to: 'expand' }, { kind: 'cache', id: 'c1' }];
+    const { nodes, edges } = toFlow(b, view({ picks }));
+    expect(nodes.filter((n) => n.selected).map((n) => [n.id, (n.data as { pick: unknown }).pick]).sort()).toEqual([
+      ['ca:c1', { no: 3, solo: false }], ['st:expand', { no: 1, solo: false }]]);
+    expect(edges.find((e) => e.id === 'wire:fetch:expand')!.selected).toBe(true);
+    const solo = toFlow(b, view({ picks: [{ kind: 'entry', workflowId: 'daily', stepId: 'fetch' }] }));
+    expect(solo.edges.find((e) => e.id === 'entry:daily:fetch')!.data).toMatchObject({ pick: { no: 1, solo: true } });
+  });
+  it("shows a workflow's run state", () => {
+    const n = toFlow(b, view({ live: (id) => (id === 'daily' ? 'running' : 'unknown') })).nodes;
+    expect(n.find((x) => x.id === 'wf:daily')!.data).toMatchObject({ status: 'running' });
+    expect(n.find((x) => x.id === 'wf:hourly')!.data).toMatchObject({ status: 'unknown' });
   });
 });
