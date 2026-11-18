@@ -5,6 +5,7 @@ import { boardChanges } from '../design/changes';
 import { createBoardStore } from '../design/boardStore';
 import { createOutputStore } from '../output/outputStore';
 import { commitDelete, prepareDelete } from './deleteWorkflow';
+import { saveBoard } from '../design/saveBoard';
 
 function setup(start = board()) {
   const output = createOutputStore(null, () => '00:00:00');
@@ -88,5 +89,63 @@ describe('deleting a triangle', () => {
     const next = boardChanges(t.store.base(), t.store.state());
     expect(next.map((c) => `${c.op} ${c.table}:${c.id}`)).toEqual(['update workflows:hourly']);
     expect(next.some((c) => c.id === 'a-daily-fetch')).toBe(false);
+  });
+
+  describe('a delete and a Save never overlap', () => {
+    const gate = <T,>() => { let open!: (v: T) => void; const p = new Promise<T>((r) => { open = r; }); return { p, open }; };
+    const APPLIED = { ok: true as const, value: { ok: true, applied: true, results: [], made: {} } };
+
+    it('commit holds the board while its apply runs: Save is refused meanwhile; released after', async () => {
+      const t = setup();
+      const plan = (await prepareDelete(t.studio, t.store, t.output, 'daily'))!;
+      t.store.edit((b) => ({ ...b, steps: { ...b.steps, lonely: { ...b.steps.lonely!, name: 'l2' } } }));
+      const g = gate<typeof APPLIED>();
+      t.api.applyModel.mockReturnValueOnce(g.p as never);
+      const running = commitDelete(t.studio, t.store, t.output, plan);
+      expect(t.store.saving()).toBe(true);
+      expect(await saveBoard(t.studio, t.store, t.output)).toBe('refused');
+      expect(t.api.applyModel).toHaveBeenCalledTimes(1);
+      expect(texts(t.output).at(-1)).toBe('Saving — wait for it to finish');
+      g.open(APPLIED);
+      expect(await running).toBe(true);
+      expect(t.store.saving()).toBe(false);
+      expect(t.store.state().workflows.daily).toBeUndefined();
+    });
+
+    it('commit releases the board when its apply fails or throws', async () => {
+      const t = setup();
+      const plan = (await prepareDelete(t.studio, t.store, t.output, 'daily'))!;
+      t.api.applyModel.mockResolvedValueOnce({ ok: false, error: { kind: 'network', message: 'down' } } as never);
+      expect(await commitDelete(t.studio, t.store, t.output, plan)).toBe(false);
+      expect(t.store.saving()).toBe(false);
+      t.api.applyModel.mockRejectedValueOnce(new Error('boom'));
+      await expect(commitDelete(t.studio, t.store, t.output, plan)).rejects.toThrow('boom');
+      expect(t.store.saving()).toBe(false);
+    });
+
+    it('prepare holds the board through the dry run', async () => {
+      const t = setup();
+      const g = gate<{ ok: true; value: { ok: boolean; results: never[] } }>();
+      t.api.validateModel.mockReturnValueOnce(g.p as never);
+      const running = prepareDelete(t.studio, t.store, t.output, 'daily');
+      expect(t.store.saving()).toBe(true);
+      g.open({ ok: true, value: { ok: true, results: [] } });
+      expect(await running).not.toBeNull();
+      expect(t.store.saving()).toBe(false);
+    });
+
+    it('commit is refused while a Save runs', async () => {
+      const t = setup();
+      const plan = (await prepareDelete(t.studio, t.store, t.output, 'daily'))!;
+      t.store.edit((b) => ({ ...b, steps: { ...b.steps, lonely: { ...b.steps.lonely!, name: 'l2' } } }));
+      const g = gate<typeof APPLIED>();
+      t.api.applyModel.mockReturnValueOnce(g.p as never);
+      const saving = saveBoard({ ...t.api, validateWorkflow: vi.fn(), publishDiagram: vi.fn() } as unknown as StudioApi, t.store, t.output);
+      expect(await commitDelete(t.studio, t.store, t.output, plan)).toBe(false);
+      expect(t.api.applyModel).toHaveBeenCalledTimes(1);
+      g.open({ ok: true, value: { ok: false, applied: false, results: [], made: {} } } as never);
+      await saving;
+      expect(t.store.state().workflows.daily).toBeDefined();
+    });
   });
 });
