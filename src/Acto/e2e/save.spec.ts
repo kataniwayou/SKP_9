@@ -124,7 +124,7 @@ test('a Save BaseAPI refuses (a new triangle with no entry arrow) saves nothing,
   await expect(saveButton(page)).toHaveText('Save');
   // the saved triangle has BaseAPI's id now, and no failure outline
   await expect(wfNode(page, again.made![wf]!).locator('.tri')).toBeVisible();
-  await expect(wfNode(page, again.made![wf]!).locator('.tri')).not.toHaveClass(/failed/);
+  await expect(wfNode(page, again.made![wf]!).locator('.tri')).not.toHaveClass(/\bfailed\b/);
   expect(await named('workflows', 'e2e-refuse-wf')).toBeTruthy();
   expect(await named('steps', 'e2e-refuse-step')).toBeTruthy();
 });

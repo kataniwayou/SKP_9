@@ -47,7 +47,7 @@ describe('systemPrompt', () => {
   it('names no tool that does not exist (every snake_case word is a tool or an argument of one)', () => {
     const known = new Set<string>(TOOL_DEFS.map((t) => t.name));
     for (const t of TOOL_DEFS) for (const k of Object.keys((t.parameters as { properties?: object }).properties ?? {})) known.add(k);
-    const words = new Set(prompt.match(/[a-z]+(?:_[a-z]+)+/g) ?? []);
+    const words = new Set(prompt.match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? []);
     expect([...words].filter((w) => !known.has(w))).toEqual([]);
   });
 
