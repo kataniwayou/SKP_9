@@ -95,21 +95,18 @@ export function boardChanges(base: BoardState, cur: BoardState): ModelChange[] {
   d.steps.updated.forEach((id) => out.push(update('steps', id)));
   // a created step that names created steps gets its full wires now; it has no stamp to check
   lateWires.forEach((id) => out.push({ op: 'update', table: 'steps', id, row: stepBody(cur.steps[id]!) }));
+  // a deleted step's own next-step rows are not cleared by BaseAPI's delete (both junction FKs restrict): clear them first,
+  // checked against the stamp the board read; the delete after it keeps that stamp, which BaseAPI only checks on a row's first change
+  for (const id of d.steps.deleted) {
+    const was = base.steps[id]!;
+    if (was.nextStepIds.length) out.push({ op: 'update', table: 'steps', id, row: { ...stepBody(was), nextStepIds: [] }, ...(was.updatedAt ? { updatedAt: was.updatedAt } : {}) });
+  }
   d.caches.updated.forEach((id) => out.push(update('caches', id)));
   d.assignments.updated.forEach((id) => out.push(update('assignments', id)));
   d.workflows.updated.forEach((id) => out.push(update('workflows', id)));
 
   d.assignments.deleted.forEach((id) => out.push(remove('assignments', id)));
-  // a deleted step goes before the deleted steps it wires into
-  const gone = new Set(d.steps.deleted);
-  const placed = new Set<Id>();
-  const visit = (id: Id) => {
-    if (placed.has(id)) return;
-    placed.add(id);
-    for (const [other, row] of Object.entries(base.steps)) if (gone.has(other) && row.nextStepIds.includes(id)) visit(other);
-    out.push(remove('steps', id));
-  };
-  d.steps.deleted.forEach(visit);
+  d.steps.deleted.forEach((id) => out.push(remove('steps', id)));
   d.caches.deleted.forEach((id) => out.push(remove('caches', id)));
   d.schemas.deleted.forEach((id) => out.push(remove('schemas', id)));
   return out;

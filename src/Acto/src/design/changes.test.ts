@@ -105,9 +105,34 @@ describe('boardChanges', () => {
       { op: 'create', table: 'caches', id: 'k1', row: expect.objectContaining({ boardX: 3, boardY: 4, items: '{}' }) }]);
   });
 
-  it('deleted steps go source before target', () => {
-    const ops = names(boardChanges(b, deleteSteps(b, ['expand', 'fetch'])));
-    expect(ops.indexOf('delete steps fetch')).toBeLessThan(ops.indexOf('delete steps expand'));
+  const idx = (ops: string[], x: string) => { const n = ops.indexOf(x); expect(n).toBeGreaterThanOrEqual(0); return n; };
+
+  it('a deleted step with wires is first updated with none, under the stamp it was read with', () => {
+    const cs = boardChanges(b, deleteSteps(b, ['fetch']));
+    const ops = names(cs);
+    expect(idx(ops, 'update steps fetch')).toBeLessThan(idx(ops, 'delete steps fetch'));
+    const clear = cs[idx(ops, 'update steps fetch')]!;
+    expect(clear.updatedAt).toBe(b.steps.fetch.updatedAt);
+    expect(clear.row).toEqual(expect.objectContaining({ nextStepIds: [], name: 'fetch-orders', processorId: 'p1' }));
+    expect(cs.find((c) => c.op === 'delete' && c.id === 'fetch')!.updatedAt).toBe(b.steps.fetch.updatedAt);
+  });
+
+  it('two deleted steps wired to each other are both cleared before either is deleted', () => {
+    const base = wire(b, 'expand', 'fetch');
+    const ops = names(boardChanges(base, deleteSteps(base, ['fetch', 'expand'])));
+    const firstDelete = Math.min(idx(ops, 'delete steps fetch'), idx(ops, 'delete steps expand'));
+    expect(idx(ops, 'update steps fetch')).toBeLessThan(firstDelete);
+    expect(idx(ops, 'update steps expand')).toBeLessThan(firstDelete);
+  });
+
+  it('a deleted step wired to a surviving one is cleared first; the survivor is not touched', () => {
+    const ops = names(boardChanges(b, deleteSteps(b, ['fetch'])));
+    expect(ops).not.toContain('update steps expand');
+    expect(idx(ops, 'update steps fetch')).toBeLessThan(idx(ops, 'delete steps fetch'));
+  });
+
+  it('a deleted step with no wires is only deleted', () => {
+    expect(names(boardChanges(b, deleteSteps(b, ['lonely'])))).toEqual(['delete steps lonely']);
   });
 });
 
