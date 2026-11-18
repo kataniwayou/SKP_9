@@ -4,7 +4,9 @@
 .topbar { flex: none; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
 .brand { font-weight: 700; font-size: 20px; letter-spacing: -.01em; color: var(--ink); }
 .brand span { color: var(--accent); }
-.theme-toggle { margin-left: auto; align-self: center; }
+.save-board { margin-left: auto; align-self: center; font-size: 12.5px; padding: 4px 12px; }
+.save-board.primary { background: var(--accent); border-color: var(--accent); color: var(--on-colour); }
+.theme-toggle { align-self: center; }
 .board-wait { display: grid; place-items: center; height: 100%; color: var(--muted); font-size: 13px; background: var(--paper); }
 
 /* toolbox (the mock's .tools) */

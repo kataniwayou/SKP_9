@@ -1,12 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ApiResult, StudioApi } from '../api/client';
+import type { BoardState } from '../design/board';
+import { board } from '../design/boardFixtures';
 import type { BoardStore } from '../design/boardStore';
 import { liveStub } from '../test/liveStub';
 import { createOutputStore } from '../output/outputStore';
 import { RUN_TIMEOUT_MS, runWorkflow } from './runWorkflow';
 
-const entry = (name: string, base: object | null, unsaved = false) => ({ base, unsaved, history: { present: { fields: { name } } } });
-const storeOf = (e: unknown) => ({ entry: () => e }) as unknown as BoardStore;
+/** A board holding workflow w1 (and w2) named `name`: in BaseAPI unless `base` is null, changed on the board when `unsaved`. */
+function entry(name: string, base: object | null, unsaved = false) {
+  const b = board();
+  const row = { ...b.workflows.daily!, name };
+  const saved: BoardState = { ...b, workflows: base === null ? {} : { w1: { ...row, id: 'w1' }, w2: { ...row, id: 'w2' } } };
+  const now: BoardState = { ...b, workflows: { w1: { ...row, id: 'w1', description: unsaved ? 'changed' : null }, w2: { ...row, id: 'w2' } } };
+  return { saved, now };
+}
+const storeOf = (e: { saved: BoardState; now: BoardState }) => ({ base: () => e.saved, state: () => e.now }) as unknown as BoardStore;
 const apiOf = (answer: ApiResult<null>) => {
   const call = vi.fn(async () => answer);
   return { api: { startWorkflow: call, stopWorkflow: call } as unknown as StudioApi, call };

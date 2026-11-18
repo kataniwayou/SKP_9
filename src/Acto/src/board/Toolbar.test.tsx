@@ -1,95 +1,56 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { App } from '../App';
-import { liveStub } from '../test/liveStub';
-import { memoryStorage } from '../test/memoryStorage';
-import { fakeApi, graphWith, wf } from './testApi';
-import { Toolbar } from './Toolbar';
+import type { LiveStatus } from '../api/liveStatus';
+import type { Pick } from './picks';
+import { confirmText, toolbarFor, type ToolbarDeps } from './Toolbar';
 
-const labels = () => screen.getAllByRole('button').map((b) => b.textContent);
+const tri: Pick = { kind: 'workflow', id: 'w1' };
+function deps(over: Partial<ToolbarDeps> = {}): ToolbarDeps {
+  return {
+    picks: [tri], run: () => 'stopped' as LiveStatus, pending: null,
+    start: vi.fn(), stop: vi.fn(), copy: vi.fn(), remove: vi.fn(), askDelete: vi.fn(), confirmDelete: vi.fn(), cancelDelete: vi.fn(),
+    ...over,
+  };
+}
+const labels = (p: Pick, d: ToolbarDeps) => toolbarFor(p, d)?.map((i) => i.label) ?? null;
 
-describe('Toolbar', () => {
-  it('shows exactly the right button per kind', () => {
-    for (const [kind, label] of [['workflow', 'Save,Delete'], ['step', 'Copy,Delete'], ['wire', 'Delete'], ['cache', 'Delete']] as const) {
-      const { container, unmount } = render(<Toolbar selection={{ kind }} actions={{}} />);
-      expect(labels().join(',')).toBe(label);
-      expect(container.firstElementChild!.classList.contains('toolbar')).toBe(true);
-      expect(container.querySelector('.toolbar-arrow')).not.toBeNull();
-      expect(container.textContent).not.toContain('Ctrl');
-      unmount();
-    }
+describe('toolbarFor', () => {
+  it('shows exactly the buttons per kind', () => {
+    const d = deps();
+    expect(labels(tri, d)).toEqual(['▶ Start', 'Delete']);
+    expect(labels({ kind: 'step', id: 's' }, d)).toEqual(['Copy', 'Delete']);
+    expect(labels({ kind: 'cache', id: 'c' }, d)).toEqual(['Delete']);
+    expect(labels({ kind: 'wire', from: 'a', to: 'b' }, d)).toEqual(['Delete']);
+    expect(labels({ kind: 'entry', workflowId: 'w1', stepId: 's' }, d)).toEqual(['Delete']);
+    expect(labels({ kind: 'cacheLink', workflowId: 'w1', cacheId: 'c' }, d)).toEqual(['Delete']);
   });
-  it('shows Start or Stop before Save by the workflow status', () => {
-    const onRun = vi.fn();
-    const { rerender } = render(<Toolbar selection={{ kind: 'workflow' }} actions={{}} run={{ op: 'start', enabled: true, onRun }} />);
-    expect(labels()).toEqual(['▶ Start', 'Save', 'Delete']);
-    expect(screen.getByText('▶ Start')).toBeEnabled();
-    expect(screen.getByText('▶ Start').className).toContain('go');
-    fireEvent.click(screen.getByText('▶ Start'));
-    expect(onRun).toHaveBeenCalledTimes(1);
-    rerender(<Toolbar selection={{ kind: 'workflow' }} actions={{}} run={{ op: 'stop', enabled: true, onRun }} />);
-    expect(labels()).toEqual(['■ Stop', 'Save', 'Delete']);
-    expect(screen.getByText('■ Stop').className).toContain('stop');
-    rerender(<Toolbar selection={{ kind: 'workflow' }} actions={{}} run={{ op: 'start', enabled: false, onRun }} />);
-    expect(screen.getByText('▶ Start')).toBeDisabled();
+  it('has no Save button anywhere: Save is board-wide', () => {
+    for (const p of [tri, { kind: 'step', id: 's' } as Pick]) expect(labels(p, deps())).not.toContain('Save');
   });
-  it('highlights Save only when unsaved, and disables it while saving', () => {
-    const { rerender } = render(<Toolbar selection={{ kind: 'workflow' }} actions={{}} />);
-    expect(screen.getByText('Save').className).not.toContain('primary');
-    rerender(<Toolbar selection={{ kind: 'workflow' }} actions={{}} unsaved />);
-    expect(screen.getByText('Save').className).toContain('primary');
-    rerender(<Toolbar selection={{ kind: 'workflow' }} actions={{}} unsaved saving />);
-    expect(screen.getByText('Saving…')).toBeDisabled();
+  it('a triangle shows its toolbar only while it is picked', () => {
+    expect(toolbarFor(tri, deps({ picks: [] }))).toBeNull();
+    expect(toolbarFor(tri, deps({ picks: [{ kind: 'step', id: 's' }] }))).toBeNull();
   });
-  it('a pending workflow delete shows the confirm text, Delete and Cancel instead of the buttons', () => {
-    const onConfirm = vi.fn(); const onCancel = vi.fn();
-    render(<Toolbar selection={{ kind: 'workflow' }} actions={{}} confirm={{ text: '5 steps, 3 assignments go. Delete orders?', onConfirm, onCancel }} />);
-    expect(screen.getByText('5 steps, 3 assignments go. Delete orders?')).toBeInTheDocument();
-    expect(labels()).toEqual(['Delete', 'Cancel']);
-    expect(screen.getByText('Delete').className).toContain('danger');
-    fireEvent.click(screen.getByText('Delete')); fireEvent.click(screen.getByText('Cancel'));
-    expect(onConfirm).toHaveBeenCalledTimes(1); expect(onCancel).toHaveBeenCalledTimes(1);
+  it('Stop for a running workflow, Start disabled while the run state is not known', () => {
+    expect(labels(tri, deps({ run: () => 'running' }))).toEqual(['■ Stop', 'Delete']);
+    expect(toolbarFor(tri, deps({ run: () => 'checking' }))![0]).toMatchObject({ label: '▶ Start', disabled: true });
   });
-  it('calls the action it is given', () => {
-    const onDelete = vi.fn();
-    render(<Toolbar selection={{ kind: 'step' }} actions={{ onDelete }} />);
-    fireEvent.click(screen.getByText('Delete'));
-    expect(onDelete).toHaveBeenCalledTimes(1);
+  it('the buttons call their actions', () => {
+    const d = deps();
+    toolbarFor(tri, d)![0]!.onClick(); expect(d.start).toHaveBeenCalledWith('w1');
+    toolbarFor(tri, d)![1]!.onClick(); expect(d.askDelete).toHaveBeenCalledWith('w1');
+    const step: Pick = { kind: 'step', id: 's' };
+    toolbarFor(step, d)![0]!.onClick(); expect(d.copy).toHaveBeenCalledWith('s');
+    toolbarFor(step, d)![1]!.onClick(); expect(d.remove).toHaveBeenCalledWith(step);
+    toolbarFor(tri, deps({ run: () => 'running', stop: d.stop }))![0]!.onClick(); expect(d.stop).toHaveBeenCalledWith('w1');
   });
-});
-
-describe('Toolbar in the app', () => {
-  it('Delete on a step removes it, selects its workflow and shows the unsaved tag', async () => {
-    render(<App api={fakeApi({ workflows: [wf('w1')], graph: graphWith({ entry: ['a'], steps: { a: ['b'], b: [] } }) })}
-      live={liveStub()} storage={memoryStorage()} session={memoryStorage()} />);
-    await screen.findByText('Board loaded: 1 workflow');
-    fireEvent.click(await screen.findByText('b-name'));
-    expect(labels().filter((l) => l === 'Delete')).toEqual(['Delete']);
-    expect(screen.queryByText('unsaved')).toBeNull();
-    await act(async () => { fireEvent.click(screen.getByText('Delete')); });
-    expect(screen.queryByText('b-name')).toBeNull();
-    expect(screen.getByText('unsaved')).toBeInTheDocument();
-    expect(screen.getByText('Save').className).toContain('primary');
-  });
-  it('Delete on a workflow asks for a confirm, Cancel keeps it, Delete removes it and its pick', async () => {
-    const api = fakeApi({ workflows: [wf('w1')], graph: graphWith({ entry: ['a'], steps: { a: [] } }) });
-    const del = vi.fn(async (_id: string, dryRun: boolean) => ({ ok: true as const, value: { applied: !dryRun, steps: 1, assignments: 2, caches: 0, processors: 0, errors: [] } }));
-    (api as unknown as { deleteWorkflow: unknown }).deleteWorkflow = del;
-    (api as unknown as { listLive: unknown }).listLive = vi.fn(async () => ({ ok: true, value: [] }));
-    render(<App api={api} live={liveStub()} storage={memoryStorage()} session={memoryStorage()} />);
-    await screen.findByText('Board loaded: 1 workflow');
-    fireEvent.click(await screen.findByText('w1-name', { selector: '.nm' }));
-    await act(async () => { fireEvent.click(screen.getByText('Delete')); });
-    expect(await screen.findByText('1 step, 2 assignments go. Delete w1-name?')).toBeInTheDocument();
-    expect(del).toHaveBeenCalledTimes(1);
-    await act(async () => { fireEvent.click(screen.getByText('Cancel')); });
-    expect(screen.getByText('Delete cancelled — nothing was sent')).toBeInTheDocument();
-    expect(screen.getByText('Save')).toBeInTheDocument();
-    await act(async () => { fireEvent.click(screen.getByText('Delete')); });
-    await screen.findByText('1 step, 2 assignments go. Delete w1-name?');
-    await act(async () => { fireEvent.click(screen.getByText('Delete')); });
-    expect(del).toHaveBeenLastCalledWith('w1', false);
-    expect(screen.getByText('w1-name deleted: 1 step, 2 assignments')).toBeInTheDocument();
-    expect(screen.queryByText('Save')).toBeNull();
+  it('a pending delete shows its confirm text from the plan, Delete and Cancel', () => {
+    const plan = { workflowId: 'w1', changes: [], lines: ['workflow orders', 'assignment a'], assignmentIds: [] };
+    const d = deps({ pending: plan });
+    const items = toolbarFor(tri, d)!;
+    expect(items.map((i) => i.label)).toEqual([confirmText(plan), 'Delete', 'Cancel']);
+    expect(confirmText(plan)).toBe('Delete workflow orders, assignment a? Its steps and caches stay.');
+    expect(items[0]!.note).toBe(true);
+    items[1]!.onClick(); items[2]!.onClick();
+    expect(d.confirmDelete).toHaveBeenCalled(); expect(d.cancelDelete).toHaveBeenCalled();
   });
 });

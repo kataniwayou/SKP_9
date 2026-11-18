@@ -8,11 +8,11 @@ export const CACHE_TONE = 'var(--cache-line)';
 
 /** A cache: a block on the board. Workflows join it with a dashed line from their back (handle `in`, on top). */
 export function CacheNode({ data, selected }: NodeProps) {
-  const { cacheId, name, pick } = data as { cacheId: string; name: string; pick?: PickInfo };
+  const { cacheId, name, failed = false, pick } = data as { cacheId: string; name: string; failed?: boolean; pick?: PickInfo };
   const self = { kind: 'cache', id: cacheId } as const;
   const toolbar = useHasToolbar(self);
   return (
-    <div className={`cache-chip${selected ? ' sel' : ''}`} title={name}>
+    <div className={`cache-chip${selected ? ' sel' : ''}${failed ? ' failed' : ''}`} title={name}>
       <PickBadge pick={pick} />
       {selected && pick?.solo && toolbar && (
         <NodeToolbar isVisible position={Position.Top} offset={10}><ItemToolbar pick={self} /></NodeToolbar>

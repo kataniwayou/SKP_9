@@ -1,14 +1,14 @@
 import type { DragEvent } from 'react';
-import type { Cache, Processor } from '../model/graph';
-import type { DropItem } from '../board/dropTarget';
+import type { Processor } from '../model/graph';
 import { HealthDot } from '../board/live/HealthDot';
 import { processorColour } from '../board/nodes/StepCard';
-import { CACHE_TONE } from '../board/nodes/CacheChip';
+import { CACHE_TONE } from '../board/nodes/CacheNode';
 import { useProcessorLive } from '../live/LiveContext';
 import { livenessText } from '../live/liveState';
+import { DRAG_TYPE, type ToolboxDrag } from './drag';
 
-const dragOf = (item: DropItem) => (e: DragEvent) => {
-  e.dataTransfer.setData('application/acto', JSON.stringify(item));
+const dragOf = (item: ToolboxDrag) => (e: DragEvent) => {
+  e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(item));
   e.dataTransfer.effectAllowed = 'copy';
 };
 
@@ -25,28 +25,21 @@ function ProcessorItem({ processor }: { processor: Processor }) {
   );
 }
 
-/** The mock's toolbox: Create, Steps (one per processor, with its live health) and Caches; every item is dragged. */
-export function ToolboxPanel({ processors, caches = [] }: { processors: Processor[]; caches?: Cache[] }) {
+/** The toolbox (spec §7): Create › Workflow and Cache, and Steps (one per processor, with its live health); each dropped anywhere on the board. */
+export function ToolboxPanel({ processors }: { processors: Processor[] }) {
   return (
     <>
       <h2>Create</h2>
       <button type="button" className="tool big" draggable onDragStart={dragOf({ kind: 'workflow' })}>
         <span className="ti" aria-hidden="true" style={{ background: ACCENT }}>W</span>
-        <span className="tx">Workflow<small>drop on empty board</small></span>
+        <span className="tx">Workflow<small>drop on the board</small></span>
       </button>
-      <button type="button" className="tool big" draggable onDragStart={dragOf({ kind: 'cache-new' })}>
+      <button type="button" className="tool big" draggable onDragStart={dragOf({ kind: 'cache' })}>
         <span className="ti" aria-hidden="true" style={{ background: CACHE_TONE }}>C</span>
-        <span className="tx">Cache<small>drop inside a workflow</small></span>
+        <span className="tx">Cache<small>drop on the board</small></span>
       </button>
       <h2>Steps</h2>
       {processors.map((p) => <ProcessorItem key={p.id} processor={p} />)}
-      <h2>Caches</h2>
-      {caches.map((c) => (
-        <div key={c.id} className="tool" data-testid="toolbox-cache" draggable onDragStart={dragOf({ kind: 'cache', cacheId: c.id })}>
-          <span className="ti" aria-hidden="true" style={{ background: CACHE_TONE }}>C</span>
-          <span className="tx">{c.name}<small className="lv">{c.version}</small></span>
-        </div>
-      ))}
     </>
   );
 }

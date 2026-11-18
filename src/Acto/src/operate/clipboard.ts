@@ -1,17 +1,17 @@
 import type { Id } from '../model/graph';
 import type { Point, Rect } from '../model/geometry';
-import { FRAME_PAD, HEADER_H, STEP_H, STEP_W } from '../board/geometry';
+import { CACHE_H, CACHE_W, STEP_H, STEP_W, TRIANGLE_H, TRIANGLE_W } from '../board/geometry';
+import type { BoardState, StepRow } from '../design/board';
 import { freeOffset, PASTE_CELL, PASTE_MARGIN } from './freeOffset';
-import { uniqueName, type AssignmentState, type StepState, type WorkflowState } from '../design/state';
 
+/** A copied step: its shared fields and where it stood. No payload: payloads belong to workflows (spec §7). */
 export interface ClipStep {
   id: Id; name: string; version: string; description: string | null; entryCondition: number;
-  processorId: Id | null; at: Point /* board coordinates */; payload: string | null;
+  processorId: Id | null; at: Point;
 }
 export interface Clip { steps: ClipStep[]; wires: [Id, Id][]; pasted: number }
 
 export { freeOffset, PASTE_CELL, PASTE_MARGIN };
-const NEAR_GAP = 40;
 const CLIP_KEY = 'acto.clip';
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -21,77 +21,71 @@ export function copyMessage(clip: Clip): string {
   return clip.wires.length > 0 ? `${base} and ${plural(clip.wires.length, 'wire')}` : base;
 }
 
-export function copyClip(parts: { state: WorkflowState; stepIds: Id[] }[]): Clip | null {
-  const steps: ClipStep[] = [];
+/** The steps (in the order given, each once) and the wires among them; null when none of them is on the board. */
+export function copyClip(b: BoardState, stepIds: readonly Id[]): Clip | null {
   const chosen = new Set<Id>();
-  for (const { state, stepIds } of parts) {
-    for (const id of stepIds) {
-      const st = state.steps[id];
-      if (!st || chosen.has(id)) continue;
-      chosen.add(id);
-      steps.push({
-        id, name: st.name, version: st.version, description: st.description, entryCondition: st.entryCondition,
-        processorId: st.processorId, at: { x: state.frame.x + st.at.x, y: state.frame.y + HEADER_H + st.at.y },
-        payload: state.assignments[id]?.payload ?? null,
-      });
-    }
+  const steps: ClipStep[] = [];
+  for (const id of stepIds) {
+    const st = b.steps[id];
+    if (!st || chosen.has(id)) continue;
+    chosen.add(id);
+    steps.push({
+      id, name: st.name, version: st.version, description: st.description, entryCondition: st.entryCondition,
+      processorId: st.processorId, at: { ...(st.at ?? { x: 0, y: 0 }) },
+    });
   }
   if (steps.length === 0) return null;
   const wires: [Id, Id][] = [];
-  for (const { state } of parts) {
-    for (const st of steps.map((s) => state.steps[s.id]).filter((x): x is StepState => !!x)) {
-      for (const to of st.nextStepIds) if (chosen.has(to) && !wires.some(([a, b]) => a === st.id && b === to)) wires.push([st.id, to]);
-    }
+  for (const s of steps) {
+    for (const to of new Set(b.steps[s.id]!.nextStepIds)) if (chosen.has(to)) wires.push([s.id, to]);
   }
   return { steps, wires, pasted: 0 };
 }
 
-/** Pastes the clip into `s` (the frame grows to hold it): new ids, unique names, free space, one new state. */
-export function pasteClip(
-  s: WorkflowState, clip: Clip, near: Id | null, newId: () => Id,
-): { state: WorkflowState; pasted: Id[] } {
-  if (clip.steps.length === 0) return { state: s, pasted: [] };
-  // the clip in this frame's body coordinates
-  const local = clip.steps.map((c) => ({ x: c.at.x - s.frame.x, y: c.at.y - s.frame.y - HEADER_H }));
-  const minX = Math.min(...local.map((p) => p.x));
-  const minY = Math.min(...local.map((p) => p.y));
-  const nearStep = near ? s.steps[near] : undefined;
-  const target: Point = nearStep
-    ? { x: nearStep.at.x + STEP_W + NEAR_GAP, y: nearStep.at.y }
-    : { x: minX + (clip.pasted + 1) * PASTE_CELL, y: minY + (clip.pasted + 1) * PASTE_CELL };
-  const start: Point = { x: Math.max(target.x, FRAME_PAD) - minX, y: Math.max(target.y, FRAME_PAD) - minY };
-  const group: Rect[] = local.map((p) => ({ x: p.x, y: p.y, w: STEP_W, h: STEP_H }));
-  const obstacles: Rect[] = Object.values(s.steps).map((st) => ({ x: st.at.x, y: st.at.y, w: STEP_W, h: STEP_H }));
-  const d = freeOffset(group, obstacles, start, PASTE_MARGIN, { x: FRAME_PAD, y: FRAME_PAD });
+/** Everything that stands on the board, as boxes. */
+function boxes(b: BoardState): Rect[] {
+  const at = (p: Point | null) => p ?? { x: 0, y: 0 };
+  return [
+    ...Object.values(b.steps).map((s) => ({ ...at(s.at), w: STEP_W, h: STEP_H })),
+    ...Object.values(b.caches).map((c) => ({ ...at(c.at), w: CACHE_W, h: CACHE_H })),
+    ...Object.values(b.workflows).map((w) => ({ ...at(w.at), w: TRIANGLE_W, h: TRIANGLE_H })),
+  ];
+}
 
-  let state = s;
+/**
+ * Pastes the clip as new steps (new ids, unique names, unsaved, wires among them remapped, no payloads), (pasted + 1)
+ * grid cells down-right of where they were copied from, moved on to the nearest free offset when that is taken.
+ */
+export function pasteClip(b: BoardState, clip: Clip, newId: () => Id): { state: BoardState; pasted: Id[] } {
+  if (clip.steps.length === 0) return { state: b, pasted: [] };
+  const cell = (clip.pasted + 1) * PASTE_CELL;
+  const group: Rect[] = clip.steps.map((c) => ({ ...c.at, w: STEP_W, h: STEP_H }));
+  const d = freeOffset(group, boxes(b), { x: cell, y: cell }, PASTE_MARGIN);
+  const taken = new Set(Object.values(b.steps).map((s) => s.name));
+  const unique = (name: string) => {
+    let n = name;
+    for (let i = 2; taken.has(n); i++) n = `${name}-${i}`;
+    taken.add(n);
+    return n;
+  };
   const made = new Map<Id, Id>();
+  const steps = { ...b.steps };
   const pasted: Id[] = [];
-  clip.steps.forEach((c, i) => {
+  for (const c of clip.steps) {
     const id = newId();
     made.set(c.id, id);
     pasted.push(id);
-    const step: StepState = {
-      id, name: uniqueName(state, c.name), version: c.version, description: c.description, entryCondition: c.entryCondition,
-      processorId: c.processorId, nextStepIds: [], at: { x: local[i]!.x + d.x, y: local[i]!.y + d.y }, updatedAt: null, isNew: true,
+    const row: StepRow = {
+      id, name: unique(c.name), version: c.version, description: c.description, processorId: c.processorId,
+      nextStepIds: [], entryCondition: c.entryCondition, at: { x: c.at.x + d.x, y: c.at.y + d.y }, updatedAt: null,
     };
-    const assignments = { ...state.assignments };
-    if (c.payload !== null) {
-      const a: AssignmentState = {
-        id: newId(), stepId: id, name: `${step.name}-assignment`, version: '1.0.0', description: null, payload: c.payload,
-        updatedAt: null, isNew: true,
-      };
-      assignments[id] = a;
-    }
-    state = { ...state, steps: { ...state.steps, [id]: step }, assignments };
-  });
-  const steps = { ...state.steps };
+    steps[id] = row;
+  }
   for (const [from, to] of clip.wires) {
     const f = made.get(from), t = made.get(to);
-    if (!f || !t) continue;
-    steps[f] = { ...steps[f]!, nextStepIds: [...steps[f]!.nextStepIds, t] };
+    if (f && t) steps[f] = { ...steps[f]!, nextStepIds: [...steps[f]!.nextStepIds, t] };
   }
-  return { state: { ...state, steps }, pasted };
+  return { state: { ...b, steps }, pasted };
 }
 
 const isPoint = (p: unknown): p is Point => !!p && typeof (p as Point).x === 'number' && typeof (p as Point).y === 'number';

@@ -11,18 +11,22 @@ const LABEL: Record<LiveStatus, string> = { running: 'Running', stopped: 'Stoppe
 
 /**
  * A workflow: a white triangle, tip to the right, with its run dot inside and its name and state under it. Solid arrows leave
- * only from the tip (handle `tip`); dashed lines to its caches leave from the back (handle `back`).
+ * only from the tip (handle `tip`); dashed lines to its caches leave from the back (handle `back`). A problem badge counts
+ * the last dry run's problems; a failure outline marks a Save BaseAPI refused on it.
  */
 export function TriangleNode({ data, selected }: NodeProps) {
-  const { workflowId, name, status, lit, pick } = data as { workflowId: string; name: string; status: LiveStatus; lit: boolean; pick?: PickInfo };
+  const { workflowId, name, status, lit, problems = 0, failed = false, pick } = data as {
+    workflowId: string; name: string; status: LiveStatus; lit: boolean; problems?: number; failed?: boolean; pick?: PickInfo;
+  };
   const tone = TONE[status];
   const on = selected || lit;
   const self = { kind: 'workflow', id: workflowId } as const;
   const toolbar = useHasToolbar(self);
   const mid = TRI_SHAPE_H / 2;
   return (
-    <div className={`tri${on ? ' sel' : ''}`} data-workflow={workflowId}>
+    <div className={`tri${on ? ' sel' : ''}${failed ? ' failed' : ''}`} data-workflow={workflowId}>
       <PickBadge pick={pick} />
+      {problems > 0 && <span className="tri-problems" title={`${problems} problem${problems === 1 ? '' : 's'} in the last dry run`}>{problems}</span>}
       {selected && pick?.solo && toolbar && (
         <NodeToolbar isVisible position={Position.Top} offset={10}><ItemToolbar pick={self} /></NodeToolbar>
       )}

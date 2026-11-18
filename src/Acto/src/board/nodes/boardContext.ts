@@ -6,8 +6,10 @@ export interface ToolbarItem {
   label: string;
   onClick: () => void;
   /** `go` / `stop` are the green and red run buttons; `danger` is Delete. */
-  tone?: 'go' | 'stop' | 'danger';
+  tone?: 'go' | 'stop' | 'danger' | 'primary';
   disabled?: boolean;
+  /** A line of text in the bar (a confirm's question), not a button. */
+  note?: boolean;
 }
 
 /**

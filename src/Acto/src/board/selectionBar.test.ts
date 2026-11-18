@@ -1,26 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import type { LiveStatus } from '../api/liveStatus';
 import { barOf } from './selectionBar';
 import type { Pick } from './picks';
 
-const wfp = (id: string): Pick => ({ kind: 'workflow', workflowId: id });
-const st = (w: string, s: string): Pick => ({ kind: 'step', workflowId: w, stepId: s });
-const status = (m: Record<string, { run: LiveStatus; unsaved: boolean }>) => (id: string) => m[id] ?? { run: 'stopped' as LiveStatus, unsaved: false };
+const st = (id: string): Pick => ({ kind: 'step', id });
+const ca = (id: string): Pick => ({ kind: 'cache', id });
 
 describe('barOf', () => {
   it('is null for fewer than two picks', () => {
-    expect(barOf([], status({}))).toBeNull();
-    expect(barOf([st('w1', 'a')], status({}))).toBeNull();
+    expect(barOf([])).toBeNull();
+    expect(barOf([st('a')])).toBeNull();
   });
-  it('steps, wires and caches from several workflows are parts', () => {
-    const picks: Pick[] = [st('w1', 'a'), { kind: 'wire', workflowId: 'w2', wireId: 'x>y' }, { kind: 'cache', workflowId: 'w2', cacheId: 'c' }];
-    expect(barOf(picks, status({}))).toEqual({ kind: 'parts', count: 3 });
+  it('steps alone: Copy and Delete', () => {
+    expect(barOf([st('a'), st('b')])).toEqual({ count: 2, copy: true, del: true });
   });
-  it('workflows split into start, stop and save lists', () => {
-    const s = status({ w1: { run: 'running', unsaved: false }, w2: { run: 'stopped', unsaved: false }, w3: { run: 'stopped', unsaved: true } });
-    expect(barOf([wfp('w1'), wfp('w2'), wfp('w3')], s)).toEqual({ kind: 'workflows', count: 3, start: ['w2', 'w3'], stop: ['w1'], save: ['w3'] });
+  it('a step and a cache: only Delete is common', () => {
+    expect(barOf([st('a'), ca('c')])).toEqual({ count: 2, copy: false, del: true });
   });
-  it('a workflow with a step is mixed', () => {
-    expect(barOf([wfp('w1'), st('w1', 'a')], status({}))).toEqual({ kind: 'mixed', count: 2 });
+  it('wires, entry arrows and cache lines: Delete', () => {
+    const picks: Pick[] = [{ kind: 'wire', from: 'a', to: 'b' }, { kind: 'entry', workflowId: 'w', stepId: 'a' }, { kind: 'cacheLink', workflowId: 'w', cacheId: 'c' }];
+    expect(barOf(picks)).toEqual({ count: 3, copy: false, del: true });
+  });
+  it('a triangle never shares an action', () => {
+    expect(barOf([{ kind: 'workflow', id: 'w' }, st('a')])).toEqual({ count: 2, copy: false, del: false });
   });
 });

@@ -15,6 +15,10 @@ export interface BoardView {
   /** Everything picked, in pick order. */
   picks: Pick[];
   live: (workflowId: Id) => LiveStatus;
+  /** The problems the workflow's last dry run found (the triangle's badge); none without it. */
+  problems?: (workflowId: Id) => number;
+  /** Whether the last Save failed on this item (`workflow:<id>`, `step:<id>`, `cache:<id>`): its failure outline. */
+  failed?: (key: string) => boolean;
 }
 
 export interface PickInfo { no: number; solo: boolean }
@@ -61,6 +65,7 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
   const selWf = sel ? b.workflows[sel]! : null;
   const reach = sel ? reachOf(b, sel) : new Set<Id>();
   const order = new Map(view.picks.map((p, i) => [flowIdOf(p), i + 1]));
+  const failed = (key: string) => view.failed?.(key) ?? false;
   const pickOf = (id: string): PickInfo | undefined => { const no = order.get(id); return no === undefined ? undefined : { no, solo: view.picks.length === 1 }; };
 
   const nodes: Node[] = [];
@@ -70,7 +75,10 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
     nodes.push({
       id, type: 'workflow', position: { ...(w.at ?? { x: 0, y: 0 }) }, width: TRIANGLE_W, height: TRIANGLE_H, style: { width: TRIANGLE_W, height: TRIANGLE_H },
       handles: TRIANGLE_HANDLES, selected: pick !== undefined, ...(sel !== null && sel !== w.id ? DIM : {}),
-      data: { workflowId: w.id, name: w.name, status: view.live(w.id), lit: sel === w.id, ...(pick ? { pick } : {}) },
+      data: {
+        workflowId: w.id, name: w.name, status: view.live(w.id), lit: sel === w.id, problems: view.problems?.(w.id) ?? 0,
+        failed: failed(`workflow:${w.id}`), ...(pick ? { pick } : {}),
+      },
     });
   }
   for (const s of Object.values(b.steps)) {
@@ -81,7 +89,7 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
     nodes.push({
       id, type: 'step', position: { ...(s.at ?? { x: 0, y: 0 }) }, width: STEP_W, height: STEP_H, style: { width: STEP_W, height: STEP_H },
       handles: STEP_HANDLES, selected: pick !== undefined, ...(lit ? {} : DIM),
-      data: { stepId: s.id, name: s.name, processor: s.processorId ? b.processors[s.processorId]?.name ?? null : null, processorId: s.processorId, footer, ...(pick ? { pick } : {}) },
+      data: { stepId: s.id, name: s.name, processor: s.processorId ? b.processors[s.processorId]?.name ?? null : null, processorId: s.processorId, footer, failed: failed(`step:${s.id}`), ...(pick ? { pick } : {}) },
     });
   }
   for (const c of Object.values(b.caches)) {
@@ -91,7 +99,7 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
     nodes.push({
       id, type: 'cache', position: { ...(c.at ?? { x: 0, y: 0 }) }, width: CACHE_W, height: CACHE_H, style: { width: CACHE_W, height: CACHE_H },
       handles: CACHE_HANDLES, selected: pick !== undefined, ...(lit ? {} : DIM),
-      data: { cacheId: c.id, name: c.name, ...(pick ? { pick } : {}) },
+      data: { cacheId: c.id, name: c.name, failed: failed(`cache:${c.id}`), ...(pick ? { pick } : {}) },
     });
   }
 

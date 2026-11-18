@@ -17,6 +17,15 @@ describe('toFlow', () => {
     expect(handles('ca:c1')).toEqual(['target:in:top']);
     expect(nodes.find((n) => n.id === 'st:fetch')!.position).toEqual({ x: 200, y: 200 });
   });
+  it('carries the marks: problems on a triangle, a failure on what a refused Save named', () => {
+    const { nodes } = toFlow(b, view({ problems: (wf) => (wf === 'daily' ? 2 : 0), failed: (k) => k === 'workflow:hourly' || k === 'step:fetch' || k === 'cache:c1' }));
+    const data = (id: string) => nodes.find((n) => n.id === id)!.data as { problems?: number; failed?: boolean };
+    expect(data('wf:daily')).toMatchObject({ problems: 2, failed: false });
+    expect(data('wf:hourly')).toMatchObject({ problems: 0, failed: true });
+    expect(data('st:fetch').failed).toBe(true);
+    expect(data('st:expand').failed).toBe(false);
+    expect(data('ca:c1').failed).toBe(true);
+  });
   it('makes one edge per wire, entry arrow and cache link', () => {
     const { edges } = toFlow(b, view());
     expect(edges.map((e) => [e.id, e.type, e.source, e.sourceHandle, e.target, e.targetHandle])).toEqual([

@@ -1,7 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { App } from './App';
-import { fakeApi, wf } from './board/testApi';
+import type { ApiResult } from './api/client';
+import { boardApi } from './board/testApi';
 import { liveStub } from './test/liveStub';
 import { memoryStorage } from './test/memoryStorage';
 import { chatPanel, chatSettled, say, scriptedAi, sendChat } from './test/scriptedAi';
@@ -12,9 +13,9 @@ describe('App chat: storage and loading', () => {
     Object.defineProperty(window, 'localStorage', { configurable: true, get() { throw new DOMException('blocked', 'SecurityError'); } });
     try {
       const aiFetch = scriptedAi([say('hello')]);
-      render(<App api={fakeApi({ workflows: [wf('w1')] })} live={liveStub()} storage={null} session={null} aiFetch={aiFetch as unknown as typeof fetch} />);
-      expect(await screen.findByTestId('rf__node-wf:w1')).toBeInTheDocument();
-      expect(await screen.findByText('Board loaded: 1 workflow')).toBeInTheDocument();
+      render(<App api={boardApi()} live={liveStub()} storage={null} session={null} aiFetch={aiFetch as unknown as typeof fetch} />);
+      expect(await screen.findByTestId('rf__node-wf:daily')).toBeInTheDocument();
+      expect(await screen.findByText('Board loaded: 2 workflows')).toBeInTheDocument();
       await sendChat('hi');
       expect(await chatPanel().findByText('hello')).toBeInTheDocument();
       await chatSettled();
@@ -25,15 +26,15 @@ describe('App chat: storage and loading', () => {
     }
   });
 
-  it('the chat waits for the board: the box and a restored question stay closed until the last workflow arrived (S1)', async () => {
-    const api = fakeApi({ workflows: [wf('w1'), wf('w2')] });
-    const get = api.getGraph;
+  it('the chat waits for the board: the box and a restored question stay closed until the board has loaded (S1)', async () => {
+    const api = boardApi();
+    const list = api.listWorkflows;
     let release: () => void = () => {};
-    api.getGraph = ((id: string) => (id === 'w2' ? new Promise((res) => { release = () => res(get(id)); }) : get(id))) as typeof api.getGraph;
-    const session = memoryStorage({ 'acto.chat': JSON.stringify({ entries: [], wire: [], question: { callId: 'c1', text: 'Stop w2-name?', choices: ['Stop', 'Cancel'], pin: 'w2' } }) });
+    api.listWorkflows = (() => new Promise<ApiResult<never>>((res) => { release = () => res(list() as never); })) as typeof api.listWorkflows;
+    const session = memoryStorage({ 'acto.chat': JSON.stringify({ entries: [], wire: [], question: { callId: 'c1', text: 'Stop hourly?', choices: ['Stop', 'Cancel'], pin: 'hourly' } }) });
     const aiFetch = scriptedAi();
     render(<App api={api} live={liveStub()} storage={memoryStorage()} session={session} aiFetch={aiFetch as unknown as typeof fetch} />);
-    expect(await screen.findByTestId('rf__node-wf:w1')).toBeInTheDocument();
+    expect(await screen.findByText('Loading the board…', { selector: '.board-wait' })).toBeInTheDocument();
     await waitFor(() => expect(aiFetch).toHaveBeenCalledWith('/ai/config', expect.anything()));
     await Promise.resolve();
     expect(chatPanel().getByText('Loading the board…')).toBeInTheDocument();
@@ -42,6 +43,7 @@ describe('App chat: storage and loading', () => {
     expect(chatPanel().getByRole('button', { name: 'Cancel' })).toBeDisabled();
     release();
     expect(await screen.findByText('Board loaded: 2 workflows')).toBeInTheDocument();
+    expect(await screen.findByTestId('rf__node-wf:hourly')).toBeInTheDocument();
     await waitFor(() => expect(chatPanel().getByRole('textbox', { name: 'Message' })).not.toBeDisabled());
     expect(chatPanel().getByRole('button', { name: 'Stop' })).not.toBeDisabled();
     expect(chatPanel().queryByText('Loading the board…')).toBeNull();

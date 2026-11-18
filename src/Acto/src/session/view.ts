@@ -1,21 +1,29 @@
-import type { BoardWorkflow } from '../board/loadBoard';
-import type { Selection } from '../board/selection';
+import type { Pick, SelectionState } from '../board/selection';
 
-export interface SavedView { x: number; y: number; zoom: number; selection: Selection | null }
+export interface SavedView { x: number; y: number; zoom: number; selection: SelectionState | null }
 
 const KEY = 'acto.view';
 
-const isStr = (v: unknown): v is string => typeof v === 'string';
+const isStr = (v: unknown): v is string => typeof v === 'string' && v !== '';
 
-function parseSelection(v: unknown): Selection | null {
+function parsePick(v: unknown): Pick | null {
   if (typeof v !== 'object' || v === null) return null;
   const s = v as Record<string, unknown>;
-  if (!isStr(s.workflowId)) return null;
-  if (s.kind === 'workflow') return { kind: 'workflow', workflowId: s.workflowId };
-  if (s.kind === 'step' && isStr(s.stepId)) return { kind: 'step', workflowId: s.workflowId, stepId: s.stepId };
-  if (s.kind === 'wire' && isStr(s.wireId)) return { kind: 'wire', workflowId: s.workflowId, wireId: s.wireId };
-  if (s.kind === 'cache' && isStr(s.cacheId)) return { kind: 'cache', workflowId: s.workflowId, cacheId: s.cacheId };
-  return null;
+  switch (s.kind) {
+    case 'workflow': case 'step': case 'cache': return isStr(s.id) ? { kind: s.kind, id: s.id } : null;
+    case 'wire': return isStr(s.from) && isStr(s.to) ? { kind: 'wire', from: s.from, to: s.to } : null;
+    case 'entry': return isStr(s.workflowId) && isStr(s.stepId) ? { kind: 'entry', workflowId: s.workflowId, stepId: s.stepId } : null;
+    case 'cacheLink': return isStr(s.workflowId) && isStr(s.cacheId) ? { kind: 'cacheLink', workflowId: s.workflowId, cacheId: s.cacheId } : null;
+    default: return null;
+  }
+}
+
+function parseSelection(v: unknown): SelectionState | null {
+  if (typeof v !== 'object' || v === null) return null;
+  const s = v as Record<string, unknown>;
+  const workflow = isStr(s.workflow) ? s.workflow : null;
+  const picks = Array.isArray(s.picks) ? s.picks.map(parsePick).filter((p): p is Pick => p !== null) : [];
+  return workflow === null && picks.length === 0 ? null : { workflow, picks };
 }
 
 export function readView(storage: Storage | null): SavedView | null {
@@ -32,15 +40,4 @@ export function readView(storage: Storage | null): SavedView | null {
 
 export function writeView(storage: Storage | null, view: SavedView): void {
   try { storage?.setItem(KEY, JSON.stringify(view)); } catch { /* no persistence */ }
-}
-
-/** The selection if its target is still on the board, else null. */
-export function keepExistingSelection(sel: Selection | null, workflows: BoardWorkflow[]): Selection | null {
-  if (sel === null) return null;
-  const w = workflows.find((x) => x.graph.workflow.id === sel.workflowId);
-  if (!w) return null;
-  if (sel.kind === 'step') return w.stepIds.includes(sel.stepId) ? sel : null;
-  if (sel.kind === 'wire') return w.wires.some((x) => x.id === sel.wireId) ? sel : null;
-  if (sel.kind === 'cache') return w.graph.workflow.cacheIds.includes(sel.cacheId) ? sel : null;
-  return sel;
 }

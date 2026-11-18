@@ -14,13 +14,13 @@ export function processorColour(name: string): string {
 
 /** A step: processor icon, name, processor; the footer is its version, or (with a triangle selected) that workflow's payload. */
 export function StepCard({ data, selected }: NodeProps) {
-  const { stepId, name, processor, processorId, footer, pick } = data as {
-    stepId: string; name: string; processor: string | null; processorId: string | null; footer: StepFooter; pick?: PickInfo;
+  const { stepId, name, processor, processorId, footer, failed = false, pick } = data as {
+    stepId: string; name: string; processor: string | null; processorId: string | null; footer: StepFooter; failed?: boolean; pick?: PickInfo;
   };
   const self = { kind: 'step', id: stepId } as const;
   const toolbar = useHasToolbar(self);
   return (
-    <div className={`node${selected ? ' sel' : ''}`}>
+    <div className={`node${selected ? ' sel' : ''}${failed ? ' failed' : ''}`}>
       <PickBadge pick={pick} />
       {selected && pick?.solo && toolbar && (
         <NodeToolbar isVisible position={Position.Top} offset={10}><ItemToolbar pick={self} /></NodeToolbar>

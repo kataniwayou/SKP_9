@@ -12,8 +12,7 @@ vi.mock('@xyflow/react', async (orig) => {
 
 import { App } from './App';
 import type { StudioApi } from './api/client';
-import { processorDto } from './api/fixtures';
-import { fakeApi, wf } from './board/testApi';
+import { boardApi } from './board/testApi';
 import { liveStub } from './test/liveStub';
 import { memoryStorage } from './test/memoryStorage';
 import { chatSettled, scriptedAi, sendChat, toolCall } from './test/scriptedAi';
@@ -24,7 +23,9 @@ function centreOf(el: HTMLElement): { x: number; y: number } {
   return { x: Number(m[1]) + parseFloat(el.style.width) / 2, y: Number(m[2]) + parseFloat(el.style.height) / 2 };
 }
 
-const frames = () => [...document.querySelectorAll<HTMLElement>('[data-testid^="rf__node-wf:"]')];
+const OLD = ['rf__node-wf:daily', 'rf__node-wf:hourly'];
+/** The triangles the chat made. */
+const made = () => [...document.querySelectorAll<HTMLElement>('[data-testid^="rf__node-wf:"]')].filter((f) => !OLD.includes(f.dataset.testid!));
 
 function renderApp(api: StudioApi, aiFetch: ReturnType<typeof scriptedAi>) {
   render(<App api={api} live={liveStub()} storage={memoryStorage()} session={memoryStorage()} aiFetch={aiFetch as unknown as typeof fetch} />);
@@ -33,38 +34,24 @@ function renderApp(api: StudioApi, aiFetch: ReturnType<typeof scriptedAi>) {
 afterEach(() => setCenter.mockClear());
 
 describe('App chat: the board follows what the chat changed', () => {
-  it('new_workflow pans the board to the new frame (Must 2)', async () => {
-    renderApp(fakeApi({ workflows: [wf('w1')] }), scriptedAi([toolCall(0, 'c1', 'new_workflow', {})]));
-    expect(await screen.findByText('Board loaded: 1 workflow')).toBeInTheDocument();
+  it('new_workflow pans the board to the new triangle (Must 2)', async () => {
+    renderApp(boardApi(), scriptedAi([toolCall(0, 'c1', 'new_workflow', {})]));
+    expect(await screen.findByText('Board loaded: 2 workflows')).toBeInTheDocument();
     await sendChat('make a workflow');
     await chatSettled();
-    await waitFor(() => expect(frames()).toHaveLength(2));
-    const made = frames().find((f) => f.dataset.testid !== 'rf__node-wf:w1')!;
-    const c = centreOf(made);
+    await waitFor(() => expect(made()).toHaveLength(1));
+    await waitFor(() => expect(made()[0]!.style.transform).not.toBe(''));
+    const c = centreOf(made()[0]!);
     expect(setCenter).toHaveBeenCalledWith(c.x, c.y, expect.objectContaining({ duration: 300 }));
   });
 
-  it('two new_workflow calls in one answer get two different slots (Must 2)', async () => {
-    renderApp(fakeApi({ workflows: [wf('w1')] }), scriptedAi([toolCall(0, 'c1', 'new_workflow', {}), toolCall(1, 'c2', 'new_workflow', {})]));
-    expect(await screen.findByText('Board loaded: 1 workflow')).toBeInTheDocument();
+  it('two new_workflow calls in one answer get two different spots (Must 2)', async () => {
+    renderApp(boardApi(), scriptedAi([toolCall(0, 'c1', 'new_workflow', {}), toolCall(1, 'c2', 'new_workflow', {})]));
+    expect(await screen.findByText('Board loaded: 2 workflows')).toBeInTheDocument();
     await sendChat('make two');
     await chatSettled();
-    await waitFor(() => expect(frames()).toHaveLength(3));
-    const made = frames().filter((f) => f.dataset.testid !== 'rf__node-wf:w1');
-    expect(made[0]!.style.transform).not.toBe(made[1]!.style.transform);
-  });
-
-  it('add_step without x and y pans to the new step, not to the frame (Must 2)', async () => {
-    const api = { ...fakeApi({ workflows: [wf('w1')] }), listProcessors: vi.fn().mockResolvedValue({ ok: true, value: [processorDto('p1', { name: 'Cruncher' })] }) } as StudioApi;
-    renderApp(api, scriptedAi([toolCall(0, 'c1', 'add_step', { workflow_id: 'w1', processor_id: 'p1' })]));
-    expect(await screen.findByText('Board loaded: 1 workflow')).toBeInTheDocument();
-    expect((await screen.findAllByText('Cruncher')).length).toBeGreaterThan(0);
-    await sendChat('add a cruncher');
-    await chatSettled();
-    const steps = () => [...document.querySelectorAll<HTMLElement>('[data-testid^="rf__node-st:w1:"]')];
-    await waitFor(() => expect(steps()).toHaveLength(2));
-    const added = steps().find((s) => s.dataset.testid !== 'rf__node-st:w1:s1')!;
-    const c = centreOf(added);
-    expect(setCenter).toHaveBeenLastCalledWith(c.x, c.y, expect.objectContaining({ duration: 300 }));
+    await waitFor(() => expect(made()).toHaveLength(2));
+    await waitFor(() => expect(made().every((f) => f.style.transform !== '')).toBe(true));
+    expect(made()[0]!.style.transform).not.toBe(made()[1]!.style.transform);
   });
 });

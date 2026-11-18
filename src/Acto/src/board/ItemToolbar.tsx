@@ -7,9 +7,9 @@ export function ItemToolbar({ pick }: { pick: Pick }) {
   if (!items || items.length === 0) return null;
   return (
     <div className="toolbar nodrag nopan" role="toolbar" aria-label={`${pick.kind} actions`} onClick={(e) => e.stopPropagation()}>
-      {items.map((it) => (
-        <button key={it.label} type="button" className={it.tone} disabled={it.disabled} onClick={it.onClick}>{it.label}</button>
-      ))}
+      {items.map((it) => it.note
+        ? <span key={it.label} className="confirm-text">{it.label}</span>
+        : <button key={it.label} type="button" className={it.tone} disabled={it.disabled} onClick={it.onClick}>{it.label}</button>)}
       <span className="toolbar-arrow" />
     </div>
   );

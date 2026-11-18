@@ -150,3 +150,9 @@
 .entry-edge.on .entry-head { fill: var(--accent); }
 .cache-line { stroke: var(--cache-line); stroke-width: 1.6; stroke-dasharray: 6 4; pointer-events: none; }
 .cache-edge.on .cache-line { stroke: var(--accent); stroke-width: 2.4; }
+
+/* Save and dry-run marks: a problem badge on a triangle, a failure outline on whatever a refused Save named */
+.tri-problems { position: absolute; left: 62px; top: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--warn); color: var(--on-colour); font: 700 11px/18px var(--mono); text-align: center; z-index: 2; }
+.tri.failed .tri-body { stroke: var(--danger); stroke-dasharray: 5 3; }
+.node.failed { border-color: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 25%, transparent); }
+.cache-chip.failed { border-color: var(--danger); }
