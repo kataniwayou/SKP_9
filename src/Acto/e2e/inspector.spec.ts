@@ -145,9 +145,7 @@ test('assignment payload: a payload the config schema refuses shows its problems
 });
 
 test('a payload that is not JSON says so, and is kept', async ({ page }) => {
-  // APP BUG: text that is not JSON shows nothing at all under the payload field. checkPayload answers no problems for
-  // it, its comment says "the field says so", but no part of the Inspector does (no .in-problem, no .in-note).
-  test.fail();
+  // Was an app bug (fixed 2026-11-18): text that is not JSON showed nothing at all under the payload field.
   const f = await savedWithStep(page);
   await field(page, 'Payload · JSON').fill('{"maxDepth": ');
   await pickFrame(f.frame);

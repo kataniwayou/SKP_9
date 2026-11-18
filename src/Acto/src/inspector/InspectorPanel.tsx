@@ -6,7 +6,7 @@ import { useLive, useLiveStore, useProcessorLive, useWorkflowStatus } from '../l
 import { livenessText, statusOf } from '../live/liveState';
 import { cronText } from '../model/cronText';
 import { CONDITIONS, conditionInfo } from '../model/entryConditions';
-import { checkPayload } from '../model/payloadCheck';
+import { checkPayload, payloadJsonProblem } from '../model/payloadCheck';
 import { useEntry, type BoardStore } from '../design/boardStore';
 import { canRedo, canUndo } from '../design/history';
 import { newId } from '../design/ids';
@@ -170,6 +170,9 @@ function PayloadCheckNote({ w, stepId, payload }: { w: BoardWorkflow; stepId: st
   const step = w.graph.steps.get(stepId);
   const processor = step?.processorId ? w.graph.processors.get(step.processorId) : undefined;
   const schema = processor?.configSchemaId ? w.graph.schemas.get(processor.configSchemaId) : undefined;
+  // text that is not JSON says so whether or not there is a schema to check it against
+  const notJson = payloadJsonProblem(payload);
+  if (notJson !== null) return <p className="in-problem">{notJson}</p>;
   if (!schema?.definition) return null;
   const r = checkPayload(schema.definition, payload);
   if ('unchecked' in r) return <p className="in-note">{r.unchecked}</p>;

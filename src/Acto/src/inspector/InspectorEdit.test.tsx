@@ -62,6 +62,16 @@ describe('inspector editing', () => {
     expect(st.boards()[0]!.graph.assignments[0]!.payload).toBe('{"y":1}');
     expect(document.querySelectorAll('.in-problem').length).toBeGreaterThan(0);
   });
+  it('says a payload is not JSON, with or without a config schema, and keeps the text', () => {
+    const st = setup(A);
+    fireEvent.change(screen.getByLabelText(/Payload/), { target: { value: '{"maxDepth": ' } });
+    expect(st.boards()[0]!.graph.assignments[0]!.payload).toBe('{"maxDepth": ');
+    expect(screen.getByLabelText(/Payload/)).toHaveProperty('value', '{"maxDepth": ');
+    const problems = [...document.querySelectorAll('.in-problem')].map((e) => e.textContent);
+    expect(problems).toEqual([expect.stringMatching(/^Not valid JSON: /)]);
+    fireEvent.change(screen.getByLabelText(/Payload/), { target: { value: '{"maxDepth": 1}' } });
+    expect(document.querySelectorAll('.in-problem')).toHaveLength(0);
+  });
   it('removes the assignment', () => {
     const st = setup(A);
     fireEvent.click(screen.getByText('Remove assignment'));

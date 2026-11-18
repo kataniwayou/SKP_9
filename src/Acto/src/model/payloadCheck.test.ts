@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkPayload } from './payloadCheck';
+import { checkPayload, payloadJsonProblem } from './payloadCheck';
 
 // as file-fetcher-config is in BaseApi
 const FETCHER = JSON.stringify({
@@ -43,8 +43,16 @@ describe('checkPayload (the user, 2026-11-02)', () => {
     expect(checkPayload('{"properties":{"at":{"type":"string","format":"date-time"}}}', '{"at":"not a date"}')).toEqual({ problems: [] });
   });
 
-  it('leaves a payload that is not JSON to the field\'s own note', () => {
-    expect(checkPayload(FETCHER, '{')).toEqual({ problems: [] });
+  it('names a payload that is not JSON, in the parser words, before any schema check', () => {
+    expect(checkPayload(FETCHER, '{"maxDepth": ')).toEqual({ problems: [expect.stringMatching(/^Not valid JSON: .+/)] });
+    // even when the schema itself cannot be checked here
+    expect(checkPayload('{', '{')).toEqual({ problems: [expect.stringMatching(/^Not valid JSON: /)] });
+  });
+
+  it('payloadJsonProblem is null for JSON and the parse problem otherwise', () => {
+    expect(payloadJsonProblem('{"a":1}')).toBeNull();
+    expect(payloadJsonProblem('')).toMatch(/^Not valid JSON: /);
+    expect(payloadJsonProblem('{a}')).toMatch(/^Not valid JSON: /);
   });
 
   it('says when the schema cannot be checked here: not JSON, or a $ref the browser cannot follow', () => {

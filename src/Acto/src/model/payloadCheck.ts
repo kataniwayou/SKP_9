@@ -52,16 +52,23 @@ function describe(e: ErrorObject): string {
   return `${at}: ${e.message ?? 'is not valid'}`;
 }
 
-/** The payload's problems against the config schema's definition; none for a payload that is not JSON (the field says so). */
+/** Why the payload text is not JSON (the parser's own words), or null when it is. */
+export function payloadJsonProblem(payload: string): string | null {
+  try {
+    JSON.parse(payload);
+    return null;
+  } catch (e) {
+    return `Not valid JSON: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+/** The payload's problems against the config schema's definition; a payload that is not JSON has that one problem. */
 export function checkPayload(definition: string, payload: string): PayloadCheck {
+  const notJson = payloadJsonProblem(payload);
+  if (notJson !== null) return { problems: [notJson] };
   const validate = validatorOf(definition);
   if (typeof validate === 'string') return { unchecked: validate };
-  let value: unknown;
-  try {
-    value = JSON.parse(payload);
-  } catch {
-    return { problems: [] };
-  }
+  const value: unknown = JSON.parse(payload);
   const markers = new Map<string, string>();
   markersIn(value, '', markers);
   const problems = [...markers].map(([path, type]) => `${path || '/'}: still a placeholder: fill in ${ARTICLE[type] ?? `a ${type}`}`);
