@@ -39,6 +39,12 @@ public sealed class WorkflowEntity : BaseEntity
 {
     public string? CronExpression { get; set; }
 
+    /// <summary>Where the Acto board draws this row, or null when it has never been placed. An update that carries no location leaves the stored one.</summary>
+    public double? BoardX { get; set; }
+
+    /// <summary>See <see cref="BoardX"/>.</summary>
+    public double? BoardY { get; set; }
+
     /// <summary>
     /// The workflow's diagram as SVG source, or null when none has been published.
     /// <para>

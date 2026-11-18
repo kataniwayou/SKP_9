@@ -12,7 +12,9 @@ public sealed record CacheCreateDto(
     string Version,
     string? Description,
     string Root,
-    string Items) : IBaseDto;
+    string Items,
+    double? BoardX = null,
+    double? BoardY = null) : IBaseDto;
 
 /// <summary>
 /// Update-side DTO. Server-controlled fields are absent here, and the mapper's <c>Update</c> method
@@ -23,7 +25,9 @@ public sealed record CacheUpdateDto(
     string Version,
     string? Description,
     string Root,
-    string Items) : IBaseDto;
+    string Items,
+    double? BoardX = null,
+    double? BoardY = null) : IBaseDto;
 
 /// <summary>
 /// Body of <c>PUT /caches/{id}/items</c>: the whole dictionary, which replaces the row's. The root and
@@ -47,4 +51,6 @@ public sealed record CacheReadDto(
     DateTime CreatedAt,
     DateTime UpdatedAt,
     string? CreatedBy,
-    string? UpdatedBy) : IBaseDto, IHasId;
+    string? UpdatedBy,
+    double? BoardX = null,
+    double? BoardY = null) : IBaseDto, IHasId;

@@ -14,7 +14,9 @@ public sealed record StepCreateDto(
     string? Description,
     Guid ProcessorId,
     List<Guid>? NextStepIds,
-    StepEntryCondition EntryCondition) : IBaseDto;
+    StepEntryCondition EntryCondition,
+    double? BoardX = null,
+    double? BoardY = null) : IBaseDto;
 
 /// <summary>
 /// Update-side DTO. On update the existing junction rows for this step are removed before the new
@@ -27,7 +29,9 @@ public sealed record StepUpdateDto(
     string? Description,
     Guid ProcessorId,
     List<Guid>? NextStepIds,
-    StepEntryCondition EntryCondition) : IBaseDto;
+    StepEntryCondition EntryCondition,
+    double? BoardX = null,
+    double? BoardY = null) : IBaseDto;
 
 /// <summary>
 /// Read-side DTO returned to clients, carrying the id and the audit fields.
@@ -51,4 +55,6 @@ public sealed record StepReadDto(
     DateTime CreatedAt,
     DateTime UpdatedAt,
     string? CreatedBy,
-    string? UpdatedBy) : IBaseDto, IHasId;
+    string? UpdatedBy,
+    double? BoardX = null,
+    double? BoardY = null) : IBaseDto, IHasId;

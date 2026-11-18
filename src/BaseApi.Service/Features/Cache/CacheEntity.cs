@@ -42,4 +42,10 @@ public sealed class CacheEntity : BaseEntity
     }
 
     public string Items { get; set; } = string.Empty;
+
+    /// <summary>Where the Acto board draws this row, or null when it has never been placed. An update that carries no location leaves the stored one.</summary>
+    public double? BoardX { get; set; }
+
+    /// <summary>See <see cref="BoardX"/>.</summary>
+    public double? BoardY { get; set; }
 }

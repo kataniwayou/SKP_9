@@ -24,4 +24,10 @@ public sealed class StepEntity : BaseEntity
 {
     public Guid ProcessorId { get; set; }
     public StepEntryCondition EntryCondition { get; set; } = StepEntryCondition.PreviousCompleted;
+
+    /// <summary>Where the Acto board draws this row, or null when it has never been placed. An update that carries no location leaves the stored one.</summary>
+    public double? BoardX { get; set; }
+
+    /// <summary>See <see cref="BoardX"/>.</summary>
+    public double? BoardY { get; set; }
 }

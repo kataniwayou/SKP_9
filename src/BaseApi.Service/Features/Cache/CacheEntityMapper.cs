@@ -24,7 +24,22 @@ public sealed partial class CacheEntityMapper :
     [MapperIgnoreTarget(nameof(CacheEntity.UpdatedAt))]
     [MapperIgnoreTarget(nameof(CacheEntity.CreatedBy))]
     [MapperIgnoreTarget(nameof(CacheEntity.UpdatedBy))]
-    public partial void Update(CacheUpdateDto dto, CacheEntity target);
+    [MapperIgnoreTarget(nameof(CacheEntity.BoardX))]
+    [MapperIgnoreTarget(nameof(CacheEntity.BoardY))]
+    [MapperIgnoreSource(nameof(CacheUpdateDto.BoardX))]
+    [MapperIgnoreSource(nameof(CacheUpdateDto.BoardY))]
+    private partial void UpdateFields(CacheUpdateDto dto, CacheEntity target);
+
+    /// <summary>
+    /// The generated field copy, then the location: BoardX and BoardY are each written only when the DTO
+    /// carries them, so a caller that does not know locations (a design save, Valence) never erases them.
+    /// </summary>
+    public void Update(CacheUpdateDto dto, CacheEntity target)
+    {
+        UpdateFields(dto, target);
+        if (dto.BoardX is { } x) target.BoardX = x;
+        if (dto.BoardY is { } y) target.BoardY = y;
+    }
 
     public partial CacheReadDto ToRead(CacheEntity entity);
 }

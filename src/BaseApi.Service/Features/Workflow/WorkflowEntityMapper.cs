@@ -49,7 +49,22 @@ public sealed partial class WorkflowEntityMapper :
     [MapperIgnoreTarget(nameof(WorkflowEntity.Diagram))]
     [MapperIgnoreTarget(nameof(WorkflowEntity.Layout))]
     [MapperIgnoreTarget(nameof(WorkflowEntity.Design))]
-    public partial void Update(WorkflowUpdateDto dto, WorkflowEntity target);
+    [MapperIgnoreTarget(nameof(WorkflowEntity.BoardX))]
+    [MapperIgnoreTarget(nameof(WorkflowEntity.BoardY))]
+    [MapperIgnoreSource(nameof(WorkflowUpdateDto.BoardX))]
+    [MapperIgnoreSource(nameof(WorkflowUpdateDto.BoardY))]
+    private partial void UpdateFields(WorkflowUpdateDto dto, WorkflowEntity target);
+
+    /// <summary>
+    /// The generated field copy, then the location: BoardX and BoardY are each written only when the DTO
+    /// carries them, so a caller that does not know locations (a design save, Valence) never erases them.
+    /// </summary>
+    public void Update(WorkflowUpdateDto dto, WorkflowEntity target)
+    {
+        UpdateFields(dto, target);
+        if (dto.BoardX is { } x) target.BoardX = x;
+        if (dto.BoardY is { } y) target.BoardY = y;
+    }
 
     // All three collections are required constructor parameters on the positional read record, so
     // they cannot be ignored — a mapped value is what satisfies them. Reads return null for each.

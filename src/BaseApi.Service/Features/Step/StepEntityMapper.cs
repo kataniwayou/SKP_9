@@ -39,7 +39,22 @@ public sealed partial class StepEntityMapper :
     [MapperIgnoreTarget(nameof(StepEntity.CreatedBy))]
     [MapperIgnoreTarget(nameof(StepEntity.UpdatedBy))]
     [MapperIgnoreSource(nameof(StepUpdateDto.NextStepIds))]
-    public partial void Update(StepUpdateDto dto, StepEntity target);
+    [MapperIgnoreTarget(nameof(StepEntity.BoardX))]
+    [MapperIgnoreTarget(nameof(StepEntity.BoardY))]
+    [MapperIgnoreSource(nameof(StepUpdateDto.BoardX))]
+    [MapperIgnoreSource(nameof(StepUpdateDto.BoardY))]
+    private partial void UpdateFields(StepUpdateDto dto, StepEntity target);
+
+    /// <summary>
+    /// The generated field copy, then the location: BoardX and BoardY are each written only when the DTO
+    /// carries them, so a caller that does not know locations (a design save, Valence) never erases them.
+    /// </summary>
+    public void Update(StepUpdateDto dto, StepEntity target)
+    {
+        UpdateFields(dto, target);
+        if (dto.BoardX is { } x) target.BoardX = x;
+        if (dto.BoardY is { } y) target.BoardY = y;
+    }
 
     [MapValue(nameof(StepReadDto.NextStepIds), null)]
     public partial StepReadDto ToRead(StepEntity entity);
