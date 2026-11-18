@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createApi, type StudioApi } from './api/client';
 import { describeError } from './api/describeError';
-import { cacheFromDto, processorFromDto } from './api/toModel';
+import { cacheFromDto, processorFromDto, schemaFromDto } from './api/toModel';
 import { Board, type BoardEdit, type BoardFocus } from './board/Board';
 import { SelectionBar, type BarActions } from './board/SelectionBarView';
 import { barOf } from './board/selectionBar';
@@ -132,16 +132,26 @@ export function App(props: AppProps) {
   const listProcessors = useCallback(async (cancelled: () => boolean = () => false) => {
     try {
       const r = await api.listProcessors?.();
-      if (cancelled() || !r) return;
-      if (r.ok) {
+      if (cancelled()) return;
+      if (r?.ok) {
         const ps = r.value.map(processorFromDto);
         processorsRef.current = ps;
         setProcessors(ps);
         store.setProcessors(ps);
       }
-      else output.log(`Could not list the processors: ${describeError(r.error)}`, 'error');
+      else if (r) output.log(`Could not list the processors: ${describeError(r.error)}`, 'error');
     } catch (e) {
-      if (!cancelled()) output.log(`Could not list the processors: ${message(e)}`, 'error');
+      if (cancelled()) return;
+      output.log(`Could not list the processors: ${message(e)}`, 'error');
+    }
+    // their schemas, definitions included: a step just added from the toolbox has them before its workflow is saved
+    try {
+      const r = await api.listSchemas?.();
+      if (cancelled() || !r) return;
+      if (r.ok) store.setSchemas(r.value.map(schemaFromDto));
+      else output.log(`Could not list the schemas: ${describeError(r.error)}`, 'error');
+    } catch (e) {
+      if (!cancelled()) output.log(`Could not list the schemas: ${message(e)}`, 'error');
     }
   }, [api, output, store]);
   useEffect(() => {

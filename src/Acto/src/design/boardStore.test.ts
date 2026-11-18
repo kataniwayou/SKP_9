@@ -4,9 +4,10 @@ import { createOutputStore } from '../output/outputStore';
 import { createBoardStore } from './boardStore';
 import { bwFull, proc } from './fixtures';
 import { canUndo } from './history';
-import { addWire, moveMany, moveStep, newWorkflowState, removeStepHere, removeWire, setProcessorField, setStepField, type WorkflowState } from './state';
+import { addStep, addWire, moveMany, moveStep, newWorkflowState, removeStepHere, removeWire, setProcessorField, setStepField, type WorkflowState } from './state';
 import { bw } from '../board/fixtures';
 import { memoryStorage } from '../test/memoryStorage';
+import { AUDIT } from '../model/fixtures';
 
 function storeWith(bw: BoardWorkflow, session: Storage | null = null) {
   const output = createOutputStore(null, () => '00:00:00');
@@ -119,6 +120,33 @@ describe('board store', () => {
     partial.load({ listed: true, workflows: [], failures: [{ workflowId: 'w1', name: 'orders', detail: 'x' }] }, []);
     expect(Object.keys(JSON.parse(session.getItem('acto.drafts')!))).toEqual(['w1']);
     expect(storeWith(bwFull(), session).entry('w1')!.unsaved).toBe(true);
+  });
+});
+
+describe('schemas from the schema list', () => {
+  const cfg = { id: 's9', name: 'cfg', version: '1.0.0', description: null, definition: '{"type":"object","required":["x"]}', audit: AUDIT };
+  it("give a step just added from the toolbox its processor's schemas, definitions included, without a save", () => {
+    const output = createOutputStore(null, () => '00:00:00');
+    const st = createBoardStore(output, null);
+    const p9 = { ...proc('p9', 'Fetcher'), configSchemaId: 's9' };
+    st.load({ listed: true, workflows: [bwFull()], failures: [] }, [proc('p1', 'Analyst'), p9]);
+    st.edit('w1', (s) => addStep(s, p9, { x: 40, y: 40 }, 'n1'));
+    expect(st.boards()[0]!.graph.schemas.get('s9')).toBeUndefined();
+    expect(st.schema('s9', 'w1')).toBeNull();
+    st.setSchemas([cfg]);
+    expect(st.boards()[0]!.graph.schemas.get('s9')?.definition).toBe(cfg.definition);
+    expect(st.schema('s9', 'w1')?.definition).toBe(cfg.definition);
+    // the list only fills gaps: nothing becomes unsaved
+    expect(st.entry('w1')!.history.past).toHaveLength(1);
+  });
+  it("never replaces a schema the workflow's own graph holds", () => {
+    const b = bwFull();
+    b.graph.schemas.set('s9', { ...cfg, name: 'from-graph' });
+    const st = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
+    st.load({ listed: true, workflows: [b], failures: [] }, [{ ...proc('p1', 'Analyst'), configSchemaId: 's9' }]);
+    st.setSchemas([cfg]);
+    expect(st.boards()[0]!.graph.schemas.get('s9')?.name).toBe('from-graph');
+    expect(st.schema('s9', 'w1')?.name).toBe('from-graph');
   });
 });
 

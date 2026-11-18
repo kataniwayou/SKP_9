@@ -89,6 +89,8 @@ const stepAtOf = (s: WorkflowState) => new Map(Object.entries(s.steps).map(([id,
 
 export function boardWorkflowOf(
   state: WorkflowState, base: BoardWorkflow | null, processors: ReadonlyMap<Id, Processor>,
+  /** BaseAPI's schema list: fills the slots of a processor the loaded graph does not hold (a step just added from the toolbox). */
+  known: ReadonlyMap<Id, Schema> = new Map(),
 ): BoardWorkflow {
   const stepIds = Object.keys(state.steps);
   const stepAt = stepAtOf(state);
@@ -119,6 +121,13 @@ export function boardWorkflowOf(
       schemas.set(e.copy.id, { ...e.copy, audit: NO_AUDIT });
     }
     procs.set(pid, shown);
+  }
+  for (const p of procs.values()) {
+    for (const slot of SLOTS) {
+      const sid = p[SLOT_FIELD[slot]];
+      const k = sid ? known.get(sid) : undefined;
+      if (sid && k && !schemas.has(sid)) schemas.set(sid, k);
+    }
   }
   const wires = wiresOf(stepIds, steps);
   const roles = stepRoles(stepIds, wires);

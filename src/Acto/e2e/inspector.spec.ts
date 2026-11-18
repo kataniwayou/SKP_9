@@ -155,10 +155,8 @@ test('a payload that is not JSON says so, and is kept', async ({ page }) => {
 });
 
 test("a step just dropped from the toolbox has its payload checked against the processor's config schema", async ({ page }) => {
-  // APP BUG: a step added from the toolbox to a workflow (until that workflow is saved and read back) shows its
-  // processor's schema slots as "definition not loaded" and checks no payload: the Inspector only knows the schemas of
-  // a workflow's loaded graph, and the processor list carries none. The same processor in a saved workflow shows them.
-  test.fail();
+  // Was an app bug (fixed 2026-11-18): a step added from the toolbox showed its processor's schema slots as "definition
+  // not loaded" and checked no payload until its workflow was saved; the schemas now come from BaseAPI's schema list.
   await openEmptyBoard(page);
   const f = await throwaway(page, 1);
   await pickStep(f.steps[0]!);

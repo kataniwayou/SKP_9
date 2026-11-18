@@ -2,7 +2,7 @@ import { createEvent, fireEvent, render, screen, within } from '@testing-library
 import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import type { StudioApi } from './api/client';
-import { processorDto } from './api/fixtures';
+import { processorDto, schemaDto } from './api/fixtures';
 import { fakeApi, graphWith, wf } from './board/testApi';
 import { liveStub } from './test/liveStub';
 import { memoryStorage } from './test/memoryStorage';
@@ -87,6 +87,19 @@ describe('App', () => {
     expect(await toolbox.findByText('Crunched')).toBeInTheDocument();
     expect(toolbox.queryByText('Cruncher')).toBeNull();
     expect(listProcessors).toHaveBeenCalledTimes(2);
+  });
+  it("gives a processor the loaded graph lacks its schemas from the schema list, and checks the payload against them", async () => {
+    const listSchemas = vi.fn().mockResolvedValue({ ok: true, value: [schemaDto('cs1', { name: 'cfg', definition: '{"type":"object","required":["x"]}' })] });
+    const api = {
+      ...fakeApi({ workflows: [wf('w1')] }), listSchemas,
+      listProcessors: vi.fn().mockResolvedValue({ ok: true, value: [processorDto('p1', { name: 'Cruncher', configSchemaId: 'cs1' })] }),
+    } as StudioApi;
+    renderApp(api, saved({ kind: 'step', workflowId: 'w1', stepId: 's1' }));
+    expect(await inspector().findByLabelText('Config schema definition')).toHaveProperty('value', '{"type":"object","required":["x"]}');
+    expect(inspector().queryByText(/definition not loaded/)).toBeNull();
+    fireEvent.change(inspector().getByLabelText(/Payload/), { target: { value: '{}' } });
+    expect(await inspector().findByText('/: missing required "x"')).toBeInTheDocument();
+    expect(listSchemas).toHaveBeenCalledTimes(1);
   });
   it('restores a saved selection into the inspector', async () => {
     renderApp(fakeApi({ workflows: [wf('w1')] }), saved({ kind: 'workflow', workflowId: 'w1' }));

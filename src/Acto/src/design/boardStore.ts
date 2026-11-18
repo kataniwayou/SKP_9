@@ -28,13 +28,18 @@ export interface BoardStore {
   /** New-workflow drafts become frames; drafts for workflows that never arrived are kept for later. */
   finish(board: BoardLoad): void;
   setProcessors(processors: Processor[]): void;
+  /**
+   * BaseAPI's schema list (with definitions): a processor's slots the loaded graph lacks (a step just added from the
+   * toolbox) are filled from it, so the Inspector and the payload check have them before any save.
+   */
+  setSchemas(schemas: Schema[]): void;
   boards(): BoardWorkflow[];
   /**
    * A processor as last read from BaseAPI (the processor list, refreshed by every re-read after a save), without any
    * unsaved edit of the designs: what a processor edit is diffed against.
    */
   processor(id: Id, workflowId: Id): Processor | null;
-  /** A schema as stored in the workflow's loaded graph. */
+  /** A schema as stored in the workflow's loaded graph, else as BaseAPI's schema list holds it. */
   schema(id: Id, workflowId: Id): Schema | null;
   entry(id: Id): BoardEntry | null;
   edit(id: Id, fn: (s: WorkflowState) => WorkflowState, merge?: string): void;
@@ -77,6 +82,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
   // the frame each workflow arrived with: a final layout only moves a frame still there
   const arrivedFrame = new Map<Id, Rect>();
   let processors = new Map<Id, Processor>();
+  let schemaList = new Map<Id, Schema>();
   let procVersion = 0;
   let bwProcVersion = 0;
   let cached: BoardWorkflow[] | null = null;
@@ -239,6 +245,11 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       procVersion++;
       notify();
     },
+    setSchemas(ss) {
+      schemaList = new Map(ss.map((x) => [x.id, x]));
+      procVersion++;
+      notify();
+    },
     boards() {
       if (cached) return cached;
       if (bwProcVersion !== procVersion) {
@@ -247,7 +258,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       }
       cached = [...recs.values()].map((r) => {
         if (!r.bw || r.bwFor !== r.history.present) {
-          r.bw = boardWorkflowOf(r.history.present, r.baseBw, processors);
+          r.bw = boardWorkflowOf(r.history.present, r.baseBw, processors, schemaList);
           r.bwFor = r.history.present;
         }
         return r.bw;
@@ -255,7 +266,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       return cached;
     },
     processor: (id, wf) => processors.get(id) ?? recs.get(wf)?.baseBw?.graph.processors.get(id) ?? null,
-    schema: (id, wf) => recs.get(wf)?.baseBw?.graph.schemas.get(id) ?? null,
+    schema: (id, wf) => recs.get(wf)?.baseBw?.graph.schemas.get(id) ?? schemaList.get(id) ?? null,
     entry: (id) => recs.get(id)?.view ?? null,
     edit(id, fn, merge) {
       const r = recs.get(id);
@@ -288,7 +299,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     adoptPresent(id) {
       const r = recs.get(id);
       if (!r) return;
-      const built = boardWorkflowOf(r.history.present, r.baseBw, processors);
+      const built = boardWorkflowOf(r.history.present, r.baseBw, processors, schemaList);
       // what was just saved is what BaseAPI holds now, the processors this workflow changed included
       learnProcessors(built.graph.processors.values());
       const next = make(built);
@@ -398,7 +409,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
           caches: merged(g0.caches, bw.graph.caches, (k) => keys.has(`cache:${k}`)),
         },
       };
-      const built = boardWorkflowOf(base, lookup, processors);
+      const built = boardWorkflowOf(base, lookup, processors, schemaList);
       const baseBw: BoardWorkflow = { ...built, graph: { ...built.graph, processors: lookup.graph.processors, schemas: lookup.graph.schemas } };
       const h = r.history;
       const history: History = { past: h.past.map(rebased), present: rebased(h.present), future: h.future.map(rebased), merge: null };
