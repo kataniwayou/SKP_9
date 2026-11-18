@@ -1,10 +1,10 @@
 import { test, expect } from './fixtures';
-import { childLabels, childTab, field, inspector, openAt, payloadOf, pickStep, pickWorkflow, stNode, tab, tabLabels, wfNode, wireEdge } from './helpers';
+import { childLabels, childTab, field, inspector, openAt, payloadOf, pickStep, pickWorkflow, selectWorkflowAlone, stNode, tab, tabLabels, wfNode, wireEdge } from './helpers';
 import { seed } from './seed';
 
 // Plan 6 (inspector-tabs spec §5), [user, 2026-11-18]: a picked step has two parent tabs, Step and Processor, each showing its own
-// fields; Step's child row holds one assignment tab per selected workflow whose stream holds the step, Processor's one tab per schema
-// its processor holds. No child is chosen at first; a child row with no tabs is not drawn. "▸ show all" reveals the five metadata
+// fields; with exactly one triangle picked beside it, Step's child row holds that workflow's assignment, Processor's one tab per
+// schema its processor holds. No child is chosen at first; a child row with no tabs is not drawn. "▸ show all" reveals the five metadata
 // rows; JSON is shown pretty; the entry condition is Studio's picker. Nothing is saved (the guard fails the test on any write):
 // processor and schema fields are only read.
 
@@ -25,12 +25,12 @@ const SEED = {
 
 const PRETTY = /\n {2}"/; // one field to a line, two-space indent
 
-test('a step alone, a triangle then the step, two triangles then their shared step: Step and Processor on top, the workflows as Step\'s children', async ({ page }) => {
+test('a step alone; a triangle with the step shows that workflow\'s assignment under Step; two triangles and a step list; one triangle and a step again', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
   const stepRow = inspector(page).getByRole('tablist', { name: 'Step tabs' });
 
-  // a step alone: Step · Processor, Step open with its own fields, no child row (no workflow selected)
+  // a step alone: Step · Processor, Step open with its own fields, no child row
   await pickStep(page, id.s1!);
   await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
   await expect(tab(page, 'Step')).toHaveAttribute('aria-selected', 'true');
@@ -40,11 +40,11 @@ test('a step alone, a triangle then the step, two triangles then their shared st
   await expect(tab(page, 'Processor')).toHaveAttribute('aria-selected', 'true');
   await expect(field(page, 'Name')).toHaveValue('archive-expander');
 
-  // a triangle: its Workflow tab; then the step: Step · Processor on top, the workflow as Step's child with its colour dot, none chosen
+  // a click on a triangle keeps the step: Step · Processor, the workflow as Step's one child with its colour dot, none chosen
   await pickWorkflow(page, id.wa!);
-  await expect(tabLabels(page)).toHaveText(['Workflow']);
-  await pickStep(page, id.s1!);
   await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
+  await expect(tab(page, 'Processor')).toHaveAttribute('aria-selected', 'true'); // the same step stays picked: its tab is kept
+  await tab(page, 'Step').click();
   await expect(childLabels(page, 'Step')).toHaveText(['e2e-tab-a']);
   await expect(childTab(page, 'Step', 'e2e-tab-a')).toHaveAttribute('aria-selected', 'false');
   await expect(field(page, 'Name')).toHaveValue('e2e-tab-shared');
@@ -57,7 +57,7 @@ test('a step alone, a triangle then the step, two triangles then their shared st
   await expect(field(page, 'Name')).toHaveValue('e2e-tab-shared');
   await expect(childTab(page, 'Step', 'e2e-tab-a')).toHaveAttribute('aria-selected', 'false');
 
-  // the step clicked again leaves the picks, the workflow stays: its Workflow tab; Ctrl+click the second triangle: the pick list of both
+  // the step clicked again leaves: the workflow alone, its Workflow tab; Ctrl+click the second triangle: the list of both
   await pickStep(page, id.s1!);
   await expect(tabLabels(page)).toHaveText(['Workflow']);
   await expect(field(page, 'Name')).toHaveValue('e2e-tab-a');
@@ -65,20 +65,27 @@ test('a step alone, a triangle then the step, two triangles then their shared st
   await expect(page.locator('.react-flow__node-workflow .tri.sel')).toHaveCount(2);
   await expect(tabLabels(page)).toHaveCount(0);
   await expect(inspector(page).locator('.in-picks li')).toHaveText(['e2e-tab-a', 'e2e-tab-b']);
-  // the shared step: one child per workflow, each with its own payload
+  // the shared step with both triangles: the list of all three
   await pickStep(page, id.s1!);
-  await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
-  await expect(childLabels(page, 'Step')).toHaveText(['e2e-tab-a', 'e2e-tab-b']);
-  expect(await childTab(page, 'Step', 'e2e-tab-b').locator('.dot').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(124, 58, 237)');
-  await expect(await payloadOf(page, 'e2e-tab-a')).toHaveValue(JSON.stringify({ from: 'a', n: 1 }, null, 2));
+  await expect(tabLabels(page)).toHaveCount(0);
+  await expect(inspector(page).locator('.in-picks li')).toHaveText(['e2e-tab-a', 'e2e-tab-b', 'e2e-tab-shared']);
+  // B clicked off: the step with A's assignment
+  await pickWorkflow(page, id.wb!);
+  await expect(childLabels(page, 'Step')).toHaveText(['e2e-tab-a']);
+  // A clicked off, B clicked: the step with B's assignment, in the first hue
+  await pickWorkflow(page, id.wa!);
+  await expect(stepRow).toHaveCount(0);
+  await pickWorkflow(page, id.wb!);
+  await expect(childLabels(page, 'Step')).toHaveText(['e2e-tab-b']);
+  expect(await childTab(page, 'Step', 'e2e-tab-b').locator('.dot').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(255, 0, 114)');
   await expect(await payloadOf(page, 'e2e-tab-b')).toHaveValue(JSON.stringify({ only: 'b' }, null, 2));
-  // the chosen child is kept while the same step stays picked
+  // the chosen child is kept while the same picks stay
   await expect(childTab(page, 'Step', 'e2e-tab-b')).toHaveAttribute('aria-selected', 'true');
-  // the step after it is in both streams too, but holds no assignment: both children, an empty payload that would make one
+  // the step after it is in B's stream too, but holds no assignment: an empty payload that would make one
   await pickStep(page, id.s2!);
-  await expect(childLabels(page, 'Step')).toHaveText(['e2e-tab-a', 'e2e-tab-b']);
+  await expect(childLabels(page, 'Step')).toHaveText(['e2e-tab-b']);
   await expect(field(page, 'Name')).toHaveValue('e2e-tab-next'); // a new pick: Step, no child
-  await expect(await payloadOf(page, 'e2e-tab-a')).toHaveValue('');
+  await expect(await payloadOf(page, 'e2e-tab-b')).toHaveValue('');
   await expect(inspector(page)).toContainText('No assignment yet');
 });
 
@@ -88,7 +95,9 @@ test('a new click on a step opens its first tab, even after a tab was chosen on 
   await openAt(page);
   await pickStep(page, id.s1!);
   await tab(page, 'Processor').click();
-  await pickWorkflow(page, id.wa!);
+  await pickStep(page, id.s2!);
+  await expect(tab(page, 'Step')).toHaveAttribute('aria-selected', 'true');
+  await tab(page, 'Processor').click();
   await pickStep(page, id.s1!);
   await expect(tab(page, 'Step')).toHaveAttribute('aria-selected', 'true');
 });
@@ -106,7 +115,7 @@ test('show all reveals the five metadata rows and hide details hides them, for t
   await expect(meta.locator('dd').nth(3)).toHaveText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} UTC$/);
   await expect(inspector(page).getByRole('button', { name: '▾ hide details' })).toBeVisible();
   // one toggle state: another item's tab opens with the details shown
-  await pickWorkflow(page, id.wa!);
+  await selectWorkflowAlone(page, id.wa!);
   await expect(inspector(page).locator('.meta dd').first()).toHaveText(id.wa!);
   await inspector(page).getByRole('button', { name: '▾ hide details' }).click();
   await expect(inspector(page).locator('.meta')).toHaveCount(0);

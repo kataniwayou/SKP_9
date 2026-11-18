@@ -39,59 +39,57 @@ NodeStatusIndicator components [user].
   running workflow reaches it]. Every other wire is solid and still.
 - An **entry arrow** moves only while its triangle runs. **Cache lines** never move (dashed, still).
 
-## 4. Selection [user: items 3, 4]
+## 4. Selection [user: items 3, 4; replaced by rule 1, user, 2026-11-18]
 
-- **Click a triangle** → it is the selected workflow; the Inspector shows its Workflow tab. Its stream is marked —
-  **nothing on the board fades any more** [user: faded is for deleted only]: the selected triangle, its tip arrows
-  and its key chips carry its colour.
+- **Board look** (unchanged): a selected triangle's stream is marked — **nothing on the board fades any more** [user:
+  faded is for deleted only]: the selected triangle, its tip arrows and its key chips carry its colour.
 - **Key chips**: every step in a selected workflow's stream that has an assignment of that workflow shows a chip
   under the card: "◆ N keys" (N = top-level keys of the payload JSON; "◆ payload" when it is not an object) [user:
-  "the keys in workflow's steps will appear"].
-- **Ctrl+click another triangle** adds it to the selected workflows (Ctrl+click again removes it) [user: item 4 —
-  lifts the old "no multi-select of triangles" rule]. Each selected workflow gets its own colour from a fixed palette
-  (pink `#FF0072`, purple `#7C3AED`, then teal, amber, blue, …) for its triangle, arrows, chips and tab dot [call].
-  With several selected, a step shows one chip per workflow ("◆ 2 keys · daily").
-- **Click a step** keeps the selected workflows (plain click on a step does not clear them); clicking empty board
-  clears everything (unchanged). A plain click on a triangle makes it the only selected workflow.
-- **Multi-select of steps, wires, caches and ghosts**: Ctrl+click as today, light bar + numbered badges [user: ghosts
-  too]. The bar shows the actions common to everything picked. With 2+ triangles selected and nothing else picked,
-  the bar shows **Start · Stop · Delete** for all of them (Delete confirms once, listing every workflow) [call].
-- **Click rules** [user, 2026-11-18] (`selectPick`):
-  - Ctrl+click toggles any item (triangle, step, cache, wire, entry arrow, cache line, ghost) in or out; a triangle
-    toggles in `workflows` too.
-  - A plain click on an item **already selected unselects only it**: a selected step (cache, wire, …) leaves the
-    picks and the selected workflows stay; a selected triangle (drawn selected = in `workflows`) leaves the picks and
-    `workflows`.
-  - A plain click on an unselected triangle selects it alone; on an unselected step, cache, wire or ghost it replaces
-    the other picks and keeps the selected workflows (an entry arrow or cache line selects its workflow alone).
-  - The empty board clears everything. A drag never counts as a click (CLICK_SLOP), a NodeToolbar button press
-    is not a click on its node (the toolbar stops the click), and a click on a node's handle (a connection gesture)
-    is never a pick or an unpick [review, 2026-11-18].
-  The chat's `pick` tool (`withPicks`) is unchanged: it sets the picks, it does not toggle.
+  "the keys in workflow's steps will appear"]. Several triangles can be selected; each gets its own colour from a
+  fixed palette (pink `#FF0072`, purple `#7C3AED`, then teal, amber, blue, …) for its triangle, arrows, chips and tab
+  dot, and with several selected a step shows one chip per workflow ("◆ 2 keys · daily") [call].
+- **Rule 1 — what a click does** [user, 2026-11-18] (`selectPick`; `workflows` is always the picked triangles, in
+  pick order, which gives their colours):
+  - a plain click on an **unselected triangle** replaces every selected triangle; the selected steps stay;
+    everything else (cache, wire, entry arrow, cache line, ghost) is dropped;
+  - a plain click on an **unselected step** replaces every selected step; the selected triangles stay; everything
+    else is dropped;
+  - a plain click on an **unselected cache, wire, entry arrow, cache line or ghost** selects it alone (no triangles,
+    no steps) — an entry arrow or cache line no longer selects its workflow;
+  - **Ctrl+click** on any item toggles it in or out;
+  - a plain click on an **already selected** item removes only that item;
+  - a click on the **empty board** clears everything.
+  Unchanged: a drag never counts as a click (CLICK_SLOP), a NodeToolbar button press is not a click on its node,
+  and a click on a node's handle (a connection gesture) is never a pick or an unpick [review, 2026-11-18].
+  The chat's `pick` tool (`withPicks`) takes the list it is given as it is; its triangles are the selected workflows.
+  A saved selection of the older shape (selected workflows that were not picks) is read with them as picked triangles.
+- **Multi-select bar**: light bar + numbered badges for 2+ picks; the bar shows the actions common to everything
+  picked. With 2+ triangles and nothing else picked it shows **Start · Stop · Delete** for all of them (Delete
+  confirms once, listing every workflow) [call].
 
-## 5. Inspector — tabs [user: items 1–4]
+## 5. Inspector — tabs [user: items 1–4; replaced by rules 2 and 3, user, 2026-11-18]
 
 The Inspector shows tabs; the first one opens on a new click, the chosen tab is kept while the same item stays picked.
 
-| What is picked | Tabs |
-|---|---|
-| exactly one triangle selected, nothing else picked | **Workflow** |
-| two or more triangles, nothing else picked | the numbered pick list of those workflows [user, 2026-11-18] |
-| exactly one step (+ any selected workflows) | **Step** · **Processor** — both parents; Step's children are one assignment tab per selected workflow **whose stream contains the step** (its name and colour dot, in selection order), Processor's are its schemas [user, 2026-11-18] |
-| exactly one cache (+ any workflows) | **Cache** |
-| exactly one wire / entry arrow / cache line (+ any workflows) | **Link** (as today's link view) |
-| exactly one ghost (+ any workflows) | **Deleted** (read-only snapshot) |
-| two or more steps/wires/caches/ghosts | the numbered pick list, triangles in the pick listed too |
+**Rule 2 — what the Inspector shows** [user, 2026-11-18]:
 
-**Parents and children** [user, 2026-11-18]: Step and Processor are the only parent tabs and work the same way. The
-parent tab shows its own fields directly. Under it, a second, lighter tab row (role tablist "Step tabs" / "Processor
-tabs") holds only its children: under Step the assignment tabs, under Processor the schema tabs (Input schema / Output
-schema / Config schema, only filled slots). No "Step" or "Processor" child tab. No child is chosen at first; a child
-shows that assignment or schema; a click on the parent tab returns to its own fields. A child row with no tabs is not
-drawn, and the top row never holds an assignment tab. Memory: a new pick opens Step with no child; the chosen parent
-and child are kept while the same pick stays and they still exist; each parent keeps its own child, so Step's chosen
-child is still chosen after a visit to Processor (a click on the parent already shown returns it to its own fields)
-[review, 2026-11-18].
+| What is selected | Inspector |
+|---|---|
+| exactly one workflow, nothing else | its **Workflow** form |
+| exactly one step, nothing else | **Step** · **Processor**, no assignment |
+| exactly one workflow and exactly one step, nothing else | **Step** · **Processor**, with **that workflow's assignment** under Step |
+| exactly one cache / wire / entry arrow / cache line / ghost | its own tab: **Cache**, **Link** or **Deleted** |
+| anything else (2+ workflows, 2+ steps, any other mix of 2+ items) | the numbered pick list of everything selected, triangles included |
+
+**Rule 3 — parents and children** [user, 2026-11-18]: Step and Processor are the only parent tabs and work the same
+way. The parent tab shows its own fields directly. Under it, a second, lighter tab row (role tablist "Step tabs" /
+"Processor tabs") holds only its children: under Step the **one** assignment tab (named after the workflow, with its
+colour dot) and only in the one-workflow-plus-one-step case — and only when that workflow's stream holds the step
+[call: an assignment off the stream is not offered]; under Processor its filled schema slots (Input schema / Output
+schema / Config schema). No child is chosen at first; a child shows that assignment or schema; a click on the parent
+tab already shown returns it to its own fields. A child row with no tabs is not drawn. Memory: a new pick opens Step
+with no child; the chosen parent and child are kept while the same pick stays and they still exist; each parent keeps
+its own chosen child [review, 2026-11-18].
 
 Every tab follows Studio's entity form [user: "show/hide all metadata of entity same as studio"]:
 - the unique name (`name version`) and a kind line ("step · shared by a, b"; "assignment · belongs to daily");

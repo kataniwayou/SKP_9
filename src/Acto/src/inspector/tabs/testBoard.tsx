@@ -45,7 +45,7 @@ export function openOn(tab: string, picks: Pick[] = [{ kind: 'step', id: 'fetch'
   const store = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
   store.load(state);
   render(<LiveStoreProvider value={liveStub()}>
-    <InspectorPanel store={store} ghosts={createGhostStore(store)} selection={{ workflows: ['daily'], picks }} />
+    <InspectorPanel store={store} ghosts={createGhostStore(store)} selection={{ workflows: [], picks: picks.length === 1 && picks[0]!.kind === 'step' ? [{ kind: 'workflow', id: 'daily' }, ...picks] : picks }} />
   </LiveStoreProvider>);
   if (TOP.has(tab)) fireEvent.click(topTab(tab));
   else if (SCHEMA.has(tab)) { fireEvent.click(topTab('Processor')); fireEvent.click(childTab('Processor', tab)); }

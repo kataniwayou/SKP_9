@@ -127,11 +127,11 @@ export async function centre(l: Locator) {
 /** Clicks a triangle on its name. */
 export const pickWorkflow = (page: Page, id: string) => wfNode(page, id).locator('.tri-nm').click();
 /**
- * Makes the triangle the one selected workflow, whatever was selected before: a plain click on an already selected
- * triangle unselects it [user, 2026-11-18], so the board is cleared first when it is drawn selected.
+ * Makes the triangle the whole selection: the board is cleared first, since a plain click on a triangle keeps the
+ * selected steps and a click on a selected one takes it out [user, 2026-11-18].
  */
 export async function selectWorkflowAlone(page: Page, id: string) {
-  if (await wfNode(page, id).locator('.tri.sel').count() > 0) await clickEmptyBoard(page);
+  await clickEmptyBoard(page);
   await pickWorkflow(page, id);
   await expect(wfNode(page, id).locator('.tri.sel')).toHaveCount(1);
 }

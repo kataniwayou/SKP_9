@@ -108,7 +108,8 @@ test('a click that wobbles a few pixels is a click: it picks and moves nothing; 
   const w0 = await flowPos(wfNode(page, id.w!));
   await dragBy(page, wfNode(page, id.w!), 2, 3, { x: 60, y: 30 });
   expect(await flowPos(wfNode(page, id.w!))).toEqual(w0);
-  await expect(inspector(page).locator('.ph .cnt')).toHaveText('workflow');
+  // picked (beside the step, which a triangle click keeps [user, 2026-11-18])
+  await expect(wfNode(page, id.w!).locator('.tri')).toHaveClass(/ sel( |$)/);
   const c0 = await flowPos(caNode(page, id.c1!));
   await dragBy(page, caNode(page, id.c1!), 3, 2, { x: 80, y: 28 });
   expect(await flowPos(caNode(page, id.c1!))).toEqual(c0);

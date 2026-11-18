@@ -1,6 +1,6 @@
 import { useState, useSyncExternalStore } from 'react';
 import { pickKey } from '../board/picks';
-import type { Pick } from '../board/selection';
+import { synced, type Pick } from '../board/selection';
 import type { BoardState, Slot } from '../design/board';
 import type { BoardStore } from '../design/boardStore';
 import type { GhostStore } from '../design/ghosts';
@@ -130,9 +130,11 @@ function TabBody({ tab, focus, state, base, edit, ghosts, sel, child, choose }: 
 /**
  * The Inspector (spec §5): tabs for what is picked, read from and edited through the board store (one state, one
  * history). A new pick opens its first tab with no child; the chosen tab and child are kept while the same thing stays
- * picked and they still exist. Several picks (or only triangles, two or more) show the numbered pick list.
+ * picked and they still exist. Rule 2: one thing, or one triangle with one step, shows tabs; anything else the numbered pick list.
  */
-export function InspectorPanel({ store, selection, ghosts }: { store: BoardStore; selection: InspectorSelection; ghosts: Ghosts }) {
+export function InspectorPanel({ store, selection: given, ghosts }: { store: BoardStore; selection: InspectorSelection; ghosts: Ghosts }) {
+  // one shape: the selected workflows are the picked triangles (rule 1)
+  const selection = synced(given);
   const state = useSyncExternalStore(store.subscribe, store.state);
   useSyncExternalStore(ghosts.subscribe, ghosts.ghosts);
   const [chosen, setChosen] = useState<Chosen | null>(null);

@@ -230,7 +230,7 @@ describe('ghosts and the selection', () => {
     expect(JSON.parse(done(await call(ctx, 'list_workflows')).result).map((w: { id: string }) => w.id)).toEqual(['daily']);
   });
 
-  it('pick keeps the selected workflows for other items and lets triangles be picked together and mixed with other items', async () => {
+  it('pick takes the items as given: triangles picked together and mixed with other items; its triangles are the selected workflows', async () => {
     const { ctx } = setup();
     expect(done(await call(ctx, 'pick', { items: [{ kind: 'workflow', id: 'daily' }, { kind: 'workflow', id: 'hourly' }] })).ok).toBe(true);
     expect(ctx.commands.picks()).toEqual([{ kind: 'workflow', id: 'daily' }, { kind: 'workflow', id: 'hourly' }]);

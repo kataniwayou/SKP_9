@@ -208,7 +208,7 @@ function toPick(ctx: ToolContext, r: Record<string, unknown>): Pick | { out: Too
 
 const pickTool: ToolDef = {
   name: 'pick',
-  description: 'Replace what is picked on the board (what copy and delete_picked act on; an empty list picks nothing). Items: {kind: step|cache|workflow, id}, {kind: wire, from, to}, {kind: entry, workflow_id, step_id}, {kind: cacheLink, workflow_id, cache_id}. Picked triangles become the selected workflows.',
+  description: 'Replace what is picked on the board (what copy and delete_picked act on; an empty list picks nothing). Items: {kind: step|cache|workflow, id}, {kind: wire, from, to}, {kind: entry, workflow_id, step_id}, {kind: cacheLink, workflow_id, cache_id}. Taken as given: the picked triangles are the selected workflows, and nothing else stays selected.',
   parameters: {
     type: 'object',
     properties: { items: { type: 'array', items: { type: 'object', properties: {

@@ -1,4 +1,4 @@
-import type { Pick, SelectionState } from '../board/selection';
+import { synced, type Pick, type SelectionState } from '../board/selection';
 
 export interface SavedView { x: number; y: number; zoom: number; selection: SelectionState | null }
 
@@ -24,7 +24,8 @@ function parseSelection(v: unknown): SelectionState | null {
   const s = v as Record<string, unknown>;
   const workflows = Array.isArray(s.workflows) ? s.workflows.filter(isStr) : isStr(s.workflow) ? [s.workflow] : [];
   const picks = Array.isArray(s.picks) ? s.picks.map(parsePick).filter((p): p is Pick => p !== null) : [];
-  return workflows.length === 0 && picks.length === 0 ? null : { workflows, picks };
+  // one shape: the selected workflows are the picked triangles (a selection saved before then is brought into it)
+  return workflows.length === 0 && picks.length === 0 ? null : synced({ workflows, picks });
 }
 
 export function readView(storage: Storage | null): SavedView | null {

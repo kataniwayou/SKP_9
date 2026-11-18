@@ -5,7 +5,7 @@ import { readView, writeView } from './view';
 describe('view', () => {
   it('round-trips the view and the selection, and survives broken storage', () => {
     const st = memoryStorage();
-    const selection = { workflows: ['w1'], picks: [{ kind: 'step' as const, id: 's1' }, { kind: 'wire' as const, from: 'a', to: 'b' }] };
+    const selection = { workflows: ['w1'], picks: [{ kind: 'step' as const, id: 's1' }, { kind: 'workflow' as const, id: 'w1' }] };
     writeView(st, { x: 1, y: 2, zoom: 0.8, selection });
     expect(readView(st)).toEqual({ x: 1, y: 2, zoom: 0.8, selection });
     const throwing = { getItem: () => { throw new Error('blocked'); } } as unknown as Storage;
@@ -23,10 +23,10 @@ describe('view', () => {
     const mixed = JSON.stringify({ x: 0, y: 0, zoom: 1, selection: { workflows: [], picks: [{ kind: 'cache', id: 'c' }, { kind: 'nope' }] } });
     expect(readView(memoryStorage({ 'acto.view': mixed }))!.selection).toEqual({ workflows: [], picks: [{ kind: 'cache', id: 'c' }] });
   });
-  it('reads the old single-workflow shape and drops ghost picks', () => {
+  it('reads the old shapes into the one shape (the selected workflows are picked triangles) and drops ghost picks', () => {
     const old = JSON.stringify({ x: 0, y: 0, zoom: 1, selection: { workflow: 'a', picks: [] } });
-    expect(readView(memoryStorage({ 'acto.view': old }))!.selection).toEqual({ workflows: ['a'], picks: [] });
+    expect(readView(memoryStorage({ 'acto.view': old }))!.selection).toEqual({ workflows: ['a'], picks: [{ kind: 'workflow', id: 'a' }] });
     const g = JSON.stringify({ x: 0, y: 0, zoom: 1, selection: { workflows: ['a'], picks: [{ kind: 'ghost', key: 'k' }, { kind: 'step', id: 's' }] } });
-    expect(readView(memoryStorage({ 'acto.view': g }))!.selection).toEqual({ workflows: ['a'], picks: [{ kind: 'step', id: 's' }] });
+    expect(readView(memoryStorage({ 'acto.view': g }))!.selection).toEqual({ workflows: ['a'], picks: [{ kind: 'step', id: 's' }, { kind: 'workflow', id: 'a' }] });
   });
 });

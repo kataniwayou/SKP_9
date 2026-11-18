@@ -1,92 +1,108 @@
 import { describe, expect, it } from 'vitest';
+import { focusOf, listOf, stepTabsOf } from '../inspector/tabs';
+import { board } from '../design/boardFixtures';
 import { hueOf } from './hues';
-import { selectPick, withPicks, type Pick, type SelectionState } from './selection';
+import { selectPick, synced, withPicks, type Pick, type SelectionState } from './selection';
 
 const wf = (id: string): Pick => ({ kind: 'workflow', id });
 const st = (id: string): Pick => ({ kind: 'step', id });
 const ghost = (key: string): Pick => ({ kind: 'ghost', key });
+const cache: Pick = { kind: 'cache', id: 'c' };
+const wire: Pick = { kind: 'wire', from: 's', to: 't' };
+const entry: Pick = { kind: 'entry', workflowId: 'a', stepId: 's' };
+const line: Pick = { kind: 'cacheLink', workflowId: 'a', cacheId: 'c' };
 const none: SelectionState = { workflows: [], picks: [] };
+/** A selection in the one shape: the workflows are the picked triangles. */
+const sel = (...picks: Pick[]): SelectionState => ({ workflows: picks.flatMap((p) => (p.kind === 'workflow' ? [p.id] : [])), picks });
+const click = (s: SelectionState, p: Pick | null) => selectPick(s, p, false);
+const ctrl = (s: SelectionState, p: Pick) => selectPick(s, p, true);
 
-describe('selectPick', () => {
-  it('a plain triangle click selects it alone', () => {
-    expect(selectPick({ workflows: ['x'], picks: [st('s')] }, wf('a'), false)).toEqual({ workflows: ['a'], picks: [wf('a')] });
+// rule 1 [user, 2026-11-18], one test per line
+describe('selectPick (rule 1)', () => {
+  it('a plain click on an unselected triangle replaces every selected triangle, keeps the steps, drops the rest', () => {
+    expect(click(sel(wf('a'), wf('b'), st('s'), st('t'), cache, wire, ghost('g')), wf('c'))).toEqual(sel(st('s'), st('t'), wf('c')));
+    expect(click(none, wf('a'))).toEqual(sel(wf('a')));
   });
-  it('ctrl+click adds and removes triangles', () => {
-    const one = selectPick(none, wf('a'), false);
-    const two = selectPick(one, wf('b'), true);
-    expect(two).toEqual({ workflows: ['a', 'b'], picks: [wf('a'), wf('b')] });
-    expect(selectPick(two, wf('a'), true)).toEqual({ workflows: ['b'], picks: [wf('b')] });
+  it('a plain click on an unselected step replaces every selected step, keeps the triangles, drops the rest', () => {
+    expect(click(sel(wf('a'), wf('b'), st('s'), st('t'), cache, entry), st('u'))).toEqual(sel(wf('a'), wf('b'), st('u')));
+    expect(click(sel(cache), st('s'))).toEqual(sel(st('s')));
   });
-  it('ctrl+click on a triangle decides by workflows, so the lists cannot diverge', () => {
-    const removed = selectPick({ workflows: ['a'], picks: [st('s')] }, wf('a'), true);
-    expect(removed).toEqual({ workflows: [], picks: [st('s')] });
-    expect(selectPick(removed, wf('a'), true)).toEqual({ workflows: ['a'], picks: [st('s'), wf('a')] });
-    expect(selectPick({ workflows: ['a'], picks: [st('s'), wf('a')] }, wf('a'), true)).toEqual({ workflows: [], picks: [st('s')] });
+  it('a plain click on an unselected cache, wire, entry arrow, cache line or ghost selects it alone', () => {
+    for (const p of [cache, wire, entry, line, ghost('g')]) expect(click(sel(wf('a'), st('s'), wire === p ? cache : wire), p)).toEqual(sel(p));
+    // an entry arrow or a cache line no longer selects its workflow
+    expect(click(none, entry).workflows).toEqual([]);
   });
-  it('a step click keeps the selected workflows', () => {
-    expect(selectPick({ workflows: ['a', 'b'], picks: [wf('a'), wf('b')] }, st('s'), false)).toEqual({ workflows: ['a', 'b'], picks: [st('s')] });
-    expect(selectPick({ workflows: ['a'], picks: [] }, ghost('g'), false)).toEqual({ workflows: ['a'], picks: [ghost('g')] });
-  });
-  it('ctrl+click on steps toggles among steps, keeps workflows', () => {
-    const prev: SelectionState = { workflows: ['a', 'b'], picks: [st('s')] };
-    const added = selectPick(prev, st('t'), true);
-    expect(added).toEqual({ workflows: ['a', 'b'], picks: [st('s'), st('t')] });
-    expect(selectPick(added, st('s'), true)).toEqual({ workflows: ['a', 'b'], picks: [st('t')] });
-  });
-  it('ctrl+click mixes ghosts with steps', () => {
-    const r = selectPick({ workflows: ['a'], picks: [st('s')] }, ghost('g'), true);
-    expect(r).toEqual({ workflows: ['a'], picks: [st('s'), ghost('g')] });
-    expect(selectPick(r, ghost('g'), true).picks).toEqual([st('s')]);
-  });
-  it('an entry arrow or cache line click selects its workflow alone', () => {
-    const e: Pick = { kind: 'entry', workflowId: 'h', stepId: 'f' };
-    expect(selectPick({ workflows: ['a', 'b'], picks: [] }, e, false)).toEqual({ workflows: ['h'], picks: [e] });
-    const l: Pick = { kind: 'cacheLink', workflowId: 'd', cacheId: 'c' };
-    expect(selectPick(none, l, false)).toEqual({ workflows: ['d'], picks: [l] });
-  });
-  // [user, 2026-11-18]: a plain click on something already selected unselects only it
-  it('a plain click on the selected step unpicks it and keeps the workflows', () => {
-    expect(selectPick({ workflows: ['a', 'b'], picks: [st('s')] }, st('s'), false)).toEqual({ workflows: ['a', 'b'], picks: [] });
-    expect(selectPick({ workflows: [], picks: [st('s'), st('t')] }, st('t'), false)).toEqual({ workflows: [], picks: [st('s')] });
-  });
-  it('a plain click on a selected triangle unselects it, from the picks and from workflows', () => {
-    expect(selectPick({ workflows: ['a'], picks: [wf('a')] }, wf('a'), false)).toEqual(none);
-    expect(selectPick({ workflows: ['a', 'b'], picks: [wf('a'), wf('b')] }, wf('b'), false)).toEqual({ workflows: ['a'], picks: [wf('a')] });
-    // drawn selected (in workflows) while a step is picked: still a selected triangle
-    expect(selectPick({ workflows: ['a', 'b'], picks: [st('s')] }, wf('a'), false)).toEqual({ workflows: ['b'], picks: [st('s')] });
-  });
-  it('a plain click on a selected cache, wire, entry arrow, cache line or ghost unpicks only it', () => {
-    const items: Pick[] = [{ kind: 'cache', id: 'c' }, { kind: 'wire', from: 's', to: 't' }, { kind: 'entry', workflowId: 'a', stepId: 's' },
-      { kind: 'cacheLink', workflowId: 'a', cacheId: 'c' }, ghost('g')];
-    for (const p of items) expect(selectPick({ workflows: ['a'], picks: [st('s'), p] }, p, false)).toEqual({ workflows: ['a'], picks: [st('s')] });
-  });
-  it('a plain click on an unselected item replaces the other picks, keeping workflows; ctrl toggles every kind', () => {
-    expect(selectPick({ workflows: ['a'], picks: [st('s'), st('t')] }, { kind: 'cache', id: 'c' }, false)).toEqual({ workflows: ['a'], picks: [{ kind: 'cache', id: 'c' }] });
-    const items: Pick[] = [wf('z'), st('u'), { kind: 'cache', id: 'c' }, { kind: 'wire', from: 's', to: 't' }, { kind: 'entry', workflowId: 'a', stepId: 's' },
-      { kind: 'cacheLink', workflowId: 'a', cacheId: 'c' }, ghost('g')];
-    for (const p of items) {
-      const on = selectPick({ workflows: ['a'], picks: [st('s')] }, p, true);
-      expect(on.picks).toEqual([st('s'), p]);
-      expect(selectPick(on, p, true)).toEqual({ workflows: ['a'], picks: [st('s')] });
+  it('Ctrl+click toggles any item in or out', () => {
+    for (const p of [wf('z'), st('u'), cache, wire, entry, line, ghost('g')]) {
+      const on = ctrl(sel(wf('a'), st('s')), p);
+      expect(on).toEqual(synced({ workflows: [], picks: [wf('a'), st('s'), p] }));
+      expect(ctrl(on, p)).toEqual(sel(wf('a'), st('s')));
     }
   });
-  it('the empty board clears everything', () => {
-    expect(selectPick({ workflows: ['a'], picks: [st('s')] }, null, false)).toEqual(none);
-    expect(selectPick({ workflows: ['a'], picks: [st('s')] }, null, true)).toEqual(none);
+  it('a plain click on an already selected item removes only it', () => {
+    const all = sel(wf('a'), wf('b'), st('s'), cache);
+    expect(click(all, wf('a'))).toEqual(sel(wf('b'), st('s'), cache));
+    expect(click(all, st('s'))).toEqual(sel(wf('a'), wf('b'), cache));
+    expect(click(all, cache)).toEqual(sel(wf('a'), wf('b'), st('s')));
+    expect(click(sel(wf('a')), wf('a'))).toEqual(none);
   });
-  it('hues follow selection order', () => {
-    expect(hueOf({ workflows: ['b', 'a'] }, 'a')).toBe('#7C3AED');
-    expect(hueOf({ workflows: ['b', 'a'] }, 'b')).toBe('#FF0072');
-    expect(hueOf({ workflows: ['b', 'a'] }, 'z')).toBeNull();
+  it('a click on the empty board clears everything', () => {
+    expect(click(sel(wf('a'), st('s')), null)).toEqual(none);
+    expect(selectPick(sel(wf('a'), st('s')), null, true)).toEqual(none);
+  });
+  it('workflows are always the picked triangles, in pick order (their hues)', () => {
+    const s = ctrl(ctrl(click(none, wf('b')), st('s')), wf('a'));
+    expect(s.workflows).toEqual(['b', 'a']);
+    expect(hueOf(s, 'b')).toBe('#FF0072');
+    expect(hueOf(s, 'a')).toBe('#7C3AED');
+    expect(hueOf(s, 'z')).toBeNull();
+  });
+  it('a selection of the old shape is read into the one shape', () => {
+    expect(synced({ workflows: ['a'], picks: [st('s')] })).toEqual(sel(st('s'), wf('a')));
+    expect(click({ workflows: ['a'], picks: [st('s')] }, wf('a'))).toEqual(sel(st('s')));
+  });
+});
+
+// the user's sequence, and the two extra cases (spec §4/§5) [user, 2026-11-18]
+describe('the user\'s sequence: clicks and what the Inspector shows', () => {
+  const b = board(); // daily and hourly both enter fetch
+  const shows = (s: SelectionState) => {
+    const f = focusOf(s);
+    if (listOf(s)) return 'list';
+    if (!f) return 'nothing';
+    if (f.kind === 'step') return `step ${f.id}${stepTabsOf(s, b, f.id).map((t) => ` + ${t.id}`).join('')}`;
+    return `${f.kind} ${'id' in f ? f.id : ''}`.trim();
+  };
+  it('click A → A form; Ctrl+click B → list; Ctrl+click step → list; click B → step with A\'s assignment; click C → step with C\'s', () => {
+    let s = click(none, wf('daily'));
+    expect(shows(s)).toBe('workflow daily');
+    s = ctrl(s, wf('hourly'));
+    expect(shows(s)).toBe('list');
+    s = ctrl(s, st('fetch'));
+    expect(shows(s)).toBe('list');
+    s = click(s, wf('hourly')); // selected: it leaves
+    expect(s).toEqual(sel(wf('daily'), st('fetch')));
+    expect(shows(s)).toBe('step fetch + assignment:daily');
+    s = click(s, wf('hourly')); // a third triangle C (unselected): it replaces A, the step stays
+    expect(s).toEqual(sel(st('fetch'), wf('hourly')));
+    expect(shows(s)).toBe('step fetch + assignment:hourly');
+  });
+  it('two steps selected, then a click on a triangle: the list', () => {
+    const s = click(ctrl(click(none, st('fetch')), st('expand')), wf('daily'));
+    expect(s).toEqual(sel(st('fetch'), st('expand'), wf('daily')));
+    expect(shows(s)).toBe('list');
+  });
+  it('a cache selected, then a click on a step: the cache is dropped', () => {
+    const s = click(click(none, { kind: 'cache', id: 'c1' }), st('fetch'));
+    expect(s).toEqual(sel(st('fetch')));
+    expect(shows(s)).toBe('step fetch');
   });
 });
 
 describe('withPicks (the chat pick tool)', () => {
-  it('picked steps keep the selected workflows', () => {
-    expect(withPicks({ workflows: ['a', 'b'], picks: [wf('a'), wf('b')] }, [st('s')])).toEqual({ workflows: ['a', 'b'], picks: [st('s')] });
-    expect(withPicks({ workflows: ['a'], picks: [wf('a')] }, [])).toEqual({ workflows: ['a'], picks: [] });
-  });
-  it('picked triangles become the selected workflows', () => {
-    expect(withPicks({ workflows: ['x'], picks: [] }, [wf('a'), wf('b')])).toEqual({ workflows: ['a', 'b'], picks: [wf('a'), wf('b')] });
+  it('takes the picks as they are; their triangles are the selected workflows', () => {
+    expect(withPicks(sel(wf('a'), wf('b')), [st('s')])).toEqual(sel(st('s')));
+    expect(withPicks(sel(wf('a')), [])).toEqual(none);
+    expect(withPicks({ workflows: ['x'], picks: [] }, [wf('a'), st('s'), wf('b')])).toEqual(sel(wf('a'), st('s'), wf('b')));
   });
 });

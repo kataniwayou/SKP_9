@@ -184,8 +184,8 @@ test('no keyboard hints anywhere: no Ctrl+ or ⌘ in any text, title, label or p
   await pickStep(page, id.s1!);
   expect(await hints(), 'a step picked').toEqual([]);
   await pickStep(page, id.s2!, true);
-  await expect(selbar(page).locator('.selbar-pill')).toHaveText('2 SELECTED');
-  expect(await hints(), 'two steps picked').toEqual([]);
+  await expect(selbar(page).locator('.selbar-pill')).toHaveText('3 SELECTED'); // the triangle and two steps
+  expect(await hints(), 'three things picked').toEqual([]);
   await page.locator('.theme-toggle').click();
   expect(await hints(), 'dark theme').toEqual([]);
 });
