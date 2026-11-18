@@ -15,7 +15,7 @@ vi.mock('@xyflow/react', async (orig) => {
   return { ...mod, ReactFlow: (p: Record<string, unknown>) => { seen.props = p as Props; return <Real {...(p as object)} />; } };
 });
 
-const view = (over: Partial<BoardView> = {}): BoardView => ({ workflow: null, picks: [], live: () => 'stopped', ...over });
+const view = (over: Partial<BoardView> = {}): BoardView => ({ workflows: [], picks: [], live: () => 'stopped', ...over });
 const show = (over: Partial<BoardProps> = {}) => render(<Board state={board()} view={view()} onPick={() => {}} initialZoom={1} {...over} />);
 const node = (id: string, x: number, y: number): Node => ({ id, position: { x, y }, data: {} });
 
@@ -50,13 +50,11 @@ describe('Board', () => {
     expect(document.querySelectorAll('.link-wire')).toHaveLength(1);
     expect(screen.getByText('C', { selector: '.pilltx' })).toBeInTheDocument();
   });
-  it('dims what the selected triangle does not reach and lights its payloads', async () => {
-    show({ view: view({ workflow: 'daily', picks: [{ kind: 'workflow', id: 'daily' }] }) });
+  it('dims nothing when a triangle is selected, and shows its payload chip', async () => {
+    show({ view: view({ workflows: ['daily'], picks: [{ kind: 'workflow', id: 'daily' }] }) });
     await screen.findByText('fetch-orders');
-    const dimmed = [...document.querySelectorAll('.react-flow__node.dim, .react-flow__edge.dim')].map((e) => e.getAttribute('data-id') ?? e.getAttribute('data-testid'));
-    expect(dimmed).toEqual(expect.arrayContaining(['st:lonely', 'wf:hourly']));
-    expect(dimmed).not.toContain('st:fetch');
-    expect(screen.getByText('0 keys')).toHaveClass('pay');
+    expect(document.querySelectorAll('.react-flow__node.dim, .react-flow__edge.dim')).toHaveLength(0);
+    expect(screen.getByText('◆ 0 keys')).toHaveClass('pay');
     expect(document.querySelector('.tri.sel')).not.toBeNull();
   });
   it('shows the run state on the triangle', async () => {

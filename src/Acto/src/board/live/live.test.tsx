@@ -44,7 +44,7 @@ describe('live state', () => {
     stub.known(['daily'], {});
     const Live = () => {
       const daily = useWorkflowStatus('daily');
-      return <Board state={board()} view={{ workflow: null, picks: [], live: (id) => (id === 'daily' ? daily : 'stopped') }} onPick={() => {}} initialZoom={1} />;
+      return <Board state={board()} view={{ workflows: [], picks: [], live: (id) => (id === 'daily' ? daily : 'stopped') }} onPick={() => {}} initialZoom={1} />;
     };
     render(<LiveStoreProvider value={stub}><Live /></LiveStoreProvider>);
     await screen.findByText('fetch-orders');

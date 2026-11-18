@@ -53,8 +53,6 @@
 .tri:hover .react-flow__handle { border-color: var(--accent); }
 .tri .react-flow__handle { cursor: crosshair; pointer-events: all; }
 
-/* what the selected triangle does not reach: dimmed, still clickable */
-.react-flow__node.dim, .react-flow__edge.dim { opacity: .3; }
 .react-flow__node, .react-flow__edge { transition: opacity .15s; }
 
 /* step */

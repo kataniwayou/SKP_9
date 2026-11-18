@@ -16,11 +16,11 @@ const LABEL: Record<LiveStatus, string> = { running: 'Running', stopped: 'Stoppe
  * the last dry run's problems; a failure outline marks a Save BaseAPI refused on it.
  */
 export function TriangleNode({ data, selected }: NodeProps) {
-  const { workflowId, name, status, lit, problems = 0, failed = false, unsaved, pick } = data as {
-    workflowId: string; name: string; status: LiveStatus; lit: boolean; problems?: number; failed?: boolean; unsaved?: boolean; pick?: PickInfo;
+  const { workflowId, name, status, hue, problems = 0, failed = false, unsaved, pick } = data as {
+    workflowId: string; name: string; status: LiveStatus; hue: string | null; problems?: number; failed?: boolean; unsaved?: boolean; pick?: PickInfo;
   };
   const tone = TONE[status];
-  const on = selected || lit;
+  const on = selected || hue !== null;
   const self = { kind: 'workflow', id: workflowId } as const;
   const toolbar = useHasToolbar(self);
   const mid = TRI_SHAPE_H / 2;

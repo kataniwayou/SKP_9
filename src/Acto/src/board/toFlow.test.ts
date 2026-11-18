@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { board } from '../design/boardFixtures';
 import type { Pick } from './selection';
-import { toFlow, type BoardView } from './toFlow';
+import type { GhostItem } from '../design/ghosts';
+import { flowIdOf, toFlow, type BoardView } from './toFlow';
 
-const view = (over: Partial<BoardView> = {}): BoardView => ({ workflow: null, picks: [], live: () => 'stopped', ...over });
+const view = (over: Partial<BoardView> = {}): BoardView => ({ workflows: [], picks: [], live: () => 'stopped', ...over });
+const twoKeys = () => {
+  const c = board();
+  return { ...c, assignments: { ...c.assignments,
+    'a-daily-fetch': { ...c.assignments['a-daily-fetch']!, payload: '{"a":1,"b":2}' },
+    'a-hourly-fetch': { ...c.assignments['a-hourly-fetch']!, payload: '[1]' } } };
+};
 const dim = (x: { className?: string | undefined }) => (x.className ?? '').split(' ').includes('dim');
 
 describe('toFlow', () => {
@@ -40,25 +47,70 @@ describe('toFlow', () => {
     expect(w(view())).toMatchObject({ condition: 1, running: false });
     expect(w(view({ live: (id) => (id === 'hourly' ? 'running' : 'stopped') })).running).toBe(true);
   });
-  it("dims nothing with no workflow selected, and shows each step's version", () => {
-    const { nodes, edges } = toFlow(b, view());
+  it('nothing is dimmed when a workflow is selected', () => {
+    const { nodes, edges } = toFlow(b, view({ workflows: ['daily'] }));
     expect([...nodes, ...edges].some(dim)).toBe(false);
-    expect((nodes.find((n) => n.id === 'st:fetch')!.data as { footer: unknown }).footer).toEqual({ text: '1.0.0', accent: false });
   });
-  it('with daily selected dims what it does not reach and shows its payload summary', () => {
-    const { nodes, edges } = toFlow(b, view({ workflow: 'daily' }));
-    const dimmed = [...nodes, ...edges].filter(dim).map((x) => x.id).sort();
-    expect(dimmed).toEqual(['entry:hourly:fetch', 'st:lonely', 'wf:hourly']);
-    const foot = (id: string) => (nodes.find((n) => n.id === id)!.data as { footer: unknown }).footer;
-    expect(foot('st:fetch')).toEqual({ text: '0 keys', accent: true });
-    expect(foot('st:expand')).toEqual({ text: 'no payload', accent: true });
-    expect(foot('st:lonely')).toEqual({ text: '1.0.0', accent: false });
+  it('chips: one per selected workflow with an assignment on the step', () => {
+    const c = twoKeys();
+    const chips = (v: BoardView) => (toFlow(c, v).nodes.find((n) => n.id === 'st:fetch')!.data as { chips: unknown }).chips;
+    expect(chips(view())).toEqual([]);
+    expect(chips(view({ workflows: ['daily'] }))).toEqual([{ text: '◆ 2 keys', hue: '#FF0072' }]);
+    expect(chips(view({ workflows: ['daily', 'hourly'] }))).toEqual([{ text: '◆ 2 keys · daily', hue: '#FF0072' }, { text: '◆ payload · hourly', hue: '#7C3AED' }]);
+    const none = toFlow(c, view({ workflows: ['daily'] })).nodes.find((n) => n.id === 'st:expand')!.data as { chips: unknown };
+    expect(none.chips).toEqual([]);
   });
-  it("lights a workflow's caches and cache line", () => {
-    const { nodes, edges } = toFlow(b, view({ workflow: 'hourly' }));
-    expect(dim(nodes.find((n) => n.id === 'ca:c1')!)).toBe(true);
-    expect(dim(edges.find((e) => e.id === 'cache:daily:c1')!)).toBe(true);
-    expect(dim(toFlow(b, view({ workflow: 'daily' })).nodes.find((n) => n.id === 'ca:c1')!)).toBe(false);
+  it('a step is running when a running workflow reaches it', () => {
+    const live = (id: string) => (id === 'hourly' ? 'running' : 'stopped') as 'running' | 'stopped';
+    const n = toFlow(b, view({ live })).nodes;
+    const run = (id: string) => (n.find((x) => x.id === id)!.data as { running: boolean }).running;
+    expect([run('st:fetch'), run('st:expand'), run('st:lonely')]).toEqual([true, true, false]);
+  });
+  it('a wire runs only when a running workflow reaches its source', () => {
+    const w = (live: (id: string) => 'running' | 'stopped') => (toFlow(b, view({ live })).edges.find((e) => e.id === 'wire:fetch:expand')!.data as { running: boolean }).running;
+    expect(w((id) => (id === 'hourly' ? 'running' : 'stopped'))).toBe(true);
+    expect(w(() => 'stopped')).toBe(false);
+  });
+  it('an entry arrow runs only while its workflow runs; cache lines never run', () => {
+    const { edges } = toFlow(b, view({ live: (id) => (id === 'hourly' ? 'running' : 'stopped') }));
+    const d = (id: string) => edges.find((e) => e.id === id)!.data as { running?: boolean };
+    expect(d('entry:hourly:fetch').running).toBe(true);
+    expect(d('entry:daily:fetch').running).toBe(false);
+    expect(d('cache:daily:c1').running).toBeUndefined();
+  });
+  it('selected triangles carry their hue; entry arrows and cache lines of a selected workflow carry it', () => {
+    const { nodes, edges } = toFlow(b, view({ workflows: ['hourly', 'daily'] }));
+    const hue = (x: { id: string; data?: unknown }) => (x.data as { hue: string | null }).hue;
+    expect(hue(nodes.find((n) => n.id === 'wf:hourly')!)).toBe('#FF0072');
+    expect(hue(nodes.find((n) => n.id === 'wf:daily')!)).toBe('#7C3AED');
+    expect(hue(edges.find((e) => e.id === 'entry:daily:fetch')!)).toBe('#7C3AED');
+    expect(hue(edges.find((e) => e.id === 'cache:daily:c1')!)).toBe('#7C3AED');
+    expect(hue(toFlow(b, view()).nodes.find((n) => n.id === 'wf:daily')!)).toBeNull();
+  });
+  describe('ghosts', () => {
+    const lonely = b.steps.lonely!;
+    const gstep: GhostItem = { key: 'step:gone', kind: 'step', row: { ...lonely, id: 'gone', name: 'gone', at: { x: 5, y: 6 } } };
+    const wire: GhostItem = { key: 'wire:fetch:gone', kind: 'wire', from: 'fetch', to: 'gone', condition: 2 };
+    const ghostEdges = (x: { edges: { id: string }[] }) => x.edges.filter((e) => e.id.startsWith('ghost:'));
+    it('are drawn with ghost: true, not draggable or connectable', () => {
+      const n = toFlow(b, view({ ghosts: [gstep] })).nodes.find((x) => x.id === 'ghost:step:gone')!;
+      expect(n).toMatchObject({ type: 'step', draggable: false, connectable: false, zIndex: -1, className: 'ghost', position: { x: 5, y: 6 } });
+      expect(n.data).toMatchObject({ ghost: true, ghostKey: 'step:gone', name: 'gone' });
+    });
+    it('a ghost wire between a real and a ghost step is drawn', () => {
+      const e = toFlow(b, view({ ghosts: [gstep, wire] })).edges.find((x) => x.id === 'ghost:wire:fetch:gone')!;
+      expect(e).toMatchObject({ type: 'wire', source: 'st:fetch', target: 'ghost:step:gone', connectable: false, className: 'ghost' });
+      expect(e.data).toMatchObject({ ghost: true, condition: 2 });
+    });
+    it('a ghost wire with a removed end is not drawn', () => {
+      expect(ghostEdges(toFlow(b, view({ ghosts: [wire] })))).toEqual([]);
+    });
+    it('a ghost whose item is back on the board is not drawn', () => {
+      expect(toFlow(b, view({ ghosts: [{ ...gstep, key: 'step:lonely', row: lonely }] })).nodes.some((x) => x.id.startsWith('ghost:'))).toBe(false);
+    });
+    it('flowIdOf names a ghost pick', () => {
+      expect(flowIdOf({ kind: 'ghost', key: 'step:gone' })).toBe('ghost:step:gone');
+    });
   });
   it('marks picked items selected, in pick order, a lone pick without a number', () => {
     const picks: Pick[] = [{ kind: 'step', id: 'expand' }, { kind: 'wire', from: 'fetch', to: 'expand' }, { kind: 'cache', id: 'c1' }];

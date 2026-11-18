@@ -11,7 +11,7 @@ import { board } from '../design/boardFixtures';
 import { Board } from './Board';
 import type { BoardView } from './toFlow';
 
-const view = (over: Partial<BoardView> = {}): BoardView => ({ workflow: null, picks: [], live: () => 'stopped', ...over });
+const view = (over: Partial<BoardView> = {}): BoardView => ({ workflows: [], picks: [], live: () => 'stopped', ...over });
 const mini = (sel: string) => [...document.querySelectorAll(`.react-flow__minimap ${sel}`)] as SVGElement[];
 
 describe('Board minimap', () => {

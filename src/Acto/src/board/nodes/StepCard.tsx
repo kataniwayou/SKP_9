@@ -2,7 +2,7 @@ import { Handle, NodeToolbar, Position, type NodeProps } from '@xyflow/react';
 import { conditionStyle } from '../wires';
 import { HealthDot } from '../live/HealthDot';
 import { ItemToolbar, useHasToolbar } from '../ItemToolbar';
-import type { PickInfo, StepFooter } from '../toFlow';
+import type { PickInfo, StepChip } from '../toFlow';
 import { PickBadge } from './PickBadge';
 import { UnsavedMark } from './UnsavedMark';
 
@@ -15,13 +15,13 @@ export function processorColour(name: string): string {
 
 /** A step: processor icon, name, processor; the footer is its version, or (with a triangle selected) that workflow's payload. */
 export function StepCard({ data, selected }: NodeProps) {
-  const { stepId, name, processor, processorId, footer, failed = false, unsaved, pick } = data as {
-    stepId: string; name: string; processor: string | null; processorId: string | null; footer: StepFooter; failed?: boolean; unsaved?: boolean; pick?: PickInfo;
+  const { stepId, name, processor, processorId, running = false, chips = [], failed = false, unsaved, pick } = data as {
+    stepId: string; name: string; processor: string | null; processorId: string | null; running?: boolean; chips?: StepChip[]; failed?: boolean; unsaved?: boolean; pick?: PickInfo;
   };
   const self = { kind: 'step', id: stepId } as const;
   const toolbar = useHasToolbar(self);
   return (
-    <div className={`node${selected ? ' sel' : ''}${failed ? ' failed' : ''}`}>
+    <div className={`node${selected ? ' sel' : ''}${running ? ' running' : ''}${failed ? ' failed' : ''}`}>
       <PickBadge pick={pick} />
       <UnsavedMark on={unsaved} />
       {selected && pick?.solo && toolbar && (
@@ -36,7 +36,7 @@ export function StepCard({ data, selected }: NodeProps) {
           <div className="sp2">{processor ?? 'no processor'}</div>
         </div>
       </div>
-      <div className="nf"><span className={`mt${footer.accent ? ' pay' : ''}`}>{footer.text}</span><HealthDot processorId={processorId} /></div>
+      <div className="nf"><span className="mt">{chips.map((c) => <span key={c.hue} className="pay" style={{ color: c.hue, marginRight: 6 }}>{c.text}</span>)}</span><HealthDot processorId={processorId} /></div>
     </div>
   );
 }

@@ -279,7 +279,7 @@ export function App(props: AppProps) {
   const unsavedKeys = store.unsaved();
   const marks = useMemo(() => unsavedMarks(store.base(), state, unsavedKeys), [store, state, unsavedKeys]);
   const view = useMemo<BoardView>(() => ({
-    workflow: sel.workflows.at(-1) ?? null, picks: sel.picks,
+    workflows: sel.workflows, picks: sel.picks,
     live: (wf) => statusOf(liveState, wf),
     problems: (wf) => store.problems(wf),
     failed: (key) => store.failures().has(key),
