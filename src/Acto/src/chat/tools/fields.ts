@@ -1,6 +1,6 @@
 import { SLOT_FIELD, type Slot } from '../../design/board';
 import { setCacheField, setProcessorField, setSlotSchema, setStepField, setWorkflowField } from '../../design/edits';
-import { removeAssignment, setPayload } from '../../design/payloads';
+import { removeAssignment, setAssignmentField, setPayload } from '../../design/payloads';
 import { CONDITIONS } from '../../model/entryConditions';
 import type { ToolDef, ToolOutcome } from '../toolTypes';
 import { applyState, done, fail, onBoard, STEP_ID, text, WORKFLOW_ID } from './common';
@@ -11,18 +11,20 @@ const FIELDS = {
   cache: ['name', 'version', 'description', 'root', 'items'],
   processor: ['name', 'version', 'description'],
   schema: ['name', 'version', 'description', 'definition'],
+  assignment: ['name', 'version', 'description'],
 } as const;
 type Kind = keyof typeof FIELDS;
 const NULLABLE = new Set(['description', 'cronExpression']);
 
 const setField: ToolDef = {
   name: 'set_field',
-  description: "Set one field of a workflow (name, version, description, cronExpression), step (name, version, description, entryCondition: 1 Completed, 2 Failed, 3 Cancelled, 4 Always, 5 Never), cache (name, version, description, root, items), processor (name, version, description) or schema (name, version, description, definition), as the Inspector does. A processor or schema shared with other things is changed for all of them; a schema edit gives the processor a schema of its own. `value` null clears a description or cron.",
+  description: "Set one field of a workflow (name, version, description, cronExpression), step (name, version, description, entryCondition: 1 Completed, 2 Failed, 3 Cancelled, 4 Always, 5 Never), cache (name, version, description, root, items), processor (name, version, description), schema (name, version, description, definition) or assignment (name, version, description: a workflow's payload row, id from read_board's payloads, with that workflow's workflow_id), as the Inspector does. A processor or schema shared with other things is changed for all of them; a schema edit gives the processor a schema of its own; an assignment other workflows also link is copied for this workflow only. `value` null clears a description or cron.",
   parameters: {
     type: 'object',
     properties: {
       kind: { type: 'string', enum: Object.keys(FIELDS) }, id: { type: 'string' }, field: { type: 'string' },
       value: { type: ['string', 'number', 'null'] },
+      workflow_id: { ...WORKFLOW_ID, description: 'Only for kind assignment: the workflow whose payload it is.' },
     },
     required: ['kind', 'id', 'field', 'value'], additionalProperties: false,
   },
@@ -32,8 +34,15 @@ const setField: ToolDef = {
     const id = text(args, 'id');
     const field = text(args, 'field');
     const b = ctx.store.state();
-    const table = kind === 'workflow' ? b.workflows : kind === 'step' ? b.steps : kind === 'cache' ? b.caches : kind === 'processor' ? b.processors : b.schemas;
+    const table = kind === 'workflow' ? b.workflows : kind === 'step' ? b.steps : kind === 'cache' ? b.caches : kind === 'processor' ? b.processors
+      : kind === 'assignment' ? b.assignments : b.schemas;
     if (id === '' || !table[id]) return fail(`no ${kind} ${id === '' ? '(none given)' : id} on the board`, 'set field');
+    const wfId = text(args, 'workflow_id');
+    if (kind === 'assignment') {
+      const w = b.workflows[wfId];
+      if (!w) return fail(`no workflow ${wfId === '' ? '(none given)' : wfId} on the board: an assignment is set through the workflow whose payload it is`, 'set field');
+      if (!w.assignmentIds.includes(id)) return fail(`workflow ${w.name} has no assignment ${id}`, 'set field');
+    }
     const names: readonly string[] = FIELDS[kind];
     if (!names.includes(field)) return fail(`a ${kind} has no field ${field}: the fields are ${names.join(', ')}`, 'set field');
     const raw = args.value;
@@ -63,6 +72,7 @@ const setField: ToolDef = {
             { id: string; name: string; version: string; description: string | null; definition: string };
           return setSlotSchema(cur, holder.id, slot, copy, ctx.newId);
         }
+        case 'assignment': return setAssignmentField(cur, wfId, id, field as 'name', value as string | null, ctx.newId);
       }
     };
     if (kind === 'schema' && edit(b) === b) return fail(`schema ${id} is held by no processor on the board`, 'set field');

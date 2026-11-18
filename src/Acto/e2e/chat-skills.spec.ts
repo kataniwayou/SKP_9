@@ -33,9 +33,12 @@ const chatPanel = (page: Page) => page.locator('[data-panel="chat"]');
 
 interface Turn { reply: string; actions: string[]; failed: string[]; asked: string[] }
 
-/** The choice a test makes on a question of Acto's own (the buttons): by default it confirms Save/Delete/Remove and declines Stop. */
+/**
+ * The choice a test makes on a question of Acto's own: a button's text, or `type:<text>` to type the answer in the message box (a
+ * typed yes/no answers it). By default it confirms Save/Delete/Remove/Take stored and declines Start and Stop: never a real run.
+ */
 type Chooser = (question: string, choices: string[]) => string;
-const confirm: Chooser = (_q, choices) => (choices.includes('Stop') ? 'Cancel' : choices.find((c) => c !== 'Cancel') ?? 'Cancel');
+const confirm: Chooser = (_q, choices) => (choices.includes('Stop') || choices.includes('Start') ? 'Cancel' : choices.find((c) => c !== 'Cancel') ?? 'Cancel');
 
 /**
  * Sends one message and waits until the model is done: every question Acto asks with buttons meanwhile is answered by
@@ -62,7 +65,10 @@ async function say(page: Page, text: string, choose: Chooser = confirm): Promise
     const choices = await question.getByRole('button').allInnerTexts();
     const c = choose(q, choices);
     asked.push(`${q} [${choices.join('/')}] -> ${c}`);
-    await question.getByRole('button', { name: c, exact: true }).click();
+    if (c.startsWith('type:')) {
+      await box.fill(c.slice('type:'.length));
+      await box.press('Enter');
+    } else await question.getByRole('button', { name: c, exact: true }).click();
     await expect(question).toHaveCount(0);
   }
   const reply = (await chat.locator('.chat-model').allInnerTexts()).slice(models0).join('\n');
@@ -236,15 +242,13 @@ test('8a pick a workflow and a step: the board selects exactly those two, and th
   await expect(wfNode(page, ids.b!)).not.toHaveClass(/selected/);
 });
 
-// FIXME (chat gap, observed 2026-11-18, 2 of 2 tries): the pick is right (8a passes) but the reply describes an Inspector that does
-// not exist. Observed: "the Inspector shows the Workflow tab and the Step tab" (try 1) and "tabs for both: the workflow tab ... and the
-// step tab" (try 2), and it calls e2e-chat-b's payload {"maxDepth": 5} "sits on the same step". Expected (inspector-tabs spec §5 rule 2):
-// Step · Processor, with the one child tab "e2e-chat-a" (its assignment) under Step; no Workflow tab. Cause: the system prompt and the
-// tools say nothing of rules 1-3 and no tool reads the picks or the Inspector, so the model guesses from the older single-panel design.
-test.fixme('8b pick a workflow and a step: the reply says what the Inspector shows, by rule 2 (Step · Processor, e2e-chat-a\'s assignment)', async ({ page }) => {
+// 8b was a fixme until read_selection and the prompt's selection rules (2026-11-18 audit G4): the reply described a Workflow tab
+// and a Step tab. Now the model reads the Inspector's own tab rules.
+test('8b pick a workflow and a step: the reply says what the Inspector shows, by rule 2 (Step · Processor, e2e-chat-a\'s assignment)', async ({ page }) => {
   await seedChain(true);
   await openAt(page);
   const t = await say(page, PICK);
+  expect(t.actions.some((a) => /read selection/.test(a)), `it read the selection\n${t.actions.join('\n')}`).toBe(true);
   const low = t.reply.toLowerCase();
   expect(low, 'the reply names the Step tab').toContain('step');
   expect(low, 'the reply names the Processor tab').toContain('processor');
@@ -252,14 +256,9 @@ test.fixme('8b pick a workflow and a step: the reply says what the Inspector sho
   expect(t.reply, 'the reply names e2e-chat-a\'s payload on the step').toMatch(/e2e-chat-a[^\n]*(payload|assignment)|(payload|assignment)[^\n]*e2e-chat-a/i);
 });
 
-// FIXME (chat gap, observed 2026-11-18, 2 of 2 tries): asked "Start the workflow e2e-chat-run.", the model called `start` at once, with
-// no question; the guard aborted POST /orchestration/start (it never reached BaseAPI), and the model reported "Start failed — Network
-// error: Failed to fetch" as a connectivity problem. Expected (the user's ask-first rule for running a workflow): a question first
-// (Acto's buttons or in words), no start request until the user confirms; "no" leaves it stopped. Cause: `start` is not in DESTRUCTIVE
-// (src/chat/tools.ts) and the prompt's rule 9 lets the model start whenever the user asked. Note: the user-approved destructive list
-// (docs/superpowers/specs/2026-10-23-skp-studio-11-chat-pane-design.md, "Destructive operations") has Stop but not Start, so this
-// expectation needs the user's ruling (add Start to the list) before it can pass.
-test.fixme('9 start asks first: the chat does not start a workflow without confirmation; "no" leaves it stopped', async ({ page }) => {
+// 9 was a fixme until Start joined the ask-first list [user, 2026-11-18] (audit G7): the model called start at once. Now Acto asks
+// with buttons and the test answers by typing "no" in the message box (audit G8). The guard still aborts any start request.
+test('9 start asks first: the chat does not start a workflow without confirmation; "no" leaves it stopped', async ({ page }) => {
   await seed({
     steps: [{ key: 's', name: 'e2e-chat-r1', at: { x: 300, y: 0 }, processor: NORMALIZER }],
     payloads: [{ key: 'p', step: 's', payload: '{"handler": "Acme"}' }],
@@ -268,11 +267,84 @@ test.fixme('9 start asks first: the chat does not start a workflow without confi
   const runs: string[] = [];
   page.on('request', (r) => { const p = new URL(r.url()).pathname; if (/\/(start|stop)$/i.test(p)) runs.push(`${r.method()} ${p}`); });
   await openAt(page);
-  // a question with buttons is declined; a question in words is answered "no"
-  const t = await say(page, 'Start the workflow e2e-chat-run.', () => 'Cancel');
-  const askedInWords = /\?/.test(t.reply);
-  expect(runs, 'no start went out before the user confirmed').toEqual([]);
-  expect(t.asked.length > 0 || askedInWords, `the chat asked first\nreply: ${t.reply}`).toBe(true);
-  if (t.asked.length === 0) await say(page, 'no', () => 'Cancel');
-  expect(runs, 'no start after "no"').toEqual([]);
+  const t = await say(page, 'Start the workflow e2e-chat-run.', () => 'type:no');
+  expect(runs, 'no start request went out').toEqual([]);
+  expect(t.asked.length, `Acto asked before the start\nreply: ${t.reply}`).toBeGreaterThan(0);
+  expect(t.asked[0]).toMatch(/^Start e2e-chat-run\?/);
+  expect(t.actions.some((a) => /user declined: start/.test(a)), `the typed no declined it\n${t.actions.join('\n')}`).toBe(true);
+  await expect(chatPanel(page).getByRole('group', { name: 'Question' })).toHaveCount(0);
+});
+
+test('10 assignment fields: e2e-chat-a\'s payload row on the shared step gets a name and a description of its own, saved', async ({ page }) => {
+  const ids = await seedChain(true);
+  await openAt(page);
+  await say(page, 'On step e2e-chat-s2, rename e2e-chat-a\'s payload (its assignment) to e2e-chat-pay-a2 and give it the description "for a only". '
+    + 'Leave e2e-chat-b\'s payload alone. Then save the board.');
+  const a = await getJson<Row>(`/workflows/${ids.a}`);
+  const b = await getJson<Row>(`/workflows/${ids.b}`);
+  const mine = await getJson<Row>(`/assignments/${(a.assignmentIds as string[])[0]}`);
+  expect(mine).toMatchObject({ name: 'e2e-chat-pay-a2', description: 'for a only', stepId: ids.s2 });
+  expect(JSON.parse(mine.payload as string)).toEqual({ maxDepth: 2 });
+  const theirs = await getJson<Row>(`/assignments/${(b.assignmentIds as string[])[0]}`);
+  expect(theirs.name).toBe('e2e-pay-pb');
+  await expect(saveButton(page)).toBeDisabled();
+});
+
+test('11 ghosts: a step deleted and saved comes back through the chat (a new row), and another ghost is removed', async ({ page }) => {
+  const ids = await seedChain();
+  await openAt(page);
+  await say(page, 'Delete the steps e2e-chat-s3 and e2e-chat-s2 from the board, then save the board.');
+  await expect(stNode(page, ids.s3!)).toHaveCount(0);
+  await expect(ghost(page, 'e2e-chat-s3')).toHaveCount(1);
+  await expect(ghost(page, 'e2e-chat-s2')).toHaveCount(1);
+  expect(await rowsNamed('steps', 'e2e-chat-s3')).toHaveLength(0);
+
+  // undo cannot bring it back now (the delete is saved): only the ghost can
+  const t = await say(page, 'Bring back the deleted step e2e-chat-s3, and drop the faded ghost of e2e-chat-s2 from the board. Then save the board.');
+  expect(t.actions.some((a) => /restore ghosts/.test(a)), `restore_ghosts ran\n${t.actions.join('\n')}`).toBe(true);
+  const s3 = await named('steps', 'e2e-chat-s3');
+  expect(s3.id, 'a new row: the old one was deleted').not.toBe(ids.s3);
+  await expect(stNode(page, s3.id)).toBeVisible();
+  await expect(ghost(page, 'e2e-chat-s3')).toHaveCount(0);
+  await expect(ghost(page, 'e2e-chat-s2')).toHaveCount(0);
+  expect(await rowsNamed('steps', 'e2e-chat-s2'), 'removing a ghost changes nothing in BaseAPI').toHaveLength(0);
+  await expect(saveButton(page)).toBeDisabled();
+});
+
+test('12 an unsaved cache: its items are edited from the board\'s value, not the stored one', async ({ page }) => {
+  await openAt(page);
+  await say(page, 'Create a cache e2e-chat-c5 with root e2e-chat-r5 and the items a = 1 and keep = yes. Do not save yet.');
+  await expect(saveButton(page)).toBeEnabled();
+  expect(await rowsNamed('caches', 'e2e-chat-c5')).toHaveLength(0);
+  await say(page, 'In the cache e2e-chat-c5, change item a to 2 and add the item b = 3. Then save the board.');
+  const c = await named('caches', 'e2e-chat-c5');
+  expect(c.root).toBe('e2e-chat-r5');
+  expect(JSON.parse(c.items as string)).toEqual({ a: '2', keep: 'yes', b: '3' });
+});
+
+test('13 Take stored: a save refused because the row changed elsewhere; the chat takes the stored version', async ({ page }) => {
+  const ids = await seedChain();
+  await openAt(page);
+  await say(page, 'Set the description of workflow e2e-chat-a to "mine". Do not save.');
+  await expect(saveButton(page)).toBeEnabled();
+  // someone else changes the same row meanwhile
+  const w = await getJson<Row>(`/workflows/${ids.a}`);
+  await apply([{ op: 'update', table: 'workflows', id: w.id, row: { ...bodyOf(w), description: 'theirs' }, updatedAt: w.updatedAt as string }]);
+
+  const refused = await say(page, 'Save the board.');
+  expect(refused.actions.some((a) => /save failed/.test(a)), `the save was refused\n${refused.actions.join('\n')}`).toBe(true);
+  expect((await getJson<Row>(`/workflows/${ids.a}`)).description).toBe('theirs');
+  const t = await say(page, 'Drop my change and take the stored version of what changed elsewhere.');
+  expect(t.asked.some((q) => /^Take the stored/.test(q)), `Acto asked first\n${t.asked.join('\n')}`).toBe(true);
+  await expect(saveButton(page), 'nothing unsaved is left').toBeDisabled();
+  expect((await getJson<Row>(`/workflows/${ids.a}`)).description).toBe('theirs');
+});
+
+test('14 add_cache with its name and root in one call, saved', async ({ page }) => {
+  await openAt(page);
+  const t = await say(page, 'Create a cache named e2e-chat-c6 with the root e2e-chat-r6 and save the board.');
+  expect(t.actions, 'one add_cache named it').toContain('add cache e2e-chat-c6');
+  const c = await named('caches', 'e2e-chat-c6');
+  expect(c.root).toBe('e2e-chat-r6');
+  await expect(caNode(page, c.id)).toBeVisible();
 });

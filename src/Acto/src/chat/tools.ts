@@ -14,4 +14,4 @@ export const toolsForModel = () =>
   TOOL_DEFS.map((t) => ({ type: 'function' as const, function: { name: t.name, description: t.description, parameters: t.parameters } }));
 
 /** The tools that ask the user before they act. */
-export const DESTRUCTIVE: ReadonlySet<string> = new Set<string>(['stop', 'delete_workflow', 'delete_picked', 'remove_assignment', 'save']);
+export const DESTRUCTIVE: ReadonlySet<string> = new Set<string>(['start', 'stop', 'delete_workflow', 'delete_picked', 'remove_assignment', 'save', 'take_stored']);

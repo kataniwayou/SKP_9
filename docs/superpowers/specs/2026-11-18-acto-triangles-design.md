@@ -214,8 +214,11 @@ for the chat"]:
 - Read tools describe the graph, the triangles (entry steps, caches, cron, state) and payloads per workflow.
 - Edit tools: add/delete step, wire, cache, workflow; set entry steps; link/unlink cache; **set payload (workflow,
   step)**; edit shared step fields; move items. Edits are board edits (one undo step each, as today).
-- `save_board` saves the whole board (asks first, as destructive tools do today); `delete_workflow` keeps its
-  ask-first behaviour; `start`/`stop` unchanged.
+- `save` saves the whole board (asks first, as destructive tools do today); `delete_workflow` keeps its
+  ask-first behaviour; `stop` unchanged; `start` asks first too [user, 2026-11-18]. Asking first is for the chat's tools
+  only (the 2026-10-23 chat-pane list); the board's Start, Stop and Save buttons do not confirm.
+- Also [user, 2026-11-18]: `take_stored` (asks first), ghost reads/`restore_ghosts`/`remove_ghosts`, `read_selection`
+  (the Inspector's own tab rules), assignment fields through `set_field`, a typed yes/no answers a question.
 
 ## 10. Removed from Acto
 

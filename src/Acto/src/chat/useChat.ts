@@ -11,13 +11,31 @@ import type { ToolContext } from './toolTypes';
 export const MAX_ROUNDS = 40;
 export const ANSWER_FIRST = 'Answer the question first';
 // what Undo reaches: the chat and the user share each workflow's history, field edits included (spec §11)
-export const CANCELLED_NOTE = 'Cancelled: what was already done stays (Undo in the Inspector reverses it, one workflow at a time)';
+export const CANCELLED_NOTE = 'Cancelled: what was already done stays (Undo reverses it, one change at a time: the board has one history)';
 const LOST_CALL = 'The question\'s tool call was lost; nothing was done';
 const NOT_RUN_STOPPED = 'not run: the user stopped the request';
 // a call unanswered after a refresh may have run (the request died before its result was recorded), so it is not said to be "not run"
 const NOT_RUN_LOST = 'the request was lost at refresh before this call\'s result was recorded: it may have run; read the workflow and Output before going on';
 
 type Outcome = 'asked' | 'continue';
+
+const YES = new Set(['yes', 'y', 'ok', 'okay', 'sure', 'go ahead', 'do it', 'confirm']);
+const NO = new Set(['no', 'n', 'nope', 'cancel', "don't", 'do not', 'stop']);
+
+/**
+ * The choice a typed answer makes on an open question (2026-10-23 chat-pane spec: typing yes/no may answer it): a
+ * choice's own text; else yes = the one choice that is not Cancel, no = Cancel. Anything else: undefined.
+ */
+export function typedChoice(choices: readonly string[], typed: string): string | undefined {
+  const t = typed.trim().toLowerCase().replace(/[.!]+$/, '');
+  const exact = choices.find((c) => c.trim().toLowerCase() === t);
+  if (exact !== undefined) return exact;
+  const others = choices.filter((c) => c !== 'Cancel' && c !== 'No');
+  const cancel = choices.find((c) => c === 'Cancel' || c === 'No');
+  if (YES.has(t) && others.length === 1) return others[0];
+  if (NO.has(t) && cancel !== undefined) return cancel;
+  return undefined;
+}
 
 /** One request in flight: its cancel signal, and `put`, which drops what it dispatches once the chat was started anew. */
 interface Run { signal: AbortSignal; put(action: ChatAction): void }
@@ -92,7 +110,7 @@ class ChatRunner {
     if (t === '' || this.ctl || state.busy) return;
     const q = state.question;
     if (q) {
-      const choice = q.choices.find((c) => c.trim().toLowerCase() === t.toLowerCase());
+      const choice = typedChoice(q.choices, t);
       if (choice !== undefined) this.answer(choice, t);
       else this.chat.dispatch({ type: 'entries', add: [{ kind: 'user', text: t }, { kind: 'note', text: ANSWER_FIRST, level: 'info' }] });
       return;

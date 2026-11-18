@@ -82,6 +82,7 @@ The user confirmed this list (2026-10-23):
 - Discard design
 - Remove an assignment
 - Stop a workflow
+- Start a workflow [user, 2026-11-18: Acto's chat asks before Start, like Stop]
 - Close a document that has unsaved changes
 
 When the model calls one of these, the studio does **not** carry it out. The chat shows a message naming exactly what

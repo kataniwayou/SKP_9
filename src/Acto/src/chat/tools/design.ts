@@ -2,7 +2,8 @@ import { CACHE_H, CACHE_W, STEP_H, STEP_W, TRIANGLE_H, TRIANGLE_W } from '../../
 import { pickKey, livePicks, deletePicks } from '../../board/picks';
 import type { Pick } from '../../board/selection';
 import type { BoardState, ItemRef } from '../../design/board';
-import { addCache, addEntry, addStep, addWire, linkCache, moveItems, removeEntries, removeWires, unlinkCaches } from '../../design/edits';
+import { addCache, addEntry, addStep, addWire, linkCache, moveItems, removeEntries, removeWires, setCacheField, unlinkCaches } from '../../design/edits';
+import { restoreGhosts, type GhostItem } from '../../design/ghosts';
 import type { Rect } from '../../model/geometry';
 import type { Id } from '../../model/graph';
 import { copyClip, copyMessage, pasteClip, readClip, writeClip } from '../../operate/clipboard';
@@ -53,15 +54,23 @@ const addStepTool: ToolDef = {
 
 const addCacheTool: ToolDef = {
   name: 'add_cache',
-  description: 'Add a cache named new-cache-N (version 1.0.0, unsaved until Save), on a free spot or at x, y. Answers its id.',
-  parameters: { type: 'object', properties: { ...XY }, additionalProperties: false },
+  description: 'Add a cache named `name` (else new-cache-N) with root `root`, version 1.0.0, unsaved until Save, on a free spot or at x, y. BaseAPI refuses to save a cache without a root. Answers its id.',
+  parameters: { type: 'object', properties: { name: { type: 'string' }, root: { type: 'string' }, ...XY }, additionalProperties: false },
   async run(ctx, args) {
     const id = ctx.newId();
     const at = spot(ctx, args, CACHE_W, CACHE_H);
-    const out = applyState(ctx, (b) => addCache(b, at, id), 'add cache', '');
+    const name = text(args, 'name').trim();
+    const root = text(args, 'root').trim();
+    const out = applyState(ctx, (b) => {
+      let made = addCache(b, at, id);
+      if (name !== '') made = setCacheField(made, id, 'name', name);
+      if (root !== '') made = setCacheField(made, id, 'root', root);
+      return made;
+    }, 'add cache', '');
     if (!out.ok) return out;
     const c = ctx.store.state().caches[id]!;
-    return done(true, `added cache ${c.name} ${c.version} (id ${id}); it is not saved yet`, `add cache ${c.name}`);
+    const noRoot = (c.root ?? '') === '' ? '; it has no root yet, and BaseAPI refuses to save a cache without one (set_field root)' : '';
+    return done(true, `added cache ${c.name} ${c.version} (id ${id})${c.root ? ` with root ${c.root}` : ''}; it is not saved yet${noRoot}`, `add cache ${c.name}`);
   },
 };
 
@@ -312,7 +321,68 @@ const redo: ToolDef = {
   parameters: NO_ARGS, run: async (ctx) => history(ctx, 'redo'),
 };
 
+/** The name a ghost shows on the board (a link: its two ends). */
+export function ghostName(g: GhostItem, lookup: (key: string) => GhostItem | undefined): string {
+  const named = (key: string, id: string) => { const x = lookup(key); return x && 'row' in x ? x.row.name : id; };
+  switch (g.kind) {
+    case 'step': case 'cache': case 'workflow': return g.row.name;
+    case 'wire': return `${named(`step:${g.from}`, g.from)} > ${named(`step:${g.to}`, g.to)}`;
+    case 'entry': return `${named(`workflow:${g.workflowId}`, g.workflowId)} > ${named(`step:${g.stepId}`, g.stepId)}`;
+    case 'cacheLink': return `${named(`workflow:${g.workflowId}`, g.workflowId)} > ${named(`cache:${g.cacheId}`, g.cacheId)}`;
+  }
+}
+
+const GHOSTS_ARG = {
+  type: 'object',
+  properties: { ghosts: { type: 'array', items: { type: 'string' }, description: 'Ghost keys (list_ghosts gives them, e.g. step:<id>) or the names of deleted steps, caches or workflows.' } },
+  required: ['ghosts'], additionalProperties: false,
+};
+
+/** The ghosts the call names, by key or by name (a name must match exactly one ghost), or the failed outcome. */
+function ghostsOf(ctx: ToolContext, args: Record<string, unknown>, action: string): GhostItem[] | { out: ToolOutcome } {
+  const store = ctx.ghosts;
+  if (!store) return { out: fail('no ghosts here', action) };
+  const wanted = Array.isArray(args.ghosts) ? args.ghosts.map(String) : [];
+  if (wanted.length === 0) return { out: fail('no ghosts given', action) };
+  const out: GhostItem[] = [];
+  for (const w of wanted) {
+    const byKey = store.get(w);
+    const hits = byKey ? [byKey] : store.ghosts().filter((g) => ghostName(g, store.get) === w);
+    if (hits.length === 0) return { out: fail(`no ghost ${w}: list_ghosts gives them`, action) };
+    if (hits.length > 1) return { out: fail(`${hits.length} ghosts are named ${w}: give a key (${hits.map((g) => g.key).join(', ')})`, action) };
+    if (!out.includes(hits[0]!)) out.push(hits[0]!);
+  }
+  return out;
+}
+
+const restoreGhostsTool: ToolDef = {
+  name: 'restore_ghosts',
+  description: "Put deleted items (ghosts) back on the board as one undoable edit, as the ghost toolbar's Restore does: the same row when BaseAPI still has it (an unsaved delete), else a new unsaved row. A wire, entry arrow or cache line comes back only when both its ends are on the board (else refused: restore <name> first).",
+  parameters: GHOSTS_ARG,
+  async run(ctx, args) {
+    const items = ghostsOf(ctx, args, 'restore ghosts');
+    if ('out' in items) return items.out;
+    const store = ctx.ghosts!;
+    const names = items.map((g) => ghostName(g, store.get)).join(', ');
+    return applyEdit(ctx, (b) => restoreGhosts(b, ctx.store.base(), items, store.get), 'restore ghosts', `restored ${names}; not saved yet`);
+  },
+};
+
+const removeGhostsTool: ToolDef = {
+  name: 'remove_ghosts',
+  description: "Drop ghosts from the board for this page session, as the ghost toolbar's Remove does. Nothing changes in BaseAPI and it is not an undo step.",
+  parameters: GHOSTS_ARG,
+  async run(ctx, args) {
+    const items = ghostsOf(ctx, args, 'remove ghosts');
+    if ('out' in items) return items.out;
+    const store = ctx.ghosts!;
+    const names = items.map((g) => ghostName(g, store.get)).join(', ');
+    store.remove(items.map((g) => g.key));
+    return done(true, `removed the ghost${items.length === 1 ? '' : 's'} ${names}`, 'remove ghosts');
+  },
+};
+
 export const DESIGN_TOOLS: ToolDef[] = [
   addStepTool, addCacheTool, connect, disconnect, setEntry, removeEntry, linkCacheTool, unlinkCacheTool,
-  moveBlocks, pickTool, copy, paste, deletePicked, undo, redo,
+  moveBlocks, pickTool, copy, paste, deletePicked, undo, redo, restoreGhostsTool, removeGhostsTool,
 ];

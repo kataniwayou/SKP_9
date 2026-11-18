@@ -83,8 +83,13 @@ const outcomeUnknown = (e: ApiError) => e.kind === 'network' || e.status === 0 |
 /**
  * Board-wide Save through /model/apply: all or nothing; the dry run and Kibana follow per affected workflow. `ghosts`
  * learns the created rows' BaseAPI ids before the board adopts the re-read, so a saved create does not become a ghost.
+ * `onApplied`, when given, hears BaseAPI's created-id map (client id -> new id) and the affected workflows' new ids once
+ * the apply went through (the chat's save reports them).
  */
-export async function saveBoard(api: StudioApi, store: BoardStore, output: OutputStore, ghosts?: GhostStore): Promise<'nothing' | 'refused' | 'saved'> {
+export async function saveBoard(
+  api: StudioApi, store: BoardStore, output: OutputStore, ghosts?: GhostStore,
+  onApplied?: (made: Readonly<Record<string, string>>, affected: readonly string[]) => void,
+): Promise<'nothing' | 'refused' | 'saved'> {
   if (store.saving()) { output.log(SAVING_REFUSAL, 'warn'); return 'refused'; }
   if (store.saveBlocked()) { output.log(OUTCOME_UNKNOWN, 'error'); return 'refused'; }
   const base = store.base();
@@ -114,6 +119,7 @@ export async function saveBoard(api: StudioApi, store: BoardStore, output: Outpu
     }
     const made = res.value.made ?? {};
     const affected = affectedWorkflows(base, present).map((id) => made[id] ?? id);
+    onApplied?.(made, affected);
     output.log(`Saved ${changes.length} change${changes.length === 1 ? '' : 's'}`, 'ok');
 
     const fresh = await loadBoard(api);

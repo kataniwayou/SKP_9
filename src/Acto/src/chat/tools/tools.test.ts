@@ -22,10 +22,11 @@ describe('reading tools', () => {
     const d = JSON.parse(done(await call(ctx, 'read_board')).result);
     expect(d.steps.map((s: { id: string; next: string[] }) => [s.id, s.next])).toEqual([['fetch', ['expand']], ['expand', []], ['lonely', []]]);
     expect(d.steps[0].processor).toMatchObject({ id: 'p1', name: 'proc' });
-    expect(d.caches).toEqual([{ id: 'c1', name: 'c1', version: '1.0.0', root: 'r', at: { x: 0, y: -100 } }]);
+    expect(d.caches).toEqual([{ id: 'c1', name: 'c1', version: '1.0.0', description: null, root: 'r', items: expect.any(String), at: { x: 0, y: -100 } }]);
+    expect(d.steps[0]).toHaveProperty('description');
     const daily = d.workflows.find((w: { id: string }) => w.id === 'daily');
     expect(daily).toMatchObject({ entrySteps: ['fetch'], caches: ['c1'], cronExpression: null, unsaved: false, saved: true, steps: ['fetch', 'expand'] });
-    expect(daily.payloads).toEqual([{ assignmentId: 'a-daily-fetch', stepId: 'fetch', payload: '{}', sharedWith: [] }]);
+    expect(daily.payloads).toEqual([{ assignmentId: 'a-daily-fetch', name: 'fetch-assignment', version: '1.0.0', description: null, stepId: 'fetch', payload: '{}', sharedWith: [] }]);
   });
 
   it('read_output gives the newest lines', async () => {
@@ -53,17 +54,21 @@ describe('workflow tools', () => {
     expect(store.state().workflows.n1).toMatchObject({ name: 'new-workflow-1', version: '1.0.0', cronExpression: null, at: { x: 700, y: 40 } });
     expect(output.lines().at(-1)).toMatchObject({ text: 'new-workflow-1 created — it is saved only when you press Save', level: 'ok' });
     expect(focus).toHaveBeenCalledWith('n1');
-    const s = done(await call(ctx, 'start', { workflow_id: 'n1' }));
+    expect(await call(ctx, 'start', { workflow_id: 'n1' })).toMatchObject({ kind: 'ask' });
+    const s = done(await call(ctx, 'start', {}, 'Start', 'n1'));
     expect(s.ok).toBe(false);
     expect(s.result).toContain('new-workflow-1: not saved yet — BaseAPI has no such workflow');
     expect(api.startWorkflow).not.toHaveBeenCalled();
     expect(done(await call(ctx, 'new_workflow', { name: 'feed' })).result).toContain('workflow feed');
   });
 
-  it('start sends the request and answers that it was accepted, not that it runs', async () => {
+  it('start asks first (user, 2026-11-18); Cancel sends nothing; Start sends the request and answers that it was accepted, not that it runs', async () => {
     vi.useFakeTimers();
     const { ctx, api, focus } = setup();
-    const o = done(await call(ctx, 'start', { workflow_id: 'daily' }));
+    expect(await call(ctx, 'start', { workflow_id: 'daily' })).toEqual({ kind: 'ask', question: { text: 'Start daily?', choices: ['Start', 'Cancel'], pin: 'daily' } });
+    expect(done(await call(ctx, 'start', { workflow_id: 'daily' }, 'Cancel', 'daily'))).toMatchObject({ ok: false, result: 'the user declined' });
+    expect(api.startWorkflow).not.toHaveBeenCalled();
+    const o = done(await call(ctx, 'start', {}, 'Start', 'daily'));
     expect(o.ok).toBe(true);
     expect(api.startWorkflow).toHaveBeenCalledWith('daily');
     expect(o.result).toContain('not confirmed yet');

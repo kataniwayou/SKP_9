@@ -1,7 +1,7 @@
 import { confirmText } from '../../board/Toolbar';
 import { boardChanges } from '../../design/changes';
 import { addWorkflow, setWorkflowField } from '../../design/edits';
-import { saveBoard } from '../../design/saveBoard';
+import { nameOf, saveBoard, takeStored } from '../../design/saveBoard';
 import { commitDelete, prepareDelete } from '../../operate/deleteWorkflow';
 import { runWorkflow, type RunOp } from '../../operate/runWorkflow';
 import type { ToolContext, ToolDef, ToolOutcome } from '../toolTypes';
@@ -55,12 +55,25 @@ const save: ToolDef = {
     if (answer === undefined) return { kind: 'ask', question: { text: `Save the board: ${n} change${n === 1 ? '' : 's'}?`, choices: ['Save', 'Cancel'] } };
     if (answer !== 'Save') return fail('the user declined', 'user declined: save');
     const before = ctx.output.lines().at(-1);
-    const r = await saveBoard(ctx.api, ctx.store, ctx.output, ctx.ghosts);
+    const present = ctx.store.state();
+    let made: Readonly<Record<string, string>> = {};
+    let affected: readonly string[] = [];
+    const r = await saveBoard(ctx.api, ctx.store, ctx.output, ctx.ghosts, (m, a) => { made = m; affected = a; });
     const lines = linesSince(ctx, before);
     const entries = lines.map((l) => ({ kind: 'output' as const, text: l.text, level: l.level, name: 'board' }));
     const said = textOf(lines, r);
     const problems = Object.values(ctx.store.state().workflows).flatMap((w) => (ctx.store.problems(w.id) > 0 ? [`${w.name}: ${ctx.store.problems(w.id)} problem(s)`] : []));
-    if (r === 'saved') return done(true, `saved. ${said}${problems.length ? ` Dry run: ${problems.join('; ')}.` : ''}`, 'saved the board', entries);
+    if (r === 'saved') {
+      // the created rows have BaseAPI's ids now: every id read before the save that is in this map is gone
+      const after = ctx.store.state();
+      const ids = Object.entries(made).map(([client, id]) => {
+        const name = present.workflows[client]?.name ?? present.steps[client]?.name ?? present.caches[client]?.name ?? present.assignments[client]?.name;
+        return `${name ?? client}: ${client} -> ${id}`;
+      });
+      const wfs = affected.map((id) => `${after.workflows[id]?.name ?? id} (id ${id})`);
+      return done(true, `saved. ${said}${problems.length ? ` Dry run: ${problems.join('; ')}.` : ''}`
+        + `${ids.length ? ` New ids (client id -> BaseAPI id): ${ids.join('; ')}.` : ''}${wfs.length ? ` Dry-run workflows: ${wfs.join(', ')}.` : ''}`, 'saved the board', entries);
+    }
     return fail(`the board was not saved (${r}): ${said}`, 'save failed', entries);
   },
 };
@@ -76,11 +89,14 @@ async function press(ctx: ToolContext, id: string, name: string, op: RunOp): Pro
 
 const start: ToolDef = {
   name: 'start',
-  description: "Start the saved workflow in BaseAPI (what its Start button does). It runs the saved version, never unsaved changes: save first. Answers BaseAPI's refusal reason, or that the start was accepted.",
+  description: "Start the saved workflow in BaseAPI (what its Start button does). It runs the saved version, never unsaved changes: save first. The user is asked first. Answers BaseAPI's refusal reason, or that the start was accepted.",
   parameters: ARG,
-  async run(ctx, args) {
-    const t = target(ctx, args, 'start');
-    return 'out' in t ? t.out : press(ctx, t.id, t.name, 'start');
+  async run(ctx, args, answer, pin) {
+    const t = target(ctx, args, 'start', answer === undefined ? undefined : pin);
+    if ('out' in t) return t.out;
+    if (answer === undefined) return { kind: 'ask', question: { text: `Start ${t.name}?`, choices: ['Start', 'Cancel'], pin: t.id } };
+    if (answer !== 'Start') return fail('the user declined', `user declined: start ${t.name}`);
+    return press(ctx, t.id, t.name, 'start');
   },
 };
 
@@ -120,4 +136,25 @@ const deleteWorkflow: ToolDef = {
   },
 };
 
-export const WORKFLOW_TOOLS: ToolDef[] = [newWorkflow, save, start, stop, deleteWorkflow];
+const takeStoredTool: ToolDef = {
+  name: 'take_stored',
+  description: "After a Save refused rows as changed elsewhere (or gone), take the stored version (BaseAPI's) of exactly those rows (what the Take stored button does): your unsaved changes to them are dropped, as one undoable edit; the rest of the unsaved board stays. The user is asked first.",
+  parameters: NO_ARGS,
+  async run(ctx, _args, answer) {
+    const rows = ctx.store.stale();
+    if (rows.length === 0) return fail('nothing to take: no row was refused as changed elsewhere by the last Save', 'take stored');
+    const names = rows.map((r) => nameOf([ctx.store.state(), ctx.store.base()], r.table, r.id));
+    if (answer === undefined) {
+      return { kind: 'ask', question: { text: `Take the stored ${names.join(', ')}? Your changes to ${rows.length === 1 ? 'it' : 'them'} are dropped.`, choices: ['Take stored', 'Cancel'] } };
+    }
+    if (answer !== 'Take stored') return fail('the user declined', 'user declined: take stored');
+    const before = ctx.output.lines().at(-1);
+    await takeStored(ctx.api, ctx.store, ctx.output);
+    const lines = linesSince(ctx, before);
+    const entries = lines.map((l) => ({ kind: 'output' as const, text: l.text, level: l.level, name: 'board' }));
+    const ok = ctx.store.stale().length === 0;
+    return ok ? done(true, textOf(lines, 'took the stored rows'), 'took stored', entries) : fail(textOf(lines, 'the stored rows could not be taken'), 'take stored failed', entries);
+  },
+};
+
+export const WORKFLOW_TOOLS: ToolDef[] = [newWorkflow, save, start, stop, deleteWorkflow, takeStoredTool];

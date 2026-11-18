@@ -7,7 +7,10 @@ import { affectedWorkflows } from '../../design/changes';
 import { assignmentsOf, linkedBy } from '../../design/payloads';
 import { conditionInfo } from '../../model/entryConditions';
 import type { Id } from '../../model/graph';
+import { withPicks } from '../../board/selection';
+import { focusOf, listOf as pickListOf, processorTabsOf, stepTabsOf, tabsOf } from '../../inspector/tabs';
 import type { ToolContext, ToolDef } from '../toolTypes';
+import { ghostName } from './design';
 import { done, fail, NO_ARGS } from './common';
 
 const json = (value: unknown, action: string) => done(true, JSON.stringify(value), action);
@@ -84,7 +87,7 @@ const listSchemas: ToolDef = {
 
 const readBoard: ToolDef = {
   name: 'read_board',
-  description: 'Read the whole board as it is now, unsaved edits included: every step (id, name, version, processor with health, entry condition, next step ids = wires, position), every cache, and every workflow triangle (fields, cron, Running or Stopped, unsaved and saved flags, problems of the last dry run, entry steps, the steps it reaches, linked caches, and its payloads: assignment id, step id, payload, and the other workflows sharing that payload).',
+  description: 'Read the whole board as it is now, unsaved edits included: every step (id, name, version, description, processor with health, entry condition, next step ids = wires, position), every cache (id, name, version, description, root, items as JSON text, position), and every workflow triangle (fields, cron, Running or Stopped, unsaved and saved flags, problems of the last dry run, entry steps, the steps it reaches, linked caches, and its payloads: assignment id, name, version, description, step id, payload, and the other workflows sharing that payload).',
   parameters: NO_ARGS,
   async run(ctx) {
     const b = ctx.store.state();
@@ -96,15 +99,18 @@ const readBoard: ToolDef = {
       return {
         id: st.id, name: st.name, version: st.version,
         processor: st.processorId ? { id: st.processorId, name: p?.name ?? null, version: p?.version ?? null, health: healthOf(live, st.processorId) } : null,
-        entryCondition: conditionInfo(st.entryCondition).name, next: st.nextStepIds, at: st.at,
+        description: st.description, entryCondition: conditionInfo(st.entryCondition).name, next: st.nextStepIds, at: st.at,
       };
     });
-    const caches = Object.values(b.caches).map((c) => ({ id: c.id, name: c.name, version: c.version, root: c.root, at: c.at }));
+    const caches = Object.values(b.caches).map((c) => ({ id: c.id, name: c.name, version: c.version, description: c.description, root: c.root, items: c.items, at: c.at }));
     const workflows = Object.values(b.workflows).map((w) => ({
       id: w.id, name: w.name, version: w.version, description: w.description, cronExpression: w.cronExpression,
       status: runWord(ctx, w.id), unsaved: touched.has(w.id), saved: !!base.workflows[w.id], problems: ctx.store.problems(w.id),
       entrySteps: w.entryStepIds, steps: [...reachOf(b, w.id)], caches: w.cacheIds, at: w.at,
-      payloads: assignmentsOf(b, w.id).map((a) => ({ assignmentId: a.id, stepId: a.stepId, payload: a.payload, sharedWith: linkedBy(b, a.id).filter((x) => x !== w.id) })),
+      payloads: assignmentsOf(b, w.id).map((a) => ({
+        assignmentId: a.id, name: a.name, version: a.version, description: a.description, stepId: a.stepId, payload: a.payload,
+        sharedWith: linkedBy(b, a.id).filter((x) => x !== w.id),
+      })),
     }));
     return json({ steps, caches, workflows }, `read board (${workflows.length} workflows)`);
   },
@@ -140,4 +146,55 @@ const readOutput: ToolDef = {
   },
 };
 
-export const READ_TOOLS: ToolDef[] = [listWorkflows, listProcessors, listCaches, listSchemas, readBoard, readEntity, readOutput];
+const listGhosts: ToolDef = {
+  name: 'list_ghosts',
+  description: 'List the ghosts: items deleted earlier in this page session and not on the board now (key, kind, name). restore_ghosts and remove_ghosts take the keys. A reload clears them.',
+  parameters: NO_ARGS,
+  async run(ctx) {
+    const store = ctx.ghosts;
+    const rows = (store?.ghosts() ?? []).map((g) => ({ key: g.key, kind: g.kind, name: ghostName(g, store!.get) }));
+    return json(rows, `list ghosts (${rows.length})`);
+  },
+};
+
+const NO_GHOSTS = { get: () => undefined };
+
+const readSelection: ToolDef = {
+  name: 'read_selection',
+  description: "Read what is selected on the board now (the user's clicks or your pick) and what the Inspector shows for it: its top tabs, the child tabs under Step (the selected workflow's assignment) and under Processor (its schemas), and the assignment shown; or the numbered pick list.",
+  parameters: NO_ARGS,
+  async run(ctx) {
+    const b = ctx.store.state();
+    const ghosts = ctx.ghosts ?? NO_GHOSTS;
+    const sel = withPicks({ workflows: [], picks: [] }, ctx.commands.picks());
+    const label = (p: (typeof sel.picks)[number]): string => {
+      switch (p.kind) {
+        case 'workflow': return `workflow ${b.workflows[p.id]?.name ?? p.id}`;
+        case 'step': return `step ${b.steps[p.id]?.name ?? p.id}`;
+        case 'cache': return `cache ${b.caches[p.id]?.name ?? p.id}`;
+        case 'wire': return `wire ${b.steps[p.from]?.name ?? p.from} > ${b.steps[p.to]?.name ?? p.to}`;
+        case 'entry': return `entry arrow ${b.workflows[p.workflowId]?.name ?? p.workflowId} > ${b.steps[p.stepId]?.name ?? p.stepId}`;
+        case 'cacheLink': return `cache line ${b.workflows[p.workflowId]?.name ?? p.workflowId} > ${b.caches[p.cacheId]?.name ?? p.cacheId}`;
+        case 'ghost': { const g = ghosts.get(p.key); return `ghost ${g ? ghostName(g, ghosts.get) : p.key}`; }
+      }
+    };
+    const picked = sel.picks.map(label);
+    const list = pickListOf(sel);
+    if (list) return json({ selected: picked, inspector: { pickList: list.map(label) } }, `read selection (${picked.length})`);
+    const focus = focusOf(sel);
+    if (!focus) return json({ selected: [], inspector: 'nothing: no item is selected' }, 'read selection (0)');
+    const tabs = tabsOf(sel, b, ghosts).map((t) => t.label);
+    if (focus.kind !== 'step') return json({ selected: picked, inspector: { tabs } }, `read selection (${picked.length})`);
+    const step = b.steps[focus.id];
+    const stepChildren = stepTabsOf(sel, b, focus.id);
+    const processorChildren = processorTabsOf(b, step?.processorId ?? null).map((c) => c.label);
+    const shown = stepChildren.map((c) => {
+      const wf = c.id.slice('assignment:'.length);
+      const a = assignmentsOf(b, wf).find((x) => x.stepId === focus.id);
+      return { workflow: c.label, assignment: a ? { id: a.id, name: a.name, payload: a.payload } : null };
+    });
+    return json({ selected: picked, inspector: { tabs, underStep: stepChildren.map((c) => c.label), underProcessor: processorChildren, assignmentShown: shown[0] ?? null } }, `read selection (${picked.length})`);
+  },
+};
+
+export const READ_TOOLS: ToolDef[] = [listWorkflows, listProcessors, listCaches, listSchemas, readBoard, readEntity, readOutput, listGhosts, readSelection];

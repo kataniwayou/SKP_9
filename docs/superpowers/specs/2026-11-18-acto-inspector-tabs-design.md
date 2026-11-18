@@ -146,6 +146,9 @@ two-column row per assignment the workflow links, label = the step name, value =
 
 **Cache tab**: Name, Version, show all, Description, Root, Items (pretty JSON when it parses), Used by.
 
+**Edits while saving**: every board edit is refused while the board saves (the board store's own guard; the UI's gestures
+and the chat's tools both go through it, and the refusal goes to Output) [user, 2026-11-18].
+
 **Pretty JSON everywhere** [user: item 2]: schema definitions, payloads, cache items are shown laid out one field to
 a line, two-space indent, as Studio's `prettyJson`; text that does not parse is shown as typed. Typing it back to the
 same JSON (any layout) is not a change [call: Studio's `sameJson` rule, so pretty-printing alone never makes a row
