@@ -237,3 +237,16 @@ export async function save(page: Page) {
   test.info().annotations.push({ type: 'save', description: (await out(page).locator('[role="listitem"] span').allInnerTexts()).join(' | ').slice(0, 1500) });
   return answer;
 }
+
+/** The Items table of a cache's Inspector (the key/value editor). */
+export const itemKey = (page: Page, n: number) => inspector(page).getByRole('textbox', { name: `Key ${n}`, exact: true });
+export const itemValue = (page: Page, n: number) => inspector(page).getByRole('textbox', { name: `Value ${n}`, exact: true });
+
+/** Adds an item as row `n` (1-based) of the Items table: "+ Add item", its key, its value (each committed with Enter). */
+export async function addItem(page: Page, n: number, key: string, value: string) {
+  await inspector(page).getByRole('button', { name: '+ Add item' }).click();
+  await itemKey(page, n).fill(key);
+  await itemKey(page, n).press('Enter');
+  await itemValue(page, n).fill(value);
+  await itemValue(page, n).press('Enter');
+}

@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures';
 import {
-  caNode, cacheTool, clearOutput, drawCacheLink, drawEntry, drawWire, dropTool, entryEdge, field, openAt, out, outLine, payloadOf, pickEdge, pickStep, pickWorkflow, pretty, regionPoint,
+  addItem, caNode, cacheTool, clearOutput, drawCacheLink, drawEntry, drawWire, dropTool, entryEdge, field, openAt, out, outLine, payloadOf, pickEdge, pickStep, pickWorkflow, pretty, regionPoint,
   renameTo, save, saveButton, stNode, toolboxStep, waitLoaded, wfNode, wireEdge, workflowTool, PROC_A, PROC_B,
 } from './helpers';
 import { seed } from './seed';
@@ -28,7 +28,7 @@ test('Save writes everything the board holds, and a reload shows it back where i
   await renameTo(page, 'e2e-save-second');
   const cache = await dropTool(page, cacheTool(page), 'cache', await regionPoint(page, { x: 200, y: 360 }));
   await renameTo(page, 'e2e-save-cache');
-  await field(page, 'Items').fill('{"k": "v"}');
+  await addItem(page, 1, 'k', 'v');
   await field(page, 'Root').fill('e2e-root');
   await drawWire(page, stNode(page, s1), stNode(page, s2));
   await drawEntry(page, wfNode(page, wf), stNode(page, s1));

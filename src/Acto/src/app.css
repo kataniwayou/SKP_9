@@ -88,3 +88,28 @@ pre.json { margin: 0; border: 1px solid var(--line); border-radius: 7px; padding
 .chip-x { background: none; border: 0; padding: 0 4px; color: var(--muted); cursor: pointer; font-size: 11px; border-radius: 999px; }
 .chip-x:hover { color: var(--danger); }
 .chip-x:focus-visible { outline: 2px solid var(--accent); }
+
+/* a cache's items: the key/value editor (ported from Studio's DictEditor) */
+.dict { min-width: 0; }
+.dict-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.dict-count { font-size: 11px; color: var(--muted); }
+.dict-tog { margin-left: auto; font: 500 10px var(--mono); letter-spacing: .08em; padding: 1px 6px; border-radius: 4px; background: none; border: 1px solid var(--line); color: var(--muted); cursor: pointer; }
+.dict-tog.on { color: var(--accent); border-color: var(--accent); }
+.dict-tog:disabled { opacity: .45; cursor: default; }
+.dict-tog:focus-visible, .dict-add:focus-visible, .dict-del:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dict-table { width: 100%; border-collapse: collapse; table-layout: fixed; font: 12px var(--mono); }
+.dict-table th { text-align: left; font: 500 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); padding: 2px 4px; border-bottom: 1px solid var(--line); }
+.dict-table th:nth-child(1) { width: 38%; }
+.dict-table th:nth-child(3) { width: 20px; }
+.dict-table td { padding: 1px 2px; border-bottom: 1px solid var(--line); }
+.fld .dict-cell { font: 12px var(--mono); background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 3px 4px; }
+.fld .dict-cell:hover:not([readonly]) { border-color: var(--line); }
+.fld .dict-cell:focus { background: var(--card-2); }
+.dict-table tr.bad .dict-cell[aria-invalid="true"] { border-color: var(--danger); color: var(--danger); }
+.dict-why td { border-bottom: 0; padding: 0 4px 3px; font-size: 11px; color: var(--danger); }
+.dict-x { text-align: center; }
+.fld .dict-del, .fld .dict-add { background: none; border: 0; padding: 0; cursor: pointer; font: 12px var(--sans); width: auto; }
+.fld .dict-del { color: var(--muted); font-size: 14px; }
+.fld .dict-del:hover { color: var(--danger); }
+.fld .dict-add { margin-top: 5px; color: var(--accent); }
+.dict-err { color: var(--danger); font-size: 12px; margin: 2px 0; }

@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { caNode, field, inspector, openAt, payloadOf, pickCache, pickStep, pickWorkflow, pretty, saveButton, stNode, subTab, tab, wfNode, wireEdge } from './helpers';
+import { addItem, caNode, field, itemKey, itemValue, inspector, openAt, payloadOf, pickCache, pickStep, pickWorkflow, pretty, saveButton, stNode, subTab, tab, wfNode, wireEdge } from './helpers';
 import { seed } from './seed';
 
 // Spec §6–§7: every field of a triangle, a step and a cache edits through the Inspector; the payload check; one undo history for the whole
@@ -109,17 +109,18 @@ test('a cache\'s Inspector: name, version, description, root and items', async (
   await expect(inspector(page).locator('.ph .cnt')).toHaveText('cache');
   await expect(field(page, 'Name')).toHaveValue('e2e-ins-cache');
   await expect(field(page, 'Root')).toHaveValue('e2e');
-  await expect(field(page, 'Items')).toHaveValue('{}');
+  await expect(inspector(page).getByText('0 items')).toBeVisible();
   await expect(inspector(page)).toContainText('cache · used by e2e-ins-a');
   await field(page, 'Name').fill('e2e-ins-cache-renamed');
   await expect(caNode(page, id.c1!).locator('.cache-nm')).toHaveText('e2e-ins-cache-renamed');
   await field(page, 'Version').fill('1.2.0');
   await field(page, 'Description').fill('cache description');
   await field(page, 'Root').fill('e2e-root');
-  await field(page, 'Items').fill('{"k": "v"}');
+  await addItem(page, 1, 'k', 'v');
   await expect(caNode(page, id.c1!).locator('.unsaved-mark')).toBeVisible();
   await expect(field(page, 'Root')).toHaveValue('e2e-root');
-  await expect(field(page, 'Items')).toHaveValue('{"k": "v"}');
+  await expect(itemKey(page, 1)).toHaveValue('k');
+  await expect(itemValue(page, 1)).toHaveValue('v');
 });
 
 test('the payload field checks JSON as it is typed; an assignment in the triangle\'s list edits and deletes', async ({ page }) => {
