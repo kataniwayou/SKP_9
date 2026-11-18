@@ -105,7 +105,7 @@ describe('InspectorPanel', () => {
       expect(screen.getByText('step · shared by daily, hourly')).toBeInTheDocument();
       expect(screen.getByLabelText('Name')).toHaveValue('fetch-orders');
       expect(screen.getByLabelText('Version')).toHaveValue('1.0.0');
-      expect(screen.getByLabelText('Entry condition')).toHaveValue('1');
+      expect(screen.getByRole('combobox', { name: 'Entry condition' })).toHaveAttribute('data-value', '1');
       expect(screen.getByText('Used by').nextSibling).toHaveTextContent('daily, hourly');
       expect(screen.queryByLabelText('Payload')).toBeNull();
     });
@@ -116,7 +116,8 @@ describe('InspectorPanel', () => {
     });
     it('the entry condition is set on the step', () => {
       const { store } = setup({ workflows: [], picks: [step('fetch')] });
-      fireEvent.change(screen.getByLabelText('Entry condition'), { target: { value: '2' } });
+      fireEvent.click(screen.getByRole('combobox', { name: 'Entry condition' }));
+      fireEvent.click(screen.getByRole('option', { name: /Failed/ }));
       expect(store.state().steps.fetch!.entryCondition).toBe(2);
     });
   });

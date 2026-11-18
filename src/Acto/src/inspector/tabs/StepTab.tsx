@@ -1,8 +1,8 @@
 import { reachOf } from '../../design/board';
 import { setStepField } from '../../design/edits';
 import type { Id } from '../../model/graph';
-import { CONDITIONS } from '../../model/entryConditions';
-import { Ro, Row, SelectField, TextField } from '../fields';
+import { ConditionPicker } from '../ConditionPicker';
+import { Field, Ro, Row, TextField } from '../fields';
 import { MetaToggle } from '../MetaToggle';
 import { EntityHead, metaOfRow, orNull, type Ctx } from './shared';
 
@@ -20,9 +20,10 @@ export function StepTab({ state, edit, id }: Ctx & { id: Id }) {
       <TextField key={`${id}:version`} label="Version" value={step.version} onChange={(v) => set('version', v)} />
       <MetaToggle meta={metaOfRow(step)} />
       <TextField key={`${id}:description`} label="Description" value={step.description} onChange={(v) => set('description', orNull(v))} />
-      {/* Task 7 puts Studio's condition picker here */}
-      <SelectField key={`${id}:entryCondition`} label="Entry condition" value={step.entryCondition}
-        options={CONDITIONS.map((c) => ({ value: c.value, label: `${c.letter} · ${c.name}` }))} onChange={(v) => set('entryCondition', v)} />
+      <Field label="Entry condition">
+        <ConditionPicker key={`${id}:entryCondition`} id={`ec-${id}`} label="Entry condition" value={String(step.entryCondition)}
+          onChange={(v) => set('entryCondition', Number(v))} />
+      </Field>
       <p className="in-note sub">Colours every wire into this step.</p>
       <Ro><Row k="Used by">{users.length > 0 ? users.join(', ') : 'no workflow'}</Row></Ro>
     </>

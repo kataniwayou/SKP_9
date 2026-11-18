@@ -76,7 +76,7 @@ test('a step\'s Inspector: shared name, version, description and entry condition
   await expect(field(page, 'Name')).toHaveValue('e2e-ins-second');
   await expect(field(page, 'Version')).toHaveValue('1.0.0');
   await expect(field(page, 'Description')).toHaveValue('');
-  await expect(field(page, /^Entry condition/)).toHaveValue('1');
+  await expect(field(page, /^Entry condition/)).toHaveAttribute('data-value', '1');
   // the processor section and its liveness are there (never edited by the suite)
   await expect(inspector(page).getByText('Processor · live')).toBeVisible();
   await expect(field(page, 'Processor name')).toHaveValue('archive-expander');
@@ -89,7 +89,8 @@ test('a step\'s Inspector: shared name, version, description and entry condition
   // the wire into this step takes the colour and letter of its entry condition
   const pill = wireEdge(page, id.s1!, id.s2!).locator('.pilltx');
   const was = await pill.textContent();
-  await field(page, /^Entry condition/).selectOption({ index: 2 });
+  await field(page, /^Entry condition/).click();
+  await inspector(page).getByRole('option', { name: /Cancelled/ }).click();
   await expect(pill).not.toHaveText(was!);
   await expect(stNode(page, id.s2!).locator('.unsaved-mark')).toBeVisible();
   await expect(field(page, 'Description')).toHaveValue('step description');

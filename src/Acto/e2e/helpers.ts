@@ -85,7 +85,7 @@ export const toolbar = (page: Page, kind: 'workflow' | 'step' | 'wire' | 'cache'
 export const selbar = (page: Page) => page.getByRole('toolbar', { name: 'selection actions' });
 export const inspector = (page: Page) => page.locator('[data-panel="inspector"]');
 export const field = (page: Page, label: string | RegExp) =>
-  inspector(page).locator('label.fld', { has: page.locator('span', { hasText: typeof label === 'string' ? new RegExp(`^${escapeRe(label)}$`) : label }) }).locator('input, textarea, select');
+  inspector(page).locator('label.fld', { has: page.locator('span', { hasText: typeof label === 'string' ? new RegExp(`^${escapeRe(label)}$`) : label }) }).locator('input, textarea, select, button[role=combobox]');
 export const saveButton = (page: Page) => page.locator('button.save-board');
 export const workflowTool = (page: Page) => page.getByRole('button', { name: /Workflow\s*drop on the board/ });
 export const cacheTool = (page: Page) => page.getByRole('button', { name: /Cache\s*drop on the board/ });
