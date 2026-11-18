@@ -45,7 +45,10 @@ Its AI drawing wand takes three plain environment variables in `k8s/31-workflow-
 Secret: `KIMI_BASE_URL`, `KIMI_MODEL_ID` and `KIMI_API_KEY`. The key is committed empty, which turns the
 wand off ("AI drawing is not configured"); put the key in your working copy only and never commit it.
 Acto (its replacement) builds the same way (`docker build -f src/Acto/Dockerfile -t acto:local .`, `k8s/47-acto.yaml`,
-`http://localhost:18083`); its model key is `KIMI_API_KEY` in `skp-dev-secrets`, which `01-secret.yaml` deliberately omits (an `apply -k` would
+`http://localhost:18083`). The image must reach the node before a `rollout restart`, or the pod keeps the node's old copy:
+`kind load docker-image acto:local --name desktop`, or without the kind CLI
+`docker save acto:local -o acto.tar` then `docker exec -i desktop-control-plane ctr -n k8s.io images import - < acto.tar`
+(the port-forward drops when the pod restarts; rerun it). Its model key is `KIMI_API_KEY` in `skp-dev-secrets`, which `01-secret.yaml` deliberately omits (an `apply -k` would
 overwrite a real key with an empty one; the manifest's `secretKeyRef` is `optional`, so without it the chat answers 503).
 Set it once, by hand, and restart the pod:
 `kubectl -n skp patch secret skp-dev-secrets -p '{"stringData":{"KIMI_API_KEY":"<key>"}}'`
