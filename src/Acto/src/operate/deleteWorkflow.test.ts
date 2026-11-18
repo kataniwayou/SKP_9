@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from '../api/client';
 import { board, shared } from '../design/boardFixtures';
+import type { BoardState } from '../design/board';
 import { boardChanges } from '../design/changes';
 import { createBoardStore } from '../design/boardStore';
 import { createOutputStore } from '../output/outputStore';
@@ -176,6 +177,42 @@ describe('deleting several triangles', () => {
     expect(t.api.applyModel).toHaveBeenCalledTimes(2);
     expect(t.store.state().workflows.daily).toBeDefined();
     expect(t.store.state().workflows.hourly).toBeUndefined();
+  });
+
+  it('an assignment only workflows of this delete share goes once, with the last that links it; one shared outside stays', async () => {
+    // daily and hourly share a-shared; weekly (outside the set) shares a-out with hourly only
+    const b = shared();
+    const start: BoardState = {
+      ...b,
+      assignments: { ...b.assignments, 'a-out': { ...b.assignments['a-shared']!, id: 'a-out', name: 'out-assignment' } },
+      workflows: {
+        ...b.workflows,
+        hourly: { ...b.workflows.hourly!, assignmentIds: ['a-shared', 'a-out'] },
+        weekly: { ...b.workflows.hourly!, id: 'weekly', name: 'weekly', assignmentIds: ['a-out'] },
+      },
+    };
+    const t = setup(start);
+    const plans = await prepareDeletes(t.studio, t.store, t.output, ['daily', 'hourly']);
+    expect(plans.map((p) => p.changes.map((c) => `${c.table}/${c.id}`))).toEqual([
+      ['workflows/daily'],
+      ['workflows/hourly', 'assignments/a-shared'],
+    ]);
+    expect(plans.map((p) => p.lines)).toEqual([['workflow daily'], ['workflow hourly', 'assignment fetch-assignment']]);
+    expect(plans[1]!.assignmentIds).toEqual(['a-shared']);
+    expect(await commitDeletes(t.studio, t.store, t.output, plans)).toEqual(['daily', 'hourly']);
+    const applied = t.api.applyModel.mock.calls.flatMap((c) => (c as unknown as [{ table: string; id: string }[]])[0]);
+    expect(applied.filter((c) => c.table === 'assignments').map((c) => c.id)).toEqual(['a-shared']);
+    expect((t.api.applyModel.mock.calls.at(-1) as unknown as [{ id: string }[]])[0].map((c) => c.id)).toContain('a-shared');
+    expect(t.store.state().assignments['a-shared']).toBeUndefined();
+    expect(t.store.state().assignments['a-out']).toBeDefined();
+    expect(t.store.state().workflows.weekly!.assignmentIds).toEqual(['a-out']);
+  });
+
+  it('a shared assignment stays when the later workflow is refused by its dry run', async () => {
+    const t = setup(shared());
+    t.api.validateModel.mockResolvedValueOnce({ ok: true, value: { ok: true, results: [] } } as never).mockResolvedValueOnce(refuse('hourly'));
+    const plans = await prepareDeletes(t.studio, t.store, t.output, ['daily', 'hourly']);
+    expect(plans.map((p) => p.changes.map((c) => c.table))).toEqual([['workflows']]);
   });
 
   it('a thrown apply of one is reported and the rest still go', async () => {

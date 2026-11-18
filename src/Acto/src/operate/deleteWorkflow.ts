@@ -11,9 +11,11 @@ export interface DeletePlan { workflowId: Id; changes: ModelChange[]; lines: str
 
 /**
  * Delete up to the confirm: `delete workflows/<id>` plus each assignment no other workflow links, put to BaseAPI's dry run.
- * Any refusal (a running workflow, say) goes to Output with BaseAPI's message; null, and the board is untouched.
+ * `gone`: workflows deleted before this one in the same run (several triangles); an assignment only they and this one
+ * link goes with this one, the last of them to be deleted. Any refusal (a running workflow, say) goes to Output with
+ * BaseAPI's message; null, and the board is untouched.
  */
-export async function prepareDelete(api: StudioApi, store: BoardStore, output: OutputStore, wf: Id): Promise<DeletePlan | null> {
+export async function prepareDelete(api: StudioApi, store: BoardStore, output: OutputStore, wf: Id, gone: readonly Id[] = []): Promise<DeletePlan | null> {
   if (store.saving()) { output.log(SAVING_REFUSAL, 'warn'); return null; }
   const base = store.base();
   const boards = [base, store.state()];
@@ -28,7 +30,8 @@ export async function prepareDelete(api: StudioApi, store: BoardStore, output: O
     for (const a of row.assignmentIds) {
       const ar = base.assignments[a];
       // in use while any other workflow links it, in base or in the unsaved board
-      if (!ar || !linkedBy(base, a).every((x) => x === wf) || !linkedBy(present, a).every((x) => x === wf)) continue;
+      const goes = (x: Id) => x === wf || gone.includes(x);
+      if (!ar || !linkedBy(base, a).every(goes) || !linkedBy(present, a).every(goes)) continue;
       assignmentIds.push(a);
       changes.push({ op: 'delete', table: 'assignments', id: a, ...(ar.updatedAt ? { updatedAt: ar.updatedAt } : {}) });
       lines.push(`assignment ${ar.name}`);
@@ -81,11 +84,14 @@ export async function commitDelete(api: StudioApi, store: BoardStore, output: Ou
 /**
  * Delete of several triangles up to their one confirm: each dry run in turn (each holds the board like a Save). A
  * refused one (a running workflow, say) is reported in Output by its own dry run and left out; the rest are planned.
+ * An assignment linked only by workflows of this delete goes with the last of them that links it (deleted in order, the
+ * others are gone by then), so it is deleted exactly once.
  */
 export async function prepareDeletes(api: StudioApi, store: BoardStore, output: OutputStore, ids: readonly Id[]): Promise<DeletePlan[]> {
   const plans: DeletePlan[] = [];
   for (const wf of ids) {
-    const plan = await prepareDelete(api, store, output, wf);
+    // the ones planned before it are deleted before it; one after it still links a shared row when this one goes
+    const plan = await prepareDelete(api, store, output, wf, plans.map((p) => p.workflowId));
     if (plan) plans.push(plan);
   }
   return plans;
