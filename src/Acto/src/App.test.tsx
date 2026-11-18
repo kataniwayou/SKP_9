@@ -73,7 +73,8 @@ describe('App', () => {
       await loaded();
       fireEvent.click(triangle('daily'));
       fireEvent.click(card('fetch-orders'));
-      const area = (await inspector().findAllByRole('textbox')).filter((t) => t.tagName === 'TEXTAREA').at(-1)!;
+      fireEvent.click(await inspector().findByRole('tab', { name: 'daily' }));
+      const area = inspector().getByLabelText('Payload');
       fireEvent.change(area, { target: { value: '{"k":1}' } });
       await waitFor(() => expect(marked()).toEqual(['wf:daily']));
     });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BoardState } from './board';
+import { NO_AUDIT } from './board';
 import { board } from './boardFixtures';
 import { affectedWorkflows, boardChanges, changedKeys, unsavedMarks } from './changes';
 import { addCache, addStep, addWire, deleteCaches, deleteSteps, moveItems } from './edits';
@@ -12,6 +13,13 @@ const wire = (s: BoardState, from: string, to: string) => (addWire(s, from, to) 
 
 describe('boardChanges', () => {
   it('nothing changed, nothing sent', () => expect(boardChanges(b, b)).toEqual([]));
+
+  it('the read-only audit fields are never sent, on a create or an update', () => {
+    const cur = withStep({ ...b, workflows: { ...b.workflows, daily: { ...b.workflows.daily, name: 'x', createdBy: 'katan' } } }, 'n1');
+    const rows = boardChanges(b, cur).map((c) => c.row as Record<string, unknown>);
+    expect(rows).toHaveLength(2);
+    for (const r of rows) for (const k of ['createdAt', 'createdBy', 'updatedBy', 'updatedAt']) expect(r).not.toHaveProperty(k);
+  });
 
   it('a stamp-only difference is not a change', () => {
     const cur = { ...b, steps: { ...b.steps, fetch: { ...b.steps.fetch, updatedAt: 'old' } } };
@@ -61,7 +69,7 @@ describe('boardChanges', () => {
     const s = withStep(b, 'n1');
     const cur: BoardState = {
       ...s,
-      assignments: { ...s.assignments, an: { id: 'an', stepId: 'n1', name: 'x', version: '1.0.0', description: null, payload: '{}', updatedAt: null } },
+      assignments: { ...s.assignments, an: { id: 'an', stepId: 'n1', name: 'x', version: '1.0.0', description: null, payload: '{}', updatedAt: null, ...NO_AUDIT } },
       workflows: { ...s.workflows, daily: { ...s.workflows.daily, assignmentIds: ['a-daily-fetch', 'an'] } },
     };
     const cs = boardChanges(b, cur);

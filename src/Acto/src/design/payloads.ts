@@ -1,5 +1,6 @@
 import type { Id } from '../model/graph';
 import type { AssignmentRow, BoardState } from './board';
+import { NO_AUDIT } from './board';
 
 /** All the assignments a workflow links, in its assignmentIds order. */
 export function assignmentsOf(b: BoardState, wf: Id): AssignmentRow[] {
@@ -32,10 +33,10 @@ export function setPayload(b: BoardState, wf: Id, stepId: Id, payload: string, n
   }
   const id = newId();
   const row: AssignmentRow = cur
-    ? { ...cur, id, payload, updatedAt: null }
+    ? { ...cur, id, payload, updatedAt: null, ...NO_AUDIT }
     : {
       id, stepId, name: `${w.name}-${b.steps[stepId]?.name ?? stepId}`, version: '1.0.0', description: null,
-      payload, updatedAt: null,
+      payload, updatedAt: null, ...NO_AUDIT,
     };
   const assignmentIds = cur ? w.assignmentIds.map((x) => (x === cur.id ? id : x)) : [...w.assignmentIds, id];
   return {
@@ -72,7 +73,7 @@ export function setAssignmentPayload(b: BoardState, wf: Id, assignmentId: Id, pa
   const id = newId();
   return {
     ...b,
-    assignments: { ...b.assignments, [id]: { ...cur, id, payload, updatedAt: null } },
+    assignments: { ...b.assignments, [id]: { ...cur, id, payload, updatedAt: null, ...NO_AUDIT } },
     workflows: { ...b.workflows, [wf]: { ...w, assignmentIds: w.assignmentIds.map((x) => (x === assignmentId ? id : x)) } },
   };
 }

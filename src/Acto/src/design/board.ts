@@ -3,19 +3,21 @@ import type { Point } from '../model/geometry';
 import { reachableStepIds } from '../model/reachability';
 
 /** The board is a plain mirror of BaseAPI's rows. updatedAt null = created on the board, not saved yet. */
-export interface StepRow {
+/** Read-only audit fields as BaseAPI sent them (null on a row made on the board); shown under "show all", never sent. */
+export interface RowAudit { createdAt: string | null; createdBy: string | null; updatedBy: string | null }
+export interface StepRow extends RowAudit {
   id: Id; name: string; version: string; description: string | null; processorId: Id | null;
   nextStepIds: Id[]; entryCondition: number; at: Point | null; updatedAt: string | null;
 }
-export interface CacheRow {
+export interface CacheRow extends RowAudit {
   id: Id; name: string; version: string; description: string | null; root: string; items: string;
   at: Point | null; updatedAt: string | null;
 }
-export interface WorkflowRow {
+export interface WorkflowRow extends RowAudit {
   id: Id; name: string; version: string; description: string | null; cronExpression: string | null;
   entryStepIds: Id[]; assignmentIds: Id[]; cacheIds: Id[]; at: Point | null; updatedAt: string | null;
 }
-export interface AssignmentRow {
+export interface AssignmentRow extends RowAudit {
   id: Id; stepId: Id; name: string; version: string; description: string | null; payload: string;
   updatedAt: string | null;
 }
@@ -50,6 +52,9 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   if (ka.length !== kb.length) return false;
   return ka.every((k) => k in b && deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
 }
+
+/** The audit fields of a row made on the board. */
+export const NO_AUDIT: RowAudit = { createdAt: null, createdBy: null, updatedBy: null };
 
 export type Slot = 'input' | 'output' | 'config';
 export interface SchemaCopy { id: Id; name: string; version: string; description: string | null; definition: string }

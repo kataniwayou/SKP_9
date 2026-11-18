@@ -2,6 +2,7 @@ import type { Id } from '../model/graph';
 import type { Point, Rect } from '../model/geometry';
 import { CACHE_H, CACHE_W, STEP_H, STEP_W, TRIANGLE_H, TRIANGLE_W } from '../board/geometry';
 import type { BoardState, StepRow } from '../design/board';
+import { NO_AUDIT } from '../design/board';
 import { freeOffset, PASTE_CELL, PASTE_MARGIN } from './freeOffset';
 
 /** A copied step: its shared fields and where it stood. No payload: payloads belong to workflows (spec §7). */
@@ -77,7 +78,7 @@ export function pasteClip(b: BoardState, clip: Clip, newId: () => Id): { state: 
     pasted.push(id);
     const row: StepRow = {
       id, name: unique(c.name), version: c.version, description: c.description, processorId: c.processorId,
-      nextStepIds: [], entryCondition: c.entryCondition, at: { x: c.at.x + d.x, y: c.at.y + d.y }, updatedAt: null,
+      nextStepIds: [], entryCondition: c.entryCondition, at: { x: c.at.x + d.x, y: c.at.y + d.y }, updatedAt: null, ...NO_AUDIT,
     };
     steps[id] = row;
   }

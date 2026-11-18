@@ -1,6 +1,6 @@
 import type { Id, Processor } from '../model/graph';
 import type { Point } from '../model/geometry';
-import { SLOT_FIELD } from './board';
+import { NO_AUDIT, SLOT_FIELD } from './board';
 import type { BoardState, CacheRow, Edit, ItemRef, SchemaCopy, SchemaRow, Slot, StepRow, WorkflowRow } from './board';
 import { linkedBy } from './payloads';
 
@@ -20,7 +20,7 @@ function freeNumbered(names: string[], prefix: string): string {
 export function addStep(b: BoardState, processor: Processor, at: Point, id: Id): BoardState {
   const step: StepRow = {
     id, name: uniqueStepName(b, processor.name), version: '1.0.0', description: null, processorId: processor.id,
-    nextStepIds: [], entryCondition: 1, at: { ...at }, updatedAt: null,
+    nextStepIds: [], entryCondition: 1, at: { ...at }, updatedAt: null, ...NO_AUDIT,
   };
   return { ...b, steps: { ...b.steps, [id]: step } };
 }
@@ -28,7 +28,7 @@ export function addStep(b: BoardState, processor: Processor, at: Point, id: Id):
 export function addCache(b: BoardState, at: Point, id: Id): BoardState {
   const cache: CacheRow = {
     id, name: freeNumbered(Object.values(b.caches).map((c) => c.name), 'new-cache'), version: '1.0.0',
-    description: null, root: '', items: '{}', at: { ...at }, updatedAt: null,
+    description: null, root: '', items: '{}', at: { ...at }, updatedAt: null, ...NO_AUDIT,
   };
   return { ...b, caches: { ...b.caches, [id]: cache } };
 }
@@ -36,7 +36,7 @@ export function addCache(b: BoardState, at: Point, id: Id): BoardState {
 export function addWorkflow(b: BoardState, at: Point, id: Id): BoardState {
   const wf: WorkflowRow = {
     id, name: freeNumbered(Object.values(b.workflows).map((w) => w.name), 'new-workflow'), version: '1.0.0',
-    description: null, cronExpression: null, entryStepIds: [], assignmentIds: [], cacheIds: [], at: { ...at }, updatedAt: null,
+    description: null, cronExpression: null, entryStepIds: [], assignmentIds: [], cacheIds: [], at: { ...at }, updatedAt: null, ...NO_AUDIT,
   };
   return { ...b, workflows: { ...b.workflows, [id]: wf } };
 }

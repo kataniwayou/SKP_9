@@ -16,6 +16,7 @@ import { ChatHost } from './chat/ChatHost';
 import { createChatStore, type ChatStore } from './chat/chatStore';
 import type { ToolContext } from './chat/toolTypes';
 import type { BoardState, ItemRef } from './design/board';
+import { NO_AUDIT } from './design/board';
 import { createBoardStore, useBoardState, type BoardStore } from './design/boardStore';
 import { addEntry, addWire, linkCache, moveItems } from './design/edits';
 import { newId } from './design/ids';
@@ -63,7 +64,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 function freeTriangleSpot(b: BoardState): Point {
   const probe = '\u0000new';
   const placed = placeMissing({ ...b, workflows: { ...b.workflows, [probe]: {
-    id: probe, name: '', version: '', description: null, cronExpression: null, entryStepIds: [], assignmentIds: [], cacheIds: [], at: null, updatedAt: null,
+    id: probe, name: '', version: '', description: null, cronExpression: null, entryStepIds: [], assignmentIds: [], cacheIds: [], at: null, updatedAt: null, ...NO_AUDIT,
   } } });
   return placed.workflows[probe]?.at ?? { x: 0, y: 0 };
 }
@@ -350,7 +351,7 @@ export function App(props: AppProps) {
               : <Board state={state} view={view} onPick={onPick} onMove={onMove} onConnect={onConnect} onDropData={onDropData}
                   toolbar={toolbar} bar={barView} settled={loaded} focusRef={boardFocus} stateNow={stateNow} onViewChange={onViewChange}
                   {...(saved ? { initialView: { x: saved.x, y: saved.y, zoom: saved.zoom } } : {})} />}
-            inspector={<InspectorPanel store={store} selection={sel} />}
+            inspector={<InspectorPanel store={store} selection={sel} ghosts={ghostStore} />}
             output={<OutputPanel />}
             chat={<ChatHost chat={chat} ctx={chatCtx} ready={loaded} storage={storage} {...(props.aiFetch ? { fetchFn: props.aiFetch } : {})} />}
           />
