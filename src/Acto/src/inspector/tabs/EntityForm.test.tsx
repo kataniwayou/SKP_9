@@ -52,12 +52,18 @@ describe('a cache\'s items', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete item 1' }));
     expect(c1(store)).toBe('{}');
     expect(store.unsaved().size).toBe(0); // back to the saved items: nothing to save
-    // the edits to one field coalesce into one undo step: undo restores the items as they were
-    expect(store.canUndo()).toBe(true);
-    while (store.canUndo()) act(() => store.undo());
+    // each commit is its own undo step: undo takes back the delete, then the value, then the key
+    act(() => store.undo());
+    expect(c1(store)).toBe('{"usd":"3.7"}');
+    expect(screen.getByRole('textbox', { name: 'Key 1' })).toHaveValue('usd');
+    expect(store.unsaved().size).toBe(1);
+    act(() => store.undo());
+    expect(c1(store)).toBe('{"usd":""}');
+    act(() => store.undo());
     expect(c1(store)).toBe('{}');
     expect(screen.queryByRole('textbox', { name: 'Key 1' })).toBeNull();
     expect(store.unsaved().size).toBe(0);
+    expect(store.canUndo()).toBe(false);
   });
 
   it('undo after an add puts the table back to the saved items', () => {
