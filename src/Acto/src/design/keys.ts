@@ -33,3 +33,13 @@ export function nudgeKey(e: KeyboardEvent): { dx: number; dy: number } | null {
   const d = ARROWS[e.key];
   return d ? { ...d } : null;
 }
+
+/**
+ * Esc (Ruling D1): a drag in progress is cancelled, and that is all; with no drag it clears the picks, unless the focus
+ * is in a text field (where Esc belongs to the field).
+ */
+export function escapeKey(e: KeyboardEvent, dragging: boolean): 'cancel-drag' | 'clear-picks' | null {
+  if (e.key !== 'Escape') return null;
+  if (dragging) return 'cancel-drag';
+  return typing(e) ? null : 'clear-picks';
+}

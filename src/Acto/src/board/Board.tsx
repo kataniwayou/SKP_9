@@ -8,6 +8,7 @@ import { LinkWire } from './edges/LinkWire';
 import { CacheChip } from './nodes/CacheChip';
 import { dropVerdictItem, stepAt, type DropItem } from './dropTarget';
 import { focusBounds } from './focus';
+import { escapeKey } from '../design/keys';
 import { StepCard } from './nodes/StepCard';
 import { WorkflowFrame } from './nodes/WorkflowFrame';
 import { BoardMiniMap } from './BoardMiniMap';
@@ -154,17 +155,20 @@ export function Board({ workflows, picks, onPick, initialZoom, initialView, onVi
   const dragStart = (n: Node, all?: Node[]) => {
     drag.current = { start: new Map((all && all.length > 0 ? all : [n]).map((m) => [m.id, { ...m.position }])), cancelled: false };
   };
+  const pickNow = useRef({ onPick, any: picks.length > 0 });
+  pickNow.current = { onPick, any: picks.length > 0 };
   useEffect(() => {
-    if (!editable) return;
     const onKey = (e: KeyboardEvent) => {
       const d = drag.current;
-      if (e.key !== 'Escape' || !d || d.cancelled) return;
+      const act = escapeKey(e, d !== null);
+      if (act === 'clear-picks') { if (pickNow.current.any) pickNow.current.onPick(null, false); return; }
+      if (act !== 'cancel-drag' || !d || d.cancelled) return;
       d.cancelled = true;
       setDragged((ns) => ns.map((n) => { const p = d.start.get(n.id); return p ? { ...n, position: { ...p } } : n; }));
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [editable]);
+  }, []);
 
   /** One edit per workflow, however many nodes React Flow dragged together. */
   const dragStop = (n: Node, all?: Node[]) => {

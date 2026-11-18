@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nudgeKey, pasteKey, undoRedoKey } from './keys';
+import { escapeKey, nudgeKey, pasteKey, undoRedoKey } from './keys';
 
 const key = (init: KeyboardEventInit, target?: HTMLElement) => {
   const e = new KeyboardEvent('keydown', init);
@@ -67,4 +67,24 @@ describe('nudgeKey', () => {
   it.each(['input', 'textarea', 'select'])('is null inside a %s', (tag) => {
     expect(k({ key: 'ArrowLeft' }, document.createElement(tag))).toBeNull();
   });
+});
+
+describe('escapeKey (Ruling D1)', () => {
+  const k = (init: KeyboardEventInit, dragging: boolean, target?: HTMLElement) => {
+    const e = new KeyboardEvent('keydown', init);
+    if (target) Object.defineProperty(e, 'target', { value: target });
+    return escapeKey(e, dragging);
+  };
+  it('cancels a drag in progress and only that', () => {
+    expect(k({ key: 'Escape' }, true)).toBe('cancel-drag');
+    expect(k({ key: 'Escape' }, true, document.createElement('input'))).toBe('cancel-drag');
+  });
+  it('clears the picks when no drag is in progress', () => {
+    expect(k({ key: 'Escape' }, false)).toBe('clear-picks');
+    expect(k({ key: 'Escape' }, false, document.createElement('div'))).toBe('clear-picks');
+  });
+  it.each(['input', 'textarea', 'select'])('leaves the picks alone while typing in a %s', (tag) => {
+    expect(k({ key: 'Escape' }, false, document.createElement(tag))).toBeNull();
+  });
+  it('is null for any other key', () => { expect(k({ key: 'Enter' }, false)).toBeNull(); expect(k({ key: 'Enter' }, true)).toBeNull(); });
 });

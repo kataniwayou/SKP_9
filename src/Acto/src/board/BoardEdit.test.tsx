@@ -124,7 +124,33 @@ describe('Board editing', () => {
     act(() => seen.props!.onNodeDragStop!({}, at(p.x + 16, p.y)));
     expect(onEdit.moveMany).toHaveBeenCalledTimes(1);
   });
-  it('Esc with no drag in progress does nothing', async () => {
+  it('Esc with no drag in progress clears the picks, but not while typing in a field (Ruling D1)', async () => {
+    const onPick = vi.fn();
+    const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    render(<Board workflows={[bw('w1', ['a', 'b'])]} picks={[{ kind: 'step', workflowId: 'w1', stepId: 'a' }, { kind: 'step', workflowId: 'w1', stepId: 'b' }]}
+      onPick={onPick} initialZoom={1} onEdit={onEdit} />);
+    await screen.findByText('a-name');
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(onPick).not.toHaveBeenCalled();
+    input.remove();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(onPick).toHaveBeenCalledWith(null, false);
+  });
+  it('Esc during a drag does not clear the picks', async () => {
+    const onPick = vi.fn();
+    const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    const w = bw('w1', ['a']);
+    render(<Board workflows={[w]} picks={[{ kind: 'step', workflowId: 'w1', stepId: 'a' }]} onPick={onPick} initialZoom={1} onEdit={onEdit} />);
+    await screen.findByText('a-name');
+    const p = w.stepAt.get('a')!;
+    act(() => seen.props!.onNodeDragStart!({}, stepNode('w1', 'a', p.x, p.y + HEADER_H)));
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(onPick).not.toHaveBeenCalled();
+  });
+  it('Esc with no drag in progress moves nothing', async () => {
     const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
     const w = bw('w1', ['a']);
     render(<Board workflows={[w]} picks={[]} onPick={() => {}} initialZoom={1} onEdit={onEdit} />);

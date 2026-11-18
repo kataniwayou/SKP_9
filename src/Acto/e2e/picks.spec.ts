@@ -90,10 +90,8 @@ test('click picks one, Ctrl+click adds and removes, the bar and numbered badges 
 });
 
 test('Esc clears the picks', async ({ page }) => {
-  // APP BUG (the brief's feature 4: "Esc/empty click clears"): Esc leaves every pick as it was (the selection bar,
-  // the badges and the Inspector's list stay). An empty click does clear them (the test above). Spec §6 names Esc only
-  // for cancelling a drag, so this may be a gap in the spec as much as in the code.
-  test.fail();
+  // Was an app bug (fixed 2026-11-18, Ruling D1): Esc left every pick as it was. Esc now clears the picks when no drag is
+  // in progress and the focus is not in a text field; during a drag it only cancels the drag (moving.spec.ts).
   await openEmptyBoard(page);
   const w = await throwaway(page, 2);
   await pickStep(w.steps[0]!);
