@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures';
 import {
-  caNode, cacheTool, clearOutput, drawCacheLink, drawEntry, drawWire, dropTool, entryEdge, field, openAt, out, outLine, pickEdge, pickStep, pickWorkflow, regionPoint,
+  caNode, cacheTool, clearOutput, drawCacheLink, drawEntry, drawWire, dropTool, entryEdge, field, openAt, out, outLine, payloadOf, pickEdge, pickStep, pickWorkflow, pretty, regionPoint,
   renameTo, save, saveButton, stNode, toolboxStep, waitLoaded, wfNode, wireEdge, workflowTool, PROC_A, PROC_B,
 } from './helpers';
 import { seed } from './seed';
@@ -36,7 +36,7 @@ test('Save writes everything the board holds, and a reload shows it back where i
   // a payload on the first step, typed with the triangle selected
   await pickWorkflow(page, wf);
   await pickStep(page, s1);
-  await field(page, 'Payload · JSON').fill('{"saved": "yes"}');
+  await (await payloadOf(page, 'e2e-save-wf')).fill('{"saved": "yes"}');
   await expect(saveButton(page)).toHaveClass(/primary/);
   await expect(saveButton(page)).toContainText('Save ·');
   const before = {
@@ -88,7 +88,7 @@ test('Save writes everything the board holds, and a reload shows it back where i
   near((await caNode(page, c.id as string).boundingBox())!, before.cache, 'cache');
   await pickWorkflow(page, w.id as string);
   await pickStep(page, a.id as string);
-  await expect(field(page, 'Payload · JSON')).toHaveValue('{"saved": "yes"}');
+  await expect(await payloadOf(page, 'e2e-save-wf')).toHaveValue(pretty('{"saved": "yes"}'));
 });
 
 test('a Save BaseAPI refuses (a new triangle with no entry arrow) saves nothing, names the item, and keeps the board as it was', async ({ page }) => {
@@ -141,10 +141,10 @@ test('a shared payload is copied on write: editing A\'s payload where the row is
   await openAt(page);
   await pickWorkflow(page, id.a!);
   await pickStep(page, id.s!);
-  await field(page, 'Payload · JSON').fill('{"owner": "a", "n": 1}');
+  await (await payloadOf(page, 'e2e-share-a')).fill('{"owner": "a", "n": 1}');
   await pickWorkflow(page, id.b!);
   await pickStep(page, id.s!);
-  await field(page, 'Payload · JSON').fill('{"owner": "b"}');
+  await (await payloadOf(page, 'e2e-share-b')).fill('{"owner": "b"}');
   await save(page);
   await expect(saveButton(page)).toBeDisabled();
   const wa = (await getJson<Row>(`/workflows/${id.a}`));
@@ -164,14 +164,14 @@ test('a shared payload is copied on write: editing A\'s payload where the row is
   await waitLoaded(page);
   await pickWorkflow(page, id.b!);
   await pickStep(page, id.s!);
-  await expect(field(page, 'Payload · JSON')).toHaveValue('{"owner": "a", "n": 1}');
+  await expect(await payloadOf(page, 'e2e-share-b')).toHaveValue(pretty('{"owner": "a", "n": 1}'));
   const sharedBefore = await getJson<Row>(`/assignments/${sharedId}`);
 
   // edit A's payload where the row is shared, then Save and reload
   await pickWorkflow(page, id.a!);
   await pickStep(page, id.s!);
-  await expect(field(page, 'Payload · JSON')).toHaveValue('{"owner": "a", "n": 1}');
-  await field(page, 'Payload · JSON').fill('{"owner": "a", "n": 2, "edited": true}');
+  await expect(await payloadOf(page, 'e2e-share-a')).toHaveValue(pretty('{"owner": "a", "n": 1}'));
+  await field(page, 'Payload').fill('{"owner": "a", "n": 2, "edited": true}');
   await expect(wfNode(page, id.a!).locator('.unsaved-mark')).toBeVisible();
   await expect(wfNode(page, id.b!).locator('.unsaved-mark')).toHaveCount(0);
   await save(page);
@@ -181,10 +181,10 @@ test('a shared payload is copied on write: editing A\'s payload where the row is
 
   await pickWorkflow(page, id.b!);
   await pickStep(page, id.s!);
-  await expect(field(page, 'Payload · JSON'), 'B keeps the shared row as it was').toHaveValue('{"owner": "a", "n": 1}');
+  await expect(await payloadOf(page, 'e2e-share-b'), 'B keeps the shared row as it was').toHaveValue(pretty('{"owner": "a", "n": 1}'));
   await pickWorkflow(page, id.a!);
   await pickStep(page, id.s!);
-  await expect(field(page, 'Payload · JSON')).toHaveValue('{"owner": "a", "n": 2, "edited": true}');
+  await expect(await payloadOf(page, 'e2e-share-a')).toHaveValue(pretty('{"owner": "a", "n": 2, "edited": true}'));
   // in BaseAPI: B still links the original row, untouched; A links a row of its own
   const wa2 = await getJson<Row>(`/workflows/${id.a}`);
   const wb2 = await getJson<Row>(`/workflows/${id.b}`);

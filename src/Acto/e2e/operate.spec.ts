@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures';
 import {
-  allSteps, clearOutput, dropTool, field, inspector, openAt, openFitted, outLine, pickStep, pickWorkflow, regionPoint, selbar, stNode, toolbar, toolboxStep,
+  allSteps, clearOutput, dropTool, field, inspector, openAt, openFitted, outLine, pickStep, pickWorkflow, regionPoint, selbar, stNode, tabLabels, toolbar, toolboxStep,
   wfNode, workflowTool, PROC_A,
 } from './helpers';
 import { seed } from './seed';
@@ -59,8 +59,8 @@ test('Copy from the step toolbar and from the bar; Ctrl+V pastes new steps with 
   // the entry condition came with them; the payload did not (and the copies belong to no workflow)
   await pickStep(page, copyIds[0]!);
   await expect(field(page, /^Entry condition/)).toBeEnabled();
-  await expect(inspector(page)).toContainText('used by no workflow');
-  await expect(field(page, 'Payload · JSON')).toHaveCount(0);
+  await expect(inspector(page).locator('dt', { hasText: 'Used by' }).locator('xpath=following-sibling::dd[1]')).toHaveText('no workflow');
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor']); // no workflow tab: no payload
   // a second paste goes further along; the original steps are untouched
   await page.keyboard.press('Control+v');
   await expect(allSteps(page)).toHaveCount(steps0 + 4);
@@ -90,11 +90,12 @@ test('Start and Stop: a real workflow\'s toolbar offers the right one for its st
     await expect(tb.getByRole('button', { name: '■ Stop', exact: true })).toBeEnabled();
     await expect(tb.getByRole('button', { name: '▶ Start', exact: true })).toHaveCount(0);
   } else test.info().annotations.push({ type: 'skipped', description: 'no running workflow on the stack' });
-  // several triangles never multi-select: no bar
+  // Ctrl+click of a second triangle: both selected, the bar offers Start · Stop · Delete for both (looked at, never pressed)
   if (stopped && running) {
     await pickWorkflow(page, stopped.id);
     await wfNode(page, running.id).locator('.tri-nm').click({ modifiers: ['Control'] });
-    await expect(selbar(page)).toHaveCount(0);
+    await expect(selbar(page).getByRole('button')).toHaveText(['▶ Start', '■ Stop', 'Delete']);
+    await page.keyboard.press('Escape');
   }
 });
 

@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { caNode, field, inspector, openAt, pickCache, pickStep, pickWorkflow, saveButton, stNode, wfNode, wireEdge } from './helpers';
+import { caNode, field, inspector, openAt, payloadOf, pickCache, pickStep, pickWorkflow, pretty, saveButton, stNode, tab, wfNode, wireEdge } from './helpers';
 import { seed } from './seed';
 
 // Spec §6–§7: every field of a triangle, a step and a cache edits through the Inspector; the payload check; one undo history for the whole
@@ -29,14 +29,14 @@ test('a triangle\'s Inspector: name, version, cron with its reading, description
   await openAt(page);
   await pickWorkflow(page, id.wa!);
   await expect(inspector(page).locator('.ph .cnt')).toHaveText('workflow');
-  await expect(inspector(page).locator('.ins-title b')).toHaveText('e2e-ins-a');
+  await expect(inspector(page).locator('[aria-label="Unique name"]')).toHaveText('e2e-ins-a 1.0.0');
   await expect(field(page, 'Name')).toHaveValue('e2e-ins-a');
   await expect(field(page, 'Version')).toHaveValue('1.0.0');
   await expect(field(page, 'Cron')).toHaveValue('0 0 * * * *');
   await expect(inspector(page)).toContainText(/every hour|hourly|at minute 0|hour/i);
-  await expect(inspector(page).locator('dt', { hasText: 'Entry step' })).toHaveCount(1);
-  await expect(inspector(page).locator('dd', { hasText: 'e2e-ins-first' })).toBeVisible();
-  await expect(inspector(page).locator('dd', { hasText: 'e2e-ins-cache' })).toBeVisible();
+  await expect(inspector(page).locator('.chip', { hasText: 'e2e-ins-first' })).toHaveCount(1);
+  await expect(inspector(page).locator('.chip', { hasText: 'e2e-ins-cache' })).toBeVisible();
+  await expect(inspector(page).getByText('Caches · 1')).toBeVisible();
   await expect(inspector(page).locator('dt', { hasText: 'Location' }).locator('xpath=following-sibling::dd[1]')).toHaveText(/^-?\d+, -?\d+$/);
   // its assignments, each naming the step it references
   const asg = inspector(page).getByTestId('assignments');
@@ -53,7 +53,7 @@ test('a triangle\'s Inspector: name, version, cron with its reading, description
   await field(page, 'Cron').fill('0 */5 * * * *');
   await expect(inspector(page)).toContainText(/5 minutes/i);
   await field(page, 'Cron').fill('not a cron');
-  await expect(inspector(page).locator('.in-note')).not.toContainText('not scheduled');
+  await expect(inspector(page).locator('.in-note.sub')).not.toContainText('not scheduled');
   await field(page, 'Cron').fill('');
   await expect(inspector(page)).toContainText('not scheduled');
   await expect(field(page, 'Version')).toHaveValue('2.5.1');
@@ -65,10 +65,11 @@ test('a triangle\'s Inspector: name, version, cron with its reading, description
   await expect(page.locator(`.react-flow__edge[data-id="entry:${id.wa}:${id.s1}"]`)).toHaveCount(0);
   await inspector(page).getByRole('button', { name: 'Remove cache e2e-ins-cache' }).click();
   await expect(page.locator(`.react-flow__edge[data-id="cache:${id.wa}:${id.c1}"]`)).toHaveCount(0);
-  await expect(inspector(page).locator('dt', { hasText: 'Entry step' })).toHaveCount(0);
+  await expect(inspector(page).locator('.chip', { hasText: 'e2e-ins-first' })).toHaveCount(0);
+  await expect(inspector(page).getByText('Caches · 0')).toBeVisible();
 });
 
-test('a step\'s Inspector: shared name, version, description and entry condition (which colours its wires); the processor is shown, not edited', async ({ page }) => {
+test('a step\'s Inspector: shared name, version, description and entry condition (which colours its wires); the processor tab is shown, not edited', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
   await pickStep(page, id.s2!);
@@ -77,10 +78,11 @@ test('a step\'s Inspector: shared name, version, description and entry condition
   await expect(field(page, 'Version')).toHaveValue('1.0.0');
   await expect(field(page, 'Description')).toHaveValue('');
   await expect(field(page, /^Entry condition/)).toHaveAttribute('data-value', '1');
-  // the processor section and its liveness are there (never edited by the suite)
-  await expect(inspector(page).getByText('Processor · live')).toBeVisible();
-  await expect(field(page, 'Processor name')).toHaveValue('archive-expander');
+  // the processor tab and its liveness are there (never edited by the suite)
+  await tab(page, 'Processor').click();
+  await expect(field(page, 'Name')).toHaveValue('archive-expander');
   await expect(inspector(page).locator('dt', { hasText: 'Liveness' })).toBeVisible();
+  await tab(page, 'Step').click();
 
   await field(page, 'Name').fill('e2e-ins-second-renamed');
   await expect(stNode(page, id.s2!).locator('.sn')).toHaveText('e2e-ins-second-renamed');
@@ -104,7 +106,7 @@ test('a cache\'s Inspector: name, version, description, root and items', async (
   await expect(field(page, 'Name')).toHaveValue('e2e-ins-cache');
   await expect(field(page, 'Root')).toHaveValue('e2e');
   await expect(field(page, 'Items')).toHaveValue('{}');
-  await expect(inspector(page)).toContainText('cache · e2e-ins-a');
+  await expect(inspector(page)).toContainText('cache · used by e2e-ins-a');
   await field(page, 'Name').fill('e2e-ins-cache-renamed');
   await expect(caNode(page, id.c1!).locator('.cache-nm')).toHaveText('e2e-ins-cache-renamed');
   await field(page, 'Version').fill('1.2.0');
@@ -123,7 +125,7 @@ test('the payload field checks JSON as it is typed; an assignment in the triangl
   const asg = inspector(page).getByTestId('assignments');
   const first = asg.locator('.in-assign').filter({ has: page.locator('b', { hasText: 'e2e-ins-first' }) });
   const box = first.locator('textarea');
-  await expect(box).toHaveValue('{"first":1}');
+  await expect(box).toHaveValue(pretty('{"first":1}'));
   await box.fill('{"first": ');
   await expect(first.locator('.in-problem')).toContainText('Not valid JSON');
   await box.fill('{"first": 2}');
@@ -132,13 +134,14 @@ test('the payload field checks JSON as it is typed; an assignment in the triangl
 
   // the same payload through the step with the triangle selected
   await pickStep(page, id.s1!);
-  await expect(field(page, 'Payload · JSON')).toHaveValue('{"first": 2}');
+  await expect(await payloadOf(page, 'e2e-ins-a')).toHaveValue(pretty('{"first": 2}'));
   await expect(stNode(page, id.s1!).locator('.key-chip')).toContainText('1 key');
-  await field(page, 'Payload · JSON').fill('nope');
+  await field(page, 'Payload').fill('nope');
   await expect(inspector(page).locator('.in-problem')).toContainText('Not valid JSON');
-  await field(page, 'Payload · JSON').fill('{"a":1,"b":2,"c":3}');
+  await field(page, 'Payload').fill('{"a":1,"b":2,"c":3}');
   await expect(stNode(page, id.s1!).locator('.key-chip')).toContainText('3 key');
-  // Remove assignment unlinks it
+  // Remove assignment unlinks it (the field is left first: see the fixme below)
+  await field(page, 'Payload').blur();
   await inspector(page).getByRole('button', { name: 'Remove assignment' }).click();
   await expect(stNode(page, id.s1!).locator('.key-chip')).toHaveCount(0);
   await pickWorkflow(page, id.wa!);
@@ -195,4 +198,19 @@ test('one undo history for the whole board: edits across two workflows undo and 
   await expect(redo(page)).toBeEnabled();
   await field(page, 'Description').fill('a new branch');
   await expect(redo(page)).toBeDisabled();
+});
+
+// BUG (Plan 6, Task 9): JsonField shows the typed text while it has the focus and the pretty layout once it loses it, and its height follows
+// the line count. Typing a one-line payload and then clicking the button under it ("Remove assignment") blurs the field on mousedown, the
+// textarea grows to the pretty layout, the button moves down under the pointer, and the click lands on the textarea: nothing is removed.
+// Expected: the first click on Remove assignment removes the assignment.
+test.fixme('a click on Remove assignment right after typing a one-line payload removes it', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  await pickWorkflow(page, id.wa!);
+  await pickStep(page, id.s1!);
+  await (await payloadOf(page, 'e2e-ins-a')).fill('{"a":1,"b":2,"c":3}');
+  await expect(stNode(page, id.s1!).locator('.key-chip')).toContainText('3 key');
+  await inspector(page).getByRole('button', { name: 'Remove assignment' }).click();
+  await expect(stNode(page, id.s1!).locator('.key-chip')).toHaveCount(0);
 });

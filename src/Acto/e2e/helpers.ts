@@ -81,11 +81,25 @@ export const allWorkflows = (page: Page) => page.locator('.react-flow__node-work
 export const allSteps = (page: Page) => page.locator('.react-flow__node-step');
 export const allCaches = (page: Page) => page.locator('.react-flow__node-cache');
 
-export const toolbar = (page: Page, kind: 'workflow' | 'step' | 'wire' | 'cache' | 'entry' | 'cacheLink') => page.getByRole('toolbar', { name: `${kind} actions` });
+export const toolbar = (page: Page, kind: 'workflow' | 'step' | 'wire' | 'cache' | 'entry' | 'cacheLink' | 'ghost') => page.getByRole('toolbar', { name: `${kind} actions` });
 export const selbar = (page: Page) => page.getByRole('toolbar', { name: 'selection actions' });
 export const inspector = (page: Page) => page.locator('[data-panel="inspector"]');
 export const field = (page: Page, label: string | RegExp) =>
   inspector(page).locator('label.fld', { has: page.locator('span', { hasText: typeof label === 'string' ? new RegExp(`^${escapeRe(label)}$`) : label }) }).locator('input, textarea, select, button[role=combobox]');
+/** An Inspector tab by its label (Step, Processor, a workflow's name, Workflow, Cache, Link, Deleted). */
+export const tab = (page: Page, name: string) => inspector(page).getByRole('tab', { name: new RegExp(`^${escapeRe(name)}$`) });
+/** The Inspector's tab labels, in order. */
+export const tabLabels = (page: Page) => inspector(page).getByRole('tab');
+/** A ghost node (a deleted step, cache or triangle drawn at its last place) by its name. */
+export const ghost = (page: Page, name: string) =>
+  page.locator('.react-flow__node.ghost').filter({ has: page.locator('.sn, .cache-nm, .tri-nm', { hasText: new RegExp(`^${escapeRe(name)}$`) }) });
+/** Studio's prettyJson: what a JSON field shows once it is not being typed in. */
+export const pretty = (json: string) => JSON.stringify(JSON.parse(json), null, 2);
+/** Opens the workflow-named tab of the picked step (its assignment) and answers its Payload field. */
+export async function payloadOf(page: Page, workflow: string) {
+  await tab(page, workflow).click();
+  return field(page, 'Payload');
+}
 export const saveButton = (page: Page) => page.locator('button.save-board');
 export const workflowTool = (page: Page) => page.getByRole('button', { name: /Workflow\s*drop on the board/ });
 export const cacheTool = (page: Page) => page.getByRole('button', { name: /Cache\s*drop on the board/ });

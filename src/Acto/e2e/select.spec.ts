@@ -1,12 +1,14 @@
+import type { Locator, Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import {
-  allWorkflows, caNode, cacheEdge, clickEmptyBoard, entryEdge, field, inspector, openAt, pickCache, pickEdge, pickStep, pickWorkflow, selbar, stNode, toolbar,
-  wfNode, wireEdge,
+  allWorkflows, caNode, cacheEdge, clickEmptyBoard, entryEdge, field, inspector, openAt, payloadOf, pickCache, pickEdge, pickStep, pickWorkflow, pretty, selbar,
+  stNode, tabLabels, toolbar, wfNode, wireEdge,
 } from './helpers';
 import { seed } from './seed';
 
-// Spec §6: a triangle first. Two workflows share an entry step and each has its own payload on it; the selected triangle lights what it
-// reaches and links and dims the rest; a step shows the payload of the selected triangle; steps, caches and wires multi-select with Ctrl.
+// Plan 6 (inspector-tabs spec §4): nothing fades for "not selected". A selected triangle carries its hue (pink first, then purple), and every
+// step in its stream holding its assignment shows a key chip "◆ N keys" in that hue; Ctrl+click adds a second triangle with its own hue. A
+// step shows Step · Processor, plus one tab per selected workflow whose stream holds it. Steps, caches and wires multi-select with Ctrl.
 
 const SEED = {
   steps: [
@@ -25,81 +27,95 @@ const SEED = {
   ],
 } as const;
 
-const dimmed = (l: import('@playwright/test').Locator) => expect(l).toHaveClass(/\bdim\b/);
-const lit = (l: import('@playwright/test').Locator) => expect(l).not.toHaveClass(/\bdim\b/);
+const PINK = 'rgb(255, 0, 114)';
+const PURPLE = 'rgb(124, 58, 237)';
+const chips = (page: Page, step: string) => stNode(page, step).locator('.key-chip');
+const borderOf = (l: Locator) => l.evaluate((e) => getComputedStyle(e).borderTopColor);
+const strokeOf = (l: Locator) => l.evaluate((e) => getComputedStyle(e).stroke);
+/** Nothing on the board is faded: no .dim anywhere and every real node at full opacity. */
+async function nothingFaded(page: Page) {
+  await expect(page.locator('.dim')).toHaveCount(0);
+  const faded = await page.locator('.react-flow__node:not(.ghost)').evaluateAll((ns) => ns.filter((n) => Number(getComputedStyle(n).opacity) < 1).length);
+  expect(faded, 'nodes drawn faded').toBe(0);
+}
 
-test('a triangle selects alone: it lights what it reaches and links, dims the rest, and each lit step shows its payload', async ({ page }) => {
+test('a triangle selects with its hue: its key chips show on the steps holding its assignment, and nothing fades', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
-  // nothing picked: nothing dimmed, no payload on any footer
-  await lit(stNode(page, id.s3!));
-  await expect(page.locator('.react-flow__node.dim')).toHaveCount(0);
+  await nothingFaded(page);
+  await expect(page.locator('.key-chip')).toHaveCount(0);
 
   await pickWorkflow(page, id.wa!);
   await expect(wfNode(page, id.wa!).locator('.tri')).toHaveClass(/\bsel\b/);
+  expect(await strokeOf(wfNode(page, id.wa!).locator('.tri-body'))).toBe(PINK);
   await expect(field(page, 'Name')).toHaveValue('e2e-sel-a');
+  await expect(tabLabels(page)).toHaveText(['Workflow']);
   await expect(toolbar(page, 'workflow').getByRole('button')).toHaveText(['▶ Start', 'Delete']);
-  // A reaches the shared step and the one after it, and links its cache; the other triangle, the orphan and every real row dim
-  await lit(stNode(page, id.s1!));
-  await lit(stNode(page, id.s2!));
-  await lit(caNode(page, id.c1!));
-  await dimmed(stNode(page, id.s3!));
-  await dimmed(wfNode(page, id.wb!));
-  await dimmed(entryEdge(page, id.wb!, id.s1!));
-  await lit(entryEdge(page, id.wa!, id.s1!));
-  await lit(cacheEdge(page, id.wa!, id.c1!));
-  await lit(wireEdge(page, id.s1!, id.s2!));
-  const realStep = page.locator('.react-flow__node-step').filter({ hasNotText: 'e2e-' }).first();
-  await dimmed(realStep);
-  // the footers: A's payload has two keys, the step after has none
-  await expect(stNode(page, id.s1!).locator('.key-chip')).toContainText('2 key');
-  await expect(stNode(page, id.s2!).locator('.key-chip')).toHaveCount(0);
+  // A's entry arrow carries the hue; B's does not
+  await expect(entryEdge(page, id.wa!, id.s1!).locator('g.entry-edge')).toHaveClass(/\bon\b/);
+  await expect(entryEdge(page, id.wb!, id.s1!).locator('g.entry-edge')).not.toHaveClass(/\bon\b/);
+  // A's payload has two keys; the step after it holds none of A's, the orphan none
+  await expect(chips(page, id.s1!)).toHaveCount(1);
+  await expect(chips(page, id.s1!)).toHaveText('◆ 2 keys');
+  expect(await borderOf(chips(page, id.s1!))).toBe(PINK);
+  await expect(chips(page, id.s2!)).toHaveCount(0);
+  await expect(chips(page, id.s3!)).toHaveCount(0);
+  await nothingFaded(page);
 
-  // B: the same step, B's payload, and the step only A reaches dims
+  // Ctrl+click B: both selected, B purple; the shared step shows one chip per workflow
+  await wfNode(page, id.wb!).locator('.tri-nm').click({ modifiers: ['Control'] });
+  await expect(page.locator('.react-flow__node-workflow .tri.sel')).toHaveCount(2);
+  expect(await strokeOf(wfNode(page, id.wb!).locator('.tri-body'))).toBe(PURPLE);
+  await expect(chips(page, id.s1!)).toHaveCount(2);
+  await expect(chips(page, id.s1!).nth(0)).toContainText('◆ 2 keys');
+  await expect(chips(page, id.s1!).nth(1)).toContainText('◆ 1 key');
+  expect(await borderOf(chips(page, id.s1!).nth(1))).toBe(PURPLE);
+  await nothingFaded(page);
+  // Ctrl+click B again takes it out
+  await wfNode(page, id.wb!).locator('.tri-nm').click({ modifiers: ['Control'] });
+  await expect(page.locator('.react-flow__node-workflow .tri.sel')).toHaveCount(1);
+  await expect(chips(page, id.s1!)).toHaveCount(1);
+
+  // a plain click on B: B alone, pink now
   await pickWorkflow(page, id.wb!);
-  await expect(field(page, 'Name')).toHaveValue('e2e-sel-b');
-  await lit(stNode(page, id.s1!));
-  await expect(stNode(page, id.s1!).locator('.key-chip')).toContainText('1 key');
-  await lit(stNode(page, id.s2!)); // reached through the wire out of the shared step
-  await dimmed(caNode(page, id.c1!));
-  await dimmed(wfNode(page, id.wa!));
+  await expect(page.locator('.react-flow__node-workflow .tri.sel')).toHaveCount(1);
+  await expect(chips(page, id.s1!)).toHaveText('◆ 1 key');
+  expect(await borderOf(chips(page, id.s1!))).toBe(PINK);
 
   // empty board clears it all
   await clickEmptyBoard(page);
-  await expect(page.locator('.react-flow__node.dim')).toHaveCount(0);
+  await expect(page.locator('.key-chip')).toHaveCount(0);
+  await expect(page.locator('.react-flow__node-workflow .tri.sel')).toHaveCount(0);
   await expect(inspector(page)).toContainText('Select a workflow, step or wire');
 });
 
-test('a step shows its shared fields, and with a triangle selected that triangle\'s payload; clicking a step keeps the triangle', async ({ page }) => {
+test('a step shows Step and Processor, and a tab per selected workflow whose stream holds it; clicking a step keeps the triangles', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
 
-  // no triangle: shared fields only, no payload
+  // no triangle: Step and Processor only, the users on the kind line
   await pickStep(page, id.s1!);
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
   await expect(field(page, 'Name')).toHaveValue('e2e-sel-shared');
-  await expect(inspector(page)).toContainText('shared fields · used by');
-  await expect(inspector(page)).toContainText('e2e-sel-a, e2e-sel-b');
-  await expect(inspector(page).getByText(/^Payload · /)).toHaveCount(0);
-  await expect(field(page, 'Payload · JSON')).toHaveCount(0);
+  await expect(inspector(page).locator('.kind')).toHaveText(/^step · shared by /);
+  await expect(inspector(page).locator('.kind')).toContainText('e2e-sel-a');
+  await expect(inspector(page).locator('.kind')).toContainText('e2e-sel-b');
 
-  // triangle first, then the step: A's payload; then B's
+  // triangle first, then the step: A's tab with A's payload; then B's
   await pickWorkflow(page, id.wa!);
   await pickStep(page, id.s1!);
   await expect(wfNode(page, id.wa!).locator('.tri')).toHaveClass(/\bsel\b/); // the triangle stays selected
-  await expect(inspector(page).getByText('Payload · e2e-sel-a')).toBeVisible();
-  await expect(field(page, 'Payload · JSON')).toHaveValue('{"from":"a","n":1}');
-  await expect(inspector(page)).toContainText('in e2e-sel-a');
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'e2e-sel-a']);
+  await expect(await payloadOf(page, 'e2e-sel-a')).toHaveValue(pretty('{"from":"a","n":1}'));
   await pickWorkflow(page, id.wb!);
   await pickStep(page, id.s1!);
-  await expect(inspector(page).getByText('Payload · e2e-sel-b')).toBeVisible();
-  await expect(field(page, 'Payload · JSON')).toHaveValue('{"only":"b"}');
+  await expect(await payloadOf(page, 'e2e-sel-b')).toHaveValue(pretty('{"only":"b"}'));
 
-  // a step the selected triangle does not reach: shared fields, "not in ..."
+  // a step the selected triangle does not reach: no workflow tab
   await pickWorkflow(page, id.wa!);
   await pickStep(page, id.s3!);
-  await expect(inspector(page)).toContainText('not in e2e-sel-a');
   await expect(field(page, 'Name')).toHaveValue('e2e-sel-orphan');
-  await expect(field(page, 'Payload · JSON')).toHaveCount(0);
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
 
   // an entry arrow or a cache line selects its triangle too
   await pickEdge(page, entryEdge(page, id.wb!, id.s1!));
@@ -110,7 +126,7 @@ test('a step shows its shared fields, and with a triangle selected that triangle
   await expect(wfNode(page, id.wa!).locator('.tri')).toHaveClass(/\bsel\b/);
 });
 
-test('Ctrl+click multi-selects steps, caches and wires with the light bar and numbered badges; triangles never join', async ({ page }) => {
+test('Ctrl+click multi-selects steps, caches and wires with the light bar and numbered badges; two triangles get Start · Stop · Delete', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
   await pickStep(page, id.s1!);
@@ -142,28 +158,25 @@ test('Ctrl+click multi-selects steps, caches and wires with the light bar and nu
   await expect(selbar(page).locator('.selbar-pill')).toHaveText('3 SELECTED');
   await expect(stNode(page, id.s2!).locator('.pick-no')).toHaveText('1');
 
-  // a triangle: Ctrl or not, it selects alone and ends the multi-selection
-  await wfNode(page, id.wa!).locator('.tri-nm').click({ modifiers: ['Control'] });
+  // a plain click on a triangle ends the multi-selection: it is the one selected workflow
+  await pickWorkflow(page, id.wa!);
   await expect(selbar(page)).toHaveCount(0);
   await expect(page.locator('.pick-no')).toHaveCount(0);
-  await expect(wfNode(page, id.wa!).locator('.tri')).toHaveClass(/\bsel\b/);
-  await expect(page.locator('.react-flow__node-workflow .tri.sel')).toHaveCount(1);
-  // and a triangle is never added to steps already picked
-  await pickStep(page, id.s1!);
-  await pickStep(page, id.s2!, true);
-  await wfNode(page, id.wb!).locator('.tri-nm').click({ modifiers: ['Control'] });
-  await expect(selbar(page)).toHaveCount(0);
-  await expect(page.locator('.react-flow__node-workflow .tri.sel')).toHaveCount(1);
   await expect(allWorkflows(page).locator('.tri.sel')).toHaveCount(1);
+  // Ctrl+click a second triangle: two selected, the bar offers Start · Stop · Delete for both (never pressed)
+  await wfNode(page, id.wb!).locator('.tri-nm').click({ modifiers: ['Control'] });
+  await expect(allWorkflows(page).locator('.tri.sel')).toHaveCount(2);
+  await expect(selbar(page).locator('.selbar-pill')).toHaveText('2 SELECTED');
+  await expect(selbar(page).getByRole('button')).toHaveText(['▶ Start', '■ Stop', 'Delete']);
 });
 
 test('Esc clears the picks and the triangle; the Delete key does nothing', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
   await pickWorkflow(page, id.wa!);
-  await expect(page.locator('.react-flow__node.dim').first()).toBeVisible();
+  await expect(allWorkflows(page).locator('.tri.sel')).toHaveCount(1);
   await page.keyboard.press('Escape');
-  await expect(page.locator('.react-flow__node.dim')).toHaveCount(0);
+  await expect(allWorkflows(page).locator('.tri.sel')).toHaveCount(0);
   await expect(inspector(page)).toContainText('Select a workflow, step or wire');
 
   await pickStep(page, id.s1!);

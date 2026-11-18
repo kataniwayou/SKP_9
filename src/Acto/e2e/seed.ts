@@ -5,7 +5,7 @@ import { apply, baseline, getJson, type Change, type Row } from './stack';
 export interface Pt { x: number; y: number }
 
 export interface StepSeed { key: string; name: string; at: Pt; processor?: string; next?: readonly string[]; condition?: number }
-export interface CacheSeed { key: string; name: string; at: Pt }
+export interface CacheSeed { key: string; name: string; at: Pt; root?: string }
 /** A payload row: one step's payload, which any number of workflows may link. */
 export interface PayloadSeed { key: string; step: string; payload: string }
 export interface WorkflowSeed { key: string; name: string; at: Pt; entry?: readonly string[]; caches?: readonly string[]; payloads?: readonly string[]; cron?: string | null }
@@ -44,7 +44,7 @@ export async function seed(spec: SeedSpec): Promise<Seeded> {
   const changes: Change[] = [];
 
   for (const k of spec.caches ?? []) {
-    changes.push({ op: 'create', table: 'caches', id: make(k.key), row: { name: k.name, version: '1.0.0', description: null, root: 'e2e', items: '{}', ...at(k.at) } });
+    changes.push({ op: 'create', table: 'caches', id: make(k.key), row: { name: k.name, version: '1.0.0', description: null, root: k.root ?? 'e2e', items: '{}', ...at(k.at) } });
   }
   for (const s of spec.steps ?? []) {
     changes.push({ op: 'create', table: 'steps', id: make(s.key), row: {
