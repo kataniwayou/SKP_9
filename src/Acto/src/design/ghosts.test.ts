@@ -140,7 +140,20 @@ describe('restoreGhosts', () => {
     store.edit((b) => deleteSteps(b, ['lonely']));
     store.saved(store.state());
     const after = stateOf(restoreGhosts(store.state(), store.base(), [ghosts.get('step:lonely')!]));
-    expect(after.steps.lonely).toEqual({ ...board().steps.lonely, updatedAt: null });
+    expect(after.steps.lonely).toEqual({ ...board().steps.lonely, updatedAt: null, createdAt: null, createdBy: null, updatedBy: null });
+  });
+
+  it('a row gone from base is restored with no audit; one base still has keeps its base audit', () => {
+    const b0 = board();
+    const { store, ghosts } = make({ ...b0, steps: { ...b0.steps,
+      lonely: { ...b0.steps.lonely!, createdAt: 'c', createdBy: 'u1', updatedBy: 'u2' },
+      expand: { ...b0.steps.expand!, createdAt: 'bc', createdBy: 'bu', updatedBy: 'bv' } } });
+    store.edit((b) => deleteSteps(b, ['lonely', 'expand']));
+    const base = { ...store.base(), steps: { ...store.base().steps } };
+    delete base.steps.lonely;
+    const after = stateOf(restoreGhosts(store.state(), base, ghosts.ghosts()));
+    expect(after.steps.lonely).toMatchObject({ updatedAt: null, createdAt: null, createdBy: null, updatedBy: null });
+    expect(after.steps.expand).toMatchObject({ createdAt: 'bc', createdBy: 'bu', updatedBy: 'bv' });
   });
 
   it('a restored step drops wires to steps that are not on the board', () => {

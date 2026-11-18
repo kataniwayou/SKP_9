@@ -1,3 +1,4 @@
+import { withPicks } from '../../board/selection';
 import { describe, expect, it, vi } from 'vitest';
 import { createGhostStore } from '../../design/ghosts';
 import { shared } from '../../design/boardFixtures';
@@ -119,11 +120,11 @@ describe('field and payload tools', () => {
 });
 
 describe('picks, clipboard and delete_picked', () => {
-  it('pick sets the page\'s picks; a triangle goes alone; a thing that is not there fails naming it', async () => {
+  it('pick sets the page\'s picks; a triangle may be mixed in; a thing that is not there fails naming it', async () => {
     const { ctx } = setup();
     expect(done(await call(ctx, 'pick', { items: [{ kind: 'step', id: 'fetch' }, { kind: 'wire', from: 'fetch', to: 'expand' }, { kind: 'entry', workflow_id: 'daily', step_id: 'fetch' }] })).ok).toBe(true);
     expect(ctx.commands.picks()).toEqual([{ kind: 'step', id: 'fetch' }, { kind: 'wire', from: 'fetch', to: 'expand' }, { kind: 'entry', workflowId: 'daily', stepId: 'fetch' }]);
-    expect(done(await call(ctx, 'pick', { items: [{ kind: 'workflow', id: 'daily' }, { kind: 'step', id: 'fetch' }] })).ok).toBe(false);
+    expect(done(await call(ctx, 'pick', { items: [{ kind: 'workflow', id: 'daily' }, { kind: 'step', id: 'fetch' }] })).ok).toBe(true);
     expect(done(await call(ctx, 'pick', { items: [{ kind: 'workflow', id: 'daily' }] })).ok).toBe(true);
     expect(done(await call(ctx, 'pick', { items: [{ kind: 'wire', from: 'expand', to: 'fetch' }] })).result).toBe('no wire expand > fetch on the board');
     expect(done(await call(ctx, 'pick', { items: [{ kind: 'step', id: 'ghost' }] })).result).toBe('no step ghost on the board');
@@ -229,10 +230,13 @@ describe('ghosts and the selection', () => {
     expect(JSON.parse(done(await call(ctx, 'list_workflows')).result).map((w: { id: string }) => w.id)).toEqual(['daily']);
   });
 
-  it('pick keeps the selected workflows for other items and lets triangles be picked together, not mixed', async () => {
+  it('pick keeps the selected workflows for other items and lets triangles be picked together and mixed with other items', async () => {
     const { ctx } = setup();
     expect(done(await call(ctx, 'pick', { items: [{ kind: 'workflow', id: 'daily' }, { kind: 'workflow', id: 'hourly' }] })).ok).toBe(true);
     expect(ctx.commands.picks()).toEqual([{ kind: 'workflow', id: 'daily' }, { kind: 'workflow', id: 'hourly' }]);
-    expect(done(await call(ctx, 'pick', { items: [{ kind: 'workflow', id: 'daily' }, { kind: 'step', id: 'fetch' }] })).ok).toBe(false);
+    expect(done(await call(ctx, 'pick', { items: [{ kind: 'workflow', id: 'daily' }, { kind: 'step', id: 'fetch' }] })).ok).toBe(true);
+    const picks = ctx.commands.picks();
+    expect(picks).toEqual([{ kind: 'workflow', id: 'daily' }, { kind: 'step', id: 'fetch' }]);
+    expect(withPicks({ workflows: ['hourly'], picks: [] }, picks)).toEqual({ workflows: ['daily'], picks });
   });
 });

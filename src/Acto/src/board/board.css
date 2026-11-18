@@ -157,7 +157,7 @@
 /* ghosts: an item deleted earlier this page session, at its last place: faded, dashed grey outline, struck-through name, a tag; wires grey and dotted */
 .react-flow__node.ghost, .react-flow__edge.ghost { opacity: .32; }
 .ghost .node, .ghost.node, .ghost .cache-chip, .ghost.cache-chip { border: 1px dashed var(--ghost-line); box-shadow: none; }
-.ghost .tri-body { fill: var(--b-node); stroke: var(--ghost-line); stroke-dasharray: 4 3; }
+.tri.ghost .tri-body, .tri.ghost.stopped .tri-body { fill: var(--b-node); stroke: var(--ghost-line); stroke-dasharray: 4 3; }
 .ghost .tri-stop, .ghost .tri-play { fill: var(--ghost-line); }
 .ghost .ico, .ghost .cond-pill { background: var(--ghost-line) !important; }
 .ghost .bn-body, .ghost .tri-nm, .ghost .cache-nm, .ghost .sn { text-decoration: line-through; }

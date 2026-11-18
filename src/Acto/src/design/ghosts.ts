@@ -1,5 +1,5 @@
 import type { Id } from '../model/graph';
-import type { AssignmentRow, BoardState, CacheRow, Edit, StepRow, WorkflowRow } from './board';
+import { NO_AUDIT, type AssignmentRow, type BoardState, type CacheRow, type Edit, type StepRow, type WorkflowRow } from './board';
 import type { BoardStore } from './boardStore';
 
 /** An assignment row on a step as last seen, with the workflows that linked it then. */
@@ -153,8 +153,14 @@ export function placeIn(ids: Id[], id: Id, order: readonly Id[] | undefined): Id
   return i < 0 ? [...ids, id] : [...ids.slice(0, i), id, ...ids.slice(i)];
 }
 
-/** Stamp of the row BaseAPI still has (an unsaved delete comes back unchanged), else null (created on the next Save). */
-const stamp = (rows: Record<Id, { updatedAt: string | null }>, id: Id) => rows[id]?.updatedAt ?? null;
+/**
+ * Stamp and audit of the row BaseAPI still has (an unsaved delete comes back unchanged); else a null stamp and no audit
+ * (created on the next Save: the deleted row's createdAt/createdBy/updatedBy are not the new row's).
+ */
+const stamp = (rows: Record<Id, { updatedAt: string | null; createdAt: string | null; createdBy: string | null; updatedBy: string | null }>, id: Id) => {
+  const r = rows[id];
+  return r ? { updatedAt: r.updatedAt, createdAt: r.createdAt, createdBy: r.createdBy, updatedBy: r.updatedBy } : { updatedAt: null, ...NO_AUDIT };
+};
 
 /**
  * Puts ghosts back as one edit: rows first (steps, caches, workflows with their assignments), then links. A restored
@@ -172,12 +178,12 @@ export function restoreGhosts(
   const by = <K extends GhostItem['kind']>(k: K) => items.filter((g): g is Extract<GhostItem, { kind: K }> => g.kind === k);
 
   const newSteps = by('step').filter((g) => !steps[g.row.id]);
-  for (const g of newSteps) steps[g.row.id] = { ...g.row, updatedAt: stamp(base.steps, g.row.id) };
+  for (const g of newSteps) steps[g.row.id] = { ...g.row, ...stamp(base.steps, g.row.id) };
   for (const g of newSteps) {
     const s = steps[g.row.id]!;
     steps[g.row.id] = { ...s, nextStepIds: s.nextStepIds.filter((x) => !!steps[x]) };
   }
-  for (const g of by('cache')) if (!caches[g.row.id]) caches[g.row.id] = { ...g.row, updatedAt: stamp(base.caches, g.row.id) };
+  for (const g of by('cache')) if (!caches[g.row.id]) caches[g.row.id] = { ...g.row, ...stamp(base.caches, g.row.id) };
 
   /** The row a link's order comes from: base's when BaseAPI still has it, else the ghost snapshot's. */
   const snapshot = (kind: 'step' | 'workflow', id: Id) => {
@@ -191,7 +197,7 @@ export function restoreGhosts(
   const putAssignment = (a: AssignmentRow): boolean => {
     if (assignments[a.id]) return true;
     if (!steps[a.stepId]) return false;
-    assignments[a.id] = { ...a, updatedAt: stamp(base.assignments, a.id) };
+    assignments[a.id] = { ...a, ...stamp(base.assignments, a.id) };
     return true;
   };
   for (const g of by('workflow')) {
@@ -206,7 +212,7 @@ export function restoreGhosts(
       entryStepIds: g.row.entryStepIds.filter((x) => !!steps[x]),
       cacheIds: g.row.cacheIds.filter((x) => !!caches[x]),
       assignmentIds,
-      updatedAt: stamp(base.workflows, g.row.id),
+      ...stamp(base.workflows, g.row.id),
     };
   }
   for (const g of newSteps) {

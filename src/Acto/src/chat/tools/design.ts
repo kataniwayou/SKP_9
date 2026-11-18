@@ -208,7 +208,7 @@ function toPick(ctx: ToolContext, r: Record<string, unknown>): Pick | { out: Too
 
 const pickTool: ToolDef = {
   name: 'pick',
-  description: 'Replace what is picked on the board (what copy and delete_picked act on; an empty list picks nothing). Items: {kind: step|cache|workflow, id}, {kind: wire, from, to}, {kind: entry, workflow_id, step_id}, {kind: cacheLink, workflow_id, cache_id}. Triangles may be picked together (they become the selected workflows) but not with other items.',
+  description: 'Replace what is picked on the board (what copy and delete_picked act on; an empty list picks nothing). Items: {kind: step|cache|workflow, id}, {kind: wire, from, to}, {kind: entry, workflow_id, step_id}, {kind: cacheLink, workflow_id, cache_id}. Picked triangles become the selected workflows.',
   parameters: {
     type: 'object',
     properties: { items: { type: 'array', items: { type: 'object', properties: {
@@ -225,7 +225,6 @@ const pickTool: ToolDef = {
       if ('out' in p) return p.out;
       if (!picks.some((x) => pickKey(x) === pickKey(p))) picks.push(p);
     }
-    if (picks.some((p) => p.kind === 'workflow') && picks.some((p) => p.kind !== 'workflow')) return fail('triangles cannot be picked together with other items', 'pick');
     ctx.commands.setPicks(picks);
     return done(true, picks.length === 0 ? 'picked nothing' : `picked ${plural(picks.length, 'item')}`, `pick ${picks.length}`);
   },

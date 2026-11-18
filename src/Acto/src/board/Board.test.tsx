@@ -113,6 +113,15 @@ describe('Board', () => {
       expect(chip).toHaveTextContent('◆ 0 keys');
       expect(chip.style.borderColor).not.toBe('');
     });
+    it('draws a ghost triangle with the ghost class on its stopped shape, so the ghost rule styles its body', async () => {
+      const row = { ...board().workflows.daily!, id: 'gone-wf', name: 'gone-workflow', at: { x: 5, y: 6 } };
+      show({ view: view({ ghosts: [{ key: 'workflow:gone-wf', kind: 'workflow' as const, row, assignments: [] }] }) });
+      const name = await screen.findByText('gone-workflow');
+      const tri = name.closest('.tri') as HTMLElement;
+      expect(tri).toHaveClass('ghost');
+      expect(tri).toHaveClass('stopped');
+      expect(tri.querySelector('.tri-body')).not.toBeNull();
+    });
     it('draws ghosts faded with their tag, and a ghost wire with the ghost class', async () => {
       const row = { ...board().steps.lonely!, id: 'gone', name: 'gone-step', at: { x: 5, y: 6 } };
       const ghosts = [
