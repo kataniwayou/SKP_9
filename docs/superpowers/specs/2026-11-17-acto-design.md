@@ -88,7 +88,7 @@ Anti-goals
   flow, ordered by creation time; written only when that workflow is saved [call].
 - **Loading**: `GET /workflows`, then each `GET /workflows/{id}/graph` (plus parked-step reads, as today) with a small
   concurrency cap; frames appear as graphs arrive. Fine at ~50 workflows [user].
-- **Zoomed far out** a frame shows only name, state and step count [call].
+- **At every zoom** a frame draws its steps, wires and handles; there is no zoomed-out summary form [user, 2026-11-17].
 - **Minimap**: frames outlined green (running) / red (stopped), selection in the accent colour, names shown; click to
   jump. **Fit** fits all frames.
 - **New workflow**: drag **Workflow** from the toolbox onto empty board (not inside another frame). It starts as
