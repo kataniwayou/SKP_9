@@ -187,13 +187,19 @@ describe('Board editing', () => {
     expect(seen.props!.onNodeDragStop).toBeUndefined();
     expect(seen.props!.nodesDraggable).toBe(false);
   });
-  it('shows the resizer only on the selected frame', async () => {
+  it('gives every frame its corner grip (shown on hover) and a picked frame its resize edges too', async () => {
     const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };
+    const kinds = () => [...document.querySelectorAll('.react-flow__resize-control')].map((c) => (c.classList.contains('handle') ? 'grip' : 'edge')).sort();
     const { rerender } = render(<Board workflows={[bw('w1', ['a'])]} picks={[]} onPick={() => {}} initialZoom={1} onEdit={onEdit} />);
     await screen.findByText('a-name');
-    expect(document.querySelector('.react-flow__resize-control')).toBeNull();
+    expect(kinds()).toEqual(['grip']);
     rerender(<Board workflows={[bw('w1', ['a'])]} picks={[{ kind: 'workflow', workflowId: 'w1' }]} onPick={() => {}} initialZoom={1} onEdit={onEdit} />);
-    expect(document.querySelector('.react-flow__resize-control')).not.toBeNull();
+    expect(kinds()).toEqual(['edge', 'edge', 'grip']);
+  });
+  it('gives a read-only board no resize controls', async () => {
+    render(<Board workflows={[bw('w1', ['a'])]} picks={[{ kind: 'workflow', workflowId: 'w1' }]} onPick={() => {}} initialZoom={1} />);
+    await screen.findByText('a-name');
+    expect(document.querySelector('.react-flow__resize-control')).toBeNull();
   });
   it('resizes only from the right edge, the bottom edge and their corner', async () => {
     const onEdit = { moveMany: vi.fn(), resizeFrame: vi.fn(), connect: vi.fn() };

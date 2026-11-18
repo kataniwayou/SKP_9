@@ -1,7 +1,7 @@
 /* Every surface, text, border, shadow and board colour of Acto, from the approved mock
    (.superpowers/sdd/2026-11-17-acto-ui-polish/mock.html). The page chrome follows the theme; the board keeps the
    reactflow.dev look in both themes (white frames and cards on the paper), so its tokens are the same in both blocks.
-   The entry-condition and run-state colours are constants in the components. Set on html[data-theme] by shell/theme.ts. */
+   The entry-condition colours are constants in the components. Set on html[data-theme] by shell/theme.ts. */
 :root, [data-theme="light"] {
   --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
   --sans: "Inter Tight", "Helvetica Neue", Arial, sans-serif;
@@ -15,6 +15,8 @@
   --sh-bar: 0 8px 22px -8px rgba(0, 0, 0, .45);
   --sh-multi: 0 10px 28px -10px rgba(255, 0, 114, .45);
   --go: #16A34A; --go-hover: #15803D; --stop: #DC2626; --stop-hover: #B91C1C;
+  /* the selection bar's Delete: plain ink on the light bar, the dark rule's red in the dark theme (the mock's .tb.multi) */
+  --multi-danger: #1A1D29;
   /* the board (reactflow.dev look, both themes) */
   --b-ink: #1A1D29; --b-muted: #6B7186; --b-faint: #8A90A3;
   --b-frame-line: #D9DCE5; --b-frame-bg: rgba(255, 255, 255, .55); --b-frame-head: rgba(255, 255, 255, .9); --b-head-line: #E6E8EE;
@@ -26,6 +28,8 @@
   --sh-ctl: 0 4px 12px -6px rgba(20, 24, 40, .2);
   --run-bg: rgba(22, 163, 74, .13); --run-ink: #15803D; --halt-bg: rgba(220, 38, 38, .11); --halt-ink: #B91C1C;
   --dirty-bg: rgba(217, 119, 6, .12); --dirty-ink: #B45309;
+  /* run state: a frame's top stripe (from its is-on / is-off / is-checking class) and its minimap outline */
+  --st-on: #16A34A; --st-off: #DC2626; --st-wait: #D97706;
   --mini-frame: #EEF0F4; --mini-ink: #5D6478; --mini-mask: rgba(26, 29, 41, .05); --mini-mask-line: rgba(26, 29, 41, .55);
   --cache-bg: #FBF4DC; --cache-line: #B8A36A; --cache-ink: #4A3D10; --cache-sel: #2563EB; --cache-halo: rgba(37, 99, 235, .3);
 }
@@ -41,6 +45,7 @@
   --sh-bar: 0 8px 22px -8px rgba(0, 0, 0, .45);
   --sh-multi: 0 10px 28px -10px rgba(255, 0, 114, .45);
   --go: #16A34A; --go-hover: #15803D; --stop: #DC2626; --stop-hover: #B91C1C;
+  --multi-danger: #C81E1E;
   --b-ink: #1A1D29; --b-muted: #6B7186; --b-faint: #8A90A3;
   --b-frame-line: #D9DCE5; --b-frame-bg: rgba(255, 255, 255, .55); --b-frame-head: rgba(255, 255, 255, .9); --b-head-line: #E6E8EE;
   --b-node: #FFFFFF; --b-node-line: #E3E5EC; --b-soft: #F4F5F8; --b-line-3: #C9CCD6; --b-handle: #9AA0B4; --b-ctl-line: #EEF0F4;
@@ -51,6 +56,7 @@
   --sh-ctl: 0 4px 12px -6px rgba(20, 24, 40, .2);
   --run-bg: rgba(22, 163, 74, .13); --run-ink: #15803D; --halt-bg: rgba(220, 38, 38, .11); --halt-ink: #B91C1C;
   --dirty-bg: rgba(217, 119, 6, .12); --dirty-ink: #B45309;
+  --st-on: #16A34A; --st-off: #DC2626; --st-wait: #D97706;
   --mini-frame: #EEF0F4; --mini-ink: #5D6478; --mini-mask: rgba(26, 29, 41, .05); --mini-mask-line: rgba(26, 29, 41, .55);
   --cache-bg: #FBF4DC; --cache-line: #B8A36A; --cache-ink: #4A3D10; --cache-sel: #2563EB; --cache-halo: rgba(37, 99, 235, .3);
 }

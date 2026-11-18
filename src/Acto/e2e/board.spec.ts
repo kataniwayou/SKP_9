@@ -140,9 +140,19 @@ test.describe('minimap', () => {
     }).toBeLessThanOrEqual(3);
     expect(Math.abs((await zoomOf(page)) - zoom)).toBeLessThan(0.001);
 
+    // the picked frame's outline is the theme's accent (the --accent token: #FF0072 in the light theme)
     const rect = mini.locator(`g[data-mini-frame="${far.id}"] rect`);
-    await expect(rect).not.toHaveAttribute('stroke', '#FF0072');
+    const accent = await page.evaluate(() => {
+      const probe = document.createElement('div');
+      probe.style.color = 'var(--accent)';
+      document.body.appendChild(probe);
+      const c = getComputedStyle(probe).color;
+      probe.remove();
+      return c;
+    });
+    expect(accent).toBe('rgb(255, 0, 114)');
+    await expect(rect).not.toHaveCSS('stroke', accent);
     await pickFrame(frameOf(page, far.id));
-    await expect(rect).toHaveAttribute('stroke', '#FF0072');
+    await expect(rect).toHaveCSS('stroke', accent);
   });
 });

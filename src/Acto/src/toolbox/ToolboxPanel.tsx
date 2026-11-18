@@ -3,6 +3,7 @@ import type { Cache, Processor } from '../model/graph';
 import type { DropItem } from '../board/dropTarget';
 import { HealthDot } from '../board/live/HealthDot';
 import { processorColour } from '../board/nodes/StepCard';
+import { CACHE_TONE } from '../board/nodes/CacheChip';
 import { useProcessorLive } from '../live/LiveContext';
 import { livenessText } from '../live/liveState';
 
@@ -11,8 +12,6 @@ const dragOf = (item: DropItem) => (e: DragEvent) => {
   e.dataTransfer.effectAllowed = 'copy';
 };
 
-/** The cache chip's colour, as the icon of a cache item. */
-const CACHE_TONE = '#B8A36A';
 const ACCENT = 'var(--accent)';
 
 function ProcessorItem({ processor }: { processor: Processor }) {

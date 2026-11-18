@@ -1,6 +1,7 @@
 import type { BoardWorkflow } from '../board/loadBoard';
 import { lastPick, pickKey, type Pick } from '../board/picks';
 import { processorColour } from '../board/nodes/StepCard';
+import { CACHE_TONE } from '../board/nodes/CacheChip';
 import { conditionStyle } from '../board/wires';
 import { useLive, useLiveStore, useProcessorLive, useWorkflowStatus } from '../live/LiveContext';
 import { livenessText, statusOf } from '../live/liveState';
@@ -13,8 +14,6 @@ import { newId } from '../design/ids';
 import { removeAssignment, setCacheField, setPayload, setStepField, setWorkflowField } from '../design/state';
 import { AreaField, LockNote, lockerName, Ro, Row, Sec, SelectField, TextField } from './fields';
 import { ProcessorSection } from './ProcessorSection';
-
-const CACHE_TONE = '#B8A36A';
 
 /** The mock's .ins-title: an icon, the bold name and a small line under it. */
 const Title = ({ tone, letter, name, sub }: { tone: string; letter: string; name: string; sub: string }) => (
@@ -160,7 +159,7 @@ function EditWorkflow({ w, store }: { w: BoardWorkflow; store: BoardStore }) {
       <TextField key={`${id}:version`} label="Version" value={workflow.version} onChange={(v) => set('version', v)} />
       <TextField key={`${id}:cron`} label="Cron" value={workflow.cronExpression} onChange={(v) => set('cronExpression', orNull(v))} />
       <p className="in-note">{parsed === null ? 'not scheduled' : 'text' in parsed ? parsed.text : workflow.cronExpression}</p>
-      <TextField key={`${id}:description`} label="Description" value={workflow.description} onChange={(v) => set('description', orNull(v))} />
+      <AreaField key={`${id}:description`} label="Description" value={workflow.description ?? ''} onChange={(v) => set('description', orNull(v))} />
       <OnTheBoard w={w} />
     </>
   );

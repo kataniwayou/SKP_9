@@ -43,15 +43,22 @@
 .fh .unsaved-tag { font: 500 11px var(--mono); color: var(--dirty-ink); background: var(--dirty-bg); padding: 3px 8px; border-radius: 999px; flex: none; }
 .fh .diff-tag { font: 500 11px var(--mono); color: var(--dirty-ink); border: 1px dashed var(--dirty-ink); padding: 2px 8px; border-radius: 999px; flex: none; }
 .fh .warn-mark { font: 600 11px var(--mono); color: var(--dirty-ink); flex: none; }
+/* the run-state stripe along the top of the header: one source, the frame's is-on / is-off / is-checking class */
+.frame.is-on .fh { box-shadow: inset 0 4px 0 var(--st-on); }
+.frame.is-off .fh { box-shadow: inset 0 4px 0 var(--st-off); }
+.frame.is-checking .fh { box-shadow: inset 0 4px 0 var(--st-wait); }
 .empty { position: absolute; left: 0; right: 0; top: 46px; bottom: 0; display: grid; place-items: center; color: var(--b-faint); font-size: 13px; text-align: center; padding: 10px; }
 .empty > span { display: inline; }
 
-/* resize: the right edge, the bottom edge and a corner grip (React Flow's controls, drawn as the mock's) */
+/* resize: the right edge, the bottom edge and a corner grip (React Flow's controls, drawn as the mock's). The edges come
+   with a pick; the grip is on every frame, shown on hover (grey) and when picked (accent), as the mock's .rz-c */
 .frame .react-flow__resize-control.line { border-color: var(--accent); border-style: dashed; border-width: 0; transform: none; }
 .frame .react-flow__resize-control.line.right { top: 46px; bottom: 14px; height: auto; left: auto; right: -1px; width: 6px; border-right-width: 2px; cursor: ew-resize; }
 .frame .react-flow__resize-control.line.bottom { left: 14px; right: 14px; width: auto; top: auto; bottom: -1px; height: 6px; border-bottom-width: 2px; cursor: ns-resize; }
 .frame .react-flow__resize-control.handle { left: auto; top: auto; right: -6px; bottom: -6px; width: 16px; height: 16px; transform: none; border-radius: 4px;
-  background: var(--b-node); border: 2px solid var(--accent); cursor: nwse-resize; }
+  background: var(--b-node); border: 2px solid var(--b-line-3); cursor: nwse-resize; opacity: 0; transition: opacity .15s; }
+.react-flow__node-workflow:hover .frame .react-flow__resize-control.handle, .frame.sel .react-flow__resize-control.handle { opacity: 1; }
+.frame.sel .react-flow__resize-control.handle { border-color: var(--accent); }
 
 /* step */
 .node { position: relative; width: 100%; height: 100%; background: var(--b-node); border: 1px solid var(--b-node-line); border-radius: 12px; padding: 11px 13px; cursor: grab;
@@ -95,6 +102,7 @@
   .state.on::before { animation: none; }
   .link-wire .wire.running { animation: none; }
   .node { transition: none; }
+  .frame .react-flow__resize-control.handle { transition: none; }
 }
 
 /* toolbars: one dark bar above the selected thing, with its little arrow */
@@ -122,6 +130,7 @@
 .selbar button { font: 500 12.5px var(--sans); color: var(--ink); background: none; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
 .selbar button:hover { background: var(--accent-soft); }
 .selbar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.selbar button.danger { color: var(--multi-danger); }
 .selbar button.primary { background: var(--accent); color: var(--on-colour); }
 .selbar button.go { background: var(--go); color: var(--on-colour); } .selbar button.go:hover { background: var(--go-hover); }
 .selbar button.stop { background: var(--stop); color: var(--on-colour); } .selbar button.stop:hover { background: var(--stop-hover); }

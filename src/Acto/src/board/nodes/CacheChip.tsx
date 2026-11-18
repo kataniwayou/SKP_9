@@ -3,6 +3,9 @@ import { useBoardWorkflow, useToolbarActions } from './boardContext';
 import { Toolbar } from '../Toolbar';
 import { PickBadge, type PickInfo } from './PickBadge';
 
+/** A cache's colour: the chip's line, and the icon of a cache in the toolbox and the Inspector. */
+export const CACHE_TONE = 'var(--cache-line)';
+
 export function CacheChip({ data, selected }: NodeProps) {
   const { workflowId, cacheId, pick } = data as { workflowId: string; cacheId: string; pick?: PickInfo };
   const info = useBoardWorkflow(workflowId);

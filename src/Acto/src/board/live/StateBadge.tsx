@@ -1,7 +1,8 @@
 import type { LiveStatus } from '../../api/liveStatus';
 
+/** A run state's colour (tokens.css --st-*): the minimap's frame outline; a frame's stripe takes the same from its class. */
 export const STATE_COLOUR: Record<LiveStatus, string> = {
-  running: '#16A34A', stopped: '#DC2626', checking: '#D97706', unknown: '#D97706',
+  running: 'var(--st-on)', stopped: 'var(--st-off)', checking: 'var(--st-wait)', unknown: 'var(--st-wait)',
 };
 
 /** The mock's .state pill: Running (green, pulsing dot), Stopped (red), Checking… (amber) while not known. */

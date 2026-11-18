@@ -3,13 +3,14 @@ import { minFrameSize } from '../placement';
 import { useBoardEdit } from './boardContext';
 import { cronText } from '../../model/cronText';
 import { useWorkflowStatus } from '../../live/LiveContext';
-import { STATE_COLOUR, StateBadge } from '../live/StateBadge';
+import { StateBadge } from '../live/StateBadge';
 import { useBoardWorkflow, useToolbarActions } from './boardContext';
 import { confirmText } from '../../operate/deleteWorkflow';
 import { Toolbar } from '../Toolbar';
 import { PickBadge, type PickInfo } from './PickBadge';
 
-/** Spec §5: the right edge, the bottom edge and their corner resize a frame; its top-left never moves. */
+/** Spec §5: the right edge, the bottom edge and their corner resize a frame; its top-left never moves. The edges show
+ *  with a pick; the corner grip is on every frame (shown on hover, as the mock's). */
 const RESIZE: { position: ControlPosition; variant: ResizeControlVariant }[] = [
   { position: 'right', variant: ResizeControlVariant.Line },
   { position: 'bottom', variant: ResizeControlVariant.Line },
@@ -34,7 +35,7 @@ export function WorkflowFrame({ data, selected }: NodeProps) {
   const min = minFrameSize(info.stepAt, info.graph.caches.size);
   return (
     <div className={`frame${selected ? ' sel' : ''} ${status === 'running' ? 'is-on' : status === 'stopped' ? 'is-off' : 'is-checking'}`}>
-      {selected && edit && RESIZE.map(({ position, variant }) => (
+      {edit && RESIZE.filter((r) => selected || r.variant === ResizeControlVariant.Handle).map(({ position, variant }) => (
         <NodeResizeControl key={position} position={position} variant={variant} minWidth={min.w} minHeight={min.h}
           onResizeEnd={(_, p) => edit.resizeFrame(workflowId, { w: p.width, h: p.height })} />
       ))}
@@ -46,7 +47,7 @@ export function WorkflowFrame({ data, selected }: NodeProps) {
             run={status === 'running' ? { op: 'stop', enabled: true, onRun: () => tb.stop(workflowId) } : { op: 'start', enabled: status === 'stopped', onRun: () => tb.start(workflowId) }} />
         </NodeToolbar>
       )}
-      <div className="fh" style={{ boxShadow: `inset 0 4px 0 ${STATE_COLOUR[status]}` }}>
+      <div className="fh">
         <span className="nm">{workflow.name}</span>
         <span className="meta">{workflow.version} · {schedule}</span>
         {info.entryDiff.stops.length + info.entryDiff.starts.length > 0 && <span className="diff-tag">first steps differ</span>}

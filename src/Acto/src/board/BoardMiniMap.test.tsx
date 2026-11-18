@@ -24,9 +24,20 @@ describe('Board minimap', () => {
     render(<Board workflows={[bw('w1', ['a']), bw('w2', [], [], { x: 700, y: 0 })]}
       picks={[{ kind: 'workflow', workflowId: 'w1' }]} onPick={() => {}} />);
     await vi.waitFor(() => expect(frames()).toHaveLength(2));
-    const stroke = (i: number) => frames()[i]!.querySelector('rect')!.getAttribute('stroke');
-    expect(stroke(0)).toBe('#FF0072');
-    expect(stroke(1)).not.toBe('#FF0072');
+    // the theme's accent token, not a fixed pink; the others by their run state's token
+    const stroke = (i: number) => (frames()[i]!.querySelector('rect') as SVGRectElement).style.stroke;
+    expect(stroke(0)).toBe('var(--accent)');
+    expect(stroke(1)).toMatch(/^var\(--st-/);
+  });
+
+  it('writes a frame name in the band above its steps, never over the step blocks', async () => {
+    render(<Board workflows={[bw('w1', ['a', 'b']), bw('w2', [], [], { x: 700, y: 0 })]} picks={[]} onPick={() => {}} />);
+    await vi.waitFor(() => expect(document.querySelectorAll('.react-flow__minimap [data-mini-step]').length).toBe(2));
+    const text = frames()[0]!.querySelector('text')!;
+    expect(text.textContent).toBe('w1-name');
+    const bottom = Number(text.getAttribute('y')) + 0.22 * Number(text.getAttribute('font-size'));
+    const tops = [...document.querySelectorAll('.react-flow__minimap [data-mini-step]')].map((r) => Number(r.getAttribute('y')));
+    expect(bottom).toBeLessThanOrEqual(Math.min(...tops));
   });
 
   it('centres the board on a clicked frame at the current zoom', async () => {
