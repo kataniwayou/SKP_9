@@ -4,6 +4,7 @@ import { TRI_SHAPE_H, TRI_SHAPE_W } from '../geometry';
 import { ItemToolbar, useHasToolbar } from '../ItemToolbar';
 import type { PickInfo } from '../toFlow';
 import { PickBadge } from './PickBadge';
+import { UnsavedMark } from './UnsavedMark';
 
 const HANDLE = 10;
 const TONE: Record<LiveStatus, 'on' | 'off' | 'wait'> = { running: 'on', stopped: 'off', checking: 'wait', unknown: 'wait' };
@@ -15,8 +16,8 @@ const LABEL: Record<LiveStatus, string> = { running: 'Running', stopped: 'Stoppe
  * the last dry run's problems; a failure outline marks a Save BaseAPI refused on it.
  */
 export function TriangleNode({ data, selected }: NodeProps) {
-  const { workflowId, name, status, lit, problems = 0, failed = false, pick } = data as {
-    workflowId: string; name: string; status: LiveStatus; lit: boolean; problems?: number; failed?: boolean; pick?: PickInfo;
+  const { workflowId, name, status, lit, problems = 0, failed = false, unsaved, pick } = data as {
+    workflowId: string; name: string; status: LiveStatus; lit: boolean; problems?: number; failed?: boolean; unsaved?: boolean; pick?: PickInfo;
   };
   const tone = TONE[status];
   const on = selected || lit;
@@ -26,6 +27,7 @@ export function TriangleNode({ data, selected }: NodeProps) {
   return (
     <div className={`tri${on ? ' sel' : ''}${failed ? ' failed' : ''}`} data-workflow={workflowId}>
       <PickBadge pick={pick} />
+      <UnsavedMark on={unsaved} />
       {problems > 0 && <span className="tri-problems" title={`${problems} problem${problems === 1 ? '' : 's'} in the last dry run`}>{problems}</span>}
       {selected && pick?.solo && toolbar && (
         <NodeToolbar isVisible position={Position.Top} offset={10}><ItemToolbar pick={self} /></NodeToolbar>

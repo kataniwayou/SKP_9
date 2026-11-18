@@ -10,8 +10,12 @@ const KEY = 'acto.board';
 export const SAVING_REFUSAL = 'Saving — wait for it to finish';
 
 export interface BoardStore {
-  /** base = b; restores the session draft (key `acto.board`) over it when present. */
-  load(b: BoardState): void;
+  /**
+   * base = b (BaseAPI's rows as read); the present starts as `present` (default b) with an empty history, so what differs
+   * (placement's locations, say) is unsaved and goes out with the next Save, and no undo returns it. A session draft (key
+   * `acto.board`) wins over both.
+   */
+  load(b: BoardState, present?: BoardState): void;
   state(): BoardState;
   base(): BoardState;
   /** Refused while saving. */
@@ -100,10 +104,10 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
   };
 
   const store: BoardStore = {
-    load(b) {
+    load(b, present = b) {
       base = b;
       const draft = readDraft(session);
-      history = draft ?? historyOf(b);
+      history = draft ?? historyOf(present);
       unsavedFor = null;
       if (!draft) writeDraft();
       notify();

@@ -20,6 +20,7 @@ import { createBoardStore, useBoardState, type BoardStore } from './design/board
 import { addEntry, addWire, linkCache, moveItems } from './design/edits';
 import { newId } from './design/ids';
 import { nudgeKey, pasteKey, undoRedoKey } from './design/keys';
+import { unsavedMarks } from './design/changes';
 import { saveBoard } from './design/saveBoard';
 import { InspectorPanel } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
@@ -118,7 +119,8 @@ export function App(props: AppProps) {
     void loadBoard(api).then((r) => {
       if (cancelled) return;
       if (r.ok) {
-        store.load(placeMissing(r.value));
+        // base stays BaseAPI's rows (nulls kept): the placed locations are unsaved, go out with the next Save, and are no undo step
+        store.load(r.value, placeMissing(r.value));
         output.log(`Board loaded: ${plural(Object.keys(r.value.workflows).length, 'workflow')}`, 'ok');
       } else output.log(`Could not load the board: ${describeError(r.error)}`, 'error');
       setLoaded(true);
@@ -274,13 +276,16 @@ export function App(props: AppProps) {
     setSelection(selectPick(selRef.current, r.pick, false));
   }, [store, output, setSelection]);
 
+  const unsavedKeys = store.unsaved();
+  const marks = useMemo(() => unsavedMarks(store.base(), state, unsavedKeys), [store, state, unsavedKeys]);
   const view = useMemo<BoardView>(() => ({
     workflow: sel.workflow, picks: sel.picks,
     live: (wf) => statusOf(liveState, wf),
     problems: (wf) => store.problems(wf),
     failed: (key) => store.failures().has(key),
+    unsaved: (key) => marks.has(key),
   // tick: the problems and failures are read through the store, so a change of theirs is a new view
-  }), [sel, liveState, store, tick]);
+  }), [sel, liveState, store, tick, marks]);
 
   const processors = useMemo(() => Object.values(state.processors).sort((a, b) => a.name.localeCompare(b.name)), [state.processors]);
   const stateNow = useCallback(() => store.state(), [store]);

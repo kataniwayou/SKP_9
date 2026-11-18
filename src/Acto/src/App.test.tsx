@@ -49,6 +49,33 @@ describe('App', () => {
     await loaded();
     const el = (await screen.findByTestId('rf__node-st:nowhere')) as HTMLElement;
     expect(el.style.transform).not.toMatch(/translate\(0px,\s*0px\)/);
+    // the placed location is unsaved: the next Save writes it; it is no undo step
+    expect(saveButton()).toHaveTextContent('Save · 1');
+    expect(within(el).getByLabelText('unsaved')).toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+    expect(saveButton()).toHaveTextContent('Save · 1');
+  });
+
+  describe('unsaved marks', () => {
+    const marked = () => [...document.querySelectorAll('.react-flow__node')].filter((n) => n.querySelector('[aria-label="unsaved"]')).map((n) => n.getAttribute('data-id'));
+    it('a clean board shows none; an edited step shows its mark', async () => {
+      renderApp();
+      await loaded();
+      expect(marked()).toEqual([]);
+      fireEvent.click(card('expand'));
+      fireEvent.change(await inspector().findByDisplayValue('expand'), { target: { value: 'expand-2' } });
+      await waitFor(() => expect(marked()).toEqual(['st:expand']));
+      expect(screen.getByTitle('unsaved')).toBeInTheDocument();
+    });
+    it('a payload edit marks the workflow it belongs to', async () => {
+      renderApp();
+      await loaded();
+      fireEvent.click(triangle('daily'));
+      fireEvent.click(card('fetch-orders'));
+      const area = (await inspector().findAllByRole('textbox')).filter((t) => t.tagName === 'TEXTAREA').at(-1)!;
+      fireEvent.change(area, { target: { value: '{"k":1}' } });
+      await waitFor(() => expect(marked()).toEqual(['wf:daily']));
+    });
   });
 
   describe('Save button', () => {

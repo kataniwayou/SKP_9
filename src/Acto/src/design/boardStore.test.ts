@@ -4,6 +4,7 @@ import { memoryStorage } from '../test/memoryStorage';
 import { board } from './boardFixtures';
 import { addEntry, deleteSteps, setStepField, setWorkflowField } from './edits';
 import { createBoardStore } from './boardStore';
+import { boardChanges } from './changes';
 
 const blocked = (): Storage => ({
   get length() { return 0; }, clear() { throw new Error('blocked'); }, key() { throw new Error('blocked'); },
@@ -135,5 +136,38 @@ describe('board store', () => {
     store.edit(nameA('A'));
     expect(n).toBeGreaterThan(1);
     off();
+  });
+});
+
+describe('load with a placed present', () => {
+  const raw = () => {
+    const b = board();
+    return { ...b, steps: { ...b.steps, lonely: { ...b.steps.lonely!, at: null } }, caches: { c1: { ...b.caches.c1!, at: null } } };
+  };
+  const placed = (r: ReturnType<typeof raw>) => ({
+    ...r, steps: { ...r.steps, lonely: { ...r.steps.lonely!, at: { x: 900, y: 40 } } }, caches: { c1: { ...r.caches.c1!, at: { x: 10, y: 300 } } },
+  });
+  it('base stays as read; the placed rows are unsaved, no undo step, and Save sends their locations', () => {
+    const store = createBoardStore(createOutputStore(null), memoryStorage());
+    const r = raw();
+    store.load(r, placed(r));
+    expect(store.base()).toBe(r);
+    expect([...store.unsaved()].sort()).toEqual(['cache:c1', 'step:lonely']);
+    expect(store.canUndo()).toBe(false);
+    store.undo();
+    expect(store.state().steps.lonely!.at).toEqual({ x: 900, y: 40 });
+    const changes = boardChanges(store.base(), store.state());
+    expect(changes.find((c) => c.id === 'lonely')!.row).toMatchObject({ boardX: 900, boardY: 40 });
+    expect(changes.find((c) => c.id === 'c1')!.row).toMatchObject({ boardX: 10, boardY: 300 });
+  });
+  it('a restored draft still wins over the placed present', () => {
+    const session = memoryStorage();
+    const first = createBoardStore(createOutputStore(null), session);
+    first.load(board());
+    first.edit(nameA('kept'));
+    const again = createBoardStore(createOutputStore(null), session);
+    const r = raw();
+    again.load(r, placed(r));
+    expect(again.state().workflows.daily!.name).toBe('kept');
   });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BoardState } from './board';
 import { board } from './boardFixtures';
-import { affectedWorkflows, boardChanges, changedKeys } from './changes';
+import { affectedWorkflows, boardChanges, changedKeys, unsavedMarks } from './changes';
 import { addCache, addStep, addWire, deleteCaches, deleteSteps, moveItems } from './edits';
 
 const b = board();
@@ -184,5 +184,15 @@ describe('affectedWorkflows and changedKeys', () => {
     expect([...changedKeys(b, deleteSteps(b, ['fetch']))].sort()).toEqual([
       'assignment:a-daily-fetch', 'assignment:a-hourly-fetch', 'step:fetch', 'workflow:daily', 'workflow:hourly']);
     expect(changedKeys(b, b).size).toBe(0);
+  });
+});
+
+describe('unsavedMarks', () => {
+  it('marks changed workflows, steps and caches, and the workflows linking a changed payload', () => {
+    const b = board();
+    expect([...unsavedMarks(b, b)]).toEqual([]);
+    const cur = moveItems({ ...b, assignments: { ...b.assignments, 'a-hourly-fetch': { ...b.assignments['a-hourly-fetch']!, payload: '{"x":1}' } } },
+      [{ ref: { kind: 'step', id: 'expand' }, at: { x: 1, y: 1 } }, { ref: { kind: 'cache', id: 'c1' }, at: { x: 1, y: 1 } }]);
+    expect([...unsavedMarks(b, cur)].sort()).toEqual(['cache:c1', 'step:expand', 'workflow:hourly']);
   });
 });

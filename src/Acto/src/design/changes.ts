@@ -122,6 +122,23 @@ export function changedKeys(base: BoardState, cur: BoardState): Set<string> {
   return keys;
 }
 
+/**
+ * The items the board marks unsaved (spec §7): each changed workflow, step and cache key, and for a changed assignment the
+ * workflows that link it (on the board or in base).
+ */
+export function unsavedMarks(base: BoardState, cur: BoardState, keys: ReadonlySet<string> = changedKeys(base, cur)): Set<string> {
+  const marks = new Set<string>();
+  for (const k of keys) {
+    const i = k.indexOf(':');
+    const kind = k.slice(0, i), id = k.slice(i + 1);
+    if (kind === 'workflow' || kind === 'step' || kind === 'cache') marks.add(k);
+    else if (kind === 'assignment') {
+      for (const w of [...Object.values(cur.workflows), ...Object.values(base.workflows)]) if (w.assignmentIds.includes(id)) marks.add(`workflow:${w.id}`);
+    }
+  }
+  return marks;
+}
+
 /** Workflows (still on the board) whose row changed, whose linked payload rows changed, or that reach a changed step before or after. */
 export function affectedWorkflows(base: BoardState, cur: BoardState): Id[] {
   const dw = diffTable('workflows', base, cur);
