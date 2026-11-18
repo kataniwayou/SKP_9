@@ -8,6 +8,7 @@ import type { BoardState } from './board';
 import { SAVING_REFUSAL, type BoardStore } from './boardStore';
 import { affectedWorkflows, boardChanges, type Table } from './changes';
 import { diagramSvg } from './diagramSvg';
+import type { GhostStore } from './ghosts';
 
 type Result = NonNullable<ModelApplyResultDto['results']>[number];
 
@@ -79,8 +80,11 @@ export const OUTCOME_UNKNOWN = 'Save outcome unknown — reload before saving ag
 /** No answer we can read (network, unreadable body, a gateway's 5xx): BaseAPI may have committed. A 4xx is a refusal. */
 const outcomeUnknown = (e: ApiError) => e.kind === 'network' || e.status === 0 || e.status >= 500;
 
-/** Board-wide Save through /model/apply: all or nothing; the dry run and Kibana follow per affected workflow. */
-export async function saveBoard(api: StudioApi, store: BoardStore, output: OutputStore): Promise<'nothing' | 'refused' | 'saved'> {
+/**
+ * Board-wide Save through /model/apply: all or nothing; the dry run and Kibana follow per affected workflow. `ghosts`
+ * learns the created rows' BaseAPI ids before the board adopts the re-read, so a saved create does not become a ghost.
+ */
+export async function saveBoard(api: StudioApi, store: BoardStore, output: OutputStore, ghosts?: GhostStore): Promise<'nothing' | 'refused' | 'saved'> {
   if (store.saving()) { output.log(SAVING_REFUSAL, 'warn'); return 'refused'; }
   if (store.saveBlocked()) { output.log(OUTCOME_UNKNOWN, 'error'); return 'refused'; }
   const base = store.base();
@@ -119,6 +123,7 @@ export async function saveBoard(api: StudioApi, store: BoardStore, output: Outpu
       after = remapIds(present, made);
       output.log(`Saved, but the board could not be read back (${transport(fresh.error)}). Reload before editing further`, 'warn');
     }
+    ghosts?.remap(made);
     store.saved(after);
 
     for (const id of affected) {

@@ -4,6 +4,8 @@ import { createOutputStore } from '../output/outputStore';
 import { board, shared } from './boardFixtures';
 import { createBoardStore } from './boardStore';
 import { saveBoard, takeStored } from './saveBoard';
+import { createGhostStore } from './ghosts';
+import { addStep } from './edits';
 import { memoryStorage } from '../test/memoryStorage';
 
 vi.mock('../board/loadBoard', () => ({ loadBoard: vi.fn() }));
@@ -29,6 +31,20 @@ const rename = (s: ReturnType<typeof setup>['store'], wf: string, name: string) 
 beforeEach(() => vi.mocked(loadBoard).mockReset());
 
 describe('saveBoard', () => {
+  it('gives the ghost store the made ids before the board adopts the re-read', async () => {
+    const t = setup();
+    const ghosts = createGhostStore(t.store);
+    let seen: string[] = [];
+    ghosts.subscribe(() => { seen = ghosts.ghosts().map((g) => g.key); });
+    t.store.edit((b) => addStep(b, b.processors.p1!, { x: 1, y: 1 }, 'tmp1'));
+    t.api.applyModel.mockResolvedValue({ ok: true, value: { ok: true, applied: true, results: [], made: { tmp1: 'real1' } } } as never);
+    const b = board();
+    vi.mocked(loadBoard).mockResolvedValue({ ok: true, value: { ...b, steps: { ...b.steps, real1: { ...t.store.state().steps.tmp1!, id: 'real1', updatedAt: T2 } } } });
+    expect(await saveBoard(t.studio, t.store, t.output, ghosts)).toBe('saved');
+    expect(ghosts.ghosts()).toEqual([]);
+    expect(seen).toEqual([]);
+  });
+
   it('says nothing when nothing changed', async () => {
     const t = setup();
     expect(await saveBoard(t.studio, t.store, t.output)).toBe('nothing');
