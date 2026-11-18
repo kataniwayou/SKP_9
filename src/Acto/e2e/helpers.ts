@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './fixtures';
 import { regionCorner, type Pt } from './seed';
+import { API, getJson, type Row } from './stack';
 
 export const PROC_A = 'archive-expander';
 export const PROC_B = 'sk-normalizer';
@@ -276,3 +277,168 @@ export async function addItem(page: Page, n: number, key: string, value: string)
   await itemValue(page, n).fill(value);
   await itemValue(page, n).press('Enter');
 }
+
+// ---- Regression suite (e2e/regression): build through the UI, read BaseAPI back ------------------------------------
+
+/** The processors the regression builds with, chosen so their schemas chain (envelope -> document -> envelope -> locator -> envelope). */
+export const EXPANDER = 'archive-expander'; // in file-envelope, out archive-document; config { maxDepth?: integer >= 1 }
+export const NORMALIZER = 'sk-normalizer'; // in archive-document, out archive-document; config { handler: Acme|AlphaBeta|Sample }
+export const COLLAPSER = 'archive-collapser'; // in archive-document, out file-envelope; config {}
+export const PERSISTER = 'file-persister'; // in file-envelope, out locator; config { folderPath }
+export const FETCHER = 'file-fetcher'; // in locator, out file-envelope; config { minimumSizeBytes, maximumSizeBytes }
+/** A payload each of those processors' config schema accepts. */
+export const VALID_PAYLOAD: Record<string, string> = {
+  [EXPANDER]: '{"maxDepth": 2}',
+  [NORMALIZER]: '{"handler": "Acme"}',
+  [COLLAPSER]: '{}',
+  [PERSISTER]: '{"folderPath": "/tmp/e2e-regression"}',
+  [FETCHER]: '{"minimumSizeBytes": 0, "maximumSizeBytes": 1024}',
+};
+/** The five entry conditions: picker option name, stored value, pill letter. */
+export const CONDITION = {
+  Completed: { value: 1, letter: 'C' }, Failed: { value: 2, letter: 'F' }, Cancelled: { value: 3, letter: 'X' },
+  Always: { value: 4, letter: 'A' }, Never: { value: 5, letter: 'N' },
+} as const;
+export type ConditionName = keyof typeof CONDITION;
+
+/** The Save button's count (0 when it says just Save). */
+export async function unsavedCount(page: Page): Promise<number> {
+  const t = await saveButton(page).innerText();
+  return t === 'Save' ? 0 : Number(/·\s*(\d+)/.exec(t)?.[1] ?? NaN);
+}
+
+/** Drops a triangle from the toolbox at the region point and renames it in the Inspector; answers its (client) id. */
+export async function newWorkflow(page: Page, at: Pt, name: string): Promise<string> {
+  // nothing picked first: a dropped triangle is added to the picks as a click would add it, so a picked step would stay beside it
+  await clickEmptyBoard(page);
+  const id = await dropTool(page, workflowTool(page), 'workflow', await regionPoint(page, at));
+  await expect(tabLabels(page)).toHaveText(['Workflow']);
+  await renameTo(page, name);
+  await expect(wfNode(page, id).locator('.tri-nm')).toHaveText(name);
+  return id;
+}
+/** Drops a step of `processor` at the region point and renames it; answers its (client) id. */
+export async function newStep(page: Page, processor: string, at: Pt, name: string): Promise<string> {
+  await clickEmptyBoard(page);
+  const id = await dropTool(page, toolboxStep(page, processor), 'step', await regionPoint(page, at));
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
+  await expect(field(page, 'Name')).toHaveValue(processor);
+  await renameTo(page, name);
+  await expect(stNode(page, id).locator('.sn')).toHaveText(name);
+  return id;
+}
+/** Drops a cache at the region point, renames it and gives it a Root (BaseAPI refuses a cache without one); answers its (client) id. */
+export async function newCache(page: Page, at: Pt, name: string, root = name): Promise<string> {
+  await clickEmptyBoard(page);
+  const id = await dropTool(page, cacheTool(page), 'cache', await regionPoint(page, at));
+  await expect(tabLabels(page)).toHaveText(['Cache']);
+  await renameTo(page, name);
+  await field(page, 'Root').fill(root);
+  await expect(caNode(page, id).locator('.cache-nm')).toHaveText(name);
+  return id;
+}
+
+/** A wire from step `from` to step `to`, checked on the board. */
+export async function wire(page: Page, from: string, to: string) {
+  await drawWire(page, stNode(page, from), stNode(page, to));
+  await expect(wireEdge(page, from, to)).toHaveCount(1);
+}
+/** An entry arrow from the triangle to the step, checked on the board. */
+export async function entry(page: Page, wf: string, step: string) {
+  await drawEntry(page, wfNode(page, wf), stNode(page, step));
+  await expect(entryEdge(page, wf, step)).toHaveCount(1);
+}
+/** A cache line from the triangle to the cache, checked on the board. */
+export async function link(page: Page, wf: string, cache: string) {
+  await drawCacheLink(page, wfNode(page, wf), caNode(page, cache));
+  await expect(cacheEdge(page, wf, cache)).toHaveCount(1);
+}
+
+/** Picks the step alone and chooses its entry condition in Studio's picker, by mouse; the card's pill follows. */
+export async function setCondition(page: Page, step: string, name: ConditionName) {
+  await clickEmptyBoard(page);
+  await pickStep(page, step);
+  await field(page, /^Entry condition/).click();
+  await inspector(page).getByRole('listbox', { name: 'Entry conditions' }).getByRole('option', { name: new RegExp(name) }).click();
+  await expect(field(page, /^Entry condition/)).toHaveAttribute('data-value', String(CONDITION[name].value));
+  await expect(stNode(page, step).locator('.cond-pill')).toHaveText(CONDITION[name].letter);
+}
+
+/** The triangle alone, then the step beside it: types the payload into that workflow's assignment tab under Step. */
+export async function typePayload(page: Page, wf: string, wfName: string, step: string, json: string) {
+  await selectWorkflowAlone(page, wf);
+  await pickStep(page, step);
+  await expect(stNode(page, step).locator('.node.sel')).toHaveCount(1);
+  await (await payloadOf(page, wfName)).fill(json);
+}
+
+/** Every row of a table whose name starts with `prefix`, as BaseAPI has it now. */
+export async function rowsNamed(table: 'workflows' | 'steps' | 'caches' | 'assignments', prefix: string): Promise<Row[]> {
+  return (await getJson<Row[]>(`/${table}`)).filter((r) => r.name.startsWith(prefix));
+}
+/** One row by its exact name (fails when there is not exactly one). */
+export async function rowNamed(table: 'workflows' | 'steps' | 'caches' | 'assignments', name: string): Promise<Row> {
+  const rows = (await getJson<Row[]>(`/${table}`)).filter((r) => r.name === name);
+  expect(rows, `exactly one ${table} row named ${name}`).toHaveLength(1);
+  return rows[0]!;
+}
+
+export interface Problem { gate: string; title: string; detail: string }
+/** BaseAPI's own dry run of the stored workflow (POST /workflows/{id}/validate: it always rolls back). */
+export async function validateStored(id: string): Promise<{ valid: boolean; problems: Problem[] }> {
+  const r = await fetch(`${API}/workflows/${id}/validate`, { method: 'POST' });
+  if (!r.ok) throw new Error(`validate ${id} answered ${r.status}`);
+  return (await r.json()) as { valid: boolean; problems: Problem[] };
+}
+/** The dry-run lines Output shows for the workflow after a Save (its Kibana line and a failed-validate line aside). */
+export async function dryRunLines(page: Page, wfName: string): Promise<string[]> {
+  const all = await out(page).locator('[role="listitem"] span').allInnerTexts();
+  return all.filter((t) => t.startsWith(`${wfName}: `) && !/: Kibana diagram (published|not published)/.test(t) && !t.startsWith(`${wfName}: could not validate`));
+}
+/**
+ * Acto's dry run of a workflow equals BaseAPI's: the Output lines for it are BaseAPI's problems (same count, same titles and details),
+ * and the triangle's badge shows their count (no badge when there are none). Answers BaseAPI's problems.
+ */
+export async function expectDryRunMatches(page: Page, wf: string, wfName: string): Promise<Problem[]> {
+  const truth = await validateStored(wf);
+  const want = truth.problems.map((p) => `${wfName}: ${p.title ?? p.gate} — ${p.detail ?? ''}`).sort();
+  test.info().annotations.push({ type: 'dry run', description: `${wfName}: ${want.length} problem(s)${want.length ? ` — ${truth.problems.map((p) => p.gate).join(', ')}` : ''}` });
+  expect((await dryRunLines(page, wfName)).sort(), `${wfName}: Output's dry-run lines are BaseAPI's problems`).toEqual(want);
+  const badge = wfNode(page, wf).locator('.tri-problems');
+  if (want.length === 0) await expect(badge, `${wfName}: no problem badge`).toHaveCount(0);
+  else await expect(badge, `${wfName}: the badge counts BaseAPI's problems`).toHaveText(String(want.length));
+  return truth.problems;
+}
+/** Output says the workflow's Kibana diagram was published, once. */
+export const expectPublished = (page: Page, wfName: string) => expect(outLine(page, `${wfName}: Kibana diagram published`)).toHaveCount(1);
+
+/**
+ * What the board shows, ghosts aside: each node (id, its name line, its place, unsaved mark, condition pill, key chips), each edge id
+ * with its pill letter, and the Save label. Two equal snapshots are the same board.
+ */
+export async function boardSnapshot(page: Page) {
+  const nodes = await page.locator('.react-flow__node:not(.ghost)').evaluateAll((ns) => ns.map((n) => {
+    const e = n as HTMLElement;
+    const name = e.querySelector('.sn, .cache-nm, .tri-nm')?.textContent ?? '';
+    const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(e.style.transform);
+    return [e.dataset.id, name, m ? `${Math.round(Number(m[1]))},${Math.round(Number(m[2]))}` : '', !!e.querySelector('.unsaved-mark'),
+      e.querySelector('.cond-pill')?.textContent ?? '', [...e.querySelectorAll('.key-chip')].map((c) => c.textContent).join('|')].join(' ');
+  }).sort());
+  const edges = await page.locator('.react-flow__edge:not(.ghost)').evaluateAll((es) => es
+    .filter((e) => !e.querySelector('.ghost'))
+    .map((e) => `${(e as HTMLElement).dataset.id} ${e.querySelector('.pilltx')?.textContent ?? ''}`).sort());
+  return { nodes, edges, save: await saveButton(page).innerText() };
+}
+
+/** The node's place on the board in flow units, rounded. */
+export async function placeOf(l: Locator): Promise<Pt> {
+  const p = await flowPos(l);
+  return { x: Math.round(p.x), y: Math.round(p.y) };
+}
+/** A stored row's location equals the board's (to a unit). */
+export function expectAt(row: Row, at: Pt, what = row.name) {
+  expect(Math.abs((row.boardX as number) - at.x), `${what} boardX`).toBeLessThanOrEqual(1);
+  expect(Math.abs((row.boardY as number) - at.y), `${what} boardY`).toBeLessThanOrEqual(1);
+}
+/** JSON text compared as data (BaseAPI and the editor may lay it out differently). */
+export const sameJson = (a: unknown, b: string) => expect(JSON.parse(String(a))).toEqual(JSON.parse(b));
