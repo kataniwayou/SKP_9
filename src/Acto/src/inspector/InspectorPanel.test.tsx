@@ -125,6 +125,24 @@ describe('InspectorPanel', () => {
       expect(store.state().workflows.daily!.assignmentIds).toEqual(['a-daily-fetch']);
       expect(store.state().assignments['new-a']).toBeUndefined();
     });
+    it('two assignments of one workflow on the same step are each editable by their own id', () => {
+      const b0 = board();
+      const b: BoardState = { ...b0,
+        assignments: { ...b0.assignments, a2: { ...b0.assignments['a-daily-fetch']!, id: 'a2', payload: '{"second":1}' } },
+        workflows: { ...b0.workflows, daily: { ...b0.workflows.daily!, assignmentIds: ['a-daily-fetch', 'a2'] } } };
+      const { store } = setup(sel, b);
+      fireEvent.change(within(screen.getByTestId('assignments')).getByDisplayValue('{"second":1}'), { target: { value: '{"second":2}' } });
+      expect(store.state().assignments.a2!.payload).toBe('{"second":2}');
+      expect(store.state().assignments['a-daily-fetch']!.payload).toBe('{}');
+    });
+    it('a list edit of a row another workflow links copies it for this one', () => {
+      const { store } = setup(sel, shared());
+      fireEvent.change(within(screen.getByTestId('assignments')).getByDisplayValue('{"shared":true}'), { target: { value: '{"d":1}' } });
+      const s = store.state();
+      expect(s.assignments['a-shared']!.payload).toBe('{"shared":true}');
+      expect(s.workflows.hourly!.assignmentIds).toEqual(['a-shared']);
+      expect(s.assignments[s.workflows.daily!.assignmentIds[0]!]!.payload).toBe('{"d":1}');
+    });
     it('a bad payload in the list shows the JSON check', () => {
       setup(sel);
       fireEvent.change(within(screen.getByTestId('assignments')).getByDisplayValue('{}'), { target: { value: 'nope' } });

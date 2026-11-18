@@ -56,3 +56,23 @@ export function removeAssignment(b: BoardState, wf: Id, assignmentId: Id): Board
   delete assignments[assignmentId];
   return { ...next, assignments };
 }
+
+/**
+ * Sets the payload of one assignment the workflow links, by its row id. Same copy-on-write rule as setPayload: a row
+ * another workflow also links is copied for this workflow only (the copy takes the row's place in its list).
+ */
+export function setAssignmentPayload(b: BoardState, wf: Id, assignmentId: Id, payload: string, newId: () => Id): BoardState {
+  const w = b.workflows[wf];
+  const cur = b.assignments[assignmentId];
+  if (!w || !cur || !w.assignmentIds.includes(assignmentId)) return b;
+  if (linkedBy(b, assignmentId).every((x) => x === wf)) {
+    if (cur.payload === payload) return b;
+    return { ...b, assignments: { ...b.assignments, [assignmentId]: { ...cur, payload } } };
+  }
+  const id = newId();
+  return {
+    ...b,
+    assignments: { ...b.assignments, [id]: { ...cur, id, payload, updatedAt: null } },
+    workflows: { ...b.workflows, [wf]: { ...w, assignmentIds: w.assignmentIds.map((x) => (x === assignmentId ? id : x)) } },
+  };
+}

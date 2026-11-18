@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { board, shared } from './boardFixtures';
 import { clearSlot, removeWires, setProcessorField, setSlotSchema, withoutWorkflow } from './edits';
-import { assignmentOf, assignmentsOf, linkedBy, removeAssignment, setPayload } from './payloads';
+import { assignmentOf, assignmentsOf, linkedBy, removeAssignment, setAssignmentPayload, setPayload } from './payloads';
 
 describe('payloads', () => {
   it('edits a payload in place when only this workflow links the row', () => {
@@ -75,5 +75,29 @@ describe('processor and schema edits', () => {
     const copy = { id: 'x', name: 'in', version: '1.0.0', description: null, definition: '{}' };
     const s = clearSlot(setSlotSchema(board(), 'p1', 'output', copy, () => 's1'), 'p1', 'output');
     expect(s.processors.p1.outputSchemaId).toBeNull();
+  });
+});
+
+describe('setAssignmentPayload', () => {
+  it('edits the named row in place when only this workflow links it', () => {
+    const b = board();
+    const two = { ...b, assignments: { ...b.assignments, 'a2': { ...b.assignments['a-daily-fetch'], id: 'a2', payload: '{"two":1}' } },
+      workflows: { ...b.workflows, daily: { ...b.workflows.daily, assignmentIds: ['a-daily-fetch', 'a2'] } } };
+    const s = setAssignmentPayload(two, 'daily', 'a2', '{"x":9}', () => 'nope');
+    expect(s.assignments.a2.payload).toBe('{"x":9}');
+    expect(s.assignments['a-daily-fetch'].payload).toBe('{}');
+    expect(setAssignmentPayload(two, 'daily', 'a2', '{"two":1}', () => 'nope')).toBe(two);
+  });
+  it('copy-on-write: a row another workflow links is copied for this one, in its place', () => {
+    const s = setAssignmentPayload(shared(), 'daily', 'a-shared', '{"d":1}', () => 'c1');
+    expect(s.assignments.c1).toMatchObject({ stepId: 'fetch', payload: '{"d":1}', updatedAt: null });
+    expect(s.workflows.daily.assignmentIds).toEqual(['c1']);
+    expect(s.workflows.hourly.assignmentIds).toEqual(['a-shared']);
+    expect(s.assignments['a-shared'].payload).toBe('{"shared":true}');
+  });
+  it('ignores a row the workflow does not link', () => {
+    const b = board();
+    expect(setAssignmentPayload(b, 'daily', 'a-hourly-fetch', 'x', () => 'n')).toBe(b);
+    expect(setAssignmentPayload(b, 'nope', 'a-daily-fetch', 'x', () => 'n')).toBe(b);
   });
 });
