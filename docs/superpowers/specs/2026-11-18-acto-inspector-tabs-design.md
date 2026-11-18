@@ -64,8 +64,8 @@ The Inspector shows tabs; the first one opens on a new click, the chosen tab is 
 | What is picked | Tabs |
 |---|---|
 | a triangle (one or several selected, no step) | **Workflow** (the last one clicked) |
-| a step, no workflow selected | **Step** · **Processor** · **Input schema** · **Output schema** · **Config schema** — no assignment [user]; a schema tab only for a slot of the step's processor that holds a schema (ids `schema:input`/`schema:output`/`schema:config`); no processor: Step · Processor only [user, 2026-11-18] |
-| a step, workflows selected | **Step** · **Processor** · the schema tabs as above · one tab per selected workflow **whose stream contains the step**, named after the workflow, with its colour dot [user + call] |
+| a step, no workflow selected | **Step** · **Processor** — no assignment [user]; the schemas are sub-tabs inside Processor, not top tabs [user, 2026-11-18] |
+| a step, workflows selected | **Step** · **Processor** · one tab per selected workflow **whose stream contains the step**, named after the workflow, with its colour dot [user + call] |
 | a cache | **Cache** |
 | a wire / entry arrow / cache line | **Link** (as today's link view) |
 | a ghost | **Deleted** (read-only snapshot) |
@@ -96,12 +96,20 @@ select-only combobox whose button and options show the letter pill + a short wir
 ✓ on the current one, keyboard as Studio's (Up/Down/Home/End/Enter/Space/Escape/Tab, a condition's letter picks it).
 Then a read-only "Used by" line (workflows whose stream contains it).
 
-**Processor tab** [user, 2026-11-18]: the processor's Name, Version, show all, Description, **Source hash** (text) and
+**Processor tab: sub-tabs** [user, 2026-11-18: "same as assignments are tabs in step, so schemas are tabs in
+processor"]: inside the Processor tab a second tab row (role tablist, named "Processor tabs"; smaller, lighter pills
+under the top tabs, same tokens in light and dark): **Processor** · **Input schema** · **Output schema** · **Config
+schema**, a schema sub-tab only when that slot holds a schema (ids `processor`, `schema:input`/`schema:output`/
+`schema:config`; `processorTabsOf` in tabs.ts). A step without a processor has no sub-tab row, only "Processor: none".
+Sub-tab memory follows the top tabs' rule: a new pick opens the first sub-tab (Processor); the chosen sub-tab is kept
+while the same pick stays — also across switching top tabs — and while it exists.
+
+**Processor sub-tab** [user, 2026-11-18]: the processor's Name, Version, show all, Description, **Source hash** (text) and
 **Instance id** (text, blank = null), editable as in Studio; then Related: Liveness, the slots as read-only rows
 "Input schema" / "Output schema" / "Config schema" → `name version` or `none`, and "Used by" (the steps using it).
 No schema editors here any more, and **no In/Out/Config buttons** [user].
 
-**Schema tab** (Input schema / Output schema / Config schema) [user, 2026-11-18]: that schema's entity form — head
+**Schema sub-tab** (Input schema / Output schema / Config schema, inside Processor) [user, 2026-11-18]: that schema's entity form — head
 `name version`, kind line `schema · input of <processor name>` (output/config likewise), Name, Version, show all,
 Description, **Definition** (pretty JSON, compared with its saved value). Every edit goes to the processor's own copy
 (`setSlotSchema`, unchanged). A schema whose definition is not read yet is shown, not edited.

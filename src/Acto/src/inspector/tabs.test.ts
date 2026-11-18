@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Pick, SelectionState } from '../board/selection';
 import { board } from '../design/boardFixtures';
 import type { GhostItem } from '../design/ghosts';
-import { activeTab, focusKey, formatInstant, keepChosen, tabsOf } from './tabs';
+import { activeTab, focusKey, formatInstant, keepChosen, processorTabsOf, tabsOf } from './tabs';
 
 const b = board();
 const noGhosts = { get: (): GhostItem | undefined => undefined };
@@ -25,11 +25,10 @@ describe('tabsOf', () => {
     expect(tabsOf({ workflows: ['daily', 'hourly'], picks: [step('expand')] }, cut, noGhosts).map((t) => t.id))
       .toEqual(['step', 'processor', 'assignment:daily']);
   });
-  it('a step whose processor holds input and config schemas: a schema tab for each, after Processor [user, 2026-11-18]', () => {
+  it('a step whose processor holds schemas: still Step, Processor and the workflows — the schemas are sub-tabs [user, 2026-11-18]', () => {
     const withSlots = { ...b, processors: { p1: { ...b.processors.p1!, inputSchemaId: 's-in', configSchemaId: 's-cfg' } } };
-    const tabs = tabsOf({ workflows: ['daily', 'hourly'], picks: [step('fetch')] }, withSlots, noGhosts);
-    expect(tabs.map((t) => t.id)).toEqual(['step', 'processor', 'schema:input', 'schema:config', 'assignment:daily', 'assignment:hourly']);
-    expect(tabs.slice(2, 4).map((t) => [t.label, t.hue])).toEqual([['Input schema', undefined], ['Config schema', undefined]]);
+    expect(tabsOf({ workflows: ['daily', 'hourly'], picks: [step('fetch')] }, withSlots, noGhosts).map((t) => t.id))
+      .toEqual(['step', 'processor', 'assignment:daily', 'assignment:hourly']);
   });
   it('a step without a processor: Step and Processor only', () => {
     const bare = { ...b, steps: { ...b.steps, fetch: { ...b.steps.fetch!, processorId: null } } };
@@ -60,6 +59,20 @@ describe('tabsOf', () => {
     expect(ids({ workflows: ['daily'], picks: [{ kind: 'workflow', id: 'daily' }, step('fetch')] })).toEqual(['step', 'processor', 'assignment:daily']);
   });
   it('nothing picked: no tabs', () => expect(ids({ workflows: [], picks: [] })).toEqual([]));
+});
+
+describe('processorTabsOf', () => {
+  it('Processor, then a sub-tab per slot holding a schema, in slot order', () => {
+    const withSlots = { ...b, processors: { p1: { ...b.processors.p1!, inputSchemaId: 's-in', configSchemaId: 's-cfg' } } };
+    const subs = processorTabsOf(withSlots, 'p1');
+    expect(subs.map((t) => t.id)).toEqual(['processor', 'schema:input', 'schema:config']);
+    expect(subs.map((t) => t.label)).toEqual(['Processor', 'Input schema', 'Config schema']);
+  });
+  it('no schemas: Processor only; no processor: none', () => {
+    expect(processorTabsOf(b, 'p1').map((t) => t.id)).toEqual(['processor']);
+    expect(processorTabsOf(b, null)).toEqual([]);
+    expect(processorTabsOf(b, 'gone')).toEqual([]);
+  });
 });
 
 describe('keepChosen', () => {

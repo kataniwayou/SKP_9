@@ -5,15 +5,28 @@ import type { BoardState } from '../design/board';
 import { reachOf, SLOT_FIELD, type Slot } from '../design/board';
 import type { GhostStore } from '../design/ghosts';
 
+/** One Inspector tab (spec §5). `assignment:<workflow id>` is that workflow's payload on the picked step. */
+export type TabId = 'workflow' | 'step' | 'processor' | 'cache' | 'link' | 'ghost' | `assignment:${string}`;
+
 /**
- * One Inspector tab (spec §5). `schema:<slot>` is the schema in that slot of the picked step's processor;
- * `assignment:<workflow id>` is that workflow's payload on the picked step.
+ * One sub-tab inside the Processor tab [user, 2026-11-18: "same as assignments are tabs in step, so schemas are tabs in
+ * processor"]: the processor's own form, or the schema in one of its slots.
  */
-export type TabId = 'workflow' | 'step' | 'processor' | 'cache' | 'link' | 'ghost' | `schema:${Slot}` | `assignment:${string}`;
+export type SubTabId = 'processor' | `schema:${Slot}`;
+export interface SubTab { id: SubTabId; label: string }
 
 /** The processor's slots in tab order, and their tab labels. */
 export const SLOTS: readonly Slot[] = ['input', 'output', 'config'];
 export const SLOT_LABEL: Readonly<Record<Slot, string>> = { input: 'Input schema', output: 'Output schema', config: 'Config schema' };
+
+/** The Processor tab's sub-tabs: Processor, then a schema sub-tab per slot that holds a schema. Empty: no such processor. */
+export function processorTabsOf(b: BoardState, processorId: string | null): SubTab[] {
+  const p = processorId === null ? undefined : b.processors[processorId];
+  if (!p) return [];
+  const tabs: SubTab[] = [{ id: 'processor', label: 'Processor' }];
+  for (const slot of SLOTS) if (p[SLOT_FIELD[slot]] !== null) tabs.push({ id: `schema:${slot}`, label: SLOT_LABEL[slot] });
+  return tabs;
+}
 export interface Tab { id: TabId; label: string; hue?: string }
 
 type GhostLookup = Pick<GhostStore, 'get'>;
@@ -50,10 +63,6 @@ export function tabsOf(sel: SelectionState, b: BoardState, ghosts: GhostLookup):
     case 'step': {
       if (!b.steps[f.id]) return [];
       const tabs: Tab[] = [{ id: 'step', label: 'Step' }, { id: 'processor', label: 'Processor' }];
-      // a schema tab per slot of the step's processor that holds a schema [user, 2026-11-18]
-      const pid = b.steps[f.id]!.processorId;
-      const processor = pid === null ? undefined : b.processors[pid];
-      if (processor) for (const slot of SLOTS) if (processor[SLOT_FIELD[slot]] !== null) tabs.push({ id: `schema:${slot}`, label: SLOT_LABEL[slot] });
       for (const wf of sel.workflows) {
         const w = b.workflows[wf];
         if (!w || !reachOf(b, wf).has(f.id)) continue;
@@ -72,8 +81,8 @@ export function keepChosen<C extends { key: string | null }>(chosen: C | null, k
   return chosen && chosen.key === key ? chosen : null;
 }
 
-/** The tab shown: the chosen one while the same thing stays picked and the tab is still there, else the first. */
-export function activeTab(tabs: readonly Tab[], key: string | null, chosen: { key: string | null; tab: TabId } | null): TabId | null {
+/** The tab shown: the chosen one while the same thing stays picked and the tab is still there, else the first. Sub-tabs alike. */
+export function activeTab<T extends string>(tabs: readonly { id: T }[], key: string | null, chosen: { key: string | null; tab: T } | null): T | null {
   if (chosen && chosen.key === key && tabs.some((t) => t.id === chosen.tab)) return chosen.tab;
   return tabs[0]?.id ?? null;
 }

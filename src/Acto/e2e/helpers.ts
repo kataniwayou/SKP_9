@@ -86,10 +86,16 @@ export const selbar = (page: Page) => page.getByRole('toolbar', { name: 'selecti
 export const inspector = (page: Page) => page.locator('[data-panel="inspector"]');
 export const field = (page: Page, label: string | RegExp) =>
   inspector(page).locator('label.fld', { has: page.locator('span', { hasText: typeof label === 'string' ? new RegExp(`^${escapeRe(label)}$`) : label }) }).locator('input, textarea, select, button[role=combobox]');
-/** An Inspector tab by its label (Step, Processor, a workflow's name, Workflow, Cache, Link, Deleted). */
-export const tab = (page: Page, name: string) => inspector(page).getByRole('tab', { name: new RegExp(`^${escapeRe(name)}$`) });
-/** The Inspector's tab labels, in order. */
-export const tabLabels = (page: Page) => inspector(page).getByRole('tab');
+const topRow = (page: Page) => inspector(page).getByRole('tablist', { name: 'Inspector tabs' });
+const subRow = (page: Page) => inspector(page).getByRole('tablist', { name: 'Processor tabs' });
+/** An Inspector tab by its label (Step, Processor, a workflow's name, Workflow, Cache, Link, Deleted): the top row only. */
+export const tab = (page: Page, name: string) => topRow(page).getByRole('tab', { name: new RegExp(`^${escapeRe(name)}$`) });
+/** The Inspector's top tab labels, in order. */
+export const tabLabels = (page: Page) => topRow(page).getByRole('tab');
+/** A sub-tab of the Processor tab by its label (Processor, Input schema, Output schema, Config schema). */
+export const subTab = (page: Page, name: string) => subRow(page).getByRole('tab', { name: new RegExp(`^${escapeRe(name)}$`) });
+/** The Processor tab's sub-tab labels, in order. */
+export const subTabLabels = (page: Page) => subRow(page).getByRole('tab');
 /** A ghost node (a deleted step, cache or triangle drawn at its last place) by its name. */
 export const ghost = (page: Page, name: string) =>
   page.locator('.react-flow__node.ghost').filter({ has: page.locator('.sn, .cache-nm, .tri-nm', { hasText: new RegExp(`^${escapeRe(name)}$`) }) });

@@ -60,7 +60,7 @@ test('Copy from the step toolbar and from the bar; Ctrl+V pastes new steps with 
   await pickStep(page, copyIds[0]!);
   await expect(field(page, /^Entry condition/)).toBeEnabled();
   await expect(inspector(page).locator('dt', { hasText: 'Used by' }).locator('xpath=following-sibling::dd[1]')).toHaveText('no workflow');
-  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'Input schema', 'Output schema', 'Config schema']); // no workflow tab: no payload
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor']); // no workflow tab: no payload
   // a second paste goes further along; the original steps are untouched
   await page.keyboard.press('Control+v');
   await expect(allSteps(page)).toHaveCount(steps0 + 4);

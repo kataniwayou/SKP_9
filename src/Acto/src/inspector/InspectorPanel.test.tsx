@@ -21,9 +21,13 @@ function setup(selection: Sel, state: BoardState = board()) {
   const view = render(ui(selection));
   return { store, ghosts, rerender: (sel: Sel) => view.rerender(ui(sel)) };
 }
-const tabNames = () => screen.queryAllByRole('tab').map((t) => t.textContent);
-const openTab = (name: string) => fireEvent.click(screen.getByRole('tab', { name }));
-const selectedTab = () => screen.getAllByRole('tab').find((t) => t.getAttribute('aria-selected') === 'true')?.textContent;
+// the top row only: the Processor tab's sub-tabs are a second tablist
+const topTabs = () => { const l = screen.queryByRole('tablist', { name: 'Inspector tabs' }); return l ? within(l).queryAllByRole('tab') : []; };
+const tabNames = () => topTabs().map((t) => t.textContent);
+const openTab = (name: string) => fireEvent.click(topTabs().find((t) => t.textContent === name)!);
+const selectedTab = () => topTabs().find((t) => t.getAttribute('aria-selected') === 'true')?.textContent;
+const subTabs = () => within(screen.getByRole('tablist', { name: 'Processor tabs' })).getAllByRole('tab');
+const selectedSub = () => subTabs().find((t) => t.getAttribute('aria-selected') === 'true')?.textContent;
 const step = (id: string): Pick => ({ kind: 'step', id });
 // getByDisplayValue collapses whitespace: the pretty payload as it matches
 const SHARED = '{ "shared": true }';
@@ -62,6 +66,33 @@ describe('InspectorPanel', () => {
       openTab('Processor');
       rerender({ workflows: ['daily'], picks: [step('expand')] });
       expect(selectedTab()).toBe('Step');
+    });
+    it('Processor sub-tabs: the first on a new pick; the chosen one kept while the pick stays and it exists [user, 2026-11-18]', () => {
+      const b0 = board();
+      const slots = { ...b0, processors: { p1: { ...b0.processors.p1!, configSchemaId: 's-cfg' } },
+        schemas: { 's-cfg': { id: 's-cfg', name: 'cfg', version: '1.0.0', description: null, definition: '{}', audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, updatedAt: null } } };
+      const { store, rerender } = setup({ workflows: [], picks: [step('fetch')] }, slots);
+      openTab('Processor');
+      expect(subTabs().map((t) => t.textContent)).toEqual(['Processor', 'Config schema']);
+      expect(selectedSub()).toBe('Processor');
+      fireEvent.click(subTabs()[1]!);
+      expect(selectedSub()).toBe('Config schema');
+      expect(screen.getByText('schema · config of proc')).toBeInTheDocument();
+      // the same pick, away to Step and back: the sub-tab is kept
+      openTab('Step');
+      openTab('Processor');
+      expect(selectedSub()).toBe('Config schema');
+      rerender({ workflows: ['daily'], picks: [step('fetch')] });
+      expect(selectedSub()).toBe('Config schema');
+      // the slot emptied: the sub-tab is gone, the first one shows
+      act(() => store.edit((b) => ({ ...b, processors: { p1: { ...b.processors.p1!, configSchemaId: null } } })));
+      expect(selectedSub()).toBe('Processor');
+      act(() => store.undo());
+      expect(selectedSub()).toBe('Config schema');
+      // a new pick opens the first sub-tab
+      rerender({ workflows: [], picks: [step('expand')] });
+      openTab('Processor');
+      expect(selectedSub()).toBe('Processor');
     });
     it('a step picked again after another pick opens on its first tab: step → triangle → the same step', () => {
       const { rerender } = setup({ workflows: [], picks: [step('fetch')] });

@@ -97,7 +97,7 @@ test('a step shows Step and Processor, and a tab per selected workflow whose str
 
   // no triangle: Step and Processor only, the users on the kind line
   await pickStep(page, id.s1!);
-  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'Input schema', 'Output schema', 'Config schema']);
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
   await expect(field(page, 'Name')).toHaveValue('e2e-sel-shared');
   await expect(inspector(page).locator('.kind')).toHaveText(/^step · shared by /);
   await expect(inspector(page).locator('.kind')).toContainText('e2e-sel-a');
@@ -107,7 +107,7 @@ test('a step shows Step and Processor, and a tab per selected workflow whose str
   await pickWorkflow(page, id.wa!);
   await pickStep(page, id.s1!);
   await expect(wfNode(page, id.wa!).locator('.tri')).toHaveClass(/\bsel\b/); // the triangle stays selected
-  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'Input schema', 'Output schema', 'Config schema', 'e2e-sel-a']);
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'e2e-sel-a']);
   await expect(await payloadOf(page, 'e2e-sel-a')).toHaveValue(pretty('{"from":"a","n":1}'));
   await pickWorkflow(page, id.wb!);
   await pickStep(page, id.s1!);
@@ -117,7 +117,7 @@ test('a step shows Step and Processor, and a tab per selected workflow whose str
   await pickWorkflow(page, id.wa!);
   await pickStep(page, id.s3!);
   await expect(field(page, 'Name')).toHaveValue('e2e-sel-orphan');
-  await expect(tabLabels(page)).toHaveText(['Step', 'Processor', 'Input schema', 'Output schema', 'Config schema']);
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
 
   // an entry arrow or a cache line selects its triangle too
   await pickEdge(page, entryEdge(page, id.wb!, id.s1!));

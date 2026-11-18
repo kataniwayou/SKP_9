@@ -1,16 +1,21 @@
-import { act, fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { board } from '../../design/boardFixtures';
 import { setPayload } from '../../design/payloads';
 import { prettyJson } from '../../model/json';
-import { openOn, REQUIRED } from './testBoard';
+import { openOn, REQUIRED, subTab } from './testBoard';
 
 afterEach(() => sessionStorage.clear());
 
 describe('SchemaTab', () => {
-  it('the step shows a tab per slot holding a schema, after Processor; none without schemas', () => {
-    openOn('Step');
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Step', 'Processor', 'Input schema', 'Config schema', 'daily']);
+  it('the schemas are sub-tabs of Processor, in a second, named row; the top tabs stay Step, Processor, the workflows', () => {
+    openOn('Processor');
+    const top = within(screen.getByRole('tablist', { name: 'Inspector tabs' })).getAllByRole('tab').map((t) => t.textContent);
+    expect(top).toEqual(['Step', 'Processor', 'daily']);
+    const subs = within(screen.getByRole('tablist', { name: 'Processor tabs' })).getAllByRole('tab');
+    expect(subs.map((t) => t.textContent)).toEqual(['Processor', 'Input schema', 'Config schema']);
+    expect(subs[0]).toHaveAttribute('aria-selected', 'true');
+    expect(subs[0]!.className).toContain('ins-subtab');
   });
   it('the config schema\'s entity form: head, kind line, fields and its Definition as pretty JSON', () => {
     openOn('Config schema');
@@ -43,7 +48,7 @@ describe('SchemaTab', () => {
     fireEvent.change(screen.getByLabelText('Definition'), { target: { value: '{"type":"object","x":1}' } });
     expect(store.state().processors.p1!.configSchemaId).toBe(copyId);
     expect(Object.keys(store.state().schemas)).toHaveLength(3);
-    expect(screen.getByRole('tab', { name: 'Config schema' })).toHaveAttribute('aria-selected', 'true');
+    expect(subTab('Config schema')).toHaveAttribute('aria-selected', 'true');
   });
   it('the schema name edits the copy too', () => {
     const store = openOn('Config schema');
@@ -59,8 +64,14 @@ describe('SchemaTab', () => {
     expect(document.querySelector('.in-problem')).toBeNull();
     expect(screen.getByText('✓ checked against cfg 1.0.0; Save checks it again')).toBeInTheDocument();
   });
-  it('a processor with no schemas gives no schema tabs', () => {
-    openOn('Step', [{ kind: 'step', id: 'fetch' }], board());
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Step', 'Processor', 'daily']);
+  it('a processor with no schemas: the Processor sub-tab alone', () => {
+    openOn('Processor', [{ kind: 'step', id: 'fetch' }], board());
+    expect(within(screen.getByRole('tablist', { name: 'Processor tabs' })).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Processor']);
+  });
+  it('a step without a processor: no sub-tabs, "none"', () => {
+    const b0 = board();
+    openOn('Processor', [{ kind: 'step', id: 'fetch' }], { ...b0, steps: { ...b0.steps, fetch: { ...b0.steps.fetch!, processorId: null } } });
+    expect(screen.queryByRole('tablist', { name: 'Processor tabs' })).toBeNull();
+    expect(screen.getByText('Processor', { selector: 'dt' }).nextSibling).toHaveTextContent('none');
   });
 });

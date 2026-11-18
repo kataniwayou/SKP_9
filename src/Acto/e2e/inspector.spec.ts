@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { caNode, field, inspector, openAt, payloadOf, pickCache, pickStep, pickWorkflow, pretty, saveButton, stNode, tab, wfNode, wireEdge } from './helpers';
+import { caNode, field, inspector, openAt, payloadOf, pickCache, pickStep, pickWorkflow, pretty, saveButton, stNode, subTab, tab, wfNode, wireEdge } from './helpers';
 import { seed } from './seed';
 
 // Spec §6–§7: every field of a triangle, a step and a cache edits through the Inspector; the payload check; one undo history for the whole
@@ -83,8 +83,8 @@ test('a step\'s Inspector: shared name, version, description and entry condition
   await expect(field(page, 'Name')).toHaveValue('archive-expander');
   await expect(inspector(page).locator('dt', { hasText: 'Liveness' })).toBeVisible();
   await expect(field(page, 'Source hash')).toHaveValue(/^\S+$/);
-  // its input schema has a tab of its own, the definition pretty JSON [user, 2026-11-18]
-  await tab(page, 'Input schema').click();
+  // its input schema is a sub-tab of the Processor tab, the definition pretty JSON [user, 2026-11-18]
+  await subTab(page, 'Input schema').click();
   await expect(field(page, 'Definition')).toHaveValue(/\n {2}"/);
   await tab(page, 'Step').click();
 
