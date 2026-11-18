@@ -134,6 +134,27 @@ describe('affectedWorkflows and changedKeys', () => {
     const cur = { ...b, workflows: { ...b.workflows, hourly: { ...b.workflows.hourly, name: 'h2' } } };
     expect(affectedWorkflows(b, cur)).toEqual(['hourly']);
   });
+  it('a changed, created or deleted linked cache affects its workflows only', () => {
+    const edited = { ...b, caches: { ...b.caches, c1: { ...b.caches.c1, root: 'z' } } };
+    expect(affectedWorkflows(b, edited)).toEqual(['daily']);
+    expect(affectedWorkflows(b, deleteCaches(b, ['c1']))).toEqual(['daily']);
+    const added = { ...b, caches: { ...b.caches, k: { ...b.caches.c1, id: 'k', updatedAt: null } } };
+    expect(affectedWorkflows(b, added)).toEqual([]);
+  });
+  it('a changed processor affects workflows reaching its steps', () => {
+    const cur = { ...b, processors: { p1: { ...proc, description: 'd' } } };
+    expect(affectedWorkflows(b, cur).sort()).toEqual(['daily', 'hourly']);
+  });
+  it('a created or changed schema a processor points at affects workflows reaching its steps', () => {
+    const s1 = { id: 's1', name: 's', version: '1.0.0', description: null, definition: '{}', audit: proc.audit, updatedAt: 'T' };
+    const withSchema = { ...b, processors: { p1: { ...proc, inputSchemaId: 's1' } }, schemas: { s1 } };
+    const edited = { ...withSchema, schemas: { s1: { ...s1, definition: '{"a":1}' } } };
+    expect(affectedWorkflows(withSchema, edited).sort()).toEqual(['daily', 'hourly']);
+    const created = { ...b, schemas: { s2: { ...s1, id: 's2', updatedAt: null } }, processors: { p1: { ...proc, outputSchemaId: 's2' } } };
+    expect(affectedWorkflows(b, created).sort()).toEqual(['daily', 'hourly']);
+    const orphan = { ...b, schemas: { s3: { ...s1, id: 's3', updatedAt: null } } };
+    expect(affectedWorkflows(b, orphan)).toEqual([]);
+  });
   it('changedKeys counts rows, not changes', () => {
     expect([...changedKeys(b, deleteSteps(b, ['fetch']))].sort()).toEqual([
       'assignment:a-daily-fetch', 'assignment:a-hourly-fetch', 'step:fetch', 'workflow:daily', 'workflow:hourly']);

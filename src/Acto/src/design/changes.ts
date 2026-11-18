@@ -134,8 +134,26 @@ export function affectedWorkflows(base: BoardState, cur: BoardState): Id[] {
   const ds = diffTable('steps', base, cur);
   const touchedSteps = new Set([...ds.created, ...ds.updated, ...ds.deleted]);
 
+  const dc = diffTable('caches', base, cur);
+  const touchedCaches = new Set([...dc.created, ...dc.updated, ...dc.deleted]);
+  const touchedProcessors = new Set(diffTable('processors', base, cur).updated);
+  const dsc = diffTable('schemas', base, cur);
+  const touchedSchemas = new Set([...dsc.created, ...dsc.updated, ...dsc.deleted]);
+  // a step whose processor row changed, or whose processor points at a created/changed schema row
+  const processorTouched = (b: BoardState, stepId: Id) => {
+    const pid = b.steps[stepId]?.processorId;
+    const p = pid ? b.processors[pid] : undefined;
+    if (!pid || !p) return false;
+    return touchedProcessors.has(pid) ||
+      [p.inputSchemaId, p.outputSchemaId, p.configSchemaId].some((x) => x !== null && touchedSchemas.has(x));
+  };
+
   return Object.keys(cur.workflows).filter((id) => {
     if (touchedWf.has(id)) return true;
+    const caches = [...cur.workflows[id]!.cacheIds, ...(base.workflows[id]?.cacheIds ?? [])];
+    if (caches.some((c) => touchedCaches.has(c))) return true;
+    for (const [bd, reach] of [[cur, reachOf(cur, id)], [base, reachOf(base, id)]] as const)
+      for (const sid of reach) if (processorTouched(bd, sid)) return true;
     const links = [...cur.workflows[id]!.assignmentIds, ...(base.workflows[id]?.assignmentIds ?? [])];
     if (links.some((a) => touchedAssignments.has(a))) return true;
     for (const s of [...reachOf(cur, id), ...reachOf(base, id)]) if (touchedSteps.has(s)) return true;
