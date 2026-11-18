@@ -50,5 +50,6 @@ export function toolbarFor(p: Pick, d: ToolbarDeps): ToolbarItem[] | null {
     }
     case 'step': return [{ label: 'Copy', onClick: () => d.copy(p.id) }, del];
     case 'cache': case 'wire': case 'entry': case 'cacheLink': return [del];
+    case 'ghost': return null; // the ghost toolbar comes with Task 5
   }
 }

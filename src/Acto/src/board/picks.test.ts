@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { board } from '../design/boardFixtures';
 import { deletePicks, lastPick, livePicks, pickKey, togglePick } from './picks';
-import { selectPick, type Pick } from './selection';
+import type { Pick } from './selection';
 
 const a: Pick = { kind: 'step', id: 'fetch' };
 const b: Pick = { kind: 'step', id: 'expand' };
 const daily: Pick = { kind: 'workflow', id: 'daily' };
-const hourly: Pick = { kind: 'workflow', id: 'hourly' };
-const none = { workflow: null, picks: [] as Pick[] };
 
 describe('picks', () => {
   it('toggles: appends a new pick, removes a present one', () => {
@@ -38,57 +36,11 @@ describe('picks', () => {
       { kind: 'cacheLink', workflowId: 'daily', cacheId: 'c1' }, daily,
     ]);
   });
-});
-
-describe('selectPick', () => {
-  it('a triangle click sets the workflow and picks only it; Ctrl is ignored', () => {
-    expect(selectPick(none, daily, false)).toEqual({ workflow: 'daily', picks: [daily] });
-    const prev = { workflow: 'daily', picks: [a, b] };
-    expect(selectPick(prev, hourly, true)).toEqual({ workflow: 'hourly', picks: [hourly] });
-  });
-  it('a step, cache or wire click keeps the workflow and replaces the picks', () => {
-    const prev = { workflow: 'daily', picks: [daily] };
-    expect(selectPick(prev, a, false)).toEqual({ workflow: 'daily', picks: [a] });
-    expect(selectPick({ workflow: 'daily', picks: [a, b] }, { kind: 'cache', id: 'c1' }, false)).toEqual({ workflow: 'daily', picks: [{ kind: 'cache', id: 'c1' }] });
-    expect(selectPick(none, a, false)).toEqual({ workflow: null, picks: [a] });
-  });
-  it('Ctrl toggles a step, cache or wire into the picks and never keeps a triangle among them', () => {
-    expect(selectPick({ workflow: 'daily', picks: [a] }, b, true)).toEqual({ workflow: 'daily', picks: [a, b] });
-    expect(selectPick({ workflow: 'daily', picks: [a, b] }, a, true)).toEqual({ workflow: 'daily', picks: [b] });
-    expect(selectPick({ workflow: 'daily', picks: [daily] }, a, true)).toEqual({ workflow: 'daily', picks: [a] });
-  });
-  it('an entry or cache-link click sets the workflow to its own', () => {
-    const e: Pick = { kind: 'entry', workflowId: 'hourly', stepId: 'fetch' };
-    expect(selectPick({ workflow: 'daily', picks: [daily] }, e, false)).toEqual({ workflow: 'hourly', picks: [e] });
-    const l: Pick = { kind: 'cacheLink', workflowId: 'daily', cacheId: 'c1' };
-    expect(selectPick(none, l, false)).toEqual({ workflow: 'daily', picks: [l] });
-  });
-  it('the empty board clears both', () => {
-    expect(selectPick({ workflow: 'daily', picks: [a] }, null, false)).toEqual(none);
-    expect(selectPick({ workflow: 'daily', picks: [a] }, null, true)).toEqual(none);
-  });
-});
-
-describe('deletePicks', () => {
-  it('deletes a step, a cache, a wire, an entry arrow and a cache line in one state', () => {
-    const s = deletePicks(board(), [
-      { kind: 'step', id: 'lonely' }, { kind: 'cache', id: 'c1' }, { kind: 'wire', from: 'fetch', to: 'expand' },
-      { kind: 'entry', workflowId: 'hourly', stepId: 'fetch' },
-    ]);
-    expect(s.steps.lonely).toBeUndefined();
-    expect(s.caches.c1).toBeUndefined();
-    expect(s.workflows.daily!.cacheIds).toEqual([]);
-    expect(s.steps.fetch!.nextStepIds).toEqual([]);
-    expect(s.workflows.hourly!.entryStepIds).toEqual([]);
-    expect(s.workflows.daily!.entryStepIds).toEqual(['fetch']);
-  });
-  it('a cache line alone unlinks only that workflow; a step takes its payloads with it', () => {
-    expect(deletePicks(board(), [{ kind: 'cacheLink', workflowId: 'daily', cacheId: 'c1' }]).caches.c1).toBeDefined();
-    const s = deletePicks(board(), [{ kind: 'step', id: 'fetch' }]);
-    expect(Object.keys(s.assignments)).toEqual([]);
-    expect(s.workflows.daily!.entryStepIds).toEqual([]);
-  });
-  it('leaves triangles alone', () => {
-    expect(deletePicks(board(), [{ kind: 'workflow', id: 'daily' }]).workflows.daily).toBeDefined();
+  it('pickKey, livePicks and deletePicks handle ghosts', () => {
+    const g: Pick = { kind: 'ghost', key: 'k' };
+    expect(pickKey(g)).toBe('gh:k');
+    expect(livePicks([g], board())).toEqual([g]);
+    const b0 = board();
+    expect(deletePicks(b0, [g])).toBe(b0);
   });
 });

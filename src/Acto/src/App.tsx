@@ -55,7 +55,7 @@ function browserSession(): Storage | null {
   try { return window.sessionStorage; } catch { return null; }
 }
 
-const NONE: SelectionState = { workflow: null, picks: [] };
+const NONE: SelectionState = { workflows: [], picks: [] };
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /** A free spot for a new triangle: where placement would put one with no location. */
@@ -70,8 +70,8 @@ function freeTriangleSpot(b: BoardState): Point {
 /** The selection with whatever left the board taken out (the same object when nothing did). */
 function trimmed(s: SelectionState, b: BoardState): SelectionState {
   const picks = livePicks(s.picks, b);
-  const workflow = s.workflow !== null && b.workflows[s.workflow] ? s.workflow : null;
-  return picks.length === s.picks.length && workflow === s.workflow ? s : { workflow, picks };
+  const workflows = s.workflows.filter((id) => b.workflows[id]);
+  return picks.length === s.picks.length && workflows.length === s.workflows.length ? s : { workflows, picks };
 }
 
 export function App(props: AppProps) {
@@ -182,7 +182,7 @@ export function App(props: AppProps) {
       store.edit((b) => { const r = pasteClip(b, clip, newId); pasted = r.pasted; return r.state; });
       if (pasted.length === 0) return;
       writeClip(session, { ...clip, pasted: clip.pasted + 1 });
-      setSelection({ workflow: selRef.current.workflow, picks: pasted.map((id) => ({ kind: 'step' as const, id })) });
+      setSelection({ workflows: selRef.current.workflows, picks: pasted.map((id) => ({ kind: 'step' as const, id })) });
       output.log(`Pasted ${plural(pasted.length, 'step')}`, 'ok');
     };
     document.addEventListener('keydown', onKey);
@@ -215,7 +215,7 @@ export function App(props: AppProps) {
   const removePicks = useCallback((picks: readonly Pick[]) => {
     const before = store.state();
     store.edit((b) => deletePicks(b, picks));
-    if (store.state() !== before) setSelection({ workflow: selRef.current.workflow, picks: [] });
+    if (store.state() !== before) setSelection({ workflows: selRef.current.workflows, picks: [] });
   }, [store, setSelection]);
 
   const askDelete = useCallback((wf: Id) => {
@@ -279,7 +279,7 @@ export function App(props: AppProps) {
   const unsavedKeys = store.unsaved();
   const marks = useMemo(() => unsavedMarks(store.base(), state, unsavedKeys), [store, state, unsavedKeys]);
   const view = useMemo<BoardView>(() => ({
-    workflow: sel.workflow, picks: sel.picks,
+    workflow: sel.workflows.at(-1) ?? null, picks: sel.picks,
     live: (wf) => statusOf(liveState, wf),
     problems: (wf) => store.problems(wf),
     failed: (key) => store.failures().has(key),
@@ -297,7 +297,7 @@ export function App(props: AppProps) {
     caches: () => Object.values(store.state().caches),
     commands: {
       focus: (workflowId, stepIds) => boardFocus.current?.(workflowId, stepIds),
-      setPicks: (picks) => setSelection({ workflow: selRef.current.workflow, picks }),
+      setPicks: (picks) => setSelection({ workflows: selRef.current.workflows, picks }),
       picks: () => selRef.current.picks,
       newWorkflowAt: () => freeTriangleSpot(store.state()),
     },

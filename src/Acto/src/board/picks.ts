@@ -13,6 +13,7 @@ export function pickKey(p: Pick): string {
     case 'wire': return `wi:${p.from}>${p.to}`;
     case 'entry': return `en:${p.workflowId}:${p.stepId}`;
     case 'cacheLink': return `cl:${p.workflowId}:${p.cacheId}`;
+    case 'ghost': return `gh:${p.key}`;
   }
 }
 
@@ -31,6 +32,7 @@ const exists = (b: BoardState, p: Pick): boolean => {
     case 'wire': return !!b.steps[p.from]?.nextStepIds.includes(p.to);
     case 'entry': return !!b.workflows[p.workflowId]?.entryStepIds.includes(p.stepId);
     case 'cacheLink': return !!b.workflows[p.workflowId]?.cacheIds.includes(p.cacheId);
+    case 'ghost': return true; // a ghost's life is decided elsewhere
   }
 };
 

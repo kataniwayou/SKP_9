@@ -19,7 +19,7 @@ import { AreaField, Ro, Row, Sec, SelectField, TextField } from './fields';
 import { ProcessorSection } from './ProcessorSection';
 
 type Id = string;
-export interface InspectorSelection { workflow: Id | null; picks: Pick[] }
+export interface InspectorSelection { workflows: Id[]; picks: Pick[] }
 
 const orNull = (v: string) => (v === '' ? null : v);
 
@@ -216,6 +216,7 @@ function pickName(p: Pick, b: BoardState): string | null {
     case 'wire': return `${stepName(b, p.from)} → ${stepName(b, p.to)}`;
     case 'entry': return `${b.workflows[p.workflowId]?.name ?? p.workflowId} → ${stepName(b, p.stepId)}`;
     case 'cacheLink': return `${b.workflows[p.workflowId]?.name ?? p.workflowId} → ${b.caches[p.cacheId]?.name ?? p.cacheId}`;
+    case 'ghost': return p.key; // Task 6 shows ghosts properly
   }
 }
 
@@ -251,7 +252,8 @@ function Header({ store, kind }: { store: BoardStore; kind: string }) {
 export function InspectorPanel({ store, selection }: { store: BoardStore; selection: InspectorSelection }) {
   const state = useSyncExternalStore(store.subscribe, store.state);
   const edit: Edit = (fn, merge) => store.edit(fn, merge);
-  const { picks, workflow } = selection;
+  const { picks } = selection;
+  const workflow = selection.workflows.at(-1) ?? null;
   const one = picks.length === 1 ? picks[0]! : null;
   const target = one ?? (picks.length === 0 && workflow ? { kind: 'workflow', id: workflow } as const : null);
   return (
@@ -259,7 +261,7 @@ export function InspectorPanel({ store, selection }: { store: BoardStore; select
       <Header store={store} kind={kindOf(picks.length === 0 && target ? [target] : picks)} />
       <div className="pb">
         {picks.length > 1 ? <PickList picks={picks} state={state} />
-          : target === null ? <BoardSummary state={state} />
+          : target === null || target.kind === 'ghost' ? <BoardSummary state={state} />
           : target.kind === 'workflow' ? <EditWorkflow state={state} edit={edit} id={target.id} />
           : target.kind === 'step' ? <EditStep state={state} edit={edit} id={target.id} workflow={workflow} />
           : target.kind === 'cache' ? <EditCache state={state} edit={edit} id={target.id} />

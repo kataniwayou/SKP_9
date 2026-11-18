@@ -39,6 +39,7 @@ export function flowIdOf(p: Pick): string {
     case 'wire': return edgeIdOf.wire(p.from, p.to);
     case 'entry': return edgeIdOf.entry(p.workflowId, p.stepId);
     case 'cacheLink': return edgeIdOf.cacheLink(p.workflowId, p.cacheId);
+    case 'ghost': return `ghost:${p.key}`; // Task 2/3 settle ghost ids
   }
 }
 

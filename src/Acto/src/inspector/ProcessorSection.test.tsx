@@ -29,7 +29,7 @@ function setup() {
   const store = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
   store.load(withSchemas());
   render(<LiveStoreProvider value={liveStub()}>
-    <InspectorPanel store={store} selection={{ workflow: 'daily', picks: [{ kind: 'step', id: 'fetch' }] }} />
+    <InspectorPanel store={store} selection={{ workflows: ['daily'], picks: [{ kind: 'step', id: 'fetch' }] }} />
   </LiveStoreProvider>);
   return store;
 }

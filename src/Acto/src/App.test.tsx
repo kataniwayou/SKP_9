@@ -200,9 +200,18 @@ describe('App', () => {
     });
 
     it('restores a saved selection', async () => {
-      const storage = memoryStorage({ 'acto.view': JSON.stringify({ x: 0, y: 0, zoom: 1, selection: { workflow: null, picks: [{ kind: 'step', id: 'expand' }] } }) });
+      const storage = memoryStorage({ 'acto.view': JSON.stringify({ x: 0, y: 0, zoom: 1, selection: { workflows: [], picks: [{ kind: 'step', id: 'expand' }] } }) });
       renderApp(boardApi(), { storage });
       expect(await inspector().findByDisplayValue('expand')).toBeInTheDocument();
+    });
+  });
+
+  describe('selection prune', () => {
+    it('a selected workflow that leaves the board leaves workflows', async () => {
+      const storage = memoryStorage({ 'acto.view': JSON.stringify({ x: 0, y: 0, zoom: 1, selection: { workflows: ['gone', 'daily'], picks: [] } }) });
+      renderApp(boardApi(), { storage });
+      await loaded();
+      await waitFor(() => expect(JSON.parse(storage.getItem('acto.view')!).selection.workflows).toEqual(['daily']));
     });
   });
 

@@ -14,6 +14,7 @@ function parsePick(v: unknown): Pick | null {
     case 'wire': return isStr(s.from) && isStr(s.to) ? { kind: 'wire', from: s.from, to: s.to } : null;
     case 'entry': return isStr(s.workflowId) && isStr(s.stepId) ? { kind: 'entry', workflowId: s.workflowId, stepId: s.stepId } : null;
     case 'cacheLink': return isStr(s.workflowId) && isStr(s.cacheId) ? { kind: 'cacheLink', workflowId: s.workflowId, cacheId: s.cacheId } : null;
+    case 'ghost': return null; // ghosts live in page memory only
     default: return null;
   }
 }
@@ -21,9 +22,9 @@ function parsePick(v: unknown): Pick | null {
 function parseSelection(v: unknown): SelectionState | null {
   if (typeof v !== 'object' || v === null) return null;
   const s = v as Record<string, unknown>;
-  const workflow = isStr(s.workflow) ? s.workflow : null;
+  const workflows = Array.isArray(s.workflows) ? s.workflows.filter(isStr) : isStr(s.workflow) ? [s.workflow] : [];
   const picks = Array.isArray(s.picks) ? s.picks.map(parsePick).filter((p): p is Pick => p !== null) : [];
-  return workflow === null && picks.length === 0 ? null : { workflow, picks };
+  return workflows.length === 0 && picks.length === 0 ? null : { workflows, picks };
 }
 
 export function readView(storage: Storage | null): SavedView | null {

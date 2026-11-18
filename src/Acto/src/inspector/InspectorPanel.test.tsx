@@ -10,7 +10,7 @@ import { createOutputStore } from '../output/outputStore';
 import { liveStub } from '../test/liveStub';
 import { InspectorPanel } from './InspectorPanel';
 
-type Sel = { workflow: string | null; picks: Pick[] };
+type Sel = { workflows: string[]; picks: Pick[] };
 
 function setup(selection: Sel, state: BoardState = board()) {
   const store = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
@@ -24,24 +24,24 @@ const payloadOf = (s: BoardStore, wf: string) => s.state().assignments[s.state()
 
 describe('InspectorPanel', () => {
   it('summarises the board when nothing is selected', () => {
-    setup({ workflow: null, picks: [] });
+    setup({ workflows: [], picks: [] });
     expect(screen.getByText(/Select a workflow/)).toBeInTheDocument();
     expect(screen.getByText(/2 workflows/)).toBeInTheDocument();
   });
 
   describe('step', () => {
     it('shows the payload of the selected workflow, daily then hourly, on the same step', () => {
-      const { store, rerender } = setup({ workflow: 'daily', picks: [step('fetch')] });
+      const { store, rerender } = setup({ workflows: ['daily'], picks: [step('fetch')] });
       act(() => store.edit((b) => setPayload(b, 'hourly', 'fetch', '{"every":"hour"}', () => 'x')));
       act(() => store.edit((b) => setPayload(b, 'daily', 'fetch', '{"every":"day"}', () => 'y')));
       expect(screen.getByText('Payload · daily')).toBeInTheDocument();
       expect(screen.getByLabelText('Payload · JSON')).toHaveValue('{"every":"day"}');
-      rerender({ workflow: 'hourly', picks: [step('fetch')] });
+      rerender({ workflows: ['hourly'], picks: [step('fetch')] });
       expect(screen.getByText('Payload · hourly')).toBeInTheDocument();
       expect(screen.getByLabelText('Payload · JSON')).toHaveValue('{"every":"hour"}');
     });
     it('editing the payload changes the selected workflow only, one undo step while typing', () => {
-      const { store } = setup({ workflow: 'daily', picks: [step('fetch')] });
+      const { store } = setup({ workflows: ['daily'], picks: [step('fetch')] });
       const area = screen.getByLabelText('Payload · JSON');
       fireEvent.change(area, { target: { value: '{"a"' } });
       fireEvent.change(area, { target: { value: '{"a":1}' } });
@@ -51,36 +51,36 @@ describe('InspectorPanel', () => {
       expect(payloadOf(store, 'daily')).toBe('{}');
     });
     it('with no workflow selected there is no payload field, only the shared fields', () => {
-      setup({ workflow: null, picks: [step('fetch')] });
+      setup({ workflows: [], picks: [step('fetch')] });
       expect(screen.queryByText(/Payload ·/)).toBeNull();
       expect(screen.queryByLabelText('Payload · JSON')).toBeNull();
       expect(screen.getByDisplayValue('fetch-orders')).toBeInTheDocument();
       expect(screen.getByText(/shared/)).toBeInTheDocument();
     });
     it('a step the workflow does not reach says so and has no payload field', () => {
-      setup({ workflow: 'daily', picks: [step('lonely')] });
+      setup({ workflows: ['daily'], picks: [step('lonely')] });
       expect(screen.getByText('not in daily')).toBeInTheDocument();
       expect(screen.queryByLabelText('Payload · JSON')).toBeNull();
     });
     it('a shared field edit goes to the step', () => {
-      const { store } = setup({ workflow: 'daily', picks: [step('fetch')] });
+      const { store } = setup({ workflows: ['daily'], picks: [step('fetch')] });
       fireEvent.change(screen.getByDisplayValue('fetch-orders'), { target: { value: 'renamed' } });
       expect(store.state().steps.fetch!.name).toBe('renamed');
     });
     it('the JSON check shows under the payload', () => {
-      const { store } = setup({ workflow: 'daily', picks: [step('fetch')] });
+      const { store } = setup({ workflows: ['daily'], picks: [step('fetch')] });
       fireEvent.change(screen.getByLabelText('Payload · JSON'), { target: { value: '{oops' } });
       expect(document.querySelector('.in-problem')).not.toBeNull();
       expect(store.state().assignments['a-daily-fetch']!.payload).toBe('{oops');
     });
     it('Remove assignment unlinks it from the selected workflow only', () => {
-      const { store } = setup({ workflow: 'daily', picks: [step('fetch')] });
+      const { store } = setup({ workflows: ['daily'], picks: [step('fetch')] });
       fireEvent.click(screen.getByRole('button', { name: 'Remove assignment' }));
       expect(store.state().workflows.daily!.assignmentIds).toEqual([]);
       expect(store.state().workflows.hourly!.assignmentIds).toEqual(['a-hourly-fetch']);
     });
     it('a payload on a row both workflows link is copied for the selected one', () => {
-      const { store } = setup({ workflow: 'daily', picks: [step('fetch')] }, shared());
+      const { store } = setup({ workflows: ['daily'], picks: [step('fetch')] }, shared());
       fireEvent.change(screen.getByLabelText('Payload · JSON'), { target: { value: '{"d":1}' } });
       const s = store.state();
       expect(s.assignments['a-shared']!.payload).toBe('{"shared":true}');
@@ -88,13 +88,13 @@ describe('InspectorPanel', () => {
       expect(s.assignments[s.workflows.daily!.assignmentIds[0]!]!.payload).toBe('{"d":1}');
     });
     it('shows the processor section', () => {
-      setup({ workflow: null, picks: [step('fetch')] });
+      setup({ workflows: [], picks: [step('fetch')] });
       expect(screen.getByDisplayValue('proc')).toBeInTheDocument();
     });
   });
 
   describe('workflow', () => {
-    const sel: Sel = { workflow: 'daily', picks: [{ kind: 'workflow', id: 'daily' }] };
+    const sel: Sel = { workflows: ['daily'], picks: [{ kind: 'workflow', id: 'daily' }] };
     it('edits name, cron (with its text)', () => {
       const { store } = setup(sel);
       fireEvent.change(screen.getByDisplayValue('daily'), { target: { value: 'nightly' } });
@@ -169,31 +169,31 @@ describe('InspectorPanel', () => {
   });
 
   it('a cache shows its fields', () => {
-    const { store } = setup({ workflow: null, picks: [{ kind: 'cache', id: 'c1' }] });
+    const { store } = setup({ workflows: [], picks: [{ kind: 'cache', id: 'c1' }] });
     fireEvent.change(screen.getByLabelText('Root'), { target: { value: 'new-root' } });
     expect(store.state().caches.c1!.root).toBe('new-root');
   });
 
   it('a wire, an entry arrow and a cache line show from, to and the condition', () => {
-    const { rerender } = setup({ workflow: null, picks: [{ kind: 'wire', from: 'fetch', to: 'expand' }] });
+    const { rerender } = setup({ workflows: [], picks: [{ kind: 'wire', from: 'fetch', to: 'expand' }] });
     expect(screen.getByText('From').nextSibling).toHaveTextContent('fetch-orders');
     expect(screen.getByText('To').nextSibling).toHaveTextContent('expand');
     expect(screen.getByText('Runs when').nextSibling).toHaveTextContent('Completed');
-    rerender({ workflow: 'daily', picks: [{ kind: 'entry', workflowId: 'daily', stepId: 'fetch' }] });
+    rerender({ workflows: ['daily'], picks: [{ kind: 'entry', workflowId: 'daily', stepId: 'fetch' }] });
     expect(screen.getByText('From').nextSibling).toHaveTextContent('daily');
     expect(screen.getByText('To').nextSibling).toHaveTextContent('fetch-orders');
-    rerender({ workflow: 'daily', picks: [{ kind: 'cacheLink', workflowId: 'daily', cacheId: 'c1' }] });
+    rerender({ workflows: ['daily'], picks: [{ kind: 'cacheLink', workflowId: 'daily', cacheId: 'c1' }] });
     expect(screen.getByText('To').nextSibling).toHaveTextContent('c1');
   });
 
   it('several picks are listed, in pick order', () => {
-    setup({ workflow: 'daily', picks: [step('expand'), { kind: 'cache', id: 'c1' }, { kind: 'wire', from: 'fetch', to: 'expand' }] });
+    setup({ workflows: ['daily'], picks: [step('expand'), { kind: 'cache', id: 'c1' }, { kind: 'wire', from: 'fetch', to: 'expand' }] });
     expect(screen.getByText('3 selected')).toBeInTheDocument();
     expect([...document.querySelectorAll('.in-picks li')].map((li) => li.textContent)).toEqual(['expand', 'c1', 'fetch-orders → expand']);
   });
 
   it('Undo and Redo act on the one board history', () => {
-    const { store } = setup({ workflow: 'daily', picks: [{ kind: 'workflow', id: 'daily' }] });
+    const { store } = setup({ workflows: ['daily'], picks: [{ kind: 'workflow', id: 'daily' }] });
     const undo = screen.getByRole('button', { name: 'Undo' });
     const redo = screen.getByRole('button', { name: 'Redo' });
     expect(undo).toBeDisabled();
