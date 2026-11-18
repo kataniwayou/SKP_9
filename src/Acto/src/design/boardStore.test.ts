@@ -1,427 +1,139 @@
 import { describe, expect, it } from 'vitest';
-import type { BoardWorkflow } from '../board/loadBoard';
 import { createOutputStore } from '../output/outputStore';
-import { createBoardStore } from './boardStore';
-import { bwFull, proc } from './fixtures';
-import { canUndo } from './history';
-import { addStep, addWire, moveMany, moveStep, newWorkflowState, removeStepHere, removeWire, setProcessorField, setStepField, type WorkflowState } from './state';
-import { bw } from '../board/fixtures';
 import { memoryStorage } from '../test/memoryStorage';
-import { AUDIT } from '../model/fixtures';
+import { board } from './boardFixtures';
+import { addEntry, deleteSteps, setStepField, setWorkflowField } from './edits';
+import { createBoardStore } from './boardStore';
 
-function storeWith(bw: BoardWorkflow, session: Storage | null = null) {
-  const output = createOutputStore(null, () => '00:00:00');
-  const st = createBoardStore(output, session);
-  st.load({ listed: true, workflows: [bw], failures: [] }, [proc('p1', 'Analyst')]);
-  return Object.assign(st, { output });
-}
-const lastLine = (st: { output: ReturnType<typeof createOutputStore> }) => {
-  const l = st.output.lines(); const { text, level } = l[l.length - 1]!; return { text, level };
+const blocked = (): Storage => ({
+  get length() { return 0; }, clear() { throw new Error('blocked'); }, key() { throw new Error('blocked'); },
+  getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); }, removeItem() { throw new Error('blocked'); },
+});
+const make = (session: Storage | null = memoryStorage()) => {
+  const out = createOutputStore(null, () => '00:00:00');
+  const store = createBoardStore(out, session);
+  store.load(board());
+  return { store, out, session };
 };
+const nameA = (n: string) => (b: ReturnType<typeof board>) => setWorkflowField(b, 'daily', 'name', n);
+const nameB = (n: string) => (b: ReturnType<typeof board>) => setWorkflowField(b, 'hourly', 'name', n);
 
 describe('board store', () => {
-  it('marks unsaved and clears it by undoing back', () => {
-    const st = storeWith(bwFull());
-    st.edit('w1', (s) => moveStep(s, 'a', { x: 99, y: 99 }));
-    expect(st.entry('w1')!.unsaved).toBe(true);
-    st.undo('w1'); expect(st.entry('w1')!.unsaved).toBe(false);
+  it('keeps one history across workflows', () => {
+    const { store } = make();
+    store.edit(nameA('A')); store.edit(nameB('B'));
+    expect(store.canUndo()).toBe(true);
+    store.undo(); store.undo();
+    expect(store.state()).toEqual(board());
+    expect(store.canUndo()).toBe(false);
+    store.redo();
+    expect(store.state().workflows.daily!.name).toBe('A');
+    expect(store.canRedo()).toBe(true);
   });
-  it('a multi-step drag is one undo step that restores every moved step', () => {
-    const st = storeWith(bwFull());
-    const at = (id: string) => st.boards()[0]!.stepAt.get(id)!;
-    const before = { a: { ...at('a') }, b: { ...at('b') } };
-    st.edit('w1', (s) => moveMany(s, { steps: [{ id: 'a', at: { x: 500, y: 500 } }, { id: 'b', at: { x: 600, y: 500 } }], frame: { x: 40, y: 50 } }));
-    expect(st.entry('w1')!.history.past).toHaveLength(1);
-    st.undo('w1');
-    expect({ a: at('a'), b: at('b') }).toEqual(before);
-    expect(st.boards()[0]!.frame).toMatchObject({ x: 0, y: 0 });
-    expect(st.entry('w1')!.history.past).toHaveLength(0);
+  it('merges edits with the same key into one step', () => {
+    const { store } = make();
+    store.edit(nameA('A'), 'name'); store.edit(nameA('AB'), 'name'); store.edit(nameA('ABC'), 'name');
+    store.undo();
+    expect(store.state()).toEqual(board());
   });
-  it('logs a refused edit and records no step', () => {
-    const st = storeWith(bwFull()); st.editOrRefuse('w1', (s) => addWire(s, 'a', 'a'));
-    expect(lastLine(st)).toEqual({ text: 'A step cannot wire to itself', level: 'warn' });
-    expect(st.entry('w1')!.history.past).toEqual([]);
+  it('counts the changed rows as unsaved', () => {
+    const { store } = make();
+    expect(store.unsaved().size).toBe(0);
+    store.edit(nameA('A')); store.edit((b) => setStepField(b, 'lonely', 'name', 'x'));
+    expect(store.unsaved().size).toBe(2);
   });
-  it('clears history when a save replaces the base', () => {
-    const st = storeWith(bwFull()); st.edit('w1', (s) => moveStep(s, 'a', { x: 1, y: 1 }));
-    st.replace('w1', bwFull());
-    expect(canUndo(st.entry('w1')!.history)).toBe(false); expect(st.entry('w1')!.unsaved).toBe(false);
+  it('refuses an edit while saving, with a warning', () => {
+    const { store, out } = make();
+    store.setSaving(true);
+    expect(store.saving()).toBe(true);
+    store.edit(nameA('A'));
+    expect(store.state()).toEqual(board());
+    expect(out.lines().at(-1)).toMatchObject({ level: 'warn', text: 'Saving — wait for it to finish' });
+    store.setSaving(false);
+    store.edit(nameA('A'));
+    expect(store.state().workflows.daily!.name).toBe('A');
   });
-  it('restores a draft after refresh only when the workflow is unchanged', () => {
-    const session = memoryStorage(); const st = storeWith(bwFull(), session);
-    st.edit('w1', (s) => moveStep(s, 'a', { x: 5, y: 5 }));
-    expect(storeWith(bwFull(), session).entry('w1')!.unsaved).toBe(true);
-    const later = storeWith(bwFull({ updatedAt: 'later' }), session);
-    expect(later.entry('w1')!.unsaved).toBe(false);
-    expect(lastLine(later).text).toBe('orders: unsaved work from before the refresh was dropped because the workflow changed');
+  it('sends an editOrRefuse refusal to Output', () => {
+    const { store, out } = make();
+    store.editOrRefuse((b) => addEntry(b, 'daily', 'fetch'));
+    expect(store.canUndo()).toBe(false);
+    expect(out.lines().at(-1)?.level).toBe('warn');
+    store.editOrRefuse((b) => ({ state: setWorkflowField(b, 'daily', 'name', 'Z') }));
+    expect(store.state().workflows.daily!.name).toBe('Z');
   });
-  it('keeps boards() stable until something changes', () => {
-    const st = storeWith(bwFull());
-    const a = st.boards();
-    expect(st.boards()).toBe(a);
-    st.edit('w1', (s) => moveStep(s, 'a', { x: 7, y: 7 }));
-    const b = st.boards();
-    expect(b).not.toBe(a);
-    expect(b[0]!.stepAt.get('a')).toEqual({ x: 7, y: 7 });
-    expect(st.boards()).toBe(b);
-  });
-  it('applies a stored server design and says so', () => {
-    const bw = bwFull();
-    bw.graph.design = { workflow: { updatedAt: 'x', fields: { name: 'renamed' } } };
-    const st = storeWith(bw);
-    expect(st.entry('w1')!.history.present.fields.name).toBe('renamed');
-    expect(st.entry('w1')!.unsaved).toBe(true);
-    expect(lastLine(st)).toEqual({ text: 'orders: loaded unsaved work from a save that failed', level: 'warn' });
-  });
-  it('lets Undo go back from a stored server design to the saved workflow', () => {
-    const bw = bwFull();
-    bw.graph.design = { workflow: { updatedAt: 'x', fields: { name: 'renamed' } } };
-    const st = storeWith(bw);
-    expect(canUndo(st.entry('w1')!.history)).toBe(true);
-    st.undo('w1');
-    expect(st.entry('w1')!.history.present.fields.name).toBe('orders');
-    expect(st.entry('w1')!.unsaved).toBe(false);
-  });
-  it('says once when unsaved work can no longer be kept across a refresh', () => {
-    const full = memoryStorage();
-    full.setItem = () => { throw new Error('QuotaExceededError'); };
-    const st = storeWith(bwFull(), full);
-    st.edit('w1', (s) => moveStep(s, 'a', { x: 5, y: 5 }));
-    st.edit('w1', (s) => moveStep(s, 'a', { x: 6, y: 6 }));
-    const warned = st.output.lines().filter((l) => l.text.startsWith('Unsaved work is no longer kept across refresh'));
-    expect(warned.map((l) => [l.level, l.text])).toEqual([['warn', 'Unsaved work is no longer kept across refresh: QuotaExceededError']]);
-  });
-  it('a new workflow is unsaved and notifies subscribers', () => {
-    const st = storeWith(bwFull()); let n = 0; st.subscribe(() => n++);
-    st.addWorkflow(newWorkflowState('w2', 'fresh', { x: 0, y: 0 }));
-    expect(st.entry('w2')!.unsaved).toBe(true); expect(n).toBe(1); expect(st.boards()).toHaveLength(2);
-  });
-  it('remove drops the workflow and its draft', () => {
-    const session = memoryStorage(); const st = storeWith(bwFull(), session);
-    st.edit('w1', (s) => moveStep(s, 'a', { x: 5, y: 5 }));
-    expect(session.getItem('acto.drafts')).not.toBeNull();
-    let n = 0; st.subscribe(() => n++);
-    st.remove('w1');
-    expect(st.entry('w1')).toBeNull(); expect(st.boards()).toHaveLength(0); expect(n).toBe(1);
-    expect(session.getItem('acto.drafts')).toBeNull();
-  });
-  it('a workflow gone from the board stays gone when a save in flight lands after it', () => {
-    const st = storeWith(bwFull());
-    let n = 0; st.subscribe(() => n++);
-    st.remove('w1');
-    st.replace('w1', bwFull());
-    st.adoptPresent('w1'); st.setLayout('w1', {}); st.setProblems('w1', 2);
-    expect(st.entry('w1')).toBeNull(); expect(st.boards()).toHaveLength(0); expect(n).toBe(1);
-  });
-  it('keeps the draft of a workflow a partial load did not bring back, and restores it on a later load', () => {
+  it('keeps the draft in the session across a new store', () => {
     const session = memoryStorage();
-    storeWith(bwFull(), session).edit('w1', (s) => moveStep(s, 'a', { x: 5, y: 5 }));
-    const partial = createBoardStore(createOutputStore(null, () => '00:00:00'), session);
-    partial.load({ listed: true, workflows: [], failures: [{ workflowId: 'w1', name: 'orders', detail: 'x' }] }, []);
-    expect(Object.keys(JSON.parse(session.getItem('acto.drafts')!))).toEqual(['w1']);
-    expect(storeWith(bwFull(), session).entry('w1')!.unsaved).toBe(true);
+    const a = make(session).store;
+    a.edit(nameA('A')); a.edit(nameB('B')); a.undo();
+    const { store } = make(session);
+    expect(store.state().workflows.daily!.name).toBe('A');
+    expect(store.state().workflows.hourly!.name).toBe('hourly');
+    expect(store.canUndo()).toBe(true); expect(store.canRedo()).toBe(true);
+    expect(store.base()).toEqual(board());
   });
-});
-
-describe('schemas from the schema list', () => {
-  const cfg = { id: 's9', name: 'cfg', version: '1.0.0', description: null, definition: '{"type":"object","required":["x"]}', audit: AUDIT };
-  it("give a step just added from the toolbox its processor's schemas, definitions included, without a save", () => {
-    const output = createOutputStore(null, () => '00:00:00');
-    const st = createBoardStore(output, null);
-    const p9 = { ...proc('p9', 'Fetcher'), configSchemaId: 's9' };
-    st.load({ listed: true, workflows: [bwFull()], failures: [] }, [proc('p1', 'Analyst'), p9]);
-    st.edit('w1', (s) => addStep(s, p9, { x: 40, y: 40 }, 'n1'));
-    expect(st.boards()[0]!.graph.schemas.get('s9')).toBeUndefined();
-    expect(st.schema('s9', 'w1')).toBeNull();
-    st.setSchemas([cfg]);
-    expect(st.boards()[0]!.graph.schemas.get('s9')?.definition).toBe(cfg.definition);
-    expect(st.schema('s9', 'w1')?.definition).toBe(cfg.definition);
-    // the list only fills gaps: nothing becomes unsaved
-    expect(st.entry('w1')!.history.past).toHaveLength(1);
+  it('keeps the draft rows with the stamps they were read with', () => {
+    const session = memoryStorage();
+    make(session).store.edit(nameA('A'));
+    const fresh = board();
+    fresh.workflows.hourly = { ...fresh.workflows.hourly!, updatedAt: 'fresher' };
+    const store = createBoardStore(createOutputStore(null), session);
+    store.load(fresh);
+    expect(store.base().workflows.hourly!.updatedAt).toBe('fresher');
+    expect(store.state().workflows.daily!.updatedAt).toBe('2026-11-01T00:00:00Z');
+    const old = board();
+    old.workflows.daily = { ...old.workflows.daily!, updatedAt: 'old' };
+    const s2 = memoryStorage();
+    const a = createBoardStore(createOutputStore(null), s2); a.load(old); a.edit(nameA('A'));
+    const b = createBoardStore(createOutputStore(null), s2); b.load(board());
+    expect(b.state().workflows.daily!.updatedAt).toBe('old');
   });
-  it("never replaces a schema the workflow's own graph holds", () => {
-    const b = bwFull();
-    b.graph.schemas.set('s9', { ...cfg, name: 'from-graph' });
-    const st = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
-    st.load({ listed: true, workflows: [b], failures: [] }, [{ ...proc('p1', 'Analyst'), configSchemaId: 's9' }]);
-    st.setSchemas([cfg]);
-    expect(st.boards()[0]!.graph.schemas.get('s9')?.name).toBe('from-graph');
-    expect(st.schema('s9', 'w1')?.name).toBe('from-graph');
+  it('saved clears history and draft', () => {
+    const session = memoryStorage();
+    const { store } = make(session);
+    store.edit(nameA('A')); store.setFailures(new Map([['workflow:daily', 'bad']]));
+    const fresh = board(); fresh.workflows.daily = { ...fresh.workflows.daily!, name: 'A' };
+    store.saved(fresh);
+    expect(store.state()).toBe(fresh); expect(store.base()).toBe(fresh);
+    expect(store.canUndo()).toBe(false); expect(store.failures().size).toBe(0);
+    expect(session.getItem('acto.board')).toBeNull();
   });
-});
-
-describe('the shared-entity lock', () => {
-  /** w1 'orders' and w2 'billing' both reach step s1 'extract'; w3 'audit' too when asked. */
-  function shared(withAudit = false) {
-    const mk = (id: string, name: string, steps: string[]) => {
-      const b = bw(id, steps);
-      b.graph.workflow = { ...b.graph.workflow, name };
-      b.graph.steps.set('s1', { ...b.graph.steps.get('s1')!, name: 'extract' });
-      return b;
-    };
-    const ws = [mk('w1', 'orders', ['s1', 't', 'u']), mk('w2', 'billing', ['s1'])];
-    if (withAudit) ws.push(mk('w3', 'audit', ['s1']));
-    const output = createOutputStore(null, () => '00:00:00');
-    const st = createBoardStore(output, null);
-    st.load({ listed: true, workflows: ws, failures: [] }, []);
-    return Object.assign(st, { output });
-  }
-  const rename = (v: string) => (s: WorkflowState) => setStepField(s, 's1', 'name', v);
-
-  it('refuses a change to a step another workflow is changing, and records nothing', () => {
-    const st = shared();
-    st.edit('w1', rename('one'));
-    st.edit('w2', rename('two'));
-    expect(lastLine(st)).toEqual({ text: 'step extract is being changed in orders — save or undo it there first', level: 'warn' });
-    expect(st.entry('w2')!.history.past).toEqual([]);
-    expect(st.entry('w2')!.history.present.steps.s1!.name).toBe('extract');
-    expect(st.lockedBy('step:s1', 'w2')).toBe('w1');
-    expect(st.lockedBy('step:s1', 'w1')).toBeNull();
+  it('drops a workflow from base and every history state, keeping earlier edits', () => {
+    const { store } = make();
+    store.edit((b) => deleteSteps(b, ['lonely']));
+    store.edit(nameA('A'));
+    store.edit((b) => setStepField(b, 'expand', 'name', 'e2'));
+    store.undo();
+    store.dropWorkflow('daily');
+    expect(store.base().workflows.daily).toBeUndefined();
+    expect(store.state().workflows.daily).toBeUndefined();
+    expect(store.state().steps.lonely).toBeUndefined();
+    store.redo();
+    expect(store.state().workflows.daily).toBeUndefined();
+    expect(store.state().steps.expand!.name).toBe('e2');
+    // the rename of the dropped workflow became a no-op step and was merged away
+    store.undo();
+    expect(store.state().steps.lonely).toBeUndefined();
+    store.undo();
+    expect(store.state().steps.lonely).toBeDefined();
+    expect(store.canUndo()).toBe(false);
   });
-  it('lets the other workflow change it once the first undoes back', () => {
-    const st = shared();
-    st.edit('w1', rename('one'));
-    st.undo('w1');
-    expect(st.lockedBy('step:s1', 'w2')).toBeNull();
-    st.edit('w2', rename('two'));
-    expect(st.entry('w2')!.history.present.steps.s1!.name).toBe('two');
+  it('never breaks editing on blocked storage', () => {
+    const { store, out } = make(blocked());
+    store.edit(nameA('A')); store.edit(nameA('B'));
+    expect(store.state().workflows.daily!.name).toBe('B');
+    store.undo();
+    expect(store.state().workflows.daily!.name).toBe('A');
+    expect(out.lines().filter((l) => l.level === 'warn').length).toBe(1);
+    const again = createBoardStore(createOutputStore(null), blocked());
+    expect(() => again.load(board())).not.toThrow();
   });
-  it('refuses a redo that would change what another workflow now holds', () => {
-    const st = shared();
-    st.edit('w1', rename('one'));
-    st.undo('w1');
-    st.edit('w2', rename('two'));
-    st.redo('w1');
-    expect(lastLine(st)).toEqual({ text: 'step extract is being changed in billing — save or undo it there first', level: 'warn' });
-    expect(st.entry('w1')!.history.present.steps.s1!.name).toBe('extract');
-    expect(st.entry('w1')!.history.future).toHaveLength(1);
-  });
-  it('refuses editOrRefuse the same way', () => {
-    const st = shared();
-    st.edit('w1', rename('one'));
-    st.editOrRefuse('w2', (s) => ({ state: rename('two')(s) }));
-    expect(st.entry('w2')!.history.past).toEqual([]);
-    expect(lastLine(st).text).toBe('step extract is being changed in orders — save or undo it there first');
-  });
-  it('refuses an undo that would change what another workflow now holds', () => {
-    const st = shared();
-    st.edit('w2', rename('two'));
-    st.edit('w2', rename('extract'));
-    st.edit('w1', rename('one'));
-    st.undo('w2');
-    expect(lastLine(st).text).toBe('step extract is being changed in orders — save or undo it there first');
-    expect(st.entry('w2')!.history.past).toHaveLength(2);
-  });
-  it('releases the lock when the holder saves, adopts its present, or goes away', () => {
-    const release: Record<string, (st: ReturnType<typeof shared>) => void> = {
-      replace: (st) => st.replace('w1', st.boards()[0]!),
-      adoptPresent: (st) => st.adoptPresent('w1'),
-      remove: (st) => st.remove('w1'),
-    };
-    for (const [how, fn] of Object.entries(release)) {
-      const st = shared();
-      st.edit('w1', rename('one'));
-      expect(st.lockedBy('step:s1', 'w2')).toBe('w1');
-      fn(st);
-      expect([how, st.lockedBy('step:s1', 'w2')]).toEqual([how, null]);
-      st.edit('w2', rename('two'));
-      expect([how, st.entry('w2')!.history.present.steps.s1!.name]).toEqual([how, 'two']);
-    }
-  });
-  it('a move of a shared step is never locked', () => {
-    const st = shared();
-    st.edit('w1', rename('one'));
-    st.edit('w2', (s) => moveStep(s, 's1', { x: 300, y: 300 }));
-    expect(st.entry('w2')!.history.past).toHaveLength(1);
-  });
-  it('says once that wiring a shared step changes what the other workflow runs', () => {
-    const st = shared();
-    st.editOrRefuse('w1', (s) => addWire(s, 's1', 't'));
-    st.editOrRefuse('w1', (s) => addWire(s, 's1', 'u'));
-    st.edit('w1', (s) => removeWire(s, 's1', 'u'));
-    const said = st.output.lines().filter((l) => l.text.includes('is shared with'));
-    expect(said.map((l) => l.text)).toEqual(['extract is shared with billing: changing its wires changes what billing runs too']);
-  });
-  it('names every other workflow, and says it again after undoing back', () => {
-    const st = shared(true);
-    st.editOrRefuse('w1', (s) => addWire(s, 's1', 't'));
-    st.undo('w1');
-    st.editOrRefuse('w1', (s) => addWire(s, 's1', 't'));
-    const said = st.output.lines().filter((l) => l.text.includes('is shared with')).map((l) => l.text);
-    expect(said).toEqual([
-      'extract is shared with billing, audit: changing its wires changes what billing, audit run too',
-      'extract is shared with billing, audit: changing its wires changes what billing, audit run too',
-    ]);
-  });
-  it('never strands two workflows that both came back holding a change to it', () => {
-    const draftOf = (id: 'w1' | 'w2', name: string) => {
-      const session = memoryStorage();
-      const st = createBoardStore(createOutputStore(null, () => '00:00:00'), session);
-      st.load({ listed: true, workflows: shared().boards(), failures: [] }, []);
-      st.edit(id, rename(name));
-      return JSON.parse(session.getItem('acto.drafts')!) as Record<string, unknown>;
-    };
-    const both = memoryStorage();
-    both.setItem('acto.drafts', JSON.stringify({ ...draftOf('w1', 'one'), ...draftOf('w2', 'two') }));
-    const st = createBoardStore(createOutputStore(null, () => '00:00:00'), both);
-    st.load({ listed: true, workflows: shared().boards(), failures: [] }, []);
-    expect([st.entry('w1')!.unsaved, st.entry('w2')!.unsaved]).toEqual([true, true]);
-    expect([st.lockedBy('step:s1', 'w1'), st.lockedBy('step:s1', 'w2')]).toEqual([null, null]);
-    st.undo('w2');
-    st.undo('w1');
-    expect([st.entry('w1')!.unsaved, st.entry('w2')!.unsaved]).toEqual([false, false]);
-  });
-});
-
-describe('rebase: a sharer re-read after another workflow saved', () => {
-  /** w1 'orders' [s1, t] and w2 'billing' [s1 → s9] share s1 'extract'. */
-  function sharedPair() {
-    const w1 = bw('w1', ['s1', 't']);
-    w1.graph.workflow = { ...w1.graph.workflow, name: 'orders' };
-    const w2 = bw('w2', ['s1', 's9'], [{ id: 's1>s9', from: 's1', to: 's9', condition: 4 }]);
-    w2.graph.workflow = { ...w2.graph.workflow, name: 'billing' };
-    const output = createOutputStore(null, () => '00:00:00');
-    const st = createBoardStore(output, null);
-    st.load({ listed: true, workflows: [w1, w2], failures: [] }, []);
-    return st;
-  }
-  /** w2 as re-read after w1 renamed s1 and wired it to n (which w2 now reaches too). */
-  function reread() {
-    const r = bw('w2', ['s1', 's9', 'n'], [
-      { id: 's1>s9', from: 's1', to: 's9', condition: 4 }, { id: 's1>n', from: 's1', to: 'n', condition: 4 },
-    ]);
-    r.graph.workflow = { ...r.graph.workflow, name: 'billing' };
-    r.graph.steps.set('s1', { ...r.graph.steps.get('s1')!, name: 'renamed', updatedAt: 'T2' });
-    r.stepAt.set('s1', { x: 999, y: 999 });
-    return r;
-  }
-
-  it('takes the re-read values and stamps of the changed entities and keeps its own unsaved work', () => {
-    const st = sharedPair();
-    const s1At = { ...st.entry('w2')!.history.present.steps.s1!.at };
-    st.edit('w2', (s) => moveStep(s, 's9', { x: 400, y: 300 }));
-    st.edit('w2', (s) => setProcessorField(s, proc('p-s9', 's9-proc'), 'name', 'mine'));
-    const procs = st.entry('w2')!.history.present.processors;
-    st.rebase('w2', reread(), new Set(['step:s1']));
-    const e = st.entry('w2')!;
-    expect(e.history.present.steps.s1).toMatchObject({ name: 'renamed', updatedAt: 'T2', at: s1At, nextStepIds: ['s9', 'n'] });
-    expect(e.history.present.steps.s9!.at).toEqual({ x: 400, y: 300 });
-    expect(e.history.present.processors).toEqual(procs);
-    expect(e.unsaved).toBe(true);
-    expect(e.base!.steps.s1!.name).toBe('renamed');
-    expect(e.history.past.every((s) => s.steps.s1!.name === 'renamed')).toBe(true);
-    st.undo('w2');
-    st.undo('w2');
-    expect(st.entry('w2')!.unsaved).toBe(false);
-  });
-  it('places a newly reached step right of its source', () => {
-    const st = sharedPair();
-    const s1At = { ...st.entry('w2')!.history.present.steps.s1!.at };
-    st.rebase('w2', reread(), new Set(['step:s1']));
-    expect(st.entry('w2')!.history.present.steps.n!.at).toEqual({ x: s1At.x + 210 + 60, y: s1At.y });
-    expect(st.boards()[1]!.stepIds).toContain('n');
-  });
-  it('leaves entities not named in the keys as they were', () => {
-    const st = sharedPair();
-    st.rebase('w2', reread(), new Set());
-    expect(st.entry('w2')!.history.present.steps.s1!.name).toBe('s1-name');
-  });
-  it('re-reads only the changed entities: anything else the re-read differs in stays as B had it', () => {
-    const st = sharedPair();
-    const r = reread();
-    r.graph.steps.set('s9', { ...r.graph.steps.get('s9')!, name: 'changed-elsewhere', updatedAt: 'T9' });
-    r.graph.workflow = { ...r.graph.workflow, updatedAt: 'W2', name: 'renamed-elsewhere' };
-    st.rebase('w2', r, new Set(['step:s1']));
-    const e = st.entry('w2')!;
-    expect(e.unsaved).toBe(false);
-    expect(e.base!.steps.s9).toMatchObject({ name: 's9-name', updatedAt: '' });
-    expect(e.base!.updatedAt).toBe('');
-    expect(e.base!.fields.name).toBe('billing');
-    expect(e.base!.steps.s1).toMatchObject({ name: 'renamed', updatedAt: 'T2' });
-    expect(st.boards()[1]!.graph.workflow.name).toBe('billing');
-  });
-  it('a step this workflow removed here comes back when a changed step now wires to it, never as a dangling wire', () => {
-    const w1 = bw('w1', ['s1', 'n']);
-    const w2 = bw('w2', ['s1', 'm', 'n'], [{ id: 'm>n', from: 'm', to: 'n', condition: 4 }]);
-    const st = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
-    st.load({ listed: true, workflows: [w1, w2], failures: [] }, []);
-    st.editOrRefuse('w2', (s) => removeStepHere(s, 'n', new Set(['s1', 'n'])));
-    expect(st.entry('w2')!.history.present.steps.n).toBeUndefined();
-    const r = bw('w2', ['s1', 'm', 'n'], [{ id: 's1>n', from: 's1', to: 'n', condition: 4 }, { id: 'm>n', from: 'm', to: 'n', condition: 4 }]);
-    st.rebase('w2', r, new Set(['step:s1']));
-    const present = st.entry('w2')!.history.present;
-    const s1 = present.steps.s1!;
-    expect(s1.nextStepIds).toEqual(['n']);
-    expect(present.steps.n!.at).toEqual({ x: s1.at.x + 210 + 60, y: s1.at.y });
-    for (const x of Object.values(present.steps)) for (const to of x.nextStepIds) expect([x.id, to, !!present.steps[to]]).toEqual([x.id, to, true]);
-  });
-  it('keeps the save lock', () => {
-    const st = sharedPair();
-    st.setSaving('w2', true);
-    st.rebase('w2', reread(), new Set(['step:s1']));
-    expect(st.entry('w2')!.saving).toBe(true);
-  });
-  describe('begin, arrive, finish', () => {
-    const fresh = (session: Storage) => {
-      const output = createOutputStore(null, () => '00:00:00');
-      return Object.assign(createBoardStore(output, session), { output });
-    };
-    const drafted = () => {
-      const session = memoryStorage();
-      const a = storeWith(bwFull(), session);
-      a.edit('w1', (s) => moveStep(s, 'a', { x: 77, y: 88 }));
-      const nw = newWorkflowState('n1', 'brand-new', { x: 2000, y: 0 });
-      a.addWorkflow(nw);
-      // a draft for a workflow that will not load
-      const raw = JSON.parse(session.getItem('acto.drafts')!);
-      raw.w3 = { ...raw.w1, updatedAt: 'later' };
-      session.setItem('acto.drafts', JSON.stringify(raw));
-      return session;
-    };
-    it('adds one workflow per arrival, applying its draft, and keeps the rest of the drafts until finish', () => {
-      const session = drafted();
-      const st = fresh(session);
-      st.begin([proc('p1', 'Analyst')]);
-      expect(st.boards()).toHaveLength(0);
-      st.arrive(bwFull());
-      expect(st.boards()).toHaveLength(1);
-      expect(st.boards()[0]!.stepAt.get('a')).toEqual({ x: 77, y: 88 });
-      expect(st.entry('w1')!.unsaved).toBe(true);
-      // mid-load the session still holds the drafts of workflows not yet arrived
-      expect(Object.keys(JSON.parse(session.getItem('acto.drafts')!)).sort()).toEqual(['n1', 'w1', 'w3']);
-      expect(st.entry('n1')).toBeNull();
-      st.finish({ listed: true, workflows: [bwFull()], failures: [] });
-      expect(st.entry('n1')).not.toBeNull();
-      expect(st.boards()).toHaveLength(2);
-      expect(Object.keys(JSON.parse(session.getItem('acto.drafts')!)).sort()).toEqual(['n1', 'w1', 'w3']);
-    });
-    it('finish moves a frame the user has not touched to its final slot, without marking it unsaved', () => {
-      const st = fresh(memoryStorage());
-      st.begin([proc('p1', 'Analyst')]);
-      const first = bwFull();
-      st.arrive(first);
-      const final = { ...first.frame, x: 4000, y: 10 };
-      st.finish({ listed: true, workflows: [{ ...first, frame: final }], failures: [], finalFrames: new Map([['w1', final]]) });
-      expect(st.boards()[0]!.frame).toMatchObject({ x: 4000, y: 10 });
-      expect(st.entry('w1')!.unsaved).toBe(false);
-      expect(st.entry('w1')!.history.past).toHaveLength(0);
-    });
-    it('finish leaves a frame the user already moved', () => {
-      const st = fresh(memoryStorage());
-      st.begin([proc('p1', 'Analyst')]);
-      const first = bwFull();
-      st.arrive(first);
-      st.edit('w1', (s) => ({ ...s, frame: { ...s.frame, x: 123 } }));
-      st.finish({ listed: true, workflows: [], failures: [], finalFrames: new Map([['w1', { ...first.frame, x: 4000 }]]) });
-      expect(st.boards()[0]!.frame.x).toBe(123);
-      expect(st.entry('w1')!.history.past[0]!.frame.x).toBe(4000);
-    });
-    it('load is begin, arrive each, finish', () => {
-      const a = fresh(drafted());
-      a.load({ listed: true, workflows: [bwFull()], failures: [] }, [proc('p1', 'Analyst')]);
-      const b = fresh(drafted());
-      b.begin([proc('p1', 'Analyst')]); b.arrive(bwFull()); b.finish({ listed: true, workflows: [bwFull()], failures: [] });
-      expect(b.boards().map((x) => x.graph.workflow.id)).toEqual(a.boards().map((x) => x.graph.workflow.id));
-    });
+  it('tracks problems and notifies subscribers', () => {
+    const { store } = make();
+    let n = 0; const off = store.subscribe(() => n++);
+    store.setProblems('daily', 2);
+    expect(store.problems('daily')).toBe(2); expect(store.problems('hourly')).toBe(0);
+    store.edit(nameA('A'));
+    expect(n).toBeGreaterThan(1);
+    off();
   });
 });
