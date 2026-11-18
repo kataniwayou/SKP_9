@@ -69,7 +69,8 @@ describe('board store', () => {
     const { store } = make(session);
     expect(store.state().workflows.daily!.name).toBe('A');
     expect(store.state().workflows.hourly!.name).toBe('hourly');
-    expect(store.canUndo()).toBe(true); expect(store.canRedo()).toBe(true);
+    // undo history is not kept across a reload: only the unsaved board is
+    expect(store.canUndo()).toBe(false); expect(store.canRedo()).toBe(false);
     expect(store.base()).toEqual(board());
   });
   it('keeps the draft rows with the stamps they were read with', () => {
@@ -169,5 +170,116 @@ describe('load with a placed present', () => {
     const r = raw();
     again.load(r, placed(r));
     expect(again.state().workflows.daily!.name).toBe('kept');
+  });
+});
+
+describe('a restored draft replays only the designer changes onto the fresh read', () => {
+  const ops = (s: ReturnType<typeof createBoardStore>) => boardChanges(s.base(), s.state()).map((c) => `${c.op} ${c.table}/${c.id}`);
+  const reload = (session: Storage, fresh: ReturnType<typeof board>) => {
+    const s = createBoardStore(createOutputStore(null), session);
+    s.load(fresh);
+    return s;
+  };
+
+  it('a row created elsewhere after the draft is never deleted', () => {
+    const session = memoryStorage();
+    make(session).store.edit(nameA('A'));
+    const fresh = board();
+    fresh.steps.other = { ...fresh.steps.lonely!, id: 'other', name: 'other', updatedAt: '2026-11-05T00:00:00Z' };
+    const store = reload(session, fresh);
+    expect(ops(store)).toEqual(['update workflows/daily']);
+    expect(store.state().steps.other!.name).toBe('other');
+  });
+
+  it('a row changed elsewhere that the designer never touched takes the fresh values and sends nothing', () => {
+    const session = memoryStorage();
+    make(session).store.edit(nameA('A'));
+    const fresh = board();
+    fresh.workflows.hourly = { ...fresh.workflows.hourly!, name: 'renamed-elsewhere', updatedAt: 'fresher' };
+    fresh.steps.expand = { ...fresh.steps.expand!, name: 'e-elsewhere', updatedAt: 'fresher' };
+    const store = reload(session, fresh);
+    expect(ops(store)).toEqual(['update workflows/daily']);
+    expect(store.state().workflows.hourly!.name).toBe('renamed-elsewhere');
+    expect(store.state().steps.expand!.name).toBe('e-elsewhere');
+  });
+
+  it('a row the designer changed keeps their version with the stamp the draft read (also changed elsewhere: a 409 from BaseAPI)', () => {
+    const session = memoryStorage();
+    make(session).store.edit(nameA('A'));
+    const fresh = board();
+    fresh.workflows.daily = { ...fresh.workflows.daily!, description: 'elsewhere', updatedAt: 'fresher' };
+    const store = reload(session, fresh);
+    const c = boardChanges(store.base(), store.state());
+    expect(c).toHaveLength(1);
+    expect(c[0]).toMatchObject({ op: 'update', table: 'workflows', id: 'daily', updatedAt: '2026-11-01T00:00:00Z' });
+    expect(store.state().workflows.daily!.name).toBe('A');
+  });
+
+  it('a row the designer deleted stays deleted with the stamp the draft read; a created row is added', () => {
+    const session = memoryStorage();
+    const a = make(session).store;
+    a.edit((b) => deleteSteps(b, ['lonely']));
+    a.edit((b) => ({ ...b, caches: { ...b.caches, n1: { ...b.caches.c1!, id: 'n1', name: 'new-cache-1', root: 'n', updatedAt: null } } }));
+    const fresh = board();
+    fresh.steps.lonely = { ...fresh.steps.lonely!, updatedAt: 'fresher' };
+    const store = reload(session, fresh);
+    const c = boardChanges(store.base(), store.state());
+    expect(c.map((x) => `${x.op} ${x.table}/${x.id}`)).toEqual(['create caches/n1', 'delete steps/lonely']);
+    expect(c.find((x) => x.id === 'lonely')!.updatedAt).toBe('2026-11-01T00:00:00Z');
+    expect(store.state().steps.lonely).toBeUndefined();
+  });
+
+  it('a row the designer deleted that is gone from the fresh read too is left alone', () => {
+    const session = memoryStorage();
+    make(session).store.edit((b) => deleteSteps(b, ['lonely']));
+    const fresh = board();
+    delete fresh.steps.lonely;
+    expect(ops(reload(session, fresh))).toEqual([]);
+  });
+
+  it('the draft holds the base and the present, not the history', () => {
+    const session = memoryStorage();
+    const { store } = make(session);
+    for (let i = 0; i < 5; i++) store.edit(nameA(`A${i}`));
+    const d = JSON.parse(session.getItem('acto.board')!);
+    expect(Object.keys(d).sort()).toEqual(['base', 'present']);
+    expect(d.present.workflows.daily.name).toBe('A4');
+    expect(d.base.workflows.daily.name).toBe('daily');
+  });
+
+  it('a draft of the old shape (no base) is not restored and is removed', () => {
+    const session = memoryStorage({ 'acto.board': JSON.stringify({ past: [], present: { ...board(), workflows: {} }, future: [] }) });
+    const { store } = make(session);
+    expect(Object.keys(store.state().workflows).sort()).toEqual(['daily', 'hourly']);
+    expect(session.getItem('acto.board')).toBeNull();
+  });
+
+  it('a clean board writes no draft: after load, after undo back to clean, and after a delete leaves it clean', () => {
+    const session = memoryStorage();
+    const { store } = make(session);
+    expect(session.getItem('acto.board')).toBeNull();
+    store.edit(nameA('A'));
+    expect(session.getItem('acto.board')).not.toBeNull();
+    store.undo();
+    expect(session.getItem('acto.board')).toBeNull();
+    store.edit(nameA('A'));
+    store.dropWorkflow('daily');
+    expect(store.unsaved().size).toBe(0);
+    expect(session.getItem('acto.board')).toBeNull();
+  });
+
+  it('a draft write that fails removes the stale draft and warns once', () => {
+    const inner = memoryStorage();
+    let full = false;
+    const flaky: Storage = { ...inner, get length() { return inner.length; },
+      getItem: (k) => inner.getItem(k), removeItem: (k) => inner.removeItem(k), key: (i) => inner.key(i), clear: () => inner.clear(),
+      setItem: (k, v) => { if (full) throw new Error('QuotaExceededError'); inner.setItem(k, v); } };
+    const { store, out } = make(flaky);
+    store.edit(nameA('A'));
+    expect(inner.getItem('acto.board')).not.toBeNull();
+    full = true;
+    store.edit(nameA('B')); store.edit(nameA('C'));
+    expect(inner.getItem('acto.board')).toBeNull();
+    expect(out.lines().filter((l) => l.level === 'warn').length).toBe(1);
   });
 });
