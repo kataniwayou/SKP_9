@@ -38,6 +38,7 @@ Goals
 
 Non-goals
 - No multi-select of triangles [user].
+  → superseded by 2026-11-18-acto-inspector-tabs-design.md §4 (Ctrl+click selects several triangles).
 - No change to how workflows run, start, stop or snapshot their payloads.
 - No change to WorkflowStudio; it keeps running side by side on its own endpoints and `Layout` column. **Acto is the
   source of truth for designers** [user]; WorkflowStudio is best-effort on data Acto creates (shared and orphan steps,
@@ -127,6 +128,7 @@ orphans included [call].
 
 - **Steps**: cards as today (processor icon, name, processor, footer, health dot), one per step in the database, at
   their stored location. No FIRST/PARKED tabs.
+  → superseded by 2026-11-18-acto-inspector-tabs-design.md §2 (the step card is the React Flow BaseNode look; nothing dims).
 - **Wires**: as today — one per link, colour/letter/arrowhead from the target step's entry condition.
 - **Caches**: blocks on the board at their location [user] (no chips).
 - **Workflows**: a triangle (tip pointing right by default), with the running dot (green/red/amber while unknown) and
@@ -143,7 +145,9 @@ orphans included [call].
 - **Click a triangle**: it is selected; the steps, wires and caches it reaches/links light up and every other item
   dims [call: dim, shown in the mockup and liked]; each lit step's footer shows that workflow's payload summary.
   Toolbar: **Start/Stop · Delete** (no Save — Save is board-wide).
+  → superseded by 2026-11-18-acto-inspector-tabs-design.md §4 (nothing dims; the stream is marked in the workflow's colour) and §5 (the Inspector is tabs).
 - **Click a step**:
+  → superseded by 2026-11-18-acto-inspector-tabs-design.md §5 (tabs: Step · Processor · one per selected workflow).
   - with no triangle selected → Inspector shows the shared fields (name, processor, entry condition, processor and
     schema slots); no payload.
   - with a triangle selected → the same shared fields marked "shared", plus **Payload · <workflow>** [user: click the
@@ -156,6 +160,7 @@ orphans included [call].
   the workflow no longer reaches simply stays in this list — no cleanup rule [user: follows the database].
 - **Multi-select**: Ctrl+click on steps, wires, caches (not triangles) [user]; bar = actions common to all
   (Copy · Delete for steps/caches; Delete for wires); numbered badges as today.
+  → superseded by 2026-11-18-acto-inspector-tabs-design.md §4 (triangles can be Ctrl+clicked; ghosts too).
 - **Toolbars**: triangle = Start/Stop · Delete; step = Copy · Delete; cache = Delete; wire = Delete; entry arrow =
   Delete; cache dashed line = Delete. Paste = Ctrl+V only. Delete key does nothing. No key hints (unchanged rules).
 
@@ -219,6 +224,7 @@ parked concept, derived first steps and the "stored entry steps differ" marking,
 (`changedEntities`/`holders`/`lockedBy`), rebase after save, per-workflow Save, per-workflow histories and drafts,
 reading/writing `Workflow.Layout`, the `board` field in layouts, workflow multi-select, and the matching chat tools
 and prompt text.
+→ "workflow multi-select" removal superseded by 2026-11-18-acto-inspector-tabs-design.md §4.
 
 ## 11. Testing
 

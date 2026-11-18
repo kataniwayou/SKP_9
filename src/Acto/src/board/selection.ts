@@ -37,3 +37,12 @@ export function selectPick(prev: SelectionState, p: Pick | null, additive: boole
   }
   return { workflows: prev.workflows, picks: toggled() };
 }
+
+/**
+ * What the chat's `pick` does to the selection: the picks are replaced; picked triangles become the selected workflows
+ * (in the order given), otherwise the selected workflows stay as they are, as with a click on a step.
+ */
+export function withPicks(prev: SelectionState, picks: Pick[]): SelectionState {
+  const ids = picks.flatMap((p) => (p.kind === 'workflow' ? [p.id] : []));
+  return { workflows: ids.length > 0 ? ids : prev.workflows, picks };
+}

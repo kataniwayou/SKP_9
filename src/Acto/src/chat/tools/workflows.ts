@@ -55,7 +55,7 @@ const save: ToolDef = {
     if (answer === undefined) return { kind: 'ask', question: { text: `Save the board: ${n} change${n === 1 ? '' : 's'}?`, choices: ['Save', 'Cancel'] } };
     if (answer !== 'Save') return fail('the user declined', 'user declined: save');
     const before = ctx.output.lines().at(-1);
-    const r = await saveBoard(ctx.api, ctx.store, ctx.output);
+    const r = await saveBoard(ctx.api, ctx.store, ctx.output, ctx.ghosts);
     const lines = linesSince(ctx, before);
     const entries = lines.map((l) => ({ kind: 'output' as const, text: l.text, level: l.level, name: 'board' }));
     const said = textOf(lines, r);

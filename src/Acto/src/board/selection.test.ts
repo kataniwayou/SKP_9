@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hueOf } from './hues';
-import { selectPick, type Pick, type SelectionState } from './selection';
+import { selectPick, withPicks, type Pick, type SelectionState } from './selection';
 
 const wf = (id: string): Pick => ({ kind: 'workflow', id });
 const st = (id: string): Pick => ({ kind: 'step', id });
@@ -52,5 +52,15 @@ describe('selectPick', () => {
     expect(hueOf({ workflows: ['b', 'a'] }, 'a')).toBe('#7C3AED');
     expect(hueOf({ workflows: ['b', 'a'] }, 'b')).toBe('#FF0072');
     expect(hueOf({ workflows: ['b', 'a'] }, 'z')).toBeNull();
+  });
+});
+
+describe('withPicks (the chat pick tool)', () => {
+  it('picked steps keep the selected workflows', () => {
+    expect(withPicks({ workflows: ['a', 'b'], picks: [wf('a'), wf('b')] }, [st('s')])).toEqual({ workflows: ['a', 'b'], picks: [st('s')] });
+    expect(withPicks({ workflows: ['a'], picks: [wf('a')] }, [])).toEqual({ workflows: ['a'], picks: [] });
+  });
+  it('picked triangles become the selected workflows', () => {
+    expect(withPicks({ workflows: ['x'], picks: [] }, [wf('a'), wf('b')])).toEqual({ workflows: ['a', 'b'], picks: [wf('a'), wf('b')] });
   });
 });

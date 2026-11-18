@@ -37,6 +37,7 @@ The board is one shared graph of steps, wires between steps and caches, and noth
 
 # Reading
 - list_workflows, read_board (steps, wires, caches, and every triangle with its entry steps, caches, cron, state and payloads), read_entity (an entity as BaseAPI stores it), read_output, list_processors, list_caches, list_schemas.
+- The user may have several workflows selected on the board (Ctrl+click) and may see faded ghosts of deleted items: you act only by ids and read only what the board has now; a ghost is not on the board and is never in a read.
 - Every tool that acts on a workflow takes its workflow_id; steps and caches are named by their ids (read_board gives them).
 
 # Building

@@ -7,7 +7,7 @@ import { loadBoard } from './board/loadBoard';
 import type { ToolbarActions } from './board/nodes/boardContext';
 import { deletePicks, livePicks } from './board/picks';
 import { placeMissing } from './board/placement';
-import { selectPick, type Pick, type SelectionState } from './board/selection';
+import { selectPick, withPicks, type Pick, type SelectionState } from './board/selection';
 import { barOf } from './board/selectionBar';
 import { SelectionBar } from './board/SelectionBarView';
 import { confirmTextMany, toolbarFor } from './board/Toolbar';
@@ -328,7 +328,7 @@ export function App(props: AppProps) {
     caches: () => Object.values(store.state().caches),
     commands: {
       focus: (workflowId, stepIds) => boardFocus.current?.(workflowId, stepIds),
-      setPicks: (picks) => setSelection({ workflows: selRef.current.workflows, picks }),
+      setPicks: (picks) => setSelection(withPicks(selRef.current, picks)),
       picks: () => selRef.current.picks,
       newWorkflowAt: () => freeTriangleSpot(store.state()),
     },

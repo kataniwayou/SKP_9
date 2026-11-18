@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createGhostStore } from '../../design/ghosts';
 import { shared } from '../../design/boardFixtures';
 import { moveItems } from '../../design/edits';
 import { call, done, setup } from './testContext';
@@ -195,11 +196,43 @@ describe('save', () => {
     expect(api.applyModel).toHaveBeenCalledTimes(1);
     expect(o.result).toContain('Saved 1 change');
   });
+
+  it('gives the page ghost ghost store the made ids (the same remap as the Save button)', async () => {
+    const { ctx, store, api } = setup();
+    const remap = vi.fn();
+    ctx.ghosts = { ghosts: () => [], get: () => undefined, remove: vi.fn(), remap, subscribe: () => () => {} };
+    api.applyModel.mockResolvedValue({ ok: true, value: { ok: true, applied: true, results: [], made: { tmp1: 'real1' } } });
+    store.edit((b) => moveItems(b, [{ ref: { kind: 'step', id: 'expand' }, at: { x: 5, y: 5 } }]));
+    done(await call(ctx, 'save', {}, 'Save'));
+    expect(remap).toHaveBeenCalledWith({ tmp1: 'real1' });
+  });
 });
 
 describe('the removed tools', () => {
   it('create_assignment, read_design and anything about frames are gone', async () => {
     const { ctx } = setup();
     for (const t of ['create_assignment', 'read_design', 'open_workflow']) expect(done(await call(ctx, t)).ok).toBe(false);
+  });
+});
+
+describe('ghosts and the selection', () => {
+  it('the board read never lists a ghost: a deleted triangle is gone from it though the page still shows its ghost', async () => {
+    const { ctx, store } = setup();
+    const ghosts = createGhostStore(store);
+    ctx.ghosts = ghosts;
+    const asked = await call(ctx, 'delete_workflow', { workflow_id: 'hourly' });
+    done(await call(ctx, 'delete_workflow', {}, 'Delete', (asked as { question: { pin: string } }).question.pin));
+    expect(ghosts.ghosts().some((g) => g.key === 'workflow:hourly')).toBe(true);
+    const d = JSON.parse(done(await call(ctx, 'read_board')).result);
+    expect(d.workflows.map((w: { id: string }) => w.id)).toEqual(['daily']);
+    expect(JSON.stringify(d)).not.toContain('hourly');
+    expect(JSON.parse(done(await call(ctx, 'list_workflows')).result).map((w: { id: string }) => w.id)).toEqual(['daily']);
+  });
+
+  it('pick keeps the selected workflows for other items and lets triangles be picked together, not mixed', async () => {
+    const { ctx } = setup();
+    expect(done(await call(ctx, 'pick', { items: [{ kind: 'workflow', id: 'daily' }, { kind: 'workflow', id: 'hourly' }] })).ok).toBe(true);
+    expect(ctx.commands.picks()).toEqual([{ kind: 'workflow', id: 'daily' }, { kind: 'workflow', id: 'hourly' }]);
+    expect(done(await call(ctx, 'pick', { items: [{ kind: 'workflow', id: 'daily' }, { kind: 'step', id: 'fetch' }] })).ok).toBe(false);
   });
 });
