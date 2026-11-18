@@ -21,7 +21,7 @@ import { addEntry, addWire, linkCache, moveItems } from './design/edits';
 import { newId } from './design/ids';
 import { nudgeKey, pasteKey, undoRedoKey } from './design/keys';
 import { unsavedMarks } from './design/changes';
-import { saveBoard } from './design/saveBoard';
+import { saveBoard, takeStored } from './design/saveBoard';
 import { InspectorPanel } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
 import { LiveStoreProvider } from './live/LiveContext';
@@ -36,7 +36,7 @@ import { watchTransitions } from './operate/transitions';
 import { OutputPanel } from './output/OutputPanel';
 import { createOutputStore, OutputProvider, type OutputStore } from './output/outputStore';
 import { readView, writeView, type SavedView } from './session/view';
-import { SaveButton } from './shell/SaveButton';
+import { SaveButton, TakeStoredButton } from './shell/SaveButton';
 import { Shell } from './shell/Shell';
 import { applyTheme, saveTheme, savedTheme, type Theme } from './shell/theme';
 import { dropOnBoard, parseToolboxDrag } from './toolbox/drag';
@@ -309,6 +309,7 @@ export function App(props: AppProps) {
         <div className="acto">
           <header className="topbar"><span className="brand">Act<span>o</span></span>
             <SaveButton unsaved={store.unsaved().size} saving={store.saving()} blocked={store.saveBlocked()} onSave={() => { void saveBoard(api, store, output); }} />
+            <TakeStoredButton count={store.stale().length} saving={store.saving()} onTake={() => { void takeStored(api, store, output); }} />
             <button type="button" className="pbtn theme-toggle" onClick={toggleTheme}>{theme === 'dark' ? 'Light' : 'Dark'}</button>
           </header>
           <Shell

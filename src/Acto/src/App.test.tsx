@@ -119,8 +119,11 @@ describe('App', () => {
       fireEvent.click(card('expand'));
       fireEvent.change(await inspector().findByDisplayValue('expand'), { target: { value: 'expand-2' } });
       fireEvent.click(saveButton());
-      expect(await screen.findByText('expand-2 changed elsewhere — undo your changes to it, or reload')).toBeInTheDocument();
+      expect(await screen.findByText('expand-2 changed elsewhere — Take stored drops your change to it')).toBeInTheDocument();
       await waitFor(() => expect(card('expand-2').closest('.node')).toHaveClass('failed'));
+      fireEvent.click(screen.getByRole('button', { name: 'Take stored · 1' }));
+      await waitFor(() => expect(card('expand').closest('.node')).not.toHaveClass('failed'));
+      expect(screen.queryByRole('button', { name: /Take stored/ })).toBeNull();
     });
   });
 

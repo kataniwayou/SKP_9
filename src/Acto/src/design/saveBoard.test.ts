@@ -3,7 +3,7 @@ import type { StudioApi } from '../api/client';
 import { createOutputStore } from '../output/outputStore';
 import { board, shared } from './boardFixtures';
 import { createBoardStore } from './boardStore';
-import { saveBoard } from './saveBoard';
+import { saveBoard, takeStored } from './saveBoard';
 import { memoryStorage } from '../test/memoryStorage';
 
 vi.mock('../board/loadBoard', () => ({ loadBoard: vi.fn() }));
@@ -70,7 +70,7 @@ describe('saveBoard', () => {
       { index: 0, op: 'update', table: 'workflows', id: 'daily', ok: false, status: 409, problem: { detail: 'stale' } },
     ] } } as never);
     await saveBoard(t.studio, t.store, t.output);
-    expect(texts(t.output)).toContain('daily-2 changed elsewhere — undo your changes to it, or reload');
+    expect(texts(t.output)).toContain('daily-2 changed elsewhere — Take stored drops your change to it');
     expect(t.store.failures().has('workflow:daily')).toBe(true);
   });
 
@@ -170,5 +170,68 @@ describe('saveBoard', () => {
     expect(await saveBoard(t.studio, t.store, t.output)).toBe('refused');
     expect(t.api.applyModel).not.toHaveBeenCalled();
     expect(t.output.lines().at(-1)).toMatchObject({ level: 'warn', text: 'Saving — wait for it to finish' });
+  });
+});
+
+describe('takeStored after a refusal on stale rows', () => {
+  const refuse = (t: ReturnType<typeof setup>, results: unknown[]) =>
+    t.api.applyModel.mockResolvedValue({ ok: true, value: { ok: false, applied: false, made: {}, results } } as never);
+
+  it('takes the stored version of only the stale rows; other changes stay; undo brings the dropped change back', async () => {
+    const t = setup();
+    rename(t.store, 'daily', 'daily-2');
+    rename(t.store, 'hourly', 'hourly-2');
+    refuse(t, [{ index: 0, op: 'update', table: 'workflows', id: 'daily', ok: false, status: 409, problem: { detail: 'stale' } }]);
+    await saveBoard(t.studio, t.store, t.output);
+    expect(t.store.stale()).toEqual([{ table: 'workflows', id: 'daily' }]);
+
+    const b = board();
+    const stored = { ...b.workflows.daily!, name: 'daily-elsewhere', updatedAt: T2 };
+    vi.mocked(loadBoard).mockResolvedValue({ ok: true, value: { ...b, workflows: { ...b.workflows, daily: stored } } });
+    await takeStored(t.studio, t.store, t.output);
+
+    expect(t.store.base().workflows.daily).toEqual(stored);
+    expect(t.store.state().workflows.daily).toEqual(stored);
+    expect(t.store.state().workflows.hourly!.name).toBe('hourly-2');
+    expect([...t.store.unsaved()]).toEqual(['workflow:hourly']);
+    expect(t.store.stale()).toEqual([]);
+    expect(t.store.failures().has('workflow:daily')).toBe(false);
+    expect(texts(t.output).at(-1)).toMatch(/^Took the stored daily-elsewhere/);
+
+    t.store.undo();
+    expect(t.store.state().workflows.daily!.name).toBe('daily-2');
+    expect(t.store.base().workflows.daily!.updatedAt).toBe(T2); // a Save now overwrites knowingly, not a 409
+  });
+
+  it('a row gone from BaseAPI (404) leaves the board', async () => {
+    const t = setup();
+    t.store.edit((b) => ({ ...b, steps: { ...b.steps, fetch: { ...b.steps.fetch!, name: 'fetch-2' } } }));
+    refuse(t, [{ index: 0, op: 'update', table: 'steps', id: 'fetch', ok: false, status: 404, problem: { title: 'Not Found' } }]);
+    await saveBoard(t.studio, t.store, t.output);
+    expect(texts(t.output)).toContain('step fetch-2 is gone — Take stored drops your change to it');
+    const b = board();
+    const steps = { ...b.steps };
+    delete steps.fetch;
+    vi.mocked(loadBoard).mockResolvedValue({ ok: true, value: { ...b, steps } });
+    await takeStored(t.studio, t.store, t.output);
+    expect(t.store.base().steps.fetch).toBeUndefined();
+    expect(t.store.state().steps.fetch).toBeUndefined();
+  });
+
+  it('other refusals are not stale; a failed read changes nothing', async () => {
+    const t = setup();
+    rename(t.store, 'daily', 'daily-2');
+    refuse(t, [{ index: 0, op: 'update', table: 'workflows', id: 'daily', ok: false, status: 422, problem: { detail: 'bad' } }]);
+    await saveBoard(t.studio, t.store, t.output);
+    expect(t.store.stale()).toEqual([]);
+
+    refuse(t, [{ index: 0, op: 'update', table: 'workflows', id: 'daily', ok: false, status: 409, problem: { detail: 'stale' } }]);
+    await saveBoard(t.studio, t.store, t.output);
+    const before = t.store.state();
+    vi.mocked(loadBoard).mockResolvedValue({ ok: false, error: { kind: 'network', status: 0 } } as never);
+    await takeStored(t.studio, t.store, t.output);
+    expect(t.store.state()).toBe(before);
+    expect(t.store.stale()).toHaveLength(1);
+    expect(t.store.saving()).toBe(false);
   });
 });

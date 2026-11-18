@@ -8,6 +8,8 @@ import { canRedo, canUndo, commit, historyOf, redo, undo, type History } from '.
 import type { Table } from './changes';
 
 const KEY = 'acto.board';
+
+export interface StaleRow { table: Table; id: Id }
 export const SAVING_REFUSAL = 'Saving — wait for it to finish';
 
 export interface BoardStore {
@@ -45,6 +47,15 @@ export interface BoardStore {
   /** Key as changedKeys → BaseAPI's message. */
   failures(): Map<string, string>;
   setFailures(f: Map<string, string>): void;
+  /** Rows Save was refused on because they changed elsewhere (409) or are gone (404). */
+  stale(): readonly StaleRow[];
+  setStale(rows: readonly StaleRow[]): void;
+  /**
+   * Takes BaseAPI's version (from `fresh`) of every stale row: the base gets its stored row (and stamp), and the present
+   * gets it too as one undoable edit, so the designer's change to it is dropped; a row gone from `fresh` leaves both.
+   * Clears the stale list and those rows' failures.
+   */
+  takeStored(fresh: BoardState): void;
   subscribe(fn: () => void): () => void;
 }
 
@@ -66,6 +77,10 @@ function readDraft(session: Storage | null): Draft | null {
     return null;
   }
 }
+
+const KIND_OF: Record<Table, string> = {
+  workflows: 'workflow', steps: 'step', caches: 'cache', assignments: 'assignment', processors: 'processor', schemas: 'schema',
+};
 
 const TABLES: readonly Table[] = ['workflows', 'steps', 'caches', 'assignments', 'processors', 'schemas'];
 
@@ -120,6 +135,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
   let saving = false;
   let problems = new Map<Id, number>();
   let failures = new Map<string, string>();
+  let stale: readonly StaleRow[] = [];
   let draftFailed = false;
   let blocked = false;
   let unsavedFor: { base: BoardState; present: BoardState; keys: Set<string> } | null = null;
@@ -161,6 +177,8 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       history = historyOf(start.present);
       unsavedFor = null;
       blocked = false;
+      stale = [];
+      failures = new Map();
       // no draft: nothing of the designer's to keep (placement is redone on every load); a stale or old-shaped key goes
       if (draft) writeDraft(); else dropDraft();
       notify();
@@ -196,6 +214,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       blocked = false;
       history = historyOf(fresh);
       failures = new Map();
+      stale = [];
       unsavedFor = null;
       writeDraft();
       notify();
@@ -229,6 +248,29 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     },
     failures: () => failures,
     setFailures(f) { failures = f; notify(); },
+    stale: () => stale,
+    setStale(rows) { stale = rows; notify(); },
+    takeStored(fresh) {
+      if (refuseWhileSaving() || stale.length === 0) return;
+      const rows = stale;
+      const take = (s: BoardState): BoardState => {
+        const out = { ...s } as Record<Table, Record<Id, unknown>>;
+        for (const { table, id } of rows) {
+          const rows = { ...out[table] };
+          const row = (fresh[table] as Record<Id, unknown>)[id];
+          if (row === undefined) delete rows[id]; else rows[id] = row;
+          out[table] = rows;
+        }
+        return out as unknown as BoardState;
+      };
+      base = take(base);
+      failures = new Map([...failures].filter(([k]) => !rows.some((r) => k === `${KIND_OF[r.table]}:${r.id}`)));
+      stale = [];
+      unsavedFor = null;
+      const next = take(history.present);
+      if (deepEqual(next, history.present)) { writeDraft(); notify(); }
+      else setHistory(commit(history, next));
+    },
     subscribe(fn) { subs.add(fn); return () => { subs.delete(fn); }; },
   };
   return store;

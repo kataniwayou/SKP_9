@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { SaveButton, saveLabel } from './SaveButton';
+import { SaveButton, saveLabel, TakeStoredButton } from './SaveButton';
 
 describe('SaveButton', () => {
   it('reads Save, Save · N or Saving…', () => {
@@ -20,6 +20,19 @@ describe('SaveButton', () => {
   });
   it('is disabled while Save is blocked (outcome unknown)', () => {
     render(<SaveButton unsaved={2} saving={false} blocked onSave={vi.fn()} />);
+    expect(screen.getByRole('button')).toBeDisabled();
+  });
+});
+
+describe('TakeStoredButton', () => {
+  it('is hidden with no stale rows, and takes them when pressed', () => {
+    const onTake = vi.fn();
+    const { rerender, container } = render(<TakeStoredButton count={0} saving={false} onTake={onTake} />);
+    expect(container).toBeEmptyDOMElement();
+    rerender(<TakeStoredButton count={2} saving={false} onTake={onTake} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Take stored · 2' }));
+    expect(onTake).toHaveBeenCalledTimes(1);
+    rerender(<TakeStoredButton count={2} saving onTake={onTake} />);
     expect(screen.getByRole('button')).toBeDisabled();
   });
 });

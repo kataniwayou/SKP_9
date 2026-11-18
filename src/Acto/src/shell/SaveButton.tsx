@@ -14,3 +14,14 @@ export function SaveButton({ unsaved, saving, blocked = false, onSave }: { unsav
     </button>
   );
 }
+
+/** Shown only after Save was refused on rows changed elsewhere or gone: takes BaseAPI's version of exactly those rows. */
+export function TakeStoredButton({ count, saving, onTake }: { count: number; saving: boolean; onTake: () => void }) {
+  if (count === 0) return null;
+  return (
+    <button type="button" className="pbtn take-stored" disabled={saving} onClick={onTake}
+      title="Drop your changes to the rows changed elsewhere and take the stored version">
+      {`Take stored · ${count}`}
+    </button>
+  );
+}

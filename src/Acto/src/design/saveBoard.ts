@@ -41,7 +41,8 @@ export function problemMessage(problem: unknown): string {
 /** The Output line for one failed change result. */
 export function failureText(r: Result, boards: BoardState[]): string {
   const name = nameOf(boards, r.table ?? '', r.id ?? '');
-  if (r.status === 409) return `${name} changed elsewhere — undo your changes to it, or reload`;
+  if (r.status === 409) return `${name} changed elsewhere — Take stored drops your change to it`;
+  if (r.status === 404) return `${kindOf(r.table ?? '')} ${name} is gone — Take stored drops your change to it`;
   return `${kindOf(r.table ?? '')} ${name}: ${problemMessage(r.problem)}`;
 }
 
@@ -102,6 +103,9 @@ export async function saveBoard(api: StudioApi, store: BoardStore, output: Outpu
       const map = reportFailures(res.value.results, [present, base], output);
       if (map.size === 0) output.log('Save refused: BaseAPI gave no reason', 'error');
       store.setFailures(map);
+      store.setStale((res.value.results ?? [])
+        .filter((r) => r.ok === false && (r.status === 409 || r.status === 404) && r.table && r.id && r.table in KIND)
+        .map((r) => ({ table: r.table as Table, id: r.id! })));
       return 'refused';
     }
     const made = res.value.made ?? {};
@@ -134,4 +138,17 @@ export async function saveBoard(api: StudioApi, store: BoardStore, output: Outpu
   } finally {
     store.setSaving(false);
   }
+}
+
+/** Drops the designer's change to every row Save found stale: reads the board and takes BaseAPI's version of those rows. */
+export async function takeStored(api: StudioApi, store: BoardStore, output: OutputStore): Promise<void> {
+  const rows = store.stale();
+  if (rows.length === 0 || store.saving()) return;
+  store.setSaving(true);
+  let fresh;
+  try { fresh = await loadBoard(api); } finally { store.setSaving(false); }
+  if (!fresh.ok) { output.log(`Could not read the stored rows: ${transport(fresh.error)}`, 'error'); return; }
+  const names = rows.map((r) => nameOf([fresh.value, store.state()], r.table, r.id));
+  store.takeStored(fresh.value);
+  output.log(`Took the stored ${names.join(', ')} — your changes to ${rows.length === 1 ? 'it' : 'them'} are dropped (Undo brings them back)`, 'ok');
 }

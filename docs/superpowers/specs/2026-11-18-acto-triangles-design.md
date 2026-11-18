@@ -179,9 +179,11 @@ orphans included [call].
 
 **Save** — one button in the top bar [call: placement], disabled when nothing changed:
 1. `POST /model/apply` with the whole diff (§4b). On refusal: nothing saved; failures go to Output and mark the items they name;
-   the board stays unsaved. A stale-stamp refusal ("changed elsewhere") names the conflicting items; the designer
-   either undoes their changes to those items and saves again, or reloads and loses the unsaved board. No automatic
-   merge [user: accepted].
+   the board stays unsaved. A stale-stamp refusal ("changed elsewhere") names the conflicting items (a 404, row gone, likewise);
+   a **Take stored · N** button then appears beside Save: it re-reads BaseAPI and takes the stored version of exactly
+   those rows (base and present), dropping the designer's change to them as one undoable edit; the rest of the unsaved
+   board stays. No automatic merge [user: accepted; Take stored: user, 2026-11-18 — undo history does not survive a
+   reload, so undoing alone could not clear a conflict after one].
 2. On success: adopt new stamps/ids; for **each affected workflow**: `POST /workflows/{id}/validate` → problems go to
    Output and mark the triangle (cleared by its next clean dry run); render its Kibana SVG and
    `PUT /workflows/{id}/diagram`.
