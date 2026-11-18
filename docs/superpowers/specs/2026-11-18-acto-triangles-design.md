@@ -5,6 +5,9 @@ Supersedes, in `2026-11-17-acto-design.md`: §5 (frames), §7 rules about first/
 lock), §8c, §9 (saving, layout), and every place the old spec says a step or cache belongs to a workflow. Everything
 else there (screen, panels, wiring look, themes, chat transport, health, Start/Stop, Output, testing style) still holds.
 
+User clarification 2026-11-18: align with the DB rules **as BaseAPI enforces them**, and use **React Flow's own style
+and wiring conventions** (handles, connections, edges, selection, minimap, controls) wherever React Flow provides them.
+
 Tags: **[user]** = the user decided it in the 2026-11-18 conversation; **[call]** = the writer's call, open to change.
 
 ## 1. Intent
@@ -53,17 +56,14 @@ Field rules (BaseAPI validators) — a Save that breaks any of these saves **not
 - Workflow: name/version present (version strict SemVer, a new workflow uses `1.0.0`); **at least one entry step**;
   no duplicate entry steps, assignments or caches; cron valid (5 or 6 fields) or none.
 - Step: a processor; no duplicate next steps; a valid entry condition (C/F/X/A/N, values 1–5).
-- Assignment: non-empty JSON, at most 1 MB; **one payload per step per workflow**; a payload row linked by another
-  workflow is copied, never edited in place (today's `GraphAssignmentResolver` behaviour).
+- Assignment: non-empty JSON, at most 1 MB. A payload row linked by another workflow is copied, never edited in
+  place (§4b).
 - Delete restrictions (foreign keys): a step cannot be deleted while any workflow enters it, any step wires into it,
   or any assignment points at it; a cache cannot be deleted while any workflow lists it — **unless the same Save also
   removes those references** (one transaction).
-- Concurrency: every row carries Postgres `xmin`; a Save whose loaded stamp is older than the stored row is refused
-  as "changed elsewhere — reload". Link rows (`StepNextSteps`, `WorkflowEntrySteps`, `WorkflowCaches`,
-  `WorkflowAssignments`) have no stamp: a wire change is guarded by its source step's stamp, an entry-arrow,
-  cache-link or payload change by its workflow's stamp, and the save bumps that owner row so the next stale save is
-  caught [call: as `WorkflowGraphSaver` forces it today]. Building `PUT /board` on the existing all-or-nothing runner
-  `POST /model/apply` is allowed if it switches to `xmin` [left to the builder].
+- Concurrency: a Save that updates or deletes a row whose `updatedAt` changed since Acto read it is refused as
+  "changed elsewhere" (BaseAPI's `/model/apply` check). Link rows have no stamp; they change only through their
+  owner row's update, so the owner's `updatedAt` guards them (§4b).
 
 Dry run (`POST /workflows/{id}/validate`, unchanged): cycles and missing steps, payload vs. config schema, schema
 equality on each wire, processor liveness. It **reports**; it never blocks or undoes a save. **Start** runs the same
@@ -77,42 +77,51 @@ Start (unchanged). Acto shows nothing extra for this.
 ### 4a. Locations [user]
 - Add nullable location columns to `Step`, `Cache` and `Workflow`: `BoardX`, `BoardY` (double) [call: names/types].
   Null = never placed; Acto places it (§5) and the next Save writes it.
-- One EF migration. A **one-time fill** sets locations from existing data [call: algorithm]: for each step/cache,
-  the position from the most recently updated workflow layout that places it, translated into one board space by
-  that workflow's old Acto `board` offset when present; triangles go left of their entry steps. Anything not found
-  stays null.
+- One EF migration (nullable columns). A **fill** sets missing locations from existing data [call: algorithm]: for
+  each step/cache whose location is null, the position from the most recently updated workflow layout that places it,
+  translated into one board space by that workflow's old Acto `board` offset when present; a triangle goes left of its
+  first entry step. Anything not found stays null. It runs at BaseAPI startup and only ever fills nulls, so it is
+  effectively one-time and never overwrites a location Acto saved [call].
 - `Workflow.Layout` is **left untouched** for WorkflowStudio; Acto stops reading and writing it [user].
-- Locations travel on the CRUD read DTOs and in the board save (4b); CRUD create/update may ignore them [call].
+- Locations travel on the CRUD create, update and read DTOs as optional trailing fields. On update, an absent (null)
+  location keeps the stored one, so callers that do not know locations (WorkflowStudio's design save, Valence) never
+  erase them [call]. Acto always sends them.
 
-### 4b. Board save — new endpoint [user: one board-wide Save]
-`PUT /board` [call: route] takes one request with everything that changed since the board was loaded:
-creates/updates/deletes of steps (name, processor, entry condition, next steps, location), caches (fields, location),
-workflows (name, version, description, cron, entry steps, cache ids, location), per-workflow payloads
-(workflow id + step id → payload or removal), and processor/schema-slot edits as today's design save accepts them.
-Each updated or deleted row carries the `xmin` stamp Acto loaded.
+### 4b. Board save — BaseAPI's existing `POST /model/apply` [user: one board-wide Save; align with BaseAPI's DB rules]
+No new save endpoint. BaseAPI already has an all-or-nothing change runner: `POST /api/v1/model/apply` takes
+`{ changes: [{ op: create|update|delete, table, id, row, updatedAt }] }`, runs each change through the same service a
+plain CRUD `POST`/`PUT`/`DELETE` uses (validators, foreign keys, unique indexes, the running-workflow delete guard),
+inside one transaction, and commits only if every change passed. Created rows are named by client ids that later
+changes may reference; the answer maps them to the ids BaseAPI gave. An update or delete carrying `updatedAt` is
+refused (409) if the row changed since it was read. `POST /model/validate` is the same run, always rolled back.
 
-- One transaction, all or nothing: any field-rule failure, FK refusal or stale stamp → rollback, and the response lists
-  every failure (entity kind, id, field, message) so Acto can point at it.
-- Payload handling reuses the per-(workflow, step) resolver, including copy-on-write of shared rows and deleting rows
-  nobody links any more.
-- Response on success: the new stamps and ids (for created rows) and the list of **affected workflows** — every
-  workflow whose own fields/payloads/caches changed or that reaches (from its entry steps, over wires after the
-  save) any step that was created, changed or deleted, or whose reach changed.
-- No ownership checks of any kind (the old design save's "not a step of this workflow" and the old delete's "used by
-  another workflow" do not apply here).
+So **Save = the diff between the loaded rows and the board's rows, as CRUD changes** — the exact DB rules, nothing
+more:
+- Rows are workflows (name, version, description, cron, entry step ids, assignment ids, cache ids, location), steps
+  (name, version, description, processor, next step ids, entry condition, location), caches, assignments
+  (step id, payload), processors and schemas (today's processor/schema-slot edits).
+- Junction changes ride on their owner row's update (a wire on its source step, entry arrows/cache links/payload links
+  on the workflow), so the owner's `updatedAt` guards them [call; replaces the link-stamp note in §3].
+- Payloads: Acto edits a workflow's assignment in place when no other workflow links that row; otherwise it creates a
+  new row and relinks this workflow to it (copy-on-write in the client, since the CRUD has no resolver). Removing a
+  payload unlinks it, and deletes the row when no workflow links it any more [call].
+- Change order inside one request, so every foreign key holds when each change runs: creates (schemas, caches, steps
+  with only already-existing next steps, assignments, workflows) → updates (processors, steps incl. new steps' new
+  next steps, caches, assignments, workflows) → deletes (assignments, steps, caches) [call].
+- BaseAPI caps one request at 500 changes; a bigger Save is refused with its message (BaseAPI's rule).
+- Affected workflows (for the dry run and Kibana, §8) are worked out by Acto from the diff: every workflow whose row
+  changed, or that reaches (before or after the save) a step that was created, changed or deleted [call].
 
-### 4c. Workflow delete — new semantics for Acto [user: steps are shared; running cannot be deleted]
-`POST /board/workflows/{id}/delete` [call: route], immediate (not part of Save), with a dry-run mode for the confirm:
-- Refused while the workflow runs or its deletion runs (today's `IWorkflowRunGuard`) [user].
-- Removes the workflow row, its entry-step, cache and assignment links, and its assignment rows that no other
-  workflow links. **Steps, wires and caches stay** (possibly as orphans).
-- WorkflowStudio's `POST /workflows/{id}/delete` and `PUT /workflows/{id}/design` stay as they are for WorkflowStudio.
+### 4c. Workflow delete — CRUD delete through the same runner [user: steps are shared; running cannot be deleted]
+Immediate (not part of Save): `POST /model/validate` first for the confirm, then `POST /model/apply` with
+`delete workflows/{id}` plus `delete assignments/{a}` for each of its assignments no other workflow links. The
+runner applies BaseAPI's running/deleting guard, so a running workflow is refused [user]. The CRUD delete removes the
+workflow's junction rows (cascade); **steps, wires and caches stay** (possibly as orphans). WorkflowStudio's
+`POST /workflows/{id}/delete` and `PUT /workflows/{id}/design` stay as they are for WorkflowStudio.
 
 ### 4d. Board read
-Acto loads: workflows (with entry steps, assignment ids, cache ids, location, stamp), all steps (with next steps,
-location, stamp), all caches, all assignments linked by any workflow, processors and schemas. Existing CRUD lists may
-serve; a single `GET /board` is allowed if the builder prefers [left to the builder]. Orphan steps come with
-`GET /steps`; all of them are drawn [call].
+CRUD lists: `GET /workflows`, `/steps`, `/caches`, `/assignments`, `/processors`, `/schemas`. Every step is drawn,
+orphans included [call].
 
 ## 5. The board
 
@@ -169,7 +178,7 @@ serve; a single `GET /board` is allowed if the builder prefers [left to the buil
 ## 8. Save, dry run, Kibana, delete
 
 **Save** — one button in the top bar [call: placement], disabled when nothing changed:
-1. `PUT /board` with the whole diff. On refusal: nothing saved; failures go to Output and mark the items they name;
+1. `POST /model/apply` with the whole diff (§4b). On refusal: nothing saved; failures go to Output and mark the items they name;
    the board stays unsaved. A stale-stamp refusal ("changed elsewhere") names the conflicting items; the designer
    either undoes their changes to those items and saves again, or reloads and loses the unsaved board. No automatic
    merge [user: accepted].
@@ -184,7 +193,7 @@ dashed lines — at their shared locations, in Acto's look on white, no live sta
 Other triangles, steps only they reach and orphans are left out.
 
 **Delete a triangle**: toolbar Delete → dry run lists what goes (workflow, its links, its unshared payloads) → confirm
-→ `POST /board/workflows/{id}/delete`. Refused while running: "running: stop it first" [user]. Immediate, not part of
+→ the CRUD delete through `POST /model/apply` (§4c). Refused while running: "running: stop it first" [user]. Immediate, not part of
 Save and not undoable [call: like Start/Stop]. Unsaved edits **of that workflow's own** — its fields, location, entry
 arrows, cache links and payloads — are dropped with it, and undo entries that touch only those are removed; unsaved
 edits to steps, wires and caches stay, even if only it reached them [call: e.g. deleting step S that was W's only
@@ -211,8 +220,9 @@ and prompt text.
 
 ## 11. Testing
 
-- BaseAPI: tests for the migration fill, `PUT /board` (all-or-nothing, FK refusals lifted by same-save removals, stale
-  stamps, copy-on-write payloads, affected-workflow list) and the new delete (running refusal, shared steps kept).
+- BaseAPI: tests for the location columns (round trip, null keeps the stored value) and the fill. `/model/apply`
+  already has its own tests; Acto's change builder is unit-tested for order, copy-on-write and stamps, and the e2e
+  suite saves through the real endpoint.
 - Acto unit tests rewritten for the new model; the headed Playwright suite (`src/Acto/e2e`) rewritten to cover every
   feature above, still against throwaway data only, never pressing Start/Stop on real workflows.
 
