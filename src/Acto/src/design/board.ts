@@ -50,3 +50,10 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   if (ka.length !== kb.length) return false;
   return ka.every((k) => k in b && deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
 }
+
+export type Slot = 'input' | 'output' | 'config';
+export interface SchemaCopy { id: Id; name: string; version: string; description: string | null; definition: string }
+/** The processor field that holds a slot's schema id (the same keys WorkflowStudio sends). */
+export const SLOT_FIELD: Readonly<Record<Slot, 'inputSchemaId' | 'outputSchemaId' | 'configSchemaId'>> = {
+  input: 'inputSchemaId', output: 'outputSchemaId', config: 'configSchemaId',
+};

@@ -35,3 +35,18 @@ export function board(): BoardState {
     schemas: {},
   };
 }
+
+/** Like board(), but one assignment row `a-shared` (on fetch) is linked by both workflows. */
+export function shared(): BoardState {
+  const b = board();
+  const row = { id: 'a-shared', stepId: 'fetch', name: 'fetch-assignment', version: '1.0.0', description: null, payload: '{"shared":true}', updatedAt: T };
+  return {
+    ...b,
+    assignments: { 'a-shared': row },
+    workflows: {
+      ...b.workflows,
+      daily: { ...b.workflows.daily, assignmentIds: ['a-shared'] },
+      hourly: { ...b.workflows.hourly, assignmentIds: ['a-shared'] },
+    },
+  };
+}

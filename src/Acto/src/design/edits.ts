@@ -1,6 +1,8 @@
 import type { Id, Processor } from '../model/graph';
 import type { Point } from '../model/geometry';
-import type { BoardState, CacheRow, Edit, ItemRef, StepRow, WorkflowRow } from './board';
+import { SLOT_FIELD } from './board';
+import type { BoardState, CacheRow, Edit, ItemRef, SchemaCopy, SchemaRow, Slot, StepRow, WorkflowRow } from './board';
+import { linkedBy } from './payloads';
 
 const stepName = (b: BoardState, id: Id) => b.steps[id]?.name ?? id;
 
@@ -142,4 +144,53 @@ export function setStepField<K extends Fields<StepRow>>(b: BoardState, id: Id, f
 export function setCacheField<K extends Fields<CacheRow>>(b: BoardState, id: Id, field: K, value: CacheRow[K]): BoardState {
   const c = b.caches[id];
   return c ? { ...b, caches: { ...b.caches, [id]: { ...c, [field]: value } } } : b;
+}
+
+/** The workflow row goes, with the assignment rows no other workflow links; steps, wires and caches stay. */
+export function withoutWorkflow(b: BoardState, wf: Id): BoardState {
+  const w = b.workflows[wf];
+  if (!w) return b;
+  const workflows = { ...b.workflows };
+  delete workflows[wf];
+  const assignments = { ...b.assignments };
+  for (const id of w.assignmentIds) if (linkedBy(b, id).every((x) => x === wf)) delete assignments[id];
+  return { ...b, workflows, assignments };
+}
+
+export function setProcessorField(
+  b: BoardState, processorId: Id, field: 'name' | 'version' | 'description', value: string | null,
+): BoardState {
+  const p = b.processors[processorId];
+  if (!p || p[field] === value) return b;
+  return { ...b, processors: { ...b.processors, [processorId]: { ...p, [field]: value } } };
+}
+
+/**
+ * A slot edit gives the processor a schema row of its own (new id, updatedAt null) holding `copy`'s fields and
+ * points the slot at it. A slot already on an unsaved row is edited in place instead of piling up copies.
+ */
+export function setSlotSchema(b: BoardState, processorId: Id, slot: Slot, copy: SchemaCopy, newId: () => Id): BoardState {
+  const p = b.processors[processorId];
+  if (!p) return b;
+  const field = SLOT_FIELD[slot];
+  const curId = p[field];
+  const cur = curId ? b.schemas[curId] : undefined;
+  const id = cur && cur.updatedAt === null ? cur.id : newId();
+  const row: SchemaRow = {
+    id, name: copy.name, version: copy.version, description: copy.description, definition: copy.definition,
+    audit: cur?.audit ?? { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, updatedAt: null,
+  };
+  return {
+    ...b,
+    schemas: { ...b.schemas, [id]: row },
+    processors: { ...b.processors, [processorId]: { ...p, [field]: id } },
+  };
+}
+
+/** Leaves the slot with no schema. */
+export function clearSlot(b: BoardState, processorId: Id, slot: Slot): BoardState {
+  const p = b.processors[processorId];
+  const field = SLOT_FIELD[slot];
+  if (!p || p[field] === null) return b;
+  return { ...b, processors: { ...b.processors, [processorId]: { ...p, [field]: null } } };
 }
