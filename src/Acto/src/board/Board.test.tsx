@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Node } from '@xyflow/react';
 import { describe, expect, it, vi } from 'vitest';
 import { board } from '../design/boardFixtures';
@@ -185,6 +185,9 @@ describe('Board', () => {
         if (!had) delete (document as { elementFromPoint?: unknown }).elementFromPoint;
       }
       expect(onPick).not.toHaveBeenCalled();
+      // and the board still draws the picks as selected: React Flow's own select-on-click is put right
+      await waitFor(() => expect([...document.querySelectorAll('.react-flow__node.selected')].map((n) => n.getAttribute('data-id')).sort())
+        .toEqual(['st:fetch', 'wf:daily']));
       // the body of the same node still picks
       fireEvent.click(screen.getByText('fetch-orders'));
       expect(onPick.mock.calls).toEqual([[{ kind: 'step', id: 'fetch' }, false]]);

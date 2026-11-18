@@ -145,7 +145,15 @@ export function Board({ state, view, onPick, onMove, onConnect, toolbar, initial
     void flow.current.fitBounds(getNodesBounds(real), { padding: 0.1 });
   };
   useEffect(() => { setDragged(derived); }, [derived]);
-  const nodes = editable ? dragged : derived;
+  /*
+   * React Flow selects a clicked node itself before onNodeClick, writing `selected` straight onto its internal nodes (its
+   * own "hack" for drags). A click that picks re-derives the nodes from the picks, which puts that right; a click that
+   * picks nothing (on a handle) does not, so it bumps `resync` to hand React Flow fresh node objects with the picks'
+   * own `selected` again.
+   */
+  const [resync, setResync] = useState(0);
+  const shown = editable ? dragged : derived;
+  const nodes = useMemo(() => (resync === 0 ? shown : shown.map((n) => ({ ...n }))), [shown, resync]);
 
   // A drag in progress: where each dragged node began, and whether Esc has cancelled it.
   const drag = useRef<{ start: Map<string, Point>; cancelled: boolean } | null>(null);
@@ -258,7 +266,7 @@ export function Board({ state, view, onPick, onMove, onConnect, toolbar, initial
           onNodeClick={(ev, n) => {
             keySelect.current = false;
             // a press on a handle (or a connection drag let go on its own node) is a connection, never a pick or an unpick
-            if (onHandle(ev.target)) return;
+            if (onHandle(ev.target)) { setResync((r) => r + 1); return; }
             const p = pickOfNode(n);
             if (p) select(p, ev.ctrlKey || ev.metaKey);
           }}
