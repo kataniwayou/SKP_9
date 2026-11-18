@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import {
-  applyNodeChanges, Background, BackgroundVariant, Controls, Panel, ReactFlow,
+  applyNodeChanges, Background, BackgroundVariant, ControlButton, Controls, getNodesBounds, Panel, ReactFlow,
   type Connection, type Edge, type EdgeChange, type EdgeTypes, type Node, type NodeChange, type NodeTypes, type Viewport,
 } from '@xyflow/react';
 import type { BoardState, ItemRef } from '../design/board';
@@ -83,10 +83,12 @@ function pickOfEdge(e: Edge): Pick | null {
   return null;
 }
 
+const isGhost = (n: Node) => (n.className ?? '').split(' ').includes('ghost');
+
 export function Board({ state, view, onPick, onMove, onConnect, toolbar, initialZoom, initialView, onViewChange, onDropData, bar, settled = true, focusRef, stateNow }: BoardProps) {
   const fitAtMount = useRef(settled);
   const flow = useRef<{
-    getViewport: () => Viewport; fitView: (o?: { nodes: { id: string }[] }) => unknown; screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number };
+    getViewport: () => Viewport; fitBounds: (b: { x: number; y: number; width: number; height: number }, o?: { padding?: number }) => unknown; screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number };
     setCenter: (x: number, y: number, o?: { zoom?: number; duration?: number }) => unknown;
   } | null>(null);
   const stateRef = useRef(state);
@@ -108,7 +110,7 @@ export function Board({ state, view, onPick, onMove, onConnect, toolbar, initial
     if (!settled || fitAtMount.current) return;
     if (initialView !== undefined || initialZoom !== undefined) { fitAtMount.current = true; return; }
     // let React Flow measure the nodes that just arrived first
-    const raf = requestAnimationFrame(() => { fitAtMount.current = true; void flow.current?.fitView(fitOptions()); });
+    const raf = requestAnimationFrame(() => { fitAtMount.current = true; fitAll(); });
     return () => cancelAnimationFrame(raf);
   }, [settled, initialView, initialZoom]);
   const select = (s: Pick | null, additive = false) => {
@@ -125,12 +127,20 @@ export function Board({ state, view, onPick, onMove, onConnect, toolbar, initial
   const [dragged, setDragged] = useState<Node[]>(derived);
   // the fit looks at real items only: a ghost is not framed
   const fitViewOptions = useMemo(() => {
-    const real = derived.filter((n) => !(n.className ?? '').split(' ').includes('ghost')).map((n) => ({ id: n.id }));
+    const real = derived.filter((n) => !isGhost(n)).map((n) => ({ id: n.id }));
     return real.length > 0 ? { nodes: real } : undefined;
   }, [derived]);
-  const fitOptions = () => fitViewOptions;
   const derivedRef = useRef(derived);
   derivedRef.current = derived;
+  /**
+   * Fits the real items now. React Flow 12's fitView only runs on the next node-internals update, which a controlled
+   * board whose nodes did not change never sends, so the fit would wait for some later change; fitBounds acts at once.
+   */
+  const fitAll = () => {
+    const real = derivedRef.current.filter((n) => !isGhost(n));
+    if (real.length === 0 || !flow.current) return;
+    void flow.current.fitBounds(getNodesBounds(real), { padding: 0.1 });
+  };
   useEffect(() => { setDragged(derived); }, [derived]);
   const nodes = editable ? dragged : derived;
 
@@ -250,7 +260,11 @@ export function Board({ state, view, onPick, onMove, onConnect, toolbar, initial
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--dot)" />
           {bar && <Panel position="top-center" className="selbar-panel">{bar}</Panel>}
           <BoardMiniMap nodes={nodes} picked={picked} />
-          <Controls showInteractive={false} orientation="vertical" />
+          <Controls showInteractive={false} showFitView={false} orientation="vertical">
+            <ControlButton className="react-flow__controls-fitview" onClick={fitAll} title="Fit View" aria-label="Fit View">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 30" aria-hidden="true"><path d="M3.692 4.63c0-.53.4-.938.939-.938h5.215V0H4.708C2.13 0 0 2.054 0 4.63v5.216h3.692V4.631zM27.354 0h-5.2v3.692h5.17c.53 0 .984.4.984.939v5.215H32V4.631A4.624 4.624 0 0027.354 0zm.954 24.83c0 .532-.4.94-.939.94h-5.215v3.768h5.215c2.577 0 4.631-2.13 4.631-4.707v-5.139h-3.692v5.139zm-23.677.94c-.531 0-.939-.4-.939-.94v-5.138H0v5.139c0 2.577 2.13 4.707 4.708 4.707h5.138V25.77H4.631z" /></svg>
+            </ControlButton>
+          </Controls>
         </ReactFlow>
       </div>
     </ToolbarContext.Provider>

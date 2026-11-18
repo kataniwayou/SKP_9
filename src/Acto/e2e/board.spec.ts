@@ -98,11 +98,15 @@ test('Fit puts everything on the board in view', async ({ page }) => {
   }).length, pane);
   expect(await outside()).toBeGreaterThan(0);
   const z0 = await zoomOf(page);
-  // a press while React Flow is still measuring the nodes fits nothing: press again until the view changes
-  await expect(async () => {
-    await page.locator('.react-flow__controls-fitview').click();
-    await expect.poll(() => zoomOf(page), { timeout: 2000 }).toBeLessThan(z0);
-  }).toPass({ timeout: 15_000 });
+  // one press fits at once, also on an idle board: React Flow's own fitView waited for a node change that a controlled
+  // board at rest never sends. Let the board settle (no node resizes for a while) before pressing.
+  await page.evaluate(() => new Promise<void>((done) => {
+    let t = setTimeout(done, 1500);
+    const ro = new ResizeObserver(() => { clearTimeout(t); t = setTimeout(() => { ro.disconnect(); done(); }, 1500); });
+    document.querySelectorAll('.react-flow__node').forEach((n) => ro.observe(n));
+  }));
+  await page.locator('.react-flow__controls-fitview').click();
+  await expect.poll(() => zoomOf(page), { timeout: 3000 }).toBeLessThan(z0);
   await expect.poll(outside).toBe(0);
   // and the controls zoom in and out
   const z1 = await zoomOf(page);
