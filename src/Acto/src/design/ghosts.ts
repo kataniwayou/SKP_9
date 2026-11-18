@@ -142,6 +142,17 @@ export function createGhostStore(board: BoardStore): GhostStore {
   };
 }
 
+/**
+ * `ids` with `id` put back where `order` has it: before the first element `order` places after it (links are ordered
+ * rows, so an unsaved delete restored comes back unchanged). Appended when `order` does not have it.
+ */
+export function placeIn(ids: Id[], id: Id, order: readonly Id[] | undefined): Id[] {
+  const at = order ? order.indexOf(id) : -1;
+  if (at < 0) return [...ids, id];
+  const i = ids.findIndex((x) => { const j = order!.indexOf(x); return j > at; });
+  return i < 0 ? [...ids, id] : [...ids.slice(0, i), id, ...ids.slice(i)];
+}
+
 /** Stamp of the row BaseAPI still has (an unsaved delete comes back unchanged), else null (created on the next Save). */
 const stamp = (rows: Record<Id, { updatedAt: string | null }>, id: Id) => rows[id]?.updatedAt ?? null;
 
@@ -167,6 +178,15 @@ export function restoreGhosts(
     steps[g.row.id] = { ...s, nextStepIds: s.nextStepIds.filter((x) => !!steps[x]) };
   }
   for (const g of by('cache')) if (!caches[g.row.id]) caches[g.row.id] = { ...g.row, updatedAt: stamp(base.caches, g.row.id) };
+
+  /** The row a link's order comes from: base's when BaseAPI still has it, else the ghost snapshot's. */
+  const snapshot = (kind: 'step' | 'workflow', id: Id) => {
+    const key = `${kind}:${id}`;
+    const g = items.find((x) => x.key === key) ?? lookup?.(key);
+    return g && (g.kind === 'step' || g.kind === 'workflow') ? g.row : undefined;
+  };
+  const stepOrder = (id: Id) => (base.steps[id] ?? (snapshot('step', id) as StepRow | undefined));
+  const wfOrder = (id: Id) => (base.workflows[id] ?? (snapshot('workflow', id) as WorkflowRow | undefined));
 
   const putAssignment = (a: AssignmentRow): boolean => {
     if (assignments[a.id]) return true;
@@ -195,7 +215,7 @@ export function restoreGhosts(
       if (linkers.length === 0 || assignments[row.id] || !putAssignment(row)) continue;
       for (const w of linkers) {
         const wf = workflows[w]!;
-        if (!wf.assignmentIds.includes(row.id)) workflows[w] = { ...wf, assignmentIds: [...wf.assignmentIds, row.id] };
+        if (!wf.assignmentIds.includes(row.id)) workflows[w] = { ...wf, assignmentIds: placeIn(wf.assignmentIds, row.id, wfOrder(w)?.assignmentIds) };
       }
     }
   }
@@ -214,17 +234,17 @@ export function restoreGhosts(
       if (!steps[g.from]) return refuse('step', g.from);
       if (!steps[g.to]) return refuse('step', g.to);
       const s = steps[g.from]!;
-      if (!s.nextStepIds.includes(g.to)) steps[g.from] = { ...s, nextStepIds: [...s.nextStepIds, g.to] };
+      if (!s.nextStepIds.includes(g.to)) steps[g.from] = { ...s, nextStepIds: placeIn(s.nextStepIds, g.to, stepOrder(g.from)?.nextStepIds) };
     } else if (g.kind === 'entry') {
       if (!workflows[g.workflowId]) return refuse('workflow', g.workflowId);
       if (!steps[g.stepId]) return refuse('step', g.stepId);
       const w = workflows[g.workflowId]!;
-      if (!w.entryStepIds.includes(g.stepId)) workflows[g.workflowId] = { ...w, entryStepIds: [...w.entryStepIds, g.stepId] };
+      if (!w.entryStepIds.includes(g.stepId)) workflows[g.workflowId] = { ...w, entryStepIds: placeIn(w.entryStepIds, g.stepId, wfOrder(g.workflowId)?.entryStepIds) };
     } else if (g.kind === 'cacheLink') {
       if (!workflows[g.workflowId]) return refuse('workflow', g.workflowId);
       if (!caches[g.cacheId]) return refuse('cache', g.cacheId);
       const w = workflows[g.workflowId]!;
-      if (!w.cacheIds.includes(g.cacheId)) workflows[g.workflowId] = { ...w, cacheIds: [...w.cacheIds, g.cacheId] };
+      if (!w.cacheIds.includes(g.cacheId)) workflows[g.workflowId] = { ...w, cacheIds: placeIn(w.cacheIds, g.cacheId, wfOrder(g.workflowId)?.cacheIds) };
     }
   }
   return { state: { ...b, steps, caches, workflows, assignments } };

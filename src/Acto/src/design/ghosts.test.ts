@@ -5,7 +5,23 @@ import { board } from './boardFixtures';
 import { createBoardStore } from './boardStore';
 import { changedKeys } from './changes';
 import { addStep, deleteSteps, withoutWorkflow } from './edits';
-import { createGhostStore, restoreGhosts, type GhostItem } from './ghosts';
+import { createGhostStore, placeIn, restoreGhosts, type GhostItem } from './ghosts';
+
+/** board() with two entries in every link array, the first of each being the one the tests delete. */
+function twoEach(): BoardState {
+  const b = board();
+  const T = b.steps.fetch!.updatedAt;
+  return {
+    ...b,
+    steps: { ...b.steps, fetch: { ...b.steps.fetch!, nextStepIds: ['expand', 'lonely'] } },
+    caches: { ...b.caches, c2: { ...b.caches.c1!, id: 'c2', name: 'c2' } },
+    assignments: { ...b.assignments, 'a-daily-lonely': { ...b.assignments['a-daily-fetch']!, id: 'a-daily-lonely', stepId: 'lonely', updatedAt: T } },
+    workflows: { ...b.workflows, daily: { ...b.workflows.daily!, entryStepIds: ['expand', 'lonely'], assignmentIds: ['a-daily-expand', 'a-daily-lonely'], cacheIds: ['c1', 'c2'] } },
+  };
+}
+const withExpandAssignment = (b: BoardState): BoardState => ({
+  ...b, assignments: { 'a-daily-expand': { ...b.assignments['a-daily-fetch']!, id: 'a-daily-expand', stepId: 'expand' }, ...b.assignments },
+});
 
 const make = (start: BoardState = board()) => {
   const out = createOutputStore(null, () => '00:00:00');
@@ -148,6 +164,32 @@ describe('restoreGhosts', () => {
     // wire first in the list: rows are restored before links regardless of order
     const after = stateOf(restoreGhosts(store.state(), store.base(), [ghosts.get('wire:fetch:expand')!, ghosts.get('step:fetch')!]));
     expect(after.steps.fetch!.nextStepIds).toEqual(['expand']);
+  });
+
+  it('links come back where they were: deleting the first of two and restoring leaves nothing changed', () => {
+    const start = withExpandAssignment(twoEach());
+    const { store, ghosts } = make(start);
+    store.edit((b) => deleteSteps(b, ['expand']));
+    store.edit((b) => ({ ...b, workflows: { ...b.workflows, daily: { ...b.workflows.daily!, cacheIds: ['c2'] } } }));
+    const after = stateOf(restoreGhosts(store.state(), store.base(), ghosts.ghosts(), ghosts.get));
+    expect(after.steps.fetch!.nextStepIds).toEqual(['expand', 'lonely']);
+    expect(after.workflows.daily).toMatchObject({ entryStepIds: ['expand', 'lonely'], assignmentIds: ['a-daily-expand', 'a-daily-lonely'], cacheIds: ['c1', 'c2'] });
+    expect(changedKeys(store.base(), after)).toEqual(new Set());
+  });
+
+  it('a link restored one at a time also returns to its place', () => {
+    const { store, ghosts } = make(withExpandAssignment(twoEach()));
+    store.edit((b) => ({ ...b, steps: { ...b.steps, fetch: { ...b.steps.fetch!, nextStepIds: ['lonely'] } } }));
+    const after = stateOf(restoreGhosts(store.state(), store.base(), [ghosts.get('wire:fetch:expand')!]));
+    expect(changedKeys(store.base(), after)).toEqual(new Set());
+  });
+
+  it('placeIn puts an id before the first one its order places after it', () => {
+    expect(placeIn(['b', 'd'], 'a', ['a', 'b', 'c', 'd'])).toEqual(['a', 'b', 'd']);
+    expect(placeIn(['b', 'd'], 'c', ['a', 'b', 'c', 'd'])).toEqual(['b', 'c', 'd']);
+    expect(placeIn(['b', 'x'], 'd', ['a', 'b', 'c', 'd'])).toEqual(['b', 'x', 'd']);
+    expect(placeIn(['b'], 'z', ['a', 'b'])).toEqual(['b', 'z']);
+    expect(placeIn(['b'], 'a', undefined)).toEqual(['b', 'a']);
   });
 
   it('an entry arrow comes back when both ends exist', () => {
