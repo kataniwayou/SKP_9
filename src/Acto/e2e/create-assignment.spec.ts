@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures';
 import {
-  COLLAPSER, FETCHER, childTab, entry, field, inspector, newStep, newWorkflow, openAt, payloadOf, pickStep, rowNamed, save,
-  selectWorkflowAlone, stNode, tab, unsavedCount,
+  COLLAPSER, FETCHER, childTab, clickEmptyBoard, entry, field, inspector, newStep, newWorkflow, openAt, payloadOf, pickStep, rowNamed, save,
+  selectWorkflowAlone, stNode, tab, unsavedCount, wire,
 } from './helpers';
 import { getJson, type Row } from './stack';
 
@@ -95,4 +95,32 @@ test('＋ Create on a step whose processor\'s config schema has no properties ma
   await expect(inspector(page).getByRole('button', { name: '＋ Create' })).toBeVisible();
   await expect(stNode(page, st).locator('.key-chip')).toHaveCount(0);
   await expect(field(page, 'Payload')).toHaveCount(0);
+});
+
+test('[user, 2026-11-19] a processor with no config schema (the live kafka-exporter): ＋ Create makes {} and a warning says to point a config schema to it', async ({ page }) => {
+  await openAt(page);
+  const wf = await newWorkflow(page, { x: 0, y: 260 }, `${P}wf4`);
+  const st = await newStep(page, 'kafka-exporter', { x: 300, y: 260 }, `${P}export`);
+  await entry(page, wf, st);
+  await selectWorkflowAlone(page, wf);
+  await pickStep(page, st);
+  await childTab(page, 'Step', `${P}wf4`).click();
+  const warning = inspector(page).locator('.in-noschema');
+  // before ＋ Create: the warning already says what ＋ Create will give
+  await expect(warning).toHaveText("⚠ kafka-exporter has no config schema, so this payload can't be laid out or checked. Point a config schema to the processor (its Processor tab shows Config schema: none).");
+  await inspector(page).getByRole('button', { name: '＋ Create' }).click();
+  await expect(field(page, 'Payload')).toHaveValue('{}');
+  await expect(warning).toHaveCount(1);
+  // the Processor tab shows the empty slot the warning names
+  await tab(page, 'Processor').click();
+  await expect(inspector(page).locator('dt', { hasText: 'Config schema' }).locator('xpath=following-sibling::dd[1]')).toHaveText('none');
+  // a processor with a config schema has no warning
+  const other = await newStep(page, FETCHER, { x: 600, y: 260 }, `${P}fetch4`);
+  await clickEmptyBoard(page);
+  await wire(page, st, other);
+  await selectWorkflowAlone(page, wf);
+  await pickStep(page, other);
+  await childTab(page, 'Step', `${P}wf4`).click();
+  await expect(inspector(page).getByRole('button', { name: '＋ Create' })).toBeVisible();
+  await expect(warning).toHaveCount(0);
 });

@@ -266,6 +266,26 @@ describe('InspectorPanel', () => {
       act(() => store.undo());
       expect(store.state().workflows.daily!.assignmentIds).toEqual(['a-daily-fetch']);
     });
+    it("a processor with no config schema: a warning before and after ＋ Create, which makes {} [user, 2026-11-19]", () => {
+      const { store } = opened({ workflows: ['daily'], picks: [step('expand')] }, withConfig(null));
+      const off = { ...store.state(), processors: { p1: { ...store.state().processors.p1!, configSchemaId: null } } };
+      cleanup();
+      const r = opened({ workflows: ['daily'], picks: [step('expand')] }, off);
+      const warning = "proc has no config schema, so this payload can't be laid out or checked";
+      expect(document.querySelector('.in-noschema')?.textContent).toContain(warning);
+      fireEvent.click(screen.getByRole('button', { name: '＋ Create' }));
+      expect(screen.getByLabelText('Payload')).toHaveValue('{}');
+      expect(document.querySelector('.in-noschema')?.textContent).toContain('Point a config schema to the processor');
+      expect(r.store.unsaved().size).toBeGreaterThan(0);
+    });
+    it('no warning when the processor has a config schema, or the step has no processor', () => {
+      opened({ workflows: ['daily'], picks: [step('expand')] }, withConfig(KAFKA));
+      expect(document.querySelector('.in-noschema')).toBeNull();
+      cleanup();
+      const b0 = board();
+      opened({ workflows: ['daily'], picks: [step('expand')] }, { ...b0, steps: { ...b0.steps, expand: { ...b0.steps.expand!, processorId: null } } });
+      expect(document.querySelector('.in-noschema')).toBeNull();
+    });
     it('＋ Create with no config schema (or one without properties) makes {}', () => {
       for (const def of [null, '{"type":"object"}']) {
         const { store } = opened({ workflows: ['daily'], picks: [step('expand')] }, withConfig(def));

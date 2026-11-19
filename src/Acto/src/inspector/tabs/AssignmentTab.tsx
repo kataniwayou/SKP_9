@@ -14,6 +14,17 @@ function configDefinition(b: BoardState, stepId: Id): string | null {
 }
 
 /**
+ * The warning for a step whose processor has no config schema [user, 2026-11-19]: ＋ Create can only make {} and nothing
+ * checks the payload. Null when the step has a processor with a config schema, or no processor at all.
+ */
+function noSchemaNote(b: BoardState, stepId: Id): string | null {
+  const pid = b.steps[stepId]?.processorId;
+  const processor = pid ? b.processors[pid] : undefined;
+  if (!processor || processor.configSchemaId !== null) return null;
+  return `⚠ ${processor.name} has no config schema, so this payload can't be laid out or checked. Point a config schema to the processor (its Processor tab shows Config schema: none).`;
+}
+
+/**
  * The workflow's assignment on the picked step: its fields, its payload (pretty JSON) and the config-schema check.
  * An assignment another workflow also links is copied for this one on its first edit (copy-on-write). No assignment
  * yet: Studio's "＋ Create" [user, 2026-11-19: "populate the payload with the json placeholders same as studio"] makes one
@@ -33,6 +44,7 @@ export function AssignmentTab({ state, base, edit, stepId, workflowId }: Ctx & {
       const cur = assignmentOf(b, workflowId, stepId);
       return cur ? setAssignmentField(b, workflowId, cur.id, key, v, newId) : b;
     }, `field:${k}:${key}`);
+  const warn = noSchemaNote(state, stepId);
   return (
     <>
       {assignment ? (
@@ -42,12 +54,14 @@ export function AssignmentTab({ state, base, edit, stepId, workflowId }: Ctx & {
         <>
           <EntityHead name={`${stepName(state, stepId)} · ${wf.name}`} kind={`assignment · belongs to ${wf.name}`} />
           <p className="none">{`No assignment yet for ${wf.name}: ＋ Create lays out the payload from the config schema.`}</p>
+          {warn && <p className="in-problem sub in-noschema">{warn}</p>}
           <button type="button" className="link in-create" onClick={() => edit((b) => setPayload(b, workflowId, stepId, payloadSkeleton(configDefinition(b, stepId)), newId))}>＋ Create</button>
         </>
       )}
       {assignment && <JsonField key={`${k}:payload`} label="Payload" value={payload} saved={assignmentOf(base, workflowId, stepId)?.payload}
         onChange={(v) => edit((b) => setPayload(b, workflowId, stepId, v, newId), `field:${k}:payload`)} />}
       {assignment && <PayloadCheckNote state={state} stepId={stepId} payload={payload} />}
+      {assignment && warn && <p className="in-problem sub in-noschema">{warn}</p>}
       {assignment && <button type="button" className="pbtn in-act" onClick={() => edit((b) => removeAssignment(b, workflowId, assignment.id))}>Remove assignment</button>}
     </>
   );

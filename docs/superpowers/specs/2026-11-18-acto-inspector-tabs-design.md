@@ -143,6 +143,10 @@ Studio: a required key as a `"<type>"` marker that the check names "still a plac
 default or its type's empty value; `{}` with no config schema or no properties), named as Studio names it:
 `<step name>-assignment`, `1.0.0`. Until it exists there is **no Payload editor**, only the line and ＋ Create [user,
 2026-11-19, as Studio]; "Remove assignment" (once it exists) takes the editor away and brings ＋ Create back.
+A step whose processor has **no config schema** [user, 2026-11-19]: ＋ Create still makes `{}`, and a warning
+(`.in-noschema`, the problem style) shows before and after it: "⚠ <processor> has no config schema, so this payload
+can't be laid out or checked. Point a config schema to the processor (its Processor tab shows Config schema: none)."
+Not shown when the processor has one, or the step has no processor. Save is not blocked (BaseAPI does not require one).
 
 **New names, as Studio's** [user, 2026-11-19]: a new workflow `untitled`, `untitled-2`, …; a new cache `cache`,
 `cache-2`, …; a new step its processor's name, then `-2`, …; a new assignment `<step name>-assignment`; all `1.0.0`.
