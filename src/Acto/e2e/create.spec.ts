@@ -24,7 +24,7 @@ test('the toolbox drops a triangle, a cache and a step where they are dropped, e
   expect(Math.abs(b.x + b.width / 2 - wfAt.x)).toBeLessThan(3);
   expect(Math.abs(b.y + b.height / 2 - wfAt.y)).toBeLessThan(3);
   await expect(wfNode(page, wf).locator('.unsaved-mark')).toBeVisible();
-  await expect(toolbar(page, 'workflow').getByRole('button')).toHaveText(['▶ Start', 'Delete']);
+  await expect(toolbar(page, 'workflow').getByRole('button')).toHaveText(['▶ Start', 'Copy', 'Delete']);
   await expect(field(page, 'Name')).toHaveValue(/^untitled(-\d+)?$/);
   await expect(field(page, 'Version')).toHaveValue('1.0.0');
   await expect(field(page, 'Cron')).toHaveValue('');
@@ -37,7 +37,7 @@ test('the toolbox drops a triangle, a cache and a step where they are dropped, e
   await expect(caNode(page, cache).locator('.cache-nm')).toHaveText(/^cache(-\d+)?$/);
   await expect(field(page, 'Version')).toHaveValue('1.0.0');
   await expect(caNode(page, cache).locator('.unsaved-mark')).toBeVisible();
-  await expect(toolbar(page, 'cache').getByRole('button')).toHaveText(['Delete']);
+  await expect(toolbar(page, 'cache').getByRole('button')).toHaveText(['Copy', 'Delete']);
   expect(await unsavedCount(page)).toBe(n0 + 2);
 
   const step = await dropTool(page, toolboxStep(page, PROC_A), 'step', await regionPoint(page, { x: 450, y: 120 }));

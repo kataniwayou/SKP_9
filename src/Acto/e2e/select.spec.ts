@@ -58,7 +58,7 @@ test('a triangle selects with its hue: its key chips show on the steps holding i
   expect(await strokeOf(wfNode(page, id.wa!).locator('.tri-body'))).toBe(PINK);
   await expect(field(page, 'Name')).toHaveValue('e2e-sel-a');
   await expect(tabLabels(page)).toHaveText(['Workflow']);
-  await expect(toolbar(page, 'workflow').getByRole('button')).toHaveText(['▶ Start', 'Delete']);
+  await expect(toolbar(page, 'workflow').getByRole('button')).toHaveText(['▶ Start', 'Copy', 'Delete']);
   // A's entry arrow carries the hue; B's does not
   await expect(entryEdge(page, id.wa!, id.s1!).locator('g.entry-edge')).toHaveClass(/\bon\b/);
   await expect(entryEdge(page, id.wb!, id.s1!).locator('g.entry-edge')).not.toHaveClass(/\bon\b/);
@@ -233,10 +233,10 @@ test('Ctrl+click multi-selects steps, caches and wires with the light bar and nu
   await expect(inspector(page)).toContainText('2 things are selected');
   await expect(inspector(page).locator('.in-picks li')).toHaveText(['e2e-sel-shared', 'e2e-sel-onlya']);
 
-  // a cache: Copy goes (a cache cannot be copied), Delete stays; a wire joins
+  // a cache: Copy and Delete stay [user, 2026-11-19: caches copy too]; a wire joins, and Copy goes
   await pickCache(page, id.c1!, true);
   await expect(selbar(page).locator('.selbar-pill')).toHaveText('3 SELECTED');
-  await expect(selbar(page).getByRole('button')).toHaveText(['Delete']);
+  await expect(selbar(page).getByRole('button')).toHaveText(['Copy', 'Delete']);
   await expect(caNode(page, id.c1!).locator('.pick-no')).toHaveText('3');
   await pickEdge(page, wireEdge(page, id.s1!, id.s2!), true);
   await expect(selbar(page).locator('.selbar-pill')).toHaveText('4 SELECTED');
@@ -260,7 +260,7 @@ test('Ctrl+click multi-selects steps, caches and wires with the light bar and nu
   await wfNode(page, id.wb!).locator('.tri-nm').click({ modifiers: ['Control'] });
   await expect(allWorkflows(page).locator('.tri.sel')).toHaveCount(2);
   await expect(selbar(page).locator('.selbar-pill')).toHaveText('2 SELECTED');
-  await expect(selbar(page).getByRole('button')).toHaveText(['▶ Start', '■ Stop', 'Delete']);
+  await expect(selbar(page).getByRole('button')).toHaveText(['▶ Start', '■ Stop', 'Copy', 'Delete']);
 });
 
 test('Esc clears the picks and the triangle; the Delete key does nothing', async ({ page }) => {

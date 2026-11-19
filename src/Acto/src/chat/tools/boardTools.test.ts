@@ -171,6 +171,27 @@ describe('picks, clipboard and delete_picked', () => {
     expect(Object.keys(store.state().steps)).toHaveLength(3);
   });
 
+  it('copy and paste of a workflow and a cache: every field but the name; links among the copies join them', async () => {
+    const { ctx, store } = setup();
+    expect(done(await call(ctx, 'copy', { cache_ids: ['ghost'] })).result).toBe('no cache ghost on the board');
+    expect(done(await call(ctx, 'copy', { workflow_ids: ['daily'], cache_ids: ['c1'] })).result).toBe('Copied 1 workflow and 1 cache');
+    const out = done(await call(ctx, 'paste'));
+    expect(out.result).toBe('pasted 1 workflow and 1 cache: cache c1-2, workflow daily-2; they are picked and not saved yet');
+    const s = store.state();
+    const wf = Object.values(s.workflows).find((w) => w.name === 'daily-2')!;
+    const c = Object.values(s.caches).find((x) => x.name === 'c1-2')!;
+    expect(wf).toMatchObject({ entryStepIds: ['fetch'], cacheIds: [c.id], assignmentIds: s.workflows.daily!.assignmentIds, updatedAt: null });
+    expect(ctx.commands.picks()).toEqual([{ kind: 'cache', id: c.id }, { kind: 'workflow', id: wf.id }]);
+  });
+
+  it('copy without ids copies the picked triangles, steps and caches', async () => {
+    const { ctx, store } = setup();
+    ctx.commands.setPicks([{ kind: 'workflow', id: 'hourly' }, { kind: 'cache', id: 'c1' }, { kind: 'wire', from: 'fetch', to: 'expand' }]);
+    expect(done(await call(ctx, 'copy')).result).toBe('Copied 1 workflow and 1 cache');
+    expect(done(await call(ctx, 'paste')).ok).toBe(true);
+    expect(Object.values(store.state().workflows).map((w) => w.name)).toContain('hourly-2');
+  });
+
   it('copy without step_ids copies the picked steps', async () => {
     const { ctx } = setup();
     ctx.commands.setPicks([{ kind: 'step', id: 'lonely' }]);

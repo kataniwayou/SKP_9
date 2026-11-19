@@ -94,7 +94,7 @@ test('Start and Stop: a real workflow\'s toolbar offers the right one for its st
   if (stopped && running) {
     await selectWorkflowAlone(page, stopped.id);
     await wfNode(page, running.id).locator('.tri-nm').click({ modifiers: ['Control'] });
-    await expect(selbar(page).getByRole('button')).toHaveText(['▶ Start', '■ Stop', 'Delete']);
+    await expect(selbar(page).getByRole('button')).toHaveText(['▶ Start', '■ Stop', 'Copy', 'Delete']);
     await page.keyboard.press('Escape');
   }
 });

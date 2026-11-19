@@ -65,8 +65,25 @@ NodeStatusIndicator components [user].
   The chat's `pick` tool (`withPicks`) takes the list it is given as it is; its triangles are the selected workflows.
   A saved selection of the older shape (selected workflows that were not picks) is read with them as picked triangles.
 - **Multi-select bar**: light bar + numbered badges for 2+ picks; the bar shows the actions common to everything
-  picked. With 2+ triangles and nothing else picked it shows **Start · Stop · Delete** for all of them (Delete
-  confirms once, listing every workflow) [call].
+  picked. With 2+ triangles and nothing else picked it shows **Start · Stop · Copy · Delete** for all of them (Delete
+  confirms once, listing every workflow) [call]. **Copy** is offered for any mix of triangles, steps and caches; with a
+  triangle among other kinds it is the only action (a triangle's Delete is a BaseAPI delete).
+
+### Copy and paste of workflows and caches [user, 2026-11-19]
+
+"to clarify the copy create new entity id but copy all the fields exactly except the name". Copy is on the triangle
+toolbar (Start/Stop · **Copy** · Delete), the cache toolbar (**Copy** · Delete), the step toolbar (unchanged) and the
+bar. Ctrl+V pastes new rows: a new id, a unique name (`name-2`, `name-3`, … Studio's names), every other field the same,
+unsaved, placed down-right of the originals on free board, and picked.
+- **Workflow**: version, description and cron; the same entry steps, caches and assignment ids (the assignment rows are
+  shared; an edit to one copies the payload for that workflow only). It is created stopped (running is not a field).
+- **Cache**: version, description and items; the **root is named on like the name** (`orders` → `orders-2`) because
+  BaseAPI keeps roots unique (a shared root would mix two caches' items) [user, 2026-11-19, asked when the exact copy was
+  refused on Save].
+- **Step**: unchanged (shared fields, no payloads).
+- **Copied together**: a link between two copied items joins the copies (wires, entry arrows, cache lines); a link to
+  anything not copied stays on the original, and is dropped if that is gone from the board by the time of the paste.
+- The chat's `copy` takes `workflow_ids`, `step_ids` and `cache_ids` (or the picks); `paste` pastes them all.
 
 ## 5. Inspector — tabs [user: items 1–4; replaced by rules 2 and 3, user, 2026-11-18]
 

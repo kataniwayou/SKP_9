@@ -17,9 +17,9 @@ const labels = (p: Pick, d: ToolbarDeps) => toolbarFor(p, d)?.map((i) => i.label
 describe('toolbarFor', () => {
   it('shows exactly the buttons per kind', () => {
     const d = deps();
-    expect(labels(tri, d)).toEqual(['▶ Start', 'Delete']);
+    expect(labels(tri, d)).toEqual(['▶ Start', 'Copy', 'Delete']);
     expect(labels({ kind: 'step', id: 's' }, d)).toEqual(['Copy', 'Delete']);
-    expect(labels({ kind: 'cache', id: 'c' }, d)).toEqual(['Delete']);
+    expect(labels({ kind: 'cache', id: 'c' }, d)).toEqual(['Copy', 'Delete']);
     expect(labels({ kind: 'wire', from: 'a', to: 'b' }, d)).toEqual(['Delete']);
     expect(labels({ kind: 'entry', workflowId: 'w1', stepId: 's' }, d)).toEqual(['Delete']);
     expect(labels({ kind: 'cacheLink', workflowId: 'w1', cacheId: 'c' }, d)).toEqual(['Delete']);
@@ -32,15 +32,17 @@ describe('toolbarFor', () => {
     expect(toolbarFor(tri, deps({ picks: [{ kind: 'step', id: 's' }] }))).toBeNull();
   });
   it('Stop for a running workflow, Start disabled while the run state is not known', () => {
-    expect(labels(tri, deps({ run: () => 'running' }))).toEqual(['■ Stop', 'Delete']);
+    expect(labels(tri, deps({ run: () => 'running' }))).toEqual(['■ Stop', 'Copy', 'Delete']);
     expect(toolbarFor(tri, deps({ run: () => 'checking' }))![0]).toMatchObject({ label: '▶ Start', disabled: true });
   });
   it('the buttons call their actions', () => {
     const d = deps();
     toolbarFor(tri, d)![0]!.onClick(); expect(d.start).toHaveBeenCalledWith('w1');
-    toolbarFor(tri, d)![1]!.onClick(); expect(d.askDelete).toHaveBeenCalledWith('w1');
+    toolbarFor(tri, d)![1]!.onClick(); expect(d.copy).toHaveBeenCalledWith({ kind: 'workflow', id: 'w1' });
+    toolbarFor(tri, d)![2]!.onClick(); expect(d.askDelete).toHaveBeenCalledWith('w1');
     const step: Pick = { kind: 'step', id: 's' };
-    toolbarFor(step, d)![0]!.onClick(); expect(d.copy).toHaveBeenCalledWith('s');
+    toolbarFor(step, d)![0]!.onClick(); expect(d.copy).toHaveBeenCalledWith({ kind: 'step', id: 's' });
+    toolbarFor({ kind: 'cache', id: 'c' }, d)![0]!.onClick(); expect(d.copy).toHaveBeenCalledWith({ kind: 'cache', id: 'c' });
     toolbarFor(step, d)![1]!.onClick(); expect(d.remove).toHaveBeenCalledWith(step);
     toolbarFor(tri, deps({ run: () => 'running', stop: d.stop }))![0]!.onClick(); expect(d.stop).toHaveBeenCalledWith('w1');
   });

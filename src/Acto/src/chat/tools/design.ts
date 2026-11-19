@@ -6,7 +6,7 @@ import { addCache, addEntry, addStep, addWire, linkCache, moveItems, removeEntri
 import { restoreGhosts, type GhostItem } from '../../design/ghosts';
 import type { Rect } from '../../model/geometry';
 import type { Id } from '../../model/graph';
-import { copyClip, copyMessage, pasteClip, readClip, writeClip } from '../../operate/clipboard';
+import { copyClip, copyMessage, countWords, pasteClip, pasteMessage, readClip, writeClip } from '../../operate/clipboard';
 import { freeOffset } from '../../operate/freeOffset';
 import type { ToolContext, ToolDef, ToolOutcome } from '../toolTypes';
 import { applyEdit, applyState, CACHE_ID, done, fail, linesSince, NO_ARGS, onBoard, STEP_ID, text, WORKFLOW_ID } from './common';
@@ -241,14 +241,26 @@ const pickTool: ToolDef = {
 
 const copy: ToolDef = {
   name: 'copy',
-  description: 'Copy steps (step_ids, or the picked steps when not given) and the wires among them for paste. No payloads are copied.',
-  parameters: { type: 'object', properties: { step_ids: { type: 'array', items: { type: 'string' } } }, additionalProperties: false },
+  description: "Copy workflows (triangles), steps and caches for paste: the ids given, or the picked ones when none is given. A paste makes new ones with every field the same but the name (and a cache's root, unique, named on like the name); the wires among copied steps are copied; a workflow keeps its entry steps, caches and assignments (shared rows), joined to the copies of those copied with it. Steps get no payloads.",
+  parameters: { type: 'object', properties: {
+    workflow_ids: { type: 'array', items: { type: 'string' } },
+    step_ids: { type: 'array', items: { type: 'string' } },
+    cache_ids: { type: 'array', items: { type: 'string' } },
+  }, additionalProperties: false },
   async run(ctx, args) {
-    const given = Array.isArray(args.step_ids) ? args.step_ids.map(String) : null;
-    const ids = given ?? ctx.commands.picks().flatMap((p) => (p.kind === 'step' ? [p.id] : []));
-    for (const id of ids) { const t = onBoard(ctx, 'step', id, 'copy'); if ('out' in t) return t.out; }
-    const clip = copyClip(ctx.store.state(), ids);
-    if (!clip) return fail('nothing to copy: pick steps or give step_ids', 'copy');
+    const ids = (k: string) => (Array.isArray(args[k]) ? (args[k] as unknown[]).map(String) : null);
+    const given = [['workflow', ids('workflow_ids')], ['step', ids('step_ids')], ['cache', ids('cache_ids')]] as const;
+    let refs: ItemRef[];
+    if (given.some(([, xs]) => xs !== null)) {
+      refs = [];
+      for (const [kind, xs] of given) {
+        for (const id of xs ?? []) { const t = onBoard(ctx, kind, id, 'copy'); if ('out' in t) return t.out; refs.push({ kind, id }); }
+      }
+    } else {
+      refs = ctx.commands.picks().flatMap((p) => (p.kind === 'workflow' || p.kind === 'step' || p.kind === 'cache' ? [{ kind: p.kind, id: p.id }] : []));
+    }
+    const clip = copyClip(ctx.store.state(), refs);
+    if (!clip) return fail('nothing to copy: pick workflows, steps or caches, or give their ids', 'copy');
     writeClip(ctx.session, clip);
     const msg = copyMessage(clip);
     ctx.output.log(msg, 'ok');
@@ -257,19 +269,22 @@ const copy: ToolDef = {
 };
 
 const paste: ToolDef = {
-  name: 'paste', description: 'Paste the copied steps as new steps on free board (new names, unsaved, no payloads) and pick them.',
+  name: 'paste', description: 'Paste what was copied as new workflows, steps and caches on free board (new names, every other field the same, unsaved; steps without payloads) and pick them.',
   parameters: NO_ARGS,
   async run(ctx) {
     const clip = readClip(ctx.session);
     if (!clip) return fail('nothing copied yet', 'paste');
-    let pasted: Id[] = [];
+    let pasted: ItemRef[] = [];
     const out = applyState(ctx, (b) => { const r = pasteClip(b, clip, ctx.newId); pasted = r.pasted; return r.state; }, 'paste', '');
     if (!out.ok) return out;
     writeClip(ctx.session, { ...clip, pasted: clip.pasted + 1 });
-    ctx.commands.setPicks(pasted.map((id) => ({ kind: 'step' as const, id })));
-    const names = pasted.map((id) => ctx.store.state().steps[id]!.name).join(', ');
-    ctx.output.log(`Pasted ${plural(pasted.length, 'step')}`, 'ok');
-    return done(true, `pasted ${plural(pasted.length, 'step')}: ${names}; they are picked and not saved yet`, 'paste');
+    ctx.commands.setPicks(pasted.map((p) => ({ ...p })));
+    const s = ctx.store.state();
+    const names = pasted.map((p) => `${p.kind} ${(p.kind === 'step' ? s.steps : p.kind === 'cache' ? s.caches : s.workflows)[p.id]!.name}`).join(', ');
+    const msg = pasteMessage(pasted);
+    ctx.output.log(msg, 'ok');
+    const n = (k: ItemRef['kind']) => pasted.filter((p) => p.kind === k).length;
+    return done(true, `pasted ${countWords({ workflows: n('workflow'), steps: n('step'), caches: n('cache') })}: ${names}; they are picked and not saved yet`, 'paste');
   },
 };
 

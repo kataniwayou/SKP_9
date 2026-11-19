@@ -1,4 +1,5 @@
 import type { LiveStatus } from '../api/liveStatus';
+import type { ItemRef } from '../design/board';
 import type { Id } from '../model/graph';
 import type { DeletePlan } from '../operate/deleteWorkflow';
 import type { ToolbarItem } from './nodes/boardContext';
@@ -14,7 +15,8 @@ export interface ToolbarDeps {
   pending: DeletePlan | null;
   start(wf: Id): void;
   stop(wf: Id): void;
-  copy(stepId: Id): void;
+  /** Copy of a triangle, step or cache for Ctrl+V. */
+  copy(ref: ItemRef): void;
   /** Delete of a step, cache, wire, entry arrow or cache line: one board edit. */
   remove(p: Pick): void;
   /** A triangle's Delete: the dry run first, then the confirm. */
@@ -36,8 +38,8 @@ export const confirmTextMany = (plans: readonly DeletePlan[]) => plans.length ==
   : `Delete ${plans.flatMap((p) => p.lines).join(', ')}? Their steps and caches stay.`;
 
 /**
- * The toolbar over a lone pick (spec §6): triangle Start/Stop · Delete (a pending delete shows its confirm instead);
- * step Copy · Delete; cache, wire, entry arrow and cache line Delete; ghost Restore · Remove.
+ * The toolbar over a lone pick (spec §6): triangle Start/Stop · Copy · Delete (a pending delete shows its confirm
+ * instead); step and cache Copy · Delete [user, 2026-11-19]; wire, entry arrow and cache line Delete; ghost Restore · Remove.
  */
 export function toolbarFor(p: Pick, d: ToolbarDeps): ToolbarItem[] | null {
   const del: ToolbarItem = { label: 'Delete', tone: 'danger', onClick: () => d.remove(p) };
@@ -55,10 +57,10 @@ export function toolbarFor(p: Pick, d: ToolbarDeps): ToolbarItem[] | null {
       const runItem: ToolbarItem = run === 'running'
         ? { label: '■ Stop', tone: 'stop', onClick: () => d.stop(p.id) }
         : { label: '▶ Start', tone: 'go', disabled: run !== 'stopped', onClick: () => d.start(p.id) };
-      return [runItem, { label: 'Delete', tone: 'danger', onClick: () => d.askDelete(p.id) }];
+      return [runItem, { label: 'Copy', onClick: () => d.copy({ kind: 'workflow', id: p.id }) }, { label: 'Delete', tone: 'danger', onClick: () => d.askDelete(p.id) }];
     }
-    case 'step': return [{ label: 'Copy', onClick: () => d.copy(p.id) }, del];
-    case 'cache': case 'wire': case 'entry': case 'cacheLink': return [del];
+    case 'step': case 'cache': return [{ label: 'Copy', onClick: () => d.copy({ kind: p.kind, id: p.id }) }, del];
+    case 'wire': case 'entry': case 'cacheLink': return [del];
     case 'ghost': return [
       { label: 'Restore', onClick: () => d.restore([p.key]) },
       { label: 'Remove', tone: 'danger', onClick: () => d.removeGhosts([p.key]) },

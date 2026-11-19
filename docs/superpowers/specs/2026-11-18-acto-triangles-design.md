@@ -163,6 +163,7 @@ orphans included [call].
   → superseded by 2026-11-18-acto-inspector-tabs-design.md §4 (triangles can be Ctrl+clicked; ghosts too).
 - **Toolbars**: triangle = Start/Stop · Delete; step = Copy · Delete; cache = Delete; wire = Delete; entry arrow =
   Delete; cache dashed line = Delete. Paste = Ctrl+V only. Delete key does nothing. No key hints (unchanged rules).
+  → amended 2026-11-19: triangle Start/Stop · Copy · Delete, cache Copy · Delete (inspector-tabs spec, Copy and paste).
 
 ## 7. Editing
 
@@ -174,7 +175,8 @@ orphans included [call].
 - **Payload**: edited only with a triangle selected; it belongs to that workflow [user].
 - **Delete a step**: removes the step, its wires, the entry arrows into it and every workflow's payload on it, in one
   edit — the designer's responsibility [user]. **Delete a cache**: removes it and every dashed line to it.
-- **Copy/paste steps**: shared fields and wires among the copied steps; no payloads [call].
+- **Copy/paste steps**: shared fields and wires among the copied steps; no payloads [call]. Workflows and caches copy
+  too since 2026-11-19 (inspector-tabs spec, Copy and paste).
 - **Undo/Redo**: **one history for the whole board** [call: per-workflow histories contradict a shared graph];
   Inspector header buttons and Ctrl+Z/Y; covers every edit including locations and payloads.
 - **Unsaved**: every changed item carries the unsaved mark; the Save button shows the count [call]. The unsaved board

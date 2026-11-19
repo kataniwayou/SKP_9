@@ -31,7 +31,7 @@ import { statusOf } from './live/liveState';
 import { signalRHub } from './live/signalrHub';
 import type { Point } from './model/geometry';
 import type { Id } from './model/graph';
-import { copyClip, copyMessage, pasteClip, readClip, writeClip } from './operate/clipboard';
+import { copyClip, copyMessage, pasteClip, pasteMessage, readClip, writeClip } from './operate/clipboard';
 import { commitDeletes, prepareDeletes, type DeletePlan } from './operate/deleteWorkflow';
 import { runWorkflow } from './operate/runWorkflow';
 import { watchTransitions } from './operate/transitions';
@@ -175,26 +175,27 @@ export function App(props: AppProps) {
     return () => document.removeEventListener('keydown', onKey);
   }, [store]);
 
-  const copySteps = useCallback((ids: Id[]) => {
-    const clip = copyClip(store.state(), ids);
-    if (!clip) { output.log('Nothing to copy — pick steps', 'warn'); return; }
+  const copyItems = useCallback((refs: ItemRef[]) => {
+    const clip = copyClip(store.state(), refs);
+    if (!clip) { output.log('Nothing to copy — pick workflows, steps or caches', 'warn'); return; }
     writeClip(session, clip);
     output.log(copyMessage(clip), 'ok');
   }, [store, output, session]);
 
-  // Ctrl+V pastes the copied steps as new steps on free board, and picks them
+  // Ctrl+V pastes the copied triangles, steps and caches as new ones on free board, and picks them
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!pasteKey(e)) return;
       e.preventDefault();
       const clip = readClip(session);
       if (!clip) { output.log('Nothing copied yet', 'warn'); return; }
-      let pasted: Id[] = [];
+      let pasted: ItemRef[] = [];
       store.edit((b) => { const r = pasteClip(b, clip, newId); pasted = r.pasted; return r.state; });
       if (pasted.length === 0) return;
       writeClip(session, { ...clip, pasted: clip.pasted + 1 });
-      setSelection({ workflows: selRef.current.workflows, picks: pasted.map((id) => ({ kind: 'step' as const, id })) });
-      output.log(`Pasted ${plural(pasted.length, 'step')}`, 'ok');
+      const triangles = pasted.flatMap((p) => (p.kind === 'workflow' ? [p.id] : []));
+      setSelection({ workflows: triangles.length > 0 ? triangles : selRef.current.workflows, picks: pasted.map((p) => ({ ...p })) });
+      output.log(pasteMessage(pasted), 'ok');
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -270,18 +271,18 @@ export function App(props: AppProps) {
     pending: pending && !pending.many ? pending.plans[0]! : null,
     start: (wf) => run(wf, 'start'),
     stop: (wf) => run(wf, 'stop'),
-    copy: (id) => copySteps([id]),
+    copy: (ref) => copyItems([ref]),
     remove: (x) => removePicks([x]),
     askDelete: (wf) => askDelete([wf]), confirmDelete, cancelDelete,
     restore, removeGhosts,
-  }), [sel.picks, pending, live, run, copySteps, removePicks, askDelete, confirmDelete, cancelDelete, restore, removeGhosts]);
+  }), [sel.picks, pending, live, run, copyItems, removePicks, askDelete, confirmDelete, cancelDelete, restore, removeGhosts]);
 
   const bar = barOf(sel.picks);
   const ghostKeys = () => selRef.current.picks.flatMap((p) => (p.kind === 'ghost' ? [p.key] : []));
   const triangleIds = () => selRef.current.picks.flatMap((p) => (p.kind === 'workflow' ? [p.id] : []));
   const barView = bar && (
     <SelectionBar bar={bar} confirm={pending?.many ? confirmTextMany(pending.plans) : null} actions={{
-      copy: () => copySteps(selRef.current.picks.flatMap((p) => (p.kind === 'step' ? [p.id] : []))),
+      copy: () => copyItems(selRef.current.picks.flatMap((p) => (p.kind === 'step' || p.kind === 'cache' || p.kind === 'workflow' ? [{ kind: p.kind, id: p.id }] : []))),
       del: () => { if (bar.run) askDelete(triangleIds()); else removePicks(selRef.current.picks); },
       restore: () => restore(ghostKeys()),
       remove: () => removeGhosts(ghostKeys()),

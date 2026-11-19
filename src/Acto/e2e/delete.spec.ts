@@ -32,7 +32,7 @@ test('deleting a triangle asks with what goes; Cancel sends nothing; Delete remo
   await openAt(page);
   await selectWorkflowAlone(page, id.a!);
   const tb = toolbar(page, 'workflow');
-  await expect(tb.getByRole('button')).toHaveText(['▶ Start', 'Delete']);
+  await expect(tb.getByRole('button')).toHaveText(['▶ Start', 'Copy', 'Delete']);
 
   const writes: string[] = [];
   page.on('request', (r) => { if (r.method() !== 'GET' && r.url().includes('/api/')) writes.push(`${r.method()} ${new URL(r.url()).pathname}`); });
@@ -44,7 +44,7 @@ test('deleting a triangle asks with what goes; Cancel sends nothing; Delete remo
 
   await tb.getByRole('button', { name: 'Cancel' }).click();
   await expect(outLine(page, 'Delete cancelled — nothing was sent')).toHaveCount(1);
-  await expect(tb.getByRole('button')).toHaveText(['▶ Start', 'Delete']);
+  await expect(tb.getByRole('button')).toHaveText(['▶ Start', 'Copy', 'Delete']);
   await expect(wfNode(page, id.a!)).toBeVisible();
   expect((await ids('workflows')).has(id.a!)).toBe(true);
   expect(writes.filter((w) => w.endsWith('/apply'))).toEqual([]);

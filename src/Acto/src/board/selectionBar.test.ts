@@ -16,8 +16,8 @@ describe('barOf', () => {
   it('steps alone: Copy and Delete', () => {
     expect(barOf([st('a'), st('b')])).toEqual(bar(2, { copy: true, del: true }));
   });
-  it('a step and a cache: only Delete is common', () => {
-    expect(barOf([st('a'), ca('c')])).toEqual(bar(2, { del: true }));
+  it('a step and a cache: Copy and Delete [user, 2026-11-19]', () => {
+    expect(barOf([st('a'), ca('c')])).toEqual(bar(2, { copy: true, del: true }));
   });
   it('wires, entry arrows and cache lines: Delete', () => {
     const picks: Pick[] = [{ kind: 'wire', from: 'a', to: 'b' }, { kind: 'entry', workflowId: 'w', stepId: 'a' }, { kind: 'cacheLink', workflowId: 'w', cacheId: 'c' }];
@@ -29,10 +29,14 @@ describe('barOf', () => {
   it('a ghost and a step: nothing common', () => {
     expect(barOf([gh('step:a'), st('b')])).toEqual(bar(2));
   });
-  it('triangles alone: Start · Stop and Delete, no Copy', () => {
-    expect(barOf([wf('a'), wf('b')])).toEqual(bar(2, { run: true, del: true }));
+  it('triangles alone: Start · Stop, Copy and Delete', () => {
+    expect(barOf([wf('a'), wf('b')])).toEqual(bar(2, { run: true, copy: true, del: true }));
   });
-  it('a triangle and a step: nothing common', () => {
-    expect(barOf([wf('w'), st('a')])).toEqual(bar(2));
+  it('a triangle with steps and caches: Copy only (a triangle Delete is a BaseAPI delete)', () => {
+    expect(barOf([wf('w'), st('a'), ca('c')])).toEqual(bar(3, { copy: true }));
+  });
+  it('a triangle and a wire, or a ghost: nothing common', () => {
+    expect(barOf([wf('w'), { kind: 'wire', from: 'a', to: 'b' }])).toEqual(bar(2));
+    expect(barOf([wf('w'), gh('step:a')])).toEqual(bar(2));
   });
 });

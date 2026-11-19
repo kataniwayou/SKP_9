@@ -144,13 +144,13 @@ describe('App', () => {
       await waitFor(() => expect(steps()).toBe(2));
     });
 
-    it('a cache has Delete only; a triangle Start · Delete', async () => {
+    it('a cache has Copy · Delete; a triangle Start · Copy · Delete', async () => {
       renderApp();
       await loaded();
       fireEvent.click(screen.getByText('c1', { selector: '.cache-nm' }));
-      await waitFor(() => expect(toolbarLabels()).toEqual(['Delete']));
+      await waitFor(() => expect(toolbarLabels()).toEqual(['Copy', 'Delete']));
       fireEvent.click(triangle('daily'));
-      await waitFor(() => expect(toolbarLabels()).toEqual(['▶ Start', 'Delete']));
+      await waitFor(() => expect(toolbarLabels()).toEqual(['▶ Start', 'Copy', 'Delete']));
     });
 
     it('a triangle Delete runs the dry run, shows its confirm; Cancel keeps it, Delete deletes it in BaseAPI', async () => {
@@ -165,7 +165,7 @@ describe('App', () => {
       fireEvent.click(inToolbar().getByRole('button', { name: 'Cancel' }));
       expect(await screen.findByText('Delete cancelled — nothing was sent')).toBeInTheDocument();
       expect(api.applyModel).not.toHaveBeenCalled();
-      await waitFor(() => expect(toolbarLabels()).toEqual(['▶ Start', 'Delete']));
+      await waitFor(() => expect(toolbarLabels()).toEqual(['▶ Start', 'Copy', 'Delete']));
       fireEvent.click(inToolbar().getByRole('button', { name: 'Delete' }));
       await screen.findByText(/^Delete workflow hourly/);
       fireEvent.click(inToolbar().getByRole('button', { name: 'Delete' }));
@@ -177,14 +177,14 @@ describe('App', () => {
   });
 
   describe('picks and the selection bar', () => {
-    it('Ctrl+click a step and a cache: the bar offers only Delete, and Delete takes both', async () => {
+    it('Ctrl+click a step and a cache: the bar offers Copy and Delete, and Delete takes both', async () => {
       renderApp();
       await loaded();
       fireEvent.click(card('lonely'));
       fireEvent.click(screen.getByText('c1', { selector: '.cache-nm' }), { ctrlKey: true });
       const bar = await screen.findByRole('toolbar', { name: 'selection actions' });
       expect(within(bar).getByText('2 SELECTED')).toBeInTheDocument();
-      expect(within(bar).getAllByRole('button').map((b) => b.textContent)).toEqual(['Delete']);
+      expect(within(bar).getAllByRole('button').map((b) => b.textContent)).toEqual(['Copy', 'Delete']);
       fireEvent.click(within(bar).getByText('Delete'));
       await waitFor(() => expect(steps()).toBe(2));
       expect(screen.queryByTestId('rf__node-ca:c1')).toBeNull();
@@ -298,7 +298,7 @@ describe('App', () => {
       renderApp(api);
       await loaded();
       const bar = await pickBoth();
-      expect(within(bar).getAllByRole('button').map((b) => b.textContent)).toEqual(['▶ Start', '■ Stop', 'Delete']);
+      expect(within(bar).getAllByRole('button').map((b) => b.textContent)).toEqual(['▶ Start', '■ Stop', 'Copy', 'Delete']);
       fireEvent.click(within(bar).getByText('▶ Start'));
       await waitFor(() => expect(api.startWorkflow).toHaveBeenCalledTimes(2));
       expect(api.startWorkflow).toHaveBeenCalledWith('daily');
