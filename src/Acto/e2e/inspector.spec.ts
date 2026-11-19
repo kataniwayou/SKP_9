@@ -34,15 +34,15 @@ test('a triangle\'s Inspector: name, version, cron with its reading, description
   await expect(field(page, 'Version')).toHaveValue('1.0.0');
   await expect(field(page, 'Cron')).toHaveValue('0 0 * * * *');
   await expect(inspector(page)).toContainText(/every hour|hourly|at minute 0|hour/i);
-  await expect(inspector(page).locator('.chip', { hasText: 'e2e-ins-first' })).toHaveCount(1);
+  await expect(inspector(page).locator('.chip:not(.in-assign)', { hasText: 'e2e-ins-first' })).toHaveCount(1);
   await expect(inspector(page).locator('.chip', { hasText: 'e2e-ins-cache' })).toBeVisible();
   await expect(inspector(page).getByText('Caches · 1')).toBeVisible();
   await expect(inspector(page).locator('dt', { hasText: 'Location' }).locator('xpath=following-sibling::dd[1]')).toHaveText(/^-?\d+, -?\d+$/);
   // its assignments, each naming the step it references
   const asg = inspector(page).getByTestId('assignments');
   await expect(asg.locator('.in-assign')).toHaveCount(2);
-  expect([...(await asg.locator('dt').allInnerTexts())].sort()).toEqual(['e2e-ins-first', 'e2e-ins-second']);
-  await expect(asg.locator('.in-assign').first()).toHaveText(/^◆ \d+ keys?$/);
+  expect([...(await asg.locator('.chip-nm').allInnerTexts())].sort()).toEqual(['e2e-ins-first', 'e2e-ins-second']);
+  await expect(asg.locator('.in-assign .chip-sub').first()).toHaveText(/^◆ \d+ keys?$/);
 
   // every field edits, each marking the triangle unsaved
   await expect(wfNode(page, id.wa!).locator('.unsaved-mark')).toHaveCount(0);
@@ -66,7 +66,7 @@ test('a triangle\'s Inspector: name, version, cron with its reading, description
   await expect(page.locator(`.react-flow__edge[data-id="entry:${id.wa}:${id.s1}"]`)).toHaveCount(0);
   await inspector(page).getByRole('button', { name: 'Remove cache e2e-ins-cache' }).click();
   await expect(page.locator(`.react-flow__edge[data-id="cache:${id.wa}:${id.c1}"]`)).toHaveCount(0);
-  await expect(inspector(page).locator('.chip', { hasText: 'e2e-ins-first' })).toHaveCount(0);
+  await expect(inspector(page).locator('.chip:not(.in-assign)', { hasText: 'e2e-ins-first' })).toHaveCount(0);
   await expect(inspector(page).getByText('Caches · 0')).toBeVisible();
 });
 
@@ -133,7 +133,7 @@ test('the payload field checks JSON as it is typed; the triangle lists its assig
   await expect(asg.locator('.in-assign')).toHaveCount(2);
   await expect(asg.locator('textarea')).toHaveCount(0);
   await expect(asg.getByRole('button', { name: 'Delete' })).toHaveCount(0);
-  await expect(asg.locator('.in-assign').first()).toHaveText(/^◆ 1 key$/);
+  await expect(asg.locator('.in-assign .chip-sub').first()).toHaveText(/^◆ 1 key$/);
 
   // the payload is edited through the step with the triangle selected
   await pickStep(page, id.s1!);

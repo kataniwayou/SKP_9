@@ -143,9 +143,9 @@ the problems). No assignment yet: an empty Payload editor that creates one on fi
 arrow), **caches as chips** (✕ unlinks; several allowed [user: "add multiple cache to workflow"] — linking is the
 existing drag from the triangle's back to a cache, repeated per cache), and one read-only **Assignments** section
 [user, 2026-11-18: assignments are listed read-only; delete and payload edits only via Step › <workflow>]: one
-two-column row per assignment the workflow links, label = the step name, value = `◆ N keys` / `◆ payload`, plus
-` · not in its stream` when the workflow does not reach that step. No Delete, no payload editor (one trigger per action).
-The value is a link (the show-all link style) [user, 2026-11-19]: it selects this workflow with that step — the same
+chip per assignment the workflow links, styled like an entry-step chip but without the ✕ [user, 2026-11-19]: the step's
+condition colour, the step name, then muted `◆ N keys` / `◆ payload`, plus ` · not in its stream` when the workflow does
+not reach that step. No Delete, no payload editor (one trigger per action). A click on the chip selects this workflow with that step — the same
 selection as a Ctrl+click on the step — and opens Step › this workflow's assignment.
 
 **Cache tab**: Name, Version, show all, Description, Root, Items (pretty JSON when it parses), Used by.

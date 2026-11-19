@@ -59,18 +59,18 @@ export function WorkflowTab({ state, edit, id, openAssignment }: Ctx & { id: Id;
       <Sec>Assignments</Sec>
       <div data-testid="assignments">
         {assignments.length === 0 ? <p className="none">No assignments.</p> : (
-          <Ro>
-            {assignments.map((a, i) => (
-              <Row key={`${id}:${i}`} k={stepName(state, a.stepId)} className="in-assign">
-                {openAssignment && (
-                  <button type="button" className="link" aria-label={`Open assignment ${stepName(state, a.stepId)}`} onClick={() => openAssignment(a.stepId)}>
-                    {keysText(a.payload)}
-                  </button>
-                )}
-                {!openAssignment && keysText(a.payload)}{reach.has(a.stepId) ? '' : ' · not in its stream'}
-              </Row>
-            ))}
-          </Ro>
+          <div className="chips">
+            {assignments.map((a, i) => {
+              const name = stepName(state, a.stepId);
+              const body = <>
+                <i style={{ background: conditionStyle(state.steps[a.stepId]?.entryCondition ?? 0).colour }} /><span className="chip-nm">{name}</span>
+                <span className="chip-sub">{keysText(a.payload)}{reach.has(a.stepId) ? '' : ' · not in its stream'}</span>
+              </>;
+              return openAssignment
+                ? <button key={`${id}:${i}`} type="button" className="chip chip-link in-assign" aria-label={`Open assignment ${name}`} onClick={() => openAssignment(a.stepId)}>{body}</button>
+                : <span key={`${id}:${i}`} className="chip in-assign">{body}</span>;
+            })}
+          </div>
         )}
       </div>
     </>
