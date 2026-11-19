@@ -1,10 +1,10 @@
 # Acto, the workflow board: a static Vite build served by nginx, which also proxies /api/ to BaseApi so the
 # browser stays same-origin (BaseApi has no CORS policy). Build from the repo root:
 #   docker build -f src/Acto/Dockerfile -t acto:local .
-# The npm packages come only from Studio-offline/npm-offline/ (2026-10-12; in the kit since 2026-10-19), the npm
-# counterpart of nugets/: the build never reaches an npm registry, and a package missing there fails it by name
-# (node tools/vendor-npm.mjs acto adds what Acto's lock file needs; the kit is shared with WorkflowStudio, so it keeps their tarballs too). The base images are build settings,
-# for a registry such as Artifactory (defaults: Docker Hub, or the tars in Studio-offline/images/ loaded into Docker):
+# The npm packages come only from Acto-offline/npm-offline/ (Acto's own offline kit since 2026-11-19; see
+# Acto-offline/README.md), the npm counterpart of nugets/: the build never reaches an npm registry, and a package missing
+# there fails it by name (node tools/vendor-npm.mjs acto keeps the folder in step with the lock file). The base images are
+# build settings, for a registry such as Artifactory (defaults: Docker Hub, or the tars in Acto-offline/images/ loaded into Docker):
 # --build-arg NODE_IMAGE=<registry>/node:24-alpine --build-arg NGINX_IMAGE=<registry>/nginx:1.29-alpine
 ARG NODE_IMAGE=node:24-alpine
 ARG NGINX_IMAGE=nginx:1.29-alpine
@@ -14,7 +14,7 @@ WORKDIR /app
 # .npmrc (legacy-peer-deps=true) must travel with the manifests: it works around an npm 10.9.2
 # crash in the peer-set resolver that the pinned dependency set triggers.
 COPY src/Acto/package.json src/Acto/package-lock.json src/Acto/.npmrc ./
-COPY Studio-offline/npm-offline/ /npm-offline/
+COPY Acto-offline/npm-offline/ /npm-offline/
 # the folder's tarballs into an empty cache, then the lock file installed from that cache alone
 RUN npm cache add /npm-offline/*.tgz --cache /tmp/npm-cache --loglevel=warn \
     && npm ci --offline --cache /tmp/npm-cache --no-audit --no-fund \

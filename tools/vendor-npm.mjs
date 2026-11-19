@@ -7,7 +7,8 @@
 //   node tools/vendor-npm.mjs <app> --install  offline: check, then npm ci in the app's folder from npm-offline/ alone
 //                                              (a temporary cache, never the network), for a compile outside Docker
 //
-// <app> is studio (src/WorkflowStudio, Studio-offline/npm-offline), acto (src/Acto, the same kit) or valence (src/Valence, Valence-offline/npm-offline).
+// <app> is studio (src/WorkflowStudio, Studio-offline/npm-offline), acto (src/Acto, Acto-offline/npm-offline: its own kit
+// since 2026-11-19) or valence (src/Valence, Valence-offline/npm-offline).
 // Run it after every change to the app's package-lock.json, and commit npm-offline/ with it. Platform builds are kept
 // only for the platforms below (the Docker build's Linux, both libcs, and Windows for a local npm ci); a machine on
 // another platform installs its own from npm.
@@ -20,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 const APPS = {
   studio: { source: 'src/WorkflowStudio', kit: 'Studio-offline' },
-  acto: { source: 'src/Acto', kit: 'Studio-offline' },
+  acto: { source: 'src/Acto', kit: 'Acto-offline' },
   valence: { source: 'src/Valence', kit: 'Valence-offline' },
 };
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
