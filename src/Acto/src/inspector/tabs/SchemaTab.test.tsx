@@ -40,30 +40,28 @@ describe('SchemaTab', () => {
     expect(screen.getByLabelText('Name')).toBeDisabled();
     expect(screen.getByText('Definition', { selector: 'dt' }).nextSibling).toHaveTextContent('not loaded');
   });
-  it('the definition retyped as the same JSON is no edit', () => {
+  it('the Definition is read-only [user, 2026-11-19]: disabled, typing changes nothing, the note says why', () => {
     const store = openOn('Config schema');
-    fireEvent.change(screen.getByLabelText('Definition'), { target: { value: '{ "type" : "object", "required": ["k"] }' } });
-    expect(store.state().processors.p1!.configSchemaId).toBe('s-cfg');
-    expect(store.unsaved().size).toBe(0);
-  });
-  it('a definition edit makes one copy, edits it in place after', () => {
-    const store = openOn('Config schema');
+    expect(screen.getByLabelText('Definition')).toBeDisabled();
+    expect(screen.getByLabelText('Definition')).toHaveValue(JSON.stringify(JSON.parse(REQUIRED), null, 2));
     fireEvent.change(screen.getByLabelText('Definition'), { target: { value: '{"type":"object"}' } });
+    expect(store.state().processors.p1!.configSchemaId).toBe('s-cfg');
+    expect(store.state().schemas['s-cfg']!.definition).toBe(REQUIRED);
+    expect(store.unsaved().size).toBe(0);
+    expect(screen.getByText('The definition is read-only: a change needs the processor restarted.')).toBeInTheDocument();
+  });
+  it('Name, Version and Description stay editable: an edit makes the processor its own copy, the definition kept', () => {
+    const store = openOn('Config schema');
+    for (const label of ['Name', 'Version', 'Description']) expect(screen.getByLabelText(label)).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'renamed' } });
     const copyId = store.state().processors.p1!.configSchemaId!;
     expect(copyId).not.toBe('s-cfg');
-    expect(store.state().schemas[copyId]).toMatchObject({ definition: '{"type":"object"}', updatedAt: null });
-    expect(store.state().schemas['s-cfg']!.definition).toBe(REQUIRED);
-    fireEvent.change(screen.getByLabelText('Definition'), { target: { value: '{"type":"object","x":1}' } });
-    expect(store.state().processors.p1!.configSchemaId).toBe(copyId);
-    expect(Object.keys(store.state().schemas)).toHaveLength(3);
-    expect(childTab('Processor', 'Config schema')).toHaveAttribute('aria-selected', 'true');
-  });
-  it('the schema name edits the copy too', () => {
-    const store = openOn('Config schema');
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'renamed' } });
-    expect(store.state().schemas[store.state().processors.p1!.configSchemaId!]!.name).toBe('renamed');
+    expect(store.state().schemas[copyId]).toMatchObject({ name: 'renamed', definition: REQUIRED, updatedAt: null });
     expect(store.state().schemas['s-cfg']!.name).toBe('cfg');
     expect(screen.getByLabelText('Unique name')).toHaveTextContent('renamed 1.0.0');
+    fireEvent.change(screen.getByLabelText('Version'), { target: { value: '2.0.0' } });
+    expect(store.state().processors.p1!.configSchemaId).toBe(copyId);
+    expect(store.state().schemas[copyId]!.version).toBe('2.0.0');
   });
   it('the payload is checked against the config schema, in the workflow child tab of Step', () => {
     const store = openOn('daily');

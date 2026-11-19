@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 
 /**
- * A labelled field: one row, the label left and the value right (the mock's .f; `tall` tops the label, for JSON and
- * long text). Controlled from the store: a refused edit shows the store value again.
+ * A labelled field: the label above its value, the value the pane's full width (Studio's .field [user, 2026-11-19];
+ * `tall` is kept for JSON and long text). Controlled from the store: a refused edit shows the store value again.
  */
 export function Field({ label, children, tall }: { label: string; children: ReactNode; tall?: boolean }) {
   return <label className={tall ? 'fld tall' : 'fld'}><span>{label}</span>{children}</label>;

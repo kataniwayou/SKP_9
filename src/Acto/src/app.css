@@ -25,16 +25,17 @@
 .tool .health-dot { margin-left: auto; }
 
 /* inspector */
-.fld { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px; align-items: center; margin: 5px 0; }
-.fld.tall { align-items: start; }
-.fld.tall > span { padding-top: 5px; }
-.fld > span { font: 500 11px var(--sans); color: var(--muted); overflow-wrap: anywhere; }
+/* the label above its value, the value the full pane width (Studio's .field) [user, 2026-11-19] */
+.fld { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; margin: 8px 0; }
+.fld > span { font: 11.5px var(--sans); color: var(--muted); overflow-wrap: anywhere; }
 .fld input, .fld select, .fld textarea { font: 13px var(--sans); color: var(--ink); background: var(--card-2); border: 1px solid var(--line); border-radius: 7px; padding: 4px 7px; width: 100%; min-width: 0; }
 .fld textarea { font: 12px/1.45 var(--mono); resize: vertical; }
 .fld input:focus, .fld select:focus, .fld textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
 .fld :disabled { opacity: .6; }
-.ro { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 4px 6px; font-size: 12.5px; margin: 5px 0 10px; }
-.ro dt { color: var(--muted); font: 500 11px var(--sans); overflow-wrap: anywhere; } .ro dd { margin: 0; font-family: var(--mono); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+/* read-outs too: the term above its value (Studio's .readout .rrow) [user, 2026-11-19] */
+.ro { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; font-size: 12.5px; margin: 5px 0 10px; }
+.ro dt { color: var(--muted); font: 11.5px var(--sans); overflow-wrap: anywhere; } .ro dt:not(:first-child) { margin-top: 6px; }
+.ro dd { margin: 0; font-family: var(--mono); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
 .sec { font: 500 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 14px 0 8px; padding-top: 10px; border-top: 1px solid var(--line); }
 .cpick { position: relative; min-width: 0; }
 .fld .cp-btn { display: flex; align-items: center; gap: 2px; text-align: left; cursor: pointer; font: 13px var(--sans); color: var(--ink); background: var(--card-2); border: 1px solid var(--line); border-radius: 7px; padding: 4px 7px; width: 100%; min-width: 0; }

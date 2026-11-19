@@ -111,7 +111,11 @@ Processor, Schema, Assignment and Cache tabs all render, with the same component
    steps, Caches, Assignments, Payload keys; step → Used by, Location; processor → Liveness, Input/Output/Config schema
    rows, Used by (its steps); cache → Used by, Location.
 **Location** stays, and every board-item tab (Workflow, Step, Cache) shows it under Related [call, 2026-11-18].
-Link and Deleted tabs use the same head and two-column read-only rows (no fields); the Link tab's icon title is gone.
+Link and Deleted tabs use the same head and the same read-only rows (no fields); the Link tab's icon title is gone.
+**Layout: the label above its value** [user, 2026-11-19: "all the labels of fields relocate above the value and not on left
+side as today — same as studio", superseding 2026-11-18's two columns]: every field (`.fld`) and every read-only row
+(`.ro` dt/dd) puts its label on its own line, muted 11.5 px, with the value the pane's full width under it (Studio's
+`.field` / `.readout .rrow`).
 
 **Step tab**: Name, Version, show all, Description, **Entry condition** with **Studio's picker** [user: item 5] — a
 select-only combobox whose button and options show the letter pill + a short wire in the condition colour + the name,
@@ -132,8 +136,11 @@ No schema editors here any more, and **no In/Out/Config buttons** [user].
 
 **Schema child tab** (Input schema / Output schema / Config schema, under Processor) [user, 2026-11-18]: that schema's entity form — head
 `name version`, kind line `schema · input of <processor name>` (output/config likewise), Name, Version, show all,
-Description, **Definition** (pretty JSON, compared with its saved value). Every edit goes to the processor's own copy
-(`setSlotSchema`, unchanged). A schema whose definition is not read yet is shown, not edited.
+Description, **Definition** (pretty JSON). Name, Version and Description edits go to the processor's own copy
+(`setSlotSchema`, unchanged). **The Definition is read-only** [user, 2026-11-19: "the processor schemas definitions are
+readonly. if you change any schema you will need to restart the processor"; "not all the schema properties, only the
+definition"]: disabled, with the note "The definition is read-only: a change needs the processor restarted."; the chat's
+set_field refuses `definition` with the same reason. A schema whose definition is not read yet is shown, not edited.
 
 **Workflow-named child tab of Step (assignment)** [user, 2026-11-18: a child of Step]: the assignment of that workflow on this step — Name, Version, show all,
 Description, **Payload** (pretty JSON), the config-schema check note ("✓ checked against … ; Save checks it again" or

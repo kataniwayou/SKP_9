@@ -18,7 +18,7 @@ const NULLABLE = new Set(['description', 'cronExpression']);
 
 const setField: ToolDef = {
   name: 'set_field',
-  description: "Set one field of a workflow (name, version, description, cronExpression), step (name, version, description, entryCondition: 1 Completed, 2 Failed, 3 Cancelled, 4 Always, 5 Never), cache (name, version, description, root, items), processor (name, version, description), schema (name, version, description, definition) or assignment (name, version, description: a workflow's payload row, id from read_board's payloads, with that workflow's workflow_id), as the Inspector does. A processor or schema shared with other things is changed for all of them; a schema edit gives the processor a schema of its own; an assignment other workflows also link is copied for this workflow only. `value` null clears a description or cron.",
+  description: "Set one field of a workflow (name, version, description, cronExpression), step (name, version, description, entryCondition: 1 Completed, 2 Failed, 3 Cancelled, 4 Always, 5 Never), cache (name, version, description, root, items), processor (name, version, description), schema (name, version, description; its definition is read-only: a change needs the processor restarted) or assignment (name, version, description: a workflow's payload row, id from read_board's payloads, with that workflow's workflow_id), as the Inspector does. A processor or schema shared with other things is changed for all of them; a schema edit gives the processor a schema of its own; an assignment other workflows also link is copied for this workflow only. `value` null clears a description or cron.",
   parameters: {
     type: 'object',
     properties: {
@@ -45,6 +45,8 @@ const setField: ToolDef = {
     }
     const names: readonly string[] = FIELDS[kind];
     if (!names.includes(field)) return fail(`a ${kind} has no field ${field}: the fields are ${names.join(', ')}`, 'set field');
+    // [user, 2026-11-19] a definition change needs the processor restarted: read-only, as in the Inspector
+    if (kind === 'schema' && field === 'definition') return fail('a schema definition is read-only: a change needs the processor restarted', 'set field');
     const raw = args.value;
     let value: string | number | null;
     if (field === 'entryCondition') {

@@ -40,6 +40,17 @@ describe('G1 set_field on an assignment (the Step > workflow tab fields)', () =>
     expect(done(await call(ctx, 'set_field', { kind: 'assignment', id: 'a-daily-fetch', workflow_id: 'daily', field: 'payload', value: '{}' })).result).toContain('the fields are name, version, description');
   });
 
+  it("a schema's definition is read-only [user, 2026-11-19]: set_field on it is refused and changes nothing", async () => {
+    const { ctx, store } = setup();
+    const b0 = store.state();
+    store.load({ ...b0, processors: { ...b0.processors, p1: { ...b0.processors.p1!, configSchemaId: 's1' } },
+      schemas: { s1: { id: 's1', name: 'cfg', version: '1.0.0', description: null, definition: '{}', audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, updatedAt: 'x' } } });
+    const before = store.state();
+    expect(done(await call(ctx, 'set_field', { kind: 'schema', id: 's1', field: 'definition', value: '{"type":"object"}' }))).toMatchObject({
+      ok: false, result: 'a schema definition is read-only: a change needs the processor restarted' });
+    expect(store.state()).toBe(before);
+  });
+
   it('read_board gives each payload\'s name, version and description', async () => {
     const { ctx } = setup();
     const d = JSON.parse(done(await call(ctx, 'read_board')).result);

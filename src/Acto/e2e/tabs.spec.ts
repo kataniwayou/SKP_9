@@ -223,3 +223,43 @@ test('[user, 2026-11-19] the Step tab removes a wire out by its chip; a Workflow
   await inspector(page).getByRole('button', { name: 'Undo' }).click();
   await expect(wireEdge(page, id.s1!, id.s2!)).toHaveCount(1);
 });
+
+test('[user, 2026-11-19] a schema\'s Definition is read-only (Name, Version, Description stay editable); every label sits above its value, as in Studio', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  await pickWorkflow(page, id.wa!);
+  await pickStep(page, id.s1!);
+  await tab(page, 'Processor').click();
+  for (const slot of ['Input', 'Output', 'Config']) {
+    await childTab(page, 'Processor', `${slot} schema`).click();
+    await expect(field(page, 'Definition'), `${slot}: Definition`).toBeDisabled();
+    for (const label of ['Name', 'Version', 'Description']) await expect(field(page, label), `${slot}: ${label}`).toBeEnabled();
+    await expect(inspector(page).locator('.in-readonly')).toHaveText('The definition is read-only: a change needs the processor restarted.');
+  }
+  // nothing was changed by looking
+  await expect(page.locator('button.save-board')).toHaveText('Save');
+
+  // label above value: each field's label box ends above its control, both starting at the same left edge
+  const labelAbove = async (what: string) => {
+    for (const f of await inspector(page).locator('label.fld').all()) {
+      const lab = (await f.locator(':scope > span').boundingBox())!;
+      const ctl = (await f.locator('input, textarea, button.cp-btn').first().boundingBox())!;
+      expect(lab.y + lab.height, `${what}: ${await f.locator(':scope > span').innerText()} above`).toBeLessThanOrEqual(ctl.y + 1);
+      expect(Math.abs(lab.x - ctl.x), `${what}: ${await f.locator(':scope > span').innerText()} left edges`).toBeLessThan(3);
+    }
+  };
+  await labelAbove('schema tab');
+  await tab(page, 'Processor').click();
+  await labelAbove('processor tab');
+  await tab(page, 'Step').click();
+  await labelAbove('step tab');
+  await childTab(page, 'Step', 'e2e-tab-a').click();
+  await labelAbove('assignment tab');
+  // read-outs too: a term above its value
+  await tab(page, 'Step').click();
+  const dt = inspector(page).locator('dt', { hasText: 'Used by' });
+  const dd = dt.locator('xpath=following-sibling::dd[1]');
+  const a = (await dt.boundingBox())!, b = (await dd.boundingBox())!;
+  expect(a.y + a.height).toBeLessThanOrEqual(b.y + 1);
+  expect(Math.abs(a.x - b.x)).toBeLessThan(3);
+});

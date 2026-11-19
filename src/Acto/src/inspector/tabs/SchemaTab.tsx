@@ -15,9 +15,10 @@ const schemaMeta = (s: SchemaRow): Meta => (s.updatedAt === null
 
 /**
  * The schema in one slot of the picked step's processor [user, 2026-11-18]: its fields and its Definition (pretty JSON).
- * Every edit goes to the processor's own copy of the schema (setSlotSchema), never to the shared row.
+ * Name, Version and Description edits go to the processor's own copy of the schema (setSlotSchema), never to the shared
+ * row. The Definition is read-only [user, 2026-11-19: "if you change any schema you will need to restart the processor"].
  */
-export function SchemaTab({ state, base, edit, stepId, slot }: Ctx & { stepId: Id; slot: Slot }) {
+export function SchemaTab({ state, edit, stepId, slot }: Ctx & { stepId: Id; slot: Slot }) {
   const processorId = state.steps[stepId]?.processorId ?? null;
   const processor = processorId === null ? undefined : state.processors[processorId];
   if (processorId === null || !processor) return null;
@@ -26,10 +27,7 @@ export function SchemaTab({ state, base, edit, stepId, slot }: Ctx & { stepId: I
   const kind = `schema · ${slot} of ${processor.name}`;
   const schema = state.schemas[schemaId];
   if (!schema) return <><EntityHead name={schemaId} kind={kind} /><Ro><Row k="Schema">not loaded</Row></Ro></>;
-  // the slot's schema as BaseAPI has it: typed back to its definition, a copy holds the saved text itself
-  const savedId = base.processors[processorId]?.[SLOT_FIELD[slot]] ?? null;
-  const saved = savedId === null ? undefined : base.schemas[savedId]?.definition ?? undefined;
-  const set = (key: 'name' | 'version' | 'description' | 'definition', v: string | null) =>
+  const set = (key: 'name' | 'version' | 'description', v: string | null) =>
     edit((b) => {
       const cur = b.schemas[b.processors[processorId]?.[SLOT_FIELD[slot]] ?? ''];
       if (!cur || cur.definition === null || cur.definition === undefined) return b;
@@ -45,7 +43,8 @@ export function SchemaTab({ state, base, edit, stepId, slot }: Ctx & { stepId: I
       <EntityBase head={`${schema.name} ${schema.version}`} kind={kind} k={k} row={schema} meta={schemaMeta(schema)} set={set} disabled={unread} />
       {definition === null
         ? <Ro><Row k="Definition">not loaded</Row></Ro>
-        : <JsonField key={`${k}:definition`} label="Definition" value={definition} saved={saved} onChange={(v) => set('definition', v)} />}
+        : <JsonField key={`${k}:definition`} label="Definition" value={definition} onChange={() => {}} disabled />}
+      <p className="in-note sub in-readonly">The definition is read-only: a change needs the processor restarted.</p>
     </>
   );
 }

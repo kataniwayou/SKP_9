@@ -49,7 +49,7 @@ The board is one shared graph of steps, wires between steps and caches, and noth
 - A step, processor, cache or schema may be shared by several workflows: a change to it is a change for all of them.
 
 # Fields and payloads
-- set_field sets one field of a workflow, step, cache, processor or schema, as the Inspector does (a step's entryCondition is 1 Completed, 2 Failed, 3 Cancelled, 4 Always, 5 Never). An unknown field is a failed result naming the fields there are.
+- set_field sets one field of a workflow, step, cache, processor or schema, as the Inspector does; a schema's definition is read-only (a change needs the processor restarted), so never offer to edit it (a step's entryCondition is 1 Completed, 2 Failed, 3 Cancelled, 4 Always, 5 Never). An unknown field is a failed result naming the fields there are.
 - set_payload gives a workflow its payload on a step (the JSON its processor gets as config). A payload that other workflows share is copied for this workflow only, so they keep theirs. It is not checked on the spot: the dry run after Save reports the config schema's problems, so report them and offer the fix. remove_assignment removes a workflow's payload. set_field kind assignment (with the workflow_id) sets the name, version or description of a workflow's payload row; a row other workflows share is copied for this workflow only.
 
 # Families (entry conditions)
