@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Pick } from '../board/selection';
@@ -227,6 +227,38 @@ describe('InspectorPanel', () => {
   describe('assignment tab', () => {
     const PRETTY = '{\n  "share": "/mnt",\n  "n": [\n    1,\n    2\n  ]\n}';
     const opened = (sel: Sel, state?: BoardState) => { const r = setup(sel, state); openTab(sel.workflows.at(-1)!); return r; };
+    /** board() with p1 holding a config schema: a required string, a required integer, an optional with a default, an optional boolean. */
+    const withConfig = (definition: string | null): BoardState => {
+      const b0 = board();
+      return { ...b0, processors: { p1: { ...b0.processors.p1!, configSchemaId: 's-cfg' } },
+        schemas: { 's-cfg': { id: 's-cfg', name: 'cfg', version: '1.0.0', description: null, definition, audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, updatedAt: null } } };
+    };
+    const KAFKA = JSON.stringify({ type: 'object', required: ['topic', 'partitions'], properties: {
+      topic: { type: 'string' }, partitions: { type: 'integer' }, acks: { type: 'string', default: 'all' }, compress: { type: 'boolean' } } });
+    it("＋ Create lays the new assignment's payload out from the config schema, as Studio; the check names the placeholders [user, 2026-11-19]", () => {
+      const { store } = opened({ workflows: ['daily'], picks: [step('expand')] }, withConfig(KAFKA));
+      expect(screen.getByText(/No assignment yet for daily/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '＋ Create' }));
+      const want = { topic: '<string>', partitions: '<integer>', acks: 'all', compress: false };
+      const made = store.state().assignments[store.state().workflows.daily!.assignmentIds.at(-1)!]!;
+      expect(made.stepId).toBe('expand');
+      expect(JSON.parse(made.payload)).toEqual(want);
+      expect(screen.getByLabelText('Payload')).toHaveValue(JSON.stringify(want, null, 2));
+      expect(screen.queryByRole('button', { name: '＋ Create' })).toBeNull();
+      expect(screen.getByText('/topic: still a placeholder: fill in a string')).toBeInTheDocument();
+      expect(screen.getByText('/partitions: still a placeholder: fill in an integer')).toBeInTheDocument();
+      expect(store.state().workflows.hourly!.assignmentIds).toEqual(['a-hourly-fetch']);
+      act(() => store.undo());
+      expect(store.state().workflows.daily!.assignmentIds).toEqual(['a-daily-fetch']);
+    });
+    it('＋ Create with no config schema (or one without properties) makes {}', () => {
+      for (const def of [null, '{"type":"object"}']) {
+        const { store } = opened({ workflows: ['daily'], picks: [step('expand')] }, withConfig(def));
+        fireEvent.click(screen.getByRole('button', { name: '＋ Create' }));
+        expect(store.state().assignments[store.state().workflows.daily!.assignmentIds.at(-1)!]!.payload).toBe('{}');
+        cleanup();
+      }
+    });
     it('shows the payload of its own workflow, pretty, on the same step', () => {
       const { store, rerender } = setup({ workflows: ['daily'], picks: [step('fetch')] });
       act(() => store.edit((b) => setPayload(b, 'hourly', 'fetch', '{"every":"hour"}', () => 'x')));

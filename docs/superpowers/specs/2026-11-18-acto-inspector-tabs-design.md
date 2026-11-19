@@ -136,8 +136,11 @@ Description, **Definition** (pretty JSON, compared with its saved value). Every 
 
 **Workflow-named child tab of Step (assignment)** [user, 2026-11-18: a child of Step]: the assignment of that workflow on this step — Name, Version, show all,
 Description, **Payload** (pretty JSON), the config-schema check note ("✓ checked against … ; Save checks it again" or
-the problems). No assignment yet: an empty Payload editor that creates one on first typing (today's behaviour) and a
-"Remove assignment" action once it exists.
+the problems). No assignment yet: Studio's **＋ Create** link [user, 2026-11-19: "populate on payload the json placeholders
+same as studio"] makes one whose payload is laid out from the step's processor's config schema (`payloadSkeleton`, as
+Studio: a required key as a `"<type>"` marker that the check names "still a placeholder", an optional one as its
+default or its type's empty value; `{}` with no config schema or no properties); typing into the empty Payload still
+makes one too. A "Remove assignment" action once it exists.
 
 **Workflow tab**: Name, Version, show all, Description, Cron (+ its reading), entry steps as chips (✕ removes the
 arrow), **caches as chips** (✕ unlinks; several allowed [user: "add multiple cache to workflow"] — linking is the
