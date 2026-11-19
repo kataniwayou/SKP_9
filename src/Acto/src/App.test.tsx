@@ -115,7 +115,7 @@ describe('App', () => {
 
     it('a refused Save outlines the item BaseAPI named', async () => {
       const api = boardApi();
-      (api.applyModel as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, value: { applied: false, results: [{ ok: false, table: 'steps', id: 'expand', status: 409 }] } });
+      (api.applyModel as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, value: { applied: false, results: [{ ok: false, table: 'steps', id: 'expand', status: 409, problem: { code: 'stale' } }] } });
       renderApp(api);
       await loaded();
       fireEvent.click(card('expand'));

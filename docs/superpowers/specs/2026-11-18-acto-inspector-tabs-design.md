@@ -84,6 +84,10 @@ unsaved, placed down-right of the originals on free board, and picked.
 - **Copied together**: a link between two copied items joins the copies (wires, entry arrows, cache lines); a link to
   anything not copied stays on the original, and is dropped if that is gone from the board by the time of the paste.
 - The chat's `copy` takes `workflow_ids`, `step_ids` and `cache_ids` (or the picks); `paste` pastes them all.
+- **Save refusal wording** [user, 2026-11-19: "fix the wording"]: only BaseAPI's stale 409 (problem code `stale`: the
+  row changed since it was read) says "<name> changed elsewhere — Take stored drops your change to it" and counts for
+  Take stored. Any other 409 (a duplicate unique value such as a cache root, a frozen schema definition) is
+  "<kind> <name>: <BaseAPI's reason>", with no Take stored, since there is no stored version to take.
 
 ## 5. Inspector — tabs [user: items 1–4; replaced by rules 2 and 3, user, 2026-11-18]
 

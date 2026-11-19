@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures';
 import {
-  allCaches, allWorkflows, cacheEdge, caNode, clearOutput, clickEmptyBoard, entryEdge, openAt, outLine, pickCache, pickStep, pickWorkflow, save, selbar,
+  allCaches, allWorkflows, cacheEdge, caNode, clearOutput, clickEmptyBoard, field, entryEdge, openAt, outLine, pickCache, pickStep, pickWorkflow, save, selbar,
   stNode, toolbar, wfNode,
 } from './helpers';
 import { seed } from './seed';
@@ -117,4 +117,22 @@ test('the bar: Copy for any mix of triangles, steps and caches; pasted together,
   await expect(selbar(page).getByRole('button')).toHaveText(['▶ Start', '■ Stop', 'Copy', 'Delete']);
   // nothing was saved
   expect((await getJson<Row[]>('/workflows')).filter((w) => w.name.startsWith('e2e-cp-')).map((w) => w.name)).toEqual(['e2e-cp-wf']);
+});
+
+test('a Save refused for a duplicate root says BaseAPI\'s reason, not "changed elsewhere", and offers no Take stored', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  await pickCache(page, id.c!);
+  await toolbar(page, 'cache').getByRole('button', { name: 'Copy' }).click();
+  await page.keyboard.press('Control+v');
+  await expect(outLine(page, 'Pasted 1 cache')).toHaveCount(1);
+  // the copy is picked: give it the original's root back
+  await field(page, 'Root').fill('e2e-cp-root');
+  const answer = await save(page);
+  expect(answer.applied).not.toBe(true);
+  await expect(outLine(page, 'cache e2e-cp-cache-2: Unique constraint violation: root already exists.')).toHaveCount(1);
+  await expect(outLine(page, /changed elsewhere/)).toHaveCount(0);
+  await expect(page.locator('button.take-stored')).toHaveCount(0);
+  // nothing was saved
+  expect((await getJson<Row[]>('/caches')).filter((c) => c.name.startsWith('e2e-cp-')).map((c) => c.name)).toEqual(['e2e-cp-cache']);
 });

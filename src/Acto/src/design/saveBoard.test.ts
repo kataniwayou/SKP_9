@@ -79,11 +79,24 @@ describe('saveBoard', () => {
     expect(t.store.saving()).toBe(false);
   });
 
+  it("a 409 that is not stale (a duplicate unique value) says BaseAPI's reason and offers no Take stored", async () => {
+    const t = setup();
+    t.store.edit((b) => ({ ...b, caches: { ...b.caches, c1: { ...b.caches.c1!, root: 'taken' } } }));
+    t.api.applyModel.mockResolvedValue({ ok: true, value: { ok: false, applied: false, made: {}, results: [
+      { index: 0, op: 'update', table: 'caches', id: 'c1', ok: false, status: 409, problem: { title: 'Conflict', detail: 'Unique constraint violation: root already exists.' } },
+    ] } } as never);
+    await saveBoard(t.studio, t.store, t.output);
+    expect(texts(t.output)).toContain('cache c1: Unique constraint violation: root already exists.');
+    expect(texts(t.output).some((x) => x.includes('changed elsewhere'))).toBe(false);
+    expect(t.store.failures().has('cache:c1')).toBe(true);
+    expect(t.store.stale()).toEqual([]);
+  });
+
   it('says "changed elsewhere" for a 409', async () => {
     const t = setup();
     rename(t.store, 'daily', 'daily-2');
     t.api.applyModel.mockResolvedValue({ ok: true, value: { ok: false, applied: false, made: {}, results: [
-      { index: 0, op: 'update', table: 'workflows', id: 'daily', ok: false, status: 409, problem: { detail: 'stale' } },
+      { index: 0, op: 'update', table: 'workflows', id: 'daily', ok: false, status: 409, problem: { detail: 'stale', code: 'stale' } },
     ] } } as never);
     await saveBoard(t.studio, t.store, t.output);
     expect(texts(t.output)).toContain('daily-2 changed elsewhere — Take stored drops your change to it');
@@ -197,7 +210,7 @@ describe('takeStored after a refusal on stale rows', () => {
     const t = setup();
     rename(t.store, 'daily', 'daily-2');
     rename(t.store, 'hourly', 'hourly-2');
-    refuse(t, [{ index: 0, op: 'update', table: 'workflows', id: 'daily', ok: false, status: 409, problem: { detail: 'stale' } }]);
+    refuse(t, [{ index: 0, op: 'update', table: 'workflows', id: 'daily', ok: false, status: 409, problem: { detail: 'stale', code: 'stale' } }]);
     await saveBoard(t.studio, t.store, t.output);
     expect(t.store.stale()).toEqual([{ table: 'workflows', id: 'daily' }]);
 
@@ -241,7 +254,7 @@ describe('takeStored after a refusal on stale rows', () => {
     await saveBoard(t.studio, t.store, t.output);
     expect(t.store.stale()).toEqual([]);
 
-    refuse(t, [{ index: 0, op: 'update', table: 'workflows', id: 'daily', ok: false, status: 409, problem: { detail: 'stale' } }]);
+    refuse(t, [{ index: 0, op: 'update', table: 'workflows', id: 'daily', ok: false, status: 409, problem: { detail: 'stale', code: 'stale' } }]);
     await saveBoard(t.studio, t.store, t.output);
     const before = t.store.state();
     vi.mocked(loadBoard).mockResolvedValue({ ok: false, error: { kind: 'network', status: 0 } } as never);

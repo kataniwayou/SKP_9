@@ -39,10 +39,18 @@ export function problemMessage(problem: unknown): string {
   return typeof p.title === 'string' && p.title ? p.title : 'refused';
 }
 
+/**
+ * A 409 for a row changed since it was read: BaseAPI's own stale check (problem code `stale`). Any other 409 (a
+ * duplicate of a unique value, say a cache's root, or a frozen schema definition) is a refusal with its own reason,
+ * with no stored version to take [user, 2026-11-19: "fix the wording"].
+ */
+export const isStale = (r: Result): boolean =>
+  r.status === 409 && !!r.problem && typeof r.problem === 'object' && (r.problem as { code?: unknown }).code === 'stale';
+
 /** The Output line for one failed change result. */
 export function failureText(r: Result, boards: BoardState[]): string {
   const name = nameOf(boards, r.table ?? '', r.id ?? '');
-  if (r.status === 409) return `${name} changed elsewhere — Take stored drops your change to it`;
+  if (isStale(r)) return `${name} changed elsewhere — Take stored drops your change to it`;
   if (r.status === 404) return `${kindOf(r.table ?? '')} ${name} is gone — Take stored drops your change to it`;
   return `${kindOf(r.table ?? '')} ${name}: ${problemMessage(r.problem)}`;
 }
@@ -113,7 +121,7 @@ export async function saveBoard(
       if (map.size === 0) output.log('Save refused: BaseAPI gave no reason', 'error');
       store.setFailures(map);
       store.setStale((res.value.results ?? [])
-        .filter((r) => r.ok === false && (r.status === 409 || r.status === 404) && r.table && r.id && r.table in KIND)
+        .filter((r) => r.ok === false && (isStale(r) || r.status === 404) && r.table && r.id && r.table in KIND)
         .map((r) => ({ table: r.table as Table, id: r.id! })));
       return 'refused';
     }
