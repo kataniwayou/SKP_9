@@ -1,3 +1,4 @@
+import { payloadSkeleton } from '../model/assignments';
 import type { Id } from '../model/graph';
 import type { AssignmentRow, BoardState } from './board';
 import { NO_AUDIT } from './board';
@@ -13,6 +14,20 @@ export function assignmentsOf(b: BoardState, wf: Id): AssignmentRow[] {
 export function assignmentOf(b: BoardState, wf: Id, stepId: Id): AssignmentRow | null {
   return assignmentsOf(b, wf).find((a) => a.stepId === stepId) ?? null;
 }
+
+/** The step's processor's config schema definition (null: no processor, no config schema, or not read). */
+export function configDefinitionOf(b: BoardState, stepId: Id): string | null {
+  const pid = b.steps[stepId]?.processorId;
+  const sid = pid ? b.processors[pid]?.configSchemaId : null;
+  return sid ? b.schemas[sid]?.definition ?? null : null;
+}
+
+/**
+ * A new assignment's payload as Studio's ＋ Create lays it out [user, 2026-11-19]: from the step's processor's config
+ * schema (payloadSkeleton: a required key as a "<type>" marker, an optional one as its default or empty value); `{}`
+ * without one. The Inspector's ＋ Create and the chat's set_payload without a payload both use it.
+ */
+export const newPayloadOf = (b: BoardState, stepId: Id): string => payloadSkeleton(configDefinitionOf(b, stepId));
 
 /** The workflows that link this assignment row. */
 export function linkedBy(b: BoardState, assignmentId: Id): Id[] {

@@ -348,3 +348,26 @@ test('14 add_cache with its name and root in one call, saved', async ({ page }) 
   expect(c.root).toBe('e2e-chat-r6');
   await expect(caNode(page, c.id)).toBeVisible();
 });
+
+test('15 a new payload laid out as ＋ Create does: the chat makes it from the config schema, names the fields to fill, then fills them and saves [user, 2026-11-19]', async ({ page }) => {
+  const id = await seed({
+    steps: [{ key: 'f', name: 'e2e-chat-f1', at: { x: 300, y: 0 }, processor: 'file-fetcher' }],
+    workflows: [{ key: 'a', name: 'e2e-chat-a', at: { x: 0, y: 0 }, entry: ['f'] }],
+  });
+  await openAt(page);
+  const t = await say(page, 'Create the payload of workflow e2e-chat-a on step e2e-chat-f1 the way the Inspector\'s Create button does, '
+    + 'and tell me which fields I still have to fill in. Do not save.');
+  expect(t.actions, 'set_payload without a payload laid it out').toContain('made payload on e2e-chat-f1');
+  // file-fetcher-config: two required integers (placeholders) and an optional array: three keys (the triangle picked shows its chip), nothing saved
+  await wfNode(page, id.a!).locator('.tri-nm').click();
+  await expect(stNode(page, id.f!).locator('.key-chip')).toContainText('3 keys');
+  for (const field of ['minimumSizeBytes', 'maximumSizeBytes']) expect(t.reply, `the reply names ${field}`).toContain(field);
+  expect((await rowsNamed('assignments', 'e2e-chat-f1-assignment'))).toHaveLength(0);
+
+  await say(page, 'Set minimumSizeBytes to 0 and maximumSizeBytes to 1024 in that payload, keep the rest, and save the board.');
+  const wf = await named('workflows', 'e2e-chat-a');
+  const rows = (await getJson<Row[]>('/assignments')).filter((a) => (wf.assignmentIds as string[]).includes(a.id));
+  expect(rows).toHaveLength(1);
+  expect(rows[0]!.name).toBe('e2e-chat-f1-assignment');
+  expect(JSON.parse(rows[0]!.payload as string)).toMatchObject({ minimumSizeBytes: 0, maximumSizeBytes: 1024 });
+});

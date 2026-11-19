@@ -103,6 +103,32 @@ describe('field and payload tools', () => {
     expect(done(await call(sh.ctx, 'set_payload', { workflow_id: 'daily', step_id: 'ghost', payload: '{}' })).result).toBe('no step ghost on the board');
   });
 
+  it('set_payload without payload lays a new one out from the config schema, as ＋ Create [user, 2026-11-19]; never over an existing one', async () => {
+    const { ctx, store } = setup();
+    const b0 = store.state();
+    const def = JSON.stringify({ type: 'object', required: ['topic'], properties: { topic: { type: 'string' }, acks: { type: 'string', default: 'all' } } });
+    store.load({ ...b0, processors: { ...b0.processors, p1: { ...b0.processors.p1!, configSchemaId: 's1' } },
+      schemas: { s1: { id: 's1', name: 'cfg', version: '1.0.0', description: null, definition: def, audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, updatedAt: 'x' } } });
+    // expand: daily reaches it, has no payload there yet
+    const r = done(await call(ctx, 'set_payload', { workflow_id: 'daily', step_id: 'expand' }));
+    const laidOut = JSON.stringify({ topic: '<string>', acks: 'all' }, null, 2);
+    expect(r).toMatchObject({ ok: true, result: expect.stringContaining(laidOut) });
+    expect(r.result).toContain('fill the "<type>" placeholders');
+    const made = store.state().assignments[store.state().workflows.daily!.assignmentIds.at(-1)!]!;
+    expect(made).toMatchObject({ stepId: 'expand', name: 'expand-assignment', payload: laidOut });
+    // a payload already there is not replaced by a laid-out one
+    const before = store.state();
+    expect(done(await call(ctx, 'set_payload', { workflow_id: 'daily', step_id: 'fetch' }))).toMatchObject({
+      ok: false, result: 'daily on step fetch-orders already has a payload: give `payload` to change it' });
+    expect(store.state()).toBe(before);
+  });
+
+  it('set_payload without payload on a step whose processor has no config schema makes {}', async () => {
+    const { ctx, store } = setup();
+    expect(done(await call(ctx, 'set_payload', { workflow_id: 'daily', step_id: 'expand' })).result).toContain('laid out from its config schema: {}');
+    expect(store.state().assignments[store.state().workflows.daily!.assignmentIds.at(-1)!]!.payload).toBe('{}');
+  });
+
   it('remove_assignment asks first and pins the workflow and the assignment; Cancel does nothing, Remove unlinks', async () => {
     const { ctx, store } = setup();
     const asked = await call(ctx, 'remove_assignment', { workflow_id: 'daily', assignment_id: 'a-daily-fetch' });

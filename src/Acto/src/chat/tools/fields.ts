@@ -1,6 +1,6 @@
 import { SLOT_FIELD, type Slot } from '../../design/board';
 import { setCacheField, setProcessorField, setSlotSchema, setStepField, setWorkflowField } from '../../design/edits';
-import { removeAssignment, setAssignmentField, setPayload } from '../../design/payloads';
+import { assignmentOf, newPayloadOf, removeAssignment, setAssignmentField, setPayload } from '../../design/payloads';
 import { CONDITIONS } from '../../model/entryConditions';
 import type { ToolDef, ToolOutcome } from '../toolTypes';
 import { applyState, done, fail, onBoard, STEP_ID, text, WORKFLOW_ID } from './common';
@@ -84,23 +84,35 @@ const setField: ToolDef = {
 
 const setPayloadTool: ToolDef = {
   name: 'set_payload',
-  description: "Set the workflow's payload (the JSON its step's processor gets as config) on a step. In place when only this workflow has one there; a payload other workflows share is copied for this workflow only; none yet makes one. Not checked against the config schema: the dry run on Save reports problems.",
+  description: "Set the workflow's payload (the JSON its step's processor gets as config) on a step. In place when only this workflow has one there; a payload other workflows share is copied for this workflow only; none yet makes one. Without `payload`, a new one is laid out from the step's processor's config schema, as the Inspector's ＋ Create does (a required key as a \"<type>\" placeholder to fill in, an optional one as its default or empty value; {} without a config schema), and the result gives it: fill the placeholders with a second set_payload. Not checked against the config schema: the dry run on Save reports problems.",
   parameters: {
     type: 'object',
-    properties: { workflow_id: WORKFLOW_ID, step_id: STEP_ID, payload: { type: 'string', description: 'The payload as JSON text.' } },
-    required: ['workflow_id', 'step_id', 'payload'], additionalProperties: false,
+    properties: {
+      workflow_id: WORKFLOW_ID, step_id: STEP_ID,
+      payload: { type: 'string', description: 'The payload as JSON text. Leave it out to lay a new payload out from the config schema (only when the workflow has none on the step yet).' },
+    },
+    required: ['workflow_id', 'step_id'], additionalProperties: false,
   },
   async run(ctx, args) {
     const wf = onBoard(ctx, 'workflow', text(args, 'workflow_id'), 'set payload');
     if ('out' in wf) return wf.out;
     const st = onBoard(ctx, 'step', text(args, 'step_id'), 'set payload');
     if ('out' in st) return st.out;
+    const b = ctx.store.state();
+    const names = `${b.workflows[wf.id]!.name} on step ${b.steps[st.id]!.name}`;
+    if (args.payload === undefined) {
+      // ＋ Create [user, 2026-11-19]: a new payload laid out from the config schema; an existing one is never replaced so
+      if (assignmentOf(b, wf.id, st.id)) return fail(`${names} already has a payload: give \`payload\` to change it`, 'set payload');
+      const laidOut = newPayloadOf(b, st.id);
+      const made = applyState(ctx, (cur) => setPayload(cur, wf.id, st.id, laidOut, ctx.newId), 'set payload', '');
+      if (!made.ok) return made;
+      return done(true, `made the payload of ${names}, laid out from its config schema: ${laidOut}; fill the "<type>" placeholders with set_payload; not saved yet`, `made payload on ${b.steps[st.id]!.name}`);
+    }
     if (typeof args.payload !== 'string') return fail('payload must be the JSON as text', 'set payload');
     const payload = args.payload;
-    const b = ctx.store.state();
     const out = applyState(ctx, (cur) => setPayload(cur, wf.id, st.id, payload, ctx.newId), 'set payload', '');
     if (!out.ok) return out;
-    return done(true, `set the payload of ${b.workflows[wf.id]!.name} on step ${b.steps[st.id]!.name}; not saved yet`, `set payload on ${b.steps[st.id]!.name}`);
+    return done(true, `set the payload of ${names}; not saved yet`, `set payload on ${b.steps[st.id]!.name}`);
   },
 };
 

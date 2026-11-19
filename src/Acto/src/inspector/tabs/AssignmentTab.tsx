@@ -1,17 +1,9 @@
 import type { BoardState } from '../../design/board';
 import { newId } from '../../design/ids';
-import { payloadSkeleton } from '../../model/assignments';
-import { assignmentOf, removeAssignment, setAssignmentField, setPayload } from '../../design/payloads';
+import { assignmentOf, newPayloadOf, removeAssignment, setAssignmentField, setPayload } from '../../design/payloads';
 import type { Id } from '../../model/graph';
 import { JsonField } from '../JsonField';
 import { EntityBase, EntityHead, metaOfRow, PayloadCheckNote, stepName, type Ctx } from './shared';
-
-/** The step's processor's config schema definition (null: no processor, no config schema, or not read). */
-function configDefinition(b: BoardState, stepId: Id): string | null {
-  const pid = b.steps[stepId]?.processorId;
-  const sid = pid ? b.processors[pid]?.configSchemaId : null;
-  return sid ? b.schemas[sid]?.definition ?? null : null;
-}
 
 /**
  * The warning for a step whose processor has no config schema [user, 2026-11-19]: ＋ Create can only make {} and nothing
@@ -55,7 +47,7 @@ export function AssignmentTab({ state, base, edit, stepId, workflowId }: Ctx & {
           <EntityHead name={`${stepName(state, stepId)} · ${wf.name}`} kind={`assignment · belongs to ${wf.name}`} />
           <p className="none">{`No assignment yet for ${wf.name}: ＋ Create lays out the payload from the config schema.`}</p>
           {warn && <p className="in-problem sub in-noschema">{warn}</p>}
-          <button type="button" className="link in-create" onClick={() => edit((b) => setPayload(b, workflowId, stepId, payloadSkeleton(configDefinition(b, stepId)), newId))}>＋ Create</button>
+          <button type="button" className="link in-create" onClick={() => edit((b) => setPayload(b, workflowId, stepId, newPayloadOf(b, stepId), newId))}>＋ Create</button>
         </>
       )}
       {assignment && <JsonField key={`${k}:payload`} label="Payload" value={payload} saved={assignmentOf(base, workflowId, stepId)?.payload}
