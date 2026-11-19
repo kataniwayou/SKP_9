@@ -23,41 +23,43 @@ export const SLOT_LABEL: Readonly<Record<Slot, string>> = { input: 'Input schema
 type GhostLookup = Pick<GhostStore, 'get'>;
 
 /**
- * What the Inspector shows for the picks (spec §5, rule 2 [user, 2026-11-18]): one thing alone → that thing; exactly one
- * triangle and one step → the step (with that workflow's assignment under Step); nothing → null; anything else → the
- * pick list (see listOf).
+ * The triangles picked with exactly one step, in pick order, when that is the whole selection and every one of their
+ * streams reaches the step (spec §5, rule 2 [user, 2026-11-19: "only workflows+one step from the same stream apply the
+ * step assignments"]); null for any other selection — one workflow off the step's stream makes the whole selection a list.
  */
-export function focusOf(sel: SelectionState): BoardPick | null {
-  const { picks } = sel;
-  if (picks.length === 1) return picks[0]!;
-  if (picks.length === 2) {
-    const step = picks.find((p) => p.kind === 'step');
-    if (step && picks.some((p) => p.kind === 'workflow')) return step;
-  }
-  return null;
+export function assignmentWorkflowsOf(sel: SelectionState, b: BoardState): string[] | null {
+  const steps = sel.picks.filter((p) => p.kind === 'step');
+  const wfs = sel.picks.flatMap((p) => (p.kind === 'workflow' ? [p.id] : []));
+  if (steps.length !== 1 || wfs.length === 0 || steps.length + wfs.length !== sel.picks.length) return null;
+  const stepId = steps[0]!.kind === 'step' ? steps[0]!.id : '';
+  return wfs.every((wf) => reachOf(b, wf).has(stepId)) ? wfs : null;
 }
 
-/** The workflow whose assignment shows under Step: the triangle picked together with the one step (rule 2). */
-export function assignmentWorkflowOf(sel: SelectionState): string | null {
-  if (sel.picks.length !== 2 || !sel.picks.some((p) => p.kind === 'step')) return null;
-  const wf = sel.picks.find((p) => p.kind === 'workflow');
-  return wf?.kind === 'workflow' ? wf.id : null;
+/**
+ * What the Inspector shows for the picks (spec §5, rule 2): one thing alone → that thing; one or more triangles and one
+ * step their streams all reach → the step (with each workflow's assignment under Step); nothing → null; anything else →
+ * the pick list (see listOf).
+ */
+export function focusOf(sel: SelectionState, b: BoardState): BoardPick | null {
+  const { picks } = sel;
+  if (picks.length === 1) return picks[0]!;
+  return assignmentWorkflowsOf(sel, b) === null ? null : picks.find((p) => p.kind === 'step')!;
 }
 
 /** The numbered pick list of everything selected (triangles included), or null when one thing (or nothing) is shown. */
-export function listOf(sel: SelectionState): BoardPick[] | null {
-  return sel.picks.length > 0 && focusOf(sel) === null ? sel.picks : null;
+export function listOf(sel: SelectionState, b: BoardState): BoardPick[] | null {
+  return sel.picks.length > 0 && focusOf(sel, b) === null ? sel.picks : null;
 }
 
 /** A stable key of what the tabs are about; the chosen tab is kept while it stays the same. */
-export const focusKey = (sel: SelectionState): string | null => {
-  const f = focusOf(sel);
+export const focusKey = (sel: SelectionState, b: BoardState): string | null => {
+  const f = focusOf(sel, b);
   return f === null ? null : pickKey(f);
 };
 
 /** The top tabs for a selection (spec §5 table). Empty: nothing to show, or a pick list. */
 export function tabsOf(sel: SelectionState, b: BoardState, ghosts: GhostLookup): Tab[] {
-  const f = focusOf(sel);
+  const f = focusOf(sel, b);
   if (f === null) return [];
   switch (f.kind) {
     case 'workflow': return b.workflows[f.id] ? [{ id: 'workflow', label: 'Workflow' }] : [];
@@ -69,14 +71,17 @@ export function tabsOf(sel: SelectionState, b: BoardState, ghosts: GhostLookup):
 }
 
 /**
- * Step's child: the one assignment tab of the workflow picked with the step (rule 3), named after it, in its hue; none
- * when no workflow is picked with it or that workflow's stream does not hold the step.
+ * Step's children: one assignment tab per triangle picked with the step (rule 3 [user, 2026-11-19]), in pick order, named
+ * after the workflow, in its hue; none when no triangle is picked with it (or the selection is a list, see
+ * assignmentWorkflowsOf).
  */
 export function stepTabsOf(sel: SelectionState, b: BoardState, stepId: string): ChildTab[] {
-  const wf = assignmentWorkflowOf(sel);
-  const w = wf === null ? undefined : b.workflows[wf];
-  if (!w || !b.steps[stepId] || !reachOf(b, w.id).has(stepId)) return [];
-  return [{ id: `assignment:${w.id}`, label: w.name, hue: hueOf(sel, w.id) ?? undefined }];
+  const wfs = assignmentWorkflowsOf(sel, b);
+  if (wfs === null || !b.steps[stepId]) return [];
+  return wfs.flatMap((id): ChildTab[] => {
+    const w = b.workflows[id];
+    return w ? [{ id: `assignment:${w.id}`, label: w.name, hue: hueOf(sel, w.id) ?? undefined }] : [];
+  });
 }
 
 /** Processor's children: a schema tab per slot of the processor that holds a schema. Empty: none, or no such processor. */

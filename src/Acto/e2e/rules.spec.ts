@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import {
-  caNode, cacheEdge, childLabels, childTab, clickEmptyBoard, entryEdge, field, ghost, inspector, openAt, payloadOf, pickCache, pickEdge,
+  caNode, cacheEdge, drawWire, childLabels, childTab, clickEmptyBoard, entryEdge, field, ghost, inspector, openAt, payloadOf, pickCache, pickEdge,
   pickStep, pickWorkflow, pretty, stNode, tab, tabLabels, toolbar, wfNode, wireEdge,
 } from './helpers';
 import { seed, type Seeded } from './seed';
@@ -114,7 +114,8 @@ test('Rule 1: "a plain click on an unselected step replaces every selected step;
   await expectSelected(page, [wf(id, 'a'), wf(id, 'b'), st(id, 's'), ca(id), entryId(id)]);
   await pickStep(page, id.t!);
   await expectSelected(page, [wf(id, 'a'), wf(id, 'b'), st(id, 't')]);
-  await expect(list(page)).toHaveText([A, B, T]);
+  // both streams reach T (through S's wire): T with each workflow's assignment tab [user, 2026-11-19]
+  await showsStep(page, T, [A, B]);
 });
 
 test('Rule 1: "a plain click on an unselected cache / wire / entry arrow / cache line / ghost selects it alone"', async ({ page }) => {
@@ -264,12 +265,96 @@ test('Rule 2: "exactly one workflow + exactly one step → Step · Processor, wi
   }
 });
 
-test('Rule 2: "one workflow + one step its stream does not reach (U) → Step · Processor, no assignment child"', async ({ page }) => {
+test('Rule 2 [user, 2026-11-19]: "workflows + one step only from the same stream apply the step assignments" — one workflow + a step its stream does not reach (U) → the list', async ({ page }) => {
   const id = await open(page);
   await pickWorkflow(page, id.a!);
   await pickStep(page, id.u!);
   await expectSelected(page, [wf(id, 'a'), st(id, 'u')]);
-  await showsStep(page, U, []);
+  await expect(list(page)).toHaveText([A, U]);
+  await expect(tabLabels(page)).toHaveCount(0);
+});
+
+test('Rule 2 [user, 2026-11-19]: several workflows + one step all their streams reach → Step · Processor with one assignment tab per workflow, in pick order and hue', async ({ page }) => {
+  const id = await open(page);
+  // C, A, B in that pick order, then S (all three enter S)
+  await pickWorkflow(page, id.c!);
+  await ctrlWf(page, id.a!);
+  await ctrlWf(page, id.b!);
+  await pickStep(page, id.s!);
+  await expectSelected(page, [wf(id, 'c'), wf(id, 'a'), wf(id, 'b'), st(id, 's')]);
+  await showsStep(page, S, [C, A, B]);
+  const hues = ['rgb(255, 0, 114)', 'rgb(124, 58, 237)', 'rgb(13, 148, 136)'];
+  for (const [i, n] of [C, A, B].entries()) {
+    expect(await childTab(page, 'Step', n).locator('.dot').evaluate((e) => getComputedStyle(e).backgroundColor), n).toBe(hues[i]);
+    await expect(childTab(page, 'Step', n)).toHaveAttribute('aria-selected', 'false'); // none chosen at first
+  }
+  // each tab is that workflow's own assignment
+  for (const n of [C, A, B]) {
+    await expect(await payloadOf(page, n)).toHaveValue(pretty(`{"from":"${n.slice(-1)}"}`));
+    await expect(inspector(page).locator('.kind')).toHaveText(`assignment · belongs to ${n}`);
+  }
+  // the board's key chips show all three
+  await expect(stNode(page, id.s!).locator('.key-chip')).toHaveCount(3);
+  // T is reached by all three through S's wire: a click on T keeps the triangles; three tabs, none with an assignment yet
+  await pickStep(page, id.t!);
+  await showsStep(page, T, [C, A, B]);
+  for (const n of [C, A, B]) {
+    await childTab(page, 'Step', n).click();
+    await expect(inspector(page).getByRole('button', { name: '＋ Create' })).toBeVisible();
+    await expect(field(page, 'Payload')).toHaveCount(0);
+  }
+  // Ctrl+click one triangle off: two tabs left
+  await ctrlWf(page, id.a!);
+  await tab(page, 'Step').click();
+  await showsStep(page, T, [C, B]);
+});
+
+test("Rule 2 [user, 2026-11-19]: one selected workflow off the step's stream turns the whole selection into the list; taking it off brings the tabs back", async ({ page }) => {
+  const id = await open(page);
+  // U is in no stream: A + B + U is the list
+  await pickWorkflow(page, id.a!);
+  await ctrlWf(page, id.b!);
+  await pickStep(page, id.u!);
+  await expect(list(page)).toHaveText([A, B, U]);
+  await expect(tabLabels(page)).toHaveCount(0);
+  await expect(inspector(page).locator('.ph .cnt')).toHaveText('3 selected');
+  // a wire S → U: now both streams reach U
+  await clickEmptyBoard(page);
+  await drawWire(page, stNode(page, id.s!), stNode(page, id.u!));
+  await expect(wireEdge(page, id.s!, id.u!)).toHaveCount(1);
+  await clickEmptyBoard(page);
+  await pickWorkflow(page, id.a!);
+  await ctrlWf(page, id.b!);
+  await pickStep(page, id.u!);
+  await showsStep(page, U, [A, B]);
+  // B's entry arrow removed (B reaches neither S nor U any more): the list again
+  await clickEmptyBoard(page);
+  await pickEdge(page, entryEdge(page, id.b!, id.s!));
+  await toolbar(page, 'entry').getByRole('button', { name: 'Delete' }).click();
+  await expect(entryEdge(page, id.b!, id.s!)).toHaveCount(0);
+  await clickEmptyBoard(page);
+  await pickWorkflow(page, id.a!);
+  await ctrlWf(page, id.b!);
+  await pickStep(page, id.u!);
+  await expect(list(page)).toHaveText([A, B, U]);
+  // B taken off by Ctrl+click: A alone with U → U with A's tab
+  await ctrlWf(page, id.b!);
+  await showsStep(page, U, [A]);
+});
+
+test('Rule 2 [user, 2026-11-19]: workflows + one step + anything else is the list (a cache, a second step, a wire)', async ({ page }) => {
+  const id = await open(page);
+  const cases: [string, () => Promise<void>, string[]][] = [
+    ['2 workflows + step + cache', async () => { await pickWorkflow(page, id.a!); await ctrlWf(page, id.b!); await pickStep(page, id.s!); await pickCache(page, id.k!, true); }, [A, B, S, K]],
+    ['2 workflows + 2 steps', async () => { await pickWorkflow(page, id.a!); await ctrlWf(page, id.b!); await pickStep(page, id.s!); await pickStep(page, id.t!, true); }, [A, B, S, T]],
+    ['workflow + step + wire', async () => { await pickWorkflow(page, id.a!); await pickStep(page, id.s!); await pickEdge(page, wireEdge(page, id.s!, id.t!), true); }, [A, S, `${S} → ${T}`]],
+  ];
+  for (const [what, select, names] of cases) {
+    await clickEmptyBoard(page);
+    await select();
+    await expect(list(page), what).toHaveText(names);
+    await expect(tabLabels(page), what).toHaveCount(0);
+  }
 });
 
 test('Rule 2: "exactly one other item (cache, wire, entry arrow, cache line, ghost) → its own tab"', async ({ page }) => {
@@ -294,12 +379,12 @@ test('Rule 2: "exactly one other item (cache, wire, entry arrow, cache line, gho
   await expect(inspector(page).locator('.kind')).toHaveText('deleted · step');
 });
 
-test('Rule 2: "anything else → the numbered pick list of everything selected" — 2 workflows; 2 steps; 2 workflows + step; step + cache; 1 workflow + 2 steps', async ({ page }) => {
+test('Rule 2: "anything else → the numbered pick list of everything selected" — 2 workflows; 2 steps; 2 workflows + a step off their streams; step + cache; 1 workflow + 2 steps', async ({ page }) => {
   const id = await open(page);
   const cases: [string, () => Promise<void>, string[]][] = [
     ['2 workflows', async () => { await pickWorkflow(page, id.a!); await ctrlWf(page, id.b!); }, [A, B]],
     ['2 steps', async () => { await pickStep(page, id.s!); await pickStep(page, id.t!, true); }, [S, T]],
-    ['2 workflows + step', async () => { await pickWorkflow(page, id.a!); await ctrlWf(page, id.b!); await pickStep(page, id.s!); }, [A, B, S]],
+    ['2 workflows + step off their streams', async () => { await pickWorkflow(page, id.a!); await ctrlWf(page, id.b!); await pickStep(page, id.u!); }, [A, B, U]],
     ['step + cache', async () => { await pickStep(page, id.s!); await pickCache(page, id.k!, true); }, [S, K]],
     ['1 workflow + 2 steps', async () => { await pickWorkflow(page, id.a!); await pickStep(page, id.s!); await pickStep(page, id.t!, true); }, [A, S, T]],
   ];
@@ -311,7 +396,7 @@ test('Rule 2: "anything else → the numbered pick list of everything selected" 
     await expect(inspector(page).locator('.ph .cnt'), what).toHaveText(`${names.length} selected`);
     // the board numbers them in the same order
     for (const [i, n] of names.entries()) {
-      const node = n === A || n === B ? wfNode(page, n === A ? id.a! : id.b!) : n === K ? caNode(page, id.k!) : stNode(page, n === S ? id.s! : id.t!);
+      const node = n === A || n === B ? wfNode(page, n === A ? id.a! : id.b!) : n === K ? caNode(page, id.k!) : stNode(page, n === S ? id.s! : n === U ? id.u! : id.t!);
       await expect(node.locator('.pick-no'), `${what}: ${n}`).toHaveText(String(i + 1));
     }
   }
@@ -405,7 +490,7 @@ test('Rule 3: "each parent keeps its own chosen child while the same pick stays"
 
 // ---------------------------------------------------------------- the user's sequence
 
-test('the user\'s sequence: click A → A form; Ctrl+click B → list [A, B]; Ctrl+click S → list [A, B, S]; click B (selected) → S with A\'s assignment; click C → C replaces A, S stays → S with C\'s assignment', async ({ page }) => {
+test('the user\'s sequence: click A → A form; Ctrl+click B → list [A, B]; Ctrl+click S → S with A\'s and B\'s assignments; click B (selected) → S with A\'s assignment; click C → C replaces A, S stays → S with C\'s assignment', async ({ page }) => {
   const id = await open(page);
   await pickWorkflow(page, id.a!);
   await expectSelected(page, [wf(id, 'a')]);
@@ -417,7 +502,7 @@ test('the user\'s sequence: click A → A form; Ctrl+click B → list [A, B]; Ct
 
   await pickStep(page, id.s!, true);
   await expectSelected(page, [wf(id, 'a'), wf(id, 'b'), st(id, 's')]);
-  await expect(list(page)).toHaveText([A, B, S]);
+  await showsStep(page, S, [A, B]); // both streams reach S [user, 2026-11-19]
 
   await pickWorkflow(page, id.b!);
   await expectSelected(page, [wf(id, 'a'), st(id, 's')]);

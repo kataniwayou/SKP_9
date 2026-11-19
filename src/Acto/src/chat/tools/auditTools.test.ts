@@ -111,7 +111,7 @@ describe('G4 read_selection: what is selected and what the Inspector shows (the 
     done(await call(ctx, 'pick', { items: [{ kind: 'workflow', id: 'daily' }, { kind: 'step', id: 'fetch' }] }));
     const r = JSON.parse(done(await call(ctx, 'read_selection')).result);
     expect(r.selected).toEqual(['workflow daily', 'step fetch-orders']);
-    expect(r.inspector).toMatchObject({ tabs: ['Step', 'Processor'], underStep: ['daily'], assignmentShown: { workflow: 'daily', assignment: { id: 'a-daily-fetch', payload: '{}' } } });
+    expect(r.inspector).toMatchObject({ tabs: ['Step', 'Processor'], underStep: ['daily'], assignmentsShown: [{ workflow: 'daily', assignment: { id: 'a-daily-fetch', payload: '{}' } }] });
   });
 
   it('one workflow alone: its Workflow tab; two workflows: the pick list; nothing: nothing', async () => {
@@ -127,7 +127,7 @@ describe('G4 read_selection: what is selected and what the Inspector shows (the 
   it('one step alone: Step · Processor with no assignment tab', async () => {
     const { ctx } = setup();
     done(await call(ctx, 'pick', { items: [{ kind: 'step', id: 'fetch' }] }));
-    expect(JSON.parse(done(await call(ctx, 'read_selection')).result).inspector).toMatchObject({ tabs: ['Step', 'Processor'], underStep: [], assignmentShown: null });
+    expect(JSON.parse(done(await call(ctx, 'read_selection')).result).inspector).toMatchObject({ tabs: ['Step', 'Processor'], underStep: [], assignmentsShown: [] });
   });
 });
 

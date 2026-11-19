@@ -78,15 +78,16 @@ The Inspector shows tabs; the first one opens on a new click, the chosen tab is 
 |---|---|
 | exactly one workflow, nothing else | its **Workflow** form |
 | exactly one step, nothing else | **Step** · **Processor**, no assignment |
-| exactly one workflow and exactly one step, nothing else | **Step** · **Processor**, with **that workflow's assignment** under Step |
+| one or more workflows and exactly one step, nothing else, **every** workflow's stream reaching the step [user, 2026-11-19] | **Step** · **Processor**, with **one assignment tab per workflow** under Step, in pick order and hue |
+| workflows and one step where **any** workflow's stream does not reach the step [user, 2026-11-19: "consistency"] | the numbered pick list |
 | exactly one cache / wire / entry arrow / cache line / ghost | its own tab: **Cache**, **Link** or **Deleted** |
-| anything else (2+ workflows, 2+ steps, any other mix of 2+ items) | the numbered pick list of everything selected, triangles included |
+| anything else (2+ workflows alone, 2+ steps, any other mix of 2+ items) | the numbered pick list of everything selected, triangles included |
 
 **Rule 3 — parents and children** [user, 2026-11-18]: Step and Processor are the only parent tabs and work the same
 way. The parent tab shows its own fields directly. Under it, a second, lighter tab row (role tablist "Step tabs" /
-"Processor tabs") holds only its children: under Step the **one** assignment tab (named after the workflow, with its
-colour dot) and only in the one-workflow-plus-one-step case — and only when that workflow's stream holds the step
-[call: an assignment off the stream is not offered]; under Processor its filled schema slots (Input schema / Output
+"Processor tabs") holds only its children: under Step one assignment tab per selected workflow (named after the workflow, with its
+colour dot, in pick order) in the workflows-plus-one-step case, which rule 2 allows only when every one of their
+streams holds the step [user, 2026-11-19]; under Processor its filled schema slots (Input schema / Output
 schema / Config schema). No child is chosen at first; a child shows that assignment or schema; a click on the parent
 tab already shown returns it to its own fields. A child row with no tabs is not drawn. Memory: a new pick opens Step
 with no child; the chosen parent and child are kept while the same pick stays and they still exist; each parent keeps

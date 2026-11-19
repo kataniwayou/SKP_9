@@ -67,8 +67,8 @@ describe('selectPick (rule 1)', () => {
 describe('the user\'s sequence: clicks and what the Inspector shows', () => {
   const b = board(); // daily and hourly both enter fetch
   const shows = (s: SelectionState) => {
-    const f = focusOf(s);
-    if (listOf(s)) return 'list';
+    const f = focusOf(s, b);
+    if (listOf(s, b)) return 'list';
     if (!f) return 'nothing';
     if (f.kind === 'step') return `step ${f.id}${stepTabsOf(s, b, f.id).map((t) => ` + ${t.id}`).join('')}`;
     return `${f.kind} ${'id' in f ? f.id : ''}`.trim();
@@ -78,14 +78,18 @@ describe('the user\'s sequence: clicks and what the Inspector shows', () => {
     expect(shows(s)).toBe('workflow daily');
     s = ctrl(s, wf('hourly'));
     expect(shows(s)).toBe('list');
-    s = ctrl(s, st('fetch'));
-    expect(shows(s)).toBe('list');
+    s = ctrl(s, st('fetch')); // both streams reach fetch: each workflow's assignment under Step [user, 2026-11-19]
+    expect(shows(s)).toBe('step fetch + assignment:daily + assignment:hourly');
     s = click(s, wf('hourly')); // selected: it leaves
     expect(s).toEqual(sel(wf('daily'), st('fetch')));
     expect(shows(s)).toBe('step fetch + assignment:daily');
     s = click(s, wf('hourly')); // a third triangle C (unselected): it replaces A, the step stays
     expect(s).toEqual(sel(st('fetch'), wf('hourly')));
     expect(shows(s)).toBe('step fetch + assignment:hourly');
+  });
+  it('a step a selected workflow does not reach: the list (lonely is in no stream) [user, 2026-11-19]', () => {
+    expect(shows(click(click(none, wf('daily')), st('lonely')))).toBe('list');
+    expect(shows(ctrl(ctrl(click(none, wf('daily')), wf('hourly')), st('lonely')))).toBe('list');
   });
   it('two steps selected, then a click on a triangle: the list', () => {
     const s = click(ctrl(click(none, st('fetch')), st('expand')), wf('daily'));

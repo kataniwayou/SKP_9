@@ -179,9 +179,9 @@ const readSelection: ToolDef = {
       }
     };
     const picked = sel.picks.map(label);
-    const list = pickListOf(sel);
+    const list = pickListOf(sel, b);
     if (list) return json({ selected: picked, inspector: { pickList: list.map(label) } }, `read selection (${picked.length})`);
-    const focus = focusOf(sel);
+    const focus = focusOf(sel, b);
     if (!focus) return json({ selected: [], inspector: 'nothing: no item is selected' }, 'read selection (0)');
     const tabs = tabsOf(sel, b, ghosts).map((t) => t.label);
     if (focus.kind !== 'step') return json({ selected: picked, inspector: { tabs } }, `read selection (${picked.length})`);
@@ -193,7 +193,7 @@ const readSelection: ToolDef = {
       const a = assignmentsOf(b, wf).find((x) => x.stepId === focus.id);
       return { workflow: c.label, assignment: a ? { id: a.id, name: a.name, payload: a.payload } : null };
     });
-    return json({ selected: picked, inspector: { tabs, underStep: stepChildren.map((c) => c.label), underProcessor: processorChildren, assignmentShown: shown[0] ?? null } }, `read selection (${picked.length})`);
+    return json({ selected: picked, inspector: { tabs, underStep: stepChildren.map((c) => c.label), underProcessor: processorChildren, assignmentsShown: shown } }, `read selection (${picked.length})`);
   },
 };
 

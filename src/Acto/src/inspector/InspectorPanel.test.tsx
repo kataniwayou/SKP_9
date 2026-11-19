@@ -64,9 +64,24 @@ describe('InspectorPanel', () => {
       expect(selectedChild('Step')).toBeNull();
       expect([...document.querySelectorAll('.ins-subtab .dot')].map((d) => (d as HTMLElement).style.background)).toEqual(['rgb(255, 0, 114)']);
       expect(screen.getByLabelText('Name')).toHaveValue('fetch-orders'); // the step's own fields
-      rerender({ workflows: ['daily'], picks: [wfP('daily'), step('lonely')] }); // not in daily's stream: no child
+      rerender({ workflows: ['daily'], picks: [wfP('daily'), step('lonely')] }); // not in daily's stream: the list [user, 2026-11-19]
+      expect(tabNames()).toEqual([]);
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
+    });
+    it('several workflows with one step all their streams reach: one assignment tab per workflow, in pick order and hue [user, 2026-11-19]', () => {
+      const { rerender } = setup({ workflows: ['hourly', 'daily'], picks: [wfP('hourly'), wfP('daily'), step('fetch')] });
       expect(tabNames()).toEqual(['Step', 'Processor']);
-      expect(childNames('Step')).toEqual([]);
+      expect(childNames('Step')).toEqual(['hourly', 'daily']);
+      expect(selectedChild('Step')).toBeNull();
+      expect([...document.querySelectorAll('.ins-subtab .dot')].map((d) => (d as HTMLElement).style.background)).toEqual(['rgb(255, 0, 114)', 'rgb(124, 58, 237)']);
+      openTab('daily');
+      expect(screen.getByText('assignment · belongs to daily')).toBeInTheDocument();
+      openTab('hourly');
+      expect(screen.getByText('assignment · belongs to hourly')).toBeInTheDocument();
+      // one of them off the step's stream: the whole selection is the list
+      rerender({ workflows: ['hourly', 'daily'], picks: [wfP('hourly'), wfP('daily'), step('lonely')] });
+      expect(tabNames()).toEqual([]);
+      expect(screen.getByText('3 selected')).toBeInTheDocument();
     });
     it('a child shows its assignment; the parent tab again shows its own fields', () => {
       setup({ workflows: ['daily'], picks: [wfP('daily'), step('fetch')] });
@@ -167,7 +182,7 @@ describe('InspectorPanel', () => {
       rerender({ workflows: ['daily'], picks: [wfP('daily'), step('fetch'), { kind: 'cache', id: 'c1' }] });
       expect([...document.querySelectorAll('.in-picks li')].map((l) => l.getAttribute('data-kind'))).toEqual(['workflow', 'step', 'cache']);
       expect(screen.getByText('3 selected')).toBeInTheDocument();
-      rerender({ workflows: ['daily', 'hourly'], picks: [wfP('daily'), wfP('hourly'), step('fetch')] });
+      rerender({ workflows: ['daily', 'hourly'], picks: [wfP('daily'), wfP('hourly'), step('lonely')] });
       expect(tabNames()).toEqual([]);
       expect(screen.getByText('3 selected')).toBeInTheDocument();
     });

@@ -123,11 +123,10 @@ test('a step alone shows Step and Processor; a triangle with the step shows that
   await expect(childLabels(page, 'Step')).toHaveText(['e2e-sel-b']);
   await expect(await payloadOf(page, 'e2e-sel-b')).toHaveValue(pretty('{"only":"b"}'));
 
-  // a step the selected triangle does not reach: no assignment tab
+  // a step the selected triangle does not reach: the list [user, 2026-11-19]
   await pickStep(page, id.s3!);
-  await expect(field(page, 'Name')).toHaveValue('e2e-sel-orphan');
-  await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
-  await expect(childLabels(page, 'Step')).toHaveCount(0);
+  await expect(tabLabels(page)).toHaveCount(0);
+  await expect(inspector(page).locator('.in-picks li')).toHaveText(['e2e-sel-b', 'e2e-sel-orphan']);
 
   // an entry arrow or a cache line is selected alone: no triangle, no step
   await pickEdge(page, entryEdge(page, id.wb!, id.s1!));
@@ -152,8 +151,9 @@ test('the user\'s sequence: A; Ctrl B; Ctrl step; click B (off); click C (replac
   await expect(field(page, 'Name')).toHaveValue('e2e-sel-a');
   await wfNode(page, id.wb!).locator('.tri-nm').click({ modifiers: ['Control'] }); // Ctrl+click B → the list
   await expect(list).toHaveText(['e2e-sel-a', 'e2e-sel-b']);
-  await pickStep(page, id.s1!, true); // Ctrl+click the step → the list
-  await expect(list).toHaveText(['e2e-sel-a', 'e2e-sel-b', 'e2e-sel-shared']);
+  await pickStep(page, id.s1!, true); // Ctrl+click the step both reach → the step with A's and B's assignments [user, 2026-11-19]
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
+  await expect(childLabels(page, 'Step')).toHaveText(['e2e-sel-a', 'e2e-sel-b']);
   await pickWorkflow(page, id.wb!); // click B, selected → B leaves: the step with A's assignment
   await expect(sel).toHaveCount(1);
   await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);

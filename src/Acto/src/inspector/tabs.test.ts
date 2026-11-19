@@ -19,8 +19,8 @@ const cache: Pick = { kind: 'cache', id: 'c1' };
 describe('tabsOf and listOf (rule 2)', () => {
   it('exactly one workflow and nothing else: its Workflow form', () => {
     expect(ids(sel(wfPick('daily')))).toEqual(['workflow']);
-    expect(focusKey(sel(wfPick('hourly')))).toBe('wf:hourly');
-    expect(listOf(sel(wfPick('daily')))).toBeNull();
+    expect(focusKey(sel(wfPick('hourly')), b)).toBe('wf:hourly');
+    expect(listOf(sel(wfPick('daily')), b)).toBeNull();
   });
   it('exactly one step and nothing else: Step · Processor, no assignment', () => {
     expect(ids(sel(step('fetch')))).toEqual(['step', 'processor']);
@@ -29,8 +29,8 @@ describe('tabsOf and listOf (rule 2)', () => {
   it('exactly one workflow and one step: Step · Processor with that workflow\'s assignment under Step', () => {
     const s = sel(wfPick('daily'), step('fetch'));
     expect(ids(s)).toEqual(['step', 'processor']);
-    expect(focusKey(s)).toBe('st:fetch');
-    expect(listOf(s)).toBeNull();
+    expect(focusKey(s, b)).toBe('st:fetch');
+    expect(listOf(s, b)).toBeNull();
     expect(stepTabsOf(s, b, 'fetch').map((t) => [t.id, t.label, t.hue])).toEqual([['assignment:daily', 'daily', '#FF0072']]);
     expect(stepTabsOf(sel(step('fetch'), wfPick('hourly')), b, 'fetch').map((t) => t.id)).toEqual(['assignment:hourly']);
   });
@@ -43,25 +43,44 @@ describe('tabsOf and listOf (rule 2)', () => {
     const ghosts = { get: (k: string) => (k === g.key ? g : undefined) };
     expect(tabsOf(sel({ kind: 'ghost', key: 'step:gone' }), b, ghosts)).toEqual([{ id: 'ghost', label: 'Deleted' }]);
   });
+  it('several workflows and one step all their streams reach: Step · Processor, one assignment tab per workflow in pick order, each in its hue [user, 2026-11-19]', () => {
+    const s = sel(wfPick('hourly'), wfPick('daily'), step('fetch'));
+    expect(ids(s)).toEqual(['step', 'processor']);
+    expect(focusKey(s, b)).toBe('st:fetch');
+    expect(listOf(s, b)).toBeNull();
+    expect(stepTabsOf(s, b, 'fetch').map((t) => [t.id, t.label, t.hue])).toEqual([
+      ['assignment:hourly', 'hourly', '#FF0072'], ['assignment:daily', 'daily', '#7C3AED']]);
+    // expand is reached by both through fetch's wire
+    expect(stepTabsOf(sel(wfPick('daily'), wfPick('hourly'), step('expand')), b, 'expand').map((t) => t.id)).toEqual(['assignment:daily', 'assignment:hourly']);
+  });
+  it("one workflow off the step's stream makes the whole selection a list, also when the others reach it", () => {
+    const off = { ...b, workflows: { ...b.workflows, hourly: { ...b.workflows.hourly!, entryStepIds: ['lonely'] } } };
+    const s = sel(wfPick('daily'), wfPick('hourly'), step('fetch'));
+    expect(focusKey(s, off)).toBeNull();
+    expect(listOf(s, off)).toEqual(s.picks);
+    expect(stepTabsOf(s, off, 'fetch')).toEqual([]);
+  });
   it('anything else: no tabs, the numbered pick list of everything selected', () => {
     const cases: SelectionState[] = [
       sel(wfPick('daily'), wfPick('hourly')),
       sel(step('fetch'), step('expand')),
       sel(wfPick('daily'), step('fetch'), step('expand')),
-      sel(wfPick('daily'), wfPick('hourly'), step('fetch')),
+      sel(wfPick('daily'), step('lonely')), // the workflow's stream does not reach the step [user, 2026-11-19]
+      sel(wfPick('daily'), wfPick('hourly'), step('lonely')),
+      sel(wfPick('daily'), step('fetch'), cache),
       sel(wfPick('daily'), cache),
       sel(step('fetch'), cache),
       sel(cache, { kind: 'wire', from: 'fetch', to: 'expand' }),
     ];
     for (const s of cases) {
       expect(ids(s)).toEqual([]);
-      expect(focusKey(s)).toBeNull();
-      expect(listOf(s)).toEqual(s.picks);
+      expect(focusKey(s, b)).toBeNull();
+      expect(listOf(s, b)).toEqual(s.picks);
     }
   });
   it('nothing selected: no tabs, no list', () => {
     expect(ids(sel())).toEqual([]);
-    expect(listOf(sel())).toBeNull();
+    expect(listOf(sel(), b)).toBeNull();
   });
   it('a step without a processor, or with schemas: still Step and Processor on top', () => {
     const bare = { ...b, steps: { ...b.steps, fetch: { ...b.steps.fetch!, processorId: null } } };
@@ -70,13 +89,13 @@ describe('tabsOf and listOf (rule 2)', () => {
   });
 });
 
-describe("stepTabsOf (Step's one child, rule 3)", () => {
-  it('none when the picked workflow\'s stream does not hold the step', () => {
+describe("stepTabsOf (Step's children, rule 3)", () => {
+  it("none when a picked workflow's stream does not hold the step", () => {
     expect(stepTabsOf(sel(wfPick('daily'), step('lonely')), b, 'lonely')).toEqual([]);
   });
-  it('none without a workflow picked with the step, or with more than the pair', () => {
+  it('none without a workflow picked with the step, or with anything else picked', () => {
     expect(stepTabsOf(sel(step('fetch')), b, 'fetch')).toEqual([]);
-    expect(stepTabsOf(sel(wfPick('daily'), wfPick('hourly'), step('fetch')), b, 'fetch')).toEqual([]);
+    expect(stepTabsOf(sel(wfPick('daily'), step('fetch'), cache), b, 'fetch')).toEqual([]);
   });
 });
 

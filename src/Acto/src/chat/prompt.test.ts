@@ -47,7 +47,8 @@ describe('systemPrompt', () => {
 
   it('states the selection and Inspector rules, the cache root rule and the ghost and Take stored tools', () => {
     expect(prompt).toMatch(/Ctrl\+click toggles/);
-    expect(prompt).toMatch(/exactly one workflow and one step, Step and Processor with that workflow's assignment/);
+    expect(prompt).toMatch(/one or more workflows and exactly one step that every one of their streams holds, Step and Processor with one tab under Step per workflow/);
+    expect(prompt).toMatch(/if any of them does not hold the step, the numbered pick list/);
     expect(prompt).toMatch(/BaseAPI refuses to save a cache without a root/);
     expect(prompt).toMatch(/restore_ghosts/);
     expect(prompt).toMatch(/take_stored/);

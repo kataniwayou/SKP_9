@@ -143,8 +143,8 @@ export function InspectorPanel({ store, selection: given, ghosts, onPicks, onCen
   useSyncExternalStore(ghosts.subscribe, ghosts.ghosts);
   const [chosen, setChosen] = useState<Chosen | null>(null);
   const edit: Edit = (fn, merge) => store.edit(fn, merge);
-  const focus = focusOf(selection);
-  const key = focusKey(selection);
+  const focus = focusOf(selection, state);
+  const key = focusKey(selection, state);
   // a new pick forgets the chosen tab, so the item opens on its first tab even when it was picked before (spec §5)
   const [seen, setSeen] = useState<string | null>(key);
   if (seen !== key) {
@@ -152,7 +152,7 @@ export function InspectorPanel({ store, selection: given, ghosts, onPicks, onCen
     const kept = keepChosen(chosen, key);
     if (kept !== chosen) setChosen(kept);
   }
-  const list = listOf(selection);
+  const list = listOf(selection, state);
   const tabs = tabsOf(selection, state, ghosts);
   const tab = activeTab(tabs, key, chosen);
   const children = focus?.kind === 'step' && tab === 'step' ? stepTabsOf(selection, state, focus.id)
@@ -160,7 +160,7 @@ export function InspectorPanel({ store, selection: given, ghosts, onPicks, onCen
   const child = activeChild(children, key, tab, chosen);
   // a chip's name [user, 2026-11-19]: the selection moves to its picks, and the tab (and Step's child) it names opens
   const go: Go | undefined = onPicks && ((picks, open) => {
-    const next = focusKey({ workflows: [], picks });
+    const next = focusKey({ workflows: [], picks }, store.state());
     setChosen(open ? { key: next, tab: open.tab, children: open.child ? { step: open.child as ChildId } : {} } : null);
     setSeen(next);
     onPicks(picks);

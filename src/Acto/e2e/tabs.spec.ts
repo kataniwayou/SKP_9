@@ -25,7 +25,7 @@ const SEED = {
 
 const PRETTY = /\n {2}"/; // one field to a line, two-space indent
 
-test('a step alone; a triangle with the step shows that workflow\'s assignment under Step; two triangles and a step list; one triangle and a step again', async ({ page }) => {
+test('a step alone; a triangle with the step shows that workflow\'s assignment under Step; two triangles and the step: a tab each; one triangle and a step again', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
   const stepRow = inspector(page).getByRole('tablist', { name: 'Step tabs' });
@@ -65,10 +65,12 @@ test('a step alone; a triangle with the step shows that workflow\'s assignment u
   await expect(page.locator('.react-flow__node-workflow .tri.sel')).toHaveCount(2);
   await expect(tabLabels(page)).toHaveCount(0);
   await expect(inspector(page).locator('.in-picks li')).toHaveText(['e2e-tab-a', 'e2e-tab-b']);
-  // the shared step with both triangles: the list of all three
+  // the shared step with both triangles (both reach it): one assignment tab each, in pick order [user, 2026-11-19]
   await pickStep(page, id.s1!);
-  await expect(tabLabels(page)).toHaveCount(0);
-  await expect(inspector(page).locator('.in-picks li')).toHaveText(['e2e-tab-a', 'e2e-tab-b', 'e2e-tab-shared']);
+  await expect(tabLabels(page)).toHaveText(['Step', 'Processor']);
+  await expect(childLabels(page, 'Step')).toHaveText(['e2e-tab-a', 'e2e-tab-b']);
+  await expect(await payloadOf(page, 'e2e-tab-b')).toHaveValue(JSON.stringify({ only: 'b' }, null, 2));
+  await expect(await payloadOf(page, 'e2e-tab-a')).toHaveValue(JSON.stringify({ from: 'a', n: 1 }, null, 2));
   // B clicked off: the step with A's assignment
   await pickWorkflow(page, id.wb!);
   await expect(childLabels(page, 'Step')).toHaveText(['e2e-tab-a']);
