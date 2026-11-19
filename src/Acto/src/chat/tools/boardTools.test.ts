@@ -15,12 +15,12 @@ describe('graph edit tools', () => {
     expect(done(await call(ctx, 'add_step', { processor_id: 'ghost' }))).toMatchObject({ ok: false, result: 'no processor ghost' });
   });
 
-  it('add_step with x and y puts the step there; add_cache makes new-cache-1', async () => {
+  it('add_step with x and y puts the step there; add_cache makes cache', async () => {
     const { ctx, store } = setup();
     await call(ctx, 'add_step', { processor_id: 'p1', name: 'mine', x: 1000, y: 1000 });
     expect(store.state().steps.n1).toMatchObject({ name: 'mine', at: { x: 1000, y: 1000 } });
-    expect(done(await call(ctx, 'add_cache')).result).toContain('new-cache-1');
-    expect(store.state().caches.n2).toMatchObject({ name: 'new-cache-1', version: '1.0.0' });
+    expect(done(await call(ctx, 'add_cache')).result).toContain('cache');
+    expect(store.state().caches.n2).toMatchObject({ name: 'cache', version: '1.0.0' });
   });
 
   it('connect wires; a duplicate is the edit\'s own refusal; an unknown id fails naming it; disconnect removes', async () => {

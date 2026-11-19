@@ -166,7 +166,7 @@ orphans included [call].
 
 ## 7. Editing
 
-- **Toolbox**: Create › **Workflow** (drop anywhere → a triangle `new-workflow-N`, `1.0.0`, no cron, no arrows),
+- **Toolbox**: Create › **Workflow** (drop anywhere → a triangle `untitled`, `untitled-2`, … (Studio's names [user, 2026-11-19]), `1.0.0`, no cron, no arrows),
   Create › **Cache** (drop anywhere → a cache block), **Steps** (one per processor, drop anywhere → a step) [call:
   Cache stays in the toolbox because caches are blocks now].
 - **Entry arrow**: drag from the triangle's tip onto a step [user]. **Cache link**: drag from the triangle's back onto

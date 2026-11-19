@@ -6,20 +6,16 @@ import { linkedBy } from './payloads';
 
 const stepName = (b: BoardState, id: Id) => b.steps[id]?.name ?? id;
 
-function uniqueStepName(b: BoardState, base: string): string {
-  const taken = new Set(Object.values(b.steps).map((x) => x.name));
+/** Studio's uniqueName: `base`, then `base-2`, `base-3`, … — the first not taken on the board. */
+function uniqueName(names: Iterable<string>, base: string): string {
+  const taken = new Set(names);
   if (!taken.has(base)) return base;
   for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
 }
 
-function freeNumbered(names: string[], prefix: string): string {
-  const taken = new Set(names);
-  for (let n = 1; ; n++) if (!taken.has(`${prefix}-${n}`)) return `${prefix}-${n}`;
-}
-
 export function addStep(b: BoardState, processor: Processor, at: Point, id: Id): BoardState {
   const step: StepRow = {
-    id, name: uniqueStepName(b, processor.name), version: '1.0.0', description: null, processorId: processor.id,
+    id, name: uniqueName(Object.values(b.steps).map((x) => x.name), processor.name), version: '1.0.0', description: null, processorId: processor.id,
     nextStepIds: [], entryCondition: 1, at: { ...at }, updatedAt: null, ...NO_AUDIT,
   };
   return { ...b, steps: { ...b.steps, [id]: step } };
@@ -27,7 +23,7 @@ export function addStep(b: BoardState, processor: Processor, at: Point, id: Id):
 
 export function addCache(b: BoardState, at: Point, id: Id): BoardState {
   const cache: CacheRow = {
-    id, name: freeNumbered(Object.values(b.caches).map((c) => c.name), 'new-cache'), version: '1.0.0',
+    id, name: uniqueName(Object.values(b.caches).map((c) => c.name), 'cache'), version: '1.0.0',
     description: null, root: '', items: '{}', at: { ...at }, updatedAt: null, ...NO_AUDIT,
   };
   return { ...b, caches: { ...b.caches, [id]: cache } };
@@ -35,7 +31,7 @@ export function addCache(b: BoardState, at: Point, id: Id): BoardState {
 
 export function addWorkflow(b: BoardState, at: Point, id: Id): BoardState {
   const wf: WorkflowRow = {
-    id, name: freeNumbered(Object.values(b.workflows).map((w) => w.name), 'new-workflow'), version: '1.0.0',
+    id, name: uniqueName(Object.values(b.workflows).map((w) => w.name), 'untitled'), version: '1.0.0',
     description: null, cronExpression: null, entryStepIds: [], assignmentIds: [], cacheIds: [], at: { ...at }, updatedAt: null, ...NO_AUDIT,
   };
   return { ...b, workflows: { ...b.workflows, [id]: wf } };

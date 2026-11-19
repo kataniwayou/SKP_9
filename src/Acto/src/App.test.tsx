@@ -399,8 +399,8 @@ describe('App', () => {
     const at = (ev: Event) => { Object.defineProperties(ev, { clientX: { value: 500 }, clientY: { value: 300 }, dataTransfer: { value: data } }); return ev; };
     fireEvent(pane, at(createEvent.dragOver(pane)));
     fireEvent(pane, at(createEvent.drop(pane)));
-    expect(await screen.findByText('new-workflow-1 created — it is saved only when you press Save')).toBeInTheDocument();
-    expect(await inspector().findByDisplayValue('new-workflow-1')).toBeInTheDocument();
+    expect(await screen.findByText('untitled created — it is saved only when you press Save')).toBeInTheDocument();
+    expect(await inspector().findByDisplayValue('untitled')).toBeInTheDocument();
     const node = screen.getByTestId(/^rf__node-wf:(?!daily|hourly)/) as HTMLElement;
     await waitFor(() => expect(node.style.transform).toMatch(/translate\(440px,\s*248px\)/));
     expect(saveButton()).toHaveTextContent('Save · 1');
@@ -417,7 +417,7 @@ describe('App', () => {
     const at = (ev: Event) => { Object.defineProperties(ev, { clientX: { value: 500 }, clientY: { value: 300 }, dataTransfer: { value: data } }); return ev; };
     fireEvent(pane, at(createEvent.dragOver(pane)));
     fireEvent(pane, at(createEvent.drop(pane)));
-    expect(await inspector().findByDisplayValue('new-workflow-1')).toBeInTheDocument();
+    expect(await inspector().findByDisplayValue('untitled')).toBeInTheDocument();
     expect(inspector().queryByDisplayValue('expand')).toBeNull();
     await waitFor(() => expect(card('expand').closest('.node')).not.toHaveClass('sel'));
   });

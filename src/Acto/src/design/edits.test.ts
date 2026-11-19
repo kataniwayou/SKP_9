@@ -57,14 +57,16 @@ describe('edits', () => {
     expect(deepEqual({ ...m.steps.fetch, at: null }, { ...before.steps.fetch, at: null })).toBe(true);
     expect(b).toEqual(before);
   });
-  it('new names take the smallest free number', () => {
+  it("new names are Studio's: untitled, untitled-2, …; cache, cache-2, … [user, 2026-11-19]", () => {
     let b = addWorkflow(board(), { x: 0, y: 0 }, 'w1');
-    expect(b.workflows.w1.name).toBe('new-workflow-1');
+    expect(b.workflows.w1.name).toBe('untitled');
     expect(b.workflows.w1.version).toBe('1.0.0');
     b = addWorkflow(b, { x: 0, y: 0 }, 'w2');
-    expect(b.workflows.w2.name).toBe('new-workflow-2');
+    expect(b.workflows.w2.name).toBe('untitled-2');
     b = addCache(b, { x: 0, y: 0 }, 'k1');
-    expect(b.caches.k1.name).toBe('new-cache-1');
+    expect(b.caches.k1.name).toBe('cache');
+    b = addCache(b, { x: 0, y: 0 }, 'k2');
+    expect(b.caches.k2.name).toBe('cache-2');
     expect(b.caches.k1.updatedAt).toBeNull();
   });
   it('a new step takes the processor name, made unique board-wide', () => {

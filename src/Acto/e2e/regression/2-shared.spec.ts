@@ -103,11 +103,13 @@ test('every shared-entity combination: shared entry, wires-only sharing, entry-o
     await expect(stNode(page, id.s).locator('.key-chip')).toHaveText([`◆ 1 key · ${N.w1}`, `◆ 2 keys · ${N.w2}`]);
     await expect(stNode(page, id.t).locator('.key-chip')).toHaveCount(0);
     await expect(stNode(page, id.u).locator('.key-chip')).toHaveCount(0);
-    // W3 reaches T only through U's wire: no assignment there, an empty payload that would make one
+    // W3 reaches T only through U's wire: no assignment there, only ＋ Create (no Payload editor, as Studio)
     await selectWorkflowAlone(page, id.w3);
     await pickStep(page, id.t);
     await expect(childLabels(page, 'Step')).toHaveText([N.w3]);
-    await expect(await payloadOf(page, N.w3)).toHaveValue('');
+    await childTab(page, 'Step', N.w3).click();
+    await expect(field(page, 'Payload')).toHaveCount(0);
+    await expect(inspector(page).getByRole('button', { name: '＋ Create' })).toBeVisible();
     // the caches: C1 used by all three, C2 by W1, C3 by none; W1 links two
     await clickEmptyBoard(page);
     await pickCache(page, id.c1);

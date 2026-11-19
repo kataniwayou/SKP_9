@@ -22,7 +22,7 @@ describe('payloads', () => {
   it('creates a row when the workflow has none for that step', () => {
     const s = setPayload(board(), 'daily', 'expand', '{"k":2}', () => 'n2');
     expect(s.assignments.n2).toMatchObject({
-      stepId: 'expand', name: 'daily-expand', version: '1.0.0', description: null, payload: '{"k":2}', updatedAt: null,
+      stepId: 'expand', name: 'expand-assignment', version: '1.0.0', description: null, payload: '{"k":2}', updatedAt: null,
     });
     expect(assignmentOf(s, 'daily', 'expand')?.id).toBe('n2');
     expect(assignmentsOf(s, 'daily').map((a) => a.id)).toEqual(['a-daily-fetch', 'n2']);

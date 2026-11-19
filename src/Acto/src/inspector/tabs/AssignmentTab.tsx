@@ -18,7 +18,8 @@ function configDefinition(b: BoardState, stepId: Id): string | null {
  * An assignment another workflow also links is copied for this one on its first edit (copy-on-write). No assignment
  * yet: Studio's "＋ Create" [user, 2026-11-19: "populate the payload with the json placeholders same as studio"] makes one
  * whose payload is laid out from the processor's config schema (`payloadSkeleton`: required keys as "<type>" markers the
- * check below names, optional ones as their default or empty value); typing into the empty payload still makes one too.
+ * check below names, optional ones as their default or empty value). Until then there is no Payload editor, as in Studio
+ * [user, 2026-11-19]: Remove assignment takes the editor away and brings ＋ Create back.
  */
 export function AssignmentTab({ state, base, edit, stepId, workflowId }: Ctx & { stepId: Id; workflowId: Id }) {
   const wf = state.workflows[workflowId];
@@ -40,12 +41,12 @@ export function AssignmentTab({ state, base, edit, stepId, workflowId }: Ctx & {
       ) : (
         <>
           <EntityHead name={`${stepName(state, stepId)} · ${wf.name}`} kind={`assignment · belongs to ${wf.name}`} />
-          <p className="none">{`No assignment yet for ${wf.name}: ＋ Create lays out the payload from the config schema, or type one.`}</p>
+          <p className="none">{`No assignment yet for ${wf.name}: ＋ Create lays out the payload from the config schema.`}</p>
           <button type="button" className="link in-create" onClick={() => edit((b) => setPayload(b, workflowId, stepId, payloadSkeleton(configDefinition(b, stepId)), newId))}>＋ Create</button>
         </>
       )}
-      <JsonField key={`${k}:payload`} label="Payload" value={payload} saved={assignmentOf(base, workflowId, stepId)?.payload}
-        onChange={(v) => { if (v === '' && !assignment) return; edit((b) => setPayload(b, workflowId, stepId, v, newId), `field:${k}:payload`); }} />
+      {assignment && <JsonField key={`${k}:payload`} label="Payload" value={payload} saved={assignmentOf(base, workflowId, stepId)?.payload}
+        onChange={(v) => edit((b) => setPayload(b, workflowId, stepId, v, newId), `field:${k}:payload`)} />}
       {assignment && <PayloadCheckNote state={state} stepId={stepId} payload={payload} />}
       {assignment && <button type="button" className="pbtn in-act" onClick={() => edit((b) => removeAssignment(b, workflowId, assignment.id))}>Remove assignment</button>}
     </>

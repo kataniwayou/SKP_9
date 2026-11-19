@@ -25,9 +25,12 @@ test('＋ Create on a new step lays the payload out from its config schema; the 
   await tab(page, 'Step').click();
   await childTab(page, 'Step', `${P}wf`).click();
   await expect(inspector(page)).toContainText(`No assignment yet for ${P}wf`);
+  await expect(field(page, 'Payload')).toHaveCount(0); // as Studio: no Payload editor until the assignment exists
   const before = await unsavedCount(page);
   await inspector(page).getByRole('button', { name: '＋ Create' }).click();
 
+  // named as Studio names it: <step name>-assignment, version 1.0.0
+  await expect(inspector(page).locator('[aria-label="Unique name"]')).toHaveText(`${P}fetch-assignment 1.0.0`);
   // the payload as Studio lays it out from file-fetcher-config: both required integers as markers, the optional array empty
   const box = await payloadOf(page, `${P}wf`);
   const laidOut = { maximumSizeBytes: '<integer>', minimumSizeBytes: '<integer>', allowedExtensions: [] };
@@ -51,6 +54,30 @@ test('＋ Create on a new step lays the payload out from its config schema; the 
   expect(rows).toHaveLength(1);
   expect(rows[0]!.stepId).toBe(s.id);
   expect(JSON.parse(rows[0]!.payload as string)).toEqual(filled);
+  expect(rows[0]!.name).toBe(`${P}fetch-assignment`);
+});
+
+test('Remove assignment takes the Payload editor away and brings ＋ Create back, as Studio; ＋ Create again lays the skeleton out', async ({ page }) => {
+  await openAt(page);
+  const wf = await newWorkflow(page, { x: 0, y: 460 }, `${P}wf3`);
+  const st = await newStep(page, FETCHER, { x: 300, y: 460 }, `${P}fetch3`);
+  await entry(page, wf, st);
+  await selectWorkflowAlone(page, wf);
+  await pickStep(page, st);
+  await childTab(page, 'Step', `${P}wf3`).click();
+  await inspector(page).getByRole('button', { name: '＋ Create' }).click();
+  await (await payloadOf(page, `${P}wf3`)).fill('{"minimumSizeBytes": 1, "maximumSizeBytes": 2}');
+  await expect(stNode(page, st).locator('.key-chip')).toContainText('2 keys');
+
+  await inspector(page).getByRole('button', { name: 'Remove assignment' }).click();
+  await expect(field(page, 'Payload')).toHaveCount(0);
+  await expect(inspector(page).getByRole('button', { name: 'Remove assignment' })).toHaveCount(0);
+  await expect(inspector(page).getByRole('button', { name: '＋ Create' })).toBeVisible();
+  await expect(inspector(page)).toContainText(`No assignment yet for ${P}wf3`);
+  await expect(stNode(page, st).locator('.key-chip')).toHaveCount(0);
+
+  await inspector(page).getByRole('button', { name: '＋ Create' }).click();
+  await expect(field(page, 'Payload')).toHaveValue(JSON.stringify({ maximumSizeBytes: '<integer>', minimumSizeBytes: '<integer>', allowedExtensions: [] }, null, 2));
 });
 
 test('＋ Create on a step whose processor\'s config schema has no properties makes {}; Undo takes the new assignment back', async ({ page }) => {
@@ -67,5 +94,5 @@ test('＋ Create on a step whose processor\'s config schema has no properties ma
   await inspector(page).getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(inspector(page).getByRole('button', { name: '＋ Create' })).toBeVisible();
   await expect(stNode(page, st).locator('.key-chip')).toHaveCount(0);
-  await expect(field(page, 'Payload')).toHaveValue('');
+  await expect(field(page, 'Payload')).toHaveCount(0);
 });

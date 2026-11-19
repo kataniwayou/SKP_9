@@ -45,19 +45,19 @@ describe('parseToolboxDrag', () => {
 
 describe('dropOnBoard', () => {
   const ids = () => 'n1';
-  it('a Workflow drop makes a triangle new-workflow-N centred on the drop point, version 1.0.0, no cron, no arrows', () => {
+  it('a Workflow drop makes a triangle untitled (as Studio names it), centred on the drop point, version 1.0.0, no cron, no arrows', () => {
     const r = dropOnBoard(board(), { kind: 'workflow' }, { x: 500, y: 300 }, ids);
     if ('refused' in r) throw new Error(r.refused);
     expect(r.pick).toEqual({ kind: 'workflow', id: 'n1' });
     expect(r.state.workflows.n1).toMatchObject({
-      name: 'new-workflow-1', version: '1.0.0', cronExpression: null, entryStepIds: [], cacheIds: [], updatedAt: null,
+      name: 'untitled', version: '1.0.0', cronExpression: null, entryStepIds: [], cacheIds: [], updatedAt: null,
       at: { x: 500 - TRIANGLE_W / 2, y: 300 - TRIANGLE_H / 2 },
     });
   });
-  it('a Cache drop makes new-cache-N; a step drop a step of that processor', () => {
+  it('a Cache drop makes cache; a step drop a step of that processor', () => {
     const c = dropOnBoard(board(), { kind: 'cache' }, { x: 0, y: 0 }, ids);
     if ('refused' in c) throw new Error(c.refused);
-    expect(c.state.caches.n1).toMatchObject({ name: 'new-cache-1', version: '1.0.0' });
+    expect(c.state.caches.n1).toMatchObject({ name: 'cache', version: '1.0.0' });
     const s = dropOnBoard(board(), { kind: 'step', processorId: 'p1' }, { x: 0, y: 0 }, ids);
     if ('refused' in s) throw new Error(s.refused);
     expect(s.state.steps.n1).toMatchObject({ processorId: 'p1', updatedAt: null });

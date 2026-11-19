@@ -139,8 +139,12 @@ Description, **Payload** (pretty JSON), the config-schema check note ("✓ check
 the problems). No assignment yet: Studio's **＋ Create** link [user, 2026-11-19: "populate on payload the json placeholders
 same as studio"] makes one whose payload is laid out from the step's processor's config schema (`payloadSkeleton`, as
 Studio: a required key as a `"<type>"` marker that the check names "still a placeholder", an optional one as its
-default or its type's empty value; `{}` with no config schema or no properties); typing into the empty Payload still
-makes one too. A "Remove assignment" action once it exists.
+default or its type's empty value; `{}` with no config schema or no properties), named as Studio names it:
+`<step name>-assignment`, `1.0.0`. Until it exists there is **no Payload editor**, only the line and ＋ Create [user,
+2026-11-19, as Studio]; "Remove assignment" (once it exists) takes the editor away and brings ＋ Create back.
+
+**New names, as Studio's** [user, 2026-11-19]: a new workflow `untitled`, `untitled-2`, …; a new cache `cache`,
+`cache-2`, …; a new step its processor's name, then `-2`, …; a new assignment `<step name>-assignment`; all `1.0.0`.
 
 **Workflow tab**: Name, Version, show all, Description, Cron (+ its reading), entry steps as chips (✕ removes the
 arrow), **caches as chips** (✕ unlinks; several allowed [user: "add multiple cache to workflow"] — linking is the

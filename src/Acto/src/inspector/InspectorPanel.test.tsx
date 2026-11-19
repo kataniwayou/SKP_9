@@ -301,15 +301,16 @@ describe('InspectorPanel', () => {
       expect(store.state().assignments['a-daily-fetch']!.payload).toBe('{oops');
       expect(screen.getByLabelText('Payload')).toHaveValue('{oops');
     });
-    it('Remove assignment unlinks it from that workflow only; then an empty payload makes one on typing', () => {
+    it('Remove assignment unlinks it from that workflow only; the Payload editor goes and ＋ Create comes back, as in Studio [user, 2026-11-19]', () => {
       const { store } = opened({ workflows: ['daily'], picks: [step('fetch')] });
       fireEvent.click(screen.getByRole('button', { name: 'Remove assignment' }));
       expect(store.state().workflows.daily!.assignmentIds).toEqual([]);
       expect(store.state().workflows.hourly!.assignmentIds).toEqual(['a-hourly-fetch']);
       expect(screen.queryByRole('button', { name: 'Remove assignment' })).toBeNull();
-      expect(screen.getByLabelText('Payload')).toHaveValue('');
-      fireEvent.change(screen.getByLabelText('Payload'), { target: { value: '{"z":1}' } });
-      expect(payloadOf(store, 'daily')).toBe('{"z":1}');
+      expect(screen.queryByLabelText('Payload')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: '＋ Create' }));
+      expect(payloadOf(store, 'daily')).toBe('{}');
+      expect(screen.getByLabelText('Payload')).toHaveValue('{}');
     });
     it('changed, then typed back to the saved JSON in another layout: nothing unsaved (the saved text itself is written)', () => {
       const b0 = board();

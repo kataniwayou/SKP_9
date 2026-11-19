@@ -35,7 +35,7 @@ export function setPayload(b: BoardState, wf: Id, stepId: Id, payload: string, n
   const row: AssignmentRow = cur
     ? { ...cur, id, payload, updatedAt: null, ...NO_AUDIT }
     : {
-      id, stepId, name: `${w.name}-${b.steps[stepId]?.name ?? stepId}`, version: '1.0.0', description: null,
+      id, stepId, name: `${b.steps[stepId]?.name ?? stepId}-assignment`, version: '1.0.0', description: null,
       payload, updatedAt: null, ...NO_AUDIT,
     };
   const assignmentIds = cur ? w.assignmentIds.map((x) => (x === cur.id ? id : x)) : [...w.assignmentIds, id];

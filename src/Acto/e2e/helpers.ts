@@ -105,11 +105,17 @@ export const ghost = (page: Page, name: string) =>
   page.locator('.react-flow__node.ghost').filter({ has: page.locator('.sn, .cache-nm, .tri-nm', { hasText: new RegExp(`^${escapeRe(name)}$`) }) });
 /** Studio's prettyJson: what a JSON field shows once it is not being typed in. */
 export const pretty = (json: string) => JSON.stringify(JSON.parse(json), null, 2);
-/** Opens the workflow-named tab of the picked step (its assignment) and answers its Payload field. */
+/**
+ * Opens the workflow-named tab of the picked step (its assignment) and answers its Payload field. With no assignment yet the
+ * tab has no Payload, only ＋ Create (as Studio [user, 2026-11-19]): it is pressed first, so the field exists.
+ */
 export async function payloadOf(page: Page, workflow: string) {
   // the workflow's assignment is a child of Step: open Step first unless its row is already shown
   if (await childTab(page, 'Step', workflow).count() === 0) await tab(page, 'Step').click();
   await childTab(page, 'Step', workflow).click();
+  const create = inspector(page).getByRole('button', { name: '＋ Create' });
+  await expect(field(page, 'Payload').or(create)).toBeVisible();
+  if (await create.count() > 0) await create.click();
   return field(page, 'Payload');
 }
 export const saveButton = (page: Page) => page.locator('button.save-board');

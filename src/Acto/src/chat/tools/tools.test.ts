@@ -51,13 +51,13 @@ describe('workflow tools', () => {
     const { ctx, store, output, focus, api } = setup();
     const o = done(await call(ctx, 'new_workflow'));
     expect(o.result).toContain('id n1');
-    expect(store.state().workflows.n1).toMatchObject({ name: 'new-workflow-1', version: '1.0.0', cronExpression: null, at: { x: 700, y: 40 } });
-    expect(output.lines().at(-1)).toMatchObject({ text: 'new-workflow-1 created — it is saved only when you press Save', level: 'ok' });
+    expect(store.state().workflows.n1).toMatchObject({ name: 'untitled', version: '1.0.0', cronExpression: null, at: { x: 700, y: 40 } });
+    expect(output.lines().at(-1)).toMatchObject({ text: 'untitled created — it is saved only when you press Save', level: 'ok' });
     expect(focus).toHaveBeenCalledWith('n1');
     expect(await call(ctx, 'start', { workflow_id: 'n1' })).toMatchObject({ kind: 'ask' });
     const s = done(await call(ctx, 'start', {}, 'Start', 'n1'));
     expect(s.ok).toBe(false);
-    expect(s.result).toContain('new-workflow-1: not saved yet — BaseAPI has no such workflow');
+    expect(s.result).toContain('untitled: not saved yet — BaseAPI has no such workflow');
     expect(api.startWorkflow).not.toHaveBeenCalled();
     expect(done(await call(ctx, 'new_workflow', { name: 'feed' })).result).toContain('workflow feed');
   });

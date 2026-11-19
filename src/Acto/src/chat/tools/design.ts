@@ -54,7 +54,7 @@ const addStepTool: ToolDef = {
 
 const addCacheTool: ToolDef = {
   name: 'add_cache',
-  description: 'Add a cache named `name` (else new-cache-N) with root `root`, version 1.0.0, unsaved until Save, on a free spot or at x, y. BaseAPI refuses to save a cache without a root. Answers its id.',
+  description: 'Add a cache named `name` (else cache, cache-2, …) with root `root`, version 1.0.0, unsaved until Save, on a free spot or at x, y. BaseAPI refuses to save a cache without a root. Answers its id.',
   parameters: { type: 'object', properties: { name: { type: 'string' }, root: { type: 'string' }, ...XY }, additionalProperties: false },
   async run(ctx, args) {
     const id = ctx.newId();

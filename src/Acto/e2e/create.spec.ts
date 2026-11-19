@@ -18,14 +18,14 @@ test('the toolbox drops a triangle, a cache and a step where they are dropped, e
 
   const wfAt = await regionPoint(page, { x: 100, y: 120 });
   const wf = await dropTool(page, workflowTool(page), 'workflow', wfAt);
-  await expect(wfNode(page, wf).locator('.tri-nm')).toHaveText(/^new-workflow-\d+$/);
+  await expect(wfNode(page, wf).locator('.tri-nm')).toHaveText(/^untitled(-\d+)?$/);
   // centred on the drop point
   const b = (await wfNode(page, wf).boundingBox())!;
   expect(Math.abs(b.x + b.width / 2 - wfAt.x)).toBeLessThan(3);
   expect(Math.abs(b.y + b.height / 2 - wfAt.y)).toBeLessThan(3);
   await expect(wfNode(page, wf).locator('.unsaved-mark')).toBeVisible();
   await expect(toolbar(page, 'workflow').getByRole('button')).toHaveText(['▶ Start', 'Delete']);
-  await expect(field(page, 'Name')).toHaveValue(/^new-workflow-\d+$/);
+  await expect(field(page, 'Name')).toHaveValue(/^untitled(-\d+)?$/);
   await expect(field(page, 'Version')).toHaveValue('1.0.0');
   await expect(field(page, 'Cron')).toHaveValue('');
   await expect(inspector(page)).toContainText('not scheduled');
@@ -34,7 +34,7 @@ test('the toolbox drops a triangle, a cache and a step where they are dropped, e
   expect(await unsavedCount(page)).toBe(n0 + 1);
 
   const cache = await dropTool(page, cacheTool(page), 'cache', await regionPoint(page, { x: 150, y: 360 }));
-  await expect(caNode(page, cache).locator('.cache-nm')).toHaveText(/^new-cache-\d+$/);
+  await expect(caNode(page, cache).locator('.cache-nm')).toHaveText(/^cache(-\d+)?$/);
   await expect(field(page, 'Version')).toHaveValue('1.0.0');
   await expect(caNode(page, cache).locator('.unsaved-mark')).toBeVisible();
   await expect(toolbar(page, 'cache').getByRole('button')).toHaveText(['Delete']);
@@ -79,7 +79,7 @@ test('a wire from a step\'s right handle, an entry arrow from the triangle\'s ti
   // the cache link, back -> cache: dashed, from the triangle
   await drawCacheLink(page, wfNode(page, wf), caNode(page, cache));
   await expect(cacheEdge(page, wf, cache)).toHaveCount(1);
-  await expect(inspector(page)).toContainText(/Caches · 1\s*⛁\s*new-cache-\d+/);
+  await expect(inspector(page)).toContainText(/Caches · 1\s*⛁\s*cache(-\d+)?/);
 
   // a back handle onto a step, a tip onto a cache, a step's handle onto a cache or a triangle: no connection
   await drawCacheLink(page, wfNode(page, wf), stNode(page, s2));

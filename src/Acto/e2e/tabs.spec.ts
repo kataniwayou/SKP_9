@@ -81,12 +81,14 @@ test('a step alone; a triangle with the step shows that workflow\'s assignment u
   await expect(await payloadOf(page, 'e2e-tab-b')).toHaveValue(JSON.stringify({ only: 'b' }, null, 2));
   // the chosen child is kept while the same picks stay
   await expect(childTab(page, 'Step', 'e2e-tab-b')).toHaveAttribute('aria-selected', 'true');
-  // the step after it is in B's stream too, but holds no assignment: an empty payload that would make one
+  // the step after it is in B's stream too, but holds no assignment: no Payload, only ＋ Create (as Studio)
   await pickStep(page, id.s2!);
   await expect(childLabels(page, 'Step')).toHaveText(['e2e-tab-b']);
   await expect(field(page, 'Name')).toHaveValue('e2e-tab-next'); // a new pick: Step, no child
-  await expect(await payloadOf(page, 'e2e-tab-b')).toHaveValue('');
+  await childTab(page, 'Step', 'e2e-tab-b').click();
   await expect(inspector(page)).toContainText('No assignment yet');
+  await expect(field(page, 'Payload')).toHaveCount(0);
+  await expect(inspector(page).getByRole('button', { name: '＋ Create' })).toBeVisible();
 });
 
 // Fix round 1 (B1), spec §5: the chosen tab is kept only while the same pick stays; a new pick opens the first tab.
