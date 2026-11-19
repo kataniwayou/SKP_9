@@ -457,10 +457,11 @@ describe('InspectorPanel', () => {
       const store = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
       store.load(board());
       const ghosts = createGhostStore(store);
-      const out = { store, picked: [] as Pick[] };
+      const out = { store, picked: [] as Pick[], centred: [] as unknown[] };
       function Host() {
         const [sel, setSel] = useState<Sel>({ workflows: [], picks: first });
-        return <InspectorPanel store={store} selection={sel} ghosts={ghosts} onPicks={(p) => { out.picked = p; setSel({ workflows: [], picks: p }); }} />;
+        return <InspectorPanel store={store} selection={sel} ghosts={ghosts} onPicks={(p) => { out.picked = p; setSel({ workflows: [], picks: p }); }}
+          onCenter={(r) => out.centred.push(r)} />;
       }
       render(<LiveStoreProvider value={liveStub()}><Host /></LiveStoreProvider>);
       return out;
@@ -481,6 +482,17 @@ describe('InspectorPanel', () => {
       expect(inList().queryByRole('button', { name: /Remove assignment/ })).toBeNull();
       expect(inList().getAllByRole('button')).toHaveLength(1);
       expect(h.store.state().workflows.daily!.assignmentIds).toEqual(['a-daily-fetch']);
+    });
+    it('a chip link centres the step (or the cache) it opens on the board [user, 2026-11-19]', () => {
+      const h = hosted([daily]);
+      fireEvent.click(screen.getByRole('button', { name: 'Open entry fetch-orders' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Open step expand' }));
+      expect(h.centred).toEqual([{ kind: 'step', id: 'fetch' }, { kind: 'step', id: 'expand' }]);
+    });
+    it('a cache chip centres the cache', () => {
+      const h = hosted([daily]);
+      fireEvent.click(screen.getByRole('button', { name: 'Open cache c1' }));
+      expect(h.centred).toEqual([{ kind: 'cache', id: 'c1' }]);
     });
     it('an entry-step chip selects that workflow with the step and opens Step with no child chosen', () => {
       const h = hosted([daily]);

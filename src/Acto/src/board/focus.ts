@@ -1,8 +1,8 @@
 import type { Id } from '../model/graph';
 import type { Rect } from '../model/geometry';
-import type { BoardState } from '../design/board';
+import type { BoardState, ItemRef } from '../design/board';
 import { reachOf } from '../design/board';
-import { STEP_H, STEP_W, TRIANGLE_H, TRIANGLE_W } from './geometry';
+import { CACHE_H, CACHE_W, STEP_H, STEP_W, TRIANGLE_H, TRIANGLE_W } from './geometry';
 
 /**
  * What the board pans to when the chat changed a workflow: the box around the named steps, or (none named, or none of them
@@ -20,4 +20,12 @@ export function focusBounds(b: BoardState, workflowId: Id, stepIds: readonly Id[
   const x0 = Math.min(...boxes.map((r) => r.x)), y0 = Math.min(...boxes.map((r) => r.y));
   const x1 = Math.max(...boxes.map((r) => r.x + r.w)), y1 = Math.max(...boxes.map((r) => r.y + r.h));
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/** One board item's box, for centring on it (an Inspector chip's link [user, 2026-11-19]); null when it is not on the board or not placed. */
+export function itemBounds(b: BoardState, ref: ItemRef): Rect | null {
+  const row = ref.kind === 'step' ? b.steps[ref.id] : ref.kind === 'cache' ? b.caches[ref.id] : b.workflows[ref.id];
+  if (!row?.at) return null;
+  const [w, h] = ref.kind === 'step' ? [STEP_W, STEP_H] : ref.kind === 'cache' ? [CACHE_W, CACHE_H] : [TRIANGLE_W, TRIANGLE_H];
+  return { x: row.at.x, y: row.at.y, w, h };
 }

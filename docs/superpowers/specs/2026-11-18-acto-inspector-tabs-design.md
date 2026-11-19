@@ -152,7 +152,8 @@ appears only on a connection — entry arrow, cache link, wire — and removes o
 [user, 2026-11-19: "the x mark only for remove the wiring not for delete entity"]. Opening —
 entry step: this workflow with that step, Step tab; assignment: the same, Step › this workflow's assignment; cache:
 the cache alone, Cache tab; next step: that step as a plain click on it would pick it (rule 1: selected workflows stay,
-steps are replaced), Step tab.
+steps are replaced), Step tab. Every link also pans the board (zoom kept) so the step it opens — or the cache — sits in
+the middle of the board, an assignment link included [user, 2026-11-19: "click on the link centerize the step"].
 
 **Cache tab**: Name, Version, show all, Description, Root, Items (pretty JSON when it parses), Used by.
 

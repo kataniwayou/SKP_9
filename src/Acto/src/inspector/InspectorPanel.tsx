@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore } from 'react';
 import { pickKey } from '../board/picks';
 import { synced, type Pick } from '../board/selection';
-import type { BoardState, Slot } from '../design/board';
+import type { BoardState, ItemRef, Slot } from '../design/board';
 import type { BoardStore } from '../design/boardStore';
 import type { GhostStore } from '../design/ghosts';
 import { useLive, useLiveStore } from '../live/LiveContext';
@@ -132,8 +132,10 @@ function TabBody({ tab, focus, state, base, edit, ghosts, sel, child, choose, go
  * history). A new pick opens its first tab with no child; the chosen tab and child are kept while the same thing stays
  * picked and they still exist. Rule 2: one thing, or one triangle with one step, shows tabs; anything else the numbered pick list.
  */
-export function InspectorPanel({ store, selection: given, ghosts, onPicks }: {
+export function InspectorPanel({ store, selection: given, ghosts, onPicks, onCenter }: {
   store: BoardStore; selection: InspectorSelection; ghosts: Ghosts; onPicks?: (picks: Pick[]) => void;
+  /** Centres an item on the board: a chip's link centres the step (or cache) it opens [user, 2026-11-19]. */
+  onCenter?: (ref: ItemRef) => void;
 }) {
   // one shape: the selected workflows are the picked triangles (rule 1)
   const selection = synced(given);
@@ -162,6 +164,8 @@ export function InspectorPanel({ store, selection: given, ghosts, onPicks }: {
     setChosen(open ? { key: next, tab: open.tab, children: open.child ? { step: open.child as ChildId } : {} } : null);
     setSeen(next);
     onPicks(picks);
+    const target = picks.find((p) => p.kind === 'step') ?? picks.find((p) => p.kind === 'cache');
+    if (target && (target.kind === 'step' || target.kind === 'cache')) onCenter?.({ kind: target.kind, id: target.id });
   });
   return (
     <>

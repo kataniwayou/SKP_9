@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import { createApi, type StudioApi } from './api/client';
 import { describeError } from './api/describeError';
-import { Board, type BoardFocus } from './board/Board';
+import { Board, type BoardCenter, type BoardFocus } from './board/Board';
 import type { ConnectionKind } from './board/connect';
 import { loadBoard } from './board/loadBoard';
 import type { ToolbarActions } from './board/nodes/boardContext';
@@ -115,6 +115,7 @@ export function App(props: AppProps) {
   const deleteToken = useRef(0);
   const viewport = useRef<{ x: number; y: number; zoom: number } | null>(saved && { x: saved.x, y: saved.y, zoom: saved.zoom });
   const boardFocus = useRef<BoardFocus | null>(null);
+  const boardCenter = useRef<BoardCenter | null>(null);
   // a nudge session: a press and the repeats of its held key; a new press or a selection change starts the next one
   const nudgeSeq = useRef(0);
 
@@ -351,9 +352,9 @@ export function App(props: AppProps) {
             board={!loaded
               ? <div className="board-wait">Loading the board…</div>
               : <Board state={state} view={view} onPick={onPick} onMove={onMove} onConnect={onConnect} onDropData={onDropData}
-                  toolbar={toolbar} bar={barView} settled={loaded} focusRef={boardFocus} stateNow={stateNow} onViewChange={onViewChange}
+                  toolbar={toolbar} bar={barView} settled={loaded} focusRef={boardFocus} centerRef={boardCenter} stateNow={stateNow} onViewChange={onViewChange}
                   {...(saved ? { initialView: { x: saved.x, y: saved.y, zoom: saved.zoom } } : {})} />}
-            inspector={<InspectorPanel store={store} selection={sel} ghosts={ghostStore} onPicks={onInspectorPicks} />}
+            inspector={<InspectorPanel store={store} selection={sel} ghosts={ghostStore} onPicks={onInspectorPicks} onCenter={(r) => boardCenter.current?.(r)} />}
             output={<OutputPanel />}
             chat={<ChatHost chat={chat} ctx={chatCtx} ready={loaded} storage={storage} {...(props.aiFetch ? { fetchFn: props.aiFetch } : {})} />}
           />

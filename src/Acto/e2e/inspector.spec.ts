@@ -241,8 +241,22 @@ test('[user, 2026-11-19] every Workflow-tab chip opens its item, shows the hover
   await cacheChip.getByRole('button', { name: 'Open cache e2e-ins-cache' }).hover();
   await expect.poll(() => cacheChip.evaluate((e) => getComputedStyle(e).borderColor)).not.toBe(before);
 
-  // the entry chip: the workflow with the step, Step open
+  // a link centres its step on the board: pan the step far off first
+  const centre = async (loc: import('@playwright/test').Locator) => {
+    const pane = (await page.locator('.react-flow').boundingBox())!;
+    const box = (await loc.boundingBox())!;
+    return Math.hypot(box.x + box.width / 2 - (pane.x + pane.width / 2), box.y + box.height / 2 - (pane.y + pane.height / 2));
+  };
+  const s1Card = stNode(page, id.s1!);
+  const pane0 = (await page.locator('.react-flow').boundingBox())!;
+  await page.mouse.move(pane0.x + 20, pane0.y + pane0.height - 20);
+  await page.mouse.down();
+  await page.mouse.move(pane0.x + pane0.width - 20, pane0.y + 20, { steps: 8 });
+  await page.mouse.up();
+  await selectWorkflowAlone(page, id.wa!);
   await inspector(page).getByRole('button', { name: 'Open entry e2e-ins-first' }).click();
+  await expect.poll(() => centre(s1Card)).toBeLessThan(4);
+  // the entry chip: the workflow with the step, Step open
   await expect(stNode(page, id.s1!).locator('.node.sel')).toHaveCount(1);
   await expect(wfNode(page, id.wa!).locator('.tri.sel')).toHaveCount(1);
   await expect(tab(page, 'Step')).toHaveAttribute('aria-selected', 'true');
@@ -254,17 +268,22 @@ test('[user, 2026-11-19] every Workflow-tab chip opens its item, shows the hover
   await expect(stNode(page, id.s1!).locator('.node.sel')).toHaveCount(0);
   await expect(wfNode(page, id.wa!).locator('.tri.sel')).toHaveCount(1);
   await expect(field(page, 'Name')).toHaveValue('e2e-ins-second');
+  await expect.poll(() => centre(stNode(page, id.s2!))).toBeLessThan(4);
 
-  // the cache chip: the cache alone
-  await selectWorkflowAlone(page, id.wa!);
+  // the cache chip: the cache alone (the centred step clicked again leaves the workflow alone; its triangle may be off-screen now)
+  await pickStep(page, id.s2!);
+  await expect(tab(page, 'Workflow')).toBeVisible();
   await inspector(page).getByRole('button', { name: 'Open cache e2e-ins-cache' }).click();
   await expect(caNode(page, id.c1!).locator('.cache-chip.sel')).toHaveCount(1);
+  await expect.poll(() => centre(caNode(page, id.c1!))).toBeLessThan(4);
   await expect(wfNode(page, id.wa!).locator('.tri.sel')).toHaveCount(0);
   await expect(tab(page, 'Cache')).toBeVisible();
 
-  // an assignment chip opens Step › that workflow's assignment
+  // an assignment chip opens Step › that workflow's assignment and centres its step too [user, 2026-11-19]
   await selectWorkflowAlone(page, id.wa!);
+  expect(await centre(stNode(page, id.s2!))).toBeGreaterThan(50); // the cache is centred now, not the step
   await asg.getByRole('button', { name: 'Open assignment e2e-ins-second' }).click();
+  await expect.poll(() => centre(stNode(page, id.s2!))).toBeLessThan(4);
   await expect(childTab(page, 'Step', 'e2e-ins-a')).toHaveAttribute('aria-selected', 'true');
   await expect(await payloadOf(page, 'e2e-ins-a')).toHaveValue(pretty('{"second":2}'));
 });

@@ -9,7 +9,7 @@ import type { Id } from '../model/graph';
 import type { Point } from '../model/geometry';
 import { BoardMiniMap } from './BoardMiniMap';
 import { connectionKind, itemOfNode, type ConnectionKind } from './connect';
-import { focusBounds } from './focus';
+import { focusBounds, itemBounds } from './focus';
 import { CLICK_SLOP } from './geometry';
 import type { Pick } from './selection';
 import { flowIdOf, toFlow, type BoardView } from './toFlow';
@@ -54,6 +54,8 @@ export interface BoardProps {
   settled?: boolean;
   /** Filled by the board with its pan: centres the view on a workflow (or, given, its steps) at the current zoom. */
   focusRef?: MutableRefObject<BoardFocus | null>;
+  /** Set by the board: centre an item (the Inspector's chip links). */
+  centerRef?: MutableRefObject<BoardCenter | null>;
   /**
    * The board as it is now, for `focusRef` (App: the store's): a tool pans right after its store edit, before React has
    * drawn it. Without it, the last render's.
@@ -63,6 +65,8 @@ export interface BoardProps {
 
 /** Pans the board to a workflow (and, given, steps); a workflow not on the board is ignored. */
 export type BoardFocus = (workflowId: string, stepIds?: string[]) => void;
+/** Pans (zoom kept) so the item is in the middle of the board. */
+export type BoardCenter = (ref: ItemRef) => void;
 
 const refOf = (n: Node): ItemRef | null => { const i = itemOfNode(n.id); return i ? { kind: i.kind, id: i.id } : null; };
 
@@ -88,7 +92,7 @@ const isGhost = (n: Node) => (n.className ?? '').split(' ').includes('ghost');
 /** Whether a click landed on a node's handle: a connection, not a pick. */
 export const onHandle = (t: EventTarget | null): boolean => t instanceof Element && t.closest('.react-flow__handle') !== null;
 
-export function Board({ state, view, onPick, onMove, onConnect, toolbar, initialZoom, initialView, onViewChange, onDropData, bar, settled = true, focusRef, stateNow }: BoardProps) {
+export function Board({ state, view, onPick, onMove, onConnect, toolbar, initialZoom, initialView, onViewChange, onDropData, bar, settled = true, focusRef, centerRef, stateNow }: BoardProps) {
   const fitAtMount = useRef(settled);
   const flow = useRef<{
     getViewport: () => Viewport; fitBounds: (b: { x: number; y: number; width: number; height: number }, o?: { padding?: number }) => unknown; screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number };
@@ -108,6 +112,16 @@ export function Board({ state, view, onPick, onMove, onConnect, toolbar, initial
     };
     return () => { focusRef.current = null; };
   }, [focusRef]);
+  useEffect(() => {
+    if (!centerRef) return;
+    centerRef.current = (ref) => {
+      const rf = flow.current;
+      const b = itemBounds(lookup.current ? lookup.current() : stateRef.current, ref);
+      if (!b || !rf) return;
+      void rf.setCenter(b.x + b.w / 2, b.y + b.h / 2, { zoom: rf.getViewport().zoom, duration: 300 });
+    };
+    return () => { centerRef.current = null; };
+  }, [centerRef]);
   // the first fit waited for the last row: fit once it is in (a saved view or a given zoom is never fitted over)
   useEffect(() => {
     if (!settled || fitAtMount.current) return;

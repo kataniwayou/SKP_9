@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { board } from '../design/boardFixtures';
-import { focusBounds } from './focus';
-import { STEP_H, STEP_W, TRIANGLE_W } from './geometry';
+import { focusBounds, itemBounds } from './focus';
+import { CACHE_H, CACHE_W, STEP_H, STEP_W, TRIANGLE_W } from './geometry';
 
 describe('focusBounds', () => {
   const b = board(); // daily at (0,0); fetch (200,200), expand (400,200); lonely (600,200)
@@ -19,5 +19,14 @@ describe('focusBounds', () => {
     const empty = { ...b, workflows: { ...b.workflows, daily: { ...b.workflows.daily, entryStepIds: [] } } };
     expect(focusBounds(empty, 'daily')).toEqual({ x: 0, y: 0, w: TRIANGLE_W, h: 104 });
     expect(focusBounds(b, 'ghost')).toBeNull();
+  });
+});
+
+describe('itemBounds', () => {
+  const b = board();
+  it('is the step box, the cache box; null for an id not on the board', () => {
+    expect(itemBounds(b, { kind: 'step', id: 'expand' })).toEqual({ x: 400, y: 200, w: STEP_W, h: STEP_H });
+    expect(itemBounds(b, { kind: 'cache', id: 'c1' })).toEqual({ x: 0, y: -100, w: CACHE_W, h: CACHE_H });
+    expect(itemBounds(b, { kind: 'step', id: 'nope' })).toBeNull();
   });
 });
