@@ -1,11 +1,12 @@
+import { conditionStyle } from '../../board/wires';
 import { reachOf } from '../../design/board';
-import { setStepField } from '../../design/edits';
+import { removeWires, setStepField } from '../../design/edits';
 import type { Id } from '../../model/graph';
 import { ConditionPicker } from '../ConditionPicker';
 import { Field, Ro, Row, Sec } from '../fields';
-import { EntityBase, locationText, metaOfRow, type Ctx } from './shared';
+import { EntityBase, locationText, metaOfRow, stepName, type Ctx } from './shared';
 
-/** A step's own fields (shared by every workflow whose stream holds it), then who uses it. */
+/** A step's own fields (shared by every workflow whose stream holds it), who uses it, and its wires out as chips (✕ removes). */
 export function StepTab({ state, edit, id }: Ctx & { id: Id }) {
   const step = state.steps[id];
   if (!step) return null;
@@ -26,6 +27,17 @@ export function StepTab({ state, edit, id }: Ctx & { id: Id }) {
         <Row k="Used by">{users.length > 0 ? users.join(', ') : 'no workflow'}</Row>
         <Row k="Location">{locationText(step.at)}</Row>
       </Ro>
+      <Sec>Next steps</Sec>
+      <div className="chips">
+        {step.nextStepIds.length === 0 && <span className="none">none</span>}
+        {step.nextStepIds.map((to) => (
+          <span key={to} className="chip">
+            <i style={{ background: conditionStyle(state.steps[to]?.entryCondition ?? 0).colour }} />{stepName(state, to)}
+            <button type="button" className="chip-x" aria-label={`Remove wire to ${stepName(state, to)}`} onClick={() => edit((b) => removeWires(b, [[id, to]]))}>✕</button>
+          </span>
+        ))}
+      </div>
+      <p className="in-note">Drag from the step&apos;s right handle to another step to wire it; ✕ removes the wire.</p>
     </>
   );
 }

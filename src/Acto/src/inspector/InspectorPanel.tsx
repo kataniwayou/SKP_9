@@ -109,12 +109,15 @@ function ParentTab({ tab, ctx, sel, stepId, child, choose }: {
   );
 }
 
-function TabBody({ tab, focus, state, base, edit, ghosts, sel, child, choose }: {
+function TabBody({ tab, focus, state, base, edit, ghosts, sel, child, choose, openAssignment }: {
   tab: TabId; focus: Pick; state: BoardState; base: BoardState; edit: Edit; ghosts: Ghosts;
-  sel: InspectorSelection; child: ChildId | null; choose: (c: ChildId) => void;
+  sel: InspectorSelection; child: ChildId | null; choose: (c: ChildId) => void; openAssignment?: (wf: string, stepId: string) => void;
 }) {
   const ctx = { state, base, edit };
-  if (tab === 'workflow' && focus.kind === 'workflow') return <WorkflowTab {...ctx} id={focus.id} />;
+  if (tab === 'workflow' && focus.kind === 'workflow') {
+    const wf = focus.id;
+    return <WorkflowTab {...ctx} id={wf} {...(openAssignment ? { openAssignment: (stepId: string) => openAssignment(wf, stepId) } : {})} />;
+  }
   if (tab === 'cache' && focus.kind === 'cache') return <CacheTab {...ctx} id={focus.id} />;
   if (tab === 'link' && (focus.kind === 'wire' || focus.kind === 'entry' || focus.kind === 'cacheLink')) return <LinkTab state={state} pick={focus} />;
   if (tab === 'ghost' && focus.kind === 'ghost') {
@@ -132,7 +135,9 @@ function TabBody({ tab, focus, state, base, edit, ghosts, sel, child, choose }: 
  * history). A new pick opens its first tab with no child; the chosen tab and child are kept while the same thing stays
  * picked and they still exist. Rule 2: one thing, or one triangle with one step, shows tabs; anything else the numbered pick list.
  */
-export function InspectorPanel({ store, selection: given, ghosts }: { store: BoardStore; selection: InspectorSelection; ghosts: Ghosts }) {
+export function InspectorPanel({ store, selection: given, ghosts, onPicks }: {
+  store: BoardStore; selection: InspectorSelection; ghosts: Ghosts; onPicks?: (picks: Pick[]) => void;
+}) {
   // one shape: the selected workflows are the picked triangles (rule 1)
   const selection = synced(given);
   const state = useSyncExternalStore(store.subscribe, store.state);
@@ -154,6 +159,14 @@ export function InspectorPanel({ store, selection: given, ghosts }: { store: Boa
   const children = focus?.kind === 'step' && tab === 'step' ? stepTabsOf(selection, state, focus.id)
     : focus?.kind === 'step' && tab === 'processor' ? processorTabsOf(state, state.steps[focus.id]?.processorId ?? null) : [];
   const child = activeChild(children, key, tab, chosen);
+  // an assignment link on the Workflow tab: pick that workflow with the step (rule 2) and open Step › its assignment
+  const openAssignment = onPicks && ((wf: string, stepId: string) => {
+    const picks: Pick[] = [{ kind: 'workflow', id: wf }, { kind: 'step', id: stepId }];
+    const next = focusKey({ workflows: [wf], picks });
+    setChosen({ key: next, tab: 'step', children: { step: `assignment:${wf}` } });
+    setSeen(next);
+    onPicks(picks);
+  });
   return (
     <>
       <Header store={store} kind={list ? `${list.length} selected` : tab !== null && focus ? focus.kind : ''} />
@@ -161,7 +174,8 @@ export function InspectorPanel({ store, selection: given, ghosts }: { store: Boa
       <div className="pb" {...(!list && tab !== null ? { role: 'tabpanel', id: 'ins-tabpanel', 'aria-labelledby': `ins-tab-${tab}` } : {})}>
         {list ? <PickList picks={list} state={state} ghosts={ghosts} />
           : tab !== null && focus ? <TabBody key={`${key}|${tab}|${child ?? ''}`} tab={tab} focus={focus} state={state} base={store.base()} edit={edit} ghosts={ghosts}
-            sel={selection} child={child} choose={(c) => { if (tab === 'step' || tab === 'processor') setChosen(chooseChild(chosen, key, tab, c)); }} />
+            sel={selection} child={child} choose={(c) => { if (tab === 'step' || tab === 'processor') setChosen(chooseChild(chosen, key, tab, c)); }}
+            {...(openAssignment ? { openAssignment } : {})} />
           : <BoardSummary state={state} />}
       </div>
     </>

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Pick } from '../board/selection';
 import { createBoardStore, type BoardStore } from '../design/boardStore';
@@ -435,5 +436,38 @@ describe('InspectorPanel', () => {
     expect(redo).toBeEnabled();
     fireEvent.click(redo);
     expect(store.state().workflows.daily!.name).toBe('x');
+  });
+
+  describe('links [user, 2026-11-19]', () => {
+    it("the Step tab lists the step's wires out; ✕ removes that wire only, in one undo step", () => {
+      const { store } = setup({ workflows: [], picks: [step('fetch')] });
+      expect(screen.getByRole('button', { name: 'Remove wire to expand' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Remove wire to expand' }));
+      expect(store.state().steps.fetch!.nextStepIds).toEqual([]);
+      expect(store.state().workflows.daily!.entryStepIds).toEqual(['fetch']);
+      act(() => store.undo());
+      expect(store.state().steps.fetch!.nextStepIds).toEqual(['expand']);
+    });
+    it('a step with no wires out says none', () => {
+      setup({ workflows: [], picks: [step('expand')] });
+      expect(screen.queryByRole('button', { name: /Remove wire to/ })).toBeNull();
+    });
+    it("a Workflow tab assignment link selects that workflow with the step and opens Step › the workflow's assignment", () => {
+      const store = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
+      store.load(board());
+      const ghosts = createGhostStore(store);
+      let picked: Pick[] = [];
+      function Host() {
+        const [sel, setSel] = useState<Sel>({ workflows: ['daily'], picks: [{ kind: 'workflow', id: 'daily' }] });
+        return <InspectorPanel store={store} selection={sel} ghosts={ghosts} onPicks={(p) => { picked = p; setSel({ workflows: [], picks: p }); }} />;
+      }
+      render(<LiveStoreProvider value={liveStub()}><Host /></LiveStoreProvider>);
+      expect(tabNames()).toEqual(['Workflow']);
+      fireEvent.click(screen.getByRole('button', { name: 'Open assignment fetch-orders' }));
+      expect(picked).toEqual([{ kind: 'workflow', id: 'daily' }, step('fetch')]);
+      expect(selectedTab()).toBe('Step');
+      expect(selectedChild('Step')).toBe('daily');
+      expect(screen.getByLabelText('Payload')).toBeInTheDocument();
+    });
   });
 });

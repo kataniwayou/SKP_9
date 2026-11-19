@@ -196,3 +196,26 @@ test('the entry-condition picker opens by mouse, picks by a keyboard letter, and
   await expect(pill).toHaveText('X');
   await expect(stNode(page, id.s2!).locator('.unsaved-mark')).toBeVisible();
 });
+
+test('[user, 2026-11-19] the Step tab removes a wire out by its chip; a Workflow tab assignment opens Step › that workflow', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+
+  // the Workflow tab's assignment link: the workflow with the step, Step › the workflow's assignment open
+  await selectWorkflowAlone(page, id.wa!);
+  await inspector(page).getByRole('button', { name: 'Open assignment e2e-tab-shared' }).click();
+  await expect(stNode(page, id.s1!).locator('.node.sel')).toHaveCount(1);
+  await expect(wfNode(page, id.wa!).locator('.tri.sel')).toHaveCount(1);
+  await expect(tab(page, 'Step')).toHaveAttribute('aria-selected', 'true');
+  await expect(childTab(page, 'Step', 'e2e-tab-a')).toHaveAttribute('aria-selected', 'true');
+  await expect(await payloadOf(page, 'e2e-tab-a')).toHaveValue(JSON.stringify({ from: 'a', n: 1 }, null, 2));
+
+  // the step's own tab: its wire out as a chip; ✕ removes the wire from the board (unsaved), Undo brings it back
+  await tab(page, 'Step').click();
+  await expect(wireEdge(page, id.s1!, id.s2!)).toHaveCount(1);
+  await inspector(page).getByRole('button', { name: 'Remove wire to e2e-tab-next' }).click();
+  await expect(wireEdge(page, id.s1!, id.s2!)).toHaveCount(0);
+  await expect(inspector(page).getByRole('button', { name: 'Remove wire to e2e-tab-next' })).toHaveCount(0);
+  await inspector(page).getByRole('button', { name: 'Undo' }).click();
+  await expect(wireEdge(page, id.s1!, id.s2!)).toHaveCount(1);
+});

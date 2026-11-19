@@ -115,7 +115,9 @@ Link and Deleted tabs use the same head and two-column read-only rows (no fields
 **Step tab**: Name, Version, show all, Description, **Entry condition** with **Studio's picker** [user: item 5] — a
 select-only combobox whose button and options show the letter pill + a short wire in the condition colour + the name,
 ✓ on the current one, keyboard as Studio's (Up/Down/Home/End/Enter/Space/Escape/Tab, a condition's letter picks it).
-Then a read-only "Used by" line (workflows whose stream contains it).
+Then a read-only "Used by" line (workflows whose stream contains it), then **Next steps**: the step's wires out as
+chips in the target's condition colour, ✕ removes that wire [user, 2026-11-19: "same as workflow inspector can delete
+the wire/pointing to cache or entry step"].
 
 **Processor's children** [user, 2026-11-18: "same as assignments are tabs in step, so schemas are tabs in
 processor"; then "remove the duplicate"]: the schema tabs only (ids `schema:input`/`schema:output`/`schema:config`;
@@ -143,6 +145,8 @@ existing drag from the triangle's back to a cache, repeated per cache), and one 
 [user, 2026-11-18: assignments are listed read-only; delete and payload edits only via Step › <workflow>]: one
 two-column row per assignment the workflow links, label = the step name, value = `◆ N keys` / `◆ payload`, plus
 ` · not in its stream` when the workflow does not reach that step. No Delete, no payload editor (one trigger per action).
+The value is a link (the show-all link style) [user, 2026-11-19]: it selects this workflow with that step — the same
+selection as a Ctrl+click on the step — and opens Step › this workflow's assignment.
 
 **Cache tab**: Name, Version, show all, Description, Root, Items (pretty JSON when it parses), Used by.
 

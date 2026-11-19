@@ -155,6 +155,7 @@ export function App(props: AppProps) {
     if (s !== selRef.current) { selRef.current = s; setSel(s); persist(s); }
   }, [loaded, state, ghosts, persist]);
 
+  const onInspectorPicks = useCallback((picks: Pick[]) => setSelection(withPicks(selRef.current, picks)), [setSelection]);
   const onPick = useCallback((p: Pick | null, additive: boolean) => setSelection(selectPick(selRef.current, p, additive)), [setSelection]);
   const onViewChange = useCallback((v: { x: number; y: number; zoom: number }) => {
     viewport.current = v;
@@ -352,7 +353,7 @@ export function App(props: AppProps) {
               : <Board state={state} view={view} onPick={onPick} onMove={onMove} onConnect={onConnect} onDropData={onDropData}
                   toolbar={toolbar} bar={barView} settled={loaded} focusRef={boardFocus} stateNow={stateNow} onViewChange={onViewChange}
                   {...(saved ? { initialView: { x: saved.x, y: saved.y, zoom: saved.zoom } } : {})} />}
-            inspector={<InspectorPanel store={store} selection={sel} ghosts={ghostStore} />}
+            inspector={<InspectorPanel store={store} selection={sel} ghosts={ghostStore} onPicks={onInspectorPicks} />}
             output={<OutputPanel />}
             chat={<ChatHost chat={chat} ctx={chatCtx} ready={loaded} storage={storage} {...(props.aiFetch ? { fetchFn: props.aiFetch } : {})} />}
           />

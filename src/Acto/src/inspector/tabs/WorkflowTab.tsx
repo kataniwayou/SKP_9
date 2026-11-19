@@ -14,8 +14,12 @@ const keysText = (payload: string) => {
   return n === null ? '◆ payload' : `◆ ${n} key${n === 1 ? '' : 's'}`;
 };
 
-/** A workflow: its fields, entry steps and caches as chips (✕ removes), and its assignments (read-only: the step's keys, and whether the workflow reaches it). */
-export function WorkflowTab({ state, edit, id }: Ctx & { id: Id }) {
+/**
+ * A workflow: its fields, entry steps and caches as chips (✕ removes), and its assignments (read-only: the step's keys, and
+ * whether the workflow reaches it). An assignment's step name is a link: it selects this workflow with that step, as a
+ * Ctrl+click would, and opens Step › this workflow's assignment [user, 2026-11-19].
+ */
+export function WorkflowTab({ state, edit, id, openAssignment }: Ctx & { id: Id; openAssignment?: (stepId: Id) => void }) {
   const status = useWorkflowStatus(id);
   const w = state.workflows[id];
   if (!w) return null;
@@ -58,7 +62,12 @@ export function WorkflowTab({ state, edit, id }: Ctx & { id: Id }) {
           <Ro>
             {assignments.map((a, i) => (
               <Row key={`${id}:${i}`} k={stepName(state, a.stepId)} className="in-assign">
-                {keysText(a.payload)}{reach.has(a.stepId) ? '' : ' · not in its stream'}
+                {openAssignment && (
+                  <button type="button" className="link" aria-label={`Open assignment ${stepName(state, a.stepId)}`} onClick={() => openAssignment(a.stepId)}>
+                    {keysText(a.payload)}
+                  </button>
+                )}
+                {!openAssignment && keysText(a.payload)}{reach.has(a.stepId) ? '' : ' · not in its stream'}
               </Row>
             ))}
           </Ro>

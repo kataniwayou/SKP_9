@@ -76,8 +76,8 @@
 .uname { font: 600 13px var(--sans); overflow-wrap: anywhere; margin-bottom: 2px; }
 .kind { font: 500 10.5px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; overflow-wrap: anywhere; }
 .metatog { margin: -4px 0 8px; }
-.metatog .link { background: none; border: 0; padding: 0; color: var(--accent); font: 12px var(--sans); cursor: pointer; }
-.metatog .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.metatog .link, .link { background: none; border: 0; padding: 0; color: var(--accent); font: 12px var(--sans); cursor: pointer; }
+.metatog .link:focus-visible, .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .meta { background: var(--card-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; margin: 0 0 10px; }
 .meta .ro { margin: 2px 0; }
 .fld textarea.json { min-height: 0; white-space: pre; overflow: auto; }
