@@ -129,7 +129,7 @@ test('the payload field checks JSON as it is typed; the triangle lists its assig
   await openAt(page);
   await selectWorkflowAlone(page, id.wa!);
   const asg = inspector(page).getByTestId('assignments');
-  // one trigger per action: the triangle's list has no payload editor and no Delete
+  // one trigger per action: the triangle's list has no payload editor, no Delete and no ✕
   await expect(asg.locator('.in-assign')).toHaveCount(2);
   await expect(asg.locator('textarea')).toHaveCount(0);
   await expect(asg.getByRole('button', { name: 'Delete' })).toHaveCount(0);
@@ -223,4 +223,48 @@ test('a click on Remove assignment right after typing a one-line payload removes
   await expect(stNode(page, id.s1!).locator('.key-chip')).toContainText('3 key');
   await inspector(page).getByRole('button', { name: 'Remove assignment' }).click();
   await expect(stNode(page, id.s1!).locator('.key-chip')).toHaveCount(0);
+});
+
+test('[user, 2026-11-19] every Workflow-tab chip opens its item, shows the hover style, and only a connection has a ✕', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  const chips = inspector(page).locator('.chip-link');
+  const asg = inspector(page).getByTestId('assignments');
+
+  // one style: entry steps, caches and assignments are all link chips; hover turns the border to the accent; ✕ only on the entry and the cache
+  await selectWorkflowAlone(page, id.wa!);
+  await expect(chips).toHaveCount(4); // 1 entry, 1 cache, 2 assignments
+  await expect(inspector(page).locator('.chip-link .chip-x')).toHaveCount(2);
+  await expect(inspector(page).getByTestId('assignments').locator('.chip-x')).toHaveCount(0);
+  const cacheChip = inspector(page).locator('.chip-link', { hasText: 'e2e-ins-cache' });
+  const before = await cacheChip.evaluate((e) => getComputedStyle(e).borderColor);
+  await cacheChip.getByRole('button', { name: 'Open cache e2e-ins-cache' }).hover();
+  await expect.poll(() => cacheChip.evaluate((e) => getComputedStyle(e).borderColor)).not.toBe(before);
+
+  // the entry chip: the workflow with the step, Step open
+  await inspector(page).getByRole('button', { name: 'Open entry e2e-ins-first' }).click();
+  await expect(stNode(page, id.s1!).locator('.node.sel')).toHaveCount(1);
+  await expect(wfNode(page, id.wa!).locator('.tri.sel')).toHaveCount(1);
+  await expect(tab(page, 'Step')).toHaveAttribute('aria-selected', 'true');
+  await expect(field(page, 'Name')).toHaveValue('e2e-ins-first');
+
+  // the step's next-step chip: that step, the workflow kept
+  await inspector(page).getByRole('button', { name: 'Open step e2e-ins-second' }).click();
+  await expect(stNode(page, id.s2!).locator('.node.sel')).toHaveCount(1);
+  await expect(stNode(page, id.s1!).locator('.node.sel')).toHaveCount(0);
+  await expect(wfNode(page, id.wa!).locator('.tri.sel')).toHaveCount(1);
+  await expect(field(page, 'Name')).toHaveValue('e2e-ins-second');
+
+  // the cache chip: the cache alone
+  await selectWorkflowAlone(page, id.wa!);
+  await inspector(page).getByRole('button', { name: 'Open cache e2e-ins-cache' }).click();
+  await expect(caNode(page, id.c1!).locator('.cache-chip.sel')).toHaveCount(1);
+  await expect(wfNode(page, id.wa!).locator('.tri.sel')).toHaveCount(0);
+  await expect(tab(page, 'Cache')).toBeVisible();
+
+  // an assignment chip opens Step › that workflow's assignment
+  await selectWorkflowAlone(page, id.wa!);
+  await asg.getByRole('button', { name: 'Open assignment e2e-ins-second' }).click();
+  await expect(childTab(page, 'Step', 'e2e-ins-a')).toHaveAttribute('aria-selected', 'true');
+  await expect(await payloadOf(page, 'e2e-ins-a')).toHaveValue(pretty('{"second":2}'));
 });

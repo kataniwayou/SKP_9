@@ -117,7 +117,7 @@ select-only combobox whose button and options show the letter pill + a short wir
 ✓ on the current one, keyboard as Studio's (Up/Down/Home/End/Enter/Space/Escape/Tab, a condition's letter picks it).
 Then a read-only "Used by" line (workflows whose stream contains it), then **Next steps**: the step's wires out as
 chips in the target's condition colour, ✕ removes that wire [user, 2026-11-19: "same as workflow inspector can delete
-the wire/pointing to cache or entry step"].
+the wire/pointing to cache or entry step"]; the chips follow **Chips, one style** below.
 
 **Processor's children** [user, 2026-11-18: "same as assignments are tabs in step, so schemas are tabs in
 processor"; then "remove the duplicate"]: the schema tabs only (ids `schema:input`/`schema:output`/`schema:config`;
@@ -141,12 +141,18 @@ the problems). No assignment yet: an empty Payload editor that creates one on fi
 
 **Workflow tab**: Name, Version, show all, Description, Cron (+ its reading), entry steps as chips (✕ removes the
 arrow), **caches as chips** (✕ unlinks; several allowed [user: "add multiple cache to workflow"] — linking is the
-existing drag from the triangle's back to a cache, repeated per cache), and one read-only **Assignments** section
-[user, 2026-11-18: assignments are listed read-only; delete and payload edits only via Step › <workflow>]: one
-chip per assignment the workflow links, styled like an entry-step chip but without the ✕ [user, 2026-11-19]: the step's
-condition colour, the step name, then muted `◆ N keys` / `◆ payload`, plus ` · not in its stream` when the workflow does
-not reach that step. No Delete, no payload editor (one trigger per action). A click on the chip selects this workflow with that step — the same
-selection as a Ctrl+click on the step — and opens Step › this workflow's assignment.
+existing drag from the triangle's back to a cache, repeated per cache), and an **Assignments** section: one chip per
+assignment the workflow links — the step's condition colour, the step name, then muted `◆ N keys` / `◆ payload`, plus
+` · not in its stream` when the workflow does not reach that step. No ✕, no Delete, no payload editor: an assignment is
+not a connection, so it is removed and edited only under Step › workflow [user, 2026-11-18, kept 2026-11-19].
+
+**Chips, one style** [user, 2026-11-19]: every related-item chip (entry steps, caches, assignments, a step's next
+steps) is `LinkChip`: the name is a link to the item (hover: accent border, pointer) and never deletes anything; ✕
+appears only on a connection — entry arrow, cache link, wire — and removes only that connection, never an item
+[user, 2026-11-19: "the x mark only for remove the wiring not for delete entity"]. Opening —
+entry step: this workflow with that step, Step tab; assignment: the same, Step › this workflow's assignment; cache:
+the cache alone, Cache tab; next step: that step as a plain click on it would pick it (rule 1: selected workflows stay,
+steps are replaced), Step tab.
 
 **Cache tab**: Name, Version, show all, Description, Root, Items (pretty JSON when it parses), Used by.
 

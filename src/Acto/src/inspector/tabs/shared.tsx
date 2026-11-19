@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+import type { Pick } from '../../board/selection';
 import type { BoardState, RowAudit } from '../../design/board';
 import type { Id } from '../../model/graph';
 import { checkPayload, payloadJsonProblem } from '../../model/payloadCheck';
@@ -6,7 +8,27 @@ import { MetaToggle, type Meta } from '../MetaToggle';
 
 export type Edit = (fn: (b: BoardState) => BoardState, merge?: string) => void;
 /** `base`: the board as BaseAPI last gave it (the saved values JSON is compared with). */
-export interface Ctx { state: BoardState; base: BoardState; edit: Edit }
+export interface Ctx { state: BoardState; base: BoardState; edit: Edit; go?: Go }
+/** Moves the selection to `picks` and opens `tab` (and Step's `child`) for it; absent where the Inspector cannot select. */
+export type Go = (picks: Pick[], open?: { tab: 'step'; child?: string }) => void;
+
+/**
+ * A related item as a chip [user, 2026-11-19: one style for all]: its name links to it (hover: accent border, pointer).
+ * ✕ only where the chip is a connection (an entry arrow, a cache link, a wire) and removes that connection, never an
+ * item; without `onRemove` there is no ✕. Without `onOpen` the name is plain text.
+ */
+export function LinkChip({ dot, icon, name, sub, openLabel, onOpen, removeLabel, onRemove, className }: {
+  dot?: string; icon?: ReactNode; name: string; sub?: string; openLabel: string; onOpen?: () => void;
+  removeLabel?: string; onRemove?: () => void; className?: string;
+}) {
+  const body = <>{dot !== undefined && <i style={{ background: dot }} />}{icon}<span className="chip-nm">{name}</span>{sub && <span className="chip-sub">{sub}</span>}</>;
+  return (
+    <span className={`chip${onOpen ? ' chip-link' : ''}${className ? ` ${className}` : ''}`}>
+      {onOpen ? <button type="button" className="chip-open" aria-label={openLabel} onClick={onOpen}>{body}</button> : body}
+      {onRemove && <button type="button" className="chip-x" aria-label={removeLabel} onClick={onRemove}>✕</button>}
+    </span>
+  );
+}
 
 export const orNull = (v: string) => (v === '' ? null : v);
 export const stepName = (b: BoardState, id: Id) => b.steps[id]?.name ?? id;

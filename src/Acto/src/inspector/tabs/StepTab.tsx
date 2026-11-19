@@ -4,10 +4,12 @@ import { removeWires, setStepField } from '../../design/edits';
 import type { Id } from '../../model/graph';
 import { ConditionPicker } from '../ConditionPicker';
 import { Field, Ro, Row, Sec } from '../fields';
-import { EntityBase, locationText, metaOfRow, stepName, type Ctx } from './shared';
+import { selectPick, type SelectionState } from '../../board/selection';
+import { EntityBase, LinkChip, locationText, metaOfRow, stepName, type Ctx } from './shared';
 
-/** A step's own fields (shared by every workflow whose stream holds it), who uses it, and its wires out as chips (✕ removes). */
-export function StepTab({ state, edit, id }: Ctx & { id: Id }) {
+/** A step's own fields (shared by every workflow whose stream holds it), who uses it, and its wires out as chips (its name opens that step as a
+ * plain click on it would, ✕ removes the wire) [user, 2026-11-19]. */
+export function StepTab({ state, edit, id, go, sel }: Ctx & { id: Id; sel?: SelectionState }) {
   const step = state.steps[id];
   if (!step) return null;
   const set = (key: 'name' | 'version' | 'description' | 'entryCondition', v: string | number | null) =>
@@ -31,10 +33,10 @@ export function StepTab({ state, edit, id }: Ctx & { id: Id }) {
       <div className="chips">
         {step.nextStepIds.length === 0 && <span className="none">none</span>}
         {step.nextStepIds.map((to) => (
-          <span key={to} className="chip">
-            <i style={{ background: conditionStyle(state.steps[to]?.entryCondition ?? 0).colour }} />{stepName(state, to)}
-            <button type="button" className="chip-x" aria-label={`Remove wire to ${stepName(state, to)}`} onClick={() => edit((b) => removeWires(b, [[id, to]]))}>✕</button>
-          </span>
+          <LinkChip key={to} dot={conditionStyle(state.steps[to]?.entryCondition ?? 0).colour} name={stepName(state, to)}
+            openLabel={`Open step ${stepName(state, to)}`}
+            {...(go && sel ? { onOpen: () => go(selectPick(sel, { kind: 'step', id: to }, false).picks) } : {})}
+            removeLabel={`Remove wire to ${stepName(state, to)}`} onRemove={() => edit((b) => removeWires(b, [[id, to]]))} />
         ))}
       </div>
       <p className="in-note">Drag from the step&apos;s right handle to another step to wire it; ✕ removes the wire.</p>
