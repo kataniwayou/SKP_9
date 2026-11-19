@@ -88,10 +88,9 @@ pre.json { margin: 0; border: 1px solid var(--line); border-radius: 7px; padding
 .chip-x { background: none; border: 0; padding: 0 4px; color: var(--muted); cursor: pointer; font-size: 11px; border-radius: 999px; }
 .chip-x:hover { color: var(--danger); }
 .chip-x:focus-visible { outline: 2px solid var(--accent); }
+.chip-link { font: 12px var(--sans); color: inherit; padding-right: 8px; cursor: pointer; }
 .chip-link:hover { border-color: var(--accent); }
-.chip-open { display: inline-flex; align-items: center; gap: 5px; background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
-.chip-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
-.chip-ico { font-family: var(--mono); color: var(--cache-line); }
+.chip-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .chip-sub { color: var(--muted); font-size: 11px; }
 
 /* a cache's items: the key/value editor (ported from Studio's DictEditor) */

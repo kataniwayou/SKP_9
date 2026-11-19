@@ -79,7 +79,7 @@ test('a wire from a step\'s right handle, an entry arrow from the triangle\'s ti
   // the cache link, back -> cache: dashed, from the triangle
   await drawCacheLink(page, wfNode(page, wf), caNode(page, cache));
   await expect(cacheEdge(page, wf, cache)).toHaveCount(1);
-  await expect(inspector(page)).toContainText(/Caches · 1\s*⛁\s*new-cache-\d+/);
+  await expect(inspector(page)).toContainText(/Caches · 1\s*⛁ new-cache-\d+/);
 
   // a back handle onto a step, a tip onto a cache, a step's handle onto a cache or a triangle: no connection
   await drawCacheLink(page, wfNode(page, wf), stNode(page, s2));

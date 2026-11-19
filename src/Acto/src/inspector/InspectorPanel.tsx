@@ -13,7 +13,7 @@ import { GhostTab, ghostName } from './tabs/GhostTab';
 import { LinkTab } from './tabs/LinkTab';
 import { ProcessorTab } from './tabs/ProcessorTab';
 import { SchemaTab } from './tabs/SchemaTab';
-import { stepName, type Edit, type Go } from './tabs/shared';
+import { stepName, type Edit } from './tabs/shared';
 import { StepTab } from './tabs/StepTab';
 import { WorkflowTab } from './tabs/WorkflowTab';
 
@@ -89,11 +89,11 @@ function TabBar<T extends string>({ tabs, active, choose, label = 'Inspector tab
  * assignment, Processor: a schema). The child row is drawn only when it has tabs; none is chosen at first.
  */
 function ParentTab({ tab, ctx, sel, stepId, child, choose }: {
-  tab: 'step' | 'processor'; ctx: { state: BoardState; base: BoardState; edit: Edit; go?: Go }; sel: InspectorSelection; stepId: string;
+  tab: 'step' | 'processor'; ctx: { state: BoardState; base: BoardState; edit: Edit }; sel: InspectorSelection; stepId: string;
   child: ChildId | null; choose: (c: ChildId) => void;
 }) {
   const children = tab === 'step' ? stepTabsOf(sel, ctx.state, stepId) : processorTabsOf(ctx.state, ctx.state.steps[stepId]?.processorId ?? null);
-  const own = tab === 'step' ? <StepTab {...ctx} id={stepId} sel={sel} /> : <ProcessorTab {...ctx} stepId={stepId} />;
+  const own = tab === 'step' ? <StepTab {...ctx} id={stepId} /> : <ProcessorTab {...ctx} stepId={stepId} />;
   if (children.length === 0) return own;
   return (
     <>
@@ -109,12 +109,15 @@ function ParentTab({ tab, ctx, sel, stepId, child, choose }: {
   );
 }
 
-function TabBody({ tab, focus, state, base, edit, ghosts, sel, child, choose, go }: {
+function TabBody({ tab, focus, state, base, edit, ghosts, sel, child, choose, openAssignment }: {
   tab: TabId; focus: Pick; state: BoardState; base: BoardState; edit: Edit; ghosts: Ghosts;
-  sel: InspectorSelection; child: ChildId | null; choose: (c: ChildId) => void; go?: Go;
+  sel: InspectorSelection; child: ChildId | null; choose: (c: ChildId) => void; openAssignment?: (wf: string, stepId: string) => void;
 }) {
-  const ctx = { state, base, edit, ...(go ? { go } : {}) };
-  if (tab === 'workflow' && focus.kind === 'workflow') return <WorkflowTab {...ctx} id={focus.id} />;
+  const ctx = { state, base, edit };
+  if (tab === 'workflow' && focus.kind === 'workflow') {
+    const wf = focus.id;
+    return <WorkflowTab {...ctx} id={wf} {...(openAssignment ? { openAssignment: (stepId: string) => openAssignment(wf, stepId) } : {})} />;
+  }
   if (tab === 'cache' && focus.kind === 'cache') return <CacheTab {...ctx} id={focus.id} />;
   if (tab === 'link' && (focus.kind === 'wire' || focus.kind === 'entry' || focus.kind === 'cacheLink')) return <LinkTab state={state} pick={focus} />;
   if (tab === 'ghost' && focus.kind === 'ghost') {
@@ -156,10 +159,11 @@ export function InspectorPanel({ store, selection: given, ghosts, onPicks }: {
   const children = focus?.kind === 'step' && tab === 'step' ? stepTabsOf(selection, state, focus.id)
     : focus?.kind === 'step' && tab === 'processor' ? processorTabsOf(state, state.steps[focus.id]?.processorId ?? null) : [];
   const child = activeChild(children, key, tab, chosen);
-  // a chip's name [user, 2026-11-19]: the selection moves to its picks, and the tab (and Step's child) it names opens
-  const go: Go | undefined = onPicks && ((picks, open) => {
-    const next = focusKey({ workflows: [], picks });
-    setChosen(open ? { key: next, tab: open.tab, children: open.child ? { step: open.child as ChildId } : {} } : null);
+  // an assignment link on the Workflow tab: pick that workflow with the step (rule 2) and open Step › its assignment
+  const openAssignment = onPicks && ((wf: string, stepId: string) => {
+    const picks: Pick[] = [{ kind: 'workflow', id: wf }, { kind: 'step', id: stepId }];
+    const next = focusKey({ workflows: [wf], picks });
+    setChosen({ key: next, tab: 'step', children: { step: `assignment:${wf}` } });
     setSeen(next);
     onPicks(picks);
   });
@@ -171,7 +175,7 @@ export function InspectorPanel({ store, selection: given, ghosts, onPicks }: {
         {list ? <PickList picks={list} state={state} ghosts={ghosts} />
           : tab !== null && focus ? <TabBody key={`${key}|${tab}|${child ?? ''}`} tab={tab} focus={focus} state={state} base={store.base()} edit={edit} ghosts={ghosts}
             sel={selection} child={child} choose={(c) => { if (tab === 'step' || tab === 'processor') setChosen(chooseChild(chosen, key, tab, c)); }}
-            {...(go ? { go } : {})} />
+            {...(openAssignment ? { openAssignment } : {})} />
           : <BoardSummary state={state} />}
       </div>
     </>

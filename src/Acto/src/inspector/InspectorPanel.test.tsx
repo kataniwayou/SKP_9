@@ -452,59 +452,22 @@ describe('InspectorPanel', () => {
       setup({ workflows: [], picks: [step('expand')] });
       expect(screen.queryByRole('button', { name: /Remove wire to/ })).toBeNull();
     });
-    /** The Inspector that moves its own selection, as App does; `picked` is the last selection it asked for. */
-    function hosted(first: Pick[]) {
+    it("a Workflow tab assignment link selects that workflow with the step and opens Step › the workflow's assignment", () => {
       const store = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
       store.load(board());
       const ghosts = createGhostStore(store);
-      const out = { store, picked: [] as Pick[] };
+      let picked: Pick[] = [];
       function Host() {
-        const [sel, setSel] = useState<Sel>({ workflows: [], picks: first });
-        return <InspectorPanel store={store} selection={sel} ghosts={ghosts} onPicks={(p) => { out.picked = p; setSel({ workflows: [], picks: p }); }} />;
+        const [sel, setSel] = useState<Sel>({ workflows: ['daily'], picks: [{ kind: 'workflow', id: 'daily' }] });
+        return <InspectorPanel store={store} selection={sel} ghosts={ghosts} onPicks={(p) => { picked = p; setSel({ workflows: [], picks: p }); }} />;
       }
       render(<LiveStoreProvider value={liveStub()}><Host /></LiveStoreProvider>);
-      return out;
-    }
-    const daily: Pick = { kind: 'workflow', id: 'daily' };
-    const inList = () => within(screen.getByTestId('assignments'));
-    it("an assignment chip selects that workflow with the step and opens Step › the workflow's assignment", () => {
-      const h = hosted([daily]);
       expect(tabNames()).toEqual(['Workflow']);
-      fireEvent.click(inList().getByRole('button', { name: 'Open assignment fetch-orders' }));
-      expect(h.picked).toEqual([daily, step('fetch')]);
+      fireEvent.click(screen.getByRole('button', { name: 'Open assignment fetch-orders' }));
+      expect(picked).toEqual([{ kind: 'workflow', id: 'daily' }, step('fetch')]);
       expect(selectedTab()).toBe('Step');
       expect(selectedChild('Step')).toBe('daily');
       expect(screen.getByLabelText('Payload')).toBeInTheDocument();
-    });
-    it("an assignment chip's ✕ unlinks it from this workflow only, in one undo step", () => {
-      const h = hosted([daily]);
-      fireEvent.click(inList().getByRole('button', { name: 'Remove assignment fetch-orders' }));
-      expect(h.store.state().workflows.daily!.assignmentIds).toEqual([]);
-      expect(h.store.state().workflows.hourly!.assignmentIds).toEqual(['a-hourly-fetch']);
-      expect(screen.getByText('No assignments.')).toBeInTheDocument();
-      act(() => h.store.undo());
-      expect(h.store.state().workflows.daily!.assignmentIds).toEqual(['a-daily-fetch']);
-    });
-    it('an entry-step chip selects that workflow with the step and opens Step with no child chosen', () => {
-      const h = hosted([daily]);
-      fireEvent.click(screen.getByRole('button', { name: 'Open entry fetch-orders' }));
-      expect(h.picked).toEqual([daily, step('fetch')]);
-      expect(selectedTab()).toBe('Step');
-      expect(selectedChild('Step')).toBeNull();
-      expect(childNames('Step')).toEqual(['daily']);
-    });
-    it('a cache chip selects the cache alone and opens its tab', () => {
-      const h = hosted([daily]);
-      fireEvent.click(screen.getByRole('button', { name: 'Open cache c1' }));
-      expect(h.picked).toEqual([{ kind: 'cache', id: 'c1' }]);
-      expect(tabNames()).toEqual(['Cache']);
-    });
-    it('a next-step chip picks that step as a plain click would: the workflow stays, the step is replaced', () => {
-      const h = hosted([daily, step('fetch')]);
-      fireEvent.click(screen.getByRole('button', { name: 'Open step expand' }));
-      expect(h.picked).toEqual([daily, step('expand')]);
-      expect(selectedTab()).toBe('Step');
-      expect(screen.getByLabelText('Name')).toHaveValue('expand');
     });
   });
 });
