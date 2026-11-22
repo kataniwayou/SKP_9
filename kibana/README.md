@@ -29,8 +29,17 @@ now needs read access and nothing else.
 
 | file | what it is |
 |---|---|
-| `kibana-export.ndjson` | the whole deliverable — data view, 3 Lens panels, 1 agg-based panel, dashboard, and the diagram panel |
+| `kibana-export.ndjson` | the whole deliverable — data view, 4 Lens panels, 1 agg-based panel, the outcomes dashboard, the workflow diagram dashboard, and the tab bar (a Links panel) on top of both |
 | `publish-diagram.py` | draws a workflow from the live graph, gates it in a browser, and PUTs it to the workflow row |
+
+**The workflow diagram has its own tab** [2026-11-22]. It is the dashboard `skp-workflow-diagram` ("SKP — workflow
+diagram"), reached from the tab bar (`skp-dashboard-tabs`, a horizontal Links panel) on top of both dashboards; the
+outcomes dashboard no longer carries it. Each tab keeps its own Workflow choice and time: the links carry neither,
+because a carried-over filter fights the other tab's control. The diagram tab opens on the last 30 days, since a
+workflow's picture shows only when it ran in the window. The picture is drawn at its own size and scrolls sideways.
+Acto publishes it on every Save it applies: each step with this workflow's settings as key/value rows (a key naming
+a password, secret, token, API key or credential is masked), the cron with a plain reading under the triangle, and
+each cache's root and item count.
 
 **The diagram panel lives in the export, not in a script.** `set-diagram-panel.py` used to write it
 — a TSVB panel whose markdown is `{{#each _all}}![](<base>/{{label}}.svg){{/each}}`, split on
