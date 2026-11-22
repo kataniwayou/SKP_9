@@ -69,6 +69,20 @@ NodeStatusIndicator components [user].
   confirms once, listing every workflow) [call]. **Copy** is offered for any mix of triangles, steps and caches; with a
   triangle among other kinds it is the only action (a triangle's Delete is a BaseAPI delete).
 
+### Box select with the right mouse button [user, 2026-11-22]
+
+"add option for multi select by right button mouse pressing and create dashed rectangle, all and partly components are
+selected, same as today one by one it shows the selected number and shared actions". A right-button drag anywhere on
+the board (not from a toolbar, the bar, the controls or the minimap) draws a dashed rectangle; on release every triangle,
+step and cache fully or partly inside it is picked. Wires, entry arrows, cache lines and ghosts are never taken.
+- Plain: the box's items replace the picks; with Ctrl held at the release they join the picks (each once, after them).
+  An empty box clears the picks (with Ctrl it changes nothing).
+- Order: left to right, then top to bottom (by the item's left, then top edge); the badges and the triangles' hues follow it.
+- From there everything is today's: 2+ picks show badges and the bar's shared actions, one pick its toolbar, and the
+  Inspector follows rule 2 (workflows + one step they reach: the step with their assignments; otherwise the list).
+- A right-click that does not move past the click slop does nothing; the browser menu never opens on the board.
+- Left-drag still pans; left-click and Ctrl+click are unchanged.
+
 ### Copy and paste of workflows and caches [user, 2026-11-19]
 
 "to clarify the copy create new entity id but copy all the fields exactly except the name". Copy is on the triangle

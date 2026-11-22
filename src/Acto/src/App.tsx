@@ -7,7 +7,8 @@ import { loadBoard } from './board/loadBoard';
 import type { ToolbarActions } from './board/nodes/boardContext';
 import { deletePicks, livePicks } from './board/picks';
 import { placeMissing } from './board/placement';
-import { selectPick, withPicks, type Pick, type SelectionState } from './board/selection';
+import { selectPick, synced, withPicks, type Pick, type SelectionState } from './board/selection';
+import { withBox } from './board/boxSelect';
 import { barOf } from './board/selectionBar';
 import { SelectionBar } from './board/SelectionBarView';
 import { confirmTextMany, toolbarFor } from './board/Toolbar';
@@ -158,6 +159,9 @@ export function App(props: AppProps) {
 
   const onInspectorPicks = useCallback((picks: Pick[]) => setSelection(withPicks(selRef.current, picks)), [setSelection]);
   const onPick = useCallback((p: Pick | null, additive: boolean) => setSelection(selectPick(selRef.current, p, additive)), [setSelection]);
+  /** A right-button box: its picks replace the selection, or (Ctrl) join it; an empty box clears it (with Ctrl, changes nothing). */
+  const onBoxPick = useCallback((picks: Pick[], additive: boolean) =>
+    setSelection(withPicks(selRef.current, withBox(synced(selRef.current).picks, picks, additive))), [setSelection]);
   const onViewChange = useCallback((v: { x: number; y: number; zoom: number }) => {
     viewport.current = v;
     persist(selRef.current);
@@ -352,7 +356,7 @@ export function App(props: AppProps) {
             toolbox={<ToolboxPanel processors={processors} />}
             board={!loaded
               ? <div className="board-wait">Loading the board…</div>
-              : <Board state={state} view={view} onPick={onPick} onMove={onMove} onConnect={onConnect} onDropData={onDropData}
+              : <Board state={state} view={view} onPick={onPick} onBoxPick={onBoxPick} onMove={onMove} onConnect={onConnect} onDropData={onDropData}
                   toolbar={toolbar} bar={barView} settled={loaded} focusRef={boardFocus} centerRef={boardCenter} stateNow={stateNow} onViewChange={onViewChange}
                   {...(saved ? { initialView: { x: saved.x, y: saved.y, zoom: saved.zoom } } : {})} />}
             inspector={<InspectorPanel store={store} selection={sel} ghosts={ghostStore} onPicks={onInspectorPicks} onCenter={(r) => boardCenter.current?.(r)} />}

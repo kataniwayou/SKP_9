@@ -1,7 +1,9 @@
 /* The board, as the approved mock draws it (the reactflow.dev look in both themes): dotted paper, white triangles and
    step cards, dark floating toolbars, pink for selection. */
 .pane.board { background: var(--paper); }
-.board { width: 100%; height: 100%; min-height: 480px; }
+.board { width: 100%; height: 100%; min-height: 480px; position: relative; }
+/* the right-button box [user, 2026-11-22]: dashed, over everything, never in the way of the pointer */
+.board .box-select { position: absolute; z-index: 10; border: 1.5px dashed var(--accent); background: var(--accent-soft); opacity: .85; border-radius: 2px; pointer-events: none; }
 .board .react-flow { background-color: var(--paper);
   --xy-edge-label-background-color: var(--b-node); --xy-edge-label-color: var(--b-ink);
   --xy-minimap-background-color: var(--b-node); --xy-minimap-mask-background-color: var(--mini-mask); --xy-minimap-mask-stroke-color: var(--mini-mask-line);

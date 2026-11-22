@@ -6,7 +6,8 @@ import {
 import type { BoardState, ItemRef } from '../design/board';
 import { escapeKey } from '../design/keys';
 import type { Id } from '../model/graph';
-import type { Point } from '../model/geometry';
+import type { Point, Rect } from '../model/geometry';
+import { boxPicks, rectOf } from './boxSelect';
 import { BoardMiniMap } from './BoardMiniMap';
 import { connectionKind, itemOfNode, type ConnectionKind } from './connect';
 import { focusBounds, itemBounds } from './focus';
@@ -31,6 +32,11 @@ export interface BoardProps {
   view: BoardView;
   /** `additive` is true while Ctrl or Meta is held; null means a click on empty board. */
   onPick: (p: Pick | null, additive: boolean) => void;
+  /**
+   * A right-button drag's box [user, 2026-11-22]: the triangles, steps and caches it touched, left to right then top to
+   * bottom (empty: it touched none); `additive` while Ctrl or Meta is held at the release. Without it there is no box.
+   */
+  onBoxPick?: (picks: Pick[], additive: boolean) => void;
   /** One drag stop: everything the drag moved, to commit as one history step. Without onMove and onConnect the board is read-only. */
   onMove?: (moved: { ref: ItemRef; at: Point }[]) => void;
   /**
@@ -92,12 +98,18 @@ const isGhost = (n: Node) => (n.className ?? '').split(' ').includes('ghost');
 /** Whether a click landed on a node's handle: a connection, not a pick. */
 export const onHandle = (t: EventTarget | null): boolean => t instanceof Element && t.closest('.react-flow__handle') !== null;
 
-export function Board({ state, view, onPick, onMove, onConnect, toolbar, initialZoom, initialView, onViewChange, onDropData, bar, settled = true, focusRef, centerRef, stateNow }: BoardProps) {
+export function Board({ state, view, onPick, onBoxPick, onMove, onConnect, toolbar, initialZoom, initialView, onViewChange, onDropData, bar, settled = true, focusRef, centerRef, stateNow }: BoardProps) {
   const fitAtMount = useRef(settled);
   const flow = useRef<{
     getViewport: () => Viewport; fitBounds: (b: { x: number; y: number; width: number; height: number }, o?: { padding?: number }) => unknown; screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number };
     setCenter: (x: number, y: number, o?: { zoom?: number; duration?: number }) => unknown;
+    getNodes: () => Node[];
   } | null>(null);
+  // the right-button box: where it started (screen), whether it has left the click slop, and the box as drawn (in the board's own pixels)
+  const wrap = useRef<HTMLDivElement>(null);
+  const boxDrag = useRef<{ pointer: number; start: Point; moved: boolean } | null>(null);
+  const [box, setBox] = useState<Rect | null>(null);
+  const endBox = () => { boxDrag.current = null; setBox(null); };
   const stateRef = useRef(state);
   stateRef.current = state;
   const lookup = useRef(stateNow);
@@ -234,7 +246,41 @@ export function Board({ state, view, onPick, onMove, onConnect, toolbar, initial
 
   return (
     <ToolbarContext.Provider value={editable ? toolbar ?? null : null}>
-      <div className="board" onKeyDownCapture={(e) => {
+      <div className="board" ref={wrap}
+        onContextMenu={(e) => { if (onBoxPick) e.preventDefault(); }}
+        onPointerDown={(e) => {
+          if (e.button !== 2 || !onBoxPick || !flow.current) return;
+          // not from the bars, the controls or the minimap: those are not the board
+          if (e.target instanceof Element && e.target.closest('.toolbar, .selbar, .react-flow__controls, .react-flow__minimap')) return;
+          boxDrag.current = { pointer: e.pointerId, start: { x: e.clientX, y: e.clientY }, moved: false };
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+          e.preventDefault();
+        }}
+        onPointerMove={(e) => {
+          const d = boxDrag.current;
+          if (!d || d.pointer !== e.pointerId || !wrap.current) return;
+          if (!d.moved && Math.hypot(e.clientX - d.start.x, e.clientY - d.start.y) < CLICK_SLOP) return;
+          d.moved = true;
+          const r = wrap.current.getBoundingClientRect();
+          setBox(rectOf({ x: d.start.x - r.left, y: d.start.y - r.top }, { x: e.clientX - r.left, y: e.clientY - r.top }));
+        }}
+        onPointerUp={(e) => {
+          const d = boxDrag.current;
+          if (!d || d.pointer !== e.pointerId) return;
+          endBox();
+          const rf = flow.current;
+          // a right-click that did not drag does nothing
+          if (!d.moved || !rf || !onBoxPick) return;
+          const area = rectOf(rf.screenToFlowPosition(d.start), rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
+          const placed = rf.getNodes().map((n) => ({
+            pick: pickOfNode(n),
+            box: { x: n.position.x, y: n.position.y, w: n.measured?.width ?? n.width ?? 0, h: n.measured?.height ?? n.height ?? 0 },
+          }));
+          onViewChange?.(rf.getViewport());
+          onBoxPick(boxPicks(placed, area), e.ctrlKey || e.metaKey);
+        }}
+        onPointerCancel={endBox}
+        onKeyDownCapture={(e) => {
         // arrows nudge picks (App): React Flow's own keyboard move of a focused node must not add to it
         if (e.key.startsWith('Arrow') && !(e.target instanceof HTMLElement && (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.target.isContentEditable))) e.stopPropagation();
         keySelect.current = e.key === 'Enter' || e.key === ' ';
@@ -289,6 +335,7 @@ export function Board({ state, view, onPick, onMove, onConnect, toolbar, initial
           proOptions={{ hideAttribution: true }}
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--dot)" />
+          {box && <div className="box-select" data-testid="box-select" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} />}
           {bar && <Panel position="top-center" className="selbar-panel">{bar}</Panel>}
           <BoardMiniMap nodes={nodes} picked={picked} />
           <Controls showInteractive={false} showFitView={false} orientation="vertical">
