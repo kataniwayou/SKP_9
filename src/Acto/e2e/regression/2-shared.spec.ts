@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from '../fixtures';
 import {
-  EXPANDER, NORMALIZER, boardSnapshot, caNode, cacheEdge, childLabels, childTab, clickEmptyBoard, entry, entryEdge, expectDryRunMatches,
+  EXPANDER, NORMALIZER, boardSnapshot, caNode, cacheEdge, childLabels, childTab, clickEmptyBoard, entry, entryEdge, expectSaveChecksNothing,
   expectPublished, field, ghost, inspector, link, newCache, newStep, newWorkflow, openAt, outLine, payloadOf, pickCache, pickStep,
   pretty, rowNamed, rowsNamed, save, saveButton, sameJson, selbar, selectWorkflowAlone, setCondition, stNode, tab, tabLabels, toolbar,
   typePayload, unsavedCount, wfNode, wire, wireEdge,
@@ -173,9 +173,9 @@ test('every shared-entity combination: shared entry, wires-only sharing, entry-o
     expect([w1, w2, w3, s, u, t, o, c1, c2, c3].map((r) => r.id), `${k} has its BaseAPI id on the board`).toContain(id[k]);
   }
 
-  // the dry run and the diagram of all three
+  // Save checked no orchestration rule on any of the three; the diagram of all three
   for (const [w, name] of [[w1, N.w1], [w2, N.w2], [w3, N.w3]] as const) {
-    await expectDryRunMatches(page, w.id, name);
+    await expectSaveChecksNothing(page, w.id, name);
     await expectPublished(page, name);
   }
   // and the same board and Inspector after it, on BaseAPI's ids
@@ -224,7 +224,7 @@ test('a shared step\'s entry condition and name, edited once: every workflow\'s 
   expect(t.description).toBe('edited once, shared by three');
   // every workflow reaching it is affected: dry-run and republished; nothing else of theirs changed
   for (const [w, name] of [[id.w1, N.w1], [id.w2, N.w2], [id.w3, N.w3]] as const) {
-    await expectDryRunMatches(page, w, name);
+    await expectSaveChecksNothing(page, w, name);
     await expectPublished(page, name);
   }
 });
@@ -301,7 +301,7 @@ test('deleting a shared step takes its wires, entry arrows and every workflow\'s
   expect((await getJson<Row>(`/workflows/${id.w2}`)).entryStepIds).toEqual([id.u]);
   expect((await getJson<Row>(`/workflows/${id.w1}`)).assignmentIds).toEqual([]);
   expect((await rowsNamed('steps', P)).map((r) => r.name).sort()).toEqual([N.o, N.t, N.u].sort());
-  for (const [w, name] of [[id.w1, N.w1], [id.w2, N.w2], [id.w3, N.w3]] as const) await expectDryRunMatches(page, w, name);
+  for (const [w, name] of [[id.w1, N.w1], [id.w2, N.w2], [id.w3, N.w3]] as const) await expectSaveChecksNothing(page, w, name);
 });
 
 test('deleting a cache linked to three workflows takes all three cache lines in one undo step; the saved delete unlinks it everywhere', async ({ page }) => {

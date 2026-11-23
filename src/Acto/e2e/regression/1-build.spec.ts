@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test';
 import { test, expect } from '../fixtures';
 import {
   COLLAPSER, CONDITION, EXPANDER, FETCHER, NORMALIZER, PERSISTER, VALID_PAYLOAD, type ConditionName,
-  entry, expectAt, expectDryRunMatches, expectPublished, field, inspector, link, newCache, newStep, newWorkflow, openAt, outLine, pickStep,
+  entry, expectAt, expectSaveChecksNothing, expectPublished, field, inspector, link, newCache, newStep, newWorkflow, openAt, outLine, pickStep,
   placeOf, rowNamed, save, saveButton, sameJson, selectWorkflowAlone, setCondition, stNode, typePayload, unsavedCount, waitLoaded, wfNode,
   caNode, wire, clickEmptyBoard,
 } from '../helpers';
@@ -150,10 +150,10 @@ test('three workflows over a branching graph, every entry condition, a cron and 
   expect(k1.root).toBe(`${P}root`);
   expectAt(k1, await placeOf(caNode(page, k1.id)));
 
-  // the dry run of every workflow the Save touched: Acto's lines and badge are BaseAPI's own answer; the graph is schema-clean and
-  // every payload conforms, so no schema-edge or payload problem may be among them
+  // Save checks no orchestration rule (that is Start's): no line, no badge; BaseAPI's own check of each stored workflow finds the
+  // graph schema-clean and every payload conforming, so no schema-edge, payload or cycle problem may be among them
   for (const w of WORKFLOWS) {
-    const problems = await expectDryRunMatches(page, wf[w.key]!.id, `${P}${w.key}`);
+    const problems = await expectSaveChecksNothing(page, wf[w.key]!.id, `${P}${w.key}`);
     expect(problems.filter((p) => p.gate === 'schemaEdge' || p.gate === 'payloadConfigSchema' || p.gate === 'cycle'), `${P}${w.key}: a clean graph`).toEqual([]);
     await expectPublished(page, `${P}${w.key}`);
   }

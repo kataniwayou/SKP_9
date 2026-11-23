@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import {
-  EXPANDER, NORMALIZER, caNode, cacheEdge, childLabels, entryEdge, expectDryRunMatches, ghost, openAt, out, rowNamed, rowsNamed,
+  EXPANDER, NORMALIZER, caNode, cacheEdge, childLabels, entryEdge, expectSaveChecksNothing, ghost, openAt, out, rowNamed, rowsNamed,
   saveButton, stNode, tabLabels, wfNode, wireEdge,
 } from './helpers';
 import { seed } from './seed';
@@ -199,7 +199,7 @@ test('6 save and report the dry run: the problems the chat reports are BaseAPI\'
     + 'reports for e2e-chat-d. Do not fix anything.');
 
   expect((await getJson<Row>(`/workflows/${ids.w}`)).description).toBe('chat dry run');
-  const problems = await expectDryRunMatches(page, ids.w!, 'e2e-chat-d');
+  const problems = await expectSaveChecksNothing(page, ids.w!, 'e2e-chat-d');
   expect(problems.length, 'the seed has a payload its config schema refuses').toBeGreaterThan(0);
   // every problem BaseAPI reports is in the reply, by its title or its detail
   const low = t.reply.toLowerCase();

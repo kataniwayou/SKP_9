@@ -1,13 +1,31 @@
 import { test, expect } from './fixtures';
-import { field, ghost, openAt, outLine, pickStep, saveButton, selectWorkflowAlone, stNode, toolbar, waitLoaded, wfNode } from './helpers';
+import {
+  drawEntry, dropTool, field, ghost, openAt, pickStep, regionPoint, renameTo, save, saveButton, selectWorkflowAlone, stNode, toolbar,
+  toolboxStep, validateStored, waitLoaded, wfNode, workflowTool, PROC_B,
+} from './helpers';
 import { seed } from './seed';
 import { getJson, type Row } from './stack';
 
-// The draft lives in localStorage and Save pushes only after one dry run of every changed workflow passes [user, 2026-11-23].
-// Nothing here starts or stops a workflow; every row is an e2e- row.
+// The draft lives in localStorage; Save checks the design rules only and pushes the design as drawn; the orchestration rules
+// (cycles, schema edges, payloads, liveness) are Start's [user, 2026-11-23, rev 2]. Nothing here presses Start or Stop.
 
-test('a draft with a problem (a cycle) is not pushed: Output lists it, the triangle shows its count, and the draft survives a reload', async ({ page }) => {
-  // seeded straight through BaseAPI (no Acto rule), so the workflow already has a cycle s1 → s2 → s1
+test('an unsaved rename survives a reload, still unsaved and not in BaseAPI', async ({ page }) => {
+  const id = await seed({
+    steps: [{ key: 's', name: 'e2e-draft-one', at: { x: 300, y: 100 } }],
+    workflows: [{ key: 'w', name: 'e2e-draft-wf', at: { x: 0, y: 30 }, entry: ['s'] }],
+  });
+  await openAt(page);
+  await selectWorkflowAlone(page, id.w!);
+  await field(page, 'Name').fill('e2e-draft-wf-renamed');
+  await page.reload();
+  await waitLoaded(page);
+  await expect(wfNode(page, id.w!).locator('.tri-nm')).toHaveText('e2e-draft-wf-renamed');
+  await expect(wfNode(page, id.w!).locator('.unsaved-mark')).toBeVisible();
+  await expect(saveButton(page)).toContainText('Save ·');
+  expect((await getJson<Row>(`/workflows/${id.w}`)).name).toBe('e2e-draft-wf');
+});
+
+test('a design with a cycle saves as drawn (free style); BaseAPI\'s workflow check names the cycle Start would refuse', async ({ page }) => {
   const id = await seed({
     steps: [
       { key: 's1', name: 'e2e-draft-one', at: { x: 300, y: 100 }, next: ['s2'] },
@@ -18,23 +36,29 @@ test('a draft with a problem (a cycle) is not pushed: Output lists it, the trian
   await openAt(page);
   await selectWorkflowAlone(page, id.w!);
   await field(page, 'Name').fill('e2e-draft-wf-renamed');
+  const answer = await save(page);
+  expect(answer.applied).toBe(true);
+  expect((await getJson<Row>(`/workflows/${id.w}`)).name).toBe('e2e-draft-wf-renamed');
+  // Save set no problem count: that is Start's
+  await expect(wfNode(page, id.w!).locator('.tri-problems')).toHaveCount(0);
+  expect((await validateStored(id.w!)).problems.some((p) => p.gate === 'cycle')).toBe(true);
+});
 
-  const applied: string[] = [];
-  page.on('request', (r) => { if (r.method() === 'POST' && new URL(r.url()).pathname === '/api/v1/model/apply') applied.push(r.url()); });
-  const checked = page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/v1/workflows/validate');
-  await saveButton(page).click();
-  await checked;
-  await expect(outLine(page, /^Not pushed: \d+ problems? in 1 workflow$/)).toHaveCount(1);
-  await expect(outLine(page, /^e2e-draft-wf-renamed: /).first()).toBeVisible();
-  await expect(wfNode(page, id.w!).locator('.tri-problems')).toBeVisible();
-  expect(applied).toEqual([]);
-  expect((await getJson<Row>(`/workflows/${id.w}`)).name).toBe('e2e-draft-wf');
-
-  // the draft is kept: a reload shows the rename still unsaved
-  await page.reload();
-  await waitLoaded(page);
-  await expect(wfNode(page, id.w!).locator('.tri-nm')).toHaveText('e2e-draft-wf-renamed');
-  await expect(saveButton(page)).toContainText('Save ·');
+test('a new triangle\'s Start is disabled until it is saved', async ({ page }) => {
+  await openAt(page);
+  const wf = await dropTool(page, workflowTool(page), 'workflow', await regionPoint(page, { x: 90, y: 130 }));
+  await renameTo(page, 'e2e-draft-new');
+  const step = await dropTool(page, toolboxStep(page, PROC_B), 'step', await regionPoint(page, { x: 400, y: 130 }));
+  await renameTo(page, 'e2e-draft-new-step');
+  await drawEntry(page, wfNode(page, wf), stNode(page, step));
+  await selectWorkflowAlone(page, wf);
+  await expect(toolbar(page, 'workflow').getByRole('button', { name: '▶ Start' })).toBeDisabled();
+  const answer = await save(page);
+  expect(answer.applied).toBe(true);
+  const saved = answer.made![wf]!;
+  await selectWorkflowAlone(page, saved);
+  await expect(wfNode(page, saved).locator('.tri-st[data-status="stopped"]')).toBeVisible();
+  await expect(toolbar(page, 'workflow').getByRole('button', { name: '▶ Start' })).toBeEnabled();
 });
 
 test('a deleted step stays a ghost across a reload, still waiting for Save', async ({ page }) => {

@@ -99,7 +99,7 @@ test('Start and Stop: a real workflow\'s toolbar offers the right one for its st
   }
 });
 
-test('Start on a never-saved workflow says it is not saved yet and sends nothing', async ({ page }) => {
+test('Start on a never-saved workflow is disabled and nothing is sent [user, 2026-11-23 rev 2]', async ({ page }) => {
   await openAt(page);
   const sent: string[] = [];
   page.on('request', (r) => { if (r.method() !== 'GET' && r.url().includes('/api/')) sent.push(`${r.method()} ${new URL(r.url()).pathname}`); });
@@ -111,8 +111,7 @@ test('Start on a never-saved workflow says it is not saved yet and sends nothing
   const start = toolbar(page, 'workflow').getByRole('button', { name: '▶ Start', exact: true });
   await expect(start).toBeVisible();
   await expect(toolbar(page, 'workflow').getByRole('button', { name: '■ Stop', exact: true })).toHaveCount(0);
-  await expect(start).toBeEnabled();
-  await start.click();
-  await expect(outLine(page, `${name}: not saved yet — BaseAPI has no such workflow`)).toHaveCount(1);
+  await expect(start).toBeDisabled();
+  void name;
   expect(sent).toEqual([]);
 });

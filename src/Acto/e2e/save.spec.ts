@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures';
 import {
-  addItem, caNode, cacheTool, clearOutput, drawCacheLink, drawEntry, drawWire, dropTool, entryEdge, field, openAt, out, outLine, payloadOf, pickEdge, pickStep, selectWorkflowAlone, pretty, regionPoint,
-  renameTo, save, saveButton, stNode, toolboxStep, waitLoaded, wfNode, wireEdge, workflowTool, PROC_A, PROC_B,
+  addItem, caNode, cacheTool, clearOutput, drawCacheLink, drawEntry, drawWire, dropTool, entryEdge, field, openAt, out, outLine, payloadOf, pickStep, selectWorkflowAlone, pretty, regionPoint,
+  renameTo, save, saveButton, validateStored, stNode, toolboxStep, waitLoaded, wfNode, wireEdge, workflowTool, PROC_A, PROC_B,
 } from './helpers';
 import { seed } from './seed';
 import { API, apply, bodyOf, getJson, type Row } from './stack';
@@ -196,11 +196,10 @@ test('a shared payload is copied on write: editing A\'s payload where the row is
   expect(original.updatedAt).toBe(sharedBefore.updatedAt);
 });
 
-test('a Save whose dry run finds a cycle pushes nothing and marks the triangle; broken, the next Save pushes it and the mark goes [user, 2026-11-23]', async ({ page }) => {
+test('a design with a cycle saves as drawn (free style); no count is set; BaseAPI\'s workflow check names the cycle Start would refuse [user, 2026-11-23 rev 2]', async ({ page }) => {
   await openAt(page);
   const wf = await dropTool(page, workflowTool(page), 'workflow', await regionPoint(page, { x: 90, y: 130 }));
   await renameTo(page, 'e2e-dry-wf');
-  // two normalizers: their schemas meet, so the cycle is the only problem
   const s1 = await dropTool(page, toolboxStep(page, PROC_B), 'step', await regionPoint(page, { x: 400, y: 130 }));
   await renameTo(page, 'e2e-dry-first');
   const s2 = await dropTool(page, toolboxStep(page, PROC_B), 'step', await regionPoint(page, { x: 700, y: 130 }));
@@ -211,26 +210,13 @@ test('a Save whose dry run finds a cycle pushes nothing and marks the triangle; 
   await expect(wireEdge(page, s2, s1)).toHaveCount(1);
 
   const answer = await save(page);
-  expect(answer.applied).toBe(false);
-  await expect(out(page).locator('.k-warn').first()).toContainText('e2e-dry-wf:');
-  await expect(outLine(page, /^Not pushed: 1 problem in 1 workflow$/)).toHaveCount(1);
-  const problems = wfNode(page, wf).locator('.tri-problems');
-  await expect(problems).toHaveText('1');
-  test.info().annotations.push({ type: 'dry run', description: await out(page).locator('.k-warn').first().innerText() });
-  // nothing reached BaseAPI, and the board is still the unsaved draft
-  expect(await named('workflows', 'e2e-dry-wf')).toBeUndefined();
-  await expect(wfNode(page, wf).locator('.unsaved-mark')).toBeVisible();
-
-  // break the cycle: the wire back goes (an edit of the workflow clears its mark), and the Save pushes
-  await pickEdge(page, wireEdge(page, s2, s1));
-  await page.getByRole('toolbar', { name: 'wire actions' }).getByRole('button', { name: 'Delete' }).click();
-  await expect(wireEdge(page, s2, s1)).toHaveCount(0);
-  await expect(problems).toHaveCount(0);
-  const again = await save(page);
-  expect(again.applied).toBe(true);
-  await expect(wfNode(page, again.made![wf]!).locator('.tri-problems')).toHaveCount(0);
+  expect(answer.applied).toBe(true);
+  const saved = answer.made![wf]!;
   await expect(outLine(page, 'e2e-dry-wf: Kibana diagram published')).toHaveCount(1);
+  await expect(wfNode(page, saved).locator('.tri-problems')).toHaveCount(0);
   expect(await named('workflows', 'e2e-dry-wf')).toBeTruthy();
+  const check = await validateStored(saved);
+  expect(check.problems.some((p) => p.gate === 'cycle'), 'Start would refuse the cycle').toBe(true);
 });
 
 test('a Save that changes a shared step republishes the Kibana diagram of both workflows that share it', async ({ page }) => {

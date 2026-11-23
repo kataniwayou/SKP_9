@@ -256,24 +256,16 @@ export async function renameTo(page: Page, name: string) {
   await field(page, 'Name').fill(name);
 }
 
-/**
- * Presses Save and waits until the whole Save has finished: the dry run (POST /workflows/validate) and, when it passed, the push
- * (/model/apply), the read back and the diagrams [user, 2026-11-23]. A dry run that refuses pushes nothing: the answer then is
- * { applied: false, checked: <the dry run answer> }.
- */
+/** Presses Save and waits until the whole Save (apply, read back, dry runs, diagrams) has finished. */
 export async function save(page: Page) {
   await expect(saveButton(page)).toBeEnabled();
   await clearOutput(page);
-  const isPost = (r: import('@playwright/test').Response, path: string) => r.request().method() === 'POST' && new URL(r.url()).pathname === path;
-  const checked = page.waitForResponse((r) => isPost(r, '/api/v1/workflows/validate'));
-  const pushed = page.waitForResponse((r) => isPost(r, '/api/v1/model/apply'));
-  pushed.catch(() => undefined); // never awaited when the dry run refuses
+  const sent = page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/v1/model/apply');
   await saveButton(page).click();
-  const check = (await (await checked).json()) as { valid?: boolean };
-  let answer: { applied?: boolean; made?: Record<string, string>; checked?: unknown } = { applied: false, checked: check };
-  if (check.valid === true) answer = (await (await pushed).json()) as typeof answer;
-  // the button says Saving… from the press until the dry run refused, or the push, read back and diagrams are done
+  const res = await sent;
+  // the button says Saving… from the press until the read back, the dry runs and the diagrams are done
   await expect(saveButton(page)).not.toHaveText('Saving…', { timeout: 60_000 });
+  const answer = (await res.json()) as { applied?: boolean; made?: Record<string, string> };
   // what Output said, kept with the test result
   test.info().annotations.push({ type: 'save', description: (await out(page).locator('[role="listitem"] span').allInnerTexts()).join(' | ').slice(0, 1500) });
   return answer;
@@ -410,17 +402,14 @@ export async function dryRunLines(page: Page, wfName: string): Promise<string[]>
   return all.filter((t) => t.startsWith(`${wfName}: `) && !/: Kibana diagram (published|not published)/.test(t) && !t.startsWith(`${wfName}: could not validate`));
 }
 /**
- * Acto's dry run of a workflow equals BaseAPI's: the Output lines for it are BaseAPI's problems (same count, same titles and details),
- * and the triangle's badge shows their count (no badge when there are none). Answers BaseAPI's problems.
+ * Save is not Start [user, 2026-11-23 rev 2]: after a Save, Output has no check line for the workflow and its triangle no problem
+ * badge, whatever BaseAPI's own check of the stored workflow finds. Answers that check's problems (what a Start would refuse).
  */
-export async function expectDryRunMatches(page: Page, wf: string, wfName: string): Promise<Problem[]> {
+export async function expectSaveChecksNothing(page: Page, wf: string, wfName: string): Promise<Problem[]> {
   const truth = await validateStored(wf);
-  const want = truth.problems.map((p) => `${wfName}: ${p.title ?? p.gate} — ${p.detail ?? ''}`).sort();
-  test.info().annotations.push({ type: 'dry run', description: `${wfName}: ${want.length} problem(s)${want.length ? ` — ${truth.problems.map((p) => p.gate).join(', ')}` : ''}` });
-  expect((await dryRunLines(page, wfName)).sort(), `${wfName}: Output's dry-run lines are BaseAPI's problems`).toEqual(want);
-  const badge = wfNode(page, wf).locator('.tri-problems');
-  if (want.length === 0) await expect(badge, `${wfName}: no problem badge`).toHaveCount(0);
-  else await expect(badge, `${wfName}: the badge counts BaseAPI's problems`).toHaveText(String(want.length));
+  test.info().annotations.push({ type: 'stored check', description: `${wfName}: ${truth.problems.length} problem(s)${truth.problems.length ? ` — ${truth.problems.map((p) => p.gate).join(', ')}` : ''}` });
+  expect(await dryRunLines(page, wfName), `${wfName}: Save writes no check lines`).toEqual([]);
+  await expect(wfNode(page, wf).locator('.tri-problems'), `${wfName}: Save sets no problem badge`).toHaveCount(0);
   return truth.problems;
 }
 /** Output says the workflow's Kibana diagram was published, once. */

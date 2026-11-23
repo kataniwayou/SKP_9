@@ -53,7 +53,7 @@ test('deleting a triangle makes it a ghost and sends nothing; Save pushes the de
   await expect(cacheEdge(page, id.a!, id.c1!)).toHaveCount(0);
 
   await save(page);
-  expect(writes).toContain('POST /api/v1/workflows/validate');
+  expect(writes).toContain('POST /api/v1/model/apply');
   // BaseAPI: the workflow and its own payload are gone, the shared payload, the steps and the cache stay, B still links the shared one
   expect((await ids('workflows')).has(id.a!)).toBe(false);
   expect((await ids('assignments')).has(id.own!)).toBe(false);
