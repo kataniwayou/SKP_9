@@ -12,7 +12,7 @@ import { apply, bodyOf, getJson, type Row } from '../stack';
 // Everything is built through the UI; the API is used only to read BaseAPI back and to make the "changed elsewhere" edits.
 
 const P = 'e2e-d-';
-const draft = (page: Page) => page.evaluate(() => sessionStorage.getItem('acto.board'));
+const draft = (page: Page) => page.evaluate(() => localStorage.getItem('acto.board'));
 const undoBtn = (page: Page) => inspector(page).getByRole('button', { name: 'Undo', exact: true });
 const redoBtn = (page: Page) => inspector(page).getByRole('button', { name: 'Redo', exact: true });
 
@@ -39,7 +39,7 @@ async function changeElsewhere(table: 'workflows' | 'steps', id: string, patch: 
   await apply([{ op: 'update', table, id, row: { ...bodyOf(row), ...patch }, updatedAt: row.updatedAt as string }]);
 }
 
-test('unsaved edits carry their marks and the Save count; a reload brings the same unsaved board, marks and count back, and no ghost', async ({ page }) => {
+test('unsaved edits carry their marks and the Save count; a reload brings the same unsaved board, marks and count back, and the same ghosts (they belong to the draft) [user, 2026-11-23]', async ({ page }) => {
   await openAt(page);
   expect(await draft(page), 'a fresh browser: no draft').toBeNull();
   const id = await savedBase(page);
@@ -63,14 +63,17 @@ test('unsaved edits carry their marks and the Save count; a reload brings the sa
   for (const l of [stNode(page, id.s1), stNode(page, s4), stNode(page, id.s3), wfNode(page, id.w1), wfNode(page, id.w2)]) await expect(l.locator('.unsaved-mark')).toBeVisible();
   // s1 (renamed, and its wire to s2 goes), s2 (deleted), s3 (wire out), s4 (new), w1 (payload), w2 (moved), w1's new assignment
   expect(await unsavedCount(page)).toBe(7);
-  expect(await draft(page), 'the unsaved board is kept as the session draft').not.toBeNull();
+  expect(await draft(page), 'the unsaved board is kept as the draft (localStorage)').not.toBeNull();
   const before = await boardSnapshot(page);
+  const ghostIds = () => page.locator('.react-flow__node.ghost, .react-flow__edge.ghost').evaluateAll((es) => es.map((e) => e.getAttribute('data-id') ?? e.getAttribute('data-testid') ?? '').sort());
+  const ghostsBefore = await ghostIds();
+  expect(ghostsBefore.length).toBeGreaterThan(0);
 
   await page.reload();
   await waitLoaded(page);
   await clickEmptyBoard(page);
   expect(await boardSnapshot(page), 'the same unsaved board after the reload').toEqual(before);
-  await expect(page.locator('.react-flow__node.ghost, .react-flow__edge.ghost'), 'ghosts are not kept across a reload').toHaveCount(0);
+  await expect.poll(ghostIds, { message: 'the same ghosts after the reload' }).toEqual(ghostsBefore);
   await expect(saveButton(page)).toHaveText('Save · 7');
   // and BaseAPI has none of it yet
   expect((await rowsNamed('steps', P)).map((s) => s.name).sort()).toEqual([`${P}s1`, `${P}s2`, `${P}s3`]);
@@ -116,7 +119,7 @@ test('a draft replays over changes made elsewhere: my edits are kept, the other 
   // Save sends only my two rows: the changes made elsewhere stay as they were saved
   const answer = await save(page);
   expect(answer.applied).toBe(true);
-  await expect(outLine(page, 'Saved 2 changes')).toHaveCount(1);
+  await expect(outLine(page, 'Pushed 2 changes')).toHaveCount(1);
   expect((await getJson<Row>(`/steps/${id.s1}`)).name).toBe(`${P}s1-mine`);
   expect((await getJson<Row>(`/workflows/${id.w1}`)).description).toBe('my unsaved description');
   expect((await getJson<Row>(`/workflows/${id.w2}`)).description).toBe('saved elsewhere');

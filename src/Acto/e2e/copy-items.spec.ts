@@ -88,10 +88,10 @@ test('the bar: Copy for any mix of triangles, steps and caches; pasted together,
   await pickStep(page, id.s!);
   await pickCache(page, id.c!, true);
   await expect(selbar(page).getByRole('button')).toHaveText(['Copy', 'Delete']);
-  // with the triangle too: Copy only (a triangle's Delete is a BaseAPI delete of its own)
+  // with the triangle too: still Copy · Delete (every delete is a ghost) [user, 2026-11-23]
   await wfNode(page, id.w!).locator('.tri-nm').click({ modifiers: ['Control'] });
   await expect(selbar(page).locator('.selbar-pill')).toHaveText('3 SELECTED');
-  await expect(selbar(page).getByRole('button')).toHaveText(['Copy']);
+  await expect(selbar(page).getByRole('button')).toHaveText(['Copy', 'Delete']);
   await selbar(page).getByRole('button', { name: 'Copy' }).click();
   await expect(outLine(page, 'Copied 1 workflow, 1 step and 1 cache')).toHaveCount(1);
 

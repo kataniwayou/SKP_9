@@ -1,16 +1,16 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from '../fixtures';
 import {
-  COLLAPSER, EXPANDER, NORMALIZER, VALID_PAYLOAD, clickEmptyBoard, dryRunLines, entry, expectDryRunMatches, expectPublished, field, newStep,
-  newWorkflow, openAt, out, pickEdge, pickStep, rowNamed, save, toolbar, typePayload, wfNode, wire, wireEdge,
+  COLLAPSER, EXPANDER, NORMALIZER, VALID_PAYLOAD, clickEmptyBoard, dryRunLines, entry, expectPublished, newStep,
+  newWorkflow, openAt, outLine, pickEdge, rowNamed, save, toolbar, typePayload, validateStored, wfNode, wire, wireEdge, type Problem,
 } from '../helpers';
 import { API, getJson, type Row } from '../stack';
 
-// Regression 4 (brief: "dry run correctness"): after each successful Save Acto dry-runs every affected workflow. Each case is built through
-// the UI, and BaseAPI's own POST /workflows/{id}/validate is called by the test: Acto's Output lines for the workflow and its triangle's
-// badge must equal BaseAPI's problems exactly. Known problems are made on purpose: a schema-edge mismatch (sk-normalizer's output,
-// archive-document, into archive-expander's input, file-envelope), a payload its config schema refuses (sk-normalizer's handler is an enum),
-// a cycle; and a clean workflow with none (no badge).
+// Regression 4 (brief: "dry run correctness"), the user's rules of 2026-11-23: Save dry-runs every affected workflow first (BaseAPI's
+// POST /workflows/validate: the changes run and rolled back, the start's gates, liveness aside) and pushes only when all are clean.
+// Each case is built through the UI. Known problems are made on purpose: a schema-edge mismatch (sk-normalizer's output,
+// archive-document, into archive-expander's input, file-envelope), a payload its config schema refuses (sk-normalizer's handler is an
+// enum), a cycle; and a clean workflow with none. Acto's Output lines and badges must be exactly the dry run's answer.
 
 const P = 'e2e-v-';
 const N = { clean: `${P}clean`, edge: `${P}edge`, pay: `${P}payload`, cycle: `${P}cycle` };
@@ -53,91 +53,85 @@ async function buildCases(page: Page) {
 }
 
 const svgStatus = async (id: string) => (await fetch(`${API}/workflows/${id}.svg`)).status;
+type Checked = { valid: boolean; workflows: { workflowId: string; problems: Problem[] }[] };
 
-test('after a Save each affected workflow\'s Output lines and badge are BaseAPI\'s validate answer: a clean one, a schema-edge mismatch, a payload off its schema, a cycle', async ({ page }) => {
+/** Output's lines for the workflow and its badge are exactly the dry run's problems for it; answers them. */
+async function expectCheckShown(page: Page, checked: Checked, wf: string, wfName: string): Promise<Problem[]> {
+  const problems = checked.workflows.find((w) => w.workflowId === wf)?.problems ?? [];
+  const want = problems.map((p) => `${wfName}: ${p.title ?? p.gate} — ${p.detail ?? ''}`).sort();
+  test.info().annotations.push({ type: 'dry run', description: `${wfName}: ${want.length} problem(s)${want.length ? ` — ${problems.map((p) => p.gate).join(', ')}` : ''}` });
+  expect((await dryRunLines(page, wfName)).sort(), `${wfName}: Output's lines are the dry run's problems`).toEqual(want);
+  const badge = wfNode(page, wf).locator('.tri-problems');
+  if (want.length === 0) await expect(badge, `${wfName}: no problem badge`).toHaveCount(0);
+  else await expect(badge, `${wfName}: the badge counts the dry run's problems`).toHaveText(String(want.length));
+  return problems;
+}
+
+test('a Save holding a schema-edge mismatch, a payload off its schema and a cycle pushes nothing: Output and the badges are the dry run\'s answer, workflow by workflow', async ({ page }) => {
   test.setTimeout(test.info().timeout * 3);
   await openAt(page, { x: -40, y: -60 }, 0.75);
-  const built = await buildCases(page);
+  const id = await buildCases(page);
   const answer = await save(page);
-  expect(answer.applied).toBe(true);
-  const id = (k: string) => answer.made?.[built[k]!] ?? built[k]!;
+  expect(answer.applied).toBe(false);
+  const checked = answer.checked as Checked;
+  expect(checked.valid).toBe(false);
 
-  const clean = await expectDryRunMatches(page, id('clean'), N.clean);
-  expect(clean.filter((p) => p.gate !== 'processorLiveness'), 'the clean workflow: no graph or payload problem').toEqual([]);
-  test.info().annotations.push({ type: 'clean', description: clean.length === 0 ? '0 problems, no badge' : `liveness only: ${clean.length}` });
-  if (clean.length === 0) await expect(wfNode(page, id('clean')).locator('.tri-problems')).toHaveCount(0);
-
-  const edge = await expectDryRunMatches(page, id('edge'), N.edge);
+  expect((await expectCheckShown(page, checked, id.clean!, N.clean)), 'the clean workflow: no problem').toEqual([]);
+  const edge = await expectCheckShown(page, checked, id.edge!, N.edge);
   const mismatch = edge.filter((p) => p.gate === 'schemaEdge');
   expect(mismatch, 'one schema-edge problem, on the wire edge-1 -> edge-2').toHaveLength(1);
-  expect(mismatch[0]!.detail).toContain(id('e1'));
-  expect(mismatch[0]!.detail).toContain(id('e2'));
   expect(mismatch[0]!.title).toBe('Schema-edge mismatch between steps');
-
-  const pay = await expectDryRunMatches(page, id('pay'), N.pay);
-  const off = pay.filter((p) => p.gate === 'payloadConfigSchema');
-  expect(off, 'one payload problem').toHaveLength(1);
-  const w = await rowNamed('workflows', N.pay);
-  expect(off[0]!.detail).toContain((w.assignmentIds as string[])[0]!);
-  expect(off[0]!.title).toBe('Assignment payload does not conform to its config schema');
-
-  const cycle = await expectDryRunMatches(page, id('cycle'), N.cycle);
+  const pay = await expectCheckShown(page, checked, id.pay!, N.pay);
+  expect(pay.filter((p) => p.gate === 'payloadConfigSchema'), 'one payload problem').toHaveLength(1);
+  expect(pay.find((p) => p.gate === 'payloadConfigSchema')!.title).toBe('Assignment payload does not conform to its config schema');
+  const cycle = await expectCheckShown(page, checked, id.cycle!, N.cycle);
   expect(cycle.filter((p) => p.gate === 'cycle')).toHaveLength(1);
+  // liveness is never part of it
+  expect([...edge, ...pay, ...cycle].some((p) => p.gate === 'processorLiveness')).toBe(false);
 
-  // one Kibana diagram per affected workflow, published and served
-  for (const k of ['clean', 'edge', 'pay', 'cycle'] as const) {
-    await expectPublished(page, N[k]);
-    expect(await svgStatus(id(k)), `${N[k]}.svg`).toBe(200);
-  }
-  // the problems are warnings in Output, one line each
-  const warn = await out(page).locator('.k-warn').allInnerTexts();
-  expect(warn.filter((t) => t.startsWith(P)).length).toBe(edge.length + pay.length + cycle.length + clean.length);
+  const n = edge.length + pay.length + cycle.length;
+  await expect(outLine(page, `Not pushed: ${n} problems in 3 workflows`)).toHaveCount(1);
+  // nothing reached BaseAPI, not even the clean workflow
+  const names = new Set((await getJson<Row[]>('/workflows')).map((w) => w.name));
+  for (const k of ['clean', 'edge', 'pay', 'cycle'] as const) expect(names.has(N[k]), `${N[k]} not pushed`).toBe(false);
 });
 
-test('a Save re-validates only the workflows it touched: the fixed one is dry-run clean and republished, the untouched ones get no Output line and keep their badges', async ({ page }) => {
+test('fixed one problem at a time, each Save still pushes nothing until the last one is fixed; then the whole board pushes at once, every badge goes and every diagram is published', async ({ page }) => {
   test.setTimeout(test.info().timeout * 3);
   await openAt(page, { x: -40, y: -60 }, 0.75);
-  const built = await buildCases(page);
-  const first = await save(page);
-  expect(first.applied).toBe(true);
-  const id = (k: string) => first.made?.[built[k]!] ?? built[k]!;
-  const payBadge = await wfNode(page, id('pay')).locator('.tri-problems').innerText();
+  const id = await buildCases(page);
+  expect((await save(page)).applied).toBe(false);
 
-  // fix the schema edge: the mismatched wire goes; nothing else changes
-  await pickEdge(page, wireEdge(page, id('e1'), id('e2')));
+  // the schema edge: its wire goes; the payload and the cycle still hold the push back
+  await pickEdge(page, wireEdge(page, id.e1!, id.e2!));
   await toolbar(page, 'wire').getByRole('button', { name: 'Delete' }).click();
-  await expect(wireEdge(page, id('e1'), id('e2'))).toHaveCount(0);
+  await expect(wireEdge(page, id.e1!, id.e2!)).toHaveCount(0);
   const second = await save(page);
-  expect(second.applied).toBe(true);
-  const fixed = await expectDryRunMatches(page, id('edge'), N.edge);
-  expect(fixed.filter((p) => p.gate === 'schemaEdge')).toEqual([]);
-  await expectPublished(page, N.edge);
-  // the other three were not affected: no dry-run line, no Kibana line; the payload case keeps its badge from its last dry run
-  const lines = await out(page).locator('[role="listitem"] span').allInnerTexts();
-  for (const k of ['clean', 'pay', 'cycle'] as const) {
-    expect(lines.filter((t) => t.startsWith(`${N[k]}: `)), `${N[k]} was not re-validated`).toEqual([]);
-    expect(await dryRunLines(page, N[k])).toEqual([]);
-  }
-  await expect(wfNode(page, id('pay')).locator('.tri-problems')).toHaveText(payBadge);
+  expect(second.applied).toBe(false);
+  expect(await expectCheckShown(page, second.checked as Checked, id.edge!, N.edge)).toEqual([]);
 
-  // fix the payload through the Inspector: only that workflow is dry-run now, and its badge goes when BaseAPI finds nothing
-  await typePayload(page, id('pay'), N.pay, id('p1'), '{"handler": "Sample"}');
+  // the payload, through the Inspector
+  await typePayload(page, id.pay!, N.pay, id.p1!, '{"handler": "Sample"}');
   await clickEmptyBoard(page);
   const third = await save(page);
-  expect(third.applied).toBe(true);
-  const nowPay = await expectDryRunMatches(page, id('pay'), N.pay);
-  expect(nowPay.filter((p) => p.gate === 'payloadConfigSchema')).toEqual([]);
-  await expectPublished(page, N.pay);
-  const after = await out(page).locator('[role="listitem"] span').allInnerTexts();
-  for (const k of ['clean', 'edge', 'cycle'] as const) expect(after.filter((t) => t.startsWith(`${N[k]}: `)), `${N[k]} was not re-validated`).toEqual([]);
-  // a step shared by nobody else, renamed: its one workflow is affected, through its stream
-  await clickEmptyBoard(page);
-  await pickStep(page, id('y2'));
-  await field(page, 'Name').fill(`${P}cycle-2-renamed`);
-  await save(page);
-  await expectDryRunMatches(page, id('cycle'), N.cycle);
-  await expectPublished(page, N.cycle);
-  const last = await out(page).locator('[role="listitem"] span').allInnerTexts();
-  for (const k of ['clean', 'edge', 'pay'] as const) expect(last.filter((t) => t.startsWith(`${N[k]}: `))).toEqual([]);
-  expect((await getJson<Row[]>('/steps')).some((s) => s.name === `${P}cycle-2-renamed`)).toBe(true);
+  expect(third.applied).toBe(false);
+  expect(await expectCheckShown(page, third.checked as Checked, id.pay!, N.pay)).toEqual([]);
+  await expect(outLine(page, /^Not pushed: \d+ problems? in 1 workflow$/)).toHaveCount(1);
+
+  // the cycle: the wire back goes, and the board pushes as a whole
+  await pickEdge(page, wireEdge(page, id.y2!, id.y1!));
+  await toolbar(page, 'wire').getByRole('button', { name: 'Delete' }).click();
+  const last = await save(page);
+  expect(last.applied).toBe(true);
+  const real = (k: string) => last.made?.[id[k]!] ?? id[k]!;
+  for (const k of ['clean', 'edge', 'pay', 'cycle'] as const) {
+    await expect(wfNode(page, real(k)).locator('.tri-problems')).toHaveCount(0);
+    await expectPublished(page, N[k]);
+    expect(await svgStatus(real(k)), `${N[k]}.svg`).toBe(200);
+    expect((await rowNamed('workflows', N[k])).name).toBe(N[k]);
+  }
+  // and BaseAPI agrees the pushed board is clean (liveness aside)
+  for (const k of ['clean', 'edge', 'pay', 'cycle'] as const) {
+    expect((await validateStored(real(k))).problems.filter((p) => p.gate !== 'processorLiveness'), N[k]).toEqual([]);
+  }
 });

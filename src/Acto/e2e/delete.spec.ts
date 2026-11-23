@@ -1,13 +1,14 @@
 import { test, expect } from './fixtures';
 import {
-  caNode, cacheEdge, dropTool, entryEdge, field, inspector, openAt, outLine, pickCache, pickEdge, pickStep, selectWorkflowAlone, regionPoint, save,
+  caNode, cacheEdge, dropTool, entryEdge, field, ghost, inspector, openAt, pickCache, pickEdge, pickStep, selectWorkflowAlone, regionPoint, save,
   saveButton, stNode, toolbar, toolboxStep, wfNode, wireEdge, workflowTool, PROC_A,
 } from './helpers';
 import { seed } from './seed';
 import { getJson, type Row } from './stack';
 
-// Spec §8: deleting a triangle is immediate (BaseAPI's CRUD delete through /model/apply), asks first with what goes, and leaves its steps and
-// caches. Only never-started e2e- workflows are used: Start and Stop are never pressed (the guard aborts them).
+// Every delete is a ghost until Save [user, 2026-11-23]: a triangle's Delete is a board edit (no request), Save pushes it with its own
+// payloads, its steps and caches stay. A running workflow is never deleted. Only never-started e2e- workflows are used: Start and
+// Stop are never pressed (the guard aborts them).
 
 const SEED = {
   steps: [
@@ -27,9 +28,13 @@ const SEED = {
 
 const ids = async (table: string) => new Set((await getJson<Row[]>(`/${table}`)).map((r) => r.id));
 
-test('deleting a triangle asks with what goes; Cancel sends nothing; Delete removes the workflow and its own payloads, and its steps and caches stay', async ({ page }) => {
+/** The triangle shows it is stopped: the live hub has answered, so its Delete may go. */
+const stopped = (page: import('@playwright/test').Page, wf: string) => expect(wfNode(page, wf).locator('.tri-st[data-status="stopped"]')).toBeVisible();
+
+test('deleting a triangle makes it a ghost and sends nothing; Save pushes the delete with its own payloads; its steps and caches stay, and so does the ghost', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
+  await stopped(page, id.a!);
   await selectWorkflowAlone(page, id.a!);
   const tb = toolbar(page, 'workflow');
   await expect(tb.getByRole('button')).toHaveText(['▶ Start', 'Copy', 'Delete']);
@@ -37,32 +42,18 @@ test('deleting a triangle asks with what goes; Cancel sends nothing; Delete remo
   const writes: string[] = [];
   page.on('request', (r) => { if (r.method() !== 'GET' && r.url().includes('/api/')) writes.push(`${r.method()} ${new URL(r.url()).pathname}`); });
   await tb.getByRole('button', { name: 'Delete', exact: true }).click();
-  // the dry run's list: the workflow and the payload only it links (the shared one stays with B)
-  await expect(tb.locator('.confirm-text')).toHaveText('Delete workflow e2e-del-a, assignment e2e-pay-own? Its steps and caches stay.');
-  await expect(tb.getByRole('button')).toHaveText(['Delete', 'Cancel']);
-  expect(writes.filter((w) => !w.endsWith('/validate'))).toEqual([]); // the dry run is /model/validate: it writes nothing
-
-  await tb.getByRole('button', { name: 'Cancel' }).click();
-  await expect(outLine(page, 'Delete cancelled — nothing was sent')).toHaveCount(1);
-  await expect(tb.getByRole('button')).toHaveText(['▶ Start', 'Copy', 'Delete']);
-  await expect(wfNode(page, id.a!)).toBeVisible();
-  expect((await ids('workflows')).has(id.a!)).toBe(true);
-  expect(writes.filter((w) => w.endsWith('/apply'))).toEqual([]);
-
-  // a different selection also drops a pending confirm
-  await tb.getByRole('button', { name: 'Delete', exact: true }).click();
-  await expect(tb.locator('.confirm-text')).toBeVisible();
-  await pickStep(page, id.s1!);
-  await selectWorkflowAlone(page, id.a!);
-  await expect(tb.locator('.confirm-text')).toHaveCount(0);
-
-  await tb.getByRole('button', { name: 'Delete', exact: true }).click();
-  await tb.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(wfNode(page, id.a!)).toHaveCount(0);
-  await expect(outLine(page, 'Deleted workflow e2e-del-a, assignment e2e-pay-own. Its steps and caches stay')).toHaveCount(1);
-  await expect(inspector(page)).toContainText('Select a workflow, step or wire');
-  expect(writes.filter((w) => w.endsWith('/apply'))).toEqual(['POST /api/v1/model/apply']);
+  await expect(ghost(page, 'e2e-del-a')).toHaveCount(1);
+  expect(writes).toEqual([]);
+  expect((await ids('workflows')).has(id.a!)).toBe(true);
+  // its steps, wire and cache are still on the board; its arrow and dashed line are not
+  await expect(stNode(page, id.s1!)).toBeVisible();
+  await expect(caNode(page, id.c1!)).toBeVisible();
+  await expect(entryEdge(page, id.a!, id.s1!)).toHaveCount(0);
+  await expect(cacheEdge(page, id.a!, id.c1!)).toHaveCount(0);
 
+  await save(page);
+  expect(writes).toContain('POST /api/v1/workflows/validate');
   // BaseAPI: the workflow and its own payload are gone, the shared payload, the steps and the cache stay, B still links the shared one
   expect((await ids('workflows')).has(id.a!)).toBe(false);
   expect((await ids('assignments')).has(id.own!)).toBe(false);
@@ -71,18 +62,14 @@ test('deleting a triangle asks with what goes; Cancel sends nothing; Delete remo
   expect(steps.has(id.s1!) && steps.has(id.s2!)).toBe(true);
   expect((await ids('caches')).has(id.c1!)).toBe(true);
   expect((await getJson<Row>(`/workflows/${id.b}`)).assignmentIds).toEqual([id.shared]);
-  // and on the board: its steps, wire and cache are still there, its arrow and dashed line are not
-  await expect(stNode(page, id.s1!)).toBeVisible();
-  await expect(stNode(page, id.s2!)).toBeVisible();
-  await expect(caNode(page, id.c1!)).toBeVisible();
   await expect(wireEdge(page, id.s1!, id.s2!)).toHaveCount(1);
-  await expect(entryEdge(page, id.a!, id.s1!)).toHaveCount(0);
-  await expect(cacheEdge(page, id.a!, id.c1!)).toHaveCount(0);
   await expect(wfNode(page, id.b!)).toBeVisible();
   await expect(saveButton(page)).toBeDisabled();
+  // the ghost belongs to the draft: it stays after the push
+  await expect(ghost(page, 'e2e-del-a')).toHaveCount(1);
 });
 
-test('a never-saved triangle is discarded with no request, and the steps dropped beside it stay on the board', async ({ page }) => {
+test('a never-saved triangle is a ghost with no request, and the step dropped beside it stays on the board', async ({ page }) => {
   await openAt(page);
   const writes: string[] = [];
   page.on('request', (r) => { if (r.method() !== 'GET' && r.url().includes('/api/')) writes.push(`${r.method()} ${new URL(r.url()).pathname}`); });
@@ -90,13 +77,10 @@ test('a never-saved triangle is discarded with no request, and the steps dropped
   const step = await dropTool(page, toolboxStep(page, PROC_A), 'step', await regionPoint(page, { x: 450, y: 130 }));
   const name = await wfNode(page, wf).locator('.tri-nm').innerText();
   await selectWorkflowAlone(page, wf);
-  const tb = toolbar(page, 'workflow');
-  await tb.getByRole('button', { name: 'Delete', exact: true }).click();
-  await expect(tb.locator('.confirm-text')).toHaveText(`Delete workflow ${name}? Its steps and caches stay.`);
-  await tb.getByRole('button', { name: 'Delete', exact: true }).click();
+  await toolbar(page, 'workflow').getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(wfNode(page, wf)).toHaveCount(0);
+  await expect(ghost(page, name)).toHaveCount(1);
   await expect(stNode(page, step)).toBeVisible();
-  await expect(outLine(page, `Deleted workflow ${name}. Its steps and caches stay`)).toHaveCount(1);
   expect(writes).toEqual([]);
 });
 
@@ -108,9 +92,9 @@ test('deleting a triangle drops its own unsaved edits and keeps the unsaved edit
   await pickStep(page, id.s1!);
   await field(page, 'Name').fill('e2e-del-first-edited');
   await expect(wfNode(page, id.a!).locator('.unsaved-mark')).toBeVisible();
+  await stopped(page, id.a!);
   await selectWorkflowAlone(page, id.a!);
   const tb = toolbar(page, 'workflow');
-  await tb.getByRole('button', { name: 'Delete', exact: true }).click();
   await tb.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(wfNode(page, id.a!)).toHaveCount(0);
   // the step's rename stays unsaved on the board; B and the others are untouched

@@ -23,7 +23,7 @@ import { addEntry, addWire, linkCache, moveItems } from './design/edits';
 import { newId } from './design/ids';
 import { nudgeKey, pasteKey, undoRedoKey } from './design/keys';
 import { unsavedMarks } from './design/changes';
-import { createGhostStore, restoreGhosts, type GhostItem, type GhostStore } from './design/ghosts';
+import { createGhostStore, keepGhosts, restoreGhosts, type GhostItem, type GhostStore } from './design/ghosts';
 import { saveBoard, takeStored } from './design/saveBoard';
 import { InspectorPanel, pickName } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
@@ -86,6 +86,7 @@ export function App(props: AppProps) {
   const [store] = useState<BoardStore>(() => createBoardStore(output, storage));
   // the draft and its ghosts live in localStorage: they outlive the tab and belong to the draft [user, 2026-11-23]
   const [ghostStore] = useState<GhostStore>(() => createGhostStore(store, storage));
+  useEffect(() => keepGhosts(ghostStore, storage), [ghostStore, storage]);
   const [saved] = useState<SavedView | null>(() => readView(storage));
   // the chat: this tab's sessionStorage, mirrored to localStorage (a new tab picks the conversation up)
   const [chat] = useState<ChatStore>(() => createChatStore(session, storage));

@@ -36,7 +36,7 @@ test('Save writes everything the board holds, and a reload shows it back where i
   // a payload on the first step, typed with the triangle selected
   await selectWorkflowAlone(page, wf);
   await pickStep(page, s1);
-  await (await payloadOf(page, 'e2e-save-wf')).fill('{"saved": "yes"}');
+  await (await payloadOf(page, 'e2e-save-wf')).fill('{"maxDepth": 3}');
   await expect(saveButton(page)).toHaveClass(/primary/);
   await expect(saveButton(page)).toContainText('Save ·');
   const before = {
@@ -45,7 +45,7 @@ test('Save writes everything the board holds, and a reload shows it back where i
 
   const answer = await save(page);
   expect(answer.applied).toBe(true);
-  await expect(outLine(page, /^Saved \d+ changes?$/)).toHaveCount(1);
+  await expect(outLine(page, /^Pushed \d+ changes?$/)).toHaveCount(1);
   await expect(outLine(page, 'e2e-save-wf: Kibana diagram published')).toHaveCount(1);
   await expect(saveButton(page)).toHaveText('Save');
   await expect(saveButton(page)).toBeDisabled();
@@ -63,7 +63,7 @@ test('Save writes everything the board holds, and a reload shows it back where i
   expect(a.nextStepIds).toEqual([b.id]);
   expect(c.items).toBe('{"k": "v"}');
   const asg = (await getJson<Row[]>('/assignments')).filter((x) => (w.assignmentIds as string[]).includes(x.id));
-  expect(asg.map((x) => [x.stepId, x.payload])).toEqual([[a.id, '{"saved": "yes"}']]);
+  expect(asg.map((x) => [x.stepId, x.payload])).toEqual([[a.id, '{"maxDepth": 3}']]);
   for (const r of [w, a, b, c]) expect(typeof r.boardX, `${r.name} was saved with a location`).toBe('number');
   expect((await svg(w.id as string)).status).toBe(200);
 
@@ -88,7 +88,7 @@ test('Save writes everything the board holds, and a reload shows it back where i
   near((await caNode(page, c.id as string).boundingBox())!, before.cache, 'cache');
   await selectWorkflowAlone(page, w.id as string);
   await pickStep(page, a.id as string);
-  await expect(await payloadOf(page, 'e2e-save-wf')).toHaveValue(pretty('{"saved": "yes"}'));
+  await expect(await payloadOf(page, 'e2e-save-wf')).toHaveValue(pretty('{"maxDepth": 3}'));
 });
 
 test('a Save BaseAPI refuses (a new triangle with no entry arrow) saves nothing, names the item, and keeps the board as it was', async ({ page }) => {
@@ -141,10 +141,10 @@ test('a shared payload is copied on write: editing A\'s payload where the row is
   await openAt(page);
   await selectWorkflowAlone(page, id.a!);
   await pickStep(page, id.s!);
-  await (await payloadOf(page, 'e2e-share-a')).fill('{"owner": "a", "n": 1}');
+  await (await payloadOf(page, 'e2e-share-a')).fill('{"maxDepth": 1}');
   await selectWorkflowAlone(page, id.b!);
   await pickStep(page, id.s!);
-  await (await payloadOf(page, 'e2e-share-b')).fill('{"owner": "b"}');
+  await (await payloadOf(page, 'e2e-share-b')).fill('{"maxDepth": 7}');
   await save(page);
   await expect(saveButton(page)).toBeDisabled();
   const wa = (await getJson<Row>(`/workflows/${id.a}`));
@@ -164,14 +164,14 @@ test('a shared payload is copied on write: editing A\'s payload where the row is
   await waitLoaded(page);
   await selectWorkflowAlone(page, id.b!);
   await pickStep(page, id.s!);
-  await expect(await payloadOf(page, 'e2e-share-b')).toHaveValue(pretty('{"owner": "a", "n": 1}'));
+  await expect(await payloadOf(page, 'e2e-share-b')).toHaveValue(pretty('{"maxDepth": 1}'));
   const sharedBefore = await getJson<Row>(`/assignments/${sharedId}`);
 
   // edit A's payload where the row is shared, then Save and reload
   await selectWorkflowAlone(page, id.a!);
   await pickStep(page, id.s!);
-  await expect(await payloadOf(page, 'e2e-share-a')).toHaveValue(pretty('{"owner": "a", "n": 1}'));
-  await field(page, 'Payload').fill('{"owner": "a", "n": 2, "edited": true}');
+  await expect(await payloadOf(page, 'e2e-share-a')).toHaveValue(pretty('{"maxDepth": 1}'));
+  await field(page, 'Payload').fill('{"maxDepth": 2}');
   await expect(wfNode(page, id.a!).locator('.unsaved-mark')).toBeVisible();
   await expect(wfNode(page, id.b!).locator('.unsaved-mark')).toHaveCount(0);
   await save(page);
@@ -181,10 +181,10 @@ test('a shared payload is copied on write: editing A\'s payload where the row is
 
   await selectWorkflowAlone(page, id.b!);
   await pickStep(page, id.s!);
-  await expect(await payloadOf(page, 'e2e-share-b'), 'B keeps the shared row as it was').toHaveValue(pretty('{"owner": "a", "n": 1}'));
+  await expect(await payloadOf(page, 'e2e-share-b'), 'B keeps the shared row as it was').toHaveValue(pretty('{"maxDepth": 1}'));
   await selectWorkflowAlone(page, id.a!);
   await pickStep(page, id.s!);
-  await expect(await payloadOf(page, 'e2e-share-a')).toHaveValue(pretty('{"owner": "a", "n": 2, "edited": true}'));
+  await expect(await payloadOf(page, 'e2e-share-a')).toHaveValue(pretty('{"maxDepth": 2}'));
   // in BaseAPI: B still links the original row, untouched; A links a row of its own
   const wa2 = await getJson<Row>(`/workflows/${id.a}`);
   const wb2 = await getJson<Row>(`/workflows/${id.b}`);
@@ -196,40 +196,41 @@ test('a shared payload is copied on write: editing A\'s payload where the row is
   expect(original.updatedAt).toBe(sharedBefore.updatedAt);
 });
 
-test('the dry run after a Save marks a triangle whose saved graph fails, and its next clean dry run clears the mark', async ({ page }) => {
+test('a Save whose dry run finds a cycle pushes nothing and marks the triangle; broken, the next Save pushes it and the mark goes [user, 2026-11-23]', async ({ page }) => {
   await openAt(page);
   const wf = await dropTool(page, workflowTool(page), 'workflow', await regionPoint(page, { x: 90, y: 130 }));
   await renameTo(page, 'e2e-dry-wf');
-  const s1 = await dropTool(page, toolboxStep(page, PROC_A), 'step', await regionPoint(page, { x: 400, y: 130 }));
+  // two normalizers: their schemas meet, so the cycle is the only problem
+  const s1 = await dropTool(page, toolboxStep(page, PROC_B), 'step', await regionPoint(page, { x: 400, y: 130 }));
   await renameTo(page, 'e2e-dry-first');
   const s2 = await dropTool(page, toolboxStep(page, PROC_B), 'step', await regionPoint(page, { x: 700, y: 130 }));
   await renameTo(page, 'e2e-dry-second');
-  // a cycle: it saves (BaseAPI's CRUD rules allow it), the start gates do not
   await drawWire(page, stNode(page, s1), stNode(page, s2));
   await drawWire(page, stNode(page, s2), stNode(page, s1));
   await drawEntry(page, wfNode(page, wf), stNode(page, s1));
   await expect(wireEdge(page, s2, s1)).toHaveCount(1);
 
   const answer = await save(page);
-  expect(answer.applied).toBe(true);
-  await expect(outLine(page, /^e2e-dry-wf: .*/).filter({ hasNotText: 'Kibana' }).first()).toBeVisible();
-  const problems = wfNode(page, answer.made![wf]!).locator('.tri-problems');
-  await expect(problems).toBeVisible();
-  expect(Number(await problems.innerText())).toBeGreaterThan(0);
+  expect(answer.applied).toBe(false);
   await expect(out(page).locator('.k-warn').first()).toContainText('e2e-dry-wf:');
+  await expect(outLine(page, /^Not pushed: 1 problem in 1 workflow$/)).toHaveCount(1);
+  const problems = wfNode(page, wf).locator('.tri-problems');
+  await expect(problems).toHaveText('1');
   test.info().annotations.push({ type: 'dry run', description: await out(page).locator('.k-warn').first().innerText() });
-  // saved all the same
-  expect(await named('workflows', 'e2e-dry-wf')).toBeTruthy();
+  // nothing reached BaseAPI, and the board is still the unsaved draft
+  expect(await named('workflows', 'e2e-dry-wf')).toBeUndefined();
+  await expect(wfNode(page, wf).locator('.unsaved-mark')).toBeVisible();
 
-  // break the cycle: remove the wire, Save: a clean dry run clears the badge
-  // the rows have BaseAPI's ids now
-  const [a, b] = [answer.made![s1]!, answer.made![s2]!];
-  await pickEdge(page, wireEdge(page, b, a));
+  // break the cycle: the wire back goes (an edit of the workflow clears its mark), and the Save pushes
+  await pickEdge(page, wireEdge(page, s2, s1));
   await page.getByRole('toolbar', { name: 'wire actions' }).getByRole('button', { name: 'Delete' }).click();
-  await expect(wireEdge(page, b, a)).toHaveCount(0);
-  await save(page);
+  await expect(wireEdge(page, s2, s1)).toHaveCount(0);
   await expect(problems).toHaveCount(0);
+  const again = await save(page);
+  expect(again.applied).toBe(true);
+  await expect(wfNode(page, again.made![wf]!).locator('.tri-problems')).toHaveCount(0);
   await expect(outLine(page, 'e2e-dry-wf: Kibana diagram published')).toHaveCount(1);
+  expect(await named('workflows', 'e2e-dry-wf')).toBeTruthy();
 });
 
 test('a Save that changes a shared step republishes the Kibana diagram of both workflows that share it', async ({ page }) => {

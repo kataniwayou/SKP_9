@@ -53,8 +53,8 @@ test('a right-drag box around a triangle, three steps and a cache picks all five
   await expect(stNode(page, id.s1!).locator('.pick-no')).toHaveText('3');
   await expect(stNode(page, id.s3!).locator('.pick-no')).toHaveText('4');
   await expect(stNode(page, id.s2!).locator('.pick-no')).toHaveText('5');
-  // a triangle with steps and a cache share only Copy
-  await expect(selbar(page).getByRole('button')).toHaveText(['Copy']);
+  // a triangle with steps and a cache share Copy and Delete (every delete is a ghost) [user, 2026-11-23]
+  await expect(selbar(page).getByRole('button')).toHaveText(['Copy', 'Delete']);
   await expect(inspector(page)).toContainText('5 things are selected');
 });
 

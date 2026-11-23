@@ -64,7 +64,8 @@ export const test = base.extend<{ guard: string[] }, { stack: Stack }>({
       }
       if (method === 'GET') return route.continue();
       let why: string | null = null;
-      if (path === '/model/apply' || path === '/model/validate') {
+      // Save's dry run (POST /workflows/validate, 2026-11-23) carries the same changes as the push: judged the same way
+      if (path === '/model/apply' || path === '/model/validate' || (method === 'POST' && path === '/workflows/validate')) {
         const body = (req.postDataJSON() ?? {}) as { changes?: { op?: string; table?: string; id?: string; row?: Record<string, unknown> }[] };
         for (const c of body.changes ?? []) { why = refusal(c, stack.real); if (why) break; }
       } else if (!(method === 'POST' && /^\/workflows\/[^/]+\/validate$/.test(path)) && !(method === 'PUT' && /^\/workflows\/[^/]+\/diagram$/.test(path))) {

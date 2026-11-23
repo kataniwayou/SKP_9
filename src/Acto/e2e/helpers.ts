@@ -256,16 +256,24 @@ export async function renameTo(page: Page, name: string) {
   await field(page, 'Name').fill(name);
 }
 
-/** Presses Save and waits until the whole Save (apply, read back, dry runs, diagrams) has finished. */
+/**
+ * Presses Save and waits until the whole Save has finished: the dry run (POST /workflows/validate) and, when it passed, the push
+ * (/model/apply), the read back and the diagrams [user, 2026-11-23]. A dry run that refuses pushes nothing: the answer then is
+ * { applied: false, checked: <the dry run answer> }.
+ */
 export async function save(page: Page) {
   await expect(saveButton(page)).toBeEnabled();
   await clearOutput(page);
-  const sent = page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/v1/model/apply');
+  const isPost = (r: import('@playwright/test').Response, path: string) => r.request().method() === 'POST' && new URL(r.url()).pathname === path;
+  const checked = page.waitForResponse((r) => isPost(r, '/api/v1/workflows/validate'));
+  const pushed = page.waitForResponse((r) => isPost(r, '/api/v1/model/apply'));
+  pushed.catch(() => undefined); // never awaited when the dry run refuses
   await saveButton(page).click();
-  const res = await sent;
-  // the button says Saving… from the press until the read back, the dry runs and the diagrams are done
+  const check = (await (await checked).json()) as { valid?: boolean };
+  let answer: { applied?: boolean; made?: Record<string, string>; checked?: unknown } = { applied: false, checked: check };
+  if (check.valid === true) answer = (await (await pushed).json()) as typeof answer;
+  // the button says Saving… from the press until the dry run refused, or the push, read back and diagrams are done
   await expect(saveButton(page)).not.toHaveText('Saving…', { timeout: 60_000 });
-  const answer = (await res.json()) as { applied?: boolean; made?: Record<string, string> };
   // what Output said, kept with the test result
   test.info().annotations.push({ type: 'save', description: (await out(page).locator('[role="listitem"] span').allInnerTexts()).join(' | ').slice(0, 1500) });
   return answer;

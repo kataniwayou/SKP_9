@@ -86,6 +86,16 @@ function remapItem(g: GhostItem, m: (id: Id) => Id): GhostItem {
 
 const GHOSTS_KEY = 'acto.ghosts';
 
+/**
+ * Writes the store's ghosts to `storage` now and on every change; answers the unsubscribe. Only the store the page uses
+ * is kept: a twin (React StrictMode creates one) that never saw a Remove must not overwrite it.
+ */
+export function keepGhosts(ghosts: GhostStore, storage: Storage | null | undefined): () => void {
+  const write = () => { try { storage?.setItem(GHOSTS_KEY, JSON.stringify(ghosts.ghosts())); } catch { /* blocked or full storage: the ghosts stay in this page */ } };
+  write();
+  return ghosts.subscribe(write);
+}
+
 /** The ghosts kept in `storage` (a JSON array of GhostItem); none when unreadable. */
 function readGhosts(storage: Storage | null | undefined): GhostItem[] {
   try {
@@ -98,8 +108,8 @@ function readGhosts(storage: Storage | null | undefined): GhostItem[] {
 
 /**
  * Records every item of the board's present on each change; ghosts = recorded − present − removed. The ghosts belong to
- * the draft [user, 2026-11-23]: with `storage` they are written there on every change and come back in a new page; one
- * whose item is on the board again is no ghost.
+ * the draft [user, 2026-11-23]: `storage` holds the ones kept from an earlier page (written by keepGhosts); one whose
+ * item is on the board again is no ghost.
  */
 export function createGhostStore(board: BoardStore, storage?: Storage | null): GhostStore {
   let recorded = new Map<string, GhostItem>(readGhosts(storage).map((g) => [g.key, g]));
@@ -115,7 +125,6 @@ export function createGhostStore(board: BoardStore, storage?: Storage | null): G
     if (next.length === list.length && next.every((g, i) => g === list[i])) return;
     list = next;
     byKey = new Map(next.map((g) => [g.key, g]));
-    try { storage?.setItem(GHOSTS_KEY, JSON.stringify(next)); } catch { /* blocked or full storage: the ghosts stay in this page */ }
     subs.forEach((f) => f());
   };
 

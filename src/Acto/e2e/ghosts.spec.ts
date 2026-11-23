@@ -51,7 +51,7 @@ test('a ghost outlives a Save; Restore after it makes the step anew, created by 
   await deleteStep(page, id.s!);
   const answer = await save(page);
   expect(answer.applied).toBe(true);
-  await expect(outLine(page, /^Saved \d+ changes?$/)).toHaveCount(1);
+  await expect(outLine(page, /^Pushed \d+ changes?$/)).toHaveCount(1);
   expect(await steps()).toEqual([]);
   // the board re-read after the Save keeps the ghost
   const g = ghost(page, 'e2e-gh-saved');
@@ -65,13 +65,13 @@ test('a ghost outlives a Save; Restore after it makes the step anew, created by 
   await expect(back.locator('.unsaved-mark')).toBeVisible();
   await expect(saveButton(page)).toContainText('Save ·');
   await save(page);
-  await expect(outLine(page, /^Saved \d+ changes?$/)).toHaveCount(1);
+  await expect(outLine(page, /^Pushed \d+ changes?$/)).toHaveCount(1);
   const made = await steps();
   expect(made.map((s) => s.name)).toEqual(['e2e-gh-saved']);
   await expect(page.locator('.unsaved-mark')).toHaveCount(0);
 });
 
-test('Remove drops a ghost; Ctrl+click of two ghosts shows the bar Restore · Remove; a reload clears every ghost', async ({ page }) => {
+test('Remove drops a ghost; Ctrl+click of two ghosts shows the bar Restore · Remove; the ghosts outlive a reload (they belong to the draft) [user, 2026-11-23]', async ({ page }) => {
   const id = await seed({
     steps: [
       { key: 'a', name: 'e2e-gh-a', at: { x: 300, y: 60 } },
@@ -104,13 +104,14 @@ test('Remove drops a ghost; Ctrl+click of two ghosts shows the bar Restore · Re
   await expect(stNode(page, id.c!)).toBeVisible();
   await expect(anyGhost(page)).toHaveCount(0);
 
-  // a ghost again, then a browser reload: no ghosts. The unsaved board itself survives the reload (the session draft), so the deletes
-  // of a and b are still pending and c is still there; BaseAPI has all three
+  // a ghost again, then a browser reload: the ghost of b comes back with the draft, the removed one of a does not; the deletes of a
+  // and b are still pending and c is still there; BaseAPI has all three
   await deleteStep(page, id.b!);
   await expect(ghost(page, 'e2e-gh-b')).toHaveCount(1);
   await page.reload();
   await waitLoaded(page);
-  await expect(anyGhost(page)).toHaveCount(0);
+  await expect(ghost(page, 'e2e-gh-b')).toHaveCount(1);
+  await expect(anyGhost(page)).toHaveCount(1);
   await expect(stNode(page, id.c!)).toBeVisible();
   await expect(stNode(page, id.a!)).toHaveCount(0);
   await expect(stNode(page, id.b!)).toHaveCount(0);

@@ -217,7 +217,7 @@ test('a shared step\'s entry condition and name, edited once: every workflow\'s 
 
   const answer = await save(page);
   expect(answer.applied).toBe(true);
-  await expect(outLine(page, 'Saved 1 change')).toHaveCount(1);
+  await expect(outLine(page, 'Pushed 1 change')).toHaveCount(1);
   const t = await rowNamed('steps', `${N.t}-renamed`);
   expect(t.id).toBe(id.t);
   expect(t.entryCondition).toBe(2);

@@ -86,7 +86,7 @@ async function drawn(page: Page) {
 test('three workflows over a branching graph, every entry condition, a cron and a payload on every reached step: Save writes exactly what the board shows', async ({ page }) => {
   test.setTimeout(test.info().timeout * 3);
   await openAt(page, { x: -40, y: -80 }, 0.62);
-  expect(await page.evaluate(() => sessionStorage.getItem('acto.board')), 'a fresh browser: no draft').toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('acto.board')), 'a fresh browser: no draft').toBeNull();
   const n0 = await unsavedCount(page);
   const id = await build(page);
 
@@ -97,7 +97,7 @@ test('three workflows over a branching graph, every entry condition, a cron and 
 
   const answer = await save(page);
   expect(answer.applied, 'the Save is applied').toBe(true);
-  await expect(outLine(page, /^Saved \d+ changes?$/)).toHaveCount(1);
+  await expect(outLine(page, /^Pushed \d+ changes?$/)).toHaveCount(1);
   await expect(saveButton(page)).toHaveText('Save');
   await expect(saveButton(page)).toBeDisabled();
   const real = (k: string) => answer.made?.[id[k]!] ?? id[k]!;

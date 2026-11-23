@@ -5,7 +5,7 @@ import { board } from './boardFixtures';
 import { createBoardStore } from './boardStore';
 import { changedKeys } from './changes';
 import { addStep, deleteSteps, withoutWorkflow } from './edits';
-import { createGhostStore, placeIn, restoreGhosts, type GhostItem } from './ghosts';
+import { createGhostStore, keepGhosts, placeIn, restoreGhosts, type GhostItem } from './ghosts';
 import { memoryStorage } from '../test/memoryStorage';
 
 /** board() with two entries in every link array, the first of each being the one the tests delete. */
@@ -119,6 +119,7 @@ describe('ghosts in storage [user, 2026-11-23: they belong to the draft]', () =>
     const out = createOutputStore(null, () => '00:00:00');
     const store = createBoardStore(out, null);
     const ghosts = createGhostStore(store, storage);
+    keepGhosts(ghosts, storage);
     store.load(start);
     return { store, ghosts };
   };
@@ -142,6 +143,20 @@ describe('ghosts in storage [user, 2026-11-23: they belong to the draft]', () =>
     const a = fresh(storage);
     a.store.edit((b) => deleteSteps(b, ['lonely']));
     a.ghosts.remove(['step:lonely']);
+    const without = { ...board(), steps: { fetch: board().steps.fetch, expand: board().steps.expand } };
+    expect(keys(fresh(storage, without).ghosts)).toEqual([]);
+  });
+  it('only the kept store writes: a second store over the same board (React StrictMode makes one) never overwrites a Remove', () => {
+    const storage = memoryStorage();
+    const out = createOutputStore(null, () => '00:00:00');
+    const store = createBoardStore(out, null);
+    createGhostStore(store, storage); // the discarded twin: never kept
+    const kept = createGhostStore(store, storage);
+    keepGhosts(kept, storage);
+    store.load(board());
+    store.edit((b) => deleteSteps(b, ['lonely']));
+    kept.remove(['step:lonely']);
+    store.edit((b) => ({ ...b, workflows: { ...b.workflows, daily: { ...b.workflows.daily!, name: 'daily-2' } } }));
     const without = { ...board(), steps: { fetch: board().steps.fetch, expand: board().steps.expand } };
     expect(keys(fresh(storage, without).ghosts)).toEqual([]);
   });
