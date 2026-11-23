@@ -73,6 +73,19 @@ describe('createApi', () => {
     }
   });
 
+  it('validateDraft POSTs /workflows/validate with { changes, workflowIds } and returns the body', async () => {
+    const outcome = { valid: false, results: [], workflows: [{ workflowId: 'w1', problems: [{ gate: 'cycle', title: 'Cycle', detail: 'a → a', offending: {} }] }] };
+    const changes = [{ op: 'update' as const, table: 'steps' as const, id: 's1', row: {} }];
+    const fetchImpl = vi.fn().mockResolvedValue(respond(200, outcome));
+    const result = await createApi('/api/v1', fetchImpl).validateDraft(changes, ['w1']);
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/workflows/validate', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ changes, workflowIds: ['w1'] }),
+    });
+    expect(result).toEqual({ ok: true, value: outcome });
+  });
+
   it('lists steps and assignments', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(respond(200, []));
     const api = createApi('/api/v1', fetchImpl);

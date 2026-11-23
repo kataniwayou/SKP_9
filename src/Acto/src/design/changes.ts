@@ -105,6 +105,8 @@ export function boardChanges(base: BoardState, cur: BoardState): ModelChange[] {
   d.assignments.updated.forEach((id) => out.push(update('assignments', id)));
   d.workflows.updated.forEach((id) => out.push(update('workflows', id)));
 
+  // a workflow delete first: its junction rows go with it, then the assignments only it linked can go [user, 2026-11-23]
+  d.workflows.deleted.forEach((id) => out.push(remove('workflows', id)));
   d.assignments.deleted.forEach((id) => out.push(remove('assignments', id)));
   d.steps.deleted.forEach((id) => out.push(remove('steps', id)));
   d.caches.deleted.forEach((id) => out.push(remove('caches', id)));

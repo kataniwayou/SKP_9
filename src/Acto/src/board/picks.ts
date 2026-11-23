@@ -1,5 +1,7 @@
+import type { LiveStatus } from '../api/liveStatus';
 import type { BoardState } from '../design/board';
-import { deleteCaches, deleteSteps, removeEntries, removeWires, unlinkCaches } from '../design/edits';
+import { deleteCaches, deleteSteps, removeEntries, removeWires, unlinkCaches, withoutWorkflow } from '../design/edits';
+import type { Id } from '../model/graph';
 import type { Pick } from './selection';
 
 export type { Pick };
@@ -40,9 +42,25 @@ const exists = (b: BoardState, p: Pick): boolean => {
 export const livePicks = (picks: readonly Pick[], b: BoardState): Pick[] => picks.filter((p) => exists(b, p));
 
 /**
- * Delete of picked steps, caches, wires, entry arrows and cache lines as one board state (one history step): the
- * links first, then the steps (with their wires, entry arrows and payloads) and the caches (with their lines).
- * Triangles are not deleted here: that is BaseAPI's delete, not an edit.
+ * Why a Delete of these picks must not happen: one line per picked workflow that runs, or whose run state is not known
+ * (a running workflow cannot be deleted, so it is never ghosted [user, 2026-11-23]). Empty: the Delete may go. A workflow
+ * not in `base` was never saved, so it cannot run.
+ */
+export function deleteRefusal(picks: readonly Pick[], b: BoardState, base: BoardState, status: (wf: Id) => LiveStatus): string[] {
+  return picks.flatMap((p) => {
+    if (p.kind !== 'workflow' || !base.workflows[p.id]) return [];
+    const name = b.workflows[p.id]?.name ?? base.workflows[p.id]!.name;
+    const s = status(p.id);
+    if (s === 'stopped') return [];
+    return [s === 'running' ? `${name} is running — stop it first` : `can't tell whether ${name} is running — try again`];
+  });
+}
+
+/**
+ * Delete of picked workflows, steps, caches, wires, entry arrows and cache lines as one board state (one history step):
+ * the links first, then the workflows (with the assignments only they link), the steps (with their wires, entry arrows
+ * and payloads) and the caches (with their lines). Every delete is a ghost until Save [user, 2026-11-23]; a running
+ * workflow is refused before this (deleteRefusal).
  */
 export function deletePicks(b: BoardState, picks: readonly Pick[]): BoardState {
   const wires: [string, string][] = [];
@@ -50,17 +68,20 @@ export function deletePicks(b: BoardState, picks: readonly Pick[]): BoardState {
   const links: [string, string][] = [];
   const steps: string[] = [];
   const caches: string[] = [];
+  const workflows: string[] = [];
   for (const p of picks) {
     if (p.kind === 'wire') wires.push([p.from, p.to]);
     else if (p.kind === 'entry') entries.push([p.workflowId, p.stepId]);
     else if (p.kind === 'cacheLink') links.push([p.workflowId, p.cacheId]);
     else if (p.kind === 'step') steps.push(p.id);
     else if (p.kind === 'cache') caches.push(p.id);
+    else if (p.kind === 'workflow') workflows.push(p.id);
   }
   let s = b;
   if (wires.length) s = removeWires(s, wires);
   if (entries.length) s = removeEntries(s, entries);
   if (links.length) s = unlinkCaches(s, links);
+  for (const wf of workflows) s = withoutWorkflow(s, wf);
   if (steps.length) s = deleteSteps(s, steps);
   if (caches.length) s = deleteCaches(s, caches);
   return s;

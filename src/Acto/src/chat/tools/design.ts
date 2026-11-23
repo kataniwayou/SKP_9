@@ -1,5 +1,6 @@
 import { CACHE_H, CACHE_W, STEP_H, STEP_W, TRIANGLE_H, TRIANGLE_W } from '../../board/geometry';
-import { pickKey, livePicks, deletePicks } from '../../board/picks';
+import { pickKey, livePicks, deletePicks, deleteRefusal } from '../../board/picks';
+import { statusOf } from '../../live/liveState';
 import type { Pick } from '../../board/selection';
 import type { BoardState, ItemRef } from '../../design/board';
 import { addCache, addEntry, addStep, addWire, linkCache, moveItems, removeEntries, removeWires, setCacheField, unlinkCaches } from '../../design/edits';
@@ -290,7 +291,7 @@ const paste: ToolDef = {
 
 const describePicks = (picks: Pick[]): string => {
   const n = (k: Pick['kind']) => picks.filter((p) => p.kind === k).length;
-  return ([['step', 'step'], ['cache', 'cache'], ['wire', 'wire'], ['entry', 'entry arrow'], ['cacheLink', 'cache line']] as const)
+  return ([['workflow', 'workflow'], ['step', 'step'], ['cache', 'cache'], ['wire', 'wire'], ['entry', 'entry arrow'], ['cacheLink', 'cache line']] as const)
     .flatMap(([k, w]) => (n(k) > 0 ? [plural(n(k), w)] : [])).join(', ');
 };
 
@@ -300,15 +301,19 @@ const parsePicks = (pin: string | undefined): Pick[] | null => {
 
 const deletePicked: ToolDef = {
   name: 'delete_picked',
-  description: 'Delete what is picked: steps (with their wires, entry arrows and payloads), caches, wires, entry arrows and cache lines, as one change. The user is asked first; what they confirm is exactly what was picked then. A picked triangle is not deleted here: use delete_workflow.',
+  description: 'Delete what is picked: workflows (with the payloads only they use), steps (with their wires, entry arrows and payloads), caches, wires, entry arrows and cache lines, as one change; each is a ghost until Save. Nothing is deleted when a picked workflow runs. The user is asked first; what they confirm is exactly what was picked then.',
   parameters: NO_ARGS,
   async run(ctx, _args, answer, pin) {
     const asked = answer === undefined;
     const picks = asked ? ctx.commands.picks() : parsePicks(pin);
     if (picks === null) return fail('the question lost what it named: pick again', 'delete picked');
-    if (picks.some((p) => p.kind === 'workflow')) return fail('a picked triangle is deleted with delete_workflow, not delete_picked', 'delete picked');
     const live = livePicks(picks, ctx.store.state());
     if (live.length === 0) return fail('nothing is picked: pick what to delete first', 'delete picked');
+    const refused = deleteRefusal(live, ctx.store.state(), ctx.store.base(), (wf) => statusOf(ctx.live.getState(), wf));
+    if (refused.length) {
+      for (const line of refused) ctx.output.log(line, 'warn');
+      return fail(refused.join('; '), 'delete picked refused');
+    }
     if (asked) return { kind: 'ask', question: { text: `Delete ${describePicks(live)}?`, choices: ['Delete', 'Cancel'], pin: JSON.stringify(live) } };
     if (answer !== 'Delete') return fail('the user declined', 'user declined: delete picked');
     const out = applyState(ctx, (b) => deletePicks(b, live), 'delete picked', `deleted ${describePicks(live)}`);

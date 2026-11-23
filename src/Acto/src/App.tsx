@@ -5,13 +5,13 @@ import { Board, type BoardCenter, type BoardFocus } from './board/Board';
 import type { ConnectionKind } from './board/connect';
 import { loadBoard } from './board/loadBoard';
 import type { ToolbarActions } from './board/nodes/boardContext';
-import { deletePicks, livePicks } from './board/picks';
+import { deletePicks, deleteRefusal, livePicks } from './board/picks';
 import { placeMissing } from './board/placement';
 import { selectPick, synced, withPicks, type Pick, type SelectionState } from './board/selection';
 import { withBox } from './board/boxSelect';
 import { barOf } from './board/selectionBar';
 import { SelectionBar } from './board/SelectionBarView';
-import { confirmTextMany, toolbarFor } from './board/Toolbar';
+import { toolbarFor } from './board/Toolbar';
 import type { BoardView } from './board/toFlow';
 import { ChatHost } from './chat/ChatHost';
 import { createChatStore, type ChatStore } from './chat/chatStore';
@@ -33,7 +33,6 @@ import { signalRHub } from './live/signalrHub';
 import type { Point } from './model/geometry';
 import type { Id } from './model/graph';
 import { copyClip, copyMessage, pasteClip, pasteMessage, readClip, writeClip } from './operate/clipboard';
-import { commitDeletes, prepareDeletes, type DeletePlan } from './operate/deleteWorkflow';
 import { runWorkflow } from './operate/runWorkflow';
 import { watchTransitions } from './operate/transitions';
 import { OutputPanel } from './output/OutputPanel';
@@ -69,9 +68,6 @@ function freeTriangleSpot(b: BoardState): Point {
   } } });
   return placed.workflows[probe]?.at ?? { x: 0, y: 0 };
 }
-
-/** A triangle delete waiting for its confirm: one plan (the triangle's toolbar) or several triangles' (the bar). */
-interface PendingDelete { plans: DeletePlan[]; many: boolean }
 
 /** The selection with whatever left the board (or the ghosts, restored or removed) taken out (the same object when nothing did). */
 function trimmed(s: SelectionState, b: BoardState, ghosts: readonly GhostItem[]): SelectionState {
@@ -114,9 +110,6 @@ export function App(props: AppProps) {
   const [sel, setSel] = useState<SelectionState>(() => saved?.selection ?? NONE);
   const selRef = useRef(sel);
   selRef.current = sel;
-  const [pending, setPending] = useState<PendingDelete | null>(null);
-  const pendingRef = useRef<PendingDelete | null>(null);
-  const deleteToken = useRef(0);
   const viewport = useRef<{ x: number; y: number; zoom: number } | null>(saved && { x: saved.x, y: saved.y, zoom: saved.zoom });
   const boardFocus = useRef<BoardFocus | null>(null);
   const boardCenter = useRef<BoardCenter | null>(null);
@@ -149,8 +142,6 @@ export function App(props: AppProps) {
   const setSelection = useCallback((next: SelectionState) => {
     selRef.current = next; setSel(next); persist(next);
     nudgeSeq.current++;
-    // a selection change drops a pending delete confirm (and a still-running dry run) silently
-    deleteToken.current++; pendingRef.current = null; setPending(null);
   }, [persist]);
 
   // a picked thing that leaves the board (deleted, undone away) leaves the selection; so does a ghost restored or removed
@@ -230,37 +221,17 @@ export function App(props: AppProps) {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [store]);
 
-  /** Delete of steps, caches, wires, entry arrows and cache lines: one edit, one undo step. */
+  /**
+   * Delete of triangles, steps, caches, wires, entry arrows and cache lines: one edit, one undo step, ghosts until Save
+   * [user, 2026-11-23]. A pick holding a running workflow (or one whose state is not known) deletes nothing at all.
+   */
   const removePicks = useCallback((picks: readonly Pick[]) => {
+    const refused = deleteRefusal(picks, store.state(), store.base(), (wf) => statusOf(live.getState(), wf));
+    if (refused.length) { for (const line of refused) output.log(line, 'warn'); return; }
     const before = store.state();
     store.edit((b) => deletePicks(b, picks));
     if (store.state() !== before) setSelection({ workflows: selRef.current.workflows, picks: [] });
-  }, [store, setSelection]);
-
-  /** A triangle's Delete (one id, its toolbar) or the bar's for several: every dry run first, then one confirm. */
-  const askDelete = useCallback((ids: Id[]) => {
-    const token = ++deleteToken.current;
-    void prepareDeletes(api, store, output, ids).then((plans) => {
-      if (plans.length === 0 || token !== deleteToken.current) return;
-      const p: PendingDelete = { plans, many: ids.length > 1 };
-      pendingRef.current = p; setPending(p);
-    });
-  }, [api, store, output]);
-  const confirmDelete = useCallback(() => {
-    const p = pendingRef.current;
-    if (!p) return;
-    pendingRef.current = null; setPending(null);
-    const token = ++deleteToken.current;
-    void commitDeletes(api, store, output, p.plans).then((gone) => {
-      // all gone: nothing picked is left; some refused: the prune takes the deleted ones out and keeps the rest
-      if (gone.length === p.plans.length && token === deleteToken.current) setSelection(NONE);
-    });
-  }, [api, store, output, setSelection]);
-  const cancelDelete = useCallback(() => {
-    if (!pendingRef.current) return;
-    deleteToken.current++; pendingRef.current = null; setPending(null);
-    output.log('Delete cancelled — nothing was sent');
-  }, [output]);
+  }, [store, setSelection, live, output]);
 
   /** Restore: the ghosts back as one board edit (one undo step); a refusal (`restore <name> first`) is an Output warning. */
   const restore = useCallback((keys: string[]) => {
@@ -275,27 +246,24 @@ export function App(props: AppProps) {
   const toolbar = useMemo<ToolbarActions>(() => (p) => toolbarFor(p, {
     picks: sel.picks,
     run: (wf) => statusOf(live.getState(), wf),
-    pending: pending && !pending.many ? pending.plans[0]! : null,
     start: (wf) => run(wf, 'start'),
     stop: (wf) => run(wf, 'stop'),
     copy: (ref) => copyItems([ref]),
     remove: (x) => removePicks([x]),
-    askDelete: (wf) => askDelete([wf]), confirmDelete, cancelDelete,
     restore, removeGhosts,
-  }), [sel.picks, pending, live, run, copyItems, removePicks, askDelete, confirmDelete, cancelDelete, restore, removeGhosts]);
+  }), [sel.picks, live, run, copyItems, removePicks, restore, removeGhosts]);
 
   const bar = barOf(sel.picks);
   const ghostKeys = () => selRef.current.picks.flatMap((p) => (p.kind === 'ghost' ? [p.key] : []));
   const triangleIds = () => selRef.current.picks.flatMap((p) => (p.kind === 'workflow' ? [p.id] : []));
   const barView = bar && (
-    <SelectionBar bar={bar} confirm={pending?.many ? confirmTextMany(pending.plans) : null} actions={{
+    <SelectionBar bar={bar} actions={{
       copy: () => copyItems(selRef.current.picks.flatMap((p) => (p.kind === 'step' || p.kind === 'cache' || p.kind === 'workflow' ? [{ kind: p.kind, id: p.id }] : []))),
-      del: () => { if (bar.run) askDelete(triangleIds()); else removePicks(selRef.current.picks); },
+      del: () => removePicks(selRef.current.picks),
       restore: () => restore(ghostKeys()),
       remove: () => removeGhosts(ghostKeys()),
       start: () => { for (const wf of triangleIds()) run(wf, 'start'); },
       stop: () => { for (const wf of triangleIds()) run(wf, 'stop'); },
-      confirmDelete, cancelDelete,
     }} />
   );
 

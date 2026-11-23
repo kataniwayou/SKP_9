@@ -5,7 +5,7 @@ import { SelectionBar, type BarActions } from './SelectionBarView';
 
 const labels = () => screen.queryAllByRole('button').map((b) => b.textContent);
 const bar = (count: number, over: Partial<Bar> = {}): Bar => ({ count, copy: false, del: false, restore: false, remove: false, run: false, ...over });
-const acts = (): BarActions => ({ copy: vi.fn(), del: vi.fn(), restore: vi.fn(), remove: vi.fn(), start: vi.fn(), stop: vi.fn(), confirmDelete: vi.fn(), cancelDelete: vi.fn() });
+const acts = (): BarActions => ({ copy: vi.fn(), del: vi.fn(), restore: vi.fn(), remove: vi.fn(), start: vi.fn(), stop: vi.fn() });
 
 describe('SelectionBar', () => {
   it('steps: the pill, Copy and Delete', () => {
@@ -38,14 +38,5 @@ describe('SelectionBar', () => {
     expect(labels()).toEqual(['▶ Start', '■ Stop', 'Delete']);
     fireEvent.click(screen.getByText('▶ Start')); fireEvent.click(screen.getByText('■ Stop'));
     expect(a.start).toHaveBeenCalledTimes(1); expect(a.stop).toHaveBeenCalledTimes(1);
-  });
-  it('a waiting confirm: its text, Delete and Cancel instead of the actions', () => {
-    const a = acts();
-    render(<SelectionBar bar={bar(2, { run: true, del: true })} actions={a} confirm="Delete workflow a, workflow b? Their steps and caches stay." />);
-    expect(screen.getByText('Delete workflow a, workflow b? Their steps and caches stay.')).toBeInTheDocument();
-    expect(labels()).toEqual(['Delete', 'Cancel']);
-    fireEvent.click(screen.getByText('Delete')); fireEvent.click(screen.getByText('Cancel'));
-    expect(a.confirmDelete).toHaveBeenCalledTimes(1); expect(a.cancelDelete).toHaveBeenCalledTimes(1);
-    expect(a.del).not.toHaveBeenCalled();
   });
 });

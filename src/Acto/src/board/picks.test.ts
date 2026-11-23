@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { board } from '../design/boardFixtures';
-import { deletePicks, lastPick, livePicks, pickKey, togglePick } from './picks';
+import { deletePicks, deleteRefusal, lastPick, livePicks, pickKey, togglePick } from './picks';
+import { shared } from '../design/boardFixtures';
+import type { LiveStatus } from '../api/liveStatus';
 import type { Pick } from './selection';
 
 const a: Pick = { kind: 'step', id: 'fetch' };
@@ -64,7 +66,36 @@ describe('deletePicks', () => {
     expect(Object.keys(s.assignments)).toEqual([]);
     expect(s.workflows.daily!.entryStepIds).toEqual([]);
   });
-  it('leaves triangles alone', () => {
-    expect(deletePicks(board(), [{ kind: 'workflow', id: 'daily' }]).workflows.daily).toBeDefined();
+  it('removes a picked workflow and the assignments only it links; a shared assignment stays [user, 2026-11-23]', () => {
+    const own = deletePicks(board(), [{ kind: 'workflow', id: 'daily' }]);
+    expect(own.workflows.daily).toBeUndefined();
+    expect(own.assignments['a-daily-fetch']).toBeUndefined();
+    expect(own.assignments['a-hourly-fetch']).toBeDefined();
+    expect(own.steps.fetch).toBeDefined();
+    const both = deletePicks(shared(), [{ kind: 'workflow', id: 'daily' }]);
+    expect(both.assignments['a-shared']).toBeDefined();
+  });
+  it('deletes a workflow and a step together as one state', () => {
+    const s = deletePicks(board(), [{ kind: 'workflow', id: 'daily' }, { kind: 'step', id: 'lonely' }]);
+    expect(s.workflows.daily).toBeUndefined();
+    expect(s.steps.lonely).toBeUndefined();
+  });
+});
+
+describe('deleteRefusal', () => {
+  const b = board();
+  const status = (m: Record<string, LiveStatus>) => (wf: string): LiveStatus => m[wf] ?? 'stopped';
+  it('names each running, checking or unknown picked workflow [user, 2026-11-23]', () => {
+    const picks: Pick[] = [{ kind: 'workflow', id: 'daily' }, { kind: 'workflow', id: 'hourly' }, { kind: 'step', id: 'lonely' }];
+    expect(deleteRefusal(picks, b, b, status({ daily: 'running', hourly: 'unknown' }))).toEqual([
+      'daily is running — stop it first',
+      "can't tell whether hourly is running — try again",
+    ]);
+    expect(deleteRefusal([{ kind: 'workflow', id: 'daily' }], b, b, status({ daily: 'checking' }))).toEqual(["can't tell whether daily is running — try again"]);
+  });
+  it('stopped workflows, never-saved workflows and other kinds pass', () => {
+    expect(deleteRefusal([{ kind: 'workflow', id: 'daily' }, a], b, b, status({}))).toEqual([]);
+    const base = { ...b, workflows: { hourly: b.workflows.hourly } };
+    expect(deleteRefusal([{ kind: 'workflow', id: 'daily' }], b, base, status({ daily: 'unknown' }))).toEqual([]);
   });
 });

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createGhostStore } from '../../design/ghosts';
 import { shared } from '../../design/boardFixtures';
 import { moveItems } from '../../design/edits';
+import { liveStub } from '../../test/liveStub';
 import { call, done, setup } from './testContext';
 
 describe('graph edit tools', () => {
@@ -219,10 +220,23 @@ describe('picks, clipboard and delete_picked', () => {
     expect(store.state().steps.fetch!.nextStepIds).toEqual(['expand']);
   });
 
-  it('delete_picked refuses a picked triangle: that is delete_workflow', async () => {
-    const { ctx } = setup();
-    ctx.commands.setPicks([{ kind: 'workflow', id: 'daily' }]);
-    expect(done(await call(ctx, 'delete_picked')).result).toContain('delete_workflow');
+  it('delete_picked takes a picked triangle with the rest, as one ghosting change; a running one stops it all [user, 2026-11-23]', async () => {
+    const live = liveStub();
+    live.known([]);
+    const { ctx, store } = setup(live);
+    ctx.commands.setPicks([{ kind: 'workflow', id: 'daily' }, { kind: 'step', id: 'lonely' }]);
+    const asked = await call(ctx, 'delete_picked');
+    expect(asked).toMatchObject({ kind: 'ask', question: { text: 'Delete 1 workflow, 1 step?' } });
+    expect(done(await call(ctx, 'delete_picked', {}, 'Delete', (asked as { question: { pin: string } }).question.pin)).ok).toBe(true);
+    expect(store.state().workflows.daily).toBeUndefined();
+    expect(store.state().steps.lonely).toBeUndefined();
+    store.undo();
+    live.known(['daily']);
+    ctx.commands.setPicks([{ kind: 'workflow', id: 'daily' }, { kind: 'step', id: 'lonely' }]);
+    const out = done(await call(ctx, 'delete_picked')); // refused before the question is asked
+    expect(out.ok).toBe(false);
+    expect(out.result).toContain('daily is running — stop it first');
+    expect(store.state().steps.lonely).toBeDefined();
   });
 });
 
@@ -265,7 +279,9 @@ describe('the removed tools', () => {
 
 describe('ghosts and the selection', () => {
   it('the board read never lists a ghost: a deleted triangle is gone from it though the page still shows its ghost', async () => {
-    const { ctx, store } = setup();
+    const live = liveStub();
+    live.known([]);
+    const { ctx, store } = setup(live);
     const ghosts = createGhostStore(store);
     ctx.ghosts = ghosts;
     const asked = await call(ctx, 'delete_workflow', { workflow_id: 'hourly' });

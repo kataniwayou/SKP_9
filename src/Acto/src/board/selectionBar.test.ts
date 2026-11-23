@@ -32,11 +32,11 @@ describe('barOf', () => {
   it('triangles alone: Start · Stop, Copy and Delete', () => {
     expect(barOf([wf('a'), wf('b')])).toEqual(bar(2, { run: true, copy: true, del: true }));
   });
-  it('a triangle with steps and caches: Copy only (a triangle Delete is a BaseAPI delete)', () => {
-    expect(barOf([wf('w'), st('a'), ca('c')])).toEqual(bar(3, { copy: true }));
+  it('a triangle with steps and caches: Copy and Delete (every delete is a ghost) [user, 2026-11-23]', () => {
+    expect(barOf([wf('w'), st('a'), ca('c')])).toEqual(bar(3, { copy: true, del: true }));
   });
-  it('a triangle and a wire, or a ghost: nothing common', () => {
-    expect(barOf([wf('w'), { kind: 'wire', from: 'a', to: 'b' }])).toEqual(bar(2));
+  it('a triangle and a wire: Delete; a triangle and a ghost: nothing common', () => {
+    expect(barOf([wf('w'), { kind: 'wire', from: 'a', to: 'b' }])).toEqual(bar(2, { del: true }));
     expect(barOf([wf('w'), gh('step:a')])).toEqual(bar(2));
   });
 });

@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { LiveStatus } from '../api/liveStatus';
 import type { Pick } from './picks';
-import { confirmText, confirmTextMany, toolbarFor, type ToolbarDeps } from './Toolbar';
+import { toolbarFor, type ToolbarDeps } from './Toolbar';
 
 const tri: Pick = { kind: 'workflow', id: 'w1' };
 function deps(over: Partial<ToolbarDeps> = {}): ToolbarDeps {
   return {
-    picks: [tri], run: () => 'stopped' as LiveStatus, pending: null,
-    start: vi.fn(), stop: vi.fn(), copy: vi.fn(), remove: vi.fn(), askDelete: vi.fn(), confirmDelete: vi.fn(), cancelDelete: vi.fn(),
+    picks: [tri], run: () => 'stopped' as LiveStatus,
+    start: vi.fn(), stop: vi.fn(), copy: vi.fn(), remove: vi.fn(),
     restore: vi.fn(), removeGhosts: vi.fn(),
     ...over,
   };
@@ -39,22 +39,12 @@ describe('toolbarFor', () => {
     const d = deps();
     toolbarFor(tri, d)![0]!.onClick(); expect(d.start).toHaveBeenCalledWith('w1');
     toolbarFor(tri, d)![1]!.onClick(); expect(d.copy).toHaveBeenCalledWith({ kind: 'workflow', id: 'w1' });
-    toolbarFor(tri, d)![2]!.onClick(); expect(d.askDelete).toHaveBeenCalledWith('w1');
+    toolbarFor(tri, d)![2]!.onClick(); expect(d.remove).toHaveBeenCalledWith(tri); // a ghost, like a step's [user, 2026-11-23]
     const step: Pick = { kind: 'step', id: 's' };
     toolbarFor(step, d)![0]!.onClick(); expect(d.copy).toHaveBeenCalledWith({ kind: 'step', id: 's' });
     toolbarFor({ kind: 'cache', id: 'c' }, d)![0]!.onClick(); expect(d.copy).toHaveBeenCalledWith({ kind: 'cache', id: 'c' });
     toolbarFor(step, d)![1]!.onClick(); expect(d.remove).toHaveBeenCalledWith(step);
     toolbarFor(tri, deps({ run: () => 'running', stop: d.stop }))![0]!.onClick(); expect(d.stop).toHaveBeenCalledWith('w1');
-  });
-  it('a pending delete shows its confirm text from the plan, Delete and Cancel', () => {
-    const plan = { workflowId: 'w1', changes: [], lines: ['workflow orders', 'assignment a'], assignmentIds: [] };
-    const d = deps({ pending: plan });
-    const items = toolbarFor(tri, d)!;
-    expect(items.map((i) => i.label)).toEqual([confirmText(plan), 'Delete', 'Cancel']);
-    expect(confirmText(plan)).toBe('Delete workflow orders, assignment a? Its steps and caches stay.');
-    expect(items[0]!.note).toBe(true);
-    items[1]!.onClick(); items[2]!.onClick();
-    expect(d.confirmDelete).toHaveBeenCalled(); expect(d.cancelDelete).toHaveBeenCalled();
   });
   it('a ghost has Restore · Remove, each acting on its key', () => {
     const d = deps();
@@ -62,11 +52,5 @@ describe('toolbarFor', () => {
     expect(labels(g, d)).toEqual(['Restore', 'Remove']);
     toolbarFor(g, d)![0]!.onClick(); expect(d.restore).toHaveBeenCalledWith(['step:s']);
     toolbarFor(g, d)![1]!.onClick(); expect(d.removeGhosts).toHaveBeenCalledWith(['step:s']);
-  });
-  it('the confirm of several triangles lists every one; of one it is the lone confirm', () => {
-    const a = { workflowId: 'a', changes: [], lines: ['workflow a'], assignmentIds: [] };
-    const b = { workflowId: 'b', changes: [], lines: ['workflow b', 'assignment x'], assignmentIds: [] };
-    expect(confirmTextMany([a, b])).toBe('Delete workflow a, workflow b, assignment x? Their steps and caches stay.');
-    expect(confirmTextMany([a])).toBe(confirmText(a));
   });
 });

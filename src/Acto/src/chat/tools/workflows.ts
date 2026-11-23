@@ -1,27 +1,11 @@
-import { confirmText } from '../../board/Toolbar';
+import { deletePicks, deleteRefusal } from '../../board/picks';
 import { boardChanges } from '../../design/changes';
 import { addWorkflow, setWorkflowField } from '../../design/edits';
 import { nameOf, saveBoard, takeStored } from '../../design/saveBoard';
-import { commitDelete, prepareDelete } from '../../operate/deleteWorkflow';
 import { runWorkflow, type RunOp } from '../../operate/runWorkflow';
+import { statusOf } from '../../live/liveState';
 import type { ToolContext, ToolDef, ToolOutcome } from '../toolTypes';
-import { done, fail, linesSince, NO_ARGS, target, textOf, withOutput, WORKFLOW_ID } from './common';
-
-/**
- * A delete question's pin: the workflow and the confirm text it was asked with (JSON), what an answer is checked
- * against. It is stored with the question, so it outlives a refresh. A bare id (a chat stored before) has no text: asked again.
- */
-function deletePin(pin: string | undefined): { w: string; text: string | null } | undefined {
-  if (pin === undefined) return undefined;
-  try {
-    const v: unknown = JSON.parse(pin);
-    if (typeof v === 'object' && v !== null && typeof (v as { w?: unknown }).w === 'string') {
-      const { w, text } = v as { w: string; text?: unknown };
-      return { w, text: typeof text === 'string' ? text : null };
-    }
-  } catch { /* not JSON: a bare workflow id */ }
-  return { w: pin, text: null };
-}
+import { applyState, done, fail, linesSince, NO_ARGS, target, textOf, withOutput, WORKFLOW_ID } from './common';
 
 const ARG = { type: 'object', properties: { workflow_id: WORKFLOW_ID }, required: ['workflow_id'], additionalProperties: false };
 
@@ -115,24 +99,20 @@ const stop: ToolDef = {
 
 const deleteWorkflow: ToolDef = {
   name: 'delete_workflow',
-  description: 'Delete the workflow (BaseAPI deletes it with the payloads no other workflow uses; its steps and caches stay; a never-saved one is discarded). The user is asked first. Refused while it runs or the board saves.',
+  description: 'Delete the workflow from the board: it becomes a ghost until Save pushes the delete (with the payloads no other workflow uses); its steps and caches stay, and Undo or Restore brings it back. Refused while it runs (or while its run state is not known). The user is asked first.',
   parameters: ARG,
   async run(ctx, args, answer, pin) {
-    const pinned = answer === undefined ? undefined : deletePin(pin);
-    const t = target(ctx, args, 'delete workflow', pinned?.w);
+    const t = target(ctx, args, 'delete workflow', answer === undefined ? undefined : pin);
     if ('out' in t) return t.out;
-    if (answer !== undefined && answer !== 'Delete') return fail('the user declined', `user declined: delete ${t.name}`);
-    const prepared = await withOutput(ctx, t.name, () => prepareDelete(ctx.api, ctx.store, ctx.output, t.id));
-    const plan = prepared.value;
-    if (plan === null) return fail(`${t.name} was not deleted: ${textOf(prepared.lines, 'refused')}`, `delete ${t.name} refused`, prepared.entries);
-    const text = confirmText(plan);
-    // what the user confirmed is what is deleted: a plan that changed since the question is asked again
-    if (answer === undefined || pinned?.text !== text) {
-      return { kind: 'ask', question: { text, choices: ['Delete', 'Cancel'], pin: JSON.stringify({ w: t.id, text }) } };
+    // a running workflow is never ghosted [user, 2026-11-23]: refused before the question and again on the answer
+    const refused = deleteRefusal([{ kind: 'workflow', id: t.id }], ctx.store.state(), ctx.store.base(), (wf) => statusOf(ctx.live.getState(), wf));
+    if (refused.length) {
+      for (const line of refused) ctx.output.log(line, 'warn');
+      return fail(refused.join('; '), `delete ${t.name} refused`);
     }
-    const ran = await withOutput(ctx, t.name, () => commitDelete(ctx.api, ctx.store, ctx.output, plan));
-    if (ran.value) return done(true, `deleted ${t.name}. ${textOf(ran.lines)}`, `deleted ${t.name}`, ran.entries);
-    return fail(`${t.name} was not deleted: ${textOf(ran.lines, 'refused')}`, `delete ${t.name} failed`, ran.entries);
+    if (answer === undefined) return { kind: 'ask', question: { text: `Delete ${t.name}? It is a ghost until Save; its steps and caches stay.`, choices: ['Delete', 'Cancel'], pin: t.id } };
+    if (answer !== 'Delete') return fail('the user declined', `user declined: delete ${t.name}`);
+    return applyState(ctx, (b) => deletePicks(b, [{ kind: 'workflow', id: t.id }]), `delete ${t.name}`, `deleted ${t.name}: a ghost until Save (Undo brings it back)`);
   },
 };
 

@@ -19,6 +19,7 @@ const toolbarLabels = () => [...document.querySelectorAll('.toolbar button')].ma
 const loaded = () => screen.findByText('Board loaded: 2 workflows');
 // real steps: ghost step cards are not counted
 const steps = () => document.querySelectorAll('.react-flow__node-step:not(.ghost)').length;
+const ghost = (key: string) => screen.queryByTestId(`rf__node-ghost:${key}`);
 
 describe('App', () => {
   it('loads the board from BaseAPI\'s lists: triangles, steps, the cache, and the processors in the toolbox', async () => {
@@ -153,26 +154,36 @@ describe('App', () => {
       await waitFor(() => expect(toolbarLabels()).toEqual(['▶ Start', 'Copy', 'Delete']));
     });
 
-    it('a triangle Delete runs the dry run, shows its confirm; Cancel keeps it, Delete deletes it in BaseAPI', async () => {
+    it('a triangle Delete makes it a ghost: nothing is sent, Save counts it, Undo brings it back [user, 2026-11-23]', async () => {
       const api = boardApi();
-      renderApp(api);
+      const live = liveStub();
+      renderApp(api, { live });
       await loaded();
+      act(() => live.known([]));
       fireEvent.click(triangle('hourly'));
       await waitFor(() => expect(toolbarLabels()).toContain('Delete'));
       fireEvent.click(inToolbar().getByRole('button', { name: 'Delete' }));
-      expect(await screen.findByText('Delete workflow hourly, assignment assignment-a-hourly-fetch? Its steps and caches stay.')).toBeInTheDocument();
-      expect(api.validateModel).toHaveBeenCalledTimes(1);
-      fireEvent.click(inToolbar().getByRole('button', { name: 'Cancel' }));
-      expect(await screen.findByText('Delete cancelled — nothing was sent')).toBeInTheDocument();
+      await waitFor(() => expect(ghost('workflow:hourly')).not.toBeNull());
+      expect(screen.queryByTestId('rf__node-wf:hourly')).toBeNull();
       expect(api.applyModel).not.toHaveBeenCalled();
-      await waitFor(() => expect(toolbarLabels()).toEqual(['▶ Start', 'Copy', 'Delete']));
-      fireEvent.click(inToolbar().getByRole('button', { name: 'Delete' }));
-      await screen.findByText(/^Delete workflow hourly/);
-      fireEvent.click(inToolbar().getByRole('button', { name: 'Delete' }));
-      await waitFor(() => expect(screen.queryByTestId('rf__node-wf:hourly')).toBeNull());
-      expect(api.applyModel).toHaveBeenCalledTimes(1);
+      expect(api.validateModel).not.toHaveBeenCalled();
+      expect(saveButton()).not.toHaveTextContent(/^Save$/);
       expect(steps()).toBe(3);
-      expect(saveButton()).toBeDisabled();
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+      await waitFor(() => expect(screen.getByTestId('rf__node-wf:hourly')).toBeInTheDocument());
+    });
+
+    it('a running triangle is never deleted: Output says so and nothing changes [user, 2026-11-23]', async () => {
+      const live = liveStub();
+      renderApp(boardApi(), { live });
+      await loaded();
+      act(() => live.known(['hourly']));
+      fireEvent.click(triangle('hourly'));
+      await waitFor(() => expect(toolbarLabels()).toContain('Delete'));
+      fireEvent.click(inToolbar().getByRole('button', { name: 'Delete' }));
+      expect(await screen.findByText('hourly is running — stop it first')).toBeInTheDocument();
+      expect(screen.getByTestId('rf__node-wf:hourly')).toBeInTheDocument();
+      expect(saveButton()).toHaveTextContent(/^Save$/);
     });
   });
 
@@ -209,7 +220,6 @@ describe('App', () => {
   });
 
   describe('ghosts', () => {
-    const ghost = (key: string) => screen.queryByTestId(`rf__node-ghost:${key}`);
     it('a deleted step is a ghost; picked, its toolbar Restores it as one edit and the Save count goes back to 0', async () => {
       renderApp();
       await loaded();
@@ -308,36 +318,35 @@ describe('App', () => {
       expect(api.startWorkflow).toHaveBeenCalledTimes(2);
     });
 
-    it('Delete runs each dry run, one confirm listing every workflow, then deletes one by one', async () => {
+    it('Delete ghosts both triangles in one undo step; nothing is sent [user, 2026-11-23]', async () => {
       const api = boardApi();
-      renderApp(api);
+      const live = liveStub();
+      renderApp(api, { live });
       await loaded();
+      act(() => live.known([]));
       const bar = await pickBoth();
       fireEvent.click(within(bar).getByText('Delete'));
-      expect(await screen.findByText(/^Delete workflow daily, .*workflow hourly, .*\? Their steps and caches stay\.$/)).toBeInTheDocument();
-      expect(api.validateModel).toHaveBeenCalledTimes(2);
+      await waitFor(() => expect(ghost('workflow:hourly')).not.toBeNull());
+      expect(ghost('workflow:daily')).not.toBeNull();
       expect(api.applyModel).not.toHaveBeenCalled();
-      fireEvent.click(within(screen.getByRole('toolbar', { name: 'selection actions' })).getByText('Delete'));
-      await waitFor(() => expect(screen.queryByTestId('rf__node-wf:hourly')).toBeNull());
-      expect(screen.queryByTestId('rf__node-wf:daily')).toBeNull();
-      expect(api.applyModel).toHaveBeenCalledTimes(2);
-      expect(steps()).toBe(3);
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+      await waitFor(() => expect(screen.getByTestId('rf__node-wf:daily')).toBeInTheDocument());
+      expect(screen.getByTestId('rf__node-wf:hourly')).toBeInTheDocument();
     });
 
-    it('a refused dry run is reported; the confirm lists the rest, and Cancel sends nothing', async () => {
-      const api = boardApi();
-      (api.validateModel as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true, value: { ok: false, results: [
-        { index: 0, op: 'delete', table: 'workflows', id: 'daily', ok: false, status: 422, problem: { detail: 'running: stop it first' } },
-      ] } });
-      renderApp(api);
+    it('a pick with a running triangle and a step: Delete takes nothing, Output names the running one', async () => {
+      const live = liveStub();
+      renderApp(boardApi(), { live });
       await loaded();
-      const bar = await pickBoth();
+      act(() => live.known(['daily']));
+      fireEvent.click(triangle('daily'));
+      fireEvent.click(card('lonely'), { ctrlKey: true });
+      const bar = await screen.findByRole('toolbar', { name: 'selection actions' });
+      expect(within(bar).getAllByRole('button').map((b) => b.textContent)).toEqual(['Copy', 'Delete']);
       fireEvent.click(within(bar).getByText('Delete'));
-      expect(await screen.findByText('workflow daily: running: stop it first')).toBeInTheDocument();
-      expect(await screen.findByText(/^Delete workflow hourly.*\? Its steps and caches stay\.$/)).toBeInTheDocument();
-      fireEvent.click(within(screen.getByRole('toolbar', { name: 'selection actions' })).getByText('Cancel'));
-      expect(await screen.findByText('Delete cancelled — nothing was sent')).toBeInTheDocument();
-      expect(api.applyModel).not.toHaveBeenCalled();
+      expect(await screen.findByText('daily is running — stop it first')).toBeInTheDocument();
+      expect(screen.getByTestId('rf__node-st:lonely')).toBeInTheDocument();
+      expect(screen.getByTestId('rf__node-wf:daily')).toBeInTheDocument();
     });
 
     it('the Delete key does nothing', async () => {

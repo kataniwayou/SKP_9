@@ -14,6 +14,20 @@ const wire = (s: BoardState, from: string, to: string) => (addWire(s, from, to) 
 describe('boardChanges', () => {
   it('nothing changed, nothing sent', () => expect(boardChanges(b, b)).toEqual([]));
 
+  it('a deleted saved workflow is sent as delete workflows/<id> with its stamp, before its assignments [user, 2026-11-23]', () => {
+    const { daily: _gone, ...workflows } = b.workflows;
+    const { 'a-daily-fetch': _a, ...assignments } = b.assignments;
+    const cs = boardChanges(b, { ...b, workflows, assignments });
+    expect(names(cs)).toEqual(['delete workflows daily', 'delete assignments a-daily-fetch']);
+    expect(cs[0]).toEqual({ op: 'delete', table: 'workflows', id: 'daily', updatedAt: b.workflows.daily.updatedAt });
+  });
+
+  it('a never-saved workflow deleted sends nothing', () => {
+    const made = { ...b, workflows: { ...b.workflows, fresh: { ...b.workflows.hourly, id: 'fresh', assignmentIds: [], updatedAt: null } } };
+    expect(boardChanges(b, made).length).toBe(1);
+    expect(boardChanges(b, b)).toEqual([]);
+  });
+
   it('the read-only audit fields are never sent, on a create or an update', () => {
     const cur = withStep({ ...b, workflows: { ...b.workflows, daily: { ...b.workflows.daily, name: 'x', createdBy: 'katan' } } }, 'n1');
     const rows = boardChanges(b, cur).map((c) => c.row as Record<string, unknown>);

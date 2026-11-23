@@ -85,26 +85,30 @@ describe('workflow tools', () => {
     expect(api.stopWorkflow).toHaveBeenCalledWith('daily');
   });
 
-  it('delete_workflow asks with the confirm text from the dry run; Cancel sends nothing, Delete deletes', async () => {
-    const { ctx, api, store } = setup();
+  it('delete_workflow asks, then makes the workflow a ghost: nothing is sent, its steps stay, Undo brings it back [user, 2026-11-23]', async () => {
+    const live = liveStub();
+    live.known([]);
+    const { ctx, api, store } = setup(live);
     const asked = await call(ctx, 'delete_workflow', { workflow_id: 'daily' });
-    const text = 'Delete workflow daily, assignment fetch-assignment? Its steps and caches stay.';
-    expect(asked).toMatchObject({ kind: 'ask', question: { text, choices: ['Delete', 'Cancel'], pin: JSON.stringify({ w: 'daily', text }) } });
-    expect(api.validateModel).toHaveBeenCalledTimes(1);
-    expect(api.applyModel).not.toHaveBeenCalled();
-    expect(done(await call(ctx, 'delete_workflow', { workflow_id: 'daily' }, 'Cancel', JSON.stringify({ w: 'daily', text }))).ok).toBe(false);
+    expect(asked).toMatchObject({ kind: 'ask', question: { text: 'Delete daily? It is a ghost until Save; its steps and caches stay.', choices: ['Delete', 'Cancel'], pin: 'daily' } });
+    expect(done(await call(ctx, 'delete_workflow', { workflow_id: 'daily' }, 'Cancel', 'daily')).ok).toBe(false);
     expect(store.state().workflows.daily).toBeDefined();
-    const gone = done(await call(ctx, 'delete_workflow', {}, 'Delete', JSON.stringify({ w: 'daily', text })));
-    expect(gone.ok).toBe(true);
-    expect(api.applyModel).toHaveBeenCalledTimes(1);
+    expect(done(await call(ctx, 'delete_workflow', {}, 'Delete', 'daily')).ok).toBe(true);
     expect(store.state().workflows.daily).toBeUndefined();
     expect(store.state().steps.fetch).toBeDefined();
+    expect(api.applyModel).not.toHaveBeenCalled();
+    expect(api.validateModel).not.toHaveBeenCalled();
+    store.undo();
+    expect(store.state().workflows.daily).toBeDefined();
   });
 
-  it('delete_workflow answered with a pin of the old shape (a bare id) asks again and deletes nothing', async () => {
-    const { ctx, api, store } = setup();
-    expect(await call(ctx, 'delete_workflow', {}, 'Delete', 'daily')).toMatchObject({ kind: 'ask' });
-    expect(api.applyModel).not.toHaveBeenCalled();
+  it('delete_workflow refuses a running workflow and changes nothing', async () => {
+    const live = liveStub();
+    live.known(['daily']);
+    const { ctx, store } = setup(live);
+    const out = done(await call(ctx, 'delete_workflow', {}, 'Delete', 'daily'));
+    expect(out.ok).toBe(false);
+    expect(out.result).toContain('daily is running — stop it first');
     expect(store.state().workflows.daily).toBeDefined();
   });
 });
