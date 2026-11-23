@@ -414,6 +414,21 @@ describe('InspectorPanel', () => {
       expect(store.state().workflows.daily!.cronExpression).toBeNull();
       expect(screen.getByText('not scheduled')).toBeInTheDocument();
     });
+    it("the Cron presets (Studio's) fill the field, which stays free text; Not scheduled clears it [user, 2026-11-23]", () => {
+      const { store } = setup(sel);
+      const presets = screen.getByLabelText('Cron presets');
+      expect([...presets.querySelectorAll('option:not([disabled])')].map((o) => o.textContent)).toEqual([
+        'Every minute · 0 * * * * *', 'Every 5 minutes · 0 */5 * * * *', 'Every hour · 0 0 * * * *',
+        'Every day at 00:00 · 0 0 0 * * *', 'Weekdays at 08:00 · 0 0 8 * * MON-FRI', 'Not scheduled',
+      ]);
+      fireEvent.change(presets, { target: { value: '4' } });
+      expect(store.state().workflows.daily!.cronExpression).toBe('0 0 8 * * MON-FRI');
+      expect(screen.getByLabelText('Cron')).toHaveValue('0 0 8 * * MON-FRI');
+      expect((presets as HTMLSelectElement).value).toBe('');
+      fireEvent.change(presets, { target: { value: '5' } });
+      expect(store.state().workflows.daily!.cronExpression).toBeNull();
+      expect(screen.getByText('not scheduled')).toBeInTheDocument();
+    });
     it('lists entry steps and caches, each with Remove', () => {
       const { store } = setup(sel);
       fireEvent.click(screen.getByRole('button', { name: 'Remove entry fetch-orders' }));

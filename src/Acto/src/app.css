@@ -28,6 +28,10 @@
 /* the label above its value, the value the full pane width (Studio's .field) [user, 2026-11-19] */
 .fld { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; margin: 8px 0; }
 .fld > span { font: 11.5px var(--sans); color: var(--muted); overflow-wrap: anywhere; }
+/* the Cron field with Studio's presets beside it [user, 2026-11-23] */
+.cronrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.cronrow .cronpre { width: 104px; cursor: pointer; }
+.fld > span > label { cursor: default; }
 .fld input, .fld select, .fld textarea { font: 13px var(--sans); color: var(--ink); background: var(--card-2); border: 1px solid var(--line); border-radius: 7px; padding: 4px 7px; width: 100%; min-width: 0; }
 .fld textarea { font: 12px/1.45 var(--mono); resize: vertical; }
 .fld input:focus, .fld select:focus, .fld textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }

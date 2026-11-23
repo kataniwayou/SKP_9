@@ -6,7 +6,7 @@ import { useWorkflowStatus } from '../../live/LiveContext';
 import { payloadKeyCount } from '../../model/assignments';
 import { cronText } from '../../model/cronText';
 import type { Id } from '../../model/graph';
-import { Ro, Row, Sec, TextField } from '../fields';
+import { CronField, Ro, Row, Sec } from '../fields';
 import { EntityBase, LinkChip, locationText, metaOfRow, orNull, stepName, type Ctx } from './shared';
 
 const keysText = (payload: string) => {
@@ -36,7 +36,7 @@ export function WorkflowTab({ state, edit, id, go }: Ctx & { id: Id }) {
   return (
     <>
       <EntityBase head={`${w.name} ${w.version}`} kind={`workflow · ${run}`} k={id} row={w} meta={metaOfRow(w)} set={set} />
-      <TextField key={`${id}:cron`} label="Cron" value={w.cronExpression} onChange={(v) => set('cronExpression', orNull(v))} />
+      <CronField key={`${id}:cron`} value={w.cronExpression} onChange={(v) => set('cronExpression', orNull(v))} />
       <p className="in-note sub">{parsed === null ? 'not scheduled' : 'text' in parsed ? parsed.text : w.cronExpression}</p>
       <Sec>Related</Sec>
       <Ro><Row k="Location">{locationText(w.at)}</Row></Ro>

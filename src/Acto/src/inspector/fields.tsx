@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
+import { CRON_PRESETS } from '../model/cronText';
 
 /**
  * A labelled field: the label above its value, the value the pane's full width (Studio's .field [user, 2026-11-19];
@@ -32,5 +33,25 @@ export function SelectField({ label, value, options, onChange, disabled }: {
         {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </Field>
+  );
+}
+
+/**
+ * The workflow's Cron: free text, with Studio's presets beside it [user, 2026-11-23]. A preset is typed into the field (the
+ * dropdown always reads "presets"); "Not scheduled" clears it.
+ */
+export function CronField({ value, onChange }: { value: string | null; onChange: (v: string) => void }) {
+  const id = useId();
+  return (
+    <div className="fld">
+      <span><label htmlFor={id}>Cron</label></span>
+      <div className="cronrow">
+        <input id={id} className="in-in" value={value ?? ''} spellCheck={false} onChange={(e) => onChange(e.target.value)} />
+        <select className="in-in cronpre" aria-label="Cron presets" value="" onChange={(e) => onChange(CRON_PRESETS[Number(e.target.value)]!.expression)}>
+          <option value="" disabled>presets</option>
+          {CRON_PRESETS.map((p, i) => <option key={p.label} value={i}>{p.label}{p.expression ? ` · ${p.expression}` : ''}</option>)}
+        </select>
+      </div>
+    </div>
   );
 }
