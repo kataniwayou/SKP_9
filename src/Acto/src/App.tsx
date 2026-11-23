@@ -25,7 +25,7 @@ import { nudgeKey, pasteKey, undoRedoKey } from './design/keys';
 import { unsavedMarks } from './design/changes';
 import { createGhostStore, restoreGhosts, type GhostItem, type GhostStore } from './design/ghosts';
 import { saveBoard, takeStored } from './design/saveBoard';
-import { InspectorPanel } from './inspector/InspectorPanel';
+import { InspectorPanel, pickName } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
 import { LiveStoreProvider } from './live/LiveContext';
 import { statusOf } from './live/liveState';
@@ -106,6 +106,9 @@ export function App(props: AppProps) {
   useEffect(() => store.subscribe(bump), [store]);
   const liveState = useSyncExternalStore(live.subscribe, live.getState);
   const ghosts = useSyncExternalStore(ghostStore.subscribe, ghostStore.ghosts);
+  // for the tabs of hidden panels: a dot on Output / Chat when something new comes in
+  const outputLines = useSyncExternalStore(output.subscribe, output.lines);
+  const chatEntries = useSyncExternalStore(chat.subscribe, () => chat.getState().entries);
 
   const [loaded, setLoaded] = useState(false);
   const [sel, setSel] = useState<SelectionState>(() => saved?.selection ?? NONE);
@@ -353,6 +356,9 @@ export function App(props: AppProps) {
           </header>
           <Shell
             storage={storage}
+            marks={{ output: outputLines, chat: chatEntries }}
+            inspectorNote={sel.picks.length > 1 ? `${sel.picks.length} selected`
+              : sel.picks[0] ? (pickName(sel.picks[0], state, ghostStore) ?? '') : ''}
             toolbox={<ToolboxPanel processors={processors} />}
             board={!loaded
               ? <div className="board-wait">Loading the board…</div>

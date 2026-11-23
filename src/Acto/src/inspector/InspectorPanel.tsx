@@ -10,6 +10,7 @@ import { activeChild, activeTab, chooseChild, chooseTab, focusKey, focusOf, keep
 import { AssignmentTab } from './tabs/AssignmentTab';
 import { CacheTab } from './tabs/CacheTab';
 import { GhostTab, ghostName } from './tabs/GhostTab';
+import { HideButton } from '../shell/HideButton';
 import { LinkTab } from './tabs/LinkTab';
 import { ProcessorTab } from './tabs/ProcessorTab';
 import { SchemaTab } from './tabs/SchemaTab';
@@ -33,7 +34,7 @@ function BoardSummary({ state }: { state: BoardState }) {
   );
 }
 
-function pickName(p: Pick, b: BoardState, ghosts: Ghosts): string | null {
+export function pickName(p: Pick, b: BoardState, ghosts: Ghosts): string | null {
   switch (p.kind) {
     case 'workflow': return b.workflows[p.id]?.name ?? null;
     case 'step': return b.steps[p.id]?.name ?? null;
@@ -64,6 +65,7 @@ function Header({ store, kind }: { store: BoardStore; kind: string }) {
     <div className="ph"><span>Inspector</span><span className="cnt">{kind}</span><span className="sp" />
       <button type="button" className="pbtn" disabled={!store.canUndo()} onClick={() => store.undo()}>Undo</button>
       <button type="button" className="pbtn" disabled={!store.canRedo()} onClick={() => store.redo()}>Redo</button>
+      <HideButton />
     </div>
   );
 }

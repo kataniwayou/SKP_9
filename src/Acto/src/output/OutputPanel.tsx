@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 import { useOutputState, type Level } from './outputStore';
+import { HideButton } from '../shell/HideButton';
 
 const KIND: Record<Level, string> = { info: '', ok: 'k-ok', warn: 'k-warn', error: 'k-err' };
 
@@ -25,6 +26,7 @@ export function OutputPanel() {
             onClick={() => store.setNewestFirst(true)}>Newest first</button>
         </span>
         <button type="button" className="pbtn" onClick={() => store.clear()}>Clear all</button>
+        <HideButton />
       </div>
       <div className="pb log" ref={body}>
         {lines.length === 0 ? <p className="none">No messages.</p> : (

@@ -14,6 +14,34 @@
 .split:hover::after, .split.on::after { background: var(--accent); }
 .split.col:hover::after, .split.col.on::after { height: 100%; } .split.row:hover::after, .split.row.on::after { width: 100%; }
 
+/* hiding panels [user, 2026-11-23]: a hidden panel stays mounted (drafts, tabs, scroll kept) and leaves a tab on its edge */
+.app [hidden] { display: none !important; }
+.split.idle { cursor: default; pointer-events: none; }
+.bottom.no-output { grid-template-columns: 26px 8px minmax(0, 1fr); }
+.bottom.no-chat { grid-template-columns: minmax(0, 1fr) 8px 26px; }
+.bottom.strip { display: flex; gap: 6px; }
+.rail { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.bottom.strip > .rail { flex-direction: row; }
+.dock-tab { display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;
+  font: 500 10.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+.dock-tab.left, .dock-tab.right { writing-mode: vertical-rl; width: 26px; padding: 12px 0; max-height: 100%; overflow: hidden; }
+.dock-tab.left { transform: rotate(180deg); }
+.dock-tab.bottom { height: 26px; padding: 0 14px; }
+.dock-tab .note { text-transform: none; letter-spacing: 0; color: var(--ink); white-space: nowrap; }
+.dock-tab:hover { color: var(--ink); border-color: var(--accent); }
+.dock-tab:focus-visible, .hide-panel:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dock-tab .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
+.hide-panel { width: 24px; height: 24px; display: grid; place-items: center; flex: none; padding: 0; cursor: pointer;
+  border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); }
+.hide-panel:hover { color: var(--ink); background: var(--card-2); border-color: var(--line); }
+.hide-panel svg { width: 14px; height: 14px; }
+.ph:has(.hide-panel) { padding-right: 8px; }
+.app > .board { position: relative; }
+.board-only { position: absolute; top: 14px; right: 14px; z-index: 5; display: inline-flex; align-items: center; gap: 6px; background: var(--card); }
+.board-only svg { width: 14px; height: 14px; }
+.pbtn.board-only.on { background: var(--accent); border-color: var(--accent); color: var(--on-colour); }
+
 /* a panel: the same rounded card as the toolbox */
 .pane { background: var(--card); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .ph { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); flex: none; }
@@ -38,5 +66,6 @@
 @media (max-width: 900px) {
   .acto { overflow: auto; height: auto; }
   .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 480px auto auto; grid-template-areas: "tools" "board" "insp" "bottom"; gap: 10px; }
-  .s1, .s2, .sh, .split { display: none; } .bottom { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .s1, .s2, .sh, .split { display: none; } .bottom, .bottom.no-output, .bottom.no-chat { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .dock-tab.left, .dock-tab.right { writing-mode: horizontal-tb; transform: none; width: auto; height: 26px; padding: 0 14px; }
 }

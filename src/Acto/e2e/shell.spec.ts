@@ -189,3 +189,32 @@ test('no keyboard hints anywhere: no Ctrl+ or ⌘ in any text, title, label or p
   await page.locator('.theme-toggle').click();
   expect(await hints(), 'dark theme').toEqual([]);
 });
+
+test('each panel hides to a tab on its edge and comes back at its size; Board only / Restore layout; kept across a reload', async ({ page }) => {
+  await openFitted(page);
+  const visible = (p: string) => page.locator(`[data-panel="${p}"]`);
+  const boardW0 = await width(page, 'board');
+
+  await page.getByRole('button', { name: 'Hide toolbox' }).click();
+  await expect(visible('toolbox')).toBeHidden();
+  await expect(page.getByTitle('Show toolbox')).toBeVisible();
+  await expect.poll(() => width(page, 'board')).toBeGreaterThan(boardW0 + 150);
+  await page.getByTitle('Show toolbox').click();
+  await expect.poll(() => width(page, 'toolbox')).toBe(200);
+
+  await page.getByRole('button', { name: 'Hide chat' }).click();
+  await expect(visible('chat')).toBeHidden();
+  await expect(page.getByTitle('Show chat')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Board only' }).click();
+  for (const p of ['toolbox', 'inspector', 'output', 'chat']) await expect(visible(p)).toBeHidden();
+  await page.screenshot({ path: 'test-results/board-only.png' });
+  await page.reload();
+  await expect(page.locator('.react-flow__node').first()).toBeVisible(); // the Output, where 'Board loaded' shows, is hidden
+  await page.getByRole('button', { name: 'Restore layout' }).click();
+  for (const p of ['toolbox', 'inspector', 'output']) await expect(visible(p)).toBeVisible();
+  await expect(visible('chat')).toBeHidden(); // hidden before Board only, so still hidden
+  await page.screenshot({ path: 'test-results/restored.png' });
+  await page.getByTitle('Show chat').click();
+  await expect(visible('chat')).toBeVisible();
+});

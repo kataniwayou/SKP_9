@@ -6,6 +6,7 @@ import { CACHE_TONE } from '../board/nodes/CacheNode';
 import { useProcessorLive } from '../live/LiveContext';
 import { livenessText } from '../live/liveState';
 import { DRAG_TYPE, type ToolboxDrag } from './drag';
+import { HideButton } from '../shell/HideButton';
 
 const dragOf = (item: ToolboxDrag) => (e: DragEvent) => {
   e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(item));
@@ -29,6 +30,8 @@ function ProcessorItem({ processor }: { processor: Processor }) {
 export function ToolboxPanel({ processors }: { processors: Processor[] }) {
   return (
     <>
+      <div className="ph"><span>Toolbox</span><span className="sp" /><HideButton /></div>
+      <div className="tools-body">
       <h2>Create</h2>
       <button type="button" className="tool big" draggable onDragStart={dragOf({ kind: 'workflow' })}>
         <span className="ti" aria-hidden="true" style={{ background: ACCENT }}>W</span>
@@ -40,6 +43,7 @@ export function ToolboxPanel({ processors }: { processors: Processor[] }) {
       </button>
       <h2>Steps</h2>
       {processors.map((p) => <ProcessorItem key={p.id} processor={p} />)}
+      </div>
     </>
   );
 }

@@ -10,7 +10,7 @@
 .board-wait { display: grid; place-items: center; height: 100%; color: var(--muted); font-size: 13px; background: var(--paper); }
 
 /* toolbox (the mock's .tools) */
-.pane.tools { padding: 12px; gap: 8px; overflow: auto; }
+.tools-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px; gap: 8px; overflow: auto; }
 .tools h2 { font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 6px 0 0; }
 .tool { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--card-2);
   cursor: grab; user-select: none; font: inherit; color: var(--ink); text-align: left; flex: none; }

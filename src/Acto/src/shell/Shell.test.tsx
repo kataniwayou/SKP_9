@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { memoryStorage } from '../test/memoryStorage';
+import { HideButton } from './HideButton';
 import { Shell } from './Shell';
 
 const ui = (storage?: Storage | null) =>
@@ -42,6 +43,61 @@ describe('Shell', () => {
     const sep = screen.getAllByRole('separator')[0]!;
     fireEvent.pointerMove(sep, { clientX: 900 });
     expect(screen.getByTestId('shell')).toHaveStyle({ '--tw': '200px' });
+  });
+
+  it('hides a panel from its header button to a tab on its edge, and the tab shows it again at its old size', () => {
+    const st = memoryStorage();
+    render(<Shell toolbox={<HideButton />} board="B" inspector={<HideButton />} output={<HideButton />} chat={<HideButton />} storage={st} />);
+    const shell = screen.getByTestId('shell');
+    fireEvent.click(screen.getByRole('button', { name: 'Hide toolbox' }));
+    expect(document.querySelector('[data-panel="toolbox"]')).not.toBeVisible();
+    expect(shell).toHaveStyle({ '--tw': '26px' });
+    expect(screen.queryByRole('separator', { name: 'Resize toolbox' })).toBeNull();
+    fireEvent.click(screen.getByTitle('Show toolbox'));
+    expect(document.querySelector('[data-panel="toolbox"]')).toBeVisible();
+    expect(shell).toHaveStyle({ '--tw': '200px' });
+    expect(screen.queryByTitle('Show toolbox')).toBeNull();
+  });
+
+  it('both bottom panels hidden: the bottom row shrinks to a strip of their two tabs', () => {
+    render(<Shell toolbox="T" board="B" inspector="I" output={<HideButton />} chat={<HideButton />} storage={null} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide output' }));
+    expect(document.querySelector('.bottom')).toHaveClass('no-output');
+    fireEvent.click(screen.getByRole('button', { name: 'Hide chat' }));
+    expect(document.querySelector('.bottom')).toHaveClass('strip');
+    expect(screen.getByTestId('shell')).toHaveStyle({ '--bh': '26px' });
+    expect(screen.getByTitle('Show output')).toHaveClass('bottom');
+    expect(screen.getByTitle('Show chat')).toHaveClass('bottom');
+  });
+
+  it('Board only hides every panel; Restore layout puts back the layout from before, even after a tab was opened', () => {
+    const st = memoryStorage();
+    const { unmount } = render(<Shell toolbox="T" board="B" inspector={<HideButton />} output="O" chat="C" storage={st} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide inspector' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Board only' }));
+    for (const p of ['toolbox', 'inspector', 'output', 'chat']) expect(document.querySelector(`[data-panel="${p}"]`)).not.toBeVisible();
+    fireEvent.click(screen.getByTitle('Show output'));
+    unmount();
+    render(<Shell toolbox="T" board="B" inspector="I" output="O" chat="C" storage={st} />); // remembered across a reload
+    fireEvent.click(screen.getByRole('button', { name: 'Restore layout' }));
+    expect(document.querySelector('[data-panel="inspector"]')).not.toBeVisible();
+    for (const p of ['toolbox', 'output', 'chat']) expect(document.querySelector(`[data-panel="${p}"]`)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Board only' })).toBeInTheDocument();
+  });
+
+  it("a hidden Output's tab gets a dot when something new arrives, gone once shown; the Inspector's tab names what it is on", () => {
+    const ui2 = (mark: number) => <Shell toolbox="T" board="B" inspector={<HideButton />} output={<HideButton />} chat="C" storage={null}
+      marks={{ output: mark }} inspectorNote="normalizer" />;
+    const { rerender } = render(ui2(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Hide output' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Hide inspector' }));
+    expect(screen.getByTitle('Show inspector')).toHaveTextContent('Inspector · normalizer');
+    expect(screen.queryByTestId('new-output')).toBeNull();
+    rerender(ui2(2));
+    expect(screen.getByTestId('new-output')).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Show output'));
+    fireEvent.click(screen.getByRole('button', { name: 'Hide output' }));
+    expect(screen.queryByTestId('new-output')).toBeNull();
   });
 
   it('writes the sizes once, on pointer-up, not on every move', () => {

@@ -4,6 +4,7 @@ import { readHistory, stepHistory, withSent, writeHistory } from './history';
 import { NOT_CONFIGURED } from './kimi';
 import { StatusLine } from './StatusLine';
 import './chat.css';
+import { HideButton } from '../shell/HideButton';
 
 export interface ChatStatus { seconds: number; prompt: number; tokens: number; activity: string }
 
@@ -107,6 +108,7 @@ export function ChatPane({ chat, onSend, onAnswer, onStop, onNewChat, status, co
         <span className="sp" />
         <button type="button" className="pbtn" title="Forget this conversation and start again" onClick={onNewChat}>New chat</button>
         {chat.busy && <button type="button" className="pbtn" title="Stop the answer; what was done stays" onClick={onStop}>Stop</button>}
+        <HideButton />
       </div>
       <div
         ref={setLog}
