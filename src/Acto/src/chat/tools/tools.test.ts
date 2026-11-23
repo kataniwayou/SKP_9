@@ -113,6 +113,20 @@ describe('workflow tools', () => {
   });
 });
 
+describe('check_workflow (final review: Save no longer checks; this asks what a Start would refuse)', () => {
+  it('answers every problem BaseAPI finds in the saved workflow, and refuses a never-saved one', async () => {
+    const { ctx, api, store } = setup();
+    api.validateWorkflow!.mockResolvedValue({ ok: true, value: { valid: false, problems: [{ gate: 'cycle', title: 'Workflow contains a cycle', detail: 'a -> a' }, { gate: 'missingPayload', title: 'Step has no payload its config schema requires', detail: 'handler' }] } });
+    const out = done(await call(ctx, 'check_workflow', { workflow_id: 'daily' }));
+    expect(out.ok).toBe(true);
+    expect(api.validateWorkflow).toHaveBeenCalledWith('daily');
+    expect(out.result).toContain('Workflow contains a cycle — a -> a');
+    expect(out.result).toContain('Step has no payload its config schema requires — handler');
+    store.edit((b) => ({ ...b, workflows: { ...b.workflows, fresh: { ...b.workflows.hourly!, id: 'fresh', name: 'fresh', updatedAt: null } } }));
+    expect(done(await call(ctx, 'check_workflow', { workflow_id: 'fresh' })).result).toContain('fresh was never saved: save it first');
+  });
+});
+
 describe('start of a never-saved workflow', () => {
   it('is refused before the question: save it first [user, 2026-11-23 rev 2]', async () => {
     const { ctx, api, store } = setup();

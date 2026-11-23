@@ -22,7 +22,7 @@ describe('systemPrompt', () => {
     expect(prompt).toMatch(/triangle/i);
     expect(prompt).toMatch(/entry steps/i);
     expect(prompt).toMatch(/Save is board-wide/);
-    expect(prompt).toMatch(/dry run/);
+    expect(prompt).toMatch(/free style/); // Save checks only the design rules [user, 2026-11-23 rev 2]
     expect(prompt).toMatch(/Start refuses/);
     expect(prompt).toMatch(/always has a processor/);
     expect(prompt).toMatch(/entry condition/);
@@ -31,11 +31,11 @@ describe('systemPrompt', () => {
 
   it('names every tool', () => {
     for (const t of TOOL_DEFS) expect(prompt).toContain(t.name);
-    for (const name of ['list_workflows', 'read_board', 'read_entity', 'read_output', 'list_processors', 'list_caches', 'list_schemas', 'new_workflow', 'add_step', 'add_cache', 'connect', 'disconnect', 'set_entry', 'remove_entry', 'link_cache', 'unlink_cache', 'set_field', 'set_payload', 'remove_assignment', 'set_processor', 'move_blocks', 'pick', 'copy', 'paste', 'delete_picked', 'delete_workflow', 'save', 'undo', 'redo', 'start', 'stop', 'list_ghosts', 'read_selection', 'restore_ghosts', 'remove_ghosts', 'take_stored']) {
+    for (const name of ['list_workflows', 'read_board', 'read_entity', 'read_output', 'list_processors', 'list_caches', 'list_schemas', 'new_workflow', 'add_step', 'add_cache', 'connect', 'disconnect', 'set_entry', 'remove_entry', 'link_cache', 'unlink_cache', 'set_field', 'set_payload', 'remove_assignment', 'set_processor', 'move_blocks', 'pick', 'copy', 'paste', 'delete_picked', 'delete_workflow', 'save', 'undo', 'redo', 'start', 'stop', 'list_ghosts', 'read_selection', 'restore_ghosts', 'remove_ghosts', 'take_stored', 'check_workflow']) {
       expect(TOOL_DEFS.map((t) => t.name)).toContain(name);
       expect(prompt).toContain(name);
     }
-    expect(TOOL_DEFS).toHaveLength(36);
+    expect(TOOL_DEFS).toHaveLength(37);
   });
 
   it('has none of the redundant lines (2026-11-18 rule audit): each rule is said once', () => {

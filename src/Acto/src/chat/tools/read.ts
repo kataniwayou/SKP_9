@@ -87,7 +87,7 @@ const listSchemas: ToolDef = {
 
 const readBoard: ToolDef = {
   name: 'read_board',
-  description: 'Read the whole board as it is now, unsaved edits included: every step (id, name, version, description, processor with health, entry condition, next step ids = wires, position), every cache (id, name, version, description, root, items as JSON text, position), and every workflow triangle (fields, cron, Running or Stopped, unsaved and saved flags, problems of the last dry run, entry steps, the steps it reaches, linked caches, and its payloads: assignment id, name, version, description, step id, payload, and the other workflows sharing that payload).',
+  description: 'Read the whole board as it is now, unsaved edits included: every step (id, name, version, description, processor with health, entry condition, next step ids = wires, position), every cache (id, name, version, description, root, items as JSON text, position), and every workflow triangle (fields, cron, Running or Stopped, unsaved and saved flags, problems of the last refused Start, entry steps, the steps it reaches, linked caches, and its payloads: assignment id, name, version, description, step id, payload, and the other workflows sharing that payload).',
   parameters: NO_ARGS,
   async run(ctx) {
     const b = ctx.store.state();

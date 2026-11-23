@@ -195,8 +195,8 @@ test('6 save and report the dry run: the problems the chat reports are BaseAPI\'
     workflows: [{ key: 'w', name: 'e2e-chat-d', at: { x: 0, y: 0 }, entry: ['s'], payloads: ['p'] }],
   });
   await openAt(page);
-  const t = await say(page, 'Set the description of workflow e2e-chat-d to "chat dry run", save the board, and tell me every problem the dry run '
-    + 'reports for e2e-chat-d. Do not fix anything.');
+  const t = await say(page, 'Set the description of workflow e2e-chat-d to "chat dry run", save the board, then check what a Start of e2e-chat-d would refuse and tell me every problem '
+    + 'it names. Do not fix anything.');
 
   expect((await getJson<Row>(`/workflows/${ids.w}`)).description).toBe('chat dry run');
   const problems = await expectSaveChecksNothing(page, ids.w!, 'e2e-chat-d');

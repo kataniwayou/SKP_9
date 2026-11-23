@@ -1,3 +1,4 @@
+import { describeError } from '../../api/describeError';
 import { deletePicks, deleteRefusal } from '../../board/picks';
 import { boardChanges } from '../../design/changes';
 import { addWorkflow, setWorkflowField } from '../../design/edits';
@@ -139,4 +140,22 @@ const takeStoredTool: ToolDef = {
   },
 };
 
-export const WORKFLOW_TOOLS: ToolDef[] = [newWorkflow, save, start, stop, deleteWorkflow, takeStoredTool];
+/** What a Start would refuse, asked of BaseAPI without starting (Save checks only the design rules) [user, 2026-11-23 rev 2]. */
+const checkWorkflow: ToolDef = {
+  name: 'check_workflow',
+  description: "Ask BaseAPI what a Start of the saved workflow would refuse — cycles, missing steps, schema-edge mismatches, payloads off their config schema, missing required payloads, processor liveness — without starting it. It checks the saved version: save first to check unsaved changes. Answers every problem, or that there is none.",
+  parameters: ARG,
+  async run(ctx, args) {
+    const t = target(ctx, args, 'check workflow');
+    if ('out' in t) return t.out;
+    if (!ctx.store.base().workflows[t.id]) return fail(`${t.name} was never saved: save it first`, `check ${t.name} refused`);
+    const r = await ctx.api.validateWorkflow(t.id);
+    if (!r.ok) return fail(`could not check ${t.name}: ${describeError(r.error)}`, `check ${t.name} failed`);
+    const problems = r.value.problems ?? [];
+    return done(true, problems.length === 0
+      ? `${t.name}: nothing a Start would refuse`
+      : `${t.name}: ${problems.length} problem${problems.length === 1 ? '' : 's'} a Start would refuse: ${problems.map((p) => `${p.title ?? p.gate} — ${p.detail ?? ''}`).join('; ')}`, `checked ${t.name}`);
+  },
+};
+
+export const WORKFLOW_TOOLS: ToolDef[] = [newWorkflow, save, start, stop, deleteWorkflow, takeStoredTool, checkWorkflow];

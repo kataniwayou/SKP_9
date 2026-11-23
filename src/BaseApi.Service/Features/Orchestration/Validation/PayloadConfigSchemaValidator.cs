@@ -128,17 +128,25 @@ internal sealed class PayloadConfigSchemaValidator
         IReadOnlyList<string> Required(Guid schemaId)
         {
             if (requiredOf.TryGetValue(schemaId, out var known)) return known;
+            // a payload is needed when the schema refuses an empty one — however it says so (required, allOf, if/then, minProperties)
             IReadOnlyList<string> found = [];
             if (snapshot.Schemas.TryGetValue(schemaId, out var dto))
             {
                 try
                 {
-                    using var doc = JsonDocument.Parse(dto.Definition);
-                    if (doc.RootElement.ValueKind == JsonValueKind.Object
-                        && doc.RootElement.TryGetProperty("required", out var req) && req.ValueKind == JsonValueKind.Array)
-                        found = req.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToList();
+                    var schema = JsonSchema.FromText(dto.Definition);
+                    using var empty = JsonDocument.Parse("{}");
+                    if (!schema.Evaluate(empty.RootElement, JsonSchemaConfig.DefaultOptions).IsValid)
+                    {
+                        using var doc = JsonDocument.Parse(dto.Definition);
+                        found = doc.RootElement.ValueKind == JsonValueKind.Object
+                                && doc.RootElement.TryGetProperty("required", out var req) && req.ValueKind == JsonValueKind.Array
+                            ? req.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToList()
+                            : [];
+                        if (found.Count == 0) found = ["a payload (the config schema refuses an empty one)"];
+                    }
                 }
-                catch (JsonException) { /* an unreadable definition is the conformance check's problem */ }
+                catch (Exception ex) when (ex is JsonException or JsonSchemaException) { /* an unreadable definition is the conformance check's problem */ }
             }
             return requiredOf[schemaId] = found;
         }

@@ -102,6 +102,18 @@ public sealed class GateCollectionTests
     }
 
     [Fact]
+    public void AStepWhoseSchemaRefusesAnEmptyPayloadOtherwiseThanByTopLevelRequiredStillNeedsOne()
+    {
+        // final review: a schema can demand a payload through allOf (or if/then, minProperties): an empty payload is what counts
+        var g = new Graph();
+        var s = g.Step(g.Processor(config: g.Schema("""{"type": "object", "allOf": [{"required": ["handler"]}]}""")));
+        g.Workflow(s);
+
+        var p = Assert.Single(new PayloadConfigSchemaValidator().Collect(g.Snapshot));
+        Assert.Equal("missingPayload", p.Gate);
+    }
+
+    [Fact]
     public void AStepSharedByTwoWorkflowsIsCheckedPerWorkflow()
     {
         var g = new Graph();
