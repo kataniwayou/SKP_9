@@ -84,7 +84,7 @@ const setField: ToolDef = {
 
 const setPayloadTool: ToolDef = {
   name: 'set_payload',
-  description: "Set the workflow's payload (the JSON its step's processor gets as config) on a step. In place when only this workflow has one there; a payload other workflows share is copied for this workflow only; none yet makes one. Without `payload`, a new one is laid out from the step's processor's config schema, as the Inspector's ＋ Create does (a required key as a \"<type>\" placeholder to fill in, an optional one as its default or empty value; {} without a config schema), and the result gives it: fill the placeholders with a second set_payload. Not checked against the config schema: the Start (and check_workflow) report problems; Save does not check them.",
+  description: "Set the workflow's payload (the JSON its step's processor gets as config) on a step. In place when only this workflow has one there; a payload other workflows share is copied for this workflow only; none yet makes one. Without `payload`, a new one is laid out from the step's processor's config schema, as the Inspector's ＋ Create does (a required key as a \"<type>\" placeholder to fill in, an optional one as its default or empty value; {} without a config schema), and the result gives it: fill the placeholders with a second set_payload. Not checked against the config schema here: check_workflow reports what a Start would refuse.",
   parameters: {
     type: 'object',
     properties: {

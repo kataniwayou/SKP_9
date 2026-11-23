@@ -242,7 +242,7 @@ const pickTool: ToolDef = {
 
 const copy: ToolDef = {
   name: 'copy',
-  description: "Copy workflows (triangles), steps and caches for paste: the ids given, or the picked ones when none is given. A paste makes new ones with every field the same but the name (and a cache's root, unique, named on like the name); the wires among copied steps are copied; a workflow copied alone pastes alone (no entry arrows, cache lines or assignments, like a step alone); copied with steps or caches it keeps its entry steps, caches and assignments (shared rows), joined to the copies of those copied with it. Steps get no payloads.",
+  description: "Copy workflows (triangles), steps and caches for paste: the ids given, or the picked ones when none is given. A paste makes new ones with every field the same but the name (and a cache's root, unique, named on like the name); the wires among copied steps are copied; a workflow copied alone pastes alone (no entry arrows, cache lines or assignments, like a step alone); copied with steps or caches it keeps its entry steps, caches and assignments (shared rows), joined to the copies of those copied with it. A step copied without its workflow gets no payloads.",
   parameters: { type: 'object', properties: {
     workflow_ids: { type: 'array', items: { type: 'string' } },
     step_ids: { type: 'array', items: { type: 'string' } },
@@ -270,7 +270,7 @@ const copy: ToolDef = {
 };
 
 const paste: ToolDef = {
-  name: 'paste', description: 'Paste what was copied as new workflows, steps and caches on free board (new names, every other field the same, unsaved; steps without payloads) and pick them.',
+  name: 'paste', description: 'Paste what was copied as new workflows, steps and caches on free board (new names, every other field the same, unsaved; links and payloads as copy says) and pick them.',
   parameters: NO_ARGS,
   async run(ctx) {
     const clip = readClip(ctx.session);
@@ -301,7 +301,7 @@ const parsePicks = (pin: string | undefined): Pick[] | null => {
 
 const deletePicked: ToolDef = {
   name: 'delete_picked',
-  description: 'Delete what is picked: workflows (with the payloads only they use), steps (with their wires, entry arrows and payloads), caches, wires, entry arrows and cache lines, as one change; each is a ghost until Save. Nothing is deleted when a picked workflow runs. The user is asked first; what they confirm is exactly what was picked then.',
+  description: 'Delete what is picked: workflows (with the payloads only they use), steps (with their wires, entry arrows and payloads), caches, wires, entry arrows and cache lines, as one change; each is a ghost until Save. Nothing is deleted when a picked workflow runs (or its run state is not known). The user is asked first; what they confirm is exactly what was picked then.',
   parameters: NO_ARGS,
   async run(ctx, _args, answer, pin) {
     const asked = answer === undefined;
@@ -333,7 +333,7 @@ function history(ctx: ToolContext, way: 'undo' | 'redo'): ToolOutcome {
 }
 
 const undo: ToolDef = {
-  name: 'undo', description: "Undo the last change on the board (the one history the user's Ctrl+Z uses).",
+  name: 'undo', description: "Undo the last change on the board (the one history the user's Undo uses).",
   parameters: NO_ARGS, run: async (ctx) => history(ctx, 'undo'),
 };
 const redo: ToolDef = {
@@ -390,7 +390,7 @@ const restoreGhostsTool: ToolDef = {
 
 const removeGhostsTool: ToolDef = {
   name: 'remove_ghosts',
-  description: "Drop ghosts from the board for this page session, as the ghost toolbar's Remove does. Nothing changes in BaseAPI and it is not an undo step.",
+  description: "Drop ghosts from the draft, as the ghost toolbar's Remove does. Nothing changes in BaseAPI and it is not an undo step.",
   parameters: GHOSTS_ARG,
   async run(ctx, args) {
     const items = ghostsOf(ctx, args, 'remove ghosts');

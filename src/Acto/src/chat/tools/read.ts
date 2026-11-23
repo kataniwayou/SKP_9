@@ -148,7 +148,7 @@ const readOutput: ToolDef = {
 
 const listGhosts: ToolDef = {
   name: 'list_ghosts',
-  description: 'List the ghosts: items deleted earlier in this page session and not on the board now (key, kind, name). restore_ghosts and remove_ghosts take the keys. A reload clears them.',
+  description: 'List the ghosts: deleted items, not on the board now (key, kind, name). They belong to the draft: a reload or a save keeps them until remove_ghosts drops them. restore_ghosts and remove_ghosts take the keys.',
   parameters: NO_ARGS,
   async run(ctx) {
     const store = ctx.ghosts;

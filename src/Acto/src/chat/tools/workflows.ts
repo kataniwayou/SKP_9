@@ -73,7 +73,7 @@ async function press(ctx: ToolContext, id: string, name: string, op: RunOp): Pro
 
 const start: ToolDef = {
   name: 'start',
-  description: "Start the saved workflow in BaseAPI (what its Start button does). It runs the saved version, never unsaved changes: save first. The user is asked first. Answers BaseAPI's refusal reason, or that the start was accepted.",
+  description: "Start the saved workflow in BaseAPI (what its Start button does). It runs the saved version: unsaved changes do not block it and are not run. A workflow never saved is refused (save it first). Not undoable. The user is asked first. Answers BaseAPI's refusal reason, or that the start was accepted.",
   parameters: ARG,
   async run(ctx, args, answer, pin) {
     const t = target(ctx, args, 'start', answer === undefined ? undefined : pin);
@@ -88,7 +88,7 @@ const start: ToolDef = {
 
 const stop: ToolDef = {
   name: 'stop',
-  description: 'Stop the workflow in BaseAPI (what its Stop button does). The user is asked first.',
+  description: 'Stop the workflow in BaseAPI (what its Stop button does). Not undoable. The user is asked first.',
   parameters: ARG,
   async run(ctx, args, answer, pin) {
     const t = target(ctx, args, 'stop', answer === undefined ? undefined : pin);

@@ -60,6 +60,28 @@ describe('systemPrompt', () => {
     expect(prompt).not.toMatch(/Save saves one workflow/);
   });
 
+  it('follows the 2026-11-23 rules (rev 2): ghosts belong to the draft, each rule said once, no keyboard hints', () => {
+    const desc = (n: string) => TOOL_DEFS.find((t) => t.name === n)!.description;
+    const all = [prompt, ...TOOL_DEFS.map((t) => t.description)];
+    // ghosts live in localStorage with the draft: they survive a reload and a push
+    for (const s of all) expect(s).not.toMatch(/page session|reload clears|for this session/i);
+    expect(desc('list_ghosts')).toMatch(/reload/);
+    // no keyboard hints in any text
+    for (const s of all) expect(s).not.toMatch(/Ctrl\+[A-Z]\b/);
+    // Start: a never-saved workflow is refused; unsaved edits do not block it
+    expect(desc('start')).toMatch(/never saved/);
+    expect(desc('start')).not.toMatch(/never unsaved changes: save first/);
+    // Delete: an unknown run state refuses too
+    expect(desc('delete_picked')).toMatch(/not known/);
+    // one place per rule: the copy rule in copy, Save's free style in save and the prompt's model only
+    expect(all.filter((s) => /pastes alone/.test(s))).toHaveLength(1);
+    expect(desc('paste')).not.toMatch(/without payloads/);
+    expect(desc('set_payload')).not.toMatch(/Save does not check/);
+    expect(prompt).not.toMatch(/checks no orchestration rule/);
+    expect(prompt).not.toMatch(/not checked on the spot/);
+    expect(prompt).not.toMatch(/\bthe the\b/);
+  });
+
   it('names no tool that does not exist (every snake_case word is a tool or an argument of one)', () => {
     const known = new Set<string>(TOOL_DEFS.map((t) => t.name));
     for (const t of TOOL_DEFS) for (const k of Object.keys((t.parameters as { properties?: object }).properties ?? {})) known.add(k);
