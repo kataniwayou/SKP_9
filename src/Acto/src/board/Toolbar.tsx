@@ -10,6 +10,8 @@ export interface ToolbarDeps {
   picks: readonly Pick[];
   /** The workflow's run state now. */
   run(wf: Id): LiveStatus;
+  /** Whether BaseAPI holds the workflow: a never-saved one cannot be started [user, 2026-11-23 rev 2]. */
+  saved(wf: Id): boolean;
   start(wf: Id): void;
   stop(wf: Id): void;
   /** Copy of a triangle, step or cache for Ctrl+V. */
@@ -33,7 +35,7 @@ export function toolbarFor(p: Pick, d: ToolbarDeps): ToolbarItem[] | null {
       const run = d.run(p.id);
       const runItem: ToolbarItem = run === 'running'
         ? { label: '■ Stop', tone: 'stop', onClick: () => d.stop(p.id) }
-        : { label: '▶ Start', tone: 'go', disabled: run !== 'stopped', onClick: () => d.start(p.id) };
+        : { label: '▶ Start', tone: 'go', disabled: run !== 'stopped' || !d.saved(p.id), onClick: () => d.start(p.id) };
       return [runItem, { label: 'Copy', onClick: () => d.copy({ kind: 'workflow', id: p.id }) }, del];
     }
     case 'step': case 'cache': return [{ label: 'Copy', onClick: () => d.copy({ kind: p.kind, id: p.id }) }, del];

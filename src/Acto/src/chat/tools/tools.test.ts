@@ -54,10 +54,10 @@ describe('workflow tools', () => {
     expect(store.state().workflows.n1).toMatchObject({ name: 'untitled', version: '1.0.0', cronExpression: null, at: { x: 700, y: 40 } });
     expect(output.lines().at(-1)).toMatchObject({ text: 'untitled created — it is saved only when you press Save', level: 'ok' });
     expect(focus).toHaveBeenCalledWith('n1');
-    expect(await call(ctx, 'start', { workflow_id: 'n1' })).toMatchObject({ kind: 'ask' });
-    const s = done(await call(ctx, 'start', {}, 'Start', 'n1'));
+    // refused before the question: a never-saved workflow cannot be started [user, 2026-11-23 rev 2]
+    const s = done(await call(ctx, 'start', { workflow_id: 'n1' }));
     expect(s.ok).toBe(false);
-    expect(s.result).toContain('untitled: not saved yet — BaseAPI has no such workflow');
+    expect(s.result).toContain('untitled was never saved: save it first');
     expect(api.startWorkflow).not.toHaveBeenCalled();
     expect(done(await call(ctx, 'new_workflow', { name: 'feed' })).result).toContain('workflow feed');
   });
@@ -110,6 +110,17 @@ describe('workflow tools', () => {
     expect(out.ok).toBe(false);
     expect(out.result).toContain('daily is running — stop it first');
     expect(store.state().workflows.daily).toBeDefined();
+  });
+});
+
+describe('start of a never-saved workflow', () => {
+  it('is refused before the question: save it first [user, 2026-11-23 rev 2]', async () => {
+    const { ctx, api, store } = setup();
+    store.edit((b) => ({ ...b, workflows: { ...b.workflows, fresh: { ...b.workflows.hourly!, id: 'fresh', name: 'fresh', updatedAt: null } } }));
+    const out = done(await call(ctx, 'start', { workflow_id: 'fresh' }));
+    expect(out.ok).toBe(false);
+    expect(out.result).toContain('fresh was never saved: save it first');
+    expect(api.startWorkflow).not.toHaveBeenCalled();
   });
 });
 

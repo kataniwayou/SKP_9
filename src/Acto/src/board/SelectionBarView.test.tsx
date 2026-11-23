@@ -39,4 +39,9 @@ describe('SelectionBar', () => {
     fireEvent.click(screen.getByText('▶ Start')); fireEvent.click(screen.getByText('■ Stop'));
     expect(a.start).toHaveBeenCalledTimes(1); expect(a.stop).toHaveBeenCalledTimes(1);
   });
+  it('Start is disabled when the bar says so (a never-saved triangle is picked) [user, 2026-11-23 rev 2]', () => {
+    render(<SelectionBar bar={bar(2, { run: true, del: true })} actions={acts()} startDisabled />);
+    expect(screen.getByText('▶ Start')).toBeDisabled();
+    expect(screen.getByText('■ Stop')).toBeEnabled();
+  });
 });

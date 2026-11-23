@@ -6,7 +6,7 @@ import { toolbarFor, type ToolbarDeps } from './Toolbar';
 const tri: Pick = { kind: 'workflow', id: 'w1' };
 function deps(over: Partial<ToolbarDeps> = {}): ToolbarDeps {
   return {
-    picks: [tri], run: () => 'stopped' as LiveStatus,
+    picks: [tri], run: () => 'stopped' as LiveStatus, saved: () => true,
     start: vi.fn(), stop: vi.fn(), copy: vi.fn(), remove: vi.fn(),
     restore: vi.fn(), removeGhosts: vi.fn(),
     ...over,
@@ -34,6 +34,10 @@ describe('toolbarFor', () => {
   it('Stop for a running workflow, Start disabled while the run state is not known', () => {
     expect(labels(tri, deps({ run: () => 'running' }))).toEqual(['■ Stop', 'Copy', 'Delete']);
     expect(toolbarFor(tri, deps({ run: () => 'checking' }))![0]).toMatchObject({ label: '▶ Start', disabled: true });
+  });
+  it('Start is disabled for a workflow that was never saved [user, 2026-11-23 rev 2]', () => {
+    expect(toolbarFor(tri, deps({ saved: () => false }))![0]).toMatchObject({ label: '▶ Start', disabled: true });
+    expect(toolbarFor(tri, deps())![0]).toMatchObject({ label: '▶ Start', disabled: false });
   });
   it('the buttons call their actions', () => {
     const d = deps();

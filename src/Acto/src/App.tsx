@@ -247,6 +247,7 @@ export function App(props: AppProps) {
   const toolbar = useMemo<ToolbarActions>(() => (p) => toolbarFor(p, {
     picks: sel.picks,
     run: (wf) => statusOf(live.getState(), wf),
+    saved: (wf) => !!store.base().workflows[wf],
     start: (wf) => run(wf, 'start'),
     stop: (wf) => run(wf, 'stop'),
     copy: (ref) => copyItems([ref]),
@@ -258,7 +259,7 @@ export function App(props: AppProps) {
   const ghostKeys = () => selRef.current.picks.flatMap((p) => (p.kind === 'ghost' ? [p.key] : []));
   const triangleIds = () => selRef.current.picks.flatMap((p) => (p.kind === 'workflow' ? [p.id] : []));
   const barView = bar && (
-    <SelectionBar bar={bar} actions={{
+    <SelectionBar bar={bar} startDisabled={bar.run && triangleIds().some((id) => !store.base().workflows[id])} actions={{
       copy: () => copyItems(selRef.current.picks.flatMap((p) => (p.kind === 'step' || p.kind === 'cache' || p.kind === 'workflow' ? [{ kind: p.kind, id: p.id }] : []))),
       del: () => removePicks(selRef.current.picks),
       restore: () => restore(ghostKeys()),

@@ -26,7 +26,6 @@ export function fakeApi(o: FakeLists = {}): StudioApi {
     listSchemas: vi.fn().mockResolvedValue(ok(o.schemas ?? [])),
     applyModel: vi.fn().mockResolvedValue(ok({ applied: true, results: [], made: {} })),
     validateModel: vi.fn().mockResolvedValue(ok({ ok: true, results: [] })),
-    validateDraft: vi.fn().mockResolvedValue(ok({ valid: true, results: [], workflows: [] })),
     validateWorkflow: vi.fn().mockResolvedValue(ok({ problems: [] })),
     getStep: notFoundFn,
     getProcessor: notFoundFn,

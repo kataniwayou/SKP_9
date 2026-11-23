@@ -15,15 +15,47 @@ function entry(name: string, base: object | null, unsaved = false) {
   const now: BoardState = { ...b, workflows: { w1: { ...row, id: 'w1', description: unsaved ? 'changed' : null }, w2: { ...row, id: 'w2' } } };
   return { saved, now };
 }
-const storeOf = (e: { saved: BoardState; now: BoardState }) => ({ base: () => e.saved, state: () => e.now }) as unknown as BoardStore;
+const storeOf = (e: { saved: BoardState; now: BoardState }) => ({ base: () => e.saved, state: () => e.now, setProblems: vi.fn() }) as unknown as BoardStore;
 const apiOf = (answer: ApiResult<null>) => {
   const call = vi.fn(async () => answer);
-  return { api: { startWorkflow: call, stopWorkflow: call } as unknown as StudioApi, call };
+  const validateWorkflow = vi.fn(async () => ({ ok: true, value: { valid: true, problems: [] } }));
+  return { api: { startWorkflow: call, stopWorkflow: call, validateWorkflow } as unknown as StudioApi, call };
 };
 const ok: ApiResult<null> = { ok: true, value: null };
 const texts = (o: ReturnType<typeof createOutputStore>) => o.lines().map((l) => [l.level, l.text]);
 
 describe('runWorkflow', () => {
+  // the orchestration rules are checked at Start only [user, 2026-11-23 rev 2]: a refusal shows every problem and the count
+  const refusedWith = (problems: object[] | null) => {
+    const startWorkflow = vi.fn(async () => ({ ok: false, error: { kind: 'unprocessable', status: 422, detail: 'Workflow contains a cycle' } }));
+    const validateWorkflow = vi.fn(async () => (problems === null
+      ? { ok: false, error: { kind: 'network', status: 0, message: 'down' } }
+      : { ok: true, value: { valid: false, problems } }));
+    return { api: { startWorkflow, validateWorkflow } as unknown as StudioApi, validateWorkflow };
+  };
+  it('a refused Start lists every problem from the workflow check and sets the count', async () => {
+    const { api, validateWorkflow } = refusedWith([{ gate: 'cycle', title: 'Workflow contains a cycle', detail: 'a -> b -> a' }, { gate: 'missingPayload', title: 'Step has no payload its config schema requires', detail: 'step s: handler' }]);
+    const store = storeOf(entry('orders', {})); const o = createOutputStore(null);
+    expect(await runWorkflow(api, store, o, liveStub(), 'w1', 'start', () => undefined)).toBe('failed');
+    expect(validateWorkflow).toHaveBeenCalledWith('w1');
+    expect(o.lines().map((l) => l.text)).toEqual([
+      'orders: Start requested', 'orders: Start refused — Workflow contains a cycle',
+      'orders: Workflow contains a cycle — a -> b -> a', 'orders: Step has no payload its config schema requires — step s: handler']);
+    expect(store.setProblems).toHaveBeenCalledWith('w1', 2);
+  });
+  it('a refused Start whose workflow check fails keeps only the refusal line and sets no count', async () => {
+    const { api } = refusedWith(null);
+    const store = storeOf(entry('orders', {})); const o = createOutputStore(null);
+    await runWorkflow(api, store, o, liveStub(), 'w1', 'start', () => undefined);
+    expect(o.lines().map((l) => l.text)).toEqual(['orders: Start requested', 'orders: Start refused — Workflow contains a cycle']);
+    expect(store.setProblems).not.toHaveBeenCalled();
+  });
+  it('an accepted Start clears the count', async () => {
+    const { api } = apiOf(ok); const store = storeOf(entry('orders', {})); const o = createOutputStore(null);
+    expect(await runWorkflow(api, store, o, liveStub(), 'w1', 'start', () => undefined)).toBe('requested');
+    expect(store.setProblems).toHaveBeenCalledWith('w1', 0);
+  });
+
   it('refuses a never-saved workflow without a request', async () => {
     const { api, call } = apiOf(ok); const o = createOutputStore(null);
     expect(await runWorkflow(api, storeOf(entry('new-workflow-1', null)), o, liveStub(), 'w1', 'start')).toBe('refused');

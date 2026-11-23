@@ -39,8 +39,18 @@ export async function runWorkflow(api: StudioApi, store: BoardStore, output: Out
     output.log(answer.error.kind === 'unprocessable'
       ? `${name}: ${verb} refused — ${answer.error.detail}`
       : `${name}: ${verb} failed — ${describeError(answer.error)}`, 'error');
+    // the start names its first problem only: the workflow's check lists them all and sets the count [user, 2026-11-23 rev 2]
+    if (op === 'start' && answer.error.kind === 'unprocessable') {
+      const check = await api.validateWorkflow(workflowId);
+      if (check.ok) {
+        const problems = check.value.problems ?? [];
+        for (const p of problems) output.log(`${name}: ${p.title ?? p.gate ?? 'problem'} — ${p.detail ?? ''}`, 'warn');
+        store.setProblems(workflowId, problems.length);
+      }
+    }
     return 'failed';
   }
+  if (op === 'start') store.setProblems(workflowId, 0);
   const want = op === 'start' ? 'running' : 'stopped';
   later(() => {
     if (presses.get(workflowId) !== press) return;

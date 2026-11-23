@@ -30,7 +30,7 @@ const newWorkflow: ToolDef = {
 
 const save: ToolDef = {
   name: 'save',
-  description: "Save the whole board in one go: the dry run first checks every changed workflow (what Start would refuse, processor liveness aside); any problem anywhere and nothing is pushed (the problems are answered and stay in Output); all clean and every unsaved change of every workflow, step, cache, payload and processor goes to BaseAPI, all or nothing. Deleted items (ghosts) are deleted then. The user is asked first.",
+  description: "Save the whole board in one go, all or nothing: every unsaved change of every workflow, step, cache, payload and processor goes to BaseAPI as drawn (free style: cycles, schema edges and payloads are checked only at Start). Deleted items (ghosts) are deleted then. BaseAPI may refuse a row (a missing field, a duplicate name, a row changed elsewhere): then nothing is kept. The user is asked first.",
   parameters: NO_ARGS,
   async run(ctx, _args, answer) {
     const base = ctx.store.base();
@@ -78,6 +78,8 @@ const start: ToolDef = {
   async run(ctx, args, answer, pin) {
     const t = target(ctx, args, 'start', answer === undefined ? undefined : pin);
     if ('out' in t) return t.out;
+    // a never-saved workflow cannot be started [user, 2026-11-23 rev 2]
+    if (!ctx.store.base().workflows[t.id]) return fail(`${t.name} was never saved: save it first`, `start ${t.name} refused`);
     if (answer === undefined) return { kind: 'ask', question: { text: `Start ${t.name}?`, choices: ['Start', 'Cancel'], pin: t.id } };
     if (answer !== 'Start') return fail('the user declined', `user declined: start ${t.name}`);
     return press(ctx, t.id, t.name, 'start');

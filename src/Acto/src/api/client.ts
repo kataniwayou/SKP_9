@@ -1,6 +1,6 @@
 import { ENTITY_PATH, type EntityKind, type ReadDtoOf, type UpdateDtoOf } from './entities';
 import type { ModelChange } from '../design/changes';
-import type { AssignmentCreateDto, AssignmentReadDto, CacheReadDto, DraftCheckDto, ModelApplyResultDto, ModelValidateResultDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowReadDto, WorkflowValidationDto } from './types';
+import type { AssignmentCreateDto, AssignmentReadDto, CacheReadDto, ModelApplyResultDto, ModelValidateResultDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowReadDto, WorkflowValidationDto } from './types';
 
 /**
  * Every way a request can fail, as data. The UI shows these in its status line (Output in plan 5);
@@ -28,8 +28,6 @@ export interface StudioApi {
   applyModel(changes: ModelChange[]): Promise<ApiResult<ModelApplyResultDto>>;
   /** `POST /model/validate`: the same dry run, never applied. */
   validateModel(changes: ModelChange[]): Promise<ApiResult<ModelValidateResultDto>>;
-  /** `POST /workflows/validate`: Save's check — the changes run and rolled back, each listed workflow through the start's gates, liveness aside. */
-  validateDraft(changes: ModelChange[], workflowIds: string[]): Promise<ApiResult<DraftCheckDto>>;
   listProcessors?(): Promise<ApiResult<ProcessorReadDto[]>>;
   listCaches?(): Promise<ApiResult<CacheReadDto[]>>;
   listSchemas?(): Promise<ApiResult<SchemaReadDto[]>>;
@@ -151,7 +149,6 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
     listAssignments: () => get<AssignmentReadDto[]>('/assignments'),
     applyModel: (changes) => request<ModelApplyResultDto>('POST', '/model/apply', { changes }),
     validateModel: (changes) => request<ModelValidateResultDto>('POST', '/model/validate', { changes }),
-    validateDraft: (changes, workflowIds) => request<DraftCheckDto>('POST', '/workflows/validate', { changes, workflowIds }),
     getEntity<K extends EntityKind>(kind: K, entityId: string) {
       return get<ReadDtoOf[K]>(`/${ENTITY_PATH[kind]}/${id(entityId)}`);
     },

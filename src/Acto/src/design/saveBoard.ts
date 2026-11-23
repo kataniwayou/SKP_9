@@ -89,13 +89,12 @@ export const OUTCOME_UNKNOWN = 'Save outcome unknown — reload before saving ag
 const outcomeUnknown = (e: ApiError) => e.kind === 'network' || e.status === 0 || e.status >= 500;
 
 /**
- * Board-wide Save [user, 2026-11-23]: the draft is already kept (every edit writes it); Save dry-runs the changes and
- * every affected workflow in one call (POST /workflows/validate: rolled back, the start's gates, liveness aside) and
- * pushes through /model/apply (all or nothing) only when no row is refused and no workflow has a problem. The dry run
- * sets each checked triangle's problem count; a clean push clears them all; Kibana follows per affected workflow. `ghosts`
- * learns the created rows' BaseAPI ids before the board adopts the re-read, so a saved create does not become a ghost.
- * `onApplied`, when given, hears BaseAPI's created-id map (client id -> new id) and the affected workflows' new ids once
- * the apply went through (the chat's save reports them).
+ * Board-wide Save [user, 2026-11-23, rev 2]: the draft is already kept (every edit writes it); Save checks the design
+ * rules only — what BaseAPI needs to store the rows — and pushes through /model/apply, all or nothing. The design goes as
+ * drawn (free style): cycles, schema edges and payloads are the orchestration rules, checked at Start. Kibana follows
+ * per affected workflow. `ghosts` learns the created rows' BaseAPI ids before the board adopts the re-read, so a saved
+ * create does not become a ghost. `onApplied`, when given, hears BaseAPI's created-id map (client id -> new id) and the
+ * affected workflows' new ids once the apply went through (the chat's save reports them).
  */
 export async function saveBoard(
   api: StudioApi, store: BoardStore, output: OutputStore, ghosts?: GhostStore,
@@ -108,7 +107,7 @@ export async function saveBoard(
   const changes = boardChanges(base, present);
   if (changes.length === 0) { output.log('Nothing to save'); return 'nothing'; }
   store.setSaving(true);
-  /** A refused row (the dry run's or the push's): failures on the board, stale rows offered to Take stored. */
+  /** A refused row: failures on the board, stale rows offered to Take stored. */
   const refuse = (results: ModelChangeResultDto[] | null | undefined) => {
     const map = reportFailures(results, [present, base], output);
     if (map.size === 0) output.log('Save refused: BaseAPI gave no reason', 'error');
@@ -118,29 +117,6 @@ export async function saveBoard(
       .map((r) => ({ table: r.table as Table, id: r.id! })));
   };
   try {
-    // a deleted workflow is not checked: it is going
-    const workflowIds = affectedWorkflows(base, present).filter((id) => id in present.workflows);
-    const check = await api.validateDraft(changes, workflowIds);
-    // the dry run wrote nothing: a failed call is a plain failure, never "outcome unknown"
-    if (!check.ok) { output.log(`Save failed: ${transport(check.error)}`, 'error'); return 'refused'; }
-    if ((check.value.results ?? []).some((r) => r.ok === false)) { refuse(check.value.results); return 'refused'; }
-    // every row passed: an earlier refusal's marks no longer hold, whatever the workflows' problems are
-    store.setFailures(new Map());
-    store.setStale([]);
-    let problems = 0, workflows = 0;
-    for (const w of check.value.workflows ?? []) {
-      const found = w.problems ?? [];
-      store.setProblems(w.workflowId, found.length);
-      if (found.length === 0) continue;
-      workflows++; problems += found.length;
-      const name = present.workflows[w.workflowId]?.name ?? w.workflowId;
-      for (const p of found) output.log(`${name}: ${p.title ?? p.gate ?? 'problem'} — ${p.detail ?? ''}`, 'warn');
-    }
-    if (problems > 0) {
-      output.log(`Not pushed: ${problems} problem${problems === 1 ? '' : 's'} in ${workflows} workflow${workflows === 1 ? '' : 's'}`, 'error');
-      return 'refused';
-    }
-
     const res = await api.applyModel(changes);
     if (!res.ok) {
       if (outcomeUnknown(res.error)) {
@@ -166,7 +142,6 @@ export async function saveBoard(
     }
     ghosts?.remap(made);
     store.saved(after);
-    store.clearProblems();
 
     for (const id of affected) {
       const wf = after.workflows[id];

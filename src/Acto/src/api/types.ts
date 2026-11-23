@@ -36,8 +36,3 @@ export type ModelChangeResultDto = Schemas['ModelChangeResultDto'];
 export type ModelApplyResultDto = Schemas['ModelApplyResultDto'];
 export type ModelValidateResultDto = Schemas['ModelValidateResultDto'];
 
-// Save's check (BaseApi POST /workflows/validate, 2026-11-23): the changes run and rolled back, each listed workflow through
-// the start's gates (liveness aside). Not in the generated schema yet: written by hand from MoleculeDtos.cs.
-export type WorkflowProblemDto = WorkflowValidationDto['problems'] extends (infer P)[] | null | undefined ? P : never;
-export interface WorkflowCheckDto { workflowId: string; problems: WorkflowProblemDto[] }
-export interface DraftCheckDto { valid: boolean; results: ModelChangeResultDto[]; workflows: WorkflowCheckDto[] }
