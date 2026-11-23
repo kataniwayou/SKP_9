@@ -124,6 +124,9 @@ export async function saveBoard(
     // the dry run wrote nothing: a failed call is a plain failure, never "outcome unknown"
     if (!check.ok) { output.log(`Save failed: ${transport(check.error)}`, 'error'); return 'refused'; }
     if ((check.value.results ?? []).some((r) => r.ok === false)) { refuse(check.value.results); return 'refused'; }
+    // every row passed: an earlier refusal's marks no longer hold, whatever the workflows' problems are
+    store.setFailures(new Map());
+    store.setStale([]);
     let problems = 0, workflows = 0;
     for (const w of check.value.workflows ?? []) {
       const found = w.problems ?? [];

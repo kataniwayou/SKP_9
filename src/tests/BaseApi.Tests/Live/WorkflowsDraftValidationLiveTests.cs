@@ -97,6 +97,10 @@ public sealed class WorkflowsDraftValidationLiveTests : IAsyncLifetime
 
         Assert.False(result.GetProperty("valid").GetBoolean(), result.GetRawText());
         Assert.Contains(Problems(result, wf), p => p.GetProperty("gate").GetString() == "cycle");
+        // the rows of the run are rolled back: a problem names them by the ids the client sent, never by ids that exist nowhere
+        var cycle = Problems(result, wf).First(p => p.GetProperty("gate").GetString() == "cycle");
+        Assert.Contains(a.ToString("D"), cycle.GetProperty("detail").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(a.ToString("D"), cycle.GetProperty("offending").GetRawText(), StringComparison.OrdinalIgnoreCase);
         await AssertGoneAsync($"workflows/{wf}");
     }
 

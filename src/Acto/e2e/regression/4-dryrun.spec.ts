@@ -81,6 +81,9 @@ test('a Save holding a schema-edge mismatch, a payload off its schema and a cycl
   const mismatch = edge.filter((p) => p.gate === 'schemaEdge');
   expect(mismatch, 'one schema-edge problem, on the wire edge-1 -> edge-2').toHaveLength(1);
   expect(mismatch[0]!.title).toBe('Schema-edge mismatch between steps');
+  // named by the board's own ids: the dry run's rows are rolled back, so it maps them back to what Acto sent
+  expect(mismatch[0]!.detail).toContain(id.e1!);
+  expect(mismatch[0]!.detail).toContain(id.e2!);
   const pay = await expectCheckShown(page, checked, id.pay!, N.pay);
   expect(pay.filter((p) => p.gate === 'payloadConfigSchema'), 'one payload problem').toHaveLength(1);
   expect(pay.find((p) => p.gate === 'payloadConfigSchema')!.title).toBe('Assignment payload does not conform to its config schema');

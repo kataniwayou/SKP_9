@@ -171,6 +171,22 @@ describe('saveBoard', () => {
     expect(ids).not.toContain('daily');
   });
 
+  it('a dry run whose rows all pass clears the marks of an earlier refused row, even when a workflow problem stops the push (final review)', async () => {
+    const t = setup();
+    rename(t.store, 'daily', 'daily-2');
+    t.api.validateDraft.mockResolvedValueOnce({ ok: true, value: { valid: false, workflows: [], results: [
+      { index: 0, op: 'update', table: 'workflows', id: 'daily', ok: false, status: 409, problem: { detail: 'stale', code: 'stale' } },
+    ] } } as never);
+    await saveBoard(t.studio, t.store, t.output);
+    expect(t.store.failures().has('workflow:daily')).toBe(true);
+    expect(t.store.stale()).toHaveLength(1);
+    t.api.validateDraft.mockResolvedValueOnce({ ok: true, value: { valid: false, results: [{ index: 0, op: 'update', table: 'workflows', id: 'daily', ok: true, status: 200 }],
+      workflows: [{ workflowId: 'daily', problems: [{ gate: 'cycle', title: 'Cycle', detail: 'a -> a', offending: {} }] }] } } as never);
+    expect(await saveBoard(t.studio, t.store, t.output)).toBe('refused');
+    expect(t.store.failures().size).toBe(0);
+    expect(t.store.stale()).toEqual([]);
+  });
+
   it('a clean push clears every count', async () => {
     const t = setup();
     t.store.setProblems('hourly', 3);

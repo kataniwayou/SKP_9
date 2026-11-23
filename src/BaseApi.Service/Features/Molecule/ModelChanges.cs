@@ -78,12 +78,21 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
             var cycles = _services.GetRequiredService<CycleDetector>();
             var edges = _services.GetRequiredService<SchemaEdgeValidator>();
             var payloads = _services.GetRequiredService<PayloadConfigSchemaValidator>();
+            // the rows this run created are rolled back: a problem names them by the ids the client sent, never by ids that exist nowhere
+            var back = made.ToDictionary(kv => kv.Value.ToString("D"), kv => kv.Key.ToString("D"), StringComparer.OrdinalIgnoreCase);
+            string Unmade(string text)
+            {
+                foreach (var (given, client) in back) text = text.Replace(given, client, StringComparison.OrdinalIgnoreCase);
+                return text;
+            }
+            object Offending(object offending) => back.Count == 0 ? offending
+                : JsonDocument.Parse(Unmade(JsonSerializer.Serialize(offending, _json))).RootElement.Clone();
             foreach (var sent in workflowIds.Distinct())
             {
                 var id = made.TryGetValue(sent, out var given) ? given : sent;
                 using var snapshot = await loader.LoadL1Async([id], c);
                 var found = cycles.Collect(snapshot).Concat(edges.Collect(snapshot)).Concat(payloads.Collect(snapshot));
-                checks.Add(new WorkflowCheckDto(sent, found.Select(p => new WorkflowProblemDto(p.Gate, p.Title, p.Message, p.Offending)).ToList()));
+                checks.Add(new WorkflowCheckDto(sent, found.Select(p => new WorkflowProblemDto(p.Gate, Unmade(p.Title), Unmade(p.Message), Offending(p.Offending))).ToList()));
             }
         });
         var valid = results.All(r => r.Ok) && checks.All(w => w.Problems.Count == 0);
