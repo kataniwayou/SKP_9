@@ -1,8 +1,8 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import {
-  EXPANDER, NORMALIZER, caNode, cacheEdge, childLabels, entryEdge, expectSaveChecksNothing, ghost, openAt, out, rowNamed, rowsNamed,
-  saveButton, stNode, tabLabels, wfNode, wireEdge,
+  EXPANDER, NORMALIZER, allSteps, allWorkflows, caNode, cacheEdge, childLabels, entryEdge, expectSaveChecksNothing, ghost, openAt, out, rowNamed, rowsNamed,
+  openFitted, saveButton, stNode, tabLabels, wfNode, wireEdge,
 } from './helpers';
 import { seed } from './seed';
 import { apply, bodyOf, getJson, type Row } from './stack';
@@ -188,7 +188,7 @@ test('5 delete a step, then restore it: the step and its wires are back, nothing
   expect((await getJson<Row>(`/steps/${ids.s3}`)).name).toBe('e2e-chat-s3');
 });
 
-test('6 save and report the dry run: the problems the chat reports are BaseAPI\'s validate problems', async ({ page }) => {
+test('6 save, then check_workflow: the problems the chat reports are what a Start would refuse (BaseAPI\'s validate problems)', async ({ page }) => {
   const ids = await seed({
     steps: [{ key: 's', name: 'e2e-chat-d1', at: { x: 300, y: 0 }, processor: NORMALIZER }],
     payloads: [{ key: 'p', step: 's', payload: '{"handler": "Bogus"}' }],
@@ -370,4 +370,71 @@ test('15 a new payload laid out as ＋ Create does: the chat makes it from the c
   expect(rows).toHaveLength(1);
   expect(rows[0]!.name).toBe('e2e-chat-f1-assignment');
   expect(JSON.parse(rows[0]!.payload as string)).toMatchObject({ minimumSizeBytes: 0, maximumSizeBytes: 1024 });
+});
+
+// [user, 2026-11-23 rev 2] the workflow-state rules, free-style Save and the copy rule, through the chat
+
+/** Declines every question: these tests must never delete, start or stop anything real. */
+const decline: Chooser = () => 'Cancel';
+
+test('16 a running workflow cannot be deleted: the chat\'s delete is refused before any question, the row stays', async ({ page }) => {
+  await openFitted(page);
+  await expect.poll(async () => page.locator('.tri-st[data-status]').count(), { timeout: 30_000 }).toBeGreaterThan(0);
+  const running = page.locator('.react-flow__node-workflow:has(.tri-st[data-status="running"])').first();
+  test.skip(await running.count() === 0, 'the cluster runs no workflow now: nothing running to try');
+  const id = (await running.getAttribute('data-id'))!.slice('wf:'.length);
+  const name = (await getJson<Row>(`/workflows/${id}`)).name as string;
+  const t = await say(page, `Delete the workflow ${name} (id ${id}). Do nothing else.`, decline);
+
+  // the model may call the delete (refused by the tool) or, having read Running, not call it at all: never a delete that goes
+  const deletes = t.actions.filter((a) => /^delete/.test(a));
+  expect(deletes.every((a) => /refused/.test(a)), `every delete tool call was refused\n${t.actions.join('\n')}`).toBe(true);
+  expect(t.asked.some((q) => q.includes('[Delete/')), 'no Delete question was asked').toBe(false);
+  await expect(wfNode(page, id)).toHaveCount(1);
+  expect((await getJson<Row>(`/workflows/${id}`)).id).toBe(id);
+});
+
+test('17 a never-saved workflow cannot be started: the chat\'s start is refused before any question', async ({ page }) => {
+  await openAt(page);
+  const t = await say(page, 'Create a new workflow named e2e-chat-ns, do not save it, and start it right away.', decline);
+
+  expect(t.asked.some((q) => q.includes('[Start/')), 'no Start question was asked').toBe(false);
+  expect(t.actions.some((a) => /start e2e-chat-ns refused/.test(a)) || /save/i.test(t.reply), `start refused, or the reply says to save first\n${t.actions.join('\n')}\n${t.reply}`).toBe(true);
+  expect(await rowsNamed('workflows', 'e2e-chat-ns'), 'nothing was saved').toHaveLength(0);
+});
+
+test('18 free style: a design with a cycle saves; check_workflow names the cycle', async ({ page }) => {
+  const ids = await seed({
+    steps: [
+      { key: 'c1', name: 'e2e-chat-c1', at: { x: 300, y: 0 }, processor: EXPANDER, next: ['c2'] },
+      { key: 'c2', name: 'e2e-chat-c2', at: { x: 600, y: 0 }, processor: EXPANDER },
+    ],
+    workflows: [{ key: 'w', name: 'e2e-chat-c', at: { x: 0, y: 0 }, entry: ['c1'] }],
+  });
+  await openAt(page);
+  const t = await say(page, 'Wire step e2e-chat-c2 back to step e2e-chat-c1 (a loop), save the board, then check what a Start of e2e-chat-c would refuse '
+    + 'and tell me every problem. Do not fix anything.');
+
+  expect((await getJson<Row>(`/steps/${ids.c2}`)).nextStepIds, 'the cycle was saved').toEqual([ids.c1]);
+  expect(t.actions.some((a) => /checked e2e-chat-c/.test(a)), `check_workflow ran\n${t.actions.join('\n')}`).toBe(true);
+  expect(t.reply, 'the reply names the cycle').toMatch(/cycl|loop/i);
+  await expect(saveButton(page)).toBeDisabled();
+});
+
+test('19 a workflow copied alone pastes alone: no entry arrows, cache lines or payloads', async ({ page }) => {
+  const ids = await seedChain();
+  await openAt(page);
+  await expect(wfNode(page, ids.a!)).toHaveCount(1);
+  const wfs0 = await allWorkflows(page).evaluateAll((els) => els.map((e) => e.getAttribute('data-id')));
+  const steps0 = await allSteps(page).count();
+  await say(page, 'Copy only the workflow e2e-chat-a (not its steps or caches) and paste it once. Do not save.');
+
+  await expect.poll(async () => allWorkflows(page).count()).toBe(wfs0.length + 1);
+  const wfs1 = await allWorkflows(page).evaluateAll((els) => els.map((e) => e.getAttribute('data-id')));
+  const pasted = wfs1.find((x) => !wfs0.includes(x))!.slice('wf:'.length);
+  expect(await allSteps(page).count(), 'no step was pasted').toBe(steps0);
+  await expect(page.locator(`.react-flow__edge[data-id^="entry:${pasted}:"]`)).toHaveCount(0);
+  await expect(page.locator(`.react-flow__edge[data-id^="cache:${pasted}:"]`)).toHaveCount(0);
+  await expect(entryEdge(page, ids.a!, ids.s1!), 'the original keeps its arrow').toHaveCount(1);
+  await expect(saveButton(page), 'the paste is unsaved').toBeEnabled();
 });
