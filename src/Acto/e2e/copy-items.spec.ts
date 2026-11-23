@@ -2,6 +2,7 @@ import { test, expect } from './fixtures';
 import {
   allCaches, allWorkflows, cacheEdge, caNode, clearOutput, clickEmptyBoard, field, entryEdge, openAt, outLine, pickCache, pickStep, pickWorkflow, save, selbar,
   stNode, toolbar, wfNode,
+  drawEntry,
 } from './helpers';
 import { seed } from './seed';
 import { getJson, type Row } from './stack';
@@ -20,7 +21,7 @@ const SEED = {
 const byName = (rows: Row[], name: string) => rows.find((r) => r.name === name);
 const nodeId = async (l: ReturnType<typeof wfNode>) => (await l.getAttribute('data-id'))!.replace(/^[a-z]+:/, '');
 
-test('a workflow\'s toolbar has Copy; the paste is a new triangle with every field, the same entry step, cache and assignment, and saves as such', async ({ page }) => {
+test('a workflow\'s toolbar has Copy; copied alone it pastes like a step alone: every field, no arrows, cache lines or assignments [user, 2026-11-23]', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
   await pickWorkflow(page, id.w!);
@@ -37,21 +38,25 @@ test('a workflow\'s toolbar has Copy; the paste is a new triangle with every fie
   await expect(copy).toHaveCount(1);
   await expect(copy.locator('.unsaved-mark')).toHaveCount(1);
   const cid = await nodeId(copy);
-  // picked alone, with its own toolbar; its entry arrow and cache line go to the same step and cache
+  // picked alone, with its own toolbar; no entry arrow and no cache line
   await expect(toolbar(page, 'workflow').getByRole('button')).toHaveText(['▶ Start', 'Copy', 'Delete']);
-  await expect(entryEdge(page, cid, id.s!)).toHaveCount(1);
-  await expect(cacheEdge(page, cid, id.c!)).toHaveCount(1);
+  await expect(entryEdge(page, cid, id.s!)).toHaveCount(0);
+  await expect(cacheEdge(page, cid, id.c!)).toHaveCount(0);
   // not on top of the original
   const [a, b] = [(await wfNode(page, id.w!).boundingBox())!, (await copy.boundingBox())!];
   expect(a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height, 'the copy overlaps the original').toBe(false);
 
+  // a workflow needs an entry arrow to be stored (BaseAPI): drawn, it saves with its fields and nothing else
+  await drawEntry(page, copy, stNode(page, id.s!));
   const answer = await save(page);
   expect(answer.applied).toBe(true);
   const rows = await getJson<Row[]>('/workflows');
   const orig = byName(rows, 'e2e-cp-wf')!, made = byName(rows, 'e2e-cp-wf-2')!;
   expect(made.id).not.toBe(orig.id);
-  for (const k of ['version', 'description', 'cronExpression', 'entryStepIds', 'cacheIds', 'assignmentIds']) expect(made[k], k).toEqual(orig[k]);
-  expect(made.assignmentIds).toEqual([id.p]);
+  for (const k of ['version', 'description', 'cronExpression']) expect(made[k], k).toEqual(orig[k]);
+  expect(made.entryStepIds).toEqual([id.s]);
+  expect(made.cacheIds).toEqual([]);
+  expect(made.assignmentIds).toEqual([]);
 });
 
 test('a cache\'s toolbar has Copy; the paste is a new cache with every field but the name and root, and saves as such', async ({ page }) => {

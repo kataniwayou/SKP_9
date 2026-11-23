@@ -78,14 +78,14 @@ describe('copy and paste of caches and workflows [user, 2026-11-19: a new id, ev
     expect(c.at).not.toEqual(b.caches.c1!.at);
     expect(state.caches.c1).toBe(b.caches.c1);
   });
-  it('a workflow alone: every field, the same entry steps, caches and assignment rows', () => {
+  it('a workflow copied alone pastes like a step alone: every field, no entry arrows, no cache lines, no assignments [user, 2026-11-23]', () => {
     const b = board();
     b.workflows.daily = { ...b.workflows.daily!, cronExpression: '0 * * * *', description: 'nightly', version: '3.1.0' };
     const { state, pasted } = pasteClip(b, copyClip(b, [T])!, ids());
     expect(pasted).toEqual([{ kind: 'workflow', id: 'new-1' }]);
     expect(state.workflows['new-1']).toMatchObject({
       name: 'daily-2', version: '3.1.0', description: 'nightly', cronExpression: '0 * * * *',
-      entryStepIds: ['fetch'], cacheIds: ['c1'], assignmentIds: ['a-daily-fetch'], updatedAt: null,
+      entryStepIds: [], cacheIds: [], assignmentIds: [], updatedAt: null,
     });
     expect(Object.keys(state.assignments)).toEqual(Object.keys(b.assignments));
     expect(Object.keys(state.steps)).toEqual(Object.keys(b.steps));
@@ -101,9 +101,9 @@ describe('copy and paste of caches and workflows [user, 2026-11-19: a new id, ev
   });
   it('a link to an item gone from the board since the copy is dropped', () => {
     const b = board();
-    const clip = copyClip(b, [T])!;
+    const clip = copyClip(b, [T, { kind: 'step', id: 'lonely' }])!; // with a step: the links are kept (a workflow alone has none)
     const gone = { ...b, caches: {}, assignments: {} };
-    expect(pasteClip(gone, clip, ids()).state.workflows['new-1']).toMatchObject({ cacheIds: [], assignmentIds: [], entryStepIds: ['fetch'] });
+    expect(Object.values(pasteClip(gone, clip, ids()).state.workflows).find((w) => w.name === 'daily-2')).toMatchObject({ cacheIds: [], assignmentIds: [], entryStepIds: ['fetch'] });
   });
   it('a second paste of the same clip names on: daily-2, daily-3', () => {
     const b = board();

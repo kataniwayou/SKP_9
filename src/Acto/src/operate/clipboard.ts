@@ -81,6 +81,11 @@ export function copyClip(b: BoardState, items: readonly ItemRef[]): Clip | null 
     seen.add(key);
   }
   if (clip.steps.length + clip.caches.length + clip.workflows.length === 0) return null;
+  // a workflow copied alone pastes like a step alone: its fields only — no entry arrows, cache lines or assignments
+  // [user, 2026-11-23]; copied with steps or caches it keeps its links (they join the copies, or stay on the originals)
+  if (clip.workflows.length === 1 && clip.steps.length === 0 && clip.caches.length === 0) {
+    clip.workflows[0] = { ...clip.workflows[0]!, entryStepIds: [], assignmentIds: [], cacheIds: [] };
+  }
   const chosen = new Set(clip.steps.map((s) => s.id));
   for (const s of clip.steps) {
     for (const to of new Set(b.steps[s.id]!.nextStepIds)) if (chosen.has(to)) clip.wires.push([s.id, to]);

@@ -242,7 +242,7 @@ const pickTool: ToolDef = {
 
 const copy: ToolDef = {
   name: 'copy',
-  description: "Copy workflows (triangles), steps and caches for paste: the ids given, or the picked ones when none is given. A paste makes new ones with every field the same but the name (and a cache's root, unique, named on like the name); the wires among copied steps are copied; a workflow keeps its entry steps, caches and assignments (shared rows), joined to the copies of those copied with it. Steps get no payloads.",
+  description: "Copy workflows (triangles), steps and caches for paste: the ids given, or the picked ones when none is given. A paste makes new ones with every field the same but the name (and a cache's root, unique, named on like the name); the wires among copied steps are copied; a workflow copied alone pastes alone (no entry arrows, cache lines or assignments, like a step alone); copied with steps or caches it keeps its entry steps, caches and assignments (shared rows), joined to the copies of those copied with it. Steps get no payloads.",
   parameters: { type: 'object', properties: {
     workflow_ids: { type: 'array', items: { type: 'string' } },
     step_ids: { type: 'array', items: { type: 'string' } },
