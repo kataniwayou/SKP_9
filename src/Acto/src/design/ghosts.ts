@@ -1,3 +1,4 @@
+import type { OutputStore } from '../output/outputStore';
 import type { Id } from '../model/graph';
 import { NO_AUDIT, type AssignmentRow, type BoardState, type CacheRow, type Edit, type StepRow, type WorkflowRow } from './board';
 import type { BoardStore } from './boardStore';
@@ -90,8 +91,16 @@ const GHOSTS_KEY = 'acto.ghosts';
  * Writes the store's ghosts to `storage` now and on every change; answers the unsubscribe. Only the store the page uses
  * is kept: a twin (React StrictMode creates one) that never saw a Remove must not overwrite it.
  */
-export function keepGhosts(ghosts: GhostStore, storage: Storage | null | undefined): () => void {
-  const write = () => { try { storage?.setItem(GHOSTS_KEY, JSON.stringify(ghosts.ghosts())); } catch { /* blocked or full storage: the ghosts stay in this page */ } };
+export function keepGhosts(ghosts: GhostStore, storage: Storage | null | undefined, output?: OutputStore): () => void {
+  let warned = false;
+  const write = () => {
+    try { storage?.setItem(GHOSTS_KEY, JSON.stringify(ghosts.ghosts())); } catch (e) {
+      // blocked or full storage: the ghosts stay in this page only; said once, as the draft does
+      if (warned) return;
+      warned = true;
+      output?.log(`Ghosts are no longer kept across refresh: ${e instanceof Error ? e.message : String(e)}`, 'warn');
+    }
+  };
   write();
   return ghosts.subscribe(write);
 }

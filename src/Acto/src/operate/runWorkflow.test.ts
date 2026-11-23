@@ -43,6 +43,18 @@ describe('runWorkflow', () => {
       'orders: Workflow contains a cycle — a -> b -> a', 'orders: Step has no payload its config schema requires — step s: handler']);
     expect(store.setProblems).toHaveBeenCalledWith('w1', 2);
   });
+  it('a workflow edited while its refused Start is being checked gets no count (it would describe the stored version) [review minor]', async () => {
+    const { api } = refusedWith([{ gate: 'cycle', title: 'Workflow contains a cycle', detail: 'a -> a' }]);
+    const e = entry('orders', {});
+    let now = e.now;
+    const store = { base: () => e.saved, state: () => now, setProblems: vi.fn() } as unknown as BoardStore;
+    (api.validateWorkflow as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+      now = { ...now, workflows: { ...now.workflows, w1: { ...now.workflows.w1!, description: 'edited meanwhile' } } };
+      return { ok: true, value: { valid: false, problems: [{ gate: 'cycle', title: 'Workflow contains a cycle', detail: 'a -> a' }] } };
+    });
+    await runWorkflow(api, store, createOutputStore(null), liveStub(), 'w1', 'start', () => undefined);
+    expect(store.setProblems).not.toHaveBeenCalled();
+  });
   it('a refused Start whose workflow check fails keeps only the refusal line and sets no count', async () => {
     const { api } = refusedWith(null);
     const store = storeOf(entry('orders', {})); const o = createOutputStore(null);

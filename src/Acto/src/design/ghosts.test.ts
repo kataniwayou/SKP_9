@@ -160,6 +160,18 @@ describe('ghosts in storage [user, 2026-11-23: they belong to the draft]', () =>
     const without = { ...board(), steps: { fetch: board().steps.fetch, expand: board().steps.expand } };
     expect(keys(fresh(storage, without).ghosts)).toEqual([]);
   });
+  it('a ghost write that fails says so once in Output (the draft does the same) [review minor]', () => {
+    const out = createOutputStore(null, () => '00:00:00');
+    const store = createBoardStore(out, null);
+    const full = { ...memoryStorage(), setItem: () => { throw new Error('QuotaExceededError'); } } as unknown as Storage;
+    const ghosts = createGhostStore(store, null);
+    keepGhosts(ghosts, full, out);
+    store.load(board());
+    store.edit((b) => deleteSteps(b, ['lonely']));
+    store.edit((b) => deleteSteps(b, ['expand']));
+    const warned = out.lines().filter((l) => l.text.startsWith('Ghosts are no longer kept across refresh'));
+    expect(warned).toHaveLength(1);
+  });
   it('unreadable stored ghosts are no ghosts', () => {
     const storage = memoryStorage({ 'acto.ghosts': '{not json' });
     expect(keys(fresh(storage).ghosts)).toEqual([]);

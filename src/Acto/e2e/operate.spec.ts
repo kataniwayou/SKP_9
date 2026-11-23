@@ -106,12 +106,10 @@ test('Start on a never-saved workflow is disabled and nothing is sent [user, 202
   const wf = await dropTool(page, workflowTool(page), 'workflow', await regionPoint(page, { x: 90, y: 130 }));
   const step = await dropTool(page, toolboxStep(page, PROC_A), 'step', await regionPoint(page, { x: 450, y: 130 }));
   void step;
-  const name = await wfNode(page, wf).locator('.tri-nm').innerText();
   await selectWorkflowAlone(page, wf);
   const start = toolbar(page, 'workflow').getByRole('button', { name: '▶ Start', exact: true });
   await expect(start).toBeVisible();
   await expect(toolbar(page, 'workflow').getByRole('button', { name: '■ Stop', exact: true })).toHaveCount(0);
   await expect(start).toBeDisabled();
-  void name;
   expect(sent).toEqual([]);
 });

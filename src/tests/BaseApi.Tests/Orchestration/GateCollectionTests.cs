@@ -114,6 +114,35 @@ public sealed class GateCollectionTests
     }
 
     [Fact]
+    public void TheMissingPayloadProblemNamesTheWorkflowAndStepByName()
+    {
+        // review minor: GUIDs alone are hard to read in Output
+        var g = new Graph();
+        var s = g.Step(g.Processor(config: g.Schema(RequiresHandler)));
+        g.Workflow(s);
+
+        var p = Assert.Single(new PayloadConfigSchemaValidator().Collect(g.Snapshot));
+        Assert.Contains("workflow 'wf'", p.Message);
+        Assert.Contains("step 's'", p.Message);
+    }
+
+    [Fact]
+    public void TheWalkEndsOnACycleAndChecksEachStepOnce()
+    {
+        var g = new Graph();
+        var cfg = g.Schema(RequiresHandler);
+        var (a, b) = (g.Step(g.Processor(config: cfg)), g.Step(g.Processor(config: cfg)));
+        g.Wire(a, b);
+        g.Wire(b, a);
+        g.Workflow(a);
+
+        var problems = new PayloadConfigSchemaValidator().Collect(g.Snapshot);
+
+        Assert.Equal(new HashSet<Guid> { a, b }, problems.Select(x => ((MissingPayloadOffending)x.Offending).stepId).ToHashSet());
+        Assert.Equal(2, problems.Count);
+    }
+
+    [Fact]
     public void AStepSharedByTwoWorkflowsIsCheckedPerWorkflow()
     {
         var g = new Graph();

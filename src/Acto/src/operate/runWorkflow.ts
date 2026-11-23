@@ -41,8 +41,11 @@ export async function runWorkflow(api: StudioApi, store: BoardStore, output: Out
       : `${name}: ${verb} failed — ${describeError(answer.error)}`, 'error');
     // the start names its first problem only: the workflow's check lists them all and sets the count [user, 2026-11-23 rev 2]
     if (op === 'start' && answer.error.kind === 'unprocessable') {
+      const before = store.state();
       const check = await api.validateWorkflow(workflowId);
-      if (check.ok) {
+      // an edit meanwhile clears the count; the check describes the stored version, so it would put back a stale one
+      const editedMeanwhile = affectedWorkflows(before, store.state()).includes(workflowId);
+      if (check.ok && !editedMeanwhile) {
         const problems = check.value.problems ?? [];
         for (const p of problems) output.log(`${name}: ${p.title ?? p.gate ?? 'problem'} — ${p.detail ?? ''}`, 'warn');
         store.setProblems(workflowId, problems.length);

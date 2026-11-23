@@ -256,14 +256,14 @@ export async function renameTo(page: Page, name: string) {
   await field(page, 'Name').fill(name);
 }
 
-/** Presses Save and waits until the whole Save (apply, read back, dry runs, diagrams) has finished. */
+/** Presses Save and waits until the whole Save (apply, read back, diagrams) has finished. */
 export async function save(page: Page) {
   await expect(saveButton(page)).toBeEnabled();
   await clearOutput(page);
   const sent = page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/v1/model/apply');
   await saveButton(page).click();
   const res = await sent;
-  // the button says Saving… from the press until the read back, the dry runs and the diagrams are done
+  // the button says Saving… from the press until the read back and the diagrams are done
   await expect(saveButton(page)).not.toHaveText('Saving…', { timeout: 60_000 });
   const answer = (await res.json()) as { applied?: boolean; made?: Record<string, string> };
   // what Output said, kept with the test result

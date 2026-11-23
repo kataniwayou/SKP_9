@@ -285,7 +285,7 @@ describe('a restored draft replays only the designer changes onto the fresh read
 });
 
 describe('problem counts [user, 2026-11-23]', () => {
-  it('an edit that touches a workflow clears its count; another workflow keeps its own; clearProblems clears all', () => {
+  it('an edit that touches a workflow clears its count; another workflow keeps its own', () => {
     const store = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
     store.load(board());
     store.setProblems('daily', 2);
@@ -293,7 +293,5 @@ describe('problem counts [user, 2026-11-23]', () => {
     store.edit((b) => ({ ...b, workflows: { ...b.workflows, daily: { ...b.workflows.daily!, name: 'daily-2' } } }));
     expect(store.problems('daily')).toBe(0);
     expect(store.problems('hourly')).toBe(1);
-    store.clearProblems();
-    expect(store.problems('hourly')).toBe(0);
   });
 });

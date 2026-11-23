@@ -33,7 +33,7 @@ internal sealed class PayloadConfigSchemaValidator
         }
     }
 
-    /// <summary>Every non-conforming assignment, in snapshot order; the first is the one <see cref="Validate"/> throws.</summary>
+    /// <summary>Every non-conforming assignment, in snapshot order, then every reached step missing the payload its config schema requires; the first is the one <see cref="Validate"/> throws.</summary>
     public IReadOnlyList<OrchestrationValidationException> Collect(WorkflowGraphSnapshot snapshot)
     {
         var problems = new List<OrchestrationValidationException>();
@@ -166,7 +166,7 @@ internal sealed class PayloadConfigSchemaValidator
                 if (linkedSteps.Contains(sid)) continue;
                 if (!snapshot.Processors.TryGetValue(step.ProcessorId, out var proc) || proc.ConfigSchemaId is not { } cfg) continue;
                 var required = Required(cfg);
-                if (required.Count > 0) yield return OrchestrationValidationException.MissingPayload(wf.Id, sid, required);
+                if (required.Count > 0) yield return OrchestrationValidationException.MissingPayload(wf.Id, wf.Name, sid, step.Name, required);
             }
         }
     }

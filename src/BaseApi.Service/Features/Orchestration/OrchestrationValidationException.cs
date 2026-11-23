@@ -79,11 +79,11 @@ public sealed class OrchestrationValidationException : Exception
 
     /// <summary>Missing-payload gate (2026-11-23) — a step the workflow reaches has no payload the workflow links, while its
     /// processor's config schema requires <paramref name="required"/>.</summary>
-    public static OrchestrationValidationException MissingPayload(Guid workflowId, Guid stepId, IReadOnlyList<string> required)
+    public static OrchestrationValidationException MissingPayload(Guid workflowId, string workflowName, Guid stepId, string stepName, IReadOnlyList<string> required)
         => new(
             "missingPayload",
             "Step has no payload its config schema requires",
-            $"Workflow '{workflowId}' links no payload on step '{stepId}', whose config schema requires: {string.Join(", ", required)}.",
+            $"The workflow '{workflowName}' ({workflowId}) links no payload on the step '{stepName}' ({stepId}), whose config schema requires: {string.Join(", ", required)}.",
             new MissingPayloadOffending(workflowId, stepId, required));
 
     /// <summary>Processor-liveness gate — no discovered replica of a participating processor is present,

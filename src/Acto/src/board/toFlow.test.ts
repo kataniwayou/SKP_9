@@ -75,6 +75,11 @@ describe('toFlow', () => {
     expect(w((id) => (id === 'hourly' ? 'running' : 'stopped'))).toBe(true);
     expect(w(() => 'stopped')).toBe(false);
   });
+  it('a wire into a Never step moves like any other while a running workflow reaches its source [user, 2026-11-23 item 4]', () => {
+    const never = { ...b, steps: { ...b.steps, expand: { ...b.steps.expand!, entryCondition: 5 } } };
+    const d = toFlow(never, view({ live: (id) => (id === 'hourly' ? 'running' : 'stopped') })).edges.find((e) => e.id === 'wire:fetch:expand')!.data as { condition: number; running: boolean };
+    expect(d).toMatchObject({ condition: 5, running: true });
+  });
   it('an entry arrow runs only while its workflow runs; cache lines never run', () => {
     const { edges } = toFlow(b, view({ live: (id) => (id === 'hourly' ? 'running' : 'stopped') }));
     const d = (id: string) => edges.find((e) => e.id === id)!.data as { running?: boolean };

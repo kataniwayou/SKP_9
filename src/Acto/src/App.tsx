@@ -86,7 +86,7 @@ export function App(props: AppProps) {
   const [store] = useState<BoardStore>(() => createBoardStore(output, storage));
   // the draft and its ghosts live in localStorage: they outlive the tab and belong to the draft [user, 2026-11-23]
   const [ghostStore] = useState<GhostStore>(() => createGhostStore(store, storage));
-  useEffect(() => keepGhosts(ghostStore, storage), [ghostStore, storage]);
+  useEffect(() => keepGhosts(ghostStore, storage, output), [ghostStore, storage, output]);
   const [saved] = useState<SavedView | null>(() => readView(storage));
   // the chat: this tab's sessionStorage, mirrored to localStorage (a new tab picks the conversation up)
   const [chat] = useState<ChatStore>(() => createChatStore(session, storage));

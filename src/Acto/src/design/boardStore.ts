@@ -44,8 +44,6 @@ export interface BoardStore {
   dropWorkflow(id: Id, deletedAssignments?: Id[]): void;
   problems(wf: Id): number;
   setProblems(wf: Id, n: number): void;
-  /** Drops every count (a clean push) [user, 2026-11-23]. */
-  clearProblems(): void;
   /** Key as changedKeys → BaseAPI's message. */
   failures(): Map<string, string>;
   setFailures(f: Map<string, string>): void;
@@ -253,7 +251,6 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       if (n === 0) problems.delete(wf); else problems.set(wf, n);
       notify();
     },
-    clearProblems() { if (problems.size) { problems = new Map(); notify(); } },
     failures: () => failures,
     setFailures(f) { failures = f; notify(); },
     stale: () => stale,

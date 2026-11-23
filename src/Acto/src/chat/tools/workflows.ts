@@ -47,7 +47,6 @@ const save: ToolDef = {
     const lines = linesSince(ctx, before);
     const entries = lines.map((l) => ({ kind: 'output' as const, text: l.text, level: l.level, name: 'board' }));
     const said = textOf(lines, r);
-    const problems = Object.values(ctx.store.state().workflows).flatMap((w) => (ctx.store.problems(w.id) > 0 ? [`${w.name}: ${ctx.store.problems(w.id)} problem(s)`] : []));
     if (r === 'saved') {
       // the created rows have BaseAPI's ids now: every id read before the save that is in this map is gone
       const after = ctx.store.state();
@@ -56,8 +55,8 @@ const save: ToolDef = {
         return `${name ?? client}: ${client} -> ${id}`;
       });
       const wfs = affected.map((id) => `${after.workflows[id]?.name ?? id} (id ${id})`);
-      return done(true, `saved. ${said}${problems.length ? ` Dry run: ${problems.join('; ')}.` : ''}`
-        + `${ids.length ? ` New ids (client id -> BaseAPI id): ${ids.join('; ')}.` : ''}${wfs.length ? ` Dry-run workflows: ${wfs.join(', ')}.` : ''}`, 'saved the board', entries);
+      return done(true, `saved. ${said}`
+        + `${ids.length ? ` New ids (client id -> BaseAPI id): ${ids.join('; ')}.` : ''}${wfs.length ? ` Affected workflows: ${wfs.join(', ')}.` : ''}`, 'saved the board', entries);
     }
     return fail(`the board was not saved (${r}): ${said}`, 'save failed', entries);
   },
