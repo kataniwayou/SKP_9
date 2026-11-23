@@ -67,6 +67,11 @@ export const test = base.extend<{ guard: string[] }, { stack: Stack }>({
       if (path === '/model/apply' || path === '/model/validate') {
         const body = (req.postDataJSON() ?? {}) as { changes?: { op?: string; table?: string; id?: string; row?: Record<string, unknown> }[] };
         for (const c of body.changes ?? []) { why = refusal(c, stack.real); if (why) break; }
+      } else if (method === 'POST' && (path === '/orchestration/start' || path === '/orchestration/stop')) {
+        // only the live run (ACTO_E2E_LIVE=1, user 2026-11-23) may start or stop, and only a workflow this run made, never a real one
+        const wf = String(req.postDataJSON() ?? '');
+        if (process.env.ACTO_E2E_LIVE !== '1') why = 'Start/Stop only in the live run (ACTO_E2E_LIVE=1)';
+        else if (stack.real.has(wf) || !wf) why = `Start/Stop of a workflow this run did not make (${wf || 'no id'})`;
       } else if (!(method === 'POST' && /^\/workflows\/[^/]+\/validate$/.test(path)) && !(method === 'PUT' && /^\/workflows\/[^/]+\/diagram$/.test(path))) {
         why = 'only a board save (/model/apply), a validate and a diagram publish may be written (never Start/Stop)';
       }
