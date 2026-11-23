@@ -84,9 +84,25 @@ function remapItem(g: GhostItem, m: (id: Id) => Id): GhostItem {
   }
 }
 
-/** Records every item of the board's present on each change; ghosts = recorded − present − removed. Page memory only. */
-export function createGhostStore(board: BoardStore): GhostStore {
-  let recorded = new Map<string, GhostItem>();
+const GHOSTS_KEY = 'acto.ghosts';
+
+/** The ghosts kept in `storage` (a JSON array of GhostItem); none when unreadable. */
+function readGhosts(storage: Storage | null | undefined): GhostItem[] {
+  try {
+    const raw = storage?.getItem(GHOSTS_KEY);
+    if (!raw) return [];
+    const v: unknown = JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((g): g is GhostItem => !!g && typeof g === 'object' && typeof (g as GhostItem).key === 'string' && typeof (g as GhostItem).kind === 'string') : [];
+  } catch { return []; }
+}
+
+/**
+ * Records every item of the board's present on each change; ghosts = recorded − present − removed. The ghosts belong to
+ * the draft [user, 2026-11-23]: with `storage` they are written there on every change and come back in a new page; one
+ * whose item is on the board again is no ghost.
+ */
+export function createGhostStore(board: BoardStore, storage?: Storage | null): GhostStore {
+  let recorded = new Map<string, GhostItem>(readGhosts(storage).map((g) => [g.key, g]));
   let removed = new Set<string>();
   let present = new Set<string>();
   let seen: BoardState | null = null;
@@ -99,6 +115,7 @@ export function createGhostStore(board: BoardStore): GhostStore {
     if (next.length === list.length && next.every((g, i) => g === list[i])) return;
     list = next;
     byKey = new Map(next.map((g) => [g.key, g]));
+    try { storage?.setItem(GHOSTS_KEY, JSON.stringify(next)); } catch { /* blocked or full storage: the ghosts stay in this page */ }
     subs.forEach((f) => f());
   };
 

@@ -6,6 +6,7 @@ import { createBoardStore } from './boardStore';
 import { changedKeys } from './changes';
 import { addStep, deleteSteps, withoutWorkflow } from './edits';
 import { createGhostStore, placeIn, restoreGhosts, type GhostItem } from './ghosts';
+import { memoryStorage } from '../test/memoryStorage';
 
 /** board() with two entries in every link array, the first of each being the one the tests delete. */
 function twoEach(): BoardState {
@@ -110,6 +111,43 @@ describe('ghost store', () => {
     store.edit((b) => deleteSteps(b, ['lonely']));
     expect(ghosts.ghosts().length).toBe(1);
     expect(store.state().steps.lonely).toBeUndefined();
+  });
+});
+
+describe('ghosts in storage [user, 2026-11-23: they belong to the draft]', () => {
+  const fresh = (storage: Storage, start: BoardState = board()) => {
+    const out = createOutputStore(null, () => '00:00:00');
+    const store = createBoardStore(out, null);
+    const ghosts = createGhostStore(store, storage);
+    store.load(start);
+    return { store, ghosts };
+  };
+  it('ghosts are written to storage and come back in a new store over the same storage', () => {
+    const storage = memoryStorage();
+    const a = fresh(storage);
+    a.store.edit((b) => deleteSteps(b, ['lonely']));
+    expect(keys(a.ghosts)).toEqual(['step:lonely']);
+    const without = { ...board(), steps: { fetch: board().steps.fetch, expand: board().steps.expand } };
+    const b = fresh(storage, without);
+    expect(keys(b.ghosts)).toEqual(['step:lonely']);
+    expect(b.ghosts.get('step:lonely')).toMatchObject({ kind: 'step', row: board().steps.lonely });
+  });
+  it('a stored ghost whose item is on the board again is not a ghost', () => {
+    const storage = memoryStorage();
+    fresh(storage).store.edit((b) => deleteSteps(b, ['lonely']));
+    expect(keys(fresh(storage).ghosts)).toEqual([]);
+  });
+  it('Remove drops a ghost from storage', () => {
+    const storage = memoryStorage();
+    const a = fresh(storage);
+    a.store.edit((b) => deleteSteps(b, ['lonely']));
+    a.ghosts.remove(['step:lonely']);
+    const without = { ...board(), steps: { fetch: board().steps.fetch, expand: board().steps.expand } };
+    expect(keys(fresh(storage, without).ghosts)).toEqual([]);
+  });
+  it('unreadable stored ghosts are no ghosts', () => {
+    const storage = memoryStorage({ 'acto.ghosts': '{not json' });
+    expect(keys(fresh(storage).ghosts)).toEqual([]);
   });
 });
 

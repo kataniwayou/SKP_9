@@ -83,9 +83,9 @@ export function App(props: AppProps) {
   const [storage] = useState<Storage | null>(() => (props.storage === undefined ? browserStorage() : props.storage));
   const [output] = useState<OutputStore>(() => createOutputStore(storage));
   const [session] = useState<Storage | null>(() => (props.session === undefined ? browserSession() : props.session));
-  const [store] = useState<BoardStore>(() => createBoardStore(output, session));
-  // ghosts: what was on the board earlier in this page session and is not now (page memory only)
-  const [ghostStore] = useState<GhostStore>(() => createGhostStore(store));
+  const [store] = useState<BoardStore>(() => createBoardStore(output, storage));
+  // the draft and its ghosts live in localStorage: they outlive the tab and belong to the draft [user, 2026-11-23]
+  const [ghostStore] = useState<GhostStore>(() => createGhostStore(store, storage));
   const [saved] = useState<SavedView | null>(() => readView(storage));
   // the chat: this tab's sessionStorage, mirrored to localStorage (a new tab picks the conversation up)
   const [chat] = useState<ChatStore>(() => createChatStore(session, storage));

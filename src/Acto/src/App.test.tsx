@@ -187,6 +187,24 @@ describe('App', () => {
     });
   });
 
+  describe('the draft lives in localStorage [user, 2026-11-23]', () => {
+    it('an unsaved delete and its ghost survive a reload with the same storage, even with a new tab session', async () => {
+      const storage = view();
+      const first = renderApp(boardApi(), { storage });
+      await loaded();
+      fireEvent.click(card('lonely'));
+      await waitFor(() => expect(toolbarLabels()).toEqual(['Copy', 'Delete']));
+      fireEvent.click(inToolbar().getByRole('button', { name: 'Delete' }));
+      await waitFor(() => expect(ghost('step:lonely')).not.toBeNull());
+      first.unmount();
+      renderApp(boardApi(), { storage, session: memoryStorage() });
+      await loaded();
+      await waitFor(() => expect(ghost('step:lonely')).not.toBeNull());
+      expect(screen.queryByTestId('rf__node-st:lonely')).toBeNull();
+      expect(saveButton()).toHaveTextContent('Save · 1');
+    });
+  });
+
   describe('picks and the selection bar', () => {
     it('Ctrl+click a step and a cache: the bar offers Copy and Delete, and Delete takes both', async () => {
       renderApp();
