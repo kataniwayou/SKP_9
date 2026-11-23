@@ -143,18 +143,3 @@ public sealed record ModelApplyResultDto(bool Ok, bool Applied, IReadOnlyList<Mo
 /// <param name="Status">What the real call would answer: 200 or 204, else the problem's status.</param>
 /// <param name="Problem">The problem the real call would answer (its <c>errors</c>, <c>detail</c>, <c>field</c>…), or null.</param>
 public sealed record ModelChangeResultDto(int Index, string Op, string Table, Guid Id, bool Ok, int Status, System.Text.Json.JsonElement? Problem);
-
-/// <summary>
-/// The body of <c>POST /workflows/validate</c>: the changes a Save would push (as <c>POST /model/apply</c> takes them) and
-/// the workflows to check once they are in — client ids of workflows the changes create included.
-/// </summary>
-public sealed record WorkflowsValidateDto(IReadOnlyList<ModelChangeDto> Changes, IReadOnlyList<Guid> WorkflowIds);
-
-/// <summary>One checked workflow, by the id the client sent, and every problem a start of it would refuse (liveness aside).</summary>
-public sealed record WorkflowCheckDto(Guid WorkflowId, IReadOnlyList<BaseApi.Service.Features.Orchestration.WorkflowProblemDto> Problems);
-
-/// <summary>
-/// The answer of <c>POST /workflows/validate</c>: <c>Valid</c> when every change passed and no checked workflow has a
-/// problem; each change's result in order; each workflow's problems (empty when a change was refused: no gate ran).
-/// </summary>
-public sealed record WorkflowsValidateResultDto(bool Valid, IReadOnlyList<ModelChangeResultDto> Results, IReadOnlyList<WorkflowCheckDto> Workflows);

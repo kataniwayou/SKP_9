@@ -19,7 +19,7 @@ namespace BaseApi.Service.Features.Orchestration;
 /// </summary>
 public sealed class OrchestrationValidationException : Exception
 {
-    /// <summary>Gate discriminator: "cycle", "missingStep", "schemaEdge", "payloadConfigSchema", "processorLiveness", "noEntryStep", "workflowDeleting" or "workflowRunning".</summary>
+    /// <summary>Gate discriminator: "cycle", "missingStep", "schemaEdge", "payloadConfigSchema", "missingPayload", "processorLiveness", "noEntryStep", "workflowDeleting" or "workflowRunning".</summary>
     public string Gate { get; }
 
     /// <summary>Gate-specific problem title.</summary>
@@ -77,6 +77,15 @@ public sealed class OrchestrationValidationException : Exception
             $"Assignment '{assignmentId}' payload does not conform to its config schema.",
             new PayloadConfigSchemaOffending(assignmentId, errors));
 
+    /// <summary>Missing-payload gate (2026-11-23) — a step the workflow reaches has no payload the workflow links, while its
+    /// processor's config schema requires <paramref name="required"/>.</summary>
+    public static OrchestrationValidationException MissingPayload(Guid workflowId, Guid stepId, IReadOnlyList<string> required)
+        => new(
+            "missingPayload",
+            "Step has no payload its config schema requires",
+            $"Workflow '{workflowId}' links no payload on step '{stepId}', whose config schema requires: {string.Join(", ", required)}.",
+            new MissingPayloadOffending(workflowId, stepId, required));
+
     /// <summary>Processor-liveness gate — no discovered replica of a participating processor is present,
     /// healthy and fresh. <paramref name="reason"/> is the aggregate count-only breakdown.</summary>
     public static OrchestrationValidationException ProcessorNotLive(Guid procId, string reason)
@@ -133,6 +142,9 @@ public sealed record SchemaEdgeOffending(Guid parentStepId, Guid childStepId);
 
 /// <summary>Offending payload for the payload gate — the assignment id and the flattened messages.</summary>
 public sealed record PayloadConfigSchemaOffending(Guid assignmentId, IReadOnlyList<string> errors);
+
+/// <summary>Offending payload for the missing-payload gate — the workflow, the step and what its config schema requires.</summary>
+public sealed record MissingPayloadOffending(Guid workflowId, Guid stepId, IReadOnlyList<string> required);
 
 /// <summary>Offending payload for the processor-liveness gate — the processor id and an aggregate
 /// reason. The reason carries per-state counts only, never instance ids, connection strings or stack

@@ -58,24 +58,6 @@ public sealed class ModelFieldsController : ControllerBase
     }
 
     /// <summary>
-    /// Acto's Save check (the user, 2026-11-23): the changes a Save would push, in one transaction that is always rolled
-    /// back, then every listed workflow (client ids of created ones included) through the start's gates inside it —
-    /// liveness aside. A 200 carries each change's result and each workflow's problems; <c>valid</c> says whether all is
-    /// clean. A 400 means the request could not be read.
-    /// </summary>
-    [HttpPost("api/v{version:apiVersion}/workflows/validate")]
-    [ProducesResponseType(typeof(WorkflowsValidateResultDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> ValidateWorkflows([FromBody] WorkflowsValidateDto body, CancellationToken ct)
-    {
-        if (body?.Changes is not { } changes)
-            return Problem(statusCode: StatusCodes.Status400BadRequest, title: "No changes", detail: "The body is { changes: [...], workflowIds: [...] }.");
-        if (changes.Count > ModelChangeRunner.MaxChanges)
-            return Problem(statusCode: StatusCodes.Status400BadRequest, title: "Too many changes", detail: $"At most {ModelChangeRunner.MaxChanges} changes in one check.");
-        return Ok(await _changes.CheckWorkflowsAsync(changes, body.WorkflowIds ?? [], HttpContext, ct));
-    }
-
-    /// <summary>
     /// Applies changes, all of them or none (the user, 2026-10-17): the dry run's way, in one transaction, committed only
     /// when every change passed. A 200 carries the results either way: <c>applied</c> says whether they were kept, and
     /// <c>made</c> maps each created row's client id to the id BaseApi gave it. A change that names when its row was read
@@ -100,8 +82,6 @@ public interface IModelChangesValidator
     Task<ModelValidateResultDto> DryRunAsync(IReadOnlyList<ModelChangeDto> changes, HttpContext http, CancellationToken ct);
     /// <summary>The same run, committed when every change passed: <c>POST /model/apply</c>.</summary>
     Task<ModelApplyResultDto> ApplyAsync(IReadOnlyList<ModelChangeDto> changes, HttpContext http, CancellationToken ct);
-    /// <summary>The dry run, then the start's snapshot gates on each listed workflow inside it: <c>POST /workflows/validate</c>.</summary>
-    Task<WorkflowsValidateResultDto> CheckWorkflowsAsync(IReadOnlyList<ModelChangeDto> changes, IReadOnlyList<Guid> workflowIds, HttpContext http, CancellationToken ct);
 }
 
 /// <summary>The fields' description and its ETag, for <see cref="ModelFieldsController.Fields"/>.</summary>

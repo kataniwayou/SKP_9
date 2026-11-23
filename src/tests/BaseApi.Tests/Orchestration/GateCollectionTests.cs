@@ -61,6 +61,59 @@ public sealed class GateCollectionTests
         }
     }
 
+    private const string RequiresHandler = """{"type": "object", "required": ["handler"], "properties": {"handler": {"type": "string"}}}""";
+    private const string RequiresNothing = """{"type": "object", "properties": {"maxDepth": {"type": "integer"}}}""";
+
+    /// <summary>The workflow links these assignments (the snapshot's own Workflow() links none).</summary>
+    private static void Link(Graph g, Guid wf, params Guid[] assignments) => g.Snapshot.Workflows[wf].AssignmentIds!.AddRange(assignments);
+
+    [Fact]
+    public void AReachedStepWithoutTheRequiredPayloadIsAProblemOfItsWorkflow()
+    {
+        // the user, 2026-11-23: an orchestration rule, checked at Start only (Save takes the design as drawn)
+        var g = new Graph();
+        var (a, b) = (g.Step(g.Processor()), g.Step(g.Processor(config: g.Schema(RequiresHandler))));
+        g.Wire(a, b);
+        var wf = g.Workflow(a);
+
+        var problems = new PayloadConfigSchemaValidator().Collect(g.Snapshot);
+
+        var p = Assert.Single(problems);
+        Assert.Equal("missingPayload", p.Gate);
+        var off = Assert.IsType<MissingPayloadOffending>(p.Offending);
+        Assert.Equal((wf, b), (off.workflowId, off.stepId));
+        Assert.Equal(["handler"], off.required);
+        Assert.Contains(b.ToString(), p.Message);
+        Assert.Contains("handler", p.Message);
+    }
+
+    [Fact]
+    public void ALinkedPayloadOrASchemaRequiringNothingNeedsNoProblem()
+    {
+        var g = new Graph();
+        var linked = g.Step(g.Processor(config: g.Schema(RequiresHandler)));
+        var free = g.Step(g.Processor(config: g.Schema(RequiresNothing)));
+        var none = g.Step(g.Processor());
+        g.Wire(linked, free, none);
+        var wf = g.Workflow(linked);
+        Link(g, wf, g.Assignment(linked, """{"handler": "Acme"}"""));
+
+        Assert.Empty(new PayloadConfigSchemaValidator().Collect(g.Snapshot));
+    }
+
+    [Fact]
+    public void AStepSharedByTwoWorkflowsIsCheckedPerWorkflow()
+    {
+        var g = new Graph();
+        var s = g.Step(g.Processor(config: g.Schema(RequiresHandler)));
+        var a = g.Workflow(s);
+        var b = g.Workflow(s);
+        Link(g, a, g.Assignment(s, """{"handler": "Acme"}"""));
+
+        var p = Assert.Single(new PayloadConfigSchemaValidator().Collect(g.Snapshot));
+        Assert.Equal(b, ((MissingPayloadOffending)p.Offending).workflowId);
+    }
+
     [Fact]
     public void TheCycleGateCollectsEveryCycleAndMissingStepInTraversalOrder()
     {
@@ -153,10 +206,11 @@ public sealed class GateCollectionTests
         var g = new Graph();
         var cfg = g.Schema("""{"type":"object","required":["url"]}""");
         var step = g.Step(g.Processor(config: cfg));
-        g.Workflow(step);
+        var wf = g.Workflow(step);
         var missing = g.Assignment(step, "{}");
         var broken = g.Assignment(step, "{not json");
-        g.Assignment(step, """{"url":"https://x"}""");
+        var ok = g.Assignment(step, """{"url":"https://x"}""");
+        Link(g, wf, missing, broken, ok); // a stored workflow links its payloads
 
         var problems = new PayloadConfigSchemaValidator().Collect(g.Snapshot);
 

@@ -113,6 +113,53 @@ internal sealed class PayloadConfigSchemaValidator
             }
         }
 
+        problems.AddRange(MissingPayloads(snapshot));
         return problems;
+    }
+
+    /// <summary>
+    /// The missing-payload check (the user, 2026-11-23: an orchestration rule, at Start only): every step a workflow
+    /// reaches whose processor's config schema requires properties must have a payload the workflow links; one problem
+    /// per workflow and step without it. A processor with no config schema, or one whose schema requires nothing, needs none.
+    /// </summary>
+    private static IEnumerable<OrchestrationValidationException> MissingPayloads(WorkflowGraphSnapshot snapshot)
+    {
+        var requiredOf = new Dictionary<Guid, IReadOnlyList<string>>();
+        IReadOnlyList<string> Required(Guid schemaId)
+        {
+            if (requiredOf.TryGetValue(schemaId, out var known)) return known;
+            IReadOnlyList<string> found = [];
+            if (snapshot.Schemas.TryGetValue(schemaId, out var dto))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(dto.Definition);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Object
+                        && doc.RootElement.TryGetProperty("required", out var req) && req.ValueKind == JsonValueKind.Array)
+                        found = req.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToList();
+                }
+                catch (JsonException) { /* an unreadable definition is the conformance check's problem */ }
+            }
+            return requiredOf[schemaId] = found;
+        }
+
+        foreach (var wf in snapshot.Workflows.Values)
+        {
+            var linkedSteps = (wf.AssignmentIds ?? [])
+                .Select(id => snapshot.Assignments.TryGetValue(id, out var a) ? a.StepId : (Guid?)null)
+                .OfType<Guid>().ToHashSet();
+            var seen = new HashSet<Guid>();
+            var queue = new Queue<Guid>(wf.EntryStepIds ?? []);
+            while (queue.Count > 0)
+            {
+                var sid = queue.Dequeue();
+                if (!seen.Add(sid) || !snapshot.Steps.TryGetValue(sid, out var step)) continue;
+                foreach (var next in step.NextStepIds ?? []) queue.Enqueue(next);
+                if (linkedSteps.Contains(sid)) continue;
+                if (!snapshot.Processors.TryGetValue(step.ProcessorId, out var proc) || proc.ConfigSchemaId is not { } cfg) continue;
+                var required = Required(cfg);
+                if (required.Count > 0) yield return OrchestrationValidationException.MissingPayload(wf.Id, sid, required);
+            }
+        }
     }
 }
