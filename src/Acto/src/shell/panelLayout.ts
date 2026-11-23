@@ -5,7 +5,7 @@ export type Hidden = Record<PanelId, boolean>;
 
 /**
  * Which panels are hidden, and the layout from before "Board only" (`saved`, null when not in board only).
- * Restore puts `saved` back exactly; showing a panel from its tab in between does not change it [user, 2026-11-23].
+ * Restore puts `saved` back exactly; showing a panel from its tab ends Board only and drops `saved` [user, 2026-11-23].
  */
 export interface PanelLayout { hidden: Hidden; saved: Hidden | null }
 
@@ -40,7 +40,8 @@ export function writeLayout(storage: Storage | null, l: PanelLayout): void {
 }
 
 export const hidePanel = (l: PanelLayout, id: PanelId): PanelLayout => ({ ...l, hidden: { ...l.hidden, [id]: true } });
-export const showPanel = (l: PanelLayout, id: PanelId): PanelLayout => ({ ...l, hidden: { ...l.hidden, [id]: false } });
+/** Showing a panel from its tab ends Board only: the button reads "Board only" again [user, 2026-11-23]. */
+export const showPanel = (l: PanelLayout, id: PanelId): PanelLayout => ({ hidden: { ...l.hidden, [id]: false }, saved: null });
 /** Board only hides every panel and keeps the layout it replaced; pressed again (Restore layout) it puts that back. */
 export const toggleBoardOnly = (l: PanelLayout): PanelLayout =>
   l.saved ? { hidden: l.saved, saved: null } : { hidden: ALL_HIDDEN, saved: l.hidden };

@@ -70,19 +70,31 @@ describe('Shell', () => {
     expect(screen.getByTitle('Show chat')).toHaveClass('bottom');
   });
 
-  it('Board only hides every panel; Restore layout puts back the layout from before, even after a tab was opened', () => {
+  it('Board only hides every panel; Restore layout puts back the layout from before, kept across a reload', () => {
     const st = memoryStorage();
     const { unmount } = render(<Shell toolbox="T" board="B" inspector={<HideButton />} output="O" chat="C" storage={st} />);
     fireEvent.click(screen.getByRole('button', { name: 'Hide inspector' }));
     fireEvent.click(screen.getByRole('button', { name: 'Board only' }));
     for (const p of ['toolbox', 'inspector', 'output', 'chat']) expect(document.querySelector(`[data-panel="${p}"]`)).not.toBeVisible();
-    fireEvent.click(screen.getByTitle('Show output'));
     unmount();
     render(<Shell toolbox="T" board="B" inspector="I" output="O" chat="C" storage={st} />); // remembered across a reload
     fireEvent.click(screen.getByRole('button', { name: 'Restore layout' }));
     expect(document.querySelector('[data-panel="inspector"]')).not.toBeVisible();
     for (const p of ['toolbox', 'output', 'chat']) expect(document.querySelector(`[data-panel="${p}"]`)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Board only' })).toBeInTheDocument();
+  });
+
+  it('in Board only, showing a panel from its tab ends Board only: the button reads Board only again', () => {
+    render(<Shell toolbox="T" board="B" inspector="I" output="O" chat="C" storage={null} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Board only' }));
+    fireEvent.click(screen.getByTitle('Show output'));
+    expect(document.querySelector('[data-panel="output"]')).toBeVisible();
+    for (const p of ['toolbox', 'inspector', 'chat']) expect(document.querySelector(`[data-panel="${p}"]`)).not.toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Restore layout' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Board only' })); // a fresh Board only keeps this layout
+    fireEvent.click(screen.getByRole('button', { name: 'Restore layout' }));
+    expect(document.querySelector('[data-panel="output"]')).toBeVisible();
+    expect(document.querySelector('[data-panel="chat"]')).not.toBeVisible();
   });
 
   it("a hidden Output's tab gets a dot when something new arrives, gone once shown; the Inspector's tab names what it is on", () => {
