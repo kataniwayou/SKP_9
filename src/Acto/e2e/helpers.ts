@@ -86,7 +86,8 @@ export const toolbar = (page: Page, kind: 'workflow' | 'step' | 'wire' | 'cache'
 export const selbar = (page: Page) => page.getByRole('toolbar', { name: 'selection actions' });
 export const inspector = (page: Page) => page.locator('[data-panel="inspector"]');
 export const field = (page: Page, label: string | RegExp) =>
-  inspector(page).locator('label.fld', { has: page.locator('span', { hasText: typeof label === 'string' ? new RegExp(`^${escapeRe(label)}$`) : label }) }).locator('input, textarea, select, button[role=combobox]');
+  // a .fld is a <label> wrapping its control, or (Cron, with its presets beside it) a <div> whose caption labels the input
+  inspector(page).locator('.fld', { has: page.locator('span', { hasText: typeof label === 'string' ? new RegExp(`^${escapeRe(label)}$`) : label }) }).locator('input, textarea, select:not(.cronpre), button[role=combobox]');
 const topRow = (page: Page) => inspector(page).getByRole('tablist', { name: 'Inspector tabs' });
 const childRow = (page: Page, parent: 'Step' | 'Processor') => inspector(page).getByRole('tablist', { name: `${parent} tabs` });
 /** A top Inspector tab by its label (Step, Processor, Workflow, Cache, Link, Deleted). */

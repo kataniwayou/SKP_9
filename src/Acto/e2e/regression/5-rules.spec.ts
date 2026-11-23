@@ -109,7 +109,7 @@ test('save rule: with nothing changed Save says so; a pushed delete leaves its g
   await expect(saveButton(page)).toBeDisabled();
 });
 
-test('item 4: a wire into a Never step moves while its workflow runs (an unsaved edit on a running workflow, never saved)', async ({ page }) => {
+test('item 4: a wire into a Never step stops moving while its workflow runs: it never fires (an unsaved edit on a running workflow, never saved)', async ({ page }) => {
   await openFitted(page);
   await runningWorkflow(page);
   const edge = page.locator('.react-flow__edge:has(.link-wire .wire.running)').first();
@@ -121,6 +121,6 @@ test('item 4: a wire into a Never step moves while its workflow runs (an unsaved
   await page.getByRole('option', { name: /Never/ }).click();
   const wire = page.locator(`.react-flow__edge[data-id="${eid}"] .link-wire`);
   await expect(wire).toHaveAttribute('data-condition', 'Never');
-  await expect(wire.locator('.wire')).toHaveClass(/\brunning\b/);
-  expect(await wire.locator('.wire').evaluate((w) => getComputedStyle(w).animationName)).toBe('wire-flow');
+  await expect(wire.locator('.wire')).not.toHaveClass(/\brunning\b/);
+  expect(await wire.locator('.wire').evaluate((w) => getComputedStyle(w).animationName)).toBe('none');
 });

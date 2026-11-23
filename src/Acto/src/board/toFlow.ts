@@ -136,7 +136,8 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
       edges.push({
         id, type: 'wire', source: nodeId('step', s.id), sourceHandle: 'out', target: nodeId('step', to), targetHandle: 'in',
         selected: pick !== undefined,
-        data: { condition: t.entryCondition, from: s.id, to, running: stepRuns(s.id), ...(pick ? { pick } : {}) },
+        // a wire into a Never step never fires, so it never moves [user, 2026-11-23 item 4]
+        data: { condition: t.entryCondition, from: s.id, to, running: stepRuns(s.id) && t.entryCondition !== 5, ...(pick ? { pick } : {}) },
       });
     }
   }
