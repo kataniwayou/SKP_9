@@ -30,7 +30,7 @@ const newWorkflow: ToolDef = {
 
 const save: ToolDef = {
   name: 'save',
-  description: "Save the whole board in one go (all or nothing): every unsaved change of every workflow, step, cache, payload and processor goes to BaseAPI; then the dry run reports each affected workflow's problems in Output. The report never blocks or undoes the save. The user is asked first.",
+  description: "Save the whole board in one go: the dry run first checks every changed workflow (what Start would refuse, processor liveness aside); any problem anywhere and nothing is pushed (the problems are answered and stay in Output); all clean and every unsaved change of every workflow, step, cache, payload and processor goes to BaseAPI, all or nothing. Deleted items (ghosts) are deleted then. The user is asked first.",
   parameters: NO_ARGS,
   async run(ctx, _args, answer) {
     const base = ctx.store.base();

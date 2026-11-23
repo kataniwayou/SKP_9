@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StudioApi } from '../api/client';
 import { createOutputStore } from '../output/outputStore';
-import { board, shared } from './boardFixtures';
+import { board } from './boardFixtures';
 import { createBoardStore } from './boardStore';
 import { saveBoard, takeStored } from './saveBoard';
 import { createGhostStore } from './ghosts';
@@ -19,6 +19,7 @@ function setup(start = board()) {
   store.load(start);
   const api = {
     applyModel: vi.fn(async () => ({ ok: true as const, value: { ok: true, applied: true, results: [], made: {} } })),
+    validateDraft: vi.fn(async (_c: unknown, ids: string[]) => ({ ok: true as const, value: { valid: true, results: [], workflows: ids.map((workflowId) => ({ workflowId, problems: [] })) } })),
     validateWorkflow: vi.fn(async () => ({ ok: true as const, value: { problems: [] } })),
     publishDiagram: vi.fn(async () => ({ ok: true as const, value: null })),
   };
@@ -45,10 +46,12 @@ describe('saveBoard', () => {
     expect(seen).toEqual([]);
   });
 
-  it('says nothing when nothing changed', async () => {
+  it('with nothing changed says "Nothing to save" and sends nothing', async () => {
     const t = setup();
     expect(await saveBoard(t.studio, t.store, t.output)).toBe('nothing');
+    expect(texts(t.output)).toEqual(['Nothing to save']);
     expect(t.api.applyModel).not.toHaveBeenCalled();
+    expect(t.api.validateDraft).not.toHaveBeenCalled();
   });
 
   it('sends the diff and adopts the re-read', async () => {
@@ -103,15 +106,78 @@ describe('saveBoard', () => {
     expect(t.store.failures().has('workflow:daily')).toBe(true);
   });
 
-  it('validates and publishes exactly the affected workflows', async () => {
+  it('dry-runs exactly the changes it pushes and the affected workflows, then pushes and publishes them [user, 2026-11-23]', async () => {
     const t = setup();
     rename(t.store, 'daily', 'daily-2');
     vi.mocked(loadBoard).mockResolvedValue({ ok: true, value: { ...board(), workflows: { ...board().workflows, daily: { ...board().workflows.daily!, name: 'daily-2' } } } });
-    await saveBoard(t.studio, t.store, t.output);
-    expect(t.api.validateWorkflow.mock.calls.map((c) => (c as unknown[])[0])).toEqual(['daily']);
+    expect(await saveBoard(t.studio, t.store, t.output)).toBe('saved');
+    const [checked, ids] = (t.api.validateDraft.mock.calls as unknown as [unknown, string[]][])[0]!;
+    expect(checked).toEqual((t.api.applyModel.mock.calls as unknown as unknown[][])[0]![0]);
+    expect(ids).toEqual(['daily']);
+    expect(t.api.validateWorkflow).not.toHaveBeenCalled();
     const pub = t.api.publishDiagram.mock.calls as unknown as [string, string][];
     expect(pub.map((c) => c[0])).toEqual(['daily']);
     expect(pub[0]![1]).toContain('<svg');
+    expect(texts(t.output)).toContain('Pushed 1 change');
+  });
+
+  it('a problem in any workflow pushes nothing, lists it under its workflow and sets the counts', async () => {
+    const t = setup();
+    rename(t.store, 'daily', 'daily-2');
+    t.store.edit((b) => ({ ...b, steps: { ...b.steps, fetch: { ...b.steps.fetch!, name: 'fetch-2' } } }));
+    t.api.validateDraft.mockResolvedValue({ ok: true, value: { valid: false, results: [], workflows: [
+      { workflowId: 'daily', problems: [{ gate: 'cycle', title: 'Cycle', detail: 'a -> a', offending: {} }, { gate: 'schemaEdge', title: 'Schema edge', detail: 'x', offending: {} }] },
+      { workflowId: 'hourly', problems: [] },
+    ] } } as never);
+    expect(await saveBoard(t.studio, t.store, t.output)).toBe('refused');
+    expect(t.api.applyModel).not.toHaveBeenCalled();
+    expect(texts(t.output)).toEqual(['daily-2: Cycle — a -> a', 'daily-2: Schema edge — x', 'Not pushed: 2 problems in 1 workflow']);
+    expect(t.store.problems('daily')).toBe(2);
+    expect(t.store.problems('hourly')).toBe(0);
+    expect(t.store.saving()).toBe(false);
+    expect(t.store.saveBlocked()).toBe(false);
+  });
+
+  it('a failed dry run call is "Save failed", pushes nothing and does not block Save', async () => {
+    const t = setup();
+    rename(t.store, 'daily', 'daily-2');
+    t.api.validateDraft.mockResolvedValue({ ok: false, error: { kind: 'network', status: 0, message: 'down' } } as never);
+    expect(await saveBoard(t.studio, t.store, t.output)).toBe('refused');
+    expect(t.api.applyModel).not.toHaveBeenCalled();
+    expect(texts(t.output)[0]).toMatch(/^Save failed: /);
+    expect(t.store.saveBlocked()).toBe(false);
+  });
+
+  it('a row the dry run refuses marks failures and stale rows like a push refusal', async () => {
+    const t = setup();
+    rename(t.store, 'daily', 'daily-2');
+    t.api.validateDraft.mockResolvedValue({ ok: true, value: { valid: false, workflows: [], results: [
+      { index: 0, op: 'update', table: 'workflows', id: 'daily', ok: false, status: 409, problem: { detail: 'stale', code: 'stale' } },
+    ] } } as never);
+    expect(await saveBoard(t.studio, t.store, t.output)).toBe('refused');
+    expect(t.api.applyModel).not.toHaveBeenCalled();
+    expect(texts(t.output)).toContain('daily-2 changed elsewhere — Take stored drops your change to it');
+    expect(t.store.stale()).toEqual([{ table: 'workflows', id: 'daily' }]);
+  });
+
+  it('a workflow created in the draft is checked by its client id; a deleted one is not checked', async () => {
+    const t = setup();
+    t.store.edit((b) => ({ ...b, workflows: { ...b.workflows, fresh: { ...b.workflows.hourly!, id: 'fresh', name: 'fresh', assignmentIds: [], updatedAt: null } } }));
+    t.store.edit((b) => { const { daily: _d, ...workflows } = b.workflows; return { ...b, workflows }; });
+    vi.mocked(loadBoard).mockResolvedValue({ ok: true, value: board() });
+    await saveBoard(t.studio, t.store, t.output);
+    const ids = (t.api.validateDraft.mock.calls as unknown as [unknown, string[]][])[0]![1];
+    expect(ids).toContain('fresh');
+    expect(ids).not.toContain('daily');
+  });
+
+  it('a clean push clears every count', async () => {
+    const t = setup();
+    t.store.setProblems('hourly', 3);
+    rename(t.store, 'daily', 'daily-2');
+    vi.mocked(loadBoard).mockResolvedValue({ ok: true, value: board() });
+    expect(await saveBoard(t.studio, t.store, t.output)).toBe('saved');
+    expect(t.store.problems('hourly')).toBe(0);
   });
 
   it('a step-only change on a shared step republishes both workflows', async () => {
@@ -120,16 +186,6 @@ describe('saveBoard', () => {
     vi.mocked(loadBoard).mockResolvedValue({ ok: true, value: board() });
     await saveBoard(t.studio, t.store, t.output);
     expect(t.api.publishDiagram.mock.calls.map((c) => (c as unknown[])[0]).sort()).toEqual(['daily', 'hourly']);
-  });
-
-  it('problems go to the store and to Output', async () => {
-    const t = setup(shared());
-    rename(t.store, 'daily', 'daily-2');
-    vi.mocked(loadBoard).mockResolvedValue({ ok: true, value: shared() });
-    t.api.validateWorkflow.mockResolvedValue({ ok: true, value: { problems: [{ title: 'Cycle', detail: 'a -> a' }] } } as never);
-    await saveBoard(t.studio, t.store, t.output);
-    expect(t.store.problems('daily')).toBe(1);
-    expect(texts(t.output)).toContain('daily: Cycle — a -> a');
   });
 
   it('a failed re-read keeps the present with BaseAPI ids and warns to reload', async () => {
@@ -163,7 +219,8 @@ describe('saveBoard', () => {
       store.load(board());
       store.edit((b) => ({ ...b, caches: { ...b.caches, n1: { ...b.caches.c1!, id: 'n1', name: 'new-cache-1', root: 'n', updatedAt: null } } }));
       const applyModel = vi.fn(async () => ({ ok: false as const, error }));
-      const api = { applyModel } as unknown as StudioApi;
+      const validateDraft = vi.fn(async () => ({ ok: true as const, value: { valid: true, results: [], workflows: [] } }));
+      const api = { applyModel, validateDraft } as unknown as StudioApi;
       const first = await saveBoard(api, store, output);
       return { output, session, store, api, applyModel, first };
     };

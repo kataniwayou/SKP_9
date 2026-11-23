@@ -256,7 +256,18 @@ describe('save', () => {
     expect(api.applyModel).not.toHaveBeenCalled();
     const o = done(await call(ctx, 'save', {}, 'Save'));
     expect(api.applyModel).toHaveBeenCalledTimes(1);
-    expect(o.result).toContain('Saved 1 change');
+    expect(o.result).toContain('Pushed 1 change');
+  });
+
+  it('a save the dry run refuses answers its problems and pushes nothing [user, 2026-11-23]', async () => {
+    const { ctx, store, api } = setup();
+    store.edit((b) => moveItems(b, [{ ref: { kind: 'step', id: 'expand' }, at: { x: 5, y: 5 } }]));
+    api.validateDraft!.mockResolvedValue({ ok: true, value: { valid: false, results: [], workflows: [{ workflowId: 'daily', problems: [{ gate: 'cycle', title: 'Cycle', detail: 'a -> a' }] }] } });
+    const o = done(await call(ctx, 'save', {}, 'Save'));
+    expect(o.ok).toBe(false);
+    expect(o.result).toContain('daily: Cycle — a -> a');
+    expect(o.result).toContain('Not pushed: 1 problem in 1 workflow');
+    expect(api.applyModel).not.toHaveBeenCalled();
   });
 
   it('gives the page ghost ghost store the made ids (the same remap as the Save button)', async () => {

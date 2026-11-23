@@ -100,18 +100,22 @@ describe('App', () => {
       expect(saveButton()).toBeDisabled();
       expect(api.applyModel).toHaveBeenCalledWith([expect.objectContaining({ op: 'delete', table: 'steps', id: 'lonely' })]);
       await act(async () => { finish({ ok: true, value: { applied: true, results: [], made: {} } }); });
-      expect(await screen.findByText('Saved 1 change')).toBeInTheDocument();
+      expect(await screen.findByText('Pushed 1 change')).toBeInTheDocument();
     });
 
-    it('marks the triangle with the problems of its dry run', async () => {
+    it('marks the triangle with the problems of its dry run, and pushes nothing [user, 2026-11-23]', async () => {
       const api = boardApi();
-      (api.validateWorkflow as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, value: { problems: [{ title: 'cycle', detail: 'x' }, { title: 'payload', detail: 'y' }] } });
+      (api.validateDraft as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, value: { valid: false, results: [], workflows: [
+        { workflowId: 'daily', problems: [{ gate: 'cycle', title: 'cycle', detail: 'x' }, { gate: 'payloadConfigSchema', title: 'payload', detail: 'y' }] },
+      ] } });
       renderApp(api);
       await loaded();
       fireEvent.click(triangle('daily'));
       fireEvent.change(await inspector().findByDisplayValue('daily'), { target: { value: 'daily-2' } });
       fireEvent.click(saveButton());
       await waitFor(() => expect(document.querySelector('[data-workflow="daily"] .tri-problems')).toHaveTextContent('2'));
+      expect(await screen.findByText('Not pushed: 2 problems in 1 workflow')).toBeInTheDocument();
+      expect(api.applyModel).not.toHaveBeenCalled();
     });
 
     it('a refused Save outlines the item BaseAPI named', async () => {

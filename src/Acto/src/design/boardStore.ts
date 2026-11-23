@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react';
 import type { Id } from '../model/graph';
 import type { OutputStore } from '../output/outputStore';
 import { deepEqual, type BoardState, type Edit } from './board';
-import { changedKeys } from './changes';
+import { affectedWorkflows, changedKeys } from './changes';
 import { withoutWorkflow } from './edits';
 import { canRedo, canUndo, commit, historyOf, redo, undo, type History } from './history';
 import type { Table } from './changes';
@@ -44,6 +44,8 @@ export interface BoardStore {
   dropWorkflow(id: Id, deletedAssignments?: Id[]): void;
   problems(wf: Id): number;
   setProblems(wf: Id, n: number): void;
+  /** Drops every count (a clean push) [user, 2026-11-23]. */
+  clearProblems(): void;
   /** Key as changedKeys → BaseAPI's message. */
   failures(): Map<string, string>;
   setFailures(f: Map<string, string>): void;
@@ -159,6 +161,11 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
   const notify = () => subs.forEach((f) => f());
   const setHistory = (h: History<BoardState>) => {
     if (h === history) return;
+    // a count is what the last dry run found on a workflow not changed since: an edit that touches it clears it [user, 2026-11-23]
+    if (problems.size > 0 && h.present !== history.present) {
+      const touched = affectedWorkflows(history.present, h.present).filter((id) => problems.has(id));
+      if (touched.length) { problems = new Map(problems); for (const id of touched) problems.delete(id); }
+    }
     history = h;
     writeDraft();
     notify();
@@ -246,6 +253,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       if (n === 0) problems.delete(wf); else problems.set(wf, n);
       notify();
     },
+    clearProblems() { if (problems.size) { problems = new Map(); notify(); } },
     failures: () => failures,
     setFailures(f) { failures = f; notify(); },
     stale: () => stale,

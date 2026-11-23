@@ -1,6 +1,6 @@
 import type { ApiError, StudioApi } from '../api/client';
 import { describeError } from '../api/describeError';
-import type { ModelApplyResultDto } from '../api/types';
+import type { ModelApplyResultDto, ModelChangeResultDto } from '../api/types';
 import { loadBoard } from '../board/loadBoard';
 import type { Id } from '../model/graph';
 import type { OutputStore } from '../output/outputStore';
@@ -89,7 +89,10 @@ export const OUTCOME_UNKNOWN = 'Save outcome unknown — reload before saving ag
 const outcomeUnknown = (e: ApiError) => e.kind === 'network' || e.status === 0 || e.status >= 500;
 
 /**
- * Board-wide Save through /model/apply: all or nothing; the dry run and Kibana follow per affected workflow. `ghosts`
+ * Board-wide Save [user, 2026-11-23]: the draft is already kept (every edit writes it); Save dry-runs the changes and
+ * every affected workflow in one call (POST /workflows/validate: rolled back, the start's gates, liveness aside) and
+ * pushes through /model/apply (all or nothing) only when no row is refused and no workflow has a problem. The dry run
+ * sets each checked triangle's problem count; a clean push clears them all; Kibana follows per affected workflow. `ghosts`
  * learns the created rows' BaseAPI ids before the board adopts the re-read, so a saved create does not become a ghost.
  * `onApplied`, when given, hears BaseAPI's created-id map (client id -> new id) and the affected workflows' new ids once
  * the apply went through (the chat's save reports them).
@@ -103,9 +106,38 @@ export async function saveBoard(
   const base = store.base();
   const present = store.state();
   const changes = boardChanges(base, present);
-  if (changes.length === 0) return 'nothing';
+  if (changes.length === 0) { output.log('Nothing to save'); return 'nothing'; }
   store.setSaving(true);
+  /** A refused row (the dry run's or the push's): failures on the board, stale rows offered to Take stored. */
+  const refuse = (results: ModelChangeResultDto[] | null | undefined) => {
+    const map = reportFailures(results, [present, base], output);
+    if (map.size === 0) output.log('Save refused: BaseAPI gave no reason', 'error');
+    store.setFailures(map);
+    store.setStale((results ?? [])
+      .filter((r) => r.ok === false && (isStale(r) || r.status === 404) && r.table && r.id && r.table in KIND)
+      .map((r) => ({ table: r.table as Table, id: r.id! })));
+  };
   try {
+    // a deleted workflow is not checked: it is going
+    const workflowIds = affectedWorkflows(base, present).filter((id) => id in present.workflows);
+    const check = await api.validateDraft(changes, workflowIds);
+    // the dry run wrote nothing: a failed call is a plain failure, never "outcome unknown"
+    if (!check.ok) { output.log(`Save failed: ${transport(check.error)}`, 'error'); return 'refused'; }
+    if ((check.value.results ?? []).some((r) => r.ok === false)) { refuse(check.value.results); return 'refused'; }
+    let problems = 0, workflows = 0;
+    for (const w of check.value.workflows ?? []) {
+      const found = w.problems ?? [];
+      store.setProblems(w.workflowId, found.length);
+      if (found.length === 0) continue;
+      workflows++; problems += found.length;
+      const name = present.workflows[w.workflowId]?.name ?? w.workflowId;
+      for (const p of found) output.log(`${name}: ${p.title ?? p.gate ?? 'problem'} — ${p.detail ?? ''}`, 'warn');
+    }
+    if (problems > 0) {
+      output.log(`Not pushed: ${problems} problem${problems === 1 ? '' : 's'} in ${workflows} workflow${workflows === 1 ? '' : 's'}`, 'error');
+      return 'refused';
+    }
+
     const res = await api.applyModel(changes);
     if (!res.ok) {
       if (outcomeUnknown(res.error)) {
@@ -116,19 +148,11 @@ export async function saveBoard(
       } else output.log(`Save failed: ${transport(res.error)}`, 'error');
       return 'refused';
     }
-    if (res.value.applied !== true) {
-      const map = reportFailures(res.value.results, [present, base], output);
-      if (map.size === 0) output.log('Save refused: BaseAPI gave no reason', 'error');
-      store.setFailures(map);
-      store.setStale((res.value.results ?? [])
-        .filter((r) => r.ok === false && (isStale(r) || r.status === 404) && r.table && r.id && r.table in KIND)
-        .map((r) => ({ table: r.table as Table, id: r.id! })));
-      return 'refused';
-    }
+    if (res.value.applied !== true) { refuse(res.value.results); return 'refused'; }
     const made = res.value.made ?? {};
     const affected = affectedWorkflows(base, present).map((id) => made[id] ?? id);
     onApplied?.(made, affected);
-    output.log(`Saved ${changes.length} change${changes.length === 1 ? '' : 's'}`, 'ok');
+    output.log(`Pushed ${changes.length} change${changes.length === 1 ? '' : 's'}`, 'ok');
 
     const fresh = await loadBoard(api);
     let after: BoardState;
@@ -139,16 +163,11 @@ export async function saveBoard(
     }
     ghosts?.remap(made);
     store.saved(after);
+    store.clearProblems();
 
     for (const id of affected) {
       const wf = after.workflows[id];
       if (!wf) continue;
-      const v = await api.validateWorkflow(id);
-      if (v.ok) {
-        const problems = v.value.problems ?? [];
-        for (const p of problems) output.log(`${wf.name}: ${p.title ?? p.gate ?? 'problem'} — ${p.detail ?? ''}`, 'warn');
-        store.setProblems(id, problems.length);
-      } else output.log(`${wf.name}: could not validate — ${transport(v.error)}`, 'warn');
       const pub = await api.publishDiagram(id, diagramSvg(after, id));
       if (pub.ok) output.log(`${wf.name}: Kibana diagram published`, 'ok');
       else output.log(`${wf.name}: Kibana diagram not published — ${transport(pub.error)}`, 'warn');
