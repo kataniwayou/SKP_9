@@ -38,6 +38,8 @@
   --stop-fill: #F1F3F7; --stop-line: #64748B; --stop-pill-bg: #E2E8F0; --stop-pill-ink: #334155;
   --ghost-line: #94A3B8; --ghost-tag-bg: #F1F5F9; --ghost-tag-ink: #475569;
   --pill-ink: #04111F; /* the letter on an entry-condition pill, whose fill is a constant colour */
+  /* drawn straight on the paper (arrows, cache lines, names under triangles, grey wires): must follow the paper, not the cards */
+  --on-paper: #1A1D29; --on-paper-2: #64748B; --on-paper-run: #15803D; --ghost-wire: #94A3B8;
 }
 
 [data-theme="dark"] {
@@ -71,6 +73,7 @@
   --stop-fill: #F1F3F7; --stop-line: #64748B; --stop-pill-bg: #E2E8F0; --stop-pill-ink: #334155;
   --ghost-line: #94A3B8; --ghost-tag-bg: #F1F5F9; --ghost-tag-ink: #475569;
   --pill-ink: #04111F; /* the letter on an entry-condition pill, whose fill is a constant colour */
+  --on-paper: #E3E6EE; --on-paper-2: #A3ADC2; --on-paper-run: #4ADE80; --ghost-wire: #CBD5E1;
 }
 
 html, body { height: 100%; margin: 0; background: var(--page); color: var(--ink); font-family: var(--sans); font-size: 14px; }
