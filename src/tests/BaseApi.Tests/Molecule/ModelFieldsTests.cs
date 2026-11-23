@@ -222,6 +222,37 @@ public sealed class ModelValidateControllerTests
     }
 
     [Fact]
+    public async Task TheWorkflowCheckGetsTheChangesAndIdsAndItsAnswerComesBack()
+    {
+        var (controller, runner) = Make();
+        var wf = Guid.NewGuid();
+        var changes = new[] { new ModelChangeDto("create", "workflows", wf, null), new ModelChangeDto("update", "steps", Guid.NewGuid(), null) };
+        var problem = new BaseApi.Service.Features.Orchestration.WorkflowProblemDto("cycle", "Cycle", "a → a", new object());
+        var answer = new WorkflowsValidateResultDto(false, [], [new WorkflowCheckDto(wf, [problem])]);
+        runner.CheckWorkflowsAsync(Arg.Any<IReadOnlyList<ModelChangeDto>>(), Arg.Any<IReadOnlyList<Guid>>(), Arg.Any<HttpContext>(), Arg.Any<CancellationToken>()).Returns(answer);
+
+        var ok = Assert.IsType<OkObjectResult>(await controller.ValidateWorkflows(new WorkflowsValidateDto(changes, [wf]), TestContext.Current.CancellationToken));
+
+        Assert.Same(answer, ok.Value);
+        await runner.Received(1).CheckWorkflowsAsync(
+            Arg.Is<IReadOnlyList<ModelChangeDto>>(c => c.SequenceEqual(changes)), Arg.Is<IReadOnlyList<Guid>>(ids => ids.SequenceEqual(new[] { wf })),
+            Arg.Any<HttpContext>(), Arg.Any<CancellationToken>());
+        await runner.DidNotReceiveWithAnyArgs().ApplyAsync(default!, default!, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task AWorkflowCheckOfNoBodyOrTooManyChangesIsABadRequest()
+    {
+        var (controller, runner) = Make();
+        var tooMany = Enumerable.Range(0, ModelChangeRunner.MaxChanges + 1).Select(_ => new ModelChangeDto("delete", "caches", Guid.NewGuid(), null)).ToList();
+
+        Assert.Equal(400, Assert.IsType<ObjectResult>(await controller.ValidateWorkflows(null!, TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(400, Assert.IsType<ObjectResult>(await controller.ValidateWorkflows(new WorkflowsValidateDto(null!, []), TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(400, Assert.IsType<ObjectResult>(await controller.ValidateWorkflows(new WorkflowsValidateDto(tooMany, []), TestContext.Current.CancellationToken)).StatusCode);
+        await runner.DidNotReceiveWithAnyArgs().CheckWorkflowsAsync(default!, default!, default!, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public async Task AnApplyOfNothingOrOfTooManyIsABadRequestAndNothingIsWritten()
     {
         var (controller, runner) = Make();

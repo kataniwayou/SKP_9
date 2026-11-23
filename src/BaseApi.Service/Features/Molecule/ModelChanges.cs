@@ -1,6 +1,8 @@
 using System.Reflection;
 using System.Text.Json;
 using BaseApi.Service.Features.Orchestration;
+using BaseApi.Service.Features.Orchestration.Loading;
+using BaseApi.Service.Features.Orchestration.Validation;
 using BaseApi.Service.Features.Workflow.Delete;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
@@ -62,10 +64,39 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
     }
 
     /// <summary>
-    /// Every change in order in one transaction, a savepoint each. A dry run always rolls back; an apply commits when
-    /// every change passed, and otherwise rolls back too — all of them, or none.
+    /// <c>POST /workflows/validate</c> (the user, 2026-11-23): the changes a Save would push, run as the dry run runs
+    /// them (always rolled back); when every change passed, each listed workflow is loaded inside that same transaction
+    /// and put through the start's snapshot gates — cycle and missing step, schema edge, payload. Never liveness: a
+    /// processor that is down says nothing about the design. A refused change: its results, and no gate runs.
     /// </summary>
-    private async Task<(List<ModelChangeResultDto> Results, Dictionary<Guid, Guid> Made, bool Applied)> RunAllAsync(IReadOnlyList<ModelChangeDto> changes, HttpContext http, bool commit, CancellationToken ct)
+    public async Task<WorkflowsValidateResultDto> CheckWorkflowsAsync(IReadOnlyList<ModelChangeDto> changes, IReadOnlyList<Guid> workflowIds, HttpContext http, CancellationToken ct)
+    {
+        var checks = new List<WorkflowCheckDto>();
+        var (results, _, _) = await RunAllAsync(changes, http, commit: false, ct, async (made, c) =>
+        {
+            var loader = _services.GetRequiredService<IWorkflowGraphLoader>();
+            var cycles = _services.GetRequiredService<CycleDetector>();
+            var edges = _services.GetRequiredService<SchemaEdgeValidator>();
+            var payloads = _services.GetRequiredService<PayloadConfigSchemaValidator>();
+            foreach (var sent in workflowIds.Distinct())
+            {
+                var id = made.TryGetValue(sent, out var given) ? given : sent;
+                using var snapshot = await loader.LoadL1Async([id], c);
+                var found = cycles.Collect(snapshot).Concat(edges.Collect(snapshot)).Concat(payloads.Collect(snapshot));
+                checks.Add(new WorkflowCheckDto(sent, found.Select(p => new WorkflowProblemDto(p.Gate, p.Title, p.Message, p.Offending)).ToList()));
+            }
+        });
+        var valid = results.All(r => r.Ok) && checks.All(w => w.Problems.Count == 0);
+        return new WorkflowsValidateResultDto(valid, results, results.All(r => r.Ok) ? checks : []);
+    }
+
+    /// <summary>
+    /// Every change in order in one transaction, a savepoint each. A dry run always rolls back; an apply commits when
+    /// every change passed, and otherwise rolls back too — all of them, or none. <paramref name="inside"/>, when given,
+    /// runs after every change passed, still inside the transaction (with the run's created-id map).
+    /// </summary>
+    private async Task<(List<ModelChangeResultDto> Results, Dictionary<Guid, Guid> Made, bool Applied)> RunAllAsync(IReadOnlyList<ModelChangeDto> changes, HttpContext http, bool commit, CancellationToken ct,
+        Func<Dictionary<Guid, Guid>, CancellationToken, Task>? inside = null)
     {
         var tables = ModelEntities.ByTable(_db.Model);
         var strategy = _db.Database.CreateExecutionStrategy();
@@ -103,6 +134,7 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
                         _db.ChangeTracker.Clear(); // the next change reads its row afresh, as a separate request would
                     }
                 }
+                if (inside is not null && list.All(r => r.Ok)) await inside(made, ct);
             }
             finally
             {
