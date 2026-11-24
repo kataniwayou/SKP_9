@@ -82,6 +82,28 @@ public sealed class RunningGraphTests
     }
 
     [Fact]
+    public void AnEntryWithItsOwnCronIsRenderedOnItsOwnLine()
+    {
+        var entry = Captured.EntryStepIds[0];
+        var graph = Captured with { EntryCrons = new Dictionary<Guid, string> { [entry] = "0/5 * * * * ?" } };
+
+        var text = GraphRenderer.Render(GraphBriefing.Of(graph)).Replace("\r\n", "\n");
+
+        Assert.Contains(
+            "Schedule: cron \"0 * * * * *\" (six fields, seconds first).\nEntry S1 runs on its own cron \"0/5 * * * * ?\".\n",
+            text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AGraphWithoutEntryCronsRendersExactlyAsBefore()
+    {
+        var plain = GraphRenderer.Render(GraphBriefing.Of(Captured));
+
+        Assert.DoesNotContain("runs on its own cron", plain, StringComparison.Ordinal);
+        Assert.Equal(plain, GraphRenderer.Render(GraphBriefing.Of(Captured with { EntryCrons = new Dictionary<Guid, string>() })));
+    }
+
+    [Fact]
     public void AnUnenterableStepIsCalledOut()
     {
         var orphan = new StepL1(Guid.NewGuid(), 0, Guid.NewGuid(), "{}", []);

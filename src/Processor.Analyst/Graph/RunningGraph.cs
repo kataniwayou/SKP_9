@@ -14,13 +14,16 @@ namespace Processor.Analyst.Graph;
 /// <param name="Live">Whether the workflow is in the live set, i.e. started and not stopped.</param>
 /// <param name="Names">Display names by id, for the workflow, its steps and its processors. A missing
 /// name is not an error: the id stands in for it.</param>
+/// <param name="EntryCrons">The cron of each entry step that runs on its own, by step id; null or empty when
+/// every entry follows the workflow's cron. Last and defaulted so a graph built without it is unchanged.</param>
 internal sealed record RunningGraph(
     Guid WorkflowId,
     bool Live,
     string? Cron,
     IReadOnlyList<Guid> EntryStepIds,
     IReadOnlyList<StepL1> Steps,
-    IReadOnlyDictionary<Guid, string> Names);
+    IReadOnlyDictionary<Guid, string> Names,
+    IReadOnlyDictionary<Guid, string>? EntryCrons = null);
 
 /// <summary>What a dispatch knows about the target's graph: the graph itself, or why it could not be read.</summary>
 internal sealed record GraphBriefing(RunningGraph? Graph, string? Unavailable)

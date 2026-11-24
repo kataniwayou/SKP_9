@@ -56,7 +56,8 @@ internal sealed class L2WorkflowGraphSource(IConnectionMultiplexer redis, IEntit
 
         return GraphBriefing.Of(new RunningGraph(
             workflowId, live, store.Cron, store.EntryStepIds, store.Steps,
-            await NamesAsync(workflowId, store).ConfigureAwait(false)));
+            await NamesAsync(workflowId, store).ConfigureAwait(false),
+            EntryCrons: store.EntryCrons));
     }
 
     /// <summary>Best effort and bounded, like the finding's target name: a name is context, never a reason to fail.</summary>
