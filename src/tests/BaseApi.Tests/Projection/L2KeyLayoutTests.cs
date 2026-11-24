@@ -93,17 +93,18 @@ public sealed class L2KeyLayoutTests
     {
         var store = new WorkflowStoreProjection(
             EntryStepIds: [S],
-            Cron: "0 0/5 * * * ?",
-            Steps: [new StepL1(S, 4, P, "{}", [])]);
+            Steps: [new StepL1(S, 4, P, "{}", [])],
+            EntryCrons: new Dictionary<Guid, string> { [S] = "0 0/5 * * * ?" });
 
         var json = JsonSerializer.Serialize(store, MessagingJson.Options);
         var back = JsonSerializer.Deserialize<WorkflowStoreProjection>(json, MessagingJson.Options)!;
 
         Assert.Contains("\"entryStepIds\"", json);
-        Assert.Contains("\"cron\"", json);
         Assert.Contains("\"steps\"", json);
+        Assert.Contains("\"entryCrons\"", json);
+        Assert.DoesNotContain("\"cron\"", json);
         Assert.Equal([S], back.EntryStepIds);
-        Assert.Equal("0 0/5 * * * ?", back.Cron);
+        Assert.Equal("0 0/5 * * * ?", back.EntryCrons![S]);
         Assert.Equal(P, Assert.Single(back.Steps).ProcessorId);
     }
 }

@@ -214,7 +214,7 @@ public sealed class WorkflowDeleteTests
             new L2ProjectionWriter(r.L2.Multiplexer, FakeStepRows.Everything()), new L2LiveSet(r.L2.Multiplexer), publisher,
             NullLogger<StartOrchestrationHandler>.Instance, r.Guard);
         var body = JsonSerializer.SerializeToUtf8Bytes(
-            new StartOrchestration(new WorkflowL1(wf, [], null, [], [], new Dictionary<Guid, string>())), MessagingJson.Options);
+            new StartOrchestration(new WorkflowL1(wf, [], [], [], new Dictionary<Guid, string>())), MessagingJson.Options);
 
         await r.Guard.BeginDeleteAsync(wf, r.H.Ct);
         await handler.HandleAsync(body, r.H.Ct);

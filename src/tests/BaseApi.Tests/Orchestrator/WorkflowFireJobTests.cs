@@ -47,7 +47,7 @@ public sealed class WorkflowFireJobTests
 
     private sealed class Harness
     {
-        private WorkflowL1 _definition = new(W, [], EveryHour, [], []);
+        private WorkflowL1 _definition = new(W, [], [], []);
 
         public IQueueSender Sender { get; } = Substitute.For<IQueueSender>();
 
@@ -87,7 +87,8 @@ public sealed class WorkflowFireJobTests
 
         /// <summary>
         /// As <see cref="WithWorkflow"/>, but each entry step carries the entry condition given
-        /// rather than the ordinary one — for the cases that turn on the value of that field.
+        /// rather than the ordinary one — for the cases that turn on the value of that field. Every
+        /// entry step runs on <see cref="EveryHour"/>, so they all belong to group 0.
         /// </summary>
         public Harness WithGatedWorkflow(
             Guid workflowId, (Guid StepId, Guid ProcessorId, int EntryCondition)[] entries)
@@ -95,31 +96,30 @@ public sealed class WorkflowFireJobTests
             _definition = new WorkflowL1(
                 workflowId,
                 entries.Select(e => e.StepId).ToList(),
-                EveryHour,
                 entries.Select(e => new StepL1(
                     e.StepId, e.EntryCondition, e.ProcessorId, Config, [])).ToList(),
-                []);
+                [],
+                EntryCrons: entries.ToDictionary(e => e.StepId, _ => EveryHour));
 
             Store.Set(workflowId, _definition, JobId);
             return this;
         }
 
         /// <summary>
-        /// Puts <paramref name="workflowId"/> in L1 with each entry step on its own cron, under the
-        /// workflow cron <see cref="EveryHour"/> — the multi-group shape, one Quartz job per distinct
-        /// cron.
+        /// Puts <paramref name="workflowId"/> in L1 with each entry step on the cron given for it — the
+        /// multi-group shape, one Quartz job per distinct cron. A null cron leaves that entry step
+        /// unscheduled.
         /// </summary>
         public Harness WithCronGroups(
-            Guid workflowId, (Guid StepId, Guid ProcessorId, string Cron)[] entries)
+            Guid workflowId, (Guid StepId, Guid ProcessorId, string? Cron)[] entries)
         {
             _definition = new WorkflowL1(
                 workflowId,
                 entries.Select(e => e.StepId).ToList(),
-                EveryHour,
                 entries.Select(e => new StepL1(
                     e.StepId, PreviousCompleted, e.ProcessorId, Config, [])).ToList(),
                 [],
-                EntryCrons: entries.ToDictionary(e => e.StepId, e => e.Cron));
+                EntryCrons: entries.Where(e => e.Cron is not null).ToDictionary(e => e.StepId, e => e.Cron!));
 
             Store.Set(workflowId, _definition, JobId);
             return this;
@@ -232,12 +232,12 @@ public sealed class WorkflowFireJobTests
             _definition = new WorkflowL1(
                 workflowId,
                 [S1],
-                EveryHour,
                 [
                     new StepL1(S1, PreviousCompleted, entryProcessor, Config, [S2]),
                     new StepL1(S2, PreviousCompleted, successorProcessor, Config, []),
                 ],
-                []);
+                [],
+                EntryCrons: new Dictionary<Guid, string> { [S1] = EveryHour });
 
             Store.Set(workflowId, _definition, JobId);
             return this;
@@ -267,8 +267,8 @@ public sealed class WorkflowFireJobTests
         }
 
         /// <summary>
-        /// The context a fire of this workflow's own job arrives with: group 0, on the workflow cron —
-        /// the single-group shape every workflow without per-step crons has.
+        /// The context a fire of this workflow's own job arrives with: group 0, on <see cref="EveryHour"/> —
+        /// the single-group shape of a workflow whose entry steps all share one cron.
         /// </summary>
         public IJobExecutionContext Context(Guid workflowId, Guid jobId) =>
             Context(workflowId, jobId, 0, EveryHour);
@@ -679,8 +679,8 @@ public sealed class WorkflowFireJobTests
     public async Task TheRescheduleCarriesTheJobsOwnIndexAndCron()
     {
         // RescheduleAsync re-creates a purged job from exactly these values, so a fire that armed its
-        // successor under the workflow cron, or under group 0, would turn the */10 job into a copy of
-        // another group's.
+        // successor under another group's cron, or under group 0, would turn the */10 job into a copy
+        // of another group's.
         var h = new Harness().AsLeader().WithCronGroups(
             W, entries: [(S1, P1, "*/30 * * * *"), (S2, P2, "*/10 * * * *")]);
 
@@ -701,6 +701,20 @@ public sealed class WorkflowFireJobTests
 
         await h.Sender.Received(1).SendAsync(ProcessorQueues.Work(P2), MessageTypes.ProcessDispatch,
             Arg.Is<ProcessDispatch>(d => d.StepId == S2), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
+        Assert.Single(h.Sender.ReceivedCalls());
+    }
+
+    [Fact]
+    public async Task AnEntryWithoutACronIsNeverDispatched()
+    {
+        // A workflow has no cron to fall back to: an entry step with no entry cron belongs to no
+        // group, so no fire sends it.
+        var h = new Harness().AsLeader().WithCronGroups(W, entries: [(S1, P1, EveryHour), (S2, P2, null)]);
+
+        await h.Build().Execute(h.Context(W, h.JobId, 0, EveryHour));
+
+        await h.Sender.Received(1).SendAsync(ProcessorQueues.Work(P1), MessageTypes.ProcessDispatch,
+            Arg.Is<ProcessDispatch>(d => d.StepId == S1), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
         Assert.Single(h.Sender.ReceivedCalls());
     }
 

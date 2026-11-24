@@ -34,15 +34,17 @@ public sealed class L2WorkflowReaderTests
         _reader = new L2WorkflowReader(redis, NullLogger<L2WorkflowReader>.Instance);
     }
 
-    private void WriteStore(string? cron, params Guid[] stepIds) =>
+    private void WriteStore(string? entryCron, params Guid[] stepIds) =>
         _db.HashGetAsync(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
             .Returns((RedisValue)JsonSerializer.Serialize(
                 new WorkflowStoreProjection(
                     EntryStepIds: [stepIds.Length > 0 ? stepIds[0] : Guid.Empty],
-                    Cron: cron,
                     Steps: stepIds
                         .Select(id => new StepL1(id, EntryCondition: 1, ProcessorId: P, Payload: "{\"k\":1}", NextStepIds: []))
-                        .ToList()),
+                        .ToList(),
+                    EntryCrons: entryCron is null || stepIds.Length == 0
+                        ? null
+                        : new Dictionary<Guid, string> { [stepIds[0]] = entryCron }),
                 MessagingJson.Options));
 
     [Fact]
@@ -54,7 +56,7 @@ public sealed class L2WorkflowReaderTests
 
         Assert.NotNull(definition);
         Assert.Equal(W, definition.WorkflowId);
-        Assert.Equal("0 * * * *", definition.Cron);
+        Assert.Equal("0 * * * *", Assert.Single(definition.EntryCrons!).Value);
         Assert.Equal([S1], definition.EntryStepIds);
         var step = Assert.Single(definition.Steps);
         Assert.Equal(S1, step.StepId);
@@ -115,7 +117,6 @@ public sealed class L2WorkflowReaderTests
             .Returns((RedisValue)JsonSerializer.Serialize(
                 new WorkflowStoreProjection(
                     EntryStepIds: [S1],
-                    Cron: "*/30 * * * * *",
                     Steps: [new StepL1(S1, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: [])],
                     EntryCrons: new Dictionary<Guid, string> { [S1] = "*/10 * * * * *" }),
                 MessagingJson.Options));
@@ -137,7 +138,6 @@ public sealed class L2WorkflowReaderTests
         var node = JsonSerializer.SerializeToNode(
             new WorkflowStoreProjection(
                 EntryStepIds: [S1],
-                Cron: "0 * * * *",
                 Steps: [new StepL1(S1, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: [])],
                 EntryCrons: new Dictionary<Guid, string> { [S1] = "*/10 * * * * *" }),
             MessagingJson.Options)!.AsObject();
@@ -151,5 +151,26 @@ public sealed class L2WorkflowReaderTests
         Assert.NotNull(definition);
         Assert.Equal([S1], definition.EntryStepIds);
         Assert.Null(definition.EntryCrons);
+    }
+
+    [Fact]
+    public async Task AStoreWithOnlyALegacyCronSchedulesNothing()
+    {
+        // What a store written while workflows still had a cron holds: a top-level "cron" and no
+        // "entryCrons". The field is gone from the contract, so it is ignored, and the definition has
+        // no schedule at all — there is no fallback to it.
+        var json =
+            $"{{\"entryStepIds\":[\"{S1:D}\"],\"cron\":\"*/30 * * * * *\",\"steps\":[{{\"StepId\":\"{S1:D}\","
+            + $"\"EntryCondition\":0,\"ProcessorId\":\"{P:D}\",\"Payload\":\"{{}}\",\"NextStepIds\":[]}}]}}";
+        _db.HashGetAsync(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
+            .Returns((RedisValue)json);
+
+        var definition = await _reader.ReadAsync(W, CancellationToken.None);
+
+        Assert.NotNull(definition);
+        Assert.Equal([S1], definition.EntryStepIds);
+        Assert.Equal(S1, Assert.Single(definition.Steps).StepId);
+        Assert.Null(definition.EntryCrons);
+        Assert.Empty(EntrySchedule.Groups(definition.EntryStepIds, definition.EntryCrons));
     }
 }

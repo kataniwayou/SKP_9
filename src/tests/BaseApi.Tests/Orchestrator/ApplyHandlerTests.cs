@@ -61,10 +61,22 @@ public sealed class ApplyHandlerTests
         /// <see cref="L2WorkflowReader.IsLiveAsync"/> and <see cref="L2WorkflowReader.ReadAsync"/> both
         /// answer as they would against the live set and the store hash a start writes.
         /// </summary>
+        /// <param name="cron">The entry cron of the first entry step <see cref="S"/>; null leaves it unscheduled.</param>
         /// <param name="secondEntryCron">When set, a second entry step <see cref="S2"/> carrying this
-        /// cron of its own, so the workflow is scheduled as two groups.</param>
+        /// cron, so the workflow is scheduled as two groups.</param>
         public Harness WithWorkflow(Guid workflowId, string? cron, string? secondEntryCron = null)
         {
+            var entryCrons = new Dictionary<Guid, string>();
+            if (cron is not null)
+            {
+                entryCrons[S] = cron;
+            }
+
+            if (secondEntryCron is not null)
+            {
+                entryCrons[S2] = secondEntryCron;
+            }
+
             _live.Add(workflowId);
 
             Db.SetContainsAsync(L2ProjectionKeys.Live(), workflowId.ToString("D"), Arg.Any<CommandFlags>())
@@ -74,11 +86,11 @@ public sealed class ApplyHandlerTests
             Db.HashGetAsync(L2ProjectionKeys.Workflow(workflowId), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
                 .Returns((RedisValue)JsonSerializer.Serialize(
                     secondEntryCron is null
-                        ? new WorkflowStoreProjection([S], cron, [new StepL1(S, 0, P, "{}", [])])
+                        ? new WorkflowStoreProjection([S], [new StepL1(S, 0, P, "{}", [])], entryCrons)
                         : new WorkflowStoreProjection(
-                            [S, S2], cron,
+                            [S, S2],
                             [new StepL1(S, 0, P, "{}", []), new StepL1(S2, 0, P, "{}", [])],
-                            EntryCrons: new Dictionary<Guid, string> { [S2] = secondEntryCron }),
+                            EntryCrons: entryCrons),
                     MessagingJson.Options));
 
             return this;

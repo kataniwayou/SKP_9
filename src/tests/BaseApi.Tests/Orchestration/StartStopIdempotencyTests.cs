@@ -141,11 +141,11 @@ public sealed class StartStopIdempotencyTests
     private static WorkflowL1 Definition(Guid[] stepIds, List<CacheL1> caches) => new(
         WorkflowId: W,
         EntryStepIds: [stepIds[0]],
-        Cron: Cron,
         Steps: stepIds
             .Select(id => new StepL1(id, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: []))
             .ToList(),
-        Caches: caches);
+        Caches: caches,
+        EntryCrons: new Dictionary<Guid, string> { [stepIds[0]] = Cron });
 
     /// <summary>A workflow whose first step is its entry, with one step key per id given.</summary>
     private static WorkflowL1 Definition(params Guid[] stepIds) => Definition(stepIds, []);
@@ -329,7 +329,7 @@ public sealed class StartStopIdempotencyTests
 
         Assert.True(c.L1.TryGetActive(W, out var entry));
         Assert.Equal([S1, S2], entry.Definition.Steps.Select(s => s.StepId));
-        Assert.Equal(Cron, entry.Definition.Cron);
+        Assert.Equal(Cron, entry.Definition.EntryCrons![S1]);
         Assert.Equal([(W, entry.JobId, 0, Cron)], c.Scheduler.Scheduled);
     }
 

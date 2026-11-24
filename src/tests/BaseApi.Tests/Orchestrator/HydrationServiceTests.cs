@@ -103,13 +103,14 @@ public sealed class HydrationServiceTests
         /// <summary>
         /// The stored workflow, as <c>L2ProjectionWriter</c> writes it. Shared by every stub that has to
         /// produce one, so a stub that answers on the second attempt cannot describe a different
-        /// workflow from the one that answers on the first.
+        /// workflow from the one that answers on the first. <paramref name="cron"/> is the entry step's
+        /// cron; null leaves it unscheduled.
         /// </summary>
         private static RedisValue StoreJson(string? cron) => JsonSerializer.Serialize(
             new WorkflowStoreProjection(
                 EntryStepIds: [S],
-                Cron: cron,
-                Steps: [new StepL1(S, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: [])]),
+                Steps: [new StepL1(S, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: [])],
+                EntryCrons: cron is null ? null : new Dictionary<Guid, string> { [S] = cron }),
             MessagingJson.Options);
 
         /// <summary>

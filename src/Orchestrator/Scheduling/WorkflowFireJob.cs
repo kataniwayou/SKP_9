@@ -18,10 +18,10 @@ namespace Orchestrator.Scheduling;
 /// <para>
 /// <b>A workflow runs one job per distinct entry-step cron, and a fire dispatches only its own
 /// group.</b> The job-data map carries the group's <c>index</c> and <c>cron</c>; the fire recomputes
-/// each entry step's effective cron from the L1 definition (<see cref="EntrySchedule.EffectiveCron"/>)
-/// and sends only the steps whose cron equals the job's, compared after normalization. Each fire mints
-/// its own correlation id, so two groups' runs are unrelated even where their branches meet. The
-/// re-arm uses the job's own index and cron, never the workflow cron.
+/// each entry step's cron from the L1 definition (<see cref="EntrySchedule.EffectiveCron"/>) and sends
+/// only the steps whose cron equals the job's, compared after normalization; an entry step with no cron
+/// is never sent. Each fire mints its own correlation id, so two groups' runs are unrelated even where
+/// their branches meet. The re-arm uses the job's own index and cron — a workflow has no cron of its own.
 /// </para>
 /// <para>
 /// <b>The leader gate sits before the dispatch and nowhere else.</b> A follower runs the whole of
@@ -226,9 +226,8 @@ public sealed class WorkflowFireJob(
                 return;
             }
 
-            // The job's own index and cron, as the map carried them — not the workflow cron, which is
-            // only the fallback for entry steps without their own and would turn every group's job
-            // into a copy of the workflow-cron group's.
+            // The job's own index and cron, as the map carried them — not another group's, which would
+            // turn this group's job into a copy of that one.
             await scheduler.RescheduleAsync(workflowId, jobId, index, cron, context.CancellationToken)
                 .ConfigureAwait(false);
         }
@@ -378,7 +377,7 @@ public sealed class WorkflowFireJob(
             // Another group's step: its own job dispatches it, on its own cron. Silent, because every
             // fire of a multi-group workflow passes over every other group's steps, and a record per
             // skip would say nothing but that the workflow has more than one cron.
-            if (EntrySchedule.EffectiveCron(entryStepId, definition.Cron, definition.EntryCrons) != ownCron)
+            if (EntrySchedule.EffectiveCron(entryStepId, definition.EntryCrons) != ownCron)
             {
                 continue;
             }

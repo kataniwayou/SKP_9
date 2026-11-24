@@ -68,7 +68,7 @@ public sealed class EntityNamesTests
     [Fact]
     public void NamesRoundTripKeyedById()
     {
-        var definition = new WorkflowL1(Id, [], null, [], [], new Dictionary<Guid, string> { [Id] = "wf_1.0.0-9aff-a7f22ee09224" });
+        var definition = new WorkflowL1(Id, [], [], [], new Dictionary<Guid, string> { [Id] = "wf_1.0.0-9aff-a7f22ee09224" });
 
         var back = JsonSerializer.Deserialize<WorkflowL1>(
             JsonSerializer.Serialize(definition, MessagingJson.Options), MessagingJson.Options);

@@ -69,7 +69,7 @@ public sealed class NameProjectionTests
         var l2 = new InMemoryL2();
 
         await new L2ProjectionWriter(l2.Multiplexer, FakeStepRows.Everything())
-            .WriteAsync(new WorkflowL1(W, [], null, [], [], new() { [stranger] = "x_1-0000-000000000000" }), CancellationToken.None);
+            .WriteAsync(new WorkflowL1(W, [], [], [], new() { [stranger] = "x_1-0000-000000000000" }), CancellationToken.None);
 
         Assert.False(l2.HasHash(L2ProjectionKeys.StepEntity(stranger)));
         Assert.False(l2.HasHash(L2ProjectionKeys.Workflow(stranger)));

@@ -56,7 +56,7 @@ public sealed class FanoutPublishTests
     }
 
     private static StartOrchestration Start(Guid workflowId) =>
-        new(new WorkflowL1(workflowId, new List<Guid>(), null, new List<StepL1>(), new List<CacheL1>()));
+        new(new WorkflowL1(workflowId, new List<Guid>(), new List<StepL1>(), new List<CacheL1>()));
 
     private static StopOrchestration Stop(Guid workflowId) => new(workflowId);
 

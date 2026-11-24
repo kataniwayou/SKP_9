@@ -82,7 +82,7 @@ public sealed class ExecutionRoundTripTests
 
         public Harness(params StepL1[] steps)
         {
-            Store.Set(W, new WorkflowL1(W, [A], "* * * * *", [.. steps], []), Guid.NewGuid());
+            Store.Set(W, new WorkflowL1(W, [A], [.. steps], []), Guid.NewGuid());
         }
 
         public IQueueMessageHandler Pre => new StepOutcomeHandler(Store, L2.Multiplexer, Bus, PreLog);
@@ -1079,7 +1079,7 @@ public sealed class ExecutionRoundTripTests
         var w2 = Guid.Parse("99999999-9999-9999-9999-999999999999");
         var entry2 = Guid.Parse("88888888-8888-8888-8888-888888888889");
         var h = new Harness(Step(A, PA, 1, "{}"));
-        h.Store.Set(w2, new WorkflowL1(w2, [A], "* * * * *", [Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}""")], []), Guid.NewGuid());
+        h.Store.Set(w2, new WorkflowL1(w2, [A], [Step(A, PA, 1, "{}", B), Step(B, PB, 1, """{"n":2}""")], []), Guid.NewGuid());
         Seed(h, Entry, Output);
         Seed(h, entry2, Output);
 

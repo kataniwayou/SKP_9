@@ -55,7 +55,7 @@ internal sealed class L2WorkflowGraphSource(IConnectionMultiplexer redis, IEntit
         }
 
         return GraphBriefing.Of(new RunningGraph(
-            workflowId, live, store.Cron, store.EntryStepIds, store.Steps,
+            workflowId, live, null, store.EntryStepIds, store.Steps,
             await NamesAsync(workflowId, store).ConfigureAwait(false),
             EntryCrons: store.EntryCrons));
     }

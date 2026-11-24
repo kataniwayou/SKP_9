@@ -66,7 +66,6 @@ public sealed class RefreshCacheHandlerTests : IAsyncLifetime
         await new L2ProjectionWriter(_l2.Multiplexer, FakeStepRows.Everything()).WriteAsync(new WorkflowL1(
             WorkflowId: workflow,
             EntryStepIds: [S],
-            Cron: null,
             Steps: [new StepL1(S, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: [])],
             Caches: [new CacheL1("artists", new() { ["acme"] = "Acme" })]), TestContext.Current.CancellationToken);
 

@@ -45,7 +45,7 @@ public sealed class GraphLayersTests
     public void AGraphWithNoHandlerHasNoSinkAndSaysSo()
     {
         var a = Guid.NewGuid(); var b = Guid.NewGuid();
-        var g = new RunningGraph(Guid.NewGuid(), true, "0 * * * * *", [a],
+        var g = new RunningGraph(Guid.NewGuid(), true, null, [a],
             [new StepL1(a, 4, Guid.NewGuid(), "{}", [b]), new StepL1(b, 1, Guid.NewGuid(), "{}", [])],
             new Dictionary<Guid, string>());
 
@@ -63,7 +63,7 @@ public sealed class GraphLayersTests
         // Condition 4 (Always) takes Failed, so Failed is handled -- but an Always step is part of the
         // work path, not a failure handler, and must not be reported as a sink.
         var a = Guid.NewGuid(); var b = Guid.NewGuid();
-        var g = new RunningGraph(Guid.NewGuid(), true, "0 * * * * *", [a],
+        var g = new RunningGraph(Guid.NewGuid(), true, null, [a],
             [new StepL1(a, 4, Guid.NewGuid(), "{}", [b]), new StepL1(b, 4, Guid.NewGuid(), "{}", [])],
             new Dictionary<Guid, string>());
 

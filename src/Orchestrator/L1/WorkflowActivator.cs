@@ -91,10 +91,11 @@ public sealed class WorkflowActivator(
         var activationId = Guid.NewGuid();
         store.Set(workflowId, definition, activationId);
 
-        // A step with no effective cron (neither its own nor the workflow's) is unscheduled, which is a
-        // valid projection, and EntrySchedule.Groups leaves it out: a workflow none of whose entry steps
-        // has a cron schedules nothing.
-        var groups = EntrySchedule.Groups(definition.EntryStepIds, definition.Cron, definition.EntryCrons);
+        // A workflow has no cron of its own: an entry step without an entry cron is unscheduled, which
+        // is a valid projection, and EntrySchedule.Groups leaves it out. A workflow none of whose entry
+        // steps has a cron — including a store written before entry crons, which holds only the
+        // retired workflow cron — schedules nothing.
+        var groups = EntrySchedule.Groups(definition.EntryStepIds, definition.EntryCrons);
         foreach (var group in groups)
         {
             await scheduler.ScheduleAsync(workflowId, activationId, group.Index, group.Cron, ct).ConfigureAwait(false);

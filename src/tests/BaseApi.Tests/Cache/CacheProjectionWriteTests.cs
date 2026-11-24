@@ -24,7 +24,6 @@ public sealed class CacheProjectionWriteTests
     private static WorkflowL1 Definition(params CacheL1[] caches) => new(
         WorkflowId: W,
         EntryStepIds: [S],
-        Cron: null,
         Steps: [new StepL1(S, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: [])],
         Caches: caches.ToList());
 

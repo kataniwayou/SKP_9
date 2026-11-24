@@ -47,45 +47,51 @@ public sealed class WorkflowActivatorTests
 
         /// <summary>
         /// What a start leaves in L2: the id in the live set, and the same store JSON
-        /// <c>L2ProjectionWriter</c> writes on the workflow hash.
+        /// <c>L2ProjectionWriter</c> writes on the workflow hash. <paramref name="cron"/> is the entry
+        /// step's cron; null leaves it unscheduled.
         /// </summary>
-        public Harness WithWorkflow(Guid workflowId, string? cron, Guid entry, Guid processor)
-        {
-            Db.SetContainsAsync(L2ProjectionKeys.Live(), workflowId.ToString("D"), Arg.Any<CommandFlags>())
-                .Returns(true);
-
-            var store = JsonSerializer.Serialize(
+        public Harness WithWorkflow(Guid workflowId, string? cron, Guid entry, Guid processor) =>
+            WithRawStore(workflowId, JsonSerializer.Serialize(
                 new WorkflowStoreProjection(
                     EntryStepIds: [entry],
-                    Cron: cron,
-                    Steps: [new StepL1(entry, EntryCondition: 0, ProcessorId: processor, Payload: "{}", NextStepIds: [])]),
-                MessagingJson.Options);
-            Db.HashGetAsync(L2ProjectionKeys.Workflow(workflowId), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
-                .Returns((RedisValue)store);
-
-            return this;
-        }
+                    Steps: [new StepL1(entry, EntryCondition: 0, ProcessorId: processor, Payload: "{}", NextStepIds: [])],
+                    EntryCrons: cron is null ? null : new Dictionary<Guid, string> { [entry] = cron }),
+                MessagingJson.Options));
 
         /// <summary>
-        /// A workflow with two entry steps, <see cref="S"/> and <see cref="S2"/>, where only
-        /// <see cref="S2"/> carries its own cron — the shape that splits one workflow into groups.
+        /// A workflow with two entry steps, <see cref="S"/> and <see cref="S2"/>, each on the cron given
+        /// for it (null leaves that step unscheduled) — two distinct crons split one workflow into groups.
         /// </summary>
-        public Harness WithTwoEntries(Guid workflowId, string? cron, string? s2Cron)
+        public Harness WithTwoEntries(Guid workflowId, string? sCron, string? s2Cron)
         {
-            Db.SetContainsAsync(L2ProjectionKeys.Live(), workflowId.ToString("D"), Arg.Any<CommandFlags>())
-                .Returns(true);
+            var crons = new Dictionary<Guid, string>();
+            if (sCron is not null)
+            {
+                crons[S] = sCron;
+            }
 
-            var store = JsonSerializer.Serialize(
+            if (s2Cron is not null)
+            {
+                crons[S2] = s2Cron;
+            }
+
+            return WithRawStore(workflowId, JsonSerializer.Serialize(
                 new WorkflowStoreProjection(
                     EntryStepIds: [S, S2],
-                    Cron: cron,
                     Steps:
                     [
                         new StepL1(S, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: []),
                         new StepL1(S2, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: []),
                     ],
-                    EntryCrons: s2Cron is null ? null : new Dictionary<Guid, string> { [S2] = s2Cron }),
-                MessagingJson.Options);
+                    EntryCrons: crons.Count == 0 ? null : crons),
+                MessagingJson.Options));
+        }
+
+        /// <summary>The id in the live set and <paramref name="store"/>, verbatim, on the workflow hash.</summary>
+        public Harness WithRawStore(Guid workflowId, string store)
+        {
+            Db.SetContainsAsync(L2ProjectionKeys.Live(), workflowId.ToString("D"), Arg.Any<CommandFlags>())
+                .Returns(true);
             Db.HashGetAsync(L2ProjectionKeys.Workflow(workflowId), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
                 .Returns((RedisValue)store);
 
@@ -120,8 +126,8 @@ public sealed class WorkflowActivatorTests
     [Fact]
     public async Task MirrorsButDoesNotScheduleAWorkflowWithNoCron()
     {
-        // A null cron means unscheduled, which is a valid projection — WorkflowL1's own doc puts that
-        // decision with whoever reads the root, which is this method.
+        // An entry step with no cron is unscheduled, which is a valid projection — WorkflowL1's own doc
+        // puts that decision with whoever reads the root, which is this method.
         var h = new Harness().WithWorkflow(W, cron: null, entry: S, processor: P);
 
         await h.Build().ActivateAsync(W, CancellationToken.None);
@@ -175,7 +181,7 @@ public sealed class WorkflowActivatorTests
     [Fact]
     public async Task TwoCronsScheduleTwoGroupsUnderOneActivation()
     {
-        var h = new Harness().WithTwoEntries(W, cron: "*/30 * * * * *", s2Cron: "*/10 * * * * *");
+        var h = new Harness().WithTwoEntries(W, sCron: "*/30 * * * * *", s2Cron: "*/10 * * * * *");
 
         await h.Build().ActivateAsync(W, CancellationToken.None);
 
@@ -188,10 +194,10 @@ public sealed class WorkflowActivatorTests
     }
 
     [Fact]
-    public async Task AnEntryCronEqualToTheWorkflowCronMakesOneGroup()
+    public async Task TwoEntryCronsEqualAfterNormalizationMakeOneGroup()
     {
         // Equal after normalization: whitespace alone does not make a second schedule.
-        var h = new Harness().WithTwoEntries(W, cron: "*/30 * * * * *", s2Cron: "  */30  * * * * * ");
+        var h = new Harness().WithTwoEntries(W, sCron: "*/30 * * * * *", s2Cron: "  */30  * * * * * ");
 
         await h.Build().ActivateAsync(W, CancellationToken.None);
 
@@ -200,9 +206,9 @@ public sealed class WorkflowActivatorTests
     }
 
     [Fact]
-    public async Task ANullWorkflowCronSchedulesOnlyStepsWithTheirOwn()
+    public async Task AnEntryWithoutACronIsLeftUnscheduled()
     {
-        var h = new Harness().WithTwoEntries(W, cron: null, s2Cron: "*/10 * * * * *");
+        var h = new Harness().WithTwoEntries(W, sCron: null, s2Cron: "*/10 * * * * *");
 
         await h.Build().ActivateAsync(W, CancellationToken.None);
 
@@ -211,14 +217,32 @@ public sealed class WorkflowActivatorTests
     }
 
     [Fact]
+    public async Task AStoreWithOnlyALegacyCronSchedulesNothing()
+    {
+        // A store written while workflows still had a cron: a top-level "cron" and no "entryCrons".
+        // It still activates — the definition reads — but there is no workflow cron to fall back to.
+        var store =
+            $"{{\"entryStepIds\":[\"{S:D}\"],\"cron\":\"*/30 * * * * *\",\"steps\":[{{\"StepId\":\"{S:D}\","
+            + $"\"EntryCondition\":0,\"ProcessorId\":\"{P:D}\",\"Payload\":\"{{}}\",\"NextStepIds\":[]}}]}}";
+        var h = new Harness().WithRawStore(W, store);
+
+        await h.Build().ActivateAsync(W, CancellationToken.None);
+
+        Assert.True(h.Store.TryGetActive(W, out var entry));
+        Assert.Equal([S], entry.Definition.EntryStepIds);
+        Assert.DoesNotContain("ScheduleAsync", h.Scheduler.Calls);
+        Assert.Empty(h.Scheduler.Scheduled);
+    }
+
+    [Fact]
     public async Task ARestartUnschedulesTheWholeWorkflowBeforeScheduling()
     {
         // A workflow this replica already holds, under an activation whose jobs were never recorded
         // by this scheduler: the teardown is one group delete keyed by the workflow, so it does not
         // need to know how many jobs the previous activation had.
-        var h = new Harness().WithTwoEntries(W, cron: "*/30 * * * * *", s2Cron: "*/10 * * * * *");
+        var h = new Harness().WithTwoEntries(W, sCron: "*/30 * * * * *", s2Cron: "*/10 * * * * *");
         var previous = Guid.NewGuid();
-        h.Store.Set(W, new WorkflowL1(W, [S, S2], "*/30 * * * * *", [], []), previous);
+        h.Store.Set(W, new WorkflowL1(W, [S, S2], [], []), previous);
 
         await h.Build().ActivateAsync(W, CancellationToken.None);
 

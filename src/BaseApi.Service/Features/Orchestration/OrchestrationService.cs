@@ -236,7 +236,6 @@ public sealed class OrchestrationService
         return new WorkflowL1(
             WorkflowId: workflowId,
             EntryStepIds: workflow.EntryStepIds ?? new List<Guid>(),
-            Cron: workflow.CronExpression,
             Steps: steps,
             Caches: caches,
             Names: names,

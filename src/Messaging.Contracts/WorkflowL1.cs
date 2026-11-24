@@ -17,27 +17,27 @@ namespace Messaging.Contracts;
 /// with an empty payload rather than a null the consumer must guard.
 /// </para>
 /// <para>
-/// <b><see cref="Cron"/> is nullable and null means unscheduled.</b> The start path does not reject a
-/// null cron: an unscheduled workflow is still a valid projection, and the decision about whether it
-/// can be scheduled belongs to whoever later reads the root, not to the write.
+/// <b>A workflow has no cron of its own; its entry steps carry the whole schedule.</b> An entry step
+/// listed in <see cref="EntryCrons"/> fires on that cron, and one that is not listed is unscheduled.
+/// The start path does not reject an unscheduled entry step: it is still a valid projection, and the
+/// decision about whether it can be scheduled belongs to whoever later reads the root, not to the write.
 /// </para>
 /// </summary>
 /// <param name="WorkflowId">The workflow this definition is for. Also the L2 root key's identity.</param>
 /// <param name="EntryStepIds">The steps a fire begins from. The BFS that discovers this graph's key
 /// set on a later clean walks outward from exactly these.</param>
-/// <param name="Cron">The five-field cron expression, or null when the workflow is not scheduled.</param>
 /// <param name="Steps">Every step in the validated graph, one entry per L2 step key to be written.</param>
 /// <param name="Caches">Every dictionary this workflow projects into L2 for the duration of a run.</param>
 /// <param name="Names">Maps every workflow, step and processor id in the started graph to its display
 /// name (see <see cref="EntityNames"/>). It rides this control message only, never a dispatch
 /// message. It is optional: a message published before it existed deserializes with null, and the
 /// workflow starts without names.</param>
-/// <param name="EntryCrons">Optional per-entry-step cron overrides. A step listed here fires on its own
-/// cron; the others use <see cref="Cron"/>. Null in a message published before it existed.</param>
+/// <param name="EntryCrons">Each scheduled entry step's cron, by step id. A step listed here fires on
+/// that cron; an entry step that is not listed is unscheduled — there is no workflow cron to fall back
+/// to. Null when no entry step is scheduled.</param>
 public sealed record WorkflowL1(
     Guid WorkflowId,
     List<Guid> EntryStepIds,
-    string? Cron,
     List<StepL1> Steps,
     List<CacheL1> Caches,
     Dictionary<Guid, string>? Names = null,

@@ -22,8 +22,10 @@ public sealed class LiveSetActivationTests
     private static readonly Guid S  = Guid.Parse("66666666-6666-6666-6666-666666666666");
     private static readonly Guid P  = Guid.Parse("77777777-7777-7777-7777-777777777777");
 
+    /// <summary>One entry step on <paramref name="cron"/>; a null cron leaves it unscheduled.</summary>
     private static WorkflowL1 Def(Guid w, string? cron = "0 0/5 * * * ?", Guid? step = null) =>
-        new(w, [step ?? S], cron, [new StepL1(step ?? S, 4, P, "{}", [])], []);
+        new(w, [step ?? S], [new StepL1(step ?? S, 4, P, "{}", [])], [],
+            EntryCrons: cron is null ? null : new Dictionary<Guid, string> { [step ?? S] = cron });
 
     private sealed class Harness
     {

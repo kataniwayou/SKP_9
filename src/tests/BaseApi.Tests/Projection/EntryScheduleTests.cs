@@ -6,8 +6,8 @@ using Xunit;
 namespace BaseApi.Tests.Projection;
 
 /// <summary>
-/// The shared rule that turns a workflow cron plus per-entry-step overrides into groups of entry steps
-/// that fire together.
+/// The shared rule that turns per-entry-step crons into groups of entry steps that fire together. A
+/// workflow has no cron of its own: a step without an entry cron is unscheduled.
 /// </summary>
 public sealed class EntryScheduleTests
 {
@@ -16,39 +16,51 @@ public sealed class EntryScheduleTests
     private static readonly Guid C = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
 
     [Fact]
-    public void AStepWithoutItsOwnCronUsesTheWorkflowCron()
-    {
-        Assert.Equal("*/30 * * * * *", EntrySchedule.EffectiveCron(A, "*/30 * * * * *", new Dictionary<Guid, string>()));
-    }
-
-    [Fact]
-    public void AStepsOwnCronOverridesTheWorkflowCron()
+    public void AStepsEntryCronIsItsSchedule()
     {
         var map = new Dictionary<Guid, string> { [B] = "*/10 * * * * *" };
-        Assert.Equal("*/10 * * * * *", EntrySchedule.EffectiveCron(B, "*/30 * * * * *", map));
+        Assert.Equal("*/10 * * * * *", EntrySchedule.EffectiveCron(B, map));
     }
 
     [Fact]
-    public void NoCronAnywhereMeansUnscheduled()
+    public void AStepWithoutAnEntryCronIsUnscheduled()
     {
-        Assert.Null(EntrySchedule.EffectiveCron(A, null, null));
-        Assert.Empty(EntrySchedule.Groups([A, B], null, null));
+        var map = new Dictionary<Guid, string> { [B] = "*/10 * * * * *" };
+        Assert.Null(EntrySchedule.EffectiveCron(A, map));
+        Assert.Null(EntrySchedule.EffectiveCron(A, new Dictionary<Guid, string> { [A] = "   " }));
+
+        var g = Assert.Single(EntrySchedule.Groups([A, B], map));
+        Assert.Equal([B], g.StepIds);
+    }
+
+    [Fact]
+    public void NoEntryCronsMeansUnscheduled()
+    {
+        Assert.Null(EntrySchedule.EffectiveCron(A, null));
+        Assert.Empty(EntrySchedule.Groups([A, B], null));
+        Assert.Empty(EntrySchedule.Groups([A, B], new Dictionary<Guid, string>()));
     }
 
     [Fact]
     public void WhitespaceOnlyDifferencesShareAGroup()
     {
-        var map = new Dictionary<Guid, string> { [B] = " */10  * * * * * " };
-        var groups = EntrySchedule.Groups([A, B], "*/10 * * * * *", map);
+        var map = new Dictionary<Guid, string> { [A] = "*/10 * * * * *", [B] = " */10  * * * * * " };
+        var groups = EntrySchedule.Groups([A, B], map);
         var g = Assert.Single(groups);
+        Assert.Equal("*/10 * * * * *", g.Cron);
         Assert.Equal([A, B], g.StepIds);
     }
 
     [Fact]
     public void GroupsAreOrderedByFirstAppearanceWithStableIndexes()
     {
-        var map = new Dictionary<Guid, string> { [B] = "*/10 * * * * *" };
-        var groups = EntrySchedule.Groups([A, B, C], "*/30 * * * * *", map);
+        var map = new Dictionary<Guid, string>
+        {
+            [A] = "*/30 * * * * *",
+            [B] = "*/10 * * * * *",
+            [C] = "*/30 * * * * *",
+        };
+        var groups = EntrySchedule.Groups([A, B, C], map);
         Assert.Equal(2, groups.Count);
         Assert.Equal(0, groups[0].Index);
         Assert.Equal("*/30 * * * * *", groups[0].Cron);

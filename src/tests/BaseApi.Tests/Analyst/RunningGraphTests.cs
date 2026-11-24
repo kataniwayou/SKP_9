@@ -76,30 +76,45 @@ public sealed class RunningGraphTests
 
         Assert.Contains("filefetcher-archiveexpander-chain_1.0.0", text, StringComparison.Ordinal);
         Assert.Contains("started (in the live set)", text, StringComparison.Ordinal);
-        Assert.Contains("cron \"0 * * * * *\"", text, StringComparison.Ordinal);
+        Assert.Contains("Schedule: each entry step runs on its own cron (six fields, seconds first).", text, StringComparison.Ordinal);
         Assert.Contains("runs processor kafka-importer_2.2.0", text, StringComparison.Ordinal);
         Assert.DoesNotContain("can never run", text, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AnEntryWithItsOwnCronIsRenderedOnItsOwnLine()
+    public void EveryEntryStepHasAScheduleLine()
     {
-        var entry = Captured.EntryStepIds[0];
-        var graph = Captured with { EntryCrons = new Dictionary<Guid, string> { [entry] = "0/5 * * * * ?" } };
+        var a = Guid.NewGuid(); var b = Guid.NewGuid();
+        var graph = new RunningGraph(Guid.NewGuid(), true, null, [a, b],
+            [new StepL1(a, 4, Guid.NewGuid(), "{}", []), new StepL1(b, 4, Guid.NewGuid(), "{}", [])],
+            new Dictionary<Guid, string>(),
+            EntryCrons: new Dictionary<Guid, string> { [a] = "0/5 * * * * ?" });
 
         var text = GraphRenderer.Render(GraphBriefing.Of(graph)).Replace("\r\n", "\n");
 
         Assert.Contains(
-            "Schedule: cron \"0 * * * * *\" (six fields, seconds first).\nEntry S1 runs on its own cron \"0/5 * * * * ?\".\n",
+            "Schedule: each entry step runs on its own cron (six fields, seconds first).\n"
+            + "Entry S1 runs on cron \"0/5 * * * * ?\".\n"
+            + "Entry S2 has no schedule.\n",
             text, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AGraphWithoutEntryCronsRendersExactlyAsBefore()
+    public void AWorkflowCronOnTheGraphIsNotRendered()
     {
-        var plain = GraphRenderer.Render(GraphBriefing.Of(Captured));
+        // RunningGraph still carries a Cron parameter, but a workflow has no cron: whatever it holds
+        // never reaches the briefing, and an entry with no cron of its own is unscheduled.
+        var text = GraphRenderer.Render(GraphBriefing.Of(Captured with { Cron = "0 * * * * *", EntryCrons = null }));
 
-        Assert.DoesNotContain("runs on its own cron", plain, StringComparison.Ordinal);
+        Assert.DoesNotContain("0 * * * * *", text, StringComparison.Ordinal);
+        Assert.Contains("Entry S1 has no schedule.", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnEmptyEntryCronMapRendersLikeNone()
+    {
+        var plain = GraphRenderer.Render(GraphBriefing.Of(Captured with { EntryCrons = null }));
+
         Assert.Equal(plain, GraphRenderer.Render(GraphBriefing.Of(Captured with { EntryCrons = new Dictionary<Guid, string>() })));
     }
 
@@ -157,7 +172,8 @@ public sealed class RunningGraphTests
     }
 
     private static string StoreJson() => System.Text.Json.JsonSerializer.Serialize(
-        new WorkflowStoreProjection([.. Captured.EntryStepIds], Captured.Cron, [.. Captured.Steps]),
+        new WorkflowStoreProjection([.. Captured.EntryStepIds], [.. Captured.Steps],
+            new Dictionary<Guid, string> { [Captured.EntryStepIds[0]] = "0 * * * * *" }),
         MessagingJson.Options);
 
     [Fact]
@@ -170,7 +186,8 @@ public sealed class RunningGraphTests
         Assert.NotNull(briefing.Graph);
         Assert.True(briefing.Graph.Live);
         Assert.Equal(Captured.Steps.Count, briefing.Graph.Steps.Count);
-        Assert.Equal("0 * * * * *", briefing.Graph.Cron);
+        Assert.Null(briefing.Graph.Cron);
+        Assert.Equal("0 * * * * *", briefing.Graph.EntryCrons![Captured.EntryStepIds[0]]);
     }
 
     [Fact]

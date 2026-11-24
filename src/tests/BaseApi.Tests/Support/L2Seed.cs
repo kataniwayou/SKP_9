@@ -11,7 +11,7 @@ internal static class L2Seed
         l2.Db.HashSetAsync(
             L2ProjectionKeys.Workflow(definition.WorkflowId), L2ProjectionKeys.StoreField,
             JsonSerializer.Serialize(
-                new WorkflowStoreProjection(definition.EntryStepIds, definition.Cron, definition.Steps),
+                new WorkflowStoreProjection(definition.EntryStepIds, definition.Steps, definition.EntryCrons),
                 MessagingJson.Options));
 
     public static async Task LiveAsync(InMemoryL2 l2, WorkflowL1 definition)

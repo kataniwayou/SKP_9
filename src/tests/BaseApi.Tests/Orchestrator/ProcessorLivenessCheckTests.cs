@@ -80,7 +80,7 @@ public sealed class ProcessorLivenessCheckTests
         var s2 = Guid.NewGuid();
         var s3 = Guid.NewGuid();
         var definition = new WorkflowL1(
-            Guid.NewGuid(), [s1], "0 * * * *",
+            Guid.NewGuid(), [s1],
             [
                 new StepL1(s1, 1, P1, "", [s2, s3]),
                 new StepL1(s2, 1, P2, "", []),
@@ -96,7 +96,7 @@ public sealed class ProcessorLivenessCheckTests
     [Fact]
     public void AStopMarkKeepsTheKeys()
     {
-        var definition = new WorkflowL1(Guid.NewGuid(), [], null, [new StepL1(Guid.NewGuid(), 1, P1, "", [])], []);
+        var definition = new WorkflowL1(Guid.NewGuid(), [], [new StepL1(Guid.NewGuid(), 1, P1, "", [])], []);
 
         var marked = new L1Entry(definition, Guid.NewGuid()) with { DeletedAt = DateTimeOffset.UnixEpoch };
 

@@ -61,7 +61,6 @@ public sealed class StartDrivenProjectionTests
         return new WorkflowL1(
             WorkflowId: w,
             EntryStepIds: [steps[0]],
-            Cron: "0 0/5 * * * ?",
             Steps: steps.Select(s => new StepL1(s, 4, P, "{}", [])).ToList(),
             Caches: caches ?? [],
             Names: names,
