@@ -76,7 +76,7 @@ function remapItem(g: GhostItem, m: (id: Id) => Id): GhostItem {
     }
     case 'cache': return { key: `cache:${m(g.row.id)}`, kind: 'cache', row: { ...g.row, id: m(g.row.id) } };
     case 'workflow': {
-      const row = { ...g.row, id: m(g.row.id), entryStepIds: g.row.entryStepIds.map(m), entryCrons: Object.fromEntries(Object.entries(g.row.entryCrons).map(([k, v]) => [m(k), v])), assignmentIds: g.row.assignmentIds.map(m), cacheIds: g.row.cacheIds.map(m) };
+      const row = { ...g.row, id: m(g.row.id), entryStepIds: g.row.entryStepIds.map(m), entryCrons: Object.fromEntries(Object.entries(g.row.entryCrons ?? {}).map(([k, v]) => [m(k), v])), assignmentIds: g.row.assignmentIds.map(m), cacheIds: g.row.cacheIds.map(m) };
       return { key: `workflow:${row.id}`, kind: 'workflow', row, assignments: g.assignments.map(asg) };
     }
     case 'wire': return { key: `wire:${m(g.from)}:${m(g.to)}`, kind: 'wire', from: m(g.from), to: m(g.to), condition: g.condition };

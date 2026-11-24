@@ -118,7 +118,7 @@ function TabBody({ tab, focus, state, base, edit, ghosts, sel, child, choose, go
   const ctx = { state, base, edit, ...(go ? { go } : {}) };
   if (tab === 'workflow' && focus.kind === 'workflow') return <WorkflowTab {...ctx} id={focus.id} />;
   if (tab === 'cache' && focus.kind === 'cache') return <CacheTab {...ctx} id={focus.id} />;
-  if (tab === 'link' && (focus.kind === 'wire' || focus.kind === 'entry' || focus.kind === 'cacheLink')) return <LinkTab state={state} pick={focus} />;
+  if (tab === 'link' && (focus.kind === 'wire' || focus.kind === 'entry' || focus.kind === 'cacheLink')) return <LinkTab state={state} edit={edit} pick={focus} />;
   if (tab === 'ghost' && focus.kind === 'ghost') {
     const g = ghosts.get(focus.key);
     return g ? <GhostTab state={state} ghosts={ghosts} item={g} /> : null;

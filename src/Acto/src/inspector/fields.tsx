@@ -40,13 +40,13 @@ export function SelectField({ label, value, options, onChange, disabled }: {
  * The workflow's Cron: free text, with Studio's presets beside it [user, 2026-11-23]. A preset is typed into the field (the
  * dropdown always reads "presets"); "Not scheduled" clears it.
  */
-export function CronField({ value, onChange }: { value: string | null; onChange: (v: string) => void }) {
+export function CronField({ value, onChange, placeholder }: { value: string | null; onChange: (v: string) => void; placeholder?: string }) {
   const id = useId();
   return (
     <div className="fld">
       <span><label htmlFor={id}>Cron</label></span>
       <div className="cronrow">
-        <input id={id} className="in-in" value={value ?? ''} spellCheck={false} onChange={(e) => onChange(e.target.value)} />
+        <input id={id} className="in-in" value={value ?? ''} {...(placeholder !== undefined ? { placeholder } : {})} spellCheck={false} onChange={(e) => onChange(e.target.value)} />
         <select className="in-in cronpre" aria-label="Cron presets" value="" onChange={(e) => onChange(CRON_PRESETS[Number(e.target.value)]!.expression)}>
           <option value="" disabled>presets</option>
           {CRON_PRESETS.map((p, i) => <option key={p.label} value={i}>{p.label}{p.expression ? ` · ${p.expression}` : ''}</option>)}

@@ -44,7 +44,7 @@ export function WorkflowTab({ state, edit, id, go }: Ctx & { id: Id }) {
       <div className="chips">
         {w.entryStepIds.length === 0 && <span className="none">none</span>}
         {w.entryStepIds.map((sid) => (
-          <LinkChip key={sid} dot={dot(sid)} name={stepName(state, sid)} openLabel={`Open entry ${stepName(state, sid)}`}
+          <LinkChip key={sid} dot={dot(sid)} name={stepName(state, sid)} {...(w.entryCrons?.[sid] ? { sub: `⏱ ${w.entryCrons[sid]}` } : {})} openLabel={`Open entry ${stepName(state, sid)}`}
             {...(go ? { onOpen: () => go(withStep(sid), { tab: 'step' }) } : {})}
             removeLabel={`Remove entry ${stepName(state, sid)}`} onRemove={() => edit((b) => removeEntries(b, [[id, sid]]))} />
         ))}

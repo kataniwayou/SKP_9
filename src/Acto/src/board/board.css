@@ -191,3 +191,7 @@
 /* every dot's catch zone [user, 2026-11-19]: a 24 px invisible circle around the 10 px dot (scaled with the board), so the
    crosshair shows and a drag starts as soon as the pointer is near the dot; a pseudo-element is hit-tested as its handle */
 .board .react-flow__handle::after { content: ''; position: absolute; left: 50%; top: 50%; width: 24px; height: 24px; transform: translate(-50%, -50%); border-radius: 50%; }
+
+/* the entry arrow's own cron, on the paper above its middle */
+.entry-cron { font: 600 10px var(--mono); fill: var(--on-paper-2); paint-order: stroke; stroke: var(--b-node); stroke-width: 3px; pointer-events: none; }
+.entry-edge.ghost .entry-cron { fill: var(--ghost-wire); }

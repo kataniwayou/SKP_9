@@ -1,0 +1,46 @@
+import { test, expect } from './fixtures';
+import { entryEdge, field, inspector, openAt, pickEdge, save, saveButton, tab, waitLoaded } from './helpers';
+import { seed } from './seed';
+import { getJson, type Row } from './stack';
+
+// An entry arrow's own cron: set in the Link tab, saved, shown on the arrow and in the workflow's entry list, back after a reload.
+// Writes only a throwaway workflow (e2e-...); never Start/Stop.
+
+const CRON = '*/10 * * * * *';
+
+test('an entry arrow keeps its own cron through Save and a reload', async ({ page }) => {
+  const id = await seed({
+    steps: [
+      { key: 'a', name: 'e2e-ecron-a', at: { x: 300, y: 40 } },
+      { key: 'b', name: 'e2e-ecron-b', at: { x: 300, y: 220 } },
+    ],
+    workflows: [{ key: 'w', name: 'e2e-ecron-wf', at: { x: 0, y: 130 }, entry: ['a', 'b'], cron: '0 0 * * * *' }],
+  });
+  await openAt(page);
+
+  await pickEdge(page, entryEdge(page, id.w!, id.b!));
+  await tab(page, 'Link').click();
+  await expect(field(page, 'Cron')).toHaveValue('');
+  await expect(field(page, 'Cron')).toHaveAttribute('placeholder', '0 0 * * * *');
+  await field(page, 'Cron').fill(CRON);
+  await expect(inspector(page)).toContainText(/10 seconds/i);
+  await expect(entryEdge(page, id.w!, id.b!).locator('.entry-cron')).toHaveText(`⏱ ${CRON}`);
+  await expect(entryEdge(page, id.w!, id.a!).locator('.entry-cron')).toHaveCount(0);
+  await expect(saveButton(page)).toContainText('Save ·');
+
+  expect((await save(page)).applied).toBe(true);
+  const saved = (await getJson<Row[]>('/workflows')).find((w) => w.name === 'e2e-ecron-wf')!;
+  expect(JSON.stringify(saved)).toContain(CRON);
+
+  await page.reload();
+  await waitLoaded(page);
+  await pickEdge(page, entryEdge(page, id.w!, id.b!));
+  await tab(page, 'Link').click();
+  await expect(field(page, 'Cron')).toHaveValue(CRON);
+  await expect(entryEdge(page, id.w!, id.b!).locator('.entry-cron')).toHaveText(`⏱ ${CRON}`);
+
+  // cleared again: the arrow follows the workflow's cron
+  await field(page, 'Cron').fill('');
+  await expect(entryEdge(page, id.w!, id.b!).locator('.entry-cron')).toHaveCount(0);
+  expect((await save(page)).applied).toBe(true);
+});

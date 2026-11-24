@@ -87,6 +87,13 @@ describe('toFlow', () => {
     expect(d('entry:daily:fetch').running).toBe(false);
     expect(d('cache:daily:c1').running).toBeUndefined();
   });
+  it('anEntryEdgeWithItsOwnCronCarriesIt', () => {
+    const withCron = { ...b, workflows: { ...b.workflows, daily: { ...b.workflows.daily!, entryCrons: { fetch: '*/10 * * * * *' } } } };
+    const { edges } = toFlow(withCron, view());
+    const d = (id: string) => edges.find((e) => e.id === id)!.data as { cron?: string };
+    expect(d('entry:daily:fetch').cron).toBe('*/10 * * * * *');
+    expect('cron' in d('entry:hourly:fetch')).toBe(false);
+  });
   it('selected triangles carry their hue; entry arrows and cache lines of a selected workflow carry it', () => {
     const { nodes, edges } = toFlow(b, view({ workflows: ['hourly', 'daily'] }));
     const hue = (x: { id: string; data?: unknown }) => (x.data as { hue: string | null }).hue;

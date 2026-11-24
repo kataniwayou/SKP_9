@@ -149,7 +149,7 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
       edges.push({
         id, type: 'entry', source: nodeId('workflow', w.id), sourceHandle: 'tip', target: nodeId('step', sid), targetHandle: 'in',
         selected: pick !== undefined,
-        data: { workflowId: w.id, stepId: sid, hue: hue(w.id), running: running(w.id), ...(pick ? { pick } : {}) },
+        data: { workflowId: w.id, stepId: sid, hue: hue(w.id), running: running(w.id), ...(w.entryCrons?.[sid] ? { cron: w.entryCrons[sid] } : {}), ...(pick ? { pick } : {}) },
       });
     }
   }
@@ -218,7 +218,7 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
     } else if (g.kind === 'entry') {
       const source = endOf('workflow', g.workflowId), target = endOf('step', g.stepId);
       if (!source || !target) continue;
-      edges.push({ id, type: 'entry', source, sourceHandle: 'tip', target, targetHandle: 'in', ...ghostBase(g.key), data: { workflowId: g.workflowId, stepId: g.stepId, hue: null, running: false, ...extra } });
+      edges.push({ id, type: 'entry', source, sourceHandle: 'tip', target, targetHandle: 'in', ...ghostBase(g.key), data: { workflowId: g.workflowId, stepId: g.stepId, hue: null, running: false, ...(g.cron ? { cron: g.cron } : {}), ...extra } });
     } else if (g.kind === 'cacheLink') {
       const source = endOf('workflow', g.workflowId), target = endOf('cache', g.cacheId);
       if (!source || !target) continue;
