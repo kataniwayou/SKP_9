@@ -4,13 +4,11 @@ namespace BaseApi.Service.Features.Workflow;
 
 /// <summary>
 /// Workflow domain entity — the apex of the entity foreign-key graph; nothing else references it.
-/// The entity carries only the optional cron expression: its entry-step, assignment and cache
-/// collections live on the DTOs and are persisted through the three junction tables, synchronized by
-/// <c>WorkflowService.SyncJunctionsAsync</c>.
+/// Its entry-step, assignment and cache collections live on the DTOs and are persisted through the
+/// three junction tables, synchronized by <c>WorkflowService.SyncJunctionsAsync</c>.
 /// <para>
-/// <c>CronExpression</c> is nullable, and null means the workflow is not scheduled. A non-null value
-/// is parsed by the validator, which accepts the five-field standard form; a six-field expression is
-/// rejected with a 400.
+/// A workflow has no cron of its own (2026-11-24): each entry step carries its schedule on the
+/// <c>WorkflowEntrySteps</c> junction, and a workflow none of whose entry steps has one is not scheduled.
 /// </para>
 /// <para>
 /// <b>The junction collections are deliberately not properties here</b> — there are no navigation
@@ -37,8 +35,6 @@ namespace BaseApi.Service.Features.Workflow;
 /// </summary>
 public sealed class WorkflowEntity : BaseEntity
 {
-    public string? CronExpression { get; set; }
-
     /// <summary>Where the Acto board draws this row, or null when it has never been placed. An update that carries no location leaves the stored one.</summary>
     public double? BoardX { get; set; }
 

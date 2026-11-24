@@ -55,6 +55,13 @@ public sealed class ModelFieldsTests
     }
 
     [Fact]
+    public void TheWorkflowsTableListsNoCronExpression()
+    {
+        // a workflow has no cron (2026-11-24): its entry steps carry the schedule
+        Assert.DoesNotContain(Entity("workflows").Fields, f => f.Field == "cronExpression");
+    }
+
+    [Fact]
     public void TheSharedRulesOfAnIncludedValidatorReachEveryEntity()
     {
         foreach (var e in Snapshot().Dto.Entities)
@@ -106,10 +113,6 @@ public sealed class ModelFieldsTests
     {
         Assert.Equal(["required", "code"], Kinds(Field("schemas", "definition")));
         Assert.Null(Field("schemas", "definition").Rules[1].Message); // Custom(...) reports its own failures; it has no message
-
-        var cron = Assert.Single(Field("workflows", "cronExpression").Rules);
-        Assert.Equal(("code", true), (cron.Kind, cron.Conditional));
-        Assert.StartsWith("CronExpression must be a valid 5- or 6-field cron expression", cron.Message);
     }
 
     [Fact]

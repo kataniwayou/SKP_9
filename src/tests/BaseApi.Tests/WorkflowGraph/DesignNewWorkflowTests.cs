@@ -22,7 +22,7 @@ public sealed class DesignNewWorkflowTests
     private static string[] Lines(DesignOutcomeDto o) => o.Log!.Select(l => $"{l.Level} {l.Stage}: {l.Message}").ToArray();
 
     private static DesignNewWorkflowDto New(string name, string version = "1.0.0") =>
-        new(F($$"""{"name":"{{name}}","version":"{{version}}","description":null,"cronExpression":null}"""));
+        new(F($$"""{"name":"{{name}}","version":"{{version}}","description":null}"""));
 
     private static Dictionary<string, System.Text.Json.JsonElement> StepFields(string name) =>
         F($$"""{"name":"{{name}}","version":"1.0.0","description":null,"entryCondition":1}""");

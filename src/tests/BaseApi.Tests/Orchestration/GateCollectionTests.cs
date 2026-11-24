@@ -26,7 +26,7 @@ public sealed class GateCollectionTests
         public Guid Workflow(params Guid[] entry)
         {
             var id = Guid.NewGuid();
-            Snapshot.Workflows[id] = new WorkflowReadDto(id, "wf", "1.0.0", null, entry.ToList(), [], [], null, T, T, null, null);
+            Snapshot.Workflows[id] = new WorkflowReadDto(id, "wf", "1.0.0", null, entry.ToList(), [], [], T, T, null, null);
             return id;
         }
 

@@ -16,11 +16,23 @@ public sealed class DesignFieldsTests
     public void WorkflowFieldsReplaceOnlyWhatIsSentAndNullClearsANullableOne()
     {
         var errors = new List<FieldError>();
-        var dto = DesignFields.Apply(new WorkflowUpdateDto("wf", "1.0.0", "d", [Guid.NewGuid()], null, null, "0 0 * * *"),
-            F("""{"name":"orders","cronExpression":null}"""), errors);
+        var dto = DesignFields.Apply(new WorkflowUpdateDto("wf", "1.0.0", "d", [Guid.NewGuid()], null, null),
+            F("""{"name":"orders","description":null}"""), errors);
 
         Assert.Empty(errors);
-        Assert.Equal(("orders", "1.0.0", "d", (string?)null), (dto.Name, dto.Version, dto.Description, dto.CronExpression));
+        Assert.Equal(("orders", "1.0.0", (string?)null), (dto.Name, dto.Version, dto.Description));
+    }
+
+    [Fact]
+    public void TheDesignPathRefusesCronExpressionAsUnknown()
+    {
+        // a workflow has no cron (2026-11-24): its entry steps carry the schedule
+        var errors = new List<FieldError>();
+        var dto = DesignFields.Apply(new WorkflowUpdateDto("wf", "1.0.0", "d", [Guid.NewGuid()], null, null),
+            F("""{"cronExpression":"0 0 * * *"}"""), errors);
+
+        Assert.Equal([new FieldError("cronExpression", "Unknown field 'cronExpression'.")], errors);
+        Assert.Equal(("wf", "1.0.0", "d"), (dto.Name, dto.Version, dto.Description));
     }
 
     [Fact]

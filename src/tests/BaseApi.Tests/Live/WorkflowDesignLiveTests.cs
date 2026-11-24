@@ -173,7 +173,7 @@ public sealed class WorkflowDesignLiveTests : IAsyncLifetime
         {
             workflow = new { updatedAt = (string?)null, entryStepIds = new[] { step } },
             newSteps = new[] { new { id = step, copyOf = (Guid?)null, processorId = processor, fields = new { name = Tag(), version = "1.0.0", description = (string?)null, entryCondition = 1 }, nextStepIds = Array.Empty<Guid>() } },
-            newWorkflow = new { fields = new { name, version = "1.0.0", description = (string?)null, cronExpression = (string?)null } },
+            newWorkflow = new { fields = new { name, version = "1.0.0", description = (string?)null } },
             layout = new { v = 1 },
         };
         Guid wf = Guid.NewGuid(), s = Guid.NewGuid();
@@ -313,13 +313,13 @@ public sealed class WorkflowDesignLiveTests : IAsyncLifetime
         var workflowStamp = Stamp(await GetAsync($"workflows/{wf}"));
 
         var (applied, errors) = await PutDesignAsync(wf, Body(
-            workflow: new { updatedAt = workflowStamp, fields = new { cronExpression = "not a cron" } },
+            workflow: new { updatedAt = workflowStamp, fields = new { version = "abc" } },
             steps: [new { id = a, updatedAt = await StepStampAsync(a), fields = new { description = "applied?" } },
                     new { id = b, updatedAt = await StepStampAsync(b), fields = new { version = "abc" } }]));
 
         Assert.False(applied);
         Assert.Contains(errors, e => Is(e, "step", b, "version"));
-        Assert.Contains(errors, e => Is(e, "workflow", wf, "cronExpression"));
+        Assert.Contains(errors, e => Is(e, "workflow", wf, "version"));
         // rolled back: a's valid change is not there either; the store moved no stamp; the design is stored
         Assert.Null(Text(await GetAsync($"steps/{a}"), "description"));
         Assert.Equal(workflowStamp, Stamp(await GetAsync($"workflows/{wf}")));

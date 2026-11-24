@@ -80,14 +80,14 @@ public sealed class DesignOwnedStagesTests
         var loaded = await h.Reader.ReadAsync(wf, h.Ct);
 
         var outcome = await h.Syncer().SaveAsync(wf, Of(
-            workflow: new DesignWorkflowDto(loaded.Workflow.UpdatedAt, F("""{"cronExpression":"not a cron"}"""), null, null),
+            workflow: new DesignWorkflowDto(loaded.Workflow.UpdatedAt, F("""{"version":"abc"}"""), null, null),
             steps: [new DesignStepDto(s1, loaded.Steps.Single().UpdatedAt, F("""{"version":"abc"}"""), null)],
             caches: [new DesignCacheDto(cache, F("""{"root":"a:b"}"""))]), h.Ct);
 
         Assert.False(outcome.Applied);
         Assert.Contains(outcome.Errors, e => (e.Kind, e.Stage, e.Field) == ("cache", "caches", "root"));
         Assert.Contains(outcome.Errors, e => (e.Kind, e.Stage, e.Field) == ("step", "steps", "version"));
-        Assert.Contains(outcome.Errors, e => (e.Kind, e.Stage, e.Field) == ("workflow", "workflow", "cronExpression"));
+        Assert.Contains(outcome.Errors, e => (e.Kind, e.Stage, e.Field) == ("workflow", "workflow", "version"));
         // in stage order
         Assert.Equal(["caches", "steps", "workflow"], outcome.Errors.Select(e => e.Stage).Distinct());
     }

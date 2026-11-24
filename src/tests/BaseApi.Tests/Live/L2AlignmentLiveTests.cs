@@ -173,7 +173,6 @@ public sealed class L2AlignmentLiveTests
     {
         name = $"l2align-wf-{run}", version = "1.0.0", description = (string?)null,
         entryStepIds = entrySteps, assignmentIds = Array.Empty<Guid>(), cacheIds = caches,
-        cronExpression = (string?)null,
     };
 
     /// <summary>

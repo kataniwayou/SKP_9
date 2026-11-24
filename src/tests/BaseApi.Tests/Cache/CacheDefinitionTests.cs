@@ -20,7 +20,7 @@ public sealed class CacheDefinitionTests
         var snapshot = new WorkflowGraphSnapshot(NullLogger<WorkflowGraphSnapshot>.Instance);
 
         snapshot.Workflows[W] = new WorkflowReadDto(
-            W, "wf", "1.0.0", null, [], [], caches.Select(c => c.Id).ToList(), null,
+            W, "wf", "1.0.0", null, [], [], caches.Select(c => c.Id).ToList(),
             DateTime.UtcNow, DateTime.UtcNow, null, null);
 
         foreach (var cache in caches)
@@ -93,7 +93,7 @@ public sealed class CacheDefinitionTests
         // unreachable, and a throw here would turn an impossible state into a failed start.
         using var snapshot = new WorkflowGraphSnapshot(NullLogger<WorkflowGraphSnapshot>.Instance);
         snapshot.Workflows[W] = new WorkflowReadDto(
-            W, "wf", "1.0.0", null, [], [], [Guid.NewGuid()], null,
+            W, "wf", "1.0.0", null, [], [], [Guid.NewGuid()],
             DateTime.UtcNow, DateTime.UtcNow, null, null);
 
         var definition = OrchestrationService.ToDefinitionForTests(snapshot, W);

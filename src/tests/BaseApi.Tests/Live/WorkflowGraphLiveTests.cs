@@ -83,7 +83,7 @@ public sealed class WorkflowGraphLiveTests : IAsyncLifetime
         object[]? schemaEdits = null, object? layout = null) => new
     {
         workflow = new { name = $"graph-live-{Guid.NewGuid():N}"[..24], version = "1.0.0", description = (string?)null,
-            cronExpression = (string?)null, updatedAt, entryStepIds = entry, cacheIds = Array.Empty<Guid>() },
+            updatedAt, entryStepIds = entry, cacheIds = Array.Empty<Guid>() },
         steps, assignments, schemaEdits, layout,
     };
 

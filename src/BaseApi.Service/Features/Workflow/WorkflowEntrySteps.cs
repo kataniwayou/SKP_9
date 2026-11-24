@@ -17,7 +17,7 @@ public sealed class WorkflowEntrySteps
     public Guid StepId { get; set; }
 
     /// <summary>
-    /// This entry step's own schedule; null means it follows the workflow's <c>CronExpression</c>.
+    /// This entry step's schedule; null means it is not scheduled. A workflow has no cron of its own: its entry steps carry the whole schedule.
     /// </summary>
     public string? CronExpression { get; set; }
 }

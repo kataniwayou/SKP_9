@@ -24,7 +24,7 @@ public sealed class NameProjectionTests
         var now = DateTime.UtcNow;
 
         snapshot.Workflows[W] = new WorkflowReadDto(
-            W, "chain", "1.0.0", null, [S1], [], [], null, now, now, null, null);
+            W, "chain", "1.0.0", null, [S1], [], [], now, now, null, null);
         snapshot.Steps[S1] = new StepReadDto(S1, "step-a", "1.0.0", null, P, [S2], default, now, now, null, null);
         snapshot.Steps[S2] = new StepReadDto(S2, "step-b", "2.0.0", null, P, [], default, now, now, null, null);
         snapshot.Processors[P] = new ProcessorReadDto(

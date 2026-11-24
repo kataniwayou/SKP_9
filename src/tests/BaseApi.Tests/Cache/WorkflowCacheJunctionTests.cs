@@ -45,7 +45,7 @@ public sealed class WorkflowCacheJunctionTests : IAsyncLifetime
 
     private async Task<Guid> CreateAsync(string name, List<Guid>? caches)
     {
-        var dto = new WorkflowCreateDto(name, "1.0.0", null, [_entryStep], null, caches, null);
+        var dto = new WorkflowCreateDto(name, "1.0.0", null, [_entryStep], null, caches);
         return (await _service.CreateAsync(dto, TestContext.Current.CancellationToken)).Id;
     }
 
@@ -75,7 +75,7 @@ public sealed class WorkflowCacheJunctionTests : IAsyncLifetime
     public async Task AnUpdateReplacesTheCachesRatherThanAppending()
     {
         var replacement = new WorkflowUpdateDto(
-            "wf-bound", "1.0.0", null, [_entryStep], null, [_cacheB], null);
+            "wf-bound", "1.0.0", null, [_entryStep], null, [_cacheB]);
 
         await _service.UpdateAsync(_bound, replacement, TestContext.Current.CancellationToken);
         var read = await _service.GetByIdAsync(_bound, TestContext.Current.CancellationToken);
@@ -112,7 +112,7 @@ public sealed class WorkflowCacheJunctionTests : IAsyncLifetime
     public void DuplicateCacheIdsAreRefusedByTheValidator()
     {
         var id = Guid.NewGuid();
-        var dto = new WorkflowCreateDto("wf", "1.0.0", null, [_entryStep], null, [id, id], null);
+        var dto = new WorkflowCreateDto("wf", "1.0.0", null, [_entryStep], null, [id, id]);
 
         var result = new WorkflowCreateDtoValidator().Validate(dto);
 
@@ -123,7 +123,7 @@ public sealed class WorkflowCacheJunctionTests : IAsyncLifetime
     public void AnEmptyGuidInCacheIdsIsRefusedByTheValidator()
     {
         var dto = new WorkflowCreateDto(
-            "wf", "1.0.0", null, [_entryStep], null, [Guid.Empty], null);
+            "wf", "1.0.0", null, [_entryStep], null, [Guid.Empty]);
 
         var result = new WorkflowCreateDtoValidator().Validate(dto);
 

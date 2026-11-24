@@ -13,10 +13,10 @@ public sealed class EntryCronValidationTests
     private static readonly Guid B = Guid.NewGuid();
 
     private static WorkflowCreateDto Create(Dictionary<Guid, string>? crons) =>
-        new("wf", "1.0.0", null, [A, B], null, null, null, EntryCrons: crons);
+        new("wf", "1.0.0", null, [A, B], null, null, EntryCrons: crons);
 
     private static WorkflowUpdateDto Update(Dictionary<Guid, string>? crons) =>
-        new("wf", "1.0.0", null, [A, B], null, null, null, EntryCrons: crons);
+        new("wf", "1.0.0", null, [A, B], null, null, EntryCrons: crons);
 
     [Fact]
     public void AnUnparseableEntryCronIsRefused()
@@ -63,5 +63,15 @@ public sealed class EntryCronValidationTests
         Assert.True(new WorkflowCreateDtoValidator().Validate(Create(crons)).IsValid);
         Assert.True(new WorkflowUpdateDtoValidator().Validate(Update(crons)).IsValid);
         Assert.True(new WorkflowCreateDtoValidator().Validate(Create(null)).IsValid);
+    }
+
+    [Fact]
+    public void AWorkflowWithNoEntryCronsIsValid()
+    {
+        // a workflow has no cron of its own (2026-11-24); one whose entry steps have none is simply not scheduled
+        Assert.True(new WorkflowCreateDtoValidator().Validate(Create(null)).IsValid);
+        Assert.True(new WorkflowUpdateDtoValidator().Validate(Update(null)).IsValid);
+        Assert.True(new WorkflowCreateDtoValidator().Validate(Create([])).IsValid);
+        Assert.True(new WorkflowUpdateDtoValidator().Validate(Update([])).IsValid);
     }
 }

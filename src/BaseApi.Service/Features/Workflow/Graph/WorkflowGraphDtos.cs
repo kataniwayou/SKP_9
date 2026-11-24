@@ -28,7 +28,6 @@ public sealed record GraphWorkflowDto(
     string Name,
     string Version,
     string? Description,
-    string? CronExpression,
     DateTime? UpdatedAt,
     List<Guid> EntryStepIds,
     List<Guid>? CacheIds);

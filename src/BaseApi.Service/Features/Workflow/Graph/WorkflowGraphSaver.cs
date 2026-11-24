@@ -84,7 +84,7 @@ internal sealed class WorkflowGraphSaver : IWorkflowGraphSaver
             failures.Add(new ValidationFailure(nameof(GraphSaveRequest.Assignments), "Each step may have one assignment intent."));
 
         var workflowDto = new WorkflowUpdateDto(
-            wf.Name, wf.Version, wf.Description, wf.EntryStepIds, null, wf.CacheIds, wf.CronExpression);
+            wf.Name, wf.Version, wf.Description, wf.EntryStepIds, null, wf.CacheIds);
         failures.AddRange((await _workflowValidator.ValidateAsync(workflowDto, ct)).Errors);
 
         var stepIds = steps.Select(s => s.Id).ToList();
@@ -154,7 +154,7 @@ internal sealed class WorkflowGraphSaver : IWorkflowGraphSaver
         if (storedWorkflow is null)
         {
             storedWorkflow = _workflowMapper.ToEntity(new WorkflowCreateDto(
-                wf.Name, wf.Version, wf.Description, wf.EntryStepIds, assignmentIds, wf.CacheIds, wf.CronExpression));
+                wf.Name, wf.Version, wf.Description, wf.EntryStepIds, assignmentIds, wf.CacheIds));
             storedWorkflow.Id = workflowId;
             _db.Add(storedWorkflow);
         }

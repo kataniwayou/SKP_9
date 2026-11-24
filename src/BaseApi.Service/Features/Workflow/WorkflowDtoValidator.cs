@@ -10,7 +10,7 @@ namespace BaseApi.Service.Features.Workflow;
 /// description rules. The workflow-specific rules are: the entry-step collection must be present,
 /// non-empty, unique and free of empty ids; the assignment collection, when present, must be unique
 /// and free of empty ids; the cache collection, when present, must be unique and free of empty ids;
-/// and the cron expression, when present, must parse.
+/// and each entry cron must parse and name one of the workflow's entry steps (a workflow has no cron of its own).
 /// <para>
 /// A well-formed but non-existent step id is not caught here — it surfaces as a foreign-key violation
 /// from Postgres and becomes a 422.
@@ -49,11 +49,6 @@ public sealed class WorkflowCreateDtoValidator : AbstractValidator<WorkflowCreat
             .Must(ids => ids is null || ids.All(id => id != Guid.Empty))
             .WithMessage("CacheIds must not contain Guid.Empty.");
 
-        RuleFor(x => x.CronExpression)
-            .Must(BeValidStandardCron)
-            .When(x => !string.IsNullOrWhiteSpace(x.CronExpression))
-            .WithMessage("CronExpression must be a valid 5- or 6-field cron expression (e.g., '0 0 * * *' or '*/30 * * * * *').");
-
         // Custom, not Must/WithMessage: the messages name the offending step, which only exists at validation time.
         RuleFor(x => x.EntryCrons)
             .Custom((crons, ctx) =>
@@ -75,7 +70,7 @@ public sealed class WorkflowCreateDtoValidator : AbstractValidator<WorkflowCreat
     private const int MaxEntryCronLength = 120;
 
     /// <summary>
-    /// Null or blank is valid, meaning the workflow is not scheduled. Otherwise the shared field-count
+    /// Null or blank passes here (the entry-cron rule refuses a blank value itself). Otherwise the shared field-count
     /// detector rejects anything that is not five or six fields up front, without throwing, and then
     /// resolves the format for a single guarded parse. A genuinely malformed expression with the right
     /// field count is still rejected by that parse.
@@ -125,11 +120,6 @@ public sealed class WorkflowUpdateDtoValidator : AbstractValidator<WorkflowUpdat
             .WithMessage("CacheIds must be unique when present.")
             .Must(ids => ids is null || ids.All(id => id != Guid.Empty))
             .WithMessage("CacheIds must not contain Guid.Empty.");
-
-        RuleFor(x => x.CronExpression)
-            .Must(BeValidStandardCron)
-            .When(x => !string.IsNullOrWhiteSpace(x.CronExpression))
-            .WithMessage("CronExpression must be a valid 5- or 6-field cron expression (e.g., '0 0 * * *' or '*/30 * * * * *').");
 
         // Custom, not Must/WithMessage: the messages name the offending step, which only exists at validation time.
         RuleFor(x => x.EntryCrons)

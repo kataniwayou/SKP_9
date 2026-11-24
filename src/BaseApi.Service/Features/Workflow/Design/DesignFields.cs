@@ -26,7 +26,6 @@ internal static class DesignFields
                 "name" => dto with { Name = Text(v, key, errors) ?? "" },
                 "version" => dto with { Version = Text(v, key, errors) ?? "" },
                 "description" => dto with { Description = Text(v, key, errors) },
-                "cronExpression" => dto with { CronExpression = Text(v, key, errors) },
                 _ => Unknown(dto, key, errors),
             };
         return dto;

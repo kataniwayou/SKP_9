@@ -6,7 +6,8 @@ namespace BaseApi.Service.Persistence.Migrations
 {
     /// <summary>
     /// An entry step may carry its own cron: a nullable column on the workflow_entry_steps junction.
-    /// Null means the step follows the workflow's cron; nothing is backfilled.
+    /// Nothing is backfilled here. Since 20261124180000_RemoveWorkflowCron (which copies the workflow cron onto entries
+    /// without one, then drops it) there is no workflow cron to fall back to: null means the step is not scheduled.
     /// </summary>
     public partial class AddEntryStepCron : Migration
     {

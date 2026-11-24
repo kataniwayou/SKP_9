@@ -448,11 +448,6 @@ namespace BaseApi.Service.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("created_by");
 
-                    b.Property<string>("CronExpression")
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)")
-                        .HasColumnName("cron_expression");
-
                     b.Property<string>("Description")
                         .HasColumnType("text")
                         .HasColumnName("description");

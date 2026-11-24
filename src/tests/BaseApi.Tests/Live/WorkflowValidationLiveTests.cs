@@ -76,7 +76,7 @@ public sealed class WorkflowValidationLiveTests : IAsyncLifetime
     private static object Body(string? updatedAt, Guid[] entry, object[]? steps = null) => new
     {
         workflow = new { name = $"validate-live-{Guid.NewGuid():N}"[..27], version = "1.0.0", description = (string?)null,
-            cronExpression = (string?)null, updatedAt, entryStepIds = entry, cacheIds = Array.Empty<Guid>() },
+            updatedAt, entryStepIds = entry, cacheIds = Array.Empty<Guid>() },
         steps, assignments = (object[]?)null, schemaEdits = (object[]?)null, layout = (object?)null,
     };
 

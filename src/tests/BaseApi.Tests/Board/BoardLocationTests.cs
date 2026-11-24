@@ -117,11 +117,11 @@ public sealed class BoardLocationTests : IAsyncLifetime
 
         var entry = Guid.NewGuid();
         var wf = await _workflows.CreateAsync(
-            new WorkflowCreateDto("w", "1.0.0", null, [entry], null, null, null, 120.5, -40), Ct);
+            new WorkflowCreateDto("w", "1.0.0", null, [entry], null, null, 120.5, -40), Ct);
         Assert.Equal((120.5, -40.0), Pair(await _workflows.GetByIdAsync(wf.Id, Ct)));
-        await _workflows.UpdateAsync(wf.Id, new WorkflowUpdateDto("w", "1.0.0", null, [entry], null, null, null, 300, 10), Ct);
+        await _workflows.UpdateAsync(wf.Id, new WorkflowUpdateDto("w", "1.0.0", null, [entry], null, null, 300, 10), Ct);
         Assert.Equal((300.0, 10.0), Pair(await _workflows.GetByIdAsync(wf.Id, Ct)));
-        await _workflows.UpdateAsync(wf.Id, new WorkflowUpdateDto("w", "1.0.0", null, [entry], null, null, null), Ct);
+        await _workflows.UpdateAsync(wf.Id, new WorkflowUpdateDto("w", "1.0.0", null, [entry], null, null), Ct);
         Assert.Equal((300.0, 10.0), Pair(await _workflows.GetByIdAsync(wf.Id, Ct)));
     }
 

@@ -73,7 +73,7 @@ internal sealed class GraphHarness : IAsyncDisposable
         GraphSchemaEdit[]? schemaEdits = null,
         string? layout = null,
         string name = "wf") =>
-        new(new GraphWorkflowDto(name, "1.0.0", null, null, workflowUpdatedAt, entry.ToList(), null),
+        new(new GraphWorkflowDto(name, "1.0.0", null, workflowUpdatedAt, entry.ToList(), null),
             steps?.ToList(), assignments?.ToList(), schemaEdits?.ToList(),
             layout is null ? null : System.Text.Json.JsonDocument.Parse(layout).RootElement.Clone());
 

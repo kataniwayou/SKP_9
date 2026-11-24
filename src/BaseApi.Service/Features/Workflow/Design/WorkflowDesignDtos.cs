@@ -48,7 +48,7 @@ public sealed record DesignSaveRequest(
     DesignNewWorkflowDto? NewWorkflow = null);
 
 /// <summary>A workflow the design creates (Workspace › New workflow, 2026-10-10).</summary>
-/// <param name="Fields">Its fields by camelCase name (<c>name</c>, <c>version</c>, <c>description</c>, <c>cronExpression</c>).</param>
+/// <param name="Fields">Its fields by camelCase name (<c>name</c>, <c>version</c>, <c>description</c>; a workflow has no cron of its own).</param>
 public sealed record DesignNewWorkflowDto(Dictionary<string, JsonElement>? Fields);
 
 /// <summary>A step the design creates (a pasted copy): its own new id, the same processor as its original.</summary>

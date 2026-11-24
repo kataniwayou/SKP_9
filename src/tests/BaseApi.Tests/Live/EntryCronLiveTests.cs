@@ -8,8 +8,8 @@ using Xunit;
 namespace BaseApi.Tests.Live;
 
 /// <summary>
-/// Entry-step crons against the real orchestrator: two entry steps of one workflow, one on the
-/// workflow's cron and one on its own, each fire at their own rate, every fire under its own
+/// Entry-step crons against the real orchestrator: two entry steps of one workflow, each on its own
+/// cron (a workflow has no cron of its own), fire at their own rates, every fire under its own
 /// correlation id, and a stop silences both.
 /// <para>
 /// <b>Self-contained.</b> The workflow and its two steps are created here and deleted in the
@@ -30,7 +30,7 @@ public sealed class EntryCronLiveTests
 {
     private const string LogIndex = "logs-generic.otel-default";
     private const string EntryDispatched = "dispatched an entry step";
-    private const string WorkflowCron = "*/30 * * * * *";
+    private const string StepACron = "*/30 * * * * *";
     private const string StepBCron = "*/10 * * * * *";
 
     private static readonly TimeSpan RunFor = TimeSpan.FromSeconds(60);
@@ -61,16 +61,15 @@ public sealed class EntryCronLiveTests
             {
                 name = $"entrycron-wf-{run}", version = "1.0.0", description = (string?)null,
                 entryStepIds = new[] { a, b }, assignmentIds = Array.Empty<Guid>(), cacheIds = Array.Empty<Guid>(),
-                cronExpression = WorkflowCron,
-                entryCrons = new Dictionary<Guid, string> { [b] = StepBCron },
+                entryCrons = new Dictionary<Guid, string> { [a] = StepACron, [b] = StepBCron },
             }, ct);
 
-            // The read echoes the per-step cron, so what fires below is what was stored.
+            // The read echoes the per-step crons, so what fires below is what was stored.
             using (var read = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/workflows/{workflow}", ct)))
             {
                 var crons = read.RootElement.GetProperty("entryCrons");
                 Assert.Equal(StepBCron, crons.GetProperty(b.ToString("D")).GetString());
-                Assert.False(crons.TryGetProperty(a.ToString("D"), out _), "step A inherits the workflow cron and has no entry of its own");
+                Assert.Equal(StepACron, crons.GetProperty(a.ToString("D")).GetString());
             }
 
             var started = DateTimeOffset.UtcNow;
@@ -92,7 +91,7 @@ public sealed class EntryCronLiveTests
             var summary = string.Join("; ", dispatches.Select(d =>
                 $"{d.At:HH:mm:ss.fff} {(d.StepId == a ? "A" : d.StepId == b ? "B" : d.StepId.ToString())} {d.CorrelationId}"));
 
-            Assert.True(perA is >= 1 and <= 3, $"step A (workflow cron {WorkflowCron}) fired {perA} times in {RunFor.TotalSeconds}s, expected 2±1: {summary}");
+            Assert.True(perA is >= 1 and <= 3, $"step A (entry cron {StepACron}) fired {perA} times in {RunFor.TotalSeconds}s, expected 2±1: {summary}");
             Assert.True(perB is >= 5 and <= 7, $"step B (entry cron {StepBCron}) fired {perB} times in {RunFor.TotalSeconds}s, expected 6±1: {summary}");
             Assert.True(perB > perA, $"step B's faster cron did not fire more often than step A's: {summary}");
 

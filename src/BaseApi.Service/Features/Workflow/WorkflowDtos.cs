@@ -10,8 +10,8 @@ namespace BaseApi.Service.Features.Workflow;
 /// <c>WorkflowService.SyncJunctionsAsync</c> between the add and the save.
 /// <para>
 /// <c>EntryStepIds</c> is required and must be non-empty. <c>AssignmentIds</c> and <c>CacheIds</c> are
-/// nullable, since a workflow may name neither. <c>CronExpression</c> is nullable, where null means
-/// not scheduled; a non-null value must parse as a five-field cron expression.
+/// nullable, since a workflow may name neither. A workflow has no cron of its own: <c>EntryCrons</c> maps
+/// an entry step to its schedule, and every value must parse as a five- or six-field cron expression.
 /// </para>
 /// </summary>
 public sealed record WorkflowCreateDto(
@@ -21,7 +21,6 @@ public sealed record WorkflowCreateDto(
     List<Guid> EntryStepIds,
     List<Guid>? AssignmentIds,
     List<Guid>? CacheIds,
-    string? CronExpression,
     double? BoardX = null,
     double? BoardY = null,
     Dictionary<Guid, string>? EntryCrons = null) : IBaseDto;
@@ -38,7 +37,6 @@ public sealed record WorkflowUpdateDto(
     List<Guid> EntryStepIds,
     List<Guid>? AssignmentIds,
     List<Guid>? CacheIds,
-    string? CronExpression,
     double? BoardX = null,
     double? BoardY = null,
     Dictionary<Guid, string>? EntryCrons = null) : IBaseDto;
@@ -63,7 +61,6 @@ public sealed record WorkflowReadDto(
     List<Guid>? EntryStepIds,
     List<Guid>? AssignmentIds,
     List<Guid>? CacheIds,
-    string? CronExpression,
     DateTime CreatedAt,
     DateTime UpdatedAt,
     string? CreatedBy,

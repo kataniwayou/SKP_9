@@ -22,7 +22,7 @@ public sealed class ModelChangeRemapTests
         var (client, given, other, wf) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         var body = $$$"""
             {"name":"wf","version":"1.0.0","description":null,"entryStepIds":["{{{client:D}}}","{{{other:D}}}"],
-             "assignmentIds":null,"cacheIds":null,"cronExpression":null,"entryCrons":{"{{{client:D}}}":"*/10 * * * * *"}}
+             "assignmentIds":null,"cacheIds":null,"entryCrons":{"{{{client:D}}}":"*/10 * * * * *"}}
             """;
         using var doc = JsonDocument.Parse(body);
 

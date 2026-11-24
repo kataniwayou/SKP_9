@@ -211,7 +211,7 @@ internal sealed class WorkflowStage : IDesignStage
 
             var errors = new List<FieldError>();
             var dto = DesignFields.Apply(
-                new WorkflowUpdateDto(entity.Name, entity.Version, entity.Description, entry, assignments, caches, entity.CronExpression),
+                new WorkflowUpdateDto(entity.Name, entity.Version, entity.Description, entry, assignments, caches),
                 w?.Fields, errors);
             if (errors.Count > 0) return errors;
             // no entry step is a design in progress (2026-10-10): stored; Start refuses it (gate noEntryStep). The CRUD's own
@@ -219,7 +219,7 @@ internal sealed class WorkflowStage : IDesignStage
             var problems = DesignFields.Failures(await _validator.ValidateAsync(dto, ct))
                 .Where(p => !(p.Field == "entryStepIds" && (dto.EntryStepIds ?? []).Count == 0)).ToList();
             if (problems.Count > 0) return problems;
-            var before = (entity.Name, entity.Version, entity.Description, entity.CronExpression);
+            var before = (entity.Name, entity.Version, entity.Description);
             var oldEntry = await _db.Set<WorkflowEntrySteps>().AsNoTracking()
                 .Where(j => j.WorkflowId == run.WorkflowId).Select(j => j.StepId).ToListAsync(ct);
             var oldCaches = await _db.Set<WorkflowCaches>().AsNoTracking()
@@ -239,7 +239,7 @@ internal sealed class WorkflowStage : IDesignStage
 
     /// <summary>What the workflow stage wrote: its changed fields, and how its entry steps, caches and assignment links changed.</summary>
     private async Task<string?> DescribeAsync(
-        (string Name, string Version, string? Description, string? CronExpression) before, WorkflowUpdateDto dto,
+        (string Name, string Version, string? Description) before, WorkflowUpdateDto dto,
         List<Guid> oldEntry, List<Guid> oldCaches, List<Guid> oldAssignments, IReadOnlyDictionary<Guid, string> known, CancellationToken ct)
     {
         var entry = dto.EntryStepIds ?? [];
@@ -257,7 +257,7 @@ internal sealed class WorkflowStage : IDesignStage
 
         var parts = DesignLogText.Fields(
             ("name", before.Name, dto.Name), ("version", before.Version, dto.Version),
-            ("description", before.Description, dto.Description), ("cronExpression", before.CronExpression, dto.CronExpression));
+            ("description", before.Description, dto.Description));
         if (DesignLogText.Links(oldEntry, entry, id => steps[id]) is { } e) parts.Add($"entry steps {e}");
         if (DesignLogText.Links(oldCaches, caches, id => Named(cacheNames, id)) is { } c) parts.Add($"caches {c}");
         if (DesignLogText.Links(oldAssignments, assignments, id => Named(assignmentNames, id)) is { } a)

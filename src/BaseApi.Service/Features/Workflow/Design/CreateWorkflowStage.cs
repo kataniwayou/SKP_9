@@ -7,7 +7,7 @@ namespace BaseApi.Service.Features.Workflow.Design;
 /// <summary>
 /// Stage 0 (2026-10-10, Workspace › New workflow): a workflow that exists only in the studio is created with the route's
 /// id, before every other stage, so they work on it as on any workflow. Its fields are judged by the workflow CRUD's own
-/// rules (name, version, description, cron) except its entry steps, which the workflow stage sets and judges after the
+/// rules (name, version, description) except its entry steps, which the workflow stage sets and judges after the
 /// steps exist; and its name must be no other workflow's. It holds the design's layout from the start; refused, the
 /// later stages still report their own errors and the whole save rolls back. Runs only when the save creates it.
 /// </summary>
@@ -24,7 +24,7 @@ internal sealed class CreateWorkflowStage : IDesignStage
 
     /// <summary>The fields a new workflow's request names, laid over empty ones (as a new step's are).</summary>
     public static WorkflowUpdateDto FieldsOf(DesignNewWorkflowDto nw, List<FieldError> errors) =>
-        DesignFields.Apply(new WorkflowUpdateDto("", "", null, [], [], [], null), nw.Fields, errors);
+        DesignFields.Apply(new WorkflowUpdateDto("", "", null, [], [], []), nw.Fields, errors);
 
     public async Task RunAsync(DesignRun run, CancellationToken ct)
     {
@@ -48,7 +48,6 @@ internal sealed class CreateWorkflowStage : IDesignStage
                 Name = dto.Name,
                 Version = dto.Version,
                 Description = dto.Description,
-                CronExpression = string.IsNullOrWhiteSpace(dto.CronExpression) ? null : dto.CronExpression,
                 Layout = run.Request.Layout?.GetRawText(),
             });
             return [];

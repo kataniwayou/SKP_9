@@ -48,14 +48,13 @@ internal sealed class WorkflowDesignSyncer : IWorkflowDesignSyncer
         if (request.NewWorkflow is { } nw)
         {
             var stored = await _db.Set<WorkflowEntity>().AsNoTracking().Where(w => w.Id == workflowId)
-                .Select(w => new { w.Name, w.Version, w.Description, w.CronExpression }).FirstOrDefaultAsync(ct);
+                .Select(w => new { w.Name, w.Version, w.Description }).FirstOrDefaultAsync(ct);
             if (stored is null) creates = true;
             else
             {
                 // this creation's retry (its first try committed) holds exactly these fields: an ordinary save from here
                 var fields = CreateWorkflowStage.FieldsOf(nw, []);
-                var cron = string.IsNullOrWhiteSpace(fields.CronExpression) ? null : fields.CronExpression;
-                if ((stored.Name, stored.Version, stored.Description, stored.CronExpression) != (fields.Name, fields.Version, fields.Description, cron))
+                if ((stored.Name, stored.Version, stored.Description) != (fields.Name, fields.Version, fields.Description))
                 {
                     const string taken = "Not created: a different workflow with this id already exists.";
                     return new DesignOutcomeDto(false, [new DesignErrorDto("workflow", workflowId, "create", null, taken)],
