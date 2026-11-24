@@ -24,8 +24,9 @@ namespace BaseApi.Tests.Orchestrator;
 /// job armed its successor — is a claim about that method, not about the store Quartz would have read
 /// the context out of. The context a fire really receives is asserted on the other side, in
 /// <see cref="WorkflowSchedulerTests"/>, against a real job store; the two files meet at
-/// <see cref="IWorkflowScheduler.WorkflowIdKey"/> and <see cref="IWorkflowScheduler.JobIdKey"/>, which
-/// is why the map below is written through those constants and never through a literal.
+/// <see cref="IWorkflowScheduler.WorkflowIdKey"/>, <see cref="IWorkflowScheduler.JobIdKey"/>,
+/// <see cref="IWorkflowScheduler.IndexKey"/> and <see cref="IWorkflowScheduler.CronKey"/>, which is why
+/// the map below is written through those constants and never through a literal.
 /// </para>
 /// </summary>
 public sealed class WorkflowFireJobTests
@@ -101,6 +102,38 @@ public sealed class WorkflowFireJobTests
 
             Store.Set(workflowId, _definition, JobId);
             return this;
+        }
+
+        /// <summary>
+        /// Puts <paramref name="workflowId"/> in L1 with each entry step on its own cron, under the
+        /// workflow cron <see cref="EveryHour"/> — the multi-group shape, one Quartz job per distinct
+        /// cron.
+        /// </summary>
+        public Harness WithCronGroups(
+            Guid workflowId, (Guid StepId, Guid ProcessorId, string Cron)[] entries)
+        {
+            _definition = new WorkflowL1(
+                workflowId,
+                entries.Select(e => e.StepId).ToList(),
+                EveryHour,
+                entries.Select(e => new StepL1(
+                    e.StepId, PreviousCompleted, e.ProcessorId, Config, [])).ToList(),
+                [],
+                EntryCrons: entries.ToDictionary(e => e.StepId, e => e.Cron));
+
+            Store.Set(workflowId, _definition, JobId);
+            return this;
+        }
+
+        /// <summary>
+        /// What a start that has already landed leaves behind: L1 holds the same workflow under a
+        /// new activation id, so every job of the old activation is stale.
+        /// </summary>
+        public Guid Reactivate(Guid workflowId)
+        {
+            var activationId = Guid.NewGuid();
+            Store.Set(workflowId, _definition, activationId);
+            return activationId;
         }
 
         /// <summary>
@@ -233,25 +266,36 @@ public sealed class WorkflowFireJobTests
             return null;
         }
 
-        /// <summary>The context a fire of this workflow's own job arrives with.</summary>
+        /// <summary>
+        /// The context a fire of this workflow's own job arrives with: group 0, on the workflow cron —
+        /// the single-group shape every workflow without per-step crons has.
+        /// </summary>
         public IJobExecutionContext Context(Guid workflowId, Guid jobId) =>
-            ContextWith(workflowId.ToString("D"), jobId.ToString("D"), CancellationToken.None);
+            Context(workflowId, jobId, 0, EveryHour);
+
+        /// <summary>The context a fire of group <paramref name="index"/>, on <paramref name="cron"/>, arrives with.</summary>
+        public IJobExecutionContext Context(Guid workflowId, Guid jobId, int index, string cron) =>
+            ContextWith(
+                workflowId.ToString("D"), jobId.ToString("D"),
+                index.ToString(System.Globalization.CultureInfo.InvariantCulture), cron, CancellationToken.None);
 
         /// <summary>
         /// The same context under a token the host has already cancelled — what a fire in progress
         /// sees once shutdown has begun.
         /// </summary>
         public IJobExecutionContext CancelledContext(Guid workflowId, Guid jobId, CancellationToken ct) =>
-            ContextWith(workflowId.ToString("D"), jobId.ToString("D"), ct);
+            ContextWith(workflowId.ToString("D"), jobId.ToString("D"), "0", EveryHour, ct);
 
         /// <summary>
         /// A context whose job-data values are whatever the caller says, for the cases where the map
         /// carries something that will not parse, or nothing at all.
         /// </summary>
-        public IJobExecutionContext RawContext(string? workflowId, string? jobId) =>
-            ContextWith(workflowId, jobId, CancellationToken.None);
+        public IJobExecutionContext RawContext(
+            string? workflowId, string? jobId, string? index = "0", string? cron = EveryHour) =>
+            ContextWith(workflowId, jobId, index, cron, CancellationToken.None);
 
-        private static IJobExecutionContext ContextWith(string? workflowId, string? jobId, CancellationToken ct)
+        private static IJobExecutionContext ContextWith(
+            string? workflowId, string? jobId, string? index, string? cron, CancellationToken ct)
         {
             var map = new JobDataMap();
             if (workflowId is not null)
@@ -262,6 +306,16 @@ public sealed class WorkflowFireJobTests
             if (jobId is not null)
             {
                 map[IWorkflowScheduler.JobIdKey] = jobId;
+            }
+
+            if (index is not null)
+            {
+                map[IWorkflowScheduler.IndexKey] = index;
+            }
+
+            if (cron is not null)
+            {
+                map[IWorkflowScheduler.CronKey] = cron;
             }
 
             var context = Substitute.For<IJobExecutionContext>();
@@ -591,16 +645,124 @@ public sealed class WorkflowFireJobTests
     }
 
     [Fact]
-    public async Task TheRescheduleCarriesTheWorkflowsOwnIdsAndCron()
+    public async Task AMapWithoutCronIsSkippedRatherThanThrown()
     {
-        // RescheduleAsync re-creates a purged job from exactly these three values, so a fire that
-        // armed its successor under the wrong ones would leave behind a job that could never find the
-        // workflow it fires again.
+        // The cron is what picks this job's entry steps and what arms its successor; without it the
+        // fire can do neither, and a throw would log a job exception on every tick.
         var h = new Harness().AsLeader().WithWorkflow(W, entries: [(S1, P1)]);
+
+        await h.Build().Execute(h.RawContext(W.ToString("D"), h.JobId.ToString("D"), cron: null));
+        await h.Build().Execute(h.RawContext(W.ToString("D"), h.JobId.ToString("D"), cron: "   "));
+
+        Assert.Empty(h.Sender.ReceivedCalls());
+        Assert.Equal(0, h.Scheduler.RescheduleCount);
+        Assert.Equal(2, h.Log.Templates.Count(
+            t => t == "a fire arrived with a job-data map that carries no usable ids; skipping"));
+    }
+
+    [Fact]
+    public async Task AMapWithoutAUsableIndexIsSkippedRatherThanThrown()
+    {
+        // The index is what the reschedule re-creates the job under; arming group 0 for a fire of
+        // group 1 would collide with group 0's own job.
+        var h = new Harness().AsLeader().WithWorkflow(W, entries: [(S1, P1)]);
+
+        await h.Build().Execute(h.RawContext(W.ToString("D"), h.JobId.ToString("D"), index: null));
+        await h.Build().Execute(h.RawContext(W.ToString("D"), h.JobId.ToString("D"), index: "one"));
+        await h.Build().Execute(h.RawContext(W.ToString("D"), h.JobId.ToString("D"), index: "-1"));
+
+        Assert.Empty(h.Sender.ReceivedCalls());
+        Assert.Equal(0, h.Scheduler.RescheduleCount);
+    }
+
+    [Fact]
+    public async Task TheRescheduleCarriesTheJobsOwnIndexAndCron()
+    {
+        // RescheduleAsync re-creates a purged job from exactly these values, so a fire that armed its
+        // successor under the workflow cron, or under group 0, would turn the */10 job into a copy of
+        // another group's.
+        var h = new Harness().AsLeader().WithCronGroups(
+            W, entries: [(S1, P1, "*/30 * * * *"), (S2, P2, "*/10 * * * *")]);
+
+        await h.Build().Execute(h.Context(W, h.JobId, 1, "*/10 * * * *"));
+
+        Assert.Equal((W, h.JobId, 1, "*/10 * * * *"), Assert.Single(h.Scheduler.Rescheduled));
+    }
+
+    [Fact]
+    public async Task AFireDispatchesOnlyTheEntryStepsOfItsOwnCron()
+    {
+        // One Quartz job per distinct cron: the */10 job fires every ten minutes, and dispatching the
+        // */30 step from it would run that step three times as often as it was set to.
+        var h = new Harness().AsLeader().WithCronGroups(
+            W, entries: [(S1, P1, "*/30 * * * *"), (S2, P2, "*/10 * * * *")]);
+
+        await h.Build().Execute(h.Context(W, h.JobId, 1, "*/10 * * * *"));
+
+        await h.Sender.Received(1).SendAsync(ProcessorQueues.Work(P2), MessageTypes.ProcessDispatch,
+            Arg.Is<ProcessDispatch>(d => d.StepId == S2), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
+        Assert.Single(h.Sender.ReceivedCalls());
+    }
+
+    [Fact]
+    public async Task AFireMatchesItsCronAfterWhitespaceIsNormalized()
+    {
+        // Groups are formed over normalized crons, so a job's cron and a step's own cron that differ
+        // only in spacing are the same group.
+        var h = new Harness().AsLeader().WithCronGroups(W, entries: [(S1, P1, "  */10   * * * * ")]);
+
+        await h.Build().Execute(h.Context(W, h.JobId, 0, "*/10 * * * *"));
+
+        await h.Sender.Received(1).SendAsync(ProcessorQueues.Work(P1), MessageTypes.ProcessDispatch,
+            Arg.Any<ProcessDispatch>(), Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
+    }
+
+    [Fact]
+    public async Task EachGroupsFireMintsItsOwnCorrelationId()
+    {
+        // A's runs and B's runs are unrelated, even where their branches meet downstream.
+        var h = new Harness().AsLeader().WithCronGroups(
+            W, entries: [(S1, P1, "*/30 * * * *"), (S2, P2, "*/10 * * * *")]);
+        var ids = new List<Guid>();
+        await h.Sender.SendAsync(Arg.Any<string>(), Arg.Any<string>(),
+                                 Arg.Do<ProcessDispatch>(d => ids.Add(d.CorrelationId)),
+                                 Arg.Any<CancellationToken>(), Arg.Any<string?>(), Arg.Any<string?>());
+
+        await h.Build().Execute(h.Context(W, h.JobId, 0, "*/30 * * * *"));
+        await h.Build().Execute(h.Context(W, h.JobId, 1, "*/10 * * * *"));
+
+        Assert.Equal(2, ids.Count);
+        Assert.Equal(2, ids.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task AStaleActivationStandsDownInEveryGroup()
+    {
+        // Supersession compares activation ids, not job keys: a new start retires every old job of
+        // every group, index 1 as surely as index 0.
+        var h = new Harness().AsLeader().WithCronGroups(
+            W, entries: [(S1, P1, "*/30 * * * *"), (S2, P2, "*/10 * * * *")]);
+        h.Reactivate(W);
+
+        await h.Build().Execute(h.Context(W, h.JobId, 1, "*/10 * * * *"));
+
+        Assert.Equal(0, h.Scheduler.RescheduleCount);
+    }
+
+    [Fact]
+    public async Task AStaleActivationDispatchesNothing()
+    {
+        // A job of an older activation can outlive the start that replaced it — re-created by a fire
+        // that raced a stop/start through RescheduleAsync's fallback. The new activation is active,
+        // so the active check alone would let this fire dispatch its entry steps once before the
+        // post-dispatch check stood it down. The activation check at the top is what stops that.
+        var h = new Harness().AsLeader().WithWorkflow(W, entries: [(S1, P1)]);
+        h.Reactivate(W);
 
         await h.Build().Execute(h.Context(W, h.JobId));
 
-        Assert.Equal((W, h.JobId, 0, EveryHour), Assert.Single(h.Scheduler.Rescheduled));
+        Assert.Empty(h.Sender.ReceivedCalls());
+        Assert.Equal(0, h.Scheduler.RescheduleCount);
     }
 
     // ---------------------------------------------------------------------------------------

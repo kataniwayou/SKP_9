@@ -1,7 +1,9 @@
+using System.Globalization;
 using BaseConsole.Core.Gating;
 using BaseConsole.Core.Messaging;
 using BaseConsole.Core.Naming;
 using Messaging.Contracts;
+using Messaging.Contracts.Projections;
 using Messaging.Transport;
 using Microsoft.Extensions.Logging;
 using Orchestrator.Election;
@@ -11,7 +13,16 @@ using Quartz;
 namespace Orchestrator.Scheduling;
 
 /// <summary>
-/// Spec §8.3. One fire of one workflow: dispatch its entry steps, then arm the next fire.
+/// Spec §8.3. One fire of one entry-schedule group of one workflow: dispatch the entry steps of
+/// that group, then arm the group's next fire.
+/// <para>
+/// <b>A workflow runs one job per distinct entry-step cron, and a fire dispatches only its own
+/// group.</b> The job-data map carries the group's <c>index</c> and <c>cron</c>; the fire recomputes
+/// each entry step's effective cron from the L1 definition (<see cref="EntrySchedule.EffectiveCron"/>)
+/// and sends only the steps whose cron equals the job's, compared after normalization. Each fire mints
+/// its own correlation id, so two groups' runs are unrelated even where their branches meet. The
+/// re-arm uses the job's own index and cron, never the workflow cron.
+/// </para>
 /// <para>
 /// <b>The leader gate sits before the dispatch and nowhere else.</b> A follower runs the whole of
 /// this method except the sends — and, critically, still reschedules. A follower that returned early
@@ -20,13 +31,23 @@ namespace Orchestrator.Scheduling;
 /// schedules is what makes a leadership change cost nothing.
 /// </para>
 /// <para>
-/// <b>The supersession check is why the job id is coupled to L1 at all (§8.2).</b> A start arriving
-/// while this fire is running deletes this job and schedules a replacement; the reschedule below can
-/// re-create a job from nothing, because a non-durable one-shot with no trigger is auto-purged and it
-/// has to be able to. Together those two facts would resurrect this job alongside its replacement —
-/// two live jobs for one workflow, both firing every tick, double-dispatching every entry step. So
-/// the fire asks L1 whether the job it belongs to is still the one L1 holds, and stands down if it is
-/// not.
+/// <b>The supersession check is why the activation id is coupled to L1 at all (§8.2), and it runs
+/// twice.</b> A start arriving while this fire is running deletes the workflow's jobs and schedules
+/// replacements under a new activation id; the reschedule below can re-create a job from nothing,
+/// because a non-durable one-shot with no trigger is auto-purged and it has to be able to. Together
+/// those two facts would resurrect this job alongside its replacement — two live jobs for one group,
+/// both firing every tick, double-dispatching every entry step. So the fire asks L1 whether the
+/// activation it belongs to is still the one L1 holds, and stands down if it is not:
+/// <list type="bullet">
+/// <item><b>At the top, before anything is dispatched.</b> A job of an older activation can already
+/// exist — re-created by a fire that raced a stop/start — and the new activation is active, so the
+/// active check alone would let it dispatch its entry steps once more. Comparing activation ids here
+/// stands it down with nothing sent and nothing armed.</item>
+/// <item><b>Again after the dispatch, on a fresh read.</b> That catches a start or a stop that lands
+/// <i>while</i> the dispatch is running, which the first read cannot see.</item>
+/// </list>
+/// Both compare the activation id, not the job key, so a new start retires every old job of every
+/// group at once.
 /// </para>
 /// <para>
 /// <b>An infra fault on an entry-step send is logged and swallowed, per entry step, and this is the
@@ -59,9 +80,9 @@ namespace Orchestrator.Scheduling;
 /// </para>
 /// <para>
 /// <b>Business cases are logged and returned from, never thrown.</b> A job-data map that will not
-/// parse and a workflow no longer in L1 are both ordinary — the second is what every fire of a
-/// stopped workflow sees on its way out — and Quartz has nothing useful to do with an exception for
-/// either.
+/// parse (ids, index or cron) and a workflow no longer in L1 are both ordinary — the second is what
+/// every fire of a stopped workflow sees on its way out — and Quartz has nothing useful to do with an
+/// exception for either.
 /// </para>
 /// </summary>
 [DisallowConcurrentExecution]
@@ -100,10 +121,13 @@ public sealed class WorkflowFireJob(
         // with both sides looking correct in isolation.
         var map = context.MergedJobDataMap;
         if (!TryReadId(map, IWorkflowScheduler.WorkflowIdKey, out var workflowId) ||
-            !TryReadId(map, IWorkflowScheduler.JobIdKey, out var jobId))
+            !TryReadId(map, IWorkflowScheduler.JobIdKey, out var jobId) ||
+            !TryReadIndex(map, out var index) ||
+            !TryReadCron(map, out var cron))
         {
-            // Neither id is logged: an unparseable value is by definition not an id, and the point of
-            // this record is that the map was wrong, not what it said.
+            // Nothing from the map is logged: an unparseable value is by definition not an id, and the
+            // point of this record is that the map was wrong, not what it said. The cron in particular
+            // is never logged, here or anywhere in this job.
             logger.LogWarning("a fire arrived with a job-data map that carries no usable ids; skipping");
             return;
         }
@@ -122,6 +146,19 @@ public sealed class WorkflowFireJob(
                 // The workflow was stopped and this job is on its way out. Returning without
                 // rescheduling is the point: arming a successor would resurrect what the stop halted.
                 logger.LogInformation("the workflow is not active in L1; this fire dispatches nothing");
+                return;
+            }
+
+            // A STALE ACTIVATION stands down here, before any gate and before any send. The workflow
+            // being active says nothing about whether THIS job belongs to the activation L1 holds: a
+            // job of an older activation, re-created by a fire that raced a stop/start through
+            // RescheduleAsync's fallback, would otherwise pass the check above on the strength of the
+            // new activation and dispatch its entry steps once before the re-read below stood it
+            // down. Not rescheduling is the point, as it is below.
+            if (entry.JobId != jobId)
+            {
+                logger.LogInformation(
+                    "this fire belongs to an activation L1 no longer holds; standing down without dispatching");
                 return;
             }
 
@@ -170,7 +207,7 @@ public sealed class WorkflowFireJob(
             }
             else if (await AllProcessorsLiveAsync(entry, context).ConfigureAwait(false))
             {
-                await DispatchEntryStepsAsync(workflowId, entry.Definition, context).ConfigureAwait(false);
+                await DispatchEntryStepsAsync(workflowId, entry.Definition, cron, context).ConfigureAwait(false);
             }
 
             // Re-read L1 rather than reusing the entry above. The whole value of this check is that it
@@ -189,17 +226,10 @@ public sealed class WorkflowFireJob(
                 return;
             }
 
-            if (current.Definition.Cron is not { } cron)
-            {
-                // Unreachable in practice — a workflow with no cron is never scheduled, so no job of
-                // it exists to fire. Stated rather than assumed away with a null-forgiving operator,
-                // because the day it becomes reachable it should say so in a log rather than throw
-                // inside Quartz.
-                logger.LogWarning("the workflow carries no cron; nothing to arm the next fire from");
-                return;
-            }
-
-            await scheduler.RescheduleAsync(workflowId, jobId, index: 0, cron, context.CancellationToken)
+            // The job's own index and cron, as the map carried them — not the workflow cron, which is
+            // only the fallback for entry steps without their own and would turn every group's job
+            // into a copy of the workflow-cron group's.
+            await scheduler.RescheduleAsync(workflowId, jobId, index, cron, context.CancellationToken)
                 .ConfigureAwait(false);
         }
     }
@@ -217,6 +247,27 @@ public sealed class WorkflowFireJob(
     {
         value = Guid.Empty;
         return map.TryGetValue(key, out var raw) && Guid.TryParse(raw as string, out value);
+    }
+
+    /// <summary>
+    /// Reads the group index, stored as an invariant-culture string. Absent, unparseable and negative
+    /// are one answer: the map is wrong.
+    /// </summary>
+    private static bool TryReadIndex(JobDataMap map, out int value)
+    {
+        value = 0;
+        return map.TryGetValue(IWorkflowScheduler.IndexKey, out var raw) &&
+               int.TryParse(raw as string, NumberStyles.None, CultureInfo.InvariantCulture, out value);
+    }
+
+    /// <summary>
+    /// Reads the job's cron, as stamped by the scheduler. Absent and blank are one answer: a job with
+    /// no cron can neither pick its entry steps nor arm its next fire.
+    /// </summary>
+    private static bool TryReadCron(JobDataMap map, out string value)
+    {
+        value = map.TryGetValue(IWorkflowScheduler.CronKey, out var raw) ? raw as string ?? string.Empty : string.Empty;
+        return !string.IsNullOrWhiteSpace(value);
     }
 
     /// <summary>
@@ -300,8 +351,9 @@ public sealed class WorkflowFireJob(
     }
 
     /// <summary>
-    /// Sends one dispatch per entry step, under one correlation id — except for entry steps frozen
-    /// with the <c>Never</c> entry condition, which are skipped. See the guard below: that is the
+    /// Sends one dispatch per entry step of this fire's group — the steps whose effective cron equals
+    /// <paramref name="cron"/> after normalization — under one correlation id, except for entry steps
+    /// frozen with the <c>Never</c> entry condition, which are skipped. See the guard below: that is the
     /// only entry condition an entry step's dispatch consults, because it is the only one that says
     /// anything about a step with no predecessor.
     /// <para>
@@ -312,8 +364,10 @@ public sealed class WorkflowFireJob(
     /// </para>
     /// </summary>
     private async Task DispatchEntryStepsAsync(
-        Guid workflowId, WorkflowL1 definition, IJobExecutionContext context)
+        Guid workflowId, WorkflowL1 definition, string cron, IJobExecutionContext context)
     {
+        var ownCron = EntrySchedule.Normalize(cron);
+
         // One id per fire, shared by every entry step of it: this is what ties one run together, and
         // a mint per dispatch would split a single run across as many runs as the workflow has entry
         // steps in every log query and every downstream projection.
@@ -321,6 +375,14 @@ public sealed class WorkflowFireJob(
 
         foreach (var entryStepId in definition.EntryStepIds)
         {
+            // Another group's step: its own job dispatches it, on its own cron. Silent, because every
+            // fire of a multi-group workflow passes over every other group's steps, and a record per
+            // skip would say nothing but that the workflow has more than one cron.
+            if (EntrySchedule.EffectiveCron(entryStepId, definition.Cron, definition.EntryCrons) != ownCron)
+            {
+                continue;
+            }
+
             var step = definition.Steps.FirstOrDefault(s => s.StepId == entryStepId);
             if (step is null)
             {
