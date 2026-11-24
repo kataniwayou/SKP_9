@@ -747,6 +747,7 @@ public sealed class WorkflowFireJobTests
         await h.Build().Execute(h.Context(W, h.JobId, 1, "*/10 * * * *"));
 
         Assert.Equal(0, h.Scheduler.RescheduleCount);
+        Assert.Empty(h.Sender.ReceivedCalls());
     }
 
     [Fact]
