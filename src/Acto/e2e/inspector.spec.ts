@@ -16,7 +16,7 @@ const SEED = {
     { key: 'p2', step: 's2', payload: '{"second":2}' },
   ],
   workflows: [
-    { key: 'wa', name: 'e2e-ins-a', at: { x: 0, y: 40 }, entry: ['s1'], caches: ['c1'], payloads: ['p1', 'p2'], cron: '0 0 * * * *' },
+    { key: 'wa', name: 'e2e-ins-a', at: { x: 0, y: 40 }, entry: ['s1'], caches: ['c1'], payloads: ['p1', 'p2'], entryCrons: { s1: '0 0 * * * *' } },
     { key: 'wb', name: 'e2e-ins-b', at: { x: 0, y: 220 }, entry: ['s2'] },
   ],
 } as const;
@@ -24,7 +24,7 @@ const SEED = {
 const undo = (page: import('@playwright/test').Page) => inspector(page).getByRole('button', { name: 'Undo', exact: true });
 const redo = (page: import('@playwright/test').Page) => inspector(page).getByRole('button', { name: 'Redo', exact: true });
 
-test('a triangle\'s Inspector: name, version, cron with its reading, description, entry steps, caches, location and assignments', async ({ page }) => {
+test('a triangle\'s Inspector: name, version, the cron of its entry step with its reading, description, entry steps, caches, location and assignments', async ({ page }) => {
   const id = await seed(SEED);
   await openAt(page);
   await selectWorkflowAlone(page, id.wa!);
@@ -32,6 +32,9 @@ test('a triangle\'s Inspector: name, version, cron with its reading, description
   await expect(inspector(page).locator('[aria-label="Unique name"]')).toHaveText('e2e-ins-a 1.0.0');
   await expect(field(page, 'Name')).toHaveValue('e2e-ins-a');
   await expect(field(page, 'Version')).toHaveValue('1.0.0');
+  // no cron of its own: one Schedules row per entry step
+  await expect(inspector(page).getByTestId(`schedule:${id.s1}`).locator('.sec-sub')).toHaveText('e2e-ins-first');
+  await expect(field(page, 'Cron')).toHaveCount(1);
   await expect(field(page, 'Cron')).toHaveValue('0 0 * * * *');
   await expect(inspector(page)).toContainText(/every hour|hourly|at minute 0|hour/i);
   await expect(inspector(page).locator('.chip:not(.in-assign)', { hasText: 'e2e-ins-first' })).toHaveCount(1);
@@ -54,9 +57,10 @@ test('a triangle\'s Inspector: name, version, cron with its reading, description
   await field(page, 'Cron').fill('0 */5 * * * *');
   await expect(inspector(page)).toContainText(/5 minutes/i);
   await field(page, 'Cron').fill('not a cron');
-  await expect(inspector(page).locator('.in-note.sub')).not.toContainText('not scheduled');
+  await expect(inspector(page).getByTestId(`schedule:${id.s1}`)).not.toContainText(/minutes|every/i);
   await field(page, 'Cron').fill('');
-  await expect(inspector(page)).toContainText('not scheduled');
+  await expect(field(page, 'Cron')).toHaveAttribute('placeholder', 'not scheduled');
+  await expect(inspector(page).getByTestId(`schedule:${id.s1}`).locator('.in-note')).toHaveCount(0);
   await expect(field(page, 'Version')).toHaveValue('2.5.1');
   await expect(field(page, 'Description')).toHaveValue('an e2e description');
   await expect(saveButton(page)).toContainText('Save ·');
@@ -64,6 +68,7 @@ test('a triangle\'s Inspector: name, version, cron with its reading, description
   // an entry step and a cache can be removed from here: the arrow and the line go
   await inspector(page).getByRole('button', { name: 'Remove entry e2e-ins-first' }).click();
   await expect(page.locator(`.react-flow__edge[data-id="entry:${id.wa}:${id.s1}"]`)).toHaveCount(0);
+  await expect(inspector(page)).toContainText('No entry steps — draw an entry arrow to schedule this workflow.');
   await inspector(page).getByRole('button', { name: 'Remove cache e2e-ins-cache' }).click();
   await expect(page.locator(`.react-flow__edge[data-id="cache:${id.wa}:${id.c1}"]`)).toHaveCount(0);
   await expect(inspector(page).locator('.chip:not(.in-assign)', { hasText: 'e2e-ins-first' })).toHaveCount(0);

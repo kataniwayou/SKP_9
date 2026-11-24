@@ -8,7 +8,7 @@ export interface StepSeed { key: string; name: string; at: Pt; processor?: strin
 export interface CacheSeed { key: string; name: string; at: Pt; root?: string }
 /** A payload row: one step's payload, which any number of workflows may link. */
 export interface PayloadSeed { key: string; step: string; payload: string }
-export interface WorkflowSeed { key: string; name: string; at: Pt; entry?: readonly string[]; caches?: readonly string[]; payloads?: readonly string[]; cron?: string | null }
+export interface WorkflowSeed { key: string; name: string; at: Pt; entry?: readonly string[]; caches?: readonly string[]; payloads?: readonly string[]; /** An entry arrow's own cron, by the entry step's key (a workflow has no cron of its own). */ entryCrons?: Readonly<Record<string, string>> }
 export interface SeedSpec { steps?: readonly StepSeed[]; caches?: readonly CacheSeed[]; payloads?: readonly PayloadSeed[]; workflows?: readonly WorkflowSeed[] }
 
 /** The ids BaseAPI gave, by the seed's keys. */
@@ -57,7 +57,8 @@ export async function seed(spec: SeedSpec): Promise<Seeded> {
   }
   for (const w of spec.workflows ?? []) {
     changes.push({ op: 'create', table: 'workflows', id: make(w.key), row: {
-      name: w.name, version: '1.0.0', description: null, cronExpression: w.cron ?? null, entryStepIds: (w.entry ?? []).map(ref),
+      name: w.name, version: '1.0.0', description: null, entryStepIds: (w.entry ?? []).map(ref),
+      entryCrons: Object.fromEntries(Object.entries(w.entryCrons ?? {}).map(([k, v]) => [ref(k), v])),
       assignmentIds: (w.payloads ?? []).map(ref), cacheIds: (w.caches ?? []).map(ref), ...at(w.at),
     } });
   }

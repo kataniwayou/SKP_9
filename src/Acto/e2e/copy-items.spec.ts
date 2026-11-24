@@ -15,7 +15,7 @@ const SEED = {
   caches: [{ key: 'c', name: 'e2e-cp-cache', at: { x: 0, y: 300 }, root: 'e2e-cp-root' }],
   steps: [{ key: 's', name: 'e2e-cp-step', at: { x: 300, y: 60 }, condition: 3 }],
   payloads: [{ key: 'p', step: 's', payload: '{"maxDepth": 4}' }],
-  workflows: [{ key: 'w', name: 'e2e-cp-wf', at: { x: 0, y: 40 }, entry: ['s'], caches: ['c'], payloads: ['p'], cron: '0 0 * * * *' }],
+  workflows: [{ key: 'w', name: 'e2e-cp-wf', at: { x: 0, y: 40 }, entry: ['s'], caches: ['c'], payloads: ['p'], entryCrons: { s: '0 0 * * * *' } }],
 } as const;
 
 const byName = (rows: Row[], name: string) => rows.find((r) => r.name === name);
@@ -53,8 +53,11 @@ test('a workflow\'s toolbar has Copy; copied alone it pastes like a step alone: 
   const rows = await getJson<Row[]>('/workflows');
   const orig = byName(rows, 'e2e-cp-wf')!, made = byName(rows, 'e2e-cp-wf-2')!;
   expect(made.id).not.toBe(orig.id);
-  for (const k of ['version', 'description', 'cronExpression']) expect(made[k], k).toEqual(orig[k]);
+  for (const k of ['version', 'description']) expect(made[k], k).toEqual(orig[k]);
   expect(made.entryStepIds).toEqual([id.s]);
+  // the cron belongs to the original's entry arrow; the copy has no arrow of its own cron
+  expect(orig.entryCrons).toEqual({ [id.s!]: '0 0 * * * *' });
+  expect(made.entryCrons ?? {}).toEqual({});
   expect(made.cacheIds).toEqual([]);
   expect(made.assignmentIds).toEqual([]);
 });

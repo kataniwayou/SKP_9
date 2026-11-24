@@ -27,8 +27,9 @@ test('the toolbox drops a triangle, a cache and a step where they are dropped, e
   await expect(toolbar(page, 'workflow').getByRole('button')).toHaveText(['▶ Start', 'Copy', 'Delete']);
   await expect(field(page, 'Name')).toHaveValue(/^untitled(-\d+)?$/);
   await expect(field(page, 'Version')).toHaveValue('1.0.0');
-  await expect(field(page, 'Cron')).toHaveValue('');
-  await expect(inspector(page)).toContainText('not scheduled');
+  // no cron of its own: scheduling is per entry arrow, and a new triangle has none yet
+  await expect(field(page, 'Cron')).toHaveCount(0);
+  await expect(inspector(page)).toContainText('No entry steps — draw an entry arrow to schedule this workflow.');
   await expect(inspector(page)).toContainText('No assignments.');
   await expect(page.locator(`.react-flow__edge[data-id*="${wf}"]`)).toHaveCount(0);
   expect(await unsavedCount(page)).toBe(n0 + 1);

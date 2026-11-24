@@ -15,7 +15,8 @@ export interface Stack extends Baseline {
   real: Map<string, Row>;
 }
 
-const norm = (v: unknown) => (v === undefined || v === '' ? null : Array.isArray(v) ? [...v].sort() : v);
+const isEmptyMap = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length === 0;
+const norm = (v: unknown) => (v === undefined || v === '' || isEmptyMap(v) ? null : Array.isArray(v) ? [...v].sort() : v);
 const sameValue = (a: unknown, b: unknown) => JSON.stringify(norm(a)) === JSON.stringify(norm(b));
 
 /** Why a /model change must not go out, or null. */

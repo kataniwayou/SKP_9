@@ -10,7 +10,7 @@ import { getJson, type Row } from '../stack';
 
 // Regression 1 (brief: "start from fresh start and build complex workflows"): three workflows over one branching graph, built through the
 // UI only (toolbox drops, handle drags, the condition picker, Inspector typing, Save) from a clean browser and an empty region. A fan-out,
-// a diamond, a six-step chain, every entry condition, a cron, descriptions and a valid payload on every step each workflow reaches. After
+// a diamond, a six-step chain, every entry condition, an entry cron, descriptions and a valid payload on every step each workflow reaches. After
 // the Save, BaseAPI's rows are read back and compared with what the board shows, field by field; then a reload shows the same board.
 
 const P = 'e2e-r-';
@@ -28,9 +28,9 @@ const STEPS: StepPlan[] = [
 ];
 const WIRES: [string, string][] = [['a1', 'n1'], ['a1', 'n2'], ['n1', 'n3'], ['n2', 'n3'], ['n3', 'c1'], ['c1', 'p1'], ['p1', 'f1']];
 const WORKFLOWS = [
-  { key: 'a', at: { x: 0, y: 70 }, entry: ['a1'], caches: ['k1'], cron: null, description: 'regression A: the whole graph' },
-  { key: 'b', at: { x: 560, y: 380 }, entry: ['c1'], caches: [], cron: null, description: 'regression B: the tail from the collapser' },
-  { key: 'c', at: { x: 560, y: 520 }, entry: ['f1', 'p1'], caches: ['k1'], cron: '0 */5 * * * *', description: 'regression C: scheduled' },
+  { key: 'a', at: { x: 0, y: 70 }, entry: ['a1'], caches: ['k1'], crons: {}, description: 'regression A: the whole graph' },
+  { key: 'b', at: { x: 560, y: 380 }, entry: ['c1'], caches: [], crons: {}, description: 'regression B: the tail from the collapser' },
+  { key: 'c', at: { x: 560, y: 520 }, entry: ['f1', 'p1'], caches: ['k1'], crons: { f1: '0 */5 * * * *' }, description: 'regression C: scheduled' },
 ] as const;
 /** Which steps each workflow reaches (its stream). */
 const REACH: Record<string, string[]> = {
@@ -56,16 +56,18 @@ async function build(page: Page) {
   for (const w of WORKFLOWS) {
     id[w.key] = await newWorkflow(page, w.at, `${P}${w.key}`);
     await field(page, 'Description').fill(w.description);
-    if (w.cron) {
-      await field(page, 'Cron').fill(w.cron);
-      await expect(inspector(page)).toContainText(/5 minutes/i);
-    }
   }
   for (const s of STEPS) id[s.key] = await newStep(page, s.proc, s.at, `${P}${s.key}`);
   id.k1 = await newCache(page, { x: 200, y: 520 }, `${P}k1`, `${P}root`);
   for (const [f, t] of WIRES) await wire(page, id[f]!, id[t]!);
   for (const w of WORKFLOWS) {
     for (const e of w.entry) await entry(page, id[w.key]!, id[e]!);
+    // the schedule lives on the workflow's entry arrows: set from its Schedules section once they are drawn
+    for (const [e, cron] of Object.entries(w.crons)) {
+      await selectWorkflowAlone(page, id[w.key]!);
+      await inspector(page).getByTestId(`schedule:${id[e]}`).getByRole('textbox', { name: 'Cron' }).fill(cron);
+      await expect(inspector(page).getByTestId(`schedule:${id[e]}`)).toContainText(/5 minutes/i);
+    }
     for (const c of w.caches) await link(page, id[w.key]!, id[c]!);
   }
   for (const s of STEPS) if (s.cond !== 'Completed') await setCondition(page, id[s.key]!, s.cond);
@@ -130,8 +132,8 @@ test('three workflows over a branching graph, every entry condition, a cron and 
     const row = wf[w.key]!;
     expect(row.version).toBe('1.0.0');
     expect(row.description).toBe(w.description);
-    expect(row.cronExpression ?? null).toBe(w.cron);
     const wantEntry = w.entry.map((e) => st[e]!.id).sort();
+    expect(row.entryCrons ?? {}, `${row.name} entry crons`).toEqual(Object.fromEntries(Object.entries(w.crons).map(([e, c]) => [st[e]!.id, c])));
     expect([...(row.entryStepIds as string[])].sort(), `${row.name} entry steps`).toEqual(wantEntry);
     expect(now.entries.filter(([f]) => f === row.id).map(([, t]) => t).sort(), `${row.name}: the board's entry arrows`).toEqual(wantEntry);
     const wantCaches = w.caches.map(() => k1.id);
@@ -166,7 +168,8 @@ test('three workflows over a branching graph, every entry condition, a cron and 
     await expect(field(page, 'Version')).toHaveValue(st[s.key]!.version as string);
   }
   await selectWorkflowAlone(page, wf.c!.id);
-  await expect(field(page, 'Cron')).toHaveValue('0 */5 * * * *');
+  await expect(inspector(page).getByTestId(`schedule:${st.f1!.id}`).getByRole('textbox', { name: 'Cron' })).toHaveValue('0 */5 * * * *');
+  await expect(inspector(page).getByTestId(`schedule:${st.p1!.id}`).getByRole('textbox', { name: 'Cron' })).toHaveValue('');
   await expect(inspector(page).getByTestId('assignments').locator('.in-assign')).toHaveCount(REACH.c!.length);
 
   // a reload: the stored board, nothing unsaved, the same places
