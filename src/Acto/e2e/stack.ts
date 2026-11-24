@@ -117,3 +117,85 @@ export function realDifferences(before: Snapshot, after: Snapshot): string[] {
   }
   return out;
 }
+
+// ---- Elasticsearch (the live specs read the orchestrator's and processors' own records) ----------------------------
+
+/** Elasticsearch through its port-forward, and the index the collector writes every service's logs to. */
+export const ES = process.env.SKP_ES_URL ?? 'http://localhost:19200';
+export const LOG_INDEX = 'logs-generic.otel-default';
+
+/** The orchestrator's record of one entry step reaching its queue (WorkflowFireJob), one per entry step per fire. */
+export const ENTRY_DISPATCHED = 'dispatched an entry step';
+/** The orchestrator's record of a finished step's successor being dispatched (StepOutcomeHandler): StepId is the finished step. */
+export const HANDED_OFF = 'handed off to {NextStepId} on {NextProcessorId} with {NextEntryId}';
+/** An entry step's own outcome, beside its advancement record (OutcomeTemplates.EntryCompleted). */
+export const ENTRY_COMPLETED = 'the entry step completed with {Result}';
+/** A Failed or Cancelled step whose successors still accept it (OutcomeTemplates.AdvancedAnyway). */
+export const ADVANCED_ANYWAY = 'advancing {SuccessorCount} successor(s) on a {Result} step — their entry conditions accept it';
+/** The scheduler's warning for an entry group whose cron has no future fire (WorkflowScheduler). */
+export const NO_FUTURE_FIRE = 'cron of entry group {EntryGroupIndex} of workflow {WorkflowId} yields no future fire time; nothing scheduled for it';
+
+/** One log record as the collector indexed it: its time (ms since the epoch) and its attributes. */
+export interface LogRecord { at: number; attributes: Record<string, string>; body: string; service: string; level: string; raw: unknown }
+
+/** The collector writes @timestamp as epoch milliseconds with a fraction, as a string. */
+const parseStamp = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.floor(n) : Date.parse(String(v));
+};
+
+/** One search over the log index: the records matching every term filter (attribute name → value) in [from, to] (ms). */
+export async function searchLogs(terms: Record<string, string>, from: number, to: number, size = 5000): Promise<LogRecord[]> {
+  const filter: unknown[] = Object.entries(terms).map(([k, v]) => ({ term: { [k]: v } }));
+  filter.push({ range: { '@timestamp': { gte: from, lte: to, format: 'epoch_millis' } } });
+  const r = await fetch(`${ES}/${LOG_INDEX}/_search`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ size, sort: [{ '@timestamp': 'asc' }], query: { bool: { filter } } }),
+  });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`elasticsearch search answered ${r.status}: ${text.slice(0, 400)}`);
+  const hits = (JSON.parse(text) as { hits: { hits: { _source: Record<string, unknown> }[] } }).hits.hits;
+  return hits.map(({ _source: s }) => ({
+    at: parseStamp(s['@timestamp']),
+    attributes: (s.attributes ?? {}) as Record<string, string>,
+    body: ((s.body as { text?: string } | undefined)?.text) ?? '',
+    service: (((s.resource as { attributes?: Record<string, string> } | undefined)?.attributes ?? {})['service.name']) ?? '',
+    level: String(s.severity_text ?? ''),
+    raw: s,
+  }));
+}
+
+/** How many records match the term filters in [from, to] (a read-only count). */
+export async function countLogs(terms: Record<string, string>, from: number, to: number): Promise<number> {
+  const filter: unknown[] = Object.entries(terms).map(([k, v]) => ({ term: { [k]: v } }));
+  filter.push({ range: { '@timestamp': { gte: from, lte: to, format: 'epoch_millis' } } });
+  const r = await fetch(`${ES}/${LOG_INDEX}/_search`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ size: 0, track_total_hits: true, query: { bool: { filter } } }),
+  });
+  if (!r.ok) throw new Error(`elasticsearch count answered ${r.status}`);
+  return (await r.json() as { hits: { total: { value: number } } }).hits.total.value;
+}
+
+/**
+ * The records matching the filters in [from - 5 s, to + 5 s], read until two polls 5 s apart agree (the ingest runs ~7–15 s
+ * behind, so one immediate read undercounts the last records). An empty answer settles only when `settleOnEmpty` says none is
+ * the expected answer. Ported from BaseApi.Tests' EntryCronLiveTests.SettledDispatchesAsync.
+ */
+export async function settledLogs(terms: Record<string, string>, from: number, to: number, opts: { settleOnEmpty?: boolean; floorMs?: number; budgetMs?: number } = {}): Promise<LogRecord[]> {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const deadline = Date.now() + (opts.budgetMs ?? 90_000);
+  await sleep(opts.floorMs ?? 10_000);
+  let previous: LogRecord[] | null = null;
+  for (;;) {
+    const current = await searchLogs(terms, from - 5_000, to + 5_000);
+    if ((previous && previous.length === current.length && (current.length > 0 || opts.settleOnEmpty)) || Date.now() > deadline) return current;
+    previous = current;
+    await sleep(5_000);
+  }
+}
+
+/** POST /orchestration/{start|stop} for a workflow, straight to BaseAPI (the live specs' cleanup and BaseAPI-layer cases). */
+export async function orchestrate(action: 'start' | 'stop', workflowId: string): Promise<Response> {
+  return fetch(`${API}/orchestration/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(workflowId) });
+}
