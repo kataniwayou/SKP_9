@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { dictPretty, dictText, keyProblem, MAX_DICT_CHARS, parseDict, type DictEntry } from '../model/dict';
+import { dictPretty, dictText, keyProblem, parseDict, valueProblem, type DictEntry } from '../model/dict';
 import { sameJson } from '../model/json';
 
 /** One row as edited: what it shows now, and the entry it stood for when last committed (null: added, never committed). */
@@ -18,13 +18,13 @@ const settled = (r: Row) => r.committed !== null && r.committed[0] === r.key;
 function problemsOf(rows: readonly Row[]): (string | null)[] {
   return rows.map((r, i) => {
     const rivals = rows.filter((o, j) => j !== i && o.key === r.key && (j < i ? !settled(r) || settled(o) : settled(o) && !settled(r)));
-    return keyProblem(r.key, rivals.map((o) => o.key));
+    return keyProblem(r.key, rivals.map((o) => o.key)) ?? valueProblem(r.value);
   });
 }
 
 /**
  * The entries a commit writes: a valid row as it shows; a row with a problem as it was last committed (an added one not
- * at all), so fixing one row never holds the others back. Null when even that cannot be stored (a key twice, too big).
+ * at all), so fixing one row never holds the others back. Null when even that cannot be stored (a key twice).
  */
 function committable(rows: readonly Row[]): DictEntry[] | null {
   const problems = problemsOf(rows);
@@ -34,7 +34,7 @@ function committable(rows: readonly Row[]): DictEntry[] | null {
     else if (r.committed) out.push(r.committed);
   }
   if (new Set(out.map(([k]) => k)).size !== out.length) return null;
-  return dictText(out).length > MAX_DICT_CHARS ? null : out;
+  return out;
 }
 
 /**

@@ -44,7 +44,7 @@ export async function seed(spec: SeedSpec): Promise<Seeded> {
   const changes: Change[] = [];
 
   for (const k of spec.caches ?? []) {
-    changes.push({ op: 'create', table: 'caches', id: make(k.key), row: { name: k.name, version: '1.0.0', description: null, root: k.root ?? 'e2e', items: '{}', ...at(k.at) } });
+    changes.push({ op: 'create', table: 'caches', id: make(k.key), row: { name: k.name, version: '1.0.0', description: null, root: k.root ?? 'e2e', items: [], ...at(k.at) } });
   }
   for (const s of spec.steps ?? []) {
     changes.push({ op: 'create', table: 'steps', id: make(s.key), row: {

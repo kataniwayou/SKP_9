@@ -136,7 +136,14 @@ describe('boardChanges', () => {
 
   it('creates a cache with its location', () => {
     expect(boardChanges(b, addCache(b, { x: 3, y: 4 }, 'k1'))).toEqual([
-      { op: 'create', table: 'caches', id: 'k1', row: expect.objectContaining({ boardX: 3, boardY: 4, items: '{}' }) }]);
+      { op: 'create', table: 'caches', id: 'k1', row: expect.objectContaining({ boardX: 3, boardY: 4, items: [] }) }]);
+  });
+
+  it("sends a cache's items as the list of pairs BaseApi stores, in the order the board shows them", () => {
+    const k = addCache(b, { x: 3, y: 4 }, 'k1');
+    const cur: BoardState = { ...k, caches: { ...k.caches, k1: { ...k.caches.k1!, items: '{"zeta":"Z","acme":""}' } } };
+    expect(boardChanges(b, cur)[0]!.row).toEqual(expect.objectContaining({
+      items: [{ key: 'zeta', value: 'Z' }, { key: 'acme', value: '' }] }));
   });
 
   const idx = (ops: string[], x: string) => { const n = ops.indexOf(x); expect(n).toBeGreaterThanOrEqual(0); return n; };

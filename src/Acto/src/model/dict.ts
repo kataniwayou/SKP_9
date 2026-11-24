@@ -1,21 +1,25 @@
 // Ported from WorkflowStudio's store/dict.ts (2026-11-18); the rules are BaseAPI's own (CacheDtoValidator.CheckItems).
 /**
- * A string-to-string dictionary field (a cache's items). BaseApi's rules (CacheDtoValidator.CheckItems): a
- * JSON object; every key non-empty and free of ':' (the key is part of its L2 key `…:cache:{root}:{key}`); every value a
- * string; at most 1 MB of text. Acto keeps the stored order, which `JSON.parse` would not (it puts integer-like keys
+ * A string-to-string dictionary field (a cache's items). BaseApi's rules (CacheRules.CheckItems): every key non-empty,
+ * free of ':' (the key is part of its L2 key `…:cache:{root}:{key}`) and at most 256 characters; every value a string of
+ * at most 1 MB; no bound on the dictionary as a whole (items are rows since 2026-11-24). Acto keeps the stored order, which `JSON.parse` would not (it puts integer-like keys
  * first), so the object is read and written here by hand.
  */
 
 /** One entry: its key and its value. */
 export type DictEntry = readonly [key: string, value: string];
 
-/** BaseApi's cap on the items text (CacheRules.MaxItemsChars). */
-export const MAX_DICT_CHARS = 1_048_576;
+/** BaseApi's bound on a key (CacheRules.MaxKeyLength). */
+export const MAX_KEY_CHARS = 256;
+
+/** BaseApi's bound on a value (CacheRules.MaxValueChars). */
+export const MAX_VALUE_CHARS = 1_048_576;
 
 /** Why a key cannot be stored, or null when it can (BaseApi's rules; `others` are the other keys, for duplicates). */
 export function keyProblem(key: string, others: readonly string[]): string | null {
   if (key.length === 0) return 'Key is empty';
   if (key.includes(':')) return "Key must not contain ':'";
+  if (key.length > MAX_KEY_CHARS) return `Key must be at most ${MAX_KEY_CHARS} characters`;
   if (others.includes(key)) return 'Duplicate key';
   return null;
 }
@@ -31,10 +35,9 @@ export function dictPretty(entries: readonly DictEntry[]): string {
   return `{\n${entries.map(([k, v]) => `  ${JSON.stringify(k)}: ${JSON.stringify(v)}`).join(',\n')}\n}`;
 }
 
-/** Why stored text is no string dictionary, or null when it is (its size included). */
-export function textProblem(text: string): string | null {
-  if (text.length > MAX_DICT_CHARS) return `Items must be at most ${MAX_DICT_CHARS} characters`;
-  return null;
+/** Why a value cannot be stored, or null when it can (BaseApi's rule). */
+export function valueProblem(value: string): string | null {
+  return value.length > MAX_VALUE_CHARS ? `Value must be at most ${MAX_VALUE_CHARS} characters` : null;
 }
 
 export type DictParse = { ok: true; entries: DictEntry[] } | { ok: false; reason: string };
@@ -48,8 +51,6 @@ const STRING = /"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/y;
  */
 export function parseDict(text: string): DictParse {
   if (text.trim() === '') return { ok: true, entries: [] };
-  const size = textProblem(text);
-  if (size) return { ok: false, reason: size };
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -79,6 +80,8 @@ export function parseDict(text: string): DictParse {
     const value = str(); skip();
     if (key.length === 0) return { ok: false, reason: 'Items must not contain an empty key' };
     if (key.includes(':')) return { ok: false, reason: `Key '${key}' must not contain ':'` };
+    if (key.length > MAX_KEY_CHARS) return { ok: false, reason: `Key '${key.slice(0, 40)}…' must be at most ${MAX_KEY_CHARS} characters` };
+    if (value.length > MAX_VALUE_CHARS) return { ok: false, reason: `The value of '${key}' must be at most ${MAX_VALUE_CHARS} characters` };
     if (seen.has(key)) return { ok: false, reason: `Key '${key}' appears twice` };
     seen.add(key);
     entries.push([key, value]);

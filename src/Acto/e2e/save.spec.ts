@@ -4,7 +4,7 @@ import {
   renameTo, save, saveButton, validateStored, stNode, toolboxStep, waitLoaded, wfNode, wireEdge, workflowTool, PROC_A, PROC_B,
 } from './helpers';
 import { seed } from './seed';
-import { API, apply, bodyOf, getJson, type Row } from './stack';
+import { API, apply, bodyOf, getJson, itemsOf, type Row } from './stack';
 
 // Spec §8: the one board-wide Save (BaseAPI's /model/apply, all or nothing), its dry run and the Kibana diagram, and the shared payload's
 // copy-on-write. The throwaway rows are named e2e- (the guard refuses a create under any other name).
@@ -61,7 +61,7 @@ test('Save writes everything the board holds, and a reload shows it back where i
   expect(w.entryStepIds).toEqual([a.id]);
   expect(w.cacheIds).toEqual([c.id]);
   expect(a.nextStepIds).toEqual([b.id]);
-  expect(c.items).toBe('{"k": "v"}');
+  expect(itemsOf(c)).toEqual({ k: 'v' });
   const asg = (await getJson<Row[]>('/assignments')).filter((x) => (w.assignmentIds as string[]).includes(x.id));
   expect(asg.map((x) => [x.stepId, x.payload])).toEqual([[a.id, '{"maxDepth": 3}']]);
   for (const r of [w, a, b, c]) expect(typeof r.boardX, `${r.name} was saved with a location`).toBe('number');

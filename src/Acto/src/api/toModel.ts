@@ -2,6 +2,7 @@ import type { Audit, Cache, Processor, Schema, Step, Workflow } from '../model/g
 import type { Point } from '../model/geometry';
 import type { AssignmentRow, CacheRow, RowAudit, ProcessorRow, SchemaRow, StepRow, WorkflowRow } from '../design/board';
 import type { AssignmentReadDto, CacheReadDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowReadDto } from './types';
+import { itemsToText } from './cacheItems';
 
 // The generated DTO types mark almost every field optional (see api/types.ts). These helpers state
 // once what the server actually guarantees, so the model never carries undefined.
@@ -74,7 +75,7 @@ export function schemaFromDto(dto: SchemaReadDto): Schema {
 export function cacheFromDto(dto: CacheReadDto): Cache {
   return {
     id: required(dto.id, 'cache id'), name: text(dto.name), version: text(dto.version),
-    description: optional(dto.description), root: text(dto.root), items: text(dto.items), audit: audit(dto),
+    description: optional(dto.description), root: text(dto.root), items: itemsToText(dto.items), audit: audit(dto),
   };
 }
 
@@ -110,7 +111,7 @@ export function stepRowFromDto(dto: StepReadDto): StepRow {
 export function cacheRowFromDto(dto: CacheReadDto): CacheRow {
   return {
     id: required(dto.id, 'cache id'), name: text(dto.name), version: text(dto.version), description: optional(dto.description),
-    root: text(dto.root), items: text(dto.items), at: atOf(dto), updatedAt: stamp(dto), ...rowAudit(dto),
+    root: text(dto.root), items: itemsToText(dto.items), at: atOf(dto), updatedAt: stamp(dto), ...rowAudit(dto),
   };
 }
 

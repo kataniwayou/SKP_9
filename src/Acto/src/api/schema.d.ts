@@ -2759,16 +2759,18 @@ export interface components {
             version?: string | null;
             description?: string | null;
             root?: string | null;
-            items?: string | null;
+            items?: components["schemas"]["CacheItemDto"][] | null;
             /** Format: double */
             boardX?: number | null;
             /** Format: double */
             boardY?: number | null;
         };
+        CacheItemDto: {
+            key?: string | null;
+            value?: string | null;
+        };
         CacheItemsUpdateDto: {
-            items?: {
-                [key: string]: string;
-            } | null;
+            items?: components["schemas"]["CacheItemDto"][] | null;
         };
         CacheReadDto: {
             /** Format: uuid */
@@ -2777,7 +2779,7 @@ export interface components {
             version?: string | null;
             description?: string | null;
             root?: string | null;
-            items?: string | null;
+            items?: components["schemas"]["CacheItemDto"][] | null;
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
@@ -2794,7 +2796,7 @@ export interface components {
             version?: string | null;
             description?: string | null;
             root?: string | null;
-            items?: string | null;
+            items?: components["schemas"]["CacheItemDto"][] | null;
             /** Format: double */
             boardX?: number | null;
             /** Format: double */

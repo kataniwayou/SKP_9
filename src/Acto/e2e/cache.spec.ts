@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures';
 import { addItem, inspector, itemKey, itemValue, openAt, pickCache, showCache, save, saveButton, waitLoaded } from './helpers';
 import { seed } from './seed';
-import { getJson, type Row } from './stack';
+import { getJson, itemsOf, type Row } from './stack';
 
 // A cache's Items are a key/value table (ported from Studio's DictEditor): add and remove items, Save, reload, items as saved.
 
@@ -17,7 +17,7 @@ test('a cache\'s items: add two, save, remove one, save, reload: BaseAPI and the
   await expect(inspector(page).getByText('2 items')).toBeVisible();
   await expect(saveButton(page)).toContainText('Save · 1');
   expect((await save(page)).applied).toBe(true);
-  expect(JSON.parse((await getJson<Row>(`/caches/${id.c}`)).items as string)).toEqual({ usd: '3.7', eur: '4.1' }); // BaseAPI keeps its own layout
+  expect(itemsOf(await getJson<Row>(`/caches/${id.c}`))).toEqual({ usd: '3.7', eur: '4.1' });
 
   // BaseAPI keeps the keys sorted (eur, usd): the table shows them so after the reload
   // a bad key is marked and not committed; the saved text stays
@@ -34,7 +34,7 @@ test('a cache\'s items: add two, save, remove one, save, reload: BaseAPI and the
   await expect(inspector(page).getByText('1 item')).toBeVisible();
   await expect(saveButton(page)).toContainText('Save · 1');
   expect((await save(page)).applied).toBe(true);
-  expect(JSON.parse((await getJson<Row>(`/caches/${id.c}`)).items as string)).toEqual({ usd: '3.7' });
+  expect(itemsOf(await getJson<Row>(`/caches/${id.c}`))).toEqual({ usd: '3.7' });
 
   await page.reload();
   await waitLoaded(page);

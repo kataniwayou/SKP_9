@@ -27,3 +27,15 @@ describe('the board rows keep the read-only audit fields', () => {
     expect(assignmentRowFromDto(assignmentDto('a1', { updatedBy: 'u' }))).toMatchObject({ updatedBy: 'u', createdAt: '2026-10-05T12:00:00Z' });
   });
 });
+
+describe('a cache\'s items arrive as a list of pairs', () => {
+  it('becomes the board\'s dictionary text, in the order sent', () => {
+    const dto = cacheDto('c1', { items: [{ key: 'zeta', value: 'Z' }, { key: 'acme', value: 'A "quoted"' }] } as never);
+    expect(cacheRowFromDto(dto).items).toBe('{"zeta":"Z","acme":"A \\"quoted\\""}');
+  });
+
+  it('an empty or missing list is the empty dictionary', () => {
+    expect(cacheRowFromDto(cacheDto('c1', { items: [] } as never)).items).toBe('{}');
+    expect(cacheRowFromDto(cacheDto('c1', { items: null } as never)).items).toBe('{}');
+  });
+});

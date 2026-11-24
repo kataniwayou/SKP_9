@@ -2,6 +2,7 @@ import type { CacheCreateDto, CacheUpdateDto, ProcessorUpdateDto, SchemaCreateDt
 import type { Id } from '../model/graph';
 import type { AssignmentRow, BoardState, CacheRow, ProcessorRow, SchemaRow, StepRow, WorkflowRow } from './board';
 import { deepEqual, reachOf } from './board';
+import { itemsFromText } from '../api/cacheItems';
 
 export type Table = 'workflows' | 'steps' | 'caches' | 'assignments' | 'processors' | 'schemas';
 export interface ModelChange { op: 'create' | 'update' | 'delete'; table: Table; id: Id; row?: object; updatedAt?: string }
@@ -49,7 +50,7 @@ const stepBody = (s: StepRow): StepCreateDto & StepUpdateDto => ({
   nextStepIds: [...s.nextStepIds], entryCondition: s.entryCondition as StepCreateDto['entryCondition'], ...loc(s.at),
 });
 const cacheBody = (c: CacheRow): CacheCreateDto & CacheUpdateDto => ({
-  name: c.name, version: c.version, description: c.description, root: c.root, items: c.items, ...loc(c.at),
+  name: c.name, version: c.version, description: c.description, root: c.root, items: itemsFromText(c.items), ...loc(c.at),
 });
 const assignmentBody = (a: AssignmentRow) => ({
   name: a.name, version: a.version, description: a.description, stepId: a.stepId, payload: a.payload,

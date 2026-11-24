@@ -5,7 +5,7 @@ import {
   openFitted, saveButton, stNode, tabLabels, wfNode, wireEdge,
 } from './helpers';
 import { seed } from './seed';
-import { apply, bodyOf, getJson, type Row } from './stack';
+import { apply, bodyOf, getJson, itemsOf, type Row } from './stack';
 
 // The chat's skills, against the deployed model (real, costs tokens). Each test types a plain-language instruction, as a user
 // would, about throwaway e2e-chat-... rows only, waits for the answer, then checks the EFFECT on the board and, after a Save,
@@ -158,15 +158,15 @@ test('3 caches: two new caches with roots, both linked to e2e-chat-a, saved', as
 
 test('4 cache items: one added, another removed, saved', async ({ page }) => {
   const ids = await seed({ caches: [{ key: 'c', name: 'e2e-chat-c4', at: { x: 0, y: 0 }, root: 'e2e-chat-c4' }] });
-  // the seed writes items '{}': give it two items through the same runner
+  // the seed writes no items: give it two through the same runner
   const c = await getJson<Row>(`/caches/${ids.c}`);
-  await apply([{ op: 'update', table: 'caches', id: c.id, row: { ...bodyOf(c), items: '{"keep":"1","drop":"2"}' }, updatedAt: c.updatedAt as string }]);
+  await apply([{ op: 'update', table: 'caches', id: c.id, row: { ...bodyOf(c), items: [{ key: 'keep', value: '1' }, { key: 'drop', value: '2' }] }, updatedAt: c.updatedAt as string }]);
   await openAt(page);
   await expect(caNode(page, ids.c!)).toBeVisible();
   await say(page, 'In the cache e2e-chat-c4, add an item "color" with the value "blue" and remove the item "drop". Keep the item "keep". Then save the board.');
 
   const after = await getJson<Row>(`/caches/${ids.c}`);
-  expect(JSON.parse(after.items as string)).toEqual({ keep: '1', color: 'blue' });
+  expect(itemsOf(after)).toEqual({ keep: '1', color: 'blue' });
   await expect(saveButton(page)).toBeDisabled();
 });
 
@@ -319,7 +319,7 @@ test('12 an unsaved cache: its items are edited from the board\'s value, not the
   await say(page, 'In the cache e2e-chat-c5, change item a to 2 and add the item b = 3. Then save the board.');
   const c = await named('caches', 'e2e-chat-c5');
   expect(c.root).toBe('e2e-chat-r5');
-  expect(JSON.parse(c.items as string)).toEqual({ a: '2', keep: 'yes', b: '3' });
+  expect(itemsOf(c)).toEqual({ a: '2', keep: 'yes', b: '3' });
 });
 
 test('13 Take stored: a save refused because the row changed elsewhere; the chat takes the stored version', async ({ page }) => {

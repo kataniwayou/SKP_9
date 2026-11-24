@@ -68,6 +68,10 @@ const READ_ONLY = new Set(['id', 'createdAt', 'updatedAt', 'createdBy', 'updated
 /** A read DTO as the write body of its row. */
 export const bodyOf = (r: Row): Record<string, unknown> => Object.fromEntries(Object.entries(r).filter(([k]) => !READ_ONLY.has(k)));
 
+/** A cache row's items as one object, for comparing: BaseAPI sends them as [{ key, value }] (rows since 2026-11-24). */
+export const itemsOf = (r: Row): Record<string, string> =>
+  Object.fromEntries((r.items as { key: string; value: string }[]).map((i) => [i.key, i.value]));
+
 /**
  * Deletes every e2e- workflow, step, cache and assignment through /model/apply, in the order BaseAPI's keys need: the
  * workflows (their junction rows go with them), the e2e steps' wires cleared, then assignments, steps and caches.
