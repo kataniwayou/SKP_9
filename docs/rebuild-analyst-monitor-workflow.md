@@ -456,7 +456,9 @@ Content-Type: application/json
     "<asg:analyst-finding-export-cfg>"
   ],
   "cacheIds": null,
-  "cronExpression": "0 9,39 * * * *"
+  "entryCrons": {
+    "<step:analyst-monitor>": "0 9,39 * * * *"
+  }
 }
 ```
 
@@ -465,8 +467,9 @@ Record the returned id as `<workflow>`.
 `cacheIds` is `null`: this graph projects no dictionary into L2. The sibling chain's cache is not
 shared with it and must not be named here.
 
-**`cronExpression` is six-field, seconds first.** `0 9,39 * * * *` is second `0` of minutes 9 and
-39 of every hour. The validator accepts 5- or 6-field expressions and picks the format **by field count**,
+**The schedule is the entry step's cron, in `entryCrons`.** A workflow has no cron of its own; an
+entry step with no cron there is never fired (a `cronExpression` field is ignored). **The cron is
+six-field, seconds first.** `0 9,39 * * * *` is second `0` of minutes 9 and 39 of every hour. The validator accepts 5- or 6-field expressions and picks the format **by field count**,
 which is what makes this field one keystroke from a disaster: `*/9 * * * * *` is also six fields
 and means every 9 **seconds** -- several paid investigations a minute. Count the fields before you
 send, and count them again after any edit.
@@ -556,7 +559,7 @@ confirm:
 - both steps have exactly one assignment pointing at them
 - `analyst-finding-export`'s `processorId` is the *existing* `kafka-exporter` row, not a new one:
   there must still be exactly one processor row whose `sourceHash` is `56c32dfb...`
-- the workflow's `cacheIds` is empty and its `cronExpression` has **six** fields
+- the workflow's `cacheIds` is empty and `entryCrons` holds the entry step's cron, with **six** fields
 
 **B3. The payload names the right workflow.** This is the check no gate performs. Read the
 assignment back, parse its `payload`, and confirm `targetWorkflowId` is the id of the workflow you
@@ -632,9 +635,10 @@ the row that already holds `56c32dfb...`. `sourceHash` is unique among rows with
 Delete the duplicate and re-point the step; do not paper over it with a second row, because the
 schema-edge gate compares ids and two byte-identical rows are two different rows.
 
-**C7. The workflow starts, the cron is armed, and it never fires.** A workflow needs a cron **and**
-an explicit start; with only one of the two the orchestrator logs nothing and looks broken. If step
-8 returned `202` and nothing has fired by the next `:09` or `:39`, re-read the `cronExpression` field count:
+**C7. The workflow starts, the cron is armed, and it never fires.** A workflow needs an entry-step
+cron **and** an explicit start; with only one of the two the orchestrator logs nothing and looks broken.
+If step 8 returned `202` and nothing has fired by the next `:09` or `:39`, re-read the workflow: `entryCrons`
+must name the entry step (a workflow-level `cronExpression` is ignored), then count the cron's fields:
 a 5-field expression is accepted and means something different from what you meant.
 
 **C8. Every run fails the moment it starts thinking.** Non-2xx from the model API becomes

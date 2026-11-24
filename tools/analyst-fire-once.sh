@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Fire analyst-monitor exactly once: one-shot cron two minutes ahead, start, wait for the step to
-# begin, stop, restore the original workflow row. Usage: fire-once.sh <label>
+# Fire analyst-monitor exactly once: one-shot cron two minutes ahead on its entry step, start, wait for
+# the step to begin, stop, restore the original workflow row. A workflow has no cron of its own: the
+# schedule is the entry step's cron (entryCrons, by step id). Usage: fire-once.sh <label>
 set -euo pipefail
 API=http://localhost:18080/api/v1
 WF=208cba76-d635-4721-9aff-a7f22ee09224
@@ -8,22 +9,24 @@ DIR=${FIRE_DIR:-${TEMP:-/tmp}/analyst-fire}; mkdir -p "$DIR"
 LABEL=${1:-fire}
 
 curl -sf "$API/workflows/$WF" > "$DIR/wf-original-$LABEL.json"
-ORIG_CRON=$(python -c "import json,sys;print(json.load(open(sys.argv[1]))['cronExpression'])" "$DIR/wf-original-$LABEL.json")
-[ "$ORIG_CRON" = "0 9,39 * * * *" ] || { echo "unexpected original cron: $ORIG_CRON"; exit 1; }
+# the (single) entry step, and the cron it fires on
+ENTRY=$(python -c "import json,sys;print(json.load(open(sys.argv[1]))['entryStepIds'][0])" "$DIR/wf-original-$LABEL.json")
+ORIG_CRON=$(python -c "import json,sys;print((json.load(open(sys.argv[1])).get('entryCrons') or {}).get(sys.argv[2],''))" "$DIR/wf-original-$LABEL.json" "$ENTRY")
+[ "$ORIG_CRON" = "0 9,39 * * * *" ] || { echo "unexpected original entry cron: $ORIG_CRON"; exit 1; }
 
 # minute two ahead (UTC), avoiding the original 9/39 minutes
 M=$(date -u -d '+2 min' +%-M); H=$(date -u -d '+2 min' +%-H)
 CRON="0 $M $H * * *"
-python - "$DIR/wf-original-$LABEL.json" "$CRON" > "$DIR/wf-oneshot-$LABEL.json" <<'EOF'
+python - "$DIR/wf-original-$LABEL.json" "$CRON" "$ENTRY" > "$DIR/wf-oneshot-$LABEL.json" <<'EOF'
 import json,sys
 w=json.load(open(sys.argv[1]))
 body={k:w[k] for k in ('name','version','description','entryStepIds','assignmentIds','cacheIds')}
-body['cronExpression']=sys.argv[2]
+body['entryCrons']={**(w.get('entryCrons') or {}), sys.argv[3]: sys.argv[2]}
 print(json.dumps(body))
 EOF
-NF=$(python -c "import json,sys;print(len(json.load(open(sys.argv[1]))['cronExpression'].split()))" "$DIR/wf-oneshot-$LABEL.json")
+NF=$(python -c "import json,sys;print(len(json.load(open(sys.argv[1]))['entryCrons'][sys.argv[2]].split()))" "$DIR/wf-oneshot-$LABEL.json" "$ENTRY")
 [ "$NF" = 6 ] || { echo "cron field count $NF"; exit 1; }
-echo "one-shot cron: $CRON"
+echo "one-shot entry cron: $CRON"
 trap 'echo "ERROR: stopping $WF"; curl -s -X POST "$API/orchestration/stop" -H "Content-Type: application/json" --data "\"$WF\"" -o /dev/null -w "stop %{http_code}\n"' ERR
 curl -sf -X PUT "$API/workflows/$WF" -H 'Content-Type: application/json' --data @"$DIR/wf-oneshot-$LABEL.json" -o /dev/null -w "PUT one-shot %{http_code}\n"
 SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -41,8 +44,10 @@ curl -s -X POST "$API/orchestration/stop" -H 'Content-Type: application/json' --
 python - "$DIR/wf-original-$LABEL.json" > "$DIR/wf-restore-$LABEL.json" <<'EOF'
 import json,sys
 w=json.load(open(sys.argv[1]))
-print(json.dumps({k:w[k] for k in ('name','version','description','entryStepIds','assignmentIds','cacheIds','cronExpression')}))
+body={k:w[k] for k in ('name','version','description','entryStepIds','assignmentIds','cacheIds')}
+body['entryCrons']=w.get('entryCrons') or {}
+print(json.dumps(body))
 EOF
 curl -sf -X PUT "$API/workflows/$WF" -H 'Content-Type: application/json' --data @"$DIR/wf-restore-$LABEL.json" -o /dev/null -w "PUT restore %{http_code}\n"
-curl -sf "$API/workflows/$WF" | python -c "import json,sys;print('cron now:',json.load(sys.stdin)['cronExpression'])"
+curl -sf "$API/workflows/$WF" | python -c "import json,sys;print('entry cron now:',(json.load(sys.stdin).get('entryCrons') or {}).get(sys.argv[1]))" "$ENTRY"
 echo "since=$SINCE"

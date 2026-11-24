@@ -189,7 +189,9 @@ Content-Type: application/json
 ### SECTION 6 — the workflow
 ### Both id lists are junction writes, so every step and assignment above must already exist.
 ###
-### cronExpression is SIX-field (seconds first): "0 */5 * * * *" = second 0 of every 5th minute.
+### A workflow has no cron of its own: the entry step's cron goes in entryCrons, keyed by its id
+### (a cronExpression field is ignored, and an entry step with no cron never fires).
+### The cron is SIX-field (seconds first): "0 */5 * * * *" = second 0 of every 5th minute.
 ### The validator accepts 5- or 6-field and picks the format by FIELD COUNT. Six is used here
 ### because every existing workflow in this deployment uses six, and because the 5-field form is
 ### one keystroke from a disaster: "*/5 * * * * *" (six fields) means every 5 SECONDS, i.e. 12 LLM
@@ -210,7 +212,9 @@ Content-Type: application/json
     "{{exportAssignment.response.body.id}}"
   ],
   "cacheIds": null,
-  "cronExpression": "0 */5 * * * *"
+  "entryCrons": {
+    "{{analystStep.response.body.id}}": "0 */5 * * * *"
+  }
 }
 
 ### ----------------------------------------------------------------------------------------------

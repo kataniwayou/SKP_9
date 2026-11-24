@@ -1067,11 +1067,17 @@ Content-Type: application/json
   "cacheIds": [
     "<cache:chain-artists>"
   ],
-  "cronExpression": "0 * * * * *"
+  "entryCrons": {
+    "<step:split-importer>": "0 * * * * *"
+  }
 }
 ```
 
 Record the returned id as `<workflow>`.
+
+A workflow has no cron of its own: each entry step fires on its own cron, given in `entryCrons`
+keyed by the entry step's id. An entry step with no cron there is never fired (a `cronExpression`
+field is ignored).
 
 `cacheIds` is a third junction beside `entryStepIds` and `assignmentIds`. Every cache it names is
 projected into L2 when the workflow starts and removed when it stops.

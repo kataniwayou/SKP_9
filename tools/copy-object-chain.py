@@ -19,7 +19,7 @@ writes skp-object-documents; the exporter after record-outcome writes skp-object
 exporters are told apart by what feeds them, not by their names.
 
 Everything else is copied verbatim: descriptions, versions, entry conditions, every other payload,
-the cache binding (chain-artists) and the cron. Steps are created first with no edges and then given
+the cache binding (chain-artists) and the entry steps' crons. Steps are created first with no edges and then given
 their mapped successors, because record-outcome is a fan-in that most of the graph points at
 (docs/rebuild-filefetcher-archiveexpander-chain.md, steps 4 and 5).
 
@@ -191,7 +191,8 @@ def create(api, workflow, plan):
         "entryStepIds": [new_id[s] for s in workflow["entryStepIds"]],
         "assignmentIds": assignment_ids,
         "cacheIds": workflow["cacheIds"],
-        "cronExpression": workflow["cronExpression"],
+        # A workflow has no cron of its own: each entry step keeps its cron under its new id.
+        "entryCrons": {new_id[s]: c for s, c in (workflow.get("entryCrons") or {}).items()},
     })
     return created["id"]
 

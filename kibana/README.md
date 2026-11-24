@@ -331,7 +331,8 @@ than verifying what you already did.
 **The coordinate gate** refuses a structurally broken drawing: every edge in the graph must be
 drawn, every edge whose source declares an output schema must be *labelled with it*, every failure
 edge must reach its sink, every assignment key *and its value* must appear verbatim, the strip
-above the drawing must carry the workflow’s own `cronExpression`, nothing may leave the viewBox, no
+above the drawing must carry the entry steps’ schedule (from `entryCrons`: the one cron, “N
+schedules” for several, or “no cron - started by hand”), nothing may leave the viewBox, no
 attribute may be declared twice, and the SVG must parse.
 
 **The browser check** measures what only a renderer can see: that the image loads at all, that no

@@ -402,6 +402,23 @@ def text_w(s, size, mono=True):
     return len(str(s)) * size * (0.62 if mono else 0.58)
 
 
+def schedule_of(wf):
+    """The workflow's schedule as (label, text). A workflow has no cron of its own: each entry step
+    fires on its own entry cron (entryCrons, by step id). Entry steps that share a cron fire together,
+    so the count is of distinct crons, whitespace-normalised the way the scheduler compares them."""
+    crons = wf.get("entryCrons") or {}
+    seen = []
+    for sid in wf.get("entryStepIds") or []:
+        cron = " ".join((crons.get(sid) or "").split())
+        if cron and cron not in seen:
+            seen.append(cron)
+    if not seen:
+        return "cron", "no cron - started by hand"
+    if len(seen) == 1:
+        return "cron", seen[0]
+    return "crons", "%d schedules" % len(seen)
+
+
 def render(g):
     """Step 2: the drawing, laid out from the graph.
 
@@ -715,12 +732,12 @@ def render(g):
             else:
                 emit(f'    <text class="lg-cfg" x="{X0+260}" y="{ly}">no config</text>\n', "lg-cfg")
 
-    # THE SCHEDULE, ABOVE THE DRAWING AND TO THE LEFT. A workflow with no cron is not a workflow
-    # that runs continuously - it is one nothing starts, which the drawing should say rather than
-    # leave as an empty strip the reader reads as "no opinion".
-    cron = (g["wf"].get("cronExpression") or "").strip()
-    cron_txt = cron if cron else "no cron - started by hand"
-    emit(f'  <text class="head-cron" x="{X0}" y="{HEAD_Y}">cron <tspan class="head-cron-val">'
+    # THE SCHEDULE, ABOVE THE DRAWING AND TO THE LEFT. It is the entry steps' crons - a workflow
+    # has none of its own. A workflow with no entry cron is not a workflow that runs continuously -
+    # it is one nothing starts, which the drawing should say rather than leave as an empty strip the
+    # reader reads as "no opinion".
+    cron_lbl, cron_txt = schedule_of(g["wf"])
+    emit(f'  <text class="head-cron" x="{X0}" y="{HEAD_Y}">{cron_lbl} <tspan class="head-cron-val">'
          f'{esc(cron_txt)}</tspan></text>\n', "head-cron", "head-cron-val")
 
     caption = (f'{len(spine)} steps on the success path, '
@@ -733,7 +750,7 @@ def render(g):
     # the boxes alone would clip them.
     right = [max(x for x, _y in pos.values()) + W,
              X0 + text_w(caption, 12, mono=False),
-             X0 + text_w("cron " + cron_txt, 11)]
+             X0 + text_w(cron_lbl + " " + cron_txt, 11)]
     for sid, rows in zip(drawn_steps, step_rows):
         right.append(X0 + text_w(steps[sid]["name"], 11))
         # Each WRAPPED row, not the joined line: the same rows the emitter drew, so the canvas is
@@ -939,13 +956,11 @@ def gate(svg, g, art):
     # AND THE SCHEDULE IS THE ROW'S. The strip above the drawing is the one thing on it that no
     # step owns, so nothing else would catch it going stale - and a diagram that states a cron the
     # workflow does not have is worse than one that states none.
-    cron = (g["wf"].get("cronExpression") or "").strip()
-    if cron and f'>{esc(cron)}<' not in svg:
-        problems.append("the drawing does not carry the workflow's cron: %s" % cron)
-    if not cron and "no cron" not in svg:
-        problems.append("the workflow has no cron and the drawing does not say so")
-    if cron and art["cron"] != cron:
-        problems.append("the drawing's cron %r is not the row's %r" % (art["cron"], cron))
+    _lbl, cron = schedule_of(g["wf"])
+    if f'>{esc(cron)}<' not in svg:
+        problems.append("the drawing does not carry the entry steps' schedule: %s" % cron)
+    if art["cron"] != cron:
+        problems.append("the drawing's schedule %r is not the entry steps' %r" % (art["cron"], cron))
     try:
         xml.dom.minidom.parseString(svg.encode("utf-8"))
     except Exception as exc:                                    # noqa: BLE001
