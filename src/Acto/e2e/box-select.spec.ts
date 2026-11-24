@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { caNode, childLabels, clickEmptyBoard, inspector, openAt, pickCache, selbar, stNode, tabLabels, toolbar, wfNode } from './helpers';
+import { caNode, childLabels, clickEmptyBoard, ghost, inspector, openAt, pickCache, pickStep, selbar, stNode, tabLabels, toolbar, wfNode } from './helpers';
 import { seed } from './seed';
 
 // Box select with the right mouse button [user, 2026-11-22]: a right-drag draws a dashed rectangle; on release every
@@ -107,4 +107,36 @@ test('Ctrl adds the box to what is picked; an empty box clears; a right-click al
   await expect(page.locator('.pick-no')).toHaveCount(0);
   // a plain left click on empty board still clears and left-drag still pans (unchanged)
   await clickEmptyBoard(page);
+});
+
+test('a box also picks ghosts; a selected ghost wears the accent frame like a selected step; a real+ghost mix has no action in common [user, 2026-11-24]', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  await pickStep(page, id.s3!);
+  await toolbar(page, 'step').getByRole('button', { name: 'Delete', exact: true }).click();
+  const g = ghost(page, 'e2e-box-lone');
+  await expect(g).toHaveCount(1);
+  const gb = (await g.boundingBox())!, s2 = await boxOf(stNode(page, id.s2!));
+  // a box over the ghost alone picks it: toolbar Restore · Remove
+  await rightDrag(page, { x: gb.x - 20, y: gb.y - 20 }, { x: gb.x + 40, y: gb.y + 30 });
+  await expect(toolbar(page, 'ghost').getByRole('button')).toHaveText(['Restore', 'Remove']);
+  // the selected frame: class, accent border (dashed kept), ring, readable opacity, still struck through
+  const inner = g.locator('.node');
+  await expect(inner).toHaveClass(/(^| )sel( |$)/);
+  const accent = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim());
+  expect(accent).not.toBe('');
+  const st = await inner.evaluate((e) => { const c = getComputedStyle(e); return { b: c.borderTopColor, style: c.borderTopStyle, sh: c.boxShadow, op: getComputedStyle(e.closest('.react-flow__node')!).opacity }; });
+  expect(st.style).toBe('dashed');
+  expect(st.sh).not.toBe('none');
+  const probe = await page.evaluate((a) => { const d = document.createElement('i'); d.style.color = a; document.body.append(d); const c = getComputedStyle(d).color; d.remove(); return c; }, accent);
+  expect(st.b).toBe(probe);
+  expect(Number(st.op)).toBeGreaterThan(0.6);
+  await expect(g.locator('.sn')).toHaveCSS('text-decoration-line', 'line-through');
+  // a box over the ghost and a real step picks both; the bar has nothing in common to offer
+  await rightDrag(page, { x: gb.x - 20, y: Math.min(gb.y, s2.y) - 20 }, { x: s2.x + s2.width + 20, y: gb.y + gb.height + 20 });
+  await expect(pills(page)).toHaveText(/SELECTED/);
+  await expect(selbar(page)).toContainText('no action in common');
+  await expect(stNode(page, id.s2!).locator('.node')).toHaveClass(/(^| )sel( |$)/);
+  await expect(g.locator('.node')).toHaveClass(/(^| )sel( |$)/);
+  await page.screenshot({ path: '../../.playwright-mcp/acto-ghost-selected.png' });
 });

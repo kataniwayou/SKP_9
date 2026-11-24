@@ -22,13 +22,18 @@ describe('rectOf', () => {
 
 describe('boxPicks', () => {
   it('takes every triangle, step and cache the box touches, fully or partly, left to right then top to bottom', () => {
-    expect(ids(boxPicks(placed, at(-10, -10, 1000, 1000)))).toEqual(['tri', 'c', 'high', 'low', 'right']);
+    expect(ids(boxPicks(placed, at(-10, -10, 1000, 1000)))).toEqual(['tri', 'c', 'high', 'low', 'ghost', 'right']);
+  });
+  it('a mixed box picks real items and ghosts together', () => {
+    expect(boxPicks(placed, at(190, 0, 130, 200))).toEqual([{ kind: 'step', id: 'high' }, { kind: 'ghost', key: 'step:gone' }]);
   });
   it('a box over only a corner of an item takes it', () => {
     expect(ids(boxPicks(placed, at(290, 40, 20, 20)))).toEqual(['high']);
   });
-  it('never takes a ghost or a non-component, and an empty box takes nothing', () => {
-    expect(boxPicks(placed, at(240, 140, 120, 40))).toEqual([]);
+  it('takes a ghost node like a real one, never a non-component; an empty box takes nothing', () => {
+    expect(boxPicks(placed, at(240, 140, 120, 40))).toEqual([{ kind: 'ghost', key: 'step:gone' }]);
+    expect(boxPicks(placed, at(310, 160, 5, 5))).toEqual([{ kind: 'ghost', key: 'step:gone' }]);
+    expect(boxPicks(placed, at(500, 160, 5, 5))).toEqual([]);
     expect(boxPicks(placed, at(2000, 2000, 10, 10))).toEqual([]);
   });
 });

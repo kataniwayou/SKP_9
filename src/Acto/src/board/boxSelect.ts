@@ -17,11 +17,11 @@ export function rectOf(a: { x: number; y: number }, b: { x: number; y: number })
 
 const touches = (a: Rect, b: Rect) => a.x <= b.x + b.w && b.x <= a.x + a.w && a.y <= b.y + b.h && b.y <= a.y + a.h;
 
-/** The triangles, steps and caches the box touches, left to right, then top to bottom. */
+/** The triangles, steps, caches and ghost nodes the box touches, left to right, then top to bottom. */
 export function boxPicks(placed: readonly Placed[], box: Rect): Pick[] {
   return placed
     .filter((n): n is Placed & { pick: Pick } =>
-      n.pick !== null && (n.pick.kind === 'workflow' || n.pick.kind === 'step' || n.pick.kind === 'cache') && touches(n.box, box))
+      n.pick !== null && (n.pick.kind === 'workflow' || n.pick.kind === 'step' || n.pick.kind === 'cache' || n.pick.kind === 'ghost') && touches(n.box, box))
     .sort((a, b) => a.box.x - b.box.x || a.box.y - b.box.y)
     .map((n) => n.pick);
 }

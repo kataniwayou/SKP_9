@@ -113,6 +113,14 @@ describe('toFlow', () => {
       expect(n).toMatchObject({ type: 'step', draggable: true, connectable: false, zIndex: -1, className: 'ghost', position: { x: 5, y: 6 } });
       expect(n.data).toMatchObject({ ghost: true, ghostKey: 'step:gone', name: 'gone' });
     });
+    it('a picked ghost node (and ghost wire) is selected, an unpicked one is not', () => {
+      const v = view({ ghosts: [gstep, wire], picks: [{ kind: 'ghost', key: 'step:gone' }, { kind: 'step', id: 'fetch' }] });
+      const r = toFlow(b, v);
+      expect(r.nodes.find((x) => x.id === 'ghost:step:gone')!.selected).toBe(true);
+      expect(r.nodes.find((x) => x.id === 'st:fetch')!.selected).toBe(true);
+      expect(r.edges.find((x) => x.id === 'ghost:wire:fetch:gone')!.selected).toBe(false);
+      expect(toFlow(b, view({ ghosts: [gstep] })).nodes.find((x) => x.id === 'ghost:step:gone')!.selected).toBe(false);
+    });
     it('a ghost wire between a real and a ghost step is drawn', () => {
       const e = toFlow(b, view({ ghosts: [gstep, wire] })).edges.find((x) => x.id === 'ghost:wire:fetch:gone')!;
       expect(e).toMatchObject({ type: 'wire', source: 'st:fetch', target: 'ghost:step:gone', connectable: false, className: 'ghost' });

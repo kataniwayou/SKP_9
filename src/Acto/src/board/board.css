@@ -168,6 +168,13 @@
 .ghost .tri-stop, .ghost .tri-play { fill: var(--ghost-line); }
 .ghost .ico, .ghost .cond-pill { background: var(--ghost-line) !important; }
 .ghost .bn-body, .ghost .tri-nm, .ghost .cache-nm, .ghost .sn { text-decoration: line-through; }
+.react-flow__node.ghost:has(.sel), .react-flow__edge.ghost:has(.sel, .on) { opacity: .85; }
+.ghost .node.sel, .ghost.node.sel, .ghost .cache-chip.sel, .ghost.cache-chip.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--sh-node-hover); }
+.tri.ghost.sel .tri-body, .tri.ghost.stopped.sel .tri-body { stroke: var(--accent); stroke-width: 3; }
+.link-wire.ghost.sel .wire { stroke: var(--accent); stroke-width: 3.6; }
+.link-wire.ghost.sel marker path, .link-wire.ghost.sel .pill { fill: var(--accent); }
+.entry-edge.ghost.on .entry-line, .cache-edge.ghost.on .cache-line { stroke: var(--accent); stroke-width: 3; }
+.entry-edge.ghost.on .entry-head { fill: var(--accent); }
 .ghost-tag { position: absolute; right: 6px; bottom: 4px; font: 9px var(--mono); color: var(--ghost-tag-ink); background: var(--ghost-tag-bg); border-radius: 999px; padding: 0 7px; white-space: nowrap; pointer-events: none; }
 .tri .ghost-tag { position: static; display: inline-block; margin-top: 2px; }
 .ghost .tri-st { display: none; }
