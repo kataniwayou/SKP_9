@@ -1,6 +1,6 @@
 # SKP Acto: build and deploy by hand on an offline machine
 
-This manual builds the Acto image (the workflow board, WorkflowStudio's replacement) and deploys it on a machine with no
+This manual builds the Acto image (the workflow board) and deploys it on a machine with no
 internet, one command at a time, with no scripts. The source is the repo's own (`src\Acto`), the deployment is the
 repo's own (`k8s\47-acto.yaml`), and this folder holds everything third-party the build needs: every npm package and the
 two base images. No ready-made Acto image is shipped; the offline machine builds it.
@@ -21,9 +21,6 @@ matches.
 | `k8s\00-namespace.yaml`, `k8s\47-acto.yaml` | The `skp` namespace; Acto's Service and Deployment, with its settings |
 | `.dockerignore` | Keeps local build output (`node_modules`, `dist`, the image tars) out of the build |
 
-The two tars are the same files as in `Studio-offline\images\` and `Valence-offline\images\`; if you deploy more than one
-of them, load the tars once.
-
 ---
 
 ## Step 0. What the machine needs
@@ -42,8 +39,7 @@ over `/api/hubs/`; an older BaseApi without these answers 404 and the board does
 
 Bring the repo at branch `feature/acto` (through git, or as a folder copy), **plus** the two tars in
 `Acto-offline\images\`, which git doesn't carry. A folder copy needn't include `node_modules`, `dist`, `test-results`
-or `playwright-report`. If you copy a working folder, first empty the keys in `k8s\31-workflow-studio.yaml` and
-`k8s\32-valence.yaml` (`KIMI_API_KEY`) and `k8s\43-processor-analyst.yaml` (`Analyst__Model__ApiKey`): a working copy
+or `playwright-report`. If you copy a working folder, first empty the key in `k8s\43-processor-analyst.yaml` (`Analyst__Model__ApiKey`): a working copy
 may hold real keys that git never sees. (`k8s\47-acto.yaml` holds no key: it reads one from a secret, step 6.)
 
 Check the commit:

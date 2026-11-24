@@ -47,8 +47,6 @@ $ns = "skp"
 $forwards = @(
     @{ svc = "rabbitmq";       local = 5673;  remote = 5672 },
     @{ svc = "baseapi-service";local = 18080; remote = 8080 },
-    @{ svc = "workflow-studio";local = 18081; remote = 8080 },
-    @{ svc = "valence";        local = 18082; remote = 8080 },
     @{ svc = "acto";           local = 18083; remote = 8080 },
     @{ svc = "otel-collector"; local = 14317; remote = 4317 },
     @{ svc = "otel-collector"; local = 18889; remote = 8889 },

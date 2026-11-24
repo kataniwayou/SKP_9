@@ -32,19 +32,7 @@ kind load docker-image processor-sample:local
 kind load docker-image orchestrator:local
 ```
 
-SKP Studio (the workflow editor) is a static build served by nginx. Its image is built from the same
-root context and reached at `http://localhost:18081` through the port-forward script:
-
-```bash
-docker build -f src/WorkflowStudio/Dockerfile -t workflow-studio:local .
-kind load docker-image workflow-studio:local --name desktop
-kubectl apply -f k8s/31-workflow-studio.yaml
-```
-
-Its AI drawing wand takes three plain environment variables in `k8s/31-workflow-studio.yaml`, not a
-Secret: `KIMI_BASE_URL`, `KIMI_MODEL_ID` and `KIMI_API_KEY`. The key is committed empty, which turns the
-wand off ("AI drawing is not configured"); put the key in your working copy only and never commit it.
-Acto (its replacement) builds the same way (`docker build -f src/Acto/Dockerfile -t acto:local .`, `k8s/47-acto.yaml`,
+Acto (the workflow board) is a static build served by nginx, built from the root context (`docker build -f src/Acto/Dockerfile -t acto:local .`, `k8s/47-acto.yaml`,
 `http://localhost:18083`). The image must reach the node before a `rollout restart`, or the pod keeps the node's old copy:
 `kind load docker-image acto:local --name desktop`, or without the kind CLI
 `docker save acto:local -o acto.tar` then `docker exec -i desktop-control-plane ctr -n k8s.io images import - < acto.tar`
@@ -52,8 +40,6 @@ Acto (its replacement) builds the same way (`docker build -f src/Acto/Dockerfile
 overwrite a real key with an empty one; the manifest's `secretKeyRef` is `optional`, so without it the chat answers 503).
 Set it once, by hand, and restart the pod:
 `kubectl -n skp patch secret skp-dev-secrets -p '{"stringData":{"KIMI_API_KEY":"<key>"}}'`
-To build and deploy the Studio or Valence by hand on an offline machine, see
-`Studio-offline/README.md` and `Valence-offline/README.md`.
 
 Every application manifest uses `imagePullPolicy: IfNotPresent` against a `:local` tag, so there is
 no registry and nothing is ever pulled. The corollary is that rebuilding an image does **not**

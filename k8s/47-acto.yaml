@@ -1,4 +1,4 @@
-# Acto: the workflow board (React Flow), the replacement for WorkflowStudio (31-workflow-studio.yaml).
+# Acto: the workflow board (React Flow).
 #
 # A static React build served by nginx. nginx also proxies /api/ to baseapi-service (one origin: BaseApi has no
 # CORS policy) and /ai/ to the chat's model.

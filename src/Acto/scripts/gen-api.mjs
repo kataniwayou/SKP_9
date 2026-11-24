@@ -1,10 +1,10 @@
-// Regenerates the BaseApi OpenAPI snapshot and the TypeScript types the studio compiles against.
+// Regenerates the BaseApi OpenAPI snapshot and the TypeScript types Acto compiles against.
 //
 // Why offline: BaseApi serves /swagger only in Development, and the cluster runs Production. The
 // Swashbuckle CLI loads the built assembly, builds the host's service provider without starting
 // it, and writes the same document Swagger would serve.
 //
-// Run from src/WorkflowStudio: npm run gen:api
+// Run from src/Acto: npm run gen:api
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
