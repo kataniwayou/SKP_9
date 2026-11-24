@@ -48,6 +48,13 @@ public sealed class ModelFieldsTests
     }
 
     [Fact]
+    public void TheWorkflowsTableDoesNotAdvertiseEntryCrons()
+    {
+        // a client building its PUT body from the field list would echo a stale map and be refused; omitting it keeps the crons
+        Assert.DoesNotContain(Entity("workflows").Fields, f => f.Field == "entryCrons");
+    }
+
+    [Fact]
     public void TheSharedRulesOfAnIncludedValidatorReachEveryEntity()
     {
         foreach (var e in Snapshot().Dto.Entities)

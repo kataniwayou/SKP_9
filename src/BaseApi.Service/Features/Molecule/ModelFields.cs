@@ -53,7 +53,7 @@ internal static class ModelFields
             var rules = RulesOf(validator);
             var nullability = new NullabilityInfoContext();
 
-            var fields = dto.GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p =>
+            var fields = dto.GetProperties(BindingFlags.Public | BindingFlags.Instance).Where(p => !IsHidden(dto, p)).Select(p =>
             {
                 var column = entityType.FindProperty(p.Name);
                 return new ModelFieldDto(
@@ -81,6 +81,15 @@ internal static class ModelFields
         var dtoOut = new ModelFieldsDto(entities);
         return new ModelFieldsSnapshot(dtoOut, ETagOf(dtoOut));
     }
+
+    /// <summary>
+    /// A DTO property that is accepted on a write but not advertised. A client that builds its PUT body from this field list
+    /// would echo the property back, and a stale echo is refused: EntryCrons is a map keyed by entry step, so a client
+    /// that removed an entry step and echoed the old map is refused ("names step X, which is not an entry step"). A write
+    /// that omits it keeps the stored crons (keep-on-null).
+    /// </summary>
+    private static bool IsHidden(Type dto, PropertyInfo p) =>
+        dto == typeof(Workflow.WorkflowUpdateDto) && p.Name == nameof(Workflow.WorkflowUpdateDto.EntryCrons);
 
     /// <summary>Every rule of a validator by DTO property, its included validators' rules first, as they run.</summary>
     private static Dictionary<string, List<ModelRuleDto>> RulesOf(IValidator validator)
