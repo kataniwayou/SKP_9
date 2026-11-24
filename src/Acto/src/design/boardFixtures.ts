@@ -13,9 +13,9 @@ export function board(): BoardState {
   });
   return {
     workflows: {
-      daily: { id: 'daily', name: 'daily', version: '1.0.0', description: null, cronExpression: null,
+      daily: { id: 'daily', name: 'daily', version: '1.0.0', description: null, 
         entryStepIds: ['fetch'], entryCrons: {}, assignmentIds: ['a-daily-fetch'], cacheIds: ['c1'], at: { x: 0, y: 0 }, updatedAt: T, ...seen },
-      hourly: { id: 'hourly', name: 'hourly', version: '1.0.0', description: null, cronExpression: null,
+      hourly: { id: 'hourly', name: 'hourly', version: '1.0.0', description: null, 
         entryStepIds: ['fetch'], entryCrons: {}, assignmentIds: ['a-hourly-fetch'], cacheIds: [], at: { x: 0, y: 100 }, updatedAt: T, ...seen },
     },
     steps: {
@@ -56,7 +56,7 @@ export function shared(): BoardState {
 /** A board with one saved workflow `id` named `name` and nothing else. */
 export function oneWorkflow(id = 'wf1', name = 'orders'): BoardState {
   return {
-    workflows: { [id]: { id, name, version: '1.0.0', description: null, cronExpression: null, entryStepIds: [], entryCrons: {}, assignmentIds: [], cacheIds: [], at: { x: 0, y: 0 }, updatedAt: T, ...seen } },
+    workflows: { [id]: { id, name, version: '1.0.0', description: null,  entryStepIds: [], entryCrons: {}, assignmentIds: [], cacheIds: [], at: { x: 0, y: 0 }, updatedAt: T, ...seen } },
     steps: {}, caches: {}, assignments: {}, processors: {}, schemas: {},
   };
 }

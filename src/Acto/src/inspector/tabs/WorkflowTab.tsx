@@ -4,10 +4,9 @@ import { removeEntries, setWorkflowField, unlinkCaches } from '../../design/edit
 import { assignmentsOf } from '../../design/payloads';
 import { useWorkflowStatus } from '../../live/LiveContext';
 import { payloadKeyCount } from '../../model/assignments';
-import { cronText } from '../../model/cronText';
 import type { Id } from '../../model/graph';
-import { CronField, Ro, Row, Sec } from '../fields';
-import { EntityBase, LinkChip, locationText, metaOfRow, orNull, stepName, type Ctx } from './shared';
+import { Ro, Row, Sec } from '../fields';
+import { EntityBase, LinkChip, locationText, metaOfRow, stepName, type Ctx } from './shared';
 
 const keysText = (payload: string) => {
   const n = payloadKeyCount(payload);
@@ -24,9 +23,8 @@ export function WorkflowTab({ state, edit, id, go }: Ctx & { id: Id }) {
   const status = useWorkflowStatus(id);
   const w = state.workflows[id];
   if (!w) return null;
-  const set = (key: 'name' | 'version' | 'description' | 'cronExpression', v: string | null) =>
+  const set = (key: 'name' | 'version' | 'description', v: string | null) =>
     edit((b) => setWorkflowField(b, id, key, v), `field:${id}:${key}`);
-  const parsed = w.cronExpression ? cronText(w.cronExpression) : null;
   const assignments = assignmentsOf(state, id);
   const run = status === 'running' ? 'running' : status === 'stopped' ? 'stopped' : 'checking…';
   const reach = reachOf(state, id);
@@ -36,8 +34,6 @@ export function WorkflowTab({ state, edit, id, go }: Ctx & { id: Id }) {
   return (
     <>
       <EntityBase head={`${w.name} ${w.version}`} kind={`workflow · ${run}`} k={id} row={w} meta={metaOfRow(w)} set={set} />
-      <CronField key={`${id}:cron`} value={w.cronExpression} onChange={(v) => set('cronExpression', orNull(v))} />
-      <p className="in-note sub">{parsed === null ? 'not scheduled' : 'text' in parsed ? parsed.text : w.cronExpression}</p>
       <Sec>Related</Sec>
       <Ro><Row k="Location">{locationText(w.at)}</Row></Ro>
       <Sec>Entry steps</Sec>

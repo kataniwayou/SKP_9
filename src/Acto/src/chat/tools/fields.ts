@@ -6,7 +6,7 @@ import type { ToolDef, ToolOutcome } from '../toolTypes';
 import { applyState, done, fail, onBoard, STEP_ID, text, WORKFLOW_ID } from './common';
 
 const FIELDS = {
-  workflow: ['name', 'version', 'description', 'cronExpression'],
+  workflow: ['name', 'version', 'description'],
   step: ['name', 'version', 'description', 'entryCondition'],
   cache: ['name', 'version', 'description', 'root', 'items'],
   processor: ['name', 'version', 'description'],
@@ -14,11 +14,11 @@ const FIELDS = {
   assignment: ['name', 'version', 'description'],
 } as const;
 type Kind = keyof typeof FIELDS;
-const NULLABLE = new Set(['description', 'cronExpression']);
+const NULLABLE = new Set(['description']);
 
 const setField: ToolDef = {
   name: 'set_field',
-  description: "Set one field of a workflow (name, version, description, cronExpression), step (name, version, description, entryCondition: 1 Completed, 2 Failed, 3 Cancelled, 4 Always, 5 Never), cache (name, version, description, root, items), processor (name, version, description), schema (name, version, description; its definition is read-only: a change needs the processor restarted) or assignment (name, version, description: a workflow's payload row, id from read_board's payloads, with that workflow's workflow_id), as the Inspector does. A processor or schema shared with other things is changed for all of them; a schema edit gives the processor a schema of its own; an assignment other workflows also link is copied for this workflow only. `value` null clears a description or cron.",
+  description: "Set one field of a workflow (name, version, description), step (name, version, description, entryCondition: 1 Completed, 2 Failed, 3 Cancelled, 4 Always, 5 Never), cache (name, version, description, root, items), processor (name, version, description), schema (name, version, description; its definition is read-only: a change needs the processor restarted) or assignment (name, version, description: a workflow's payload row, id from read_board's payloads, with that workflow's workflow_id), as the Inspector does. A processor or schema shared with other things is changed for all of them; a schema edit gives the processor a schema of its own; an assignment other workflows also link is copied for this workflow only. `value` null clears a description.",
   parameters: {
     type: 'object',
     properties: {

@@ -91,8 +91,11 @@ describe('graph edit tools', () => {
 describe('field and payload tools', () => {
   it('set_field sets a field of each kind as the Inspector does, one undo step each; a bad field or id is named', async () => {
     const { ctx, store } = setup();
-    expect(done(await call(ctx, 'set_field', { kind: 'workflow', id: 'daily', field: 'cronExpression', value: '0 * * * *' })).ok).toBe(true);
-    expect(store.state().workflows.daily!.cronExpression).toBe('0 * * * *');
+    expect(done(await call(ctx, 'set_field', { kind: 'workflow', id: 'daily', field: 'description', value: 'nightly' })).ok).toBe(true);
+    expect(store.state().workflows.daily!.description).toBe('nightly');
+    const refused = done(await call(ctx, 'set_field', { kind: 'workflow', id: 'daily', field: 'cronExpression', value: '0 * * * *' }));
+    expect(refused.ok).toBe(false);
+    expect(refused.result).toBe('a workflow has no field cronExpression: the fields are name, version, description');
     expect(done(await call(ctx, 'set_field', { kind: 'step', id: 'fetch', field: 'entryCondition', value: 2 })).ok).toBe(true);
     expect(store.state().steps.fetch!.entryCondition).toBe(2);
     expect(done(await call(ctx, 'set_field', { kind: 'cache', id: 'c1', field: 'root', value: 'x' })).ok).toBe(true);

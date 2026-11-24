@@ -14,7 +14,7 @@ export interface CacheRow extends RowAudit {
   at: Point | null; updatedAt: string | null;
 }
 export interface WorkflowRow extends RowAudit {
-  id: Id; name: string; version: string; description: string | null; cronExpression: string | null;
+  id: Id; name: string; version: string; description: string | null;
   entryStepIds: Id[]; assignmentIds: Id[]; cacheIds: Id[]; at: Point | null; updatedAt: string | null;
   /** The cron of an entry arrow, by entry step; only the entries that run on their own cron have a key. */
   entryCrons: Record<Id, string>;

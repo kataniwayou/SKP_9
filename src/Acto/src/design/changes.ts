@@ -36,7 +36,7 @@ function diffTable(table: Table, base: BoardState, cur: BoardState): Diff {
 const loc = (at: { x: number; y: number } | null) => ({ boardX: at ? at.x : null, boardY: at ? at.y : null });
 
 const workflowBody = (w: WorkflowRow): WorkflowCreateDto & WorkflowUpdateDto => ({
-  name: w.name, version: w.version, description: w.description, cronExpression: w.cronExpression,
+  name: w.name, version: w.version, description: w.description,
   entryStepIds: [...w.entryStepIds], entryCrons: { ...w.entryCrons }, assignmentIds: [...w.assignmentIds], cacheIds: [...w.cacheIds], ...loc(w.at),
 });
 const stepBody = (s: StepRow): StepCreateDto & StepUpdateDto => ({

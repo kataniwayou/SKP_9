@@ -80,11 +80,11 @@ describe('copy and paste of caches and workflows [user, 2026-11-19: a new id, ev
   });
   it('a workflow copied alone pastes like a step alone: every field, no entry arrows, no cache lines, no assignments [user, 2026-11-23]', () => {
     const b = board();
-    b.workflows.daily = { ...b.workflows.daily!, cronExpression: '0 * * * *', description: 'nightly', version: '3.1.0' };
+    b.workflows.daily = { ...b.workflows.daily!, description: 'nightly', version: '3.1.0' };
     const { state, pasted } = pasteClip(b, copyClip(b, [T])!, ids());
     expect(pasted).toEqual([{ kind: 'workflow', id: 'new-1' }]);
     expect(state.workflows['new-1']).toMatchObject({
-      name: 'daily-2', version: '3.1.0', description: 'nightly', cronExpression: '0 * * * *',
+      name: 'daily-2', version: '3.1.0', description: 'nightly',
       entryStepIds: [], cacheIds: [], assignmentIds: [], updatedAt: null,
     });
     expect(Object.keys(state.assignments)).toEqual(Object.keys(b.assignments));

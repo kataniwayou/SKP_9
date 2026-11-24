@@ -79,7 +79,7 @@ describe('edits', () => {
     expect(b.steps.s10.name).toBe('expand-3');
   });
   it('field setters change one field', () => {
-    expect(setWorkflowField(board(), 'daily', 'cronExpression', '* * * * *').workflows.daily.cronExpression).toBe('* * * * *');
+    expect(setWorkflowField(board(), 'daily', 'description', 'x').workflows.daily.description).toBe('x');
     expect(setStepField(board(), 'fetch', 'name', 'x').steps.fetch.name).toBe('x');
     expect(setCacheField(board(), 'c1', 'root', 'z').caches.c1.root).toBe('z');
   });

@@ -20,6 +20,20 @@ const nameA = (n: string) => (b: ReturnType<typeof board>) => setWorkflowField(b
 const nameB = (n: string) => (b: ReturnType<typeof board>) => setWorkflowField(b, 'hourly', 'name', n);
 
 describe('board store', () => {
+  it('aDraftWithALegacyCronExpressionLoadsAndSavesWithoutIt', () => {
+    const session = memoryStorage();
+    const legacy = (b: ReturnType<typeof board>) => ({
+      ...b, workflows: Object.fromEntries(Object.entries(b.workflows).map(([id, w]) => [id, { ...w, cronExpression: '0 0 * * * *' }])),
+    });
+    const edited = setWorkflowField(board(), 'daily', 'name', 'A');
+    session.setItem('acto.board', JSON.stringify({ base: legacy(board()), present: legacy(edited) }));
+    const { store } = make(session);
+    for (const w of [...Object.values(store.state().workflows), ...Object.values(store.base().workflows)]) expect(w).not.toHaveProperty('cronExpression');
+    expect(store.state().workflows.daily!.name).toBe('A');
+    store.edit(nameB('B'));
+    expect(session.getItem('acto.board')).not.toContain('cronExpression');
+    expect(JSON.stringify(boardChanges(store.base(), store.state()))).not.toContain('cronExpression');
+  });
   it('keeps one history across workflows', () => {
     const { store } = make();
     store.edit(nameA('A')); store.edit(nameB('B'));

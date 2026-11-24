@@ -27,7 +27,6 @@ export function workflowFromDto(dto: WorkflowReadDto): Workflow {
     name: text(dto.name),
     version: text(dto.version),
     description: optional(dto.description),
-    cronExpression: optional(dto.cronExpression),
     entryStepIds: list(dto.entryStepIds),
     assignmentIds: list(dto.assignmentIds),
     cacheIds: list(dto.cacheIds),
@@ -95,7 +94,7 @@ const rowAudit = (dto: Audited): RowAudit => ({
 export function workflowRowFromDto(dto: WorkflowReadDto): WorkflowRow {
   return {
     id: required(dto.id, 'workflow id'), name: text(dto.name), version: text(dto.version), description: optional(dto.description),
-    cronExpression: optional(dto.cronExpression), entryStepIds: list(dto.entryStepIds), assignmentIds: list(dto.assignmentIds),
+    entryStepIds: list(dto.entryStepIds), assignmentIds: list(dto.assignmentIds),
     cacheIds: list(dto.cacheIds), entryCrons: { ...(dto.entryCrons ?? {}) }, at: atOf(dto), updatedAt: stamp(dto), ...rowAudit(dto),
   };
 }

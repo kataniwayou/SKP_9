@@ -4873,10 +4873,6 @@
             "type": "string",
             "nullable": true
           },
-          "cronExpression": {
-            "type": "string",
-            "nullable": true
-          },
           "updatedAt": {
             "type": "string",
             "format": "date-time",
@@ -5854,10 +5850,6 @@
             },
             "nullable": true
           },
-          "cronExpression": {
-            "type": "string",
-            "nullable": true
-          },
           "boardX": {
             "type": "number",
             "format": "double",
@@ -6034,10 +6026,6 @@
             },
             "nullable": true
           },
-          "cronExpression": {
-            "type": "string",
-            "nullable": true
-          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -6111,10 +6099,6 @@
               "type": "string",
               "format": "uuid"
             },
-            "nullable": true
-          },
-          "cronExpression": {
-            "type": "string",
             "nullable": true
           },
           "boardX": {

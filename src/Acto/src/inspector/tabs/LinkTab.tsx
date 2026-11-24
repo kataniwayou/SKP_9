@@ -43,7 +43,7 @@ function EntryCron({ state, edit, wf, step }: { state: BoardState; edit: Ctx['ed
   const parsed = own ? cronText(own) : null;
   return (
     <>
-      <CronField key={`${wf}:${step}:cron`} value={own} placeholder={w?.cronExpression || 'not scheduled'}
+      <CronField key={`${wf}:${step}:cron`} value={own} placeholder="not scheduled"
         onChange={(v) => edit((b) => setEntryCron(b, wf, step, orNull(v)), `entryCron:${wf}:${step}`)} />
       {parsed && <p className="in-note sub">{'text' in parsed ? parsed.text : own}</p>}
     </>

@@ -22,7 +22,7 @@ export interface ClipCache {
  * the same ids: the paste shares the assignment rows (an edit there copies the payload for that workflow only).
  */
 export interface ClipWorkflow {
-  id: Id; name: string; version: string; description: string | null; cronExpression: string | null;
+  id: Id; name: string; version: string; description: string | null;
   entryStepIds: Id[]; assignmentIds: Id[]; cacheIds: Id[]; at: Point;
   /** The cron of each entry arrow by entry step; absent on a clip stored before entry crons. */
   entryCrons?: Record<Id, string>;
@@ -76,7 +76,7 @@ export function copyClip(b: BoardState, items: readonly ItemRef[]): Clip | null 
       const w = b.workflows[ref.id];
       if (!w) continue;
       clip.workflows.push({
-        id: w.id, name: w.name, version: w.version, description: w.description, cronExpression: w.cronExpression,
+        id: w.id, name: w.name, version: w.version, description: w.description,
         entryStepIds: [...w.entryStepIds], entryCrons: { ...w.entryCrons }, assignmentIds: [...w.assignmentIds], cacheIds: [...w.cacheIds], at: at0(w.at),
       });
     }
@@ -177,7 +177,7 @@ export function pasteClip(b: BoardState, clip: Clip, newId: () => Id): { state: 
     const id = newId();
     pasted.push({ kind: 'workflow', id });
     const row: WorkflowRow = {
-      id, name: workflowName(c.name), version: c.version, description: c.description, cronExpression: c.cronExpression,
+      id, name: workflowName(c.name), version: c.version, description: c.description,
       entryStepIds: relink(c.entryStepIds, madeStep, b.steps),
       entryCrons: Object.fromEntries(c.entryStepIds.flatMap((x) => {
         const cron = c.entryCrons?.[x], to = madeStep.get(x) ?? (b.steps[x] ? x : undefined);

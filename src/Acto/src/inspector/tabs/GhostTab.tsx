@@ -68,7 +68,6 @@ export function GhostTab({ state, ghosts, item }: { state: BoardState; ghosts: L
         <Row k="Description">{r.description ?? '—'}</Row>
         {item.kind === 'step' && <Row k="Processor">{item.row.processorId === null ? 'none' : state.processors[item.row.processorId]?.name ?? item.row.processorId}</Row>}
         {item.kind === 'step' && <Row k="Entry condition">{conditionInfo(item.row.entryCondition).name}</Row>}
-        {item.kind === 'workflow' && <Row k="Cron">{item.row.cronExpression ?? 'not scheduled'}</Row>}
         {item.kind === 'workflow' && <Row k="Assignments">{String(item.assignments.length)}</Row>}
         {item.kind === 'cache' && <Row k="Root">{item.row.root}</Row>}
       </Ro>

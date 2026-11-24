@@ -12,7 +12,7 @@ const ARG = { type: 'object', properties: { workflow_id: WORKFLOW_ID }, required
 
 const newWorkflow: ToolDef = {
   name: 'new_workflow',
-  description: 'Make a new triangle on free board, named `name` or untitled, untitled-2, … (version 1.0.0, no cron, no entry arrows). It exists only on the board until the board is saved. Answers its id.',
+  description: 'Make a new triangle on free board, named `name` or untitled, untitled-2, … (version 1.0.0, no entry arrows, so it is not scheduled). It exists only on the board until the board is saved. Answers its id.',
   parameters: { type: 'object', properties: { name: { type: 'string' } }, additionalProperties: false },
   async run(ctx, args) {
     const id = ctx.newId();

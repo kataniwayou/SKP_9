@@ -104,7 +104,7 @@ const readBoard: ToolDef = {
     });
     const caches = Object.values(b.caches).map((c) => ({ id: c.id, name: c.name, version: c.version, description: c.description, root: c.root, items: c.items, at: c.at }));
     const workflows = Object.values(b.workflows).map((w) => ({
-      id: w.id, name: w.name, version: w.version, description: w.description, cronExpression: w.cronExpression,
+      id: w.id, name: w.name, version: w.version, description: w.description,
       status: runWord(ctx, w.id), unsaved: touched.has(w.id), saved: !!base.workflows[w.id], problems: ctx.store.problems(w.id),
       entrySteps: w.entryStepIds.map((id) => ({ id, cron: w.entryCrons[id] ?? null })), steps: [...reachOf(b, w.id)], caches: w.cacheIds, at: w.at,
       payloads: assignmentsOf(b, w.id).map((a) => ({

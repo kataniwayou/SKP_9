@@ -240,7 +240,7 @@ export function diagramSvg(b: BoardState, workflowId: Id): string {
   }
 
   // the triangle and its cron badge
-  const cron = wf?.cronExpression?.trim() || null;
+  const cron: string | null = null; // Task 4 draws the entry crons here; a workflow has none of its own
   const reading = cron ? cronText(cron) : null;
   out.push(
     `<polygon points="${num(T.x)},${num(T.y)} ${num(T.x)},${num(T.y + T.h)} ${num(T.x + T.w)},${num(T.y + T.h / 2)}" fill="#EEF2FF" stroke="${TRI_STROKE}" stroke-width="2" stroke-linejoin="round"/>`,

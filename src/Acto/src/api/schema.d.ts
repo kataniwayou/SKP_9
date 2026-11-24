@@ -2961,7 +2961,6 @@ export interface components {
             name?: string | null;
             version?: string | null;
             description?: string | null;
-            cronExpression?: string | null;
             /** Format: date-time */
             updatedAt?: string | null;
             entryStepIds?: string[] | null;
@@ -3260,7 +3259,6 @@ export interface components {
             } | null;
             assignmentIds?: string[] | null;
             cacheIds?: string[] | null;
-            cronExpression?: string | null;
             /** Format: double */
             boardX?: number | null;
             /** Format: double */
@@ -3308,7 +3306,6 @@ export interface components {
             } | null;
             assignmentIds?: string[] | null;
             cacheIds?: string[] | null;
-            cronExpression?: string | null;
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
@@ -3330,7 +3327,6 @@ export interface components {
             } | null;
             assignmentIds?: string[] | null;
             cacheIds?: string[] | null;
-            cronExpression?: string | null;
             /** Format: double */
             boardX?: number | null;
             /** Format: double */

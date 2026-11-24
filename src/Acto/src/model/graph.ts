@@ -23,7 +23,6 @@ export interface Workflow {
   name: string;
   version: string;
   description: string | null;
-  cronExpression: string | null;
   entryStepIds: Id[];
   assignmentIds: Id[];
   cacheIds: Id[];

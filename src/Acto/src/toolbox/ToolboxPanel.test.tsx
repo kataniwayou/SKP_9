@@ -50,7 +50,7 @@ describe('dropOnBoard', () => {
     if ('refused' in r) throw new Error(r.refused);
     expect(r.pick).toEqual({ kind: 'workflow', id: 'n1' });
     expect(r.state.workflows.n1).toMatchObject({
-      name: 'untitled', version: '1.0.0', cronExpression: null, entryStepIds: [], cacheIds: [], updatedAt: null,
+      name: 'untitled', version: '1.0.0', entryStepIds: [], cacheIds: [], updatedAt: null,
       at: { x: 500 - TRIANGLE_W / 2, y: 300 - TRIANGLE_H / 2 },
     });
   });

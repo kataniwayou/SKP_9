@@ -32,7 +32,7 @@ export function addCache(b: BoardState, at: Point, id: Id): BoardState {
 export function addWorkflow(b: BoardState, at: Point, id: Id): BoardState {
   const wf: WorkflowRow = {
     id, name: uniqueName(Object.values(b.workflows).map((w) => w.name), 'untitled'), version: '1.0.0',
-    description: null, cronExpression: null, entryStepIds: [], entryCrons: {}, assignmentIds: [], cacheIds: [], at: { ...at }, updatedAt: null, ...NO_AUDIT,
+    description: null, entryStepIds: [], entryCrons: {}, assignmentIds: [], cacheIds: [], at: { ...at }, updatedAt: null, ...NO_AUDIT,
   };
   return { ...b, workflows: { ...b.workflows, [id]: wf } };
 }

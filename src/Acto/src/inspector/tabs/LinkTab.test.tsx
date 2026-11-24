@@ -18,11 +18,6 @@ describe('the Link tab', () => {
     expect(store.state().workflows.daily!.entryCrons).toEqual({});
     expect(store.canUndo()).toBe(false);
   });
-  it('an entry arrow with no cron of its own shows the workflow cron as the placeholder', () => {
-    const b = withSchemas();
-    openOn('Link', [ENTRY], { ...b, workflows: { ...b.workflows, daily: { ...b.workflows.daily!, cronExpression: '0 0 * * * *' } } });
-    expect(screen.getByLabelText('Cron')).toHaveProperty('placeholder', '0 0 * * * *');
-  });
   it('aWireHasNoCronField', () => {
     openOn('Link', [{ kind: 'wire', from: 'fetch', to: 'expand' }]);
     expect(screen.queryByLabelText('Cron')).toBeNull();

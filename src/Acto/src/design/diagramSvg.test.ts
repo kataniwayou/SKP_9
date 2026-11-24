@@ -87,14 +87,6 @@ describe('diagramSvg', () => {
     expect(svg).toContain('+3 more');
   });
 
-  it('shows the cron and its reading under the triangle, or "manual start" without one', () => {
-    const cronOf = (svg: string) => parse(svg).querySelector('g[data-part="cron"]')!.textContent!.trim();
-    expect(cronOf(diagramSvg(board(), 'daily'))).toBe('manual start');
-    const b = board();
-    b.workflows.daily!.cronExpression = '0 0 2 * * *';
-    expect(cronOf(diagramSvg(b, 'daily')).replace(/\s+/g, ' ')).toBe('0 0 2 * * * daily at 02:00:00');
-  });
-
   it('shows a cache\'s root and item count', () => {
     const b = board();
     b.caches.c1!.items = '{"a":"1","b":"2","c":"3"}';
