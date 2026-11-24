@@ -340,3 +340,22 @@ describe('ghosts and the selection', () => {
     expect(withPicks({ workflows: ['hourly'], picks: [] }, picks)).toEqual({ workflows: ['daily'], picks });
   });
 });
+
+describe('set_field on a cache\'s items (final review, 2026-11-24)', () => {
+  it('refuses items text the board could not save, naming why, and leaves the items as they were', async () => {
+    const { ctx, store } = setup();
+    const before = store.state().caches.c1!.items;
+    for (const [value, why] of [['{"n":5}', 'must be a string'], ['{"a:b":"x"}', "must not contain ':'"], [`{"${'k'.repeat(257)}":"x"}`, 'at most 256'], ['not json', 'valid JSON']] as const) {
+      const o = done(await call(ctx, 'set_field', { kind: 'cache', id: 'c1', field: 'items', value }));
+      expect(o.ok, value).toBe(false);
+      expect(o.result, value).toContain(why);
+    }
+    expect(store.state().caches.c1!.items).toBe(before);
+  });
+
+  it('sets valid items text', async () => {
+    const { ctx, store } = setup();
+    expect(done(await call(ctx, 'set_field', { kind: 'cache', id: 'c1', field: 'items', value: '{"usd":"3.7"}' })).ok).toBe(true);
+    expect(store.state().caches.c1!.items).toBe('{"usd":"3.7"}');
+  });
+});

@@ -124,7 +124,8 @@ def ensure_cache(args, wanted):
     """Merges `wanted` into the cache row through the items endpoint and waits for L2 to hold every
     key. The running chain is refreshed in place; nothing is stopped or started."""
     cache = find_workflow_cache(args.baseapi, args.workflow_id, args.cache_root)
-    items = json.loads(cache["items"] or "{}")
+    # BaseApi sends a cache's items as [{key, value}] (rows since 2026-11-24)
+    items = {i["key"]: i["value"] for i in cache.get("items") or []}
 
     missing = {k: v for k, v in wanted.items() if items.get(k) != v}
     if missing or not redis_has_all(args.namespace, args.redis_pod, args.workflow_id,
@@ -132,7 +133,8 @@ def ensure_cache(args, wanted):
         # Sent even when the row already holds every artist: the same items again re-align L2 with
         # the row, for a chain started before the row had them.
         items.update(missing)
-        http_json("PUT", f"{args.baseapi}/api/v1/caches/{cache['id']}/items", {"items": items})
+        http_json("PUT", f"{args.baseapi}/api/v1/caches/{cache['id']}/items",
+                  {"items": [{"key": k, "value": v} for k, v in items.items()]})
         say(f"cache '{cache['name']}': added {len(missing)} item(s); now {len(items)}")
 
         deadline = time.time() + 60

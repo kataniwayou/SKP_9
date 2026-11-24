@@ -49,8 +49,16 @@ const stepBody = (s: StepRow): StepCreateDto & StepUpdateDto => ({
   name: s.name, version: s.version, description: s.description, processorId: s.processorId as string,
   nextStepIds: [...s.nextStepIds], entryCondition: s.entryCondition as StepCreateDto['entryCondition'], ...loc(s.at),
 });
+/** A cache's items as pairs; text that cannot be converted names its cache (Save reports it and sends nothing). */
+function cacheItems(c: CacheRow) {
+  try {
+    return itemsFromText(c.items);
+  } catch (e) {
+    throw new Error(`cache ${c.name}: items: ${(e as Error).message}`);
+  }
+}
 const cacheBody = (c: CacheRow): CacheCreateDto & CacheUpdateDto => ({
-  name: c.name, version: c.version, description: c.description, root: c.root, items: itemsFromText(c.items), ...loc(c.at),
+  name: c.name, version: c.version, description: c.description, root: c.root, items: cacheItems(c), ...loc(c.at),
 });
 const assignmentBody = (a: AssignmentRow) => ({
   name: a.name, version: a.version, description: a.description, stepId: a.stepId, payload: a.payload,

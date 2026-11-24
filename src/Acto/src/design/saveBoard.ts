@@ -6,7 +6,7 @@ import type { Id } from '../model/graph';
 import type { OutputStore } from '../output/outputStore';
 import type { BoardState } from './board';
 import { SAVING_REFUSAL, type BoardStore } from './boardStore';
-import { affectedWorkflows, boardChanges, type Table } from './changes';
+import { affectedWorkflows, boardChanges, type ModelChange, type Table } from './changes';
 import { diagramSvg } from './diagramSvg';
 import type { GhostStore } from './ghosts';
 
@@ -104,7 +104,14 @@ export async function saveBoard(
   if (store.saveBlocked()) { output.log(OUTCOME_UNKNOWN, 'error'); return 'refused'; }
   const base = store.base();
   const present = store.state();
-  const changes = boardChanges(base, present);
+  let changes: ModelChange[];
+  try {
+    changes = boardChanges(base, present);
+  } catch (e) {
+    // a row the board cannot put in BaseAPI's shape (a cache's items text): nothing is sent
+    output.log(`Save refused: ${(e as Error).message}`, 'error');
+    return 'refused';
+  }
   if (changes.length === 0) { output.log('Nothing to save'); return 'nothing'; }
   store.setSaving(true);
   /** A refused row: failures on the board, stale rows offered to Take stored. */

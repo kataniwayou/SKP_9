@@ -173,6 +173,28 @@ public sealed class CacheItemsPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AnUpdateAfterModelApplysFreshnessCheckSavesTheItems()
+    {
+        // /model/apply (Acto's Save) first Finds the row to compare updatedAt, then detaches only the cache row -- its
+        // auto-included items may stay tracked -- and runs the service's UpdateAsync, then may change the same cache again.
+        // (The runner itself needs Postgres savepoints; this drives the same context steps.)
+        var created = await CreateAsync("artists", [I("acme", "Acme"), I("beta", "Beta")]);
+        _db.ChangeTracker.Clear();
+
+        var found = await _db.FindAsync(typeof(CacheEntity), [created.Id], Ct);
+        _db.Entry(found!).State = EntityState.Detached;
+        _clock.Advance(TimeSpan.FromMinutes(5));
+        var first = await Service().UpdateAsync(created.Id,
+            new CacheUpdateDto(created.Name, created.Version, null, created.Root, [I("acme", "Changed"), I("gamma", "G")]), Ct);
+        var second = await Service().UpdateAsync(created.Id,
+            new CacheUpdateDto(created.Name, created.Version, null, created.Root, [I("gamma", "G2")]), Ct);
+
+        Assert.Equal(created.UpdatedAt.AddMinutes(5), first.UpdatedAt);
+        Assert.Equal([I("gamma", "G2")], second.Items);
+        Assert.Equal([("gamma", "G2")], await RowsAsync(created.Id));
+    }
+
+    [Fact]
     public async Task AnItemsOnlyUpdateStampsTheCache()
     {
         // Only child rows change, so EF alone would leave the cache row Unchanged: no UpdatedAt, no

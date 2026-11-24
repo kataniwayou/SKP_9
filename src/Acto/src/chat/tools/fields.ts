@@ -2,6 +2,7 @@ import { SLOT_FIELD, type Slot } from '../../design/board';
 import { setCacheField, setProcessorField, setSlotSchema, setStepField, setWorkflowField } from '../../design/edits';
 import { assignmentOf, newPayloadOf, removeAssignment, setAssignmentField, setPayload } from '../../design/payloads';
 import { CONDITIONS } from '../../model/entryConditions';
+import { parseDict } from '../../model/dict';
 import type { ToolDef, ToolOutcome } from '../toolTypes';
 import { applyState, done, fail, onBoard, STEP_ID, text, WORKFLOW_ID } from './common';
 
@@ -58,6 +59,11 @@ const setField: ToolDef = {
       value = null;
     } else if (typeof raw === 'string') value = raw;
     else return fail(`${field} takes a text`, 'set field');
+    // a cache's items go to BaseAPI as pairs: text the board could not convert would stop the whole Save
+    if (kind === 'cache' && field === 'items' && typeof value === 'string') {
+      const parsed = parseDict(value);
+      if (!parsed.ok) return fail(`items: ${parsed.reason}`, 'set field');
+    }
     const what = `${kind} ${(table[id] as { name: string }).name}`;
     const edit = (cur: typeof b) => {
       switch (kind) {

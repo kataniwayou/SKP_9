@@ -31,6 +31,15 @@ const rename = (s: ReturnType<typeof setup>['store'], wf: string, name: string) 
 beforeEach(() => vi.mocked(loadBoard).mockReset());
 
 describe('saveBoard', () => {
+  it('reports a cache whose items cannot be sent, by name, and sends nothing (final review, 2026-11-24)', async () => {
+    const t = setup();
+    t.store.edit((b) => ({ ...b, caches: { ...b.caches, c1: { ...b.caches.c1!, items: '{"n":5}' } } }));
+    expect(await saveBoard(t.studio, t.store, t.output)).toBe('refused');
+    expect(t.api.applyModel).not.toHaveBeenCalled();
+    expect(texts(t.output).some((x) => x.startsWith('Save refused: cache') && x.includes(t.store.state().caches.c1!.name) && x.includes('must be a string'))).toBe(true);
+    expect(t.store.saving()).toBe(false);
+  });
+
   it('gives the ghost store the made ids before the board adopts the re-read', async () => {
     const t = setup();
     const ghosts = createGhostStore(t.store);
