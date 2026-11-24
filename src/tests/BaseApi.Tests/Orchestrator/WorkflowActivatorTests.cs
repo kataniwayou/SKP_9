@@ -154,7 +154,7 @@ public sealed class WorkflowActivatorTests
 
         await h.Build().ActivateAsync(W, CancellationToken.None);
 
-        Assert.Equal([W], h.Scheduler.Unscheduled);
+        Assert.Equal([W, W], h.Scheduler.Unscheduled);
         Assert.True(h.Store.TryGetActive(W, out var e2));
         Assert.NotEqual(first, e2.JobId);
 
@@ -162,7 +162,10 @@ public sealed class WorkflowActivatorTests
         // a teardown landing after the schedule would delete the replacement too — and the
         // convergence argument in WorkflowActivator's own doc is an ordering claim, which needs an
         // ordered record to rest on.
-        Assert.Equal(["ScheduleAsync", "UnscheduleWorkflowAsync", "ScheduleAsync"], h.Scheduler.Calls);
+        // Every activation clears first, the first one included.
+        Assert.Equal(
+            ["UnscheduleWorkflowAsync", "ScheduleAsync", "UnscheduleWorkflowAsync", "ScheduleAsync"],
+            h.Scheduler.Calls);
 
         // The replacement went out under the NEW job id, not the torn-down one. Assert.NotEqual above
         // says L1 moved on; this says the scheduler was told the same thing.

@@ -133,10 +133,11 @@ public sealed class ApplyHandlerTests
 
         // LiveJobCount alone is a net count: it cannot tell teardown-then-apply from a broken order
         // that happens to net the same. The call sequence pins the order the test's name promises —
-        // the second activation's UnscheduleWorkflowAsync must land between the two
-        // ScheduleAsync calls, not after both.
+        // each activation's UnscheduleWorkflowAsync must land before its own ScheduleAsync, so the
+        // second one falls between the two ScheduleAsync calls, not after both.
         Assert.Equal(
-            new[] { "ScheduleAsync", "UnscheduleWorkflowAsync", "ScheduleAsync" }, h.Scheduler.Calls);
+            new[] { "UnscheduleWorkflowAsync", "ScheduleAsync", "UnscheduleWorkflowAsync", "ScheduleAsync" },
+            h.Scheduler.Calls);
     }
 
     [Fact]
@@ -195,10 +196,11 @@ public sealed class ApplyHandlerTests
         Assert.False(h.Store.TryGetActive(W, out _));
         Assert.Equal(0, h.Scheduler.LiveJobCount);
 
-        // The net count above is satisfied by exactly one schedule and one unschedule regardless of
-        // their order; the sequence pins that the stop's teardown is the one and only scheduler call
-        // to follow the start's.
-        Assert.Equal(new[] { "ScheduleAsync", "UnscheduleWorkflowAsync" }, h.Scheduler.Calls);
+        // The net count above is satisfied regardless of order; the sequence pins that the stop's
+        // teardown is the one and only scheduler call to follow the start's (whose own clear comes
+        // first, before its schedule).
+        Assert.Equal(
+            new[] { "UnscheduleWorkflowAsync", "ScheduleAsync", "UnscheduleWorkflowAsync" }, h.Scheduler.Calls);
     }
 
     [Fact]
@@ -217,12 +219,37 @@ public sealed class ApplyHandlerTests
         await h.BuildStop().HandleAsync(Body(new OrchestrationStopped(W)), CancellationToken.None);
 
         Assert.Equal(2, h.Scheduler.Scheduled.Count);
-        Assert.Equal([W], h.Scheduler.Unscheduled);
-        Assert.Equal(new[] { "ScheduleAsync", "ScheduleAsync", "UnscheduleWorkflowAsync" }, h.Scheduler.Calls);
+        Assert.Equal([W, W], h.Scheduler.Unscheduled);
+        Assert.Equal(
+            new[] { "UnscheduleWorkflowAsync", "ScheduleAsync", "ScheduleAsync", "UnscheduleWorkflowAsync" },
+            h.Scheduler.Calls);
         Assert.Equal(0, h.Scheduler.LiveJobCount);
         Assert.True(workflowStillActiveAtUnschedule, "unschedule must run before the workflow is marked");
         Assert.True(h.Store.TryGetIncludingStopped(W, out var entry));
         Assert.NotNull(entry.DeletedAt);
+    }
+
+    [Fact]
+    public async Task AStartAfterAStopStillClearsTheWorkflowsGroupFirst()
+    {
+        // A fire racing the stop can re-create its own job after the stop's group delete, so a marked
+        // entry does not mean an empty group. The restart must delete the group again before it
+        // schedules, or that stray job would fire alongside the new activation.
+        var h = new Harness().WithWorkflow(W, "*/30 * * * * *", secondEntryCron: "*/10 * * * * *");
+        await h.BuildStart().HandleAsync(Body(new OrchestrationStarted(W)), CancellationToken.None);
+        h.RemoveWorkflowFromL2(W);
+        await h.BuildStop().HandleAsync(Body(new OrchestrationStopped(W)), CancellationToken.None);
+        h.RestoreWorkflowToL2(W);
+        var callsBeforeRestart = h.Scheduler.Calls.Count;
+
+        await h.BuildStart().HandleAsync(Body(new OrchestrationStarted(W)), CancellationToken.None);
+
+        Assert.Equal(
+            new[] { "UnscheduleWorkflowAsync", "ScheduleAsync", "ScheduleAsync" },
+            h.Scheduler.Calls.Skip(callsBeforeRestart));
+        Assert.True(h.Store.TryGetActive(W, out var entry));
+        Assert.All(h.Scheduler.Scheduled.Skip(2), s => Assert.Equal(entry.JobId, s.ActivationId));
+        Assert.Equal(2, h.Scheduler.LiveJobCount);
     }
 
     [Fact]

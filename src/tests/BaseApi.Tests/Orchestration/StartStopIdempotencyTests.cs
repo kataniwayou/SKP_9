@@ -311,8 +311,10 @@ public sealed class StartStopIdempotencyTests
         Assert.True(c.L1.TryGetActive(W, out var second));
         Assert.Equal(Shape(first.Definition), Shape(second.Definition));
         Assert.Equal(1, c.Scheduler.LiveJobCount);
-        Assert.Equal([W], c.Scheduler.Unscheduled);
-        Assert.Equal(["ScheduleAsync", "UnscheduleWorkflowAsync", "ScheduleAsync"], c.Scheduler.Calls);
+        Assert.Equal([W, W], c.Scheduler.Unscheduled);
+        Assert.Equal(
+            ["UnscheduleWorkflowAsync", "ScheduleAsync", "UnscheduleWorkflowAsync", "ScheduleAsync"],
+            c.Scheduler.Calls);
     }
 
     [Fact]
@@ -345,7 +347,7 @@ public sealed class StartStopIdempotencyTests
         // The redelivery: the API removes an already-absent live-set entry and announces again, and the
         // replica finds the entry its predecessor already marked. Neither half has anything left to
         // do — and in particular the second delivery must not unschedule a second time, which is what
-        // the single-element Unscheduled assertion below pins.
+        // the Unscheduled assertion below pins: one clear from the start, one from the first stop.
         await c.ApiStopAsync(W);
         await c.DeliverAsync();
 
@@ -355,7 +357,9 @@ public sealed class StartStopIdempotencyTests
         Assert.True(c.L1.TryGetIncludingStopped(W, out var marked));
         Assert.NotNull(marked.DeletedAt);
 
-        Assert.Equal([W], c.Scheduler.Unscheduled);
+        Assert.Equal([W, W], c.Scheduler.Unscheduled);
+        Assert.Equal(
+            ["UnscheduleWorkflowAsync", "ScheduleAsync", "UnscheduleWorkflowAsync"], c.Scheduler.Calls);
         Assert.Equal(0, c.Scheduler.LiveJobCount);
 
         // The stop takes the id out of the live set and nothing else: the store outlives it, so the
@@ -414,7 +418,8 @@ public sealed class StartStopIdempotencyTests
         // empty.
         Assert.False(c.L1.TryGetActive(W, out _));
         Assert.Equal(0, c.Scheduler.LiveJobCount);
+        // Per cycle: the start clears the group then schedules, the stop clears it again.
         Assert.Equal(2, c.Scheduler.Scheduled.Count);
-        Assert.Equal(2, c.Scheduler.Unscheduled.Count);
+        Assert.Equal(4, c.Scheduler.Unscheduled.Count);
     }
 }

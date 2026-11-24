@@ -95,10 +95,12 @@ internal sealed class ApplyStopHandler : IQueueMessageHandler
             if (_store.TryGetIncludingStopped(m.WorkflowId, out var entry))
             {
                 // An entry already marked has had both halves done to it, and neither is worth
-                // repeating. The unschedule would delete the workflow's Quartz group a second time and
-                // find it already empty, and the mark is deliberately not refreshed — see MarkDeleted:
-                // refreshing would move when the entry reads as having been stopped, for no benefit,
-                // since nothing prunes it by age either way.
+                // repeating. The unschedule would delete the workflow's Quartz group a second time —
+                // and a job a racing fire re-created since then is harmless here: it fires, finds the
+                // entry marked, dispatches nothing and does not re-arm (the next start clears the
+                // group regardless; see WorkflowActivator). The mark is deliberately not refreshed —
+                // see MarkDeleted: refreshing would move when the entry reads as having been stopped,
+                // for no benefit, since nothing prunes it by age either way.
                 if (entry.DeletedAt is not null)
                 {
                     _logger.LogInformation("stop applied; the workflow was already marked stopped");

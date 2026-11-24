@@ -453,19 +453,19 @@ public sealed class HydrationServiceTests
         h.PumpTime(TimeSpan.FromSeconds(30));
         await run.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
-        // Three schedules across two passes — W1 on both, W2 only on the one that got that far — and
-        // the second activation of W1 tore down the job the first one left. Two live jobs, one per
+        // Three schedules across two passes — W1 on both, W2 only on the one that got that far. Every
+        // activation clears its workflow's group first, so W1 is torn down on both passes and W2 once;
+        // the second clear of W1 is what removed the job the first pass left. Two live jobs, one per
         // workflow, is the whole claim.
         Assert.True(h.Admission.IsOpen);
         Assert.Equal([W1, W1, W2], h.Scheduler.Scheduled.Select(s => s.WorkflowId));
-        Assert.Single(h.Scheduler.Unscheduled);
+        Assert.Equal([W1, W1, W2], h.Scheduler.Unscheduled);
         Assert.Equal(2, h.Scheduler.LiveJobCount);
 
         // And the surviving job is the one L1 points at: the teardown was of W1, and the schedule that
         // followed it went out under the activation L1 now holds. A teardown that ran in the other
         // order would have removed W1's whole group, current job included.
         Assert.True(h.Store.TryGetActive(W1, out var w1));
-        Assert.Equal([W1], h.Scheduler.Unscheduled);
         Assert.Equal(w1.JobId, h.Scheduler.Scheduled[1].ActivationId);
     }
 

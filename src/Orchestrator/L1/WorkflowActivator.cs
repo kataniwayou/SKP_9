@@ -17,9 +17,9 @@ namespace Orchestrator.L1;
 /// nowhere for the difference to live.
 /// </para>
 /// <para>
-/// <b>Teardown precedes apply.</b> An activation of a workflow already held deletes the workflow's
-/// whole Quartz group — one call keyed by the workflow id, covering every job of every group the
-/// previous activation scheduled — before minting a new activation. Without that, a redelivered
+/// <b>Teardown precedes apply.</b> Every activation first deletes the workflow's whole Quartz group —
+/// one call keyed by the workflow id, covering every job of every group the previous activation
+/// scheduled — before minting a new activation. Without that, a redelivered
 /// announcement would leave the previous jobs running alongside their replacements, both firing every
 /// tick, double-dispatching every entry step. Tearing down first is what makes a redelivery converge
 /// instead of accumulate.
@@ -45,7 +45,7 @@ public sealed class WorkflowActivator(
 {
     /// <summary>
     /// Spec §7.1, in order: return unless the workflow is live, read the definition, return if L2 holds
-    /// no usable store for it, unschedule every job of the workflow when L1 holds it active, put the
+    /// no usable store for it, unschedule every job of the workflow (always — see below), put the
     /// definition in L1 under a fresh activation id, schedule one job per entry-schedule group under that
     /// id, and preload its names.
     /// </summary>
@@ -72,21 +72,19 @@ public sealed class WorkflowActivator(
             return;
         }
 
-        // ACTIVE, not merely held, and the distinction matters on the restart path. A marked entry has
-        // no jobs left to tear down: ApplyStopHandler deletes the workflow's whole group strictly before
-        // it marks, so "marked" implies "already unscheduled". Deleting the group again would find it
-        // empty — harmless in Quartz, but it would state a teardown that did not happen and put this
-        // method's convergence argument on a call that cannot be doing what it claims. (A fire racing
-        // the stop can re-create its own job afterwards; that job carries the old activation id, so
-        // its next fire finds itself superseded and does not re-arm.)
+        // EVERY activation, not only one of a workflow already active. "Marked stopped" does not imply
+        // "group empty": a fire racing a stop can pass its checks just before the stop's group delete
+        // and then re-create its own job through RescheduleAsync's fallback, after the delete. That
+        // stray job carries the old activation id and sits in the group. If a start followed and
+        // skipped the teardown, the stray job would fire while the new activation is active and could
+        // dispatch entry steps before it found itself superseded. The group delete is keyed by the
+        // workflow id and idempotent — on a first activation it finds nothing, and costs that much —
+        // so running it on every start clears any such job before the new groups are scheduled.
         //
         // Store.Set below then writes a fresh entry carrying no DeletedAt, which is what clears the
         // stop. The un-marking is a side effect of the write rather than a separate call this path
         // could forget to make.
-        if (store.TryGetActive(workflowId, out _))
-        {
-            await scheduler.UnscheduleWorkflowAsync(workflowId, ct).ConfigureAwait(false);
-        }
+        await scheduler.UnscheduleWorkflowAsync(workflowId, ct).ConfigureAwait(false);
 
         // One activation id for every group. The fire job's supersession check compares it, so a later
         // activation retires every group's job at once.
