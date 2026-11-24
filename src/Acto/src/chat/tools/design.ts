@@ -7,6 +7,7 @@ import { addCache, addEntry, addStep, addWire, linkCache, moveItems, removeEntri
 import { restoreGhosts, withTheirWires, type GhostItem } from '../../design/ghosts';
 import type { Rect } from '../../model/geometry';
 import type { Id } from '../../model/graph';
+import { cronText } from '../../model/cronText';
 import { copyClip, copyMessage, countWords, pasteClip, pasteMessage, readClip, writeClip } from '../../operate/clipboard';
 import { freeOffset } from '../../operate/freeOffset';
 import type { ToolContext, ToolDef, ToolOutcome } from '../toolTypes';
@@ -146,7 +147,7 @@ const removeEntry: ToolDef = {
 };
 
 const setEntryCronTool: ToolDef = {
-  name: 'set_entry_cron', description: "Set or clear the cron of one entry arrow (an entry step of the workflow); value null or blank clears it.",
+  name: 'set_entry_cron', description: "Set or clear the cron of one entry arrow (an entry step of the workflow); value null or blank clears it. A cron has 5 fields, or 6 with seconds first (e.g. */10 * * * * * is every 10 seconds), at most 120 characters.",
   parameters: {
     type: 'object',
     properties: { workflow_id: WORKFLOW_ID, step_id: STEP_ID, value: { type: ['string', 'null'], description: 'The cron expression, or null to clear.' } },
@@ -157,6 +158,11 @@ const setEntryCronTool: ToolDef = {
     if ('out' in t) return t.out;
     if (!ctx.store.state().workflows[t.wf]!.entryStepIds.includes(t.other)) return fail(`${t.other} is not an entry step of ${nameOf(ctx, t.wf)}`, 'set entry cron');
     const value = typeof args.value === 'string' ? args.value : null;
+    if (value?.trim()) {
+      if (value.length > 120) return fail(`the cron is ${value.length} characters; at most 120`, 'set entry cron');
+      const parsed = cronText(value);
+      if ('problem' in parsed) return fail(`not a valid cron: ${parsed.problem}`, 'set entry cron');
+    }
     return applyState(ctx, (b) => setEntryCron(b, t.wf, t.other, value), 'set entry cron', `${value?.trim() ? `set the cron of ${nameOf(ctx, t.wf)}'s entry arrow to ${t.other} to ${value.trim()}` : `cleared the cron of ${nameOf(ctx, t.wf)}'s entry arrow to ${t.other}`}`);
   },
 };

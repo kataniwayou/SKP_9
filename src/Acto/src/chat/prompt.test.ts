@@ -42,6 +42,12 @@ describe('systemPrompt', () => {
     expect(prompt.match(/scheduled only by its entry arrows/g)).toHaveLength(1);
     expect(prompt).not.toMatch(/workflow's cron|its own cron|overrides the workflow/);
   });
+  it('has no manual run and states the entry cron format once', () => {
+    expect(prompt).not.toMatch(/by hand/);
+    expect(prompt.match(/6 with seconds first/g)).toHaveLength(1);
+    expect(prompt).toContain('never fires');
+    expect(prompt).toContain('one correlation id');
+  });
   it('has none of the redundant lines (2026-11-18 rule audit): each rule is said once', () => {
     expect(prompt).not.toMatch(/smooth curve/);
     expect(prompt).not.toMatch(/Acto asks the user first/);

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { moveItems, setEntryCron } from '../../design/edits';
+import { TOOL_DEFS } from '../tools';
 import { liveStub } from '../../test/liveStub';
 import { call, done, setup } from './testContext';
 
@@ -28,6 +29,12 @@ describe('reading tools', () => {
     expect(daily).toMatchObject({ entrySteps: [{ id: 'fetch', cron: null }], caches: ['c1'], unsaved: false, saved: true, steps: ['fetch', 'expand'] });
     expect(daily).not.toHaveProperty('cronExpression');
     expect(daily.payloads).toEqual([{ assignmentId: 'a-daily-fetch', name: 'fetch-assignment', version: '1.0.0', description: null, stepId: 'fetch', payload: '{}', sharedWith: [] }]);
+  });
+
+  it('read_board description lists no workflow cron of the triangle', () => {
+    const d = TOOL_DEFS.find((t) => t.name === 'read_board')!.description;
+    expect(d).toContain('entry steps (id and its own cron');
+    expect(d).not.toMatch(/fields, cron/);
   });
 
   it('readBoardShowsEntryCrons', async () => {

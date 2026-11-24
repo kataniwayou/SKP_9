@@ -47,6 +47,23 @@ describe('graph edit tools', () => {
     expect(store.state().workflows.daily!.entryCrons).toEqual({});
   });
 
+  it('setEntryCronValidates: refuses unparseable and over-long, accepts 5- and 6-field, clears on blank', async () => {
+    const { ctx, store } = setup();
+    const bad = done(await call(ctx, 'set_entry_cron', { workflow_id: 'daily', step_id: 'fetch', value: 'every day' }));
+    expect(bad.ok).toBe(false);
+    expect(bad.result).toContain('A cron expression has 5 fields, or 6 with seconds first');
+    expect(store.state().workflows.daily!.entryCrons).toEqual({});
+    const long = done(await call(ctx, 'set_entry_cron', { workflow_id: 'daily', step_id: 'fetch', value: '*/5 * * * *' + ' '.repeat(110) }));
+    expect(long.ok).toBe(false);
+    expect(long.result).toContain('at most 120');
+    expect(store.state().workflows.daily!.entryCrons).toEqual({});
+    expect(done(await call(ctx, 'set_entry_cron', { workflow_id: 'daily', step_id: 'fetch', value: '*/10 * * * * *' })).ok).toBe(true);
+    expect(done(await call(ctx, 'set_entry_cron', { workflow_id: 'daily', step_id: 'fetch', value: '0 9 * * 1' })).ok).toBe(true);
+    expect(store.state().workflows.daily!.entryCrons).toEqual({ fetch: '0 9 * * 1' });
+    expect(done(await call(ctx, 'set_entry_cron', { workflow_id: 'daily', step_id: 'fetch', value: '   ' })).ok).toBe(true);
+    expect(store.state().workflows.daily!.entryCrons).toEqual({});
+  });
+
   it('setEntryCronRefusesANonEntryStep', async () => {
     const { ctx, store } = setup();
     expect(done(await call(ctx, 'set_entry_cron', { workflow_id: 'daily', step_id: 'lonely', value: '* * * * * *' }))).toMatchObject({ ok: false, result: 'lonely is not an entry step of daily' });
