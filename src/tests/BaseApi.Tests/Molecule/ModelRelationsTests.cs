@@ -1,3 +1,4 @@
+using BaseApi.Core.Entities;
 using BaseApi.Service;
 using BaseApi.Service.Features.Molecule;
 using Microsoft.EntityFrameworkCore;
@@ -71,10 +72,23 @@ public sealed class ModelRelationsTests
     public void NoForeignKeyInTheModelIsLeftOut()
     {
         // The generic guard: a key added by a future migration is described without any edit to ModelRelations.
+        // Only a parts table's keys are left out, with the table (an entity's parts are its field).
         using var db = NpgsqlModelContext();
-        var inModel = db.Model.GetEntityTypes().SelectMany(e => e.GetForeignKeys()).Count();
+        var inModel = db.Model.GetRelationalModel().Tables
+            .Where(t => ModelRelations.IsLink(t) || typeof(BaseEntity).IsAssignableFrom(t.EntityTypeMappings.Single().TypeBase.ClrType))
+            .Sum(t => t.ForeignKeyConstraints.Count());
 
         Assert.Equal(inModel, ModelRelations.Describe(db.Model).Dto.Relations.Count);
+    }
+
+    [Fact]
+    public void AnEntitysPartsTableIsLeftOutWithItsKey()
+    {
+        // A cache's items are rows of cache_items (2026-11-24), described as the cache's items field.
+        var described = Describe();
+
+        Assert.DoesNotContain(described.Tables, t => t.Table == "cache_items");
+        Assert.DoesNotContain(described.Relations, r => r.Owner == "cache_items");
     }
 
     [Fact]

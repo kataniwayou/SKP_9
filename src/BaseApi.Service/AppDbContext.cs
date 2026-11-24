@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 namespace BaseApi.Service;
 
 /// <summary>
-/// The application's context: six entity sets and four junction sets.
+/// The application's context: six entity sets, four junction sets and the caches' item rows.
 /// <para>
 /// The ordering inside <c>OnModelCreating</c> is load-bearing — see the comment there.
 /// </para>
@@ -30,6 +30,9 @@ public sealed class AppDbContext : BaseDbContext
     public DbSet<WorkflowEntrySteps> WorkflowEntrySteps => Set<WorkflowEntrySteps>();
     public DbSet<WorkflowAssignments> WorkflowAssignments => Set<WorkflowAssignments>();
     public DbSet<WorkflowCaches> WorkflowCaches => Set<WorkflowCaches>();
+
+    /// <summary>The caches' entries; the set's name is what makes the table <c>cache_items</c>.</summary>
+    public DbSet<CacheItem> CacheItems => Set<CacheItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

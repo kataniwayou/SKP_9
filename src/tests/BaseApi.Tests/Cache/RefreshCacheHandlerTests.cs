@@ -49,7 +49,7 @@ public sealed class RefreshCacheHandlerTests : IAsyncLifetime
         _db.Set<CacheEntity>().Add(new CacheEntity
         {
             Id = _cache, Name = "artists", Version = "1.0.0", Root = "artists",
-            Items = """{"acme":"Acme (Approved)","beta":"Beta"}""",
+            Items = [new CacheItem { Key = "acme", Value = "Acme (Approved)" }, new CacheItem { Key = "beta", Value = "Beta" }],
         });
         await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
     }

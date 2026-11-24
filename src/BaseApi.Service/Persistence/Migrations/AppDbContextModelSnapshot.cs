@@ -110,11 +110,6 @@ namespace BaseApi.Service.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("description");
 
-                    b.Property<string>("Items")
-                        .IsRequired()
-                        .HasColumnType("jsonb")
-                        .HasColumnName("items");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text")
@@ -153,6 +148,28 @@ namespace BaseApi.Service.Persistence.Migrations
                         .HasDatabaseName("uq_cache_root");
 
                     b.ToTable("caches", (string)null);
+                });
+
+            modelBuilder.Entity("BaseApi.Service.Features.Cache.CacheItem", b =>
+                {
+                    b.Property<Guid>("CacheId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cache_id");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("key");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("value");
+
+                    b.HasKey("CacheId", "Key")
+                        .HasName("pk_cache_items");
+
+                    b.ToTable("cache_items", (string)null);
                 });
 
             modelBuilder.Entity("BaseApi.Service.Features.Processor.ProcessorEntity", b =>
@@ -528,6 +545,16 @@ namespace BaseApi.Service.Persistence.Migrations
                         .HasConstraintName("fk_assignment_step_id");
                 });
 
+            modelBuilder.Entity("BaseApi.Service.Features.Cache.CacheItem", b =>
+                {
+                    b.HasOne("BaseApi.Service.Features.Cache.CacheEntity", null)
+                        .WithMany("Items")
+                        .HasForeignKey("CacheId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_cache_items_cache_id");
+                });
+
             modelBuilder.Entity("BaseApi.Service.Features.Processor.ProcessorEntity", b =>
                 {
                     b.HasOne("BaseApi.Service.Features.Schema.SchemaEntity", null)
@@ -625,6 +652,11 @@ namespace BaseApi.Service.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_workflow_entry_steps_workflow_id");
+                });
+
+            modelBuilder.Entity("BaseApi.Service.Features.Cache.CacheEntity", b =>
+                {
+                    b.Navigation("Items");
                 });
 #pragma warning restore 612, 618
         }

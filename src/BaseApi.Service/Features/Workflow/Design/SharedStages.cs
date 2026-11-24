@@ -161,14 +161,15 @@ internal sealed class CacheStage : IDesignStage
             var applied = await run.UnitAsync("cache", n.Id, "caches", async () =>
             {
                 var errors = new List<FieldError>();
-                var fields = DesignFields.Apply(new CacheUpdateDto("", "", null, "", ""), n.Fields, errors);
+                var fields = DesignFields.Apply(new CacheUpdateDto("", "", null, "", []), n.Fields, errors);
                 if (errors.Count > 0) return errors;
                 var dto = new CacheCreateDto(fields.Name, fields.Version, fields.Description, fields.Root, fields.Items);
                 var existing = await _db.Set<CacheEntity>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == n.Id, ct);
                 if (existing is not null)
                 {
                     // the same row this design creates (a Save sent again after its answer was lost): nothing to do
-                    if ((existing.Name, existing.Version, existing.Description, existing.Root, existing.Items) == (dto.Name, dto.Version, dto.Description, dto.Root, dto.Items))
+                    if ((existing.Name, existing.Version, existing.Description, existing.Root) == (dto.Name, dto.Version, dto.Description, dto.Root)
+                        && CacheItems.Same(CacheItems.ToDtos(existing.Items), dto.Items))
                     {
                         already = true;
                         return [];
@@ -207,9 +208,13 @@ internal sealed class CacheStage : IDesignStage
                 if (problems.Count > 0) return problems;
                 if (dto.Root != before.Root && await RootTakenAsync(dto.Root, c.Id, ct) is { } taken) return [taken];
                 _mapper.Update(dto, entity);
+                // the mapper leaves the items to this diff, which also stamps a cache whose items alone changed
+                CacheItems.Apply(_db, entity, dto.Items);
+                // the same pairs in another order are no change; the log compares by reference otherwise
+                var items = CacheItems.Same(before.Items, dto.Items) ? before.Items : dto.Items;
                 change = DesignLogText.Join(DesignLogText.Fields(
                     ("name", before.Name, dto.Name), ("version", before.Version, dto.Version), ("description", before.Description, dto.Description),
-                    ("root", before.Root, dto.Root), ("items", before.Items, dto.Items)));
+                    ("root", before.Root, dto.Root), ("items", before.Items, items)));
                 return problems;
             }, ct, shared: true);
             if (!applied) continue;

@@ -79,7 +79,7 @@ internal static class DesignFields
                 "version" => dto with { Version = Text(v, key, errors) ?? "" },
                 "description" => dto with { Description = Text(v, key, errors) },
                 "root" => dto with { Root = Text(v, key, errors) ?? "" },
-                "items" => dto with { Items = Text(v, key, errors) ?? "" },
+                "items" => dto with { Items = ItemsOf(v, key, errors) ?? dto.Items },
                 _ => Unknown(dto, key, errors),
             };
         return dto;
@@ -105,7 +105,7 @@ internal static class DesignFields
     public static ProcessorUpdateDto UpdateOf(ProcessorEntity e) =>
         new(e.Name, e.Version, e.Description, e.SourceHash, e.InstanceId, e.InputSchemaId, e.OutputSchemaId, e.ConfigSchemaId);
 
-    public static CacheUpdateDto UpdateOf(CacheEntity e) => new(e.Name, e.Version, e.Description, e.Root, e.Items);
+    public static CacheUpdateDto UpdateOf(CacheEntity e) => new(e.Name, e.Version, e.Description, e.Root, CacheItems.ToDtos(e.Items));
 
     public static AssignmentUpdateDto UpdateOf(AssignmentEntity e) => new(e.Name, e.Version, e.Description, e.StepId, e.Payload);
 
@@ -130,6 +130,33 @@ internal static class DesignFields
             case JsonValueKind.Null: return null;
             default: errors.Add(new FieldError(key, $"{key} must be text or null.")); return null;
         }
+    }
+
+    /// <summary>
+    /// A cache's items as the design sends them: a list of <c>{ "key": string, "value": string }</c> pairs. Any other
+    /// shape — the old JSON-object text among them — is one error on the field, and the stored items stay.
+    /// Duplicates and key rules are the CRUD validator's to judge.
+    /// </summary>
+    private static List<CacheItemDto>? ItemsOf(JsonElement v, string key, List<FieldError> errors)
+    {
+        if (v.ValueKind == JsonValueKind.Array)
+        {
+            var items = new List<CacheItemDto>();
+            foreach (var e in v.EnumerateArray())
+            {
+                if (e.ValueKind != JsonValueKind.Object
+                    || !e.TryGetProperty("key", out var k) || k.ValueKind != JsonValueKind.String
+                    || !e.TryGetProperty("value", out var val) || val.ValueKind != JsonValueKind.String)
+                {
+                    items = null;
+                    break;
+                }
+                items.Add(new CacheItemDto(k.GetString()!, val.GetString()!));
+            }
+            if (items is not null) return items;
+        }
+        errors.Add(new FieldError(key, $"{key} must be a list of {{ key, value }} pairs."));
+        return null;
     }
 
     /// <summary>The message a step with no processor is refused with (2026-10-10).</summary>

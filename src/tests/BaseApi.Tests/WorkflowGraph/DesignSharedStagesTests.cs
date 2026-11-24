@@ -1,3 +1,4 @@
+using BaseApi.Service.Features.Cache;
 using BaseApi.Service.Features.Workflow.Design;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -81,6 +82,89 @@ public sealed class DesignSharedStagesTests
 
         var error = Assert.Single(outcome.Errors);
         Assert.Equal(("cache", cache, "caches", "root"), (error.Kind, error.Id, error.Stage, error.Field));
+    }
+
+    [Fact]
+    public async Task ACachesItemsAreReplacedRowByRow()
+    {
+        await using var h = new GraphHarness();
+        var cache = await h.CacheAsync("root-a", ("acme", "Acme"), ("beta", "Beta"));
+        var wf = await h.WorkflowAsync("wf", [await h.StepAsync(await h.ProcessorAsync())]);
+
+        var outcome = await h.Syncer().SaveAsync(wf, Of(caches: [new DesignCacheDto(cache,
+            F("""{"items":[{"key":"acme","value":"Acme (Approved)"},{"key":"gamma","value":"G"}]}"""))]), h.Ct);
+
+        Assert.True(outcome.Applied, Describe(outcome));
+        h.Forget();
+        var rows = await h.Db.Set<CacheItem>().Where(i => i.CacheId == cache).ToListAsync(h.Ct);
+        Assert.Equal([("acme", "Acme (Approved)"), ("gamma", "G")],
+            rows.OrderBy(i => i.Key, StringComparer.Ordinal).Select(i => (i.Key, i.Value)));
+        Assert.Contains(outcome.Log!, l => l.Id == cache && l.Message.Contains("items changed"));
+    }
+
+    [Fact]
+    public async Task AnItemsOnlyDesignChangeStampsTheCache()
+    {
+        await using var h = new GraphHarness();
+        var cache = await h.CacheAsync("root-a", ("acme", "Acme"));
+        var wf = await h.WorkflowAsync("wf", [await h.StepAsync(await h.ProcessorAsync())]);
+        h.Forget();
+        var before = (await h.Db.Caches.SingleAsync(c => c.Id == cache, h.Ct)).UpdatedAt;
+        h.Forget();
+        h.Tick();
+
+        var outcome = await h.Syncer().SaveAsync(wf, Of(caches: [new DesignCacheDto(cache,
+            F("""{"items":[{"key":"acme","value":"Changed"}]}"""))]), h.Ct);
+
+        Assert.True(outcome.Applied, Describe(outcome));
+        h.Forget();
+        Assert.True((await h.Db.Caches.SingleAsync(c => c.Id == cache, h.Ct)).UpdatedAt > before);
+    }
+
+    [Fact]
+    public async Task TheSameItemsInAnotherOrderAreNoChange()
+    {
+        await using var h = new GraphHarness();
+        var cache = await h.CacheAsync("root-a", ("acme", "Acme"), ("beta", "Beta"));
+        var wf = await h.WorkflowAsync("wf", [await h.StepAsync(await h.ProcessorAsync())]);
+
+        var outcome = await h.Syncer().SaveAsync(wf, Of(caches: [new DesignCacheDto(cache,
+            F("""{"items":[{"key":"beta","value":"Beta"},{"key":"acme","value":"Acme"}]}"""))]), h.Ct);
+
+        Assert.True(outcome.Applied, Describe(outcome));
+        Assert.DoesNotContain(outcome.Log!, l => l.Id == cache && l.Message.Contains("items changed"));
+    }
+
+    [Fact]
+    public async Task ADesignedCacheIsCreatedWithItsItemRows()
+    {
+        await using var h = new GraphHarness();
+        var wf = await h.WorkflowAsync("wf", [await h.StepAsync(await h.ProcessorAsync())]);
+        var cache = Guid.NewGuid();
+
+        var outcome = await h.Syncer().SaveAsync(wf, Of(newCaches: [new DesignNewCacheDto(cache, null,
+            F("""{"name":"c","version":"1.0.0","root":"root-new","items":[{"key":"acme","value":"Acme"}]}"""))]), h.Ct);
+
+        Assert.True(outcome.Applied, Describe(outcome));
+        h.Forget();
+        var row = Assert.Single(await h.Db.Set<CacheItem>().Where(i => i.CacheId == cache).ToListAsync(h.Ct));
+        Assert.Equal(("acme", "Acme"), (row.Key, row.Value));
+    }
+
+    [Fact]
+    public async Task ADesignedItemTwiceIsAnErrorOnTheItemsField()
+    {
+        await using var h = new GraphHarness();
+        var cache = await h.CacheAsync("root-a", ("acme", "Acme"));
+        var wf = await h.WorkflowAsync("wf", [await h.StepAsync(await h.ProcessorAsync())]);
+
+        var outcome = await h.Syncer().SaveAsync(wf, Of(caches: [new DesignCacheDto(cache,
+            F("""{"items":[{"key":"beta","value":"1"},{"key":"beta","value":"2"}]}"""))]), h.Ct);
+
+        var error = Assert.Single(outcome.Errors);
+        Assert.Equal(("cache", cache, "caches", "items"), (error.Kind, error.Id, error.Stage, error.Field));
+        h.Forget();
+        Assert.Equal(["acme"], await h.Db.Set<CacheItem>().Where(i => i.CacheId == cache).Select(i => i.Key).ToListAsync(h.Ct));
     }
 
     [Fact]

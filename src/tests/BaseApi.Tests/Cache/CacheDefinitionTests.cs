@@ -31,16 +31,16 @@ public sealed class CacheDefinitionTests
         return snapshot;
     }
 
-    private static CacheReadDto Cache(string root, string items) => new(
-        Guid.NewGuid(), $"cache-{root}", "1.0.0", null, root, items,
+    private static CacheReadDto Cache(string root, params (string Key, string Value)[] items) => new(
+        Guid.NewGuid(), $"cache-{root}", "1.0.0", null, root, items.Select(i => new CacheItemDto(i.Key, i.Value)).ToList(),
         DateTime.UtcNow, DateTime.UtcNow, null, null);
 
     [Fact]
     public void EveryCacheOnTheWorkflowReachesTheDefinition()
     {
         using var snapshot = Snapshot(
-            Cache("sk-whitelist", """{"acme":"1"}"""),
-            Cache("other-list", """{"beta":"2"}"""));
+            Cache("sk-whitelist", ("acme", "1")),
+            Cache("other-list", ("beta", "2")));
 
         var definition = OrchestrationService.ToDefinitionForTests(snapshot, W);
 
@@ -52,7 +52,7 @@ public sealed class CacheDefinitionTests
     [Fact]
     public void TheDictionaryArrivesIntact()
     {
-        using var snapshot = Snapshot(Cache("sk-whitelist", """{"acme":"1","alphabeta":"2"}"""));
+        using var snapshot = Snapshot(Cache("sk-whitelist", ("acme", "1"), ("alphabeta", "2")));
 
         var definition = OrchestrationService.ToDefinitionForTests(snapshot, W);
 
@@ -67,7 +67,7 @@ public sealed class CacheDefinitionTests
     {
         // "Allow nothing" is a legitimate configuration. Dropping the cache here would make it
         // indistinguishable from a workflow that named no cache at all.
-        using var snapshot = Snapshot(Cache("sk-whitelist", "{}"));
+        using var snapshot = Snapshot(Cache("sk-whitelist"));
 
         var definition = OrchestrationService.ToDefinitionForTests(snapshot, W);
 
@@ -104,7 +104,7 @@ public sealed class CacheDefinitionTests
     [Fact]
     public void TheSnapshotClearsItsCachesOnDispose()
     {
-        var snapshot = Snapshot(Cache("sk-whitelist", """{"acme":"1"}"""));
+        var snapshot = Snapshot(Cache("sk-whitelist", ("acme", "1")));
 
         snapshot.Dispose();
 

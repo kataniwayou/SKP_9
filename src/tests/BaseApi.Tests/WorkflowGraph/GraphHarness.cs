@@ -136,9 +136,13 @@ internal sealed class GraphHarness : IAsyncDisposable
         return a.Id;
     }
 
-    public async Task<Guid> CacheAsync(string root)
+    public async Task<Guid> CacheAsync(string root, params (string Key, string Value)[] items)
     {
-        var c = new CacheEntity { Id = Guid.NewGuid(), Name = "cache", Version = "1.0.0", Root = root, Items = "{}" };
+        var c = new CacheEntity
+        {
+            Id = Guid.NewGuid(), Name = "cache", Version = "1.0.0", Root = root,
+            Items = items.Select(i => new CacheItem { Key = i.Key, Value = i.Value }).ToList(),
+        };
         Db.Add(c);
         await Db.SaveChangesAsync(Ct);
         return c.Id;

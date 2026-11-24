@@ -12,7 +12,7 @@ public sealed record CacheCreateDto(
     string Version,
     string? Description,
     string Root,
-    string Items,
+    List<CacheItemDto> Items,
     double? BoardX = null,
     double? BoardY = null) : IBaseDto;
 
@@ -25,7 +25,7 @@ public sealed record CacheUpdateDto(
     string Version,
     string? Description,
     string Root,
-    string Items,
+    List<CacheItemDto> Items,
     double? BoardX = null,
     double? BoardY = null) : IBaseDto;
 
@@ -34,7 +34,14 @@ public sealed record CacheUpdateDto(
 /// every other field are absent, so the one edit that reaches running workflows cannot move the address
 /// their steps read.
 /// </summary>
-public sealed record CacheItemsUpdateDto(Dictionary<string, string> Items);
+public sealed record CacheItemsUpdateDto(List<CacheItemDto> Items);
+
+/// <summary>
+/// One entry of a cache's dictionary as the API carries it. Items travel as a list of these, not as an
+/// object: a list can say a key twice, which the validator then refuses by name, where an object would
+/// silently keep the last one.
+/// </summary>
+public sealed record CacheItemDto(string Key, string Value);
 
 /// <summary>
 /// Read-side DTO returned to clients, carrying the id and the audit fields. It implements
@@ -47,7 +54,7 @@ public sealed record CacheReadDto(
     string Version,
     string? Description,
     string Root,
-    string Items,
+    List<CacheItemDto> Items,
     DateTime CreatedAt,
     DateTime UpdatedAt,
     string? CreatedBy,

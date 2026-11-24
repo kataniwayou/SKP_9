@@ -74,9 +74,8 @@ internal sealed class RefreshCacheHandler : IQueueMessageHandler
 
         var live = (await _live.ListAsync(ct).ConfigureAwait(false)).ToHashSet();
 
-        // The validator holds a stored row to a flat object of strings, so this parse cannot fail on one.
-        var items = new CacheL1(cache.Root,
-            JsonSerializer.Deserialize<Dictionary<string, string>>(cache.Items) ?? new Dictionary<string, string>());
+        // The item rows came with the cache (auto-included).
+        var items = new CacheL1(cache.Root, CacheItems.ToDictionary(cache.Items));
 
         foreach (var workflowId in bound.Where(live.Contains))
         {

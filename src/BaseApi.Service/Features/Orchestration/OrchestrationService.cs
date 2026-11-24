@@ -1,4 +1,3 @@
-using System.Text.Json;
 using BaseApi.Core.Exceptions;
 using BaseApi.Core.Persistence;
 using BaseApi.Service.Features.Cache;
@@ -214,10 +213,7 @@ public sealed class OrchestrationService
         var caches = (workflow.CacheIds ?? new List<Guid>())
             .Select(id => snapshot.Caches.TryGetValue(id, out var dto) ? dto : null)
             .Where(dto => dto is not null)
-            .Select(dto => new CacheL1(
-                dto!.Root,
-                JsonSerializer.Deserialize<Dictionary<string, string>>(dto.Items)
-                    ?? new Dictionary<string, string>()))
+            .Select(dto => new CacheL1(dto!.Root, CacheItems.ToDictionary(dto.Items ?? [])))
             .ToList();
 
         // The workflow and each of its steps, each id once. Processors are absent on purpose: every

@@ -54,7 +54,7 @@ public sealed class L2AlignmentLiveTests
             ownKeys.Add(L2ProjectionKeys.StepEntity(b));
             c = await CreateAsync(http, "steps", Step($"l2align-c-{run}", processorId), ct);
             ownKeys.Add(L2ProjectionKeys.StepEntity(c));
-            cache = await CreateAsync(http, "caches", Cache(root, """{"x":"1","y":"2"}""", run), ct);
+            cache = await CreateAsync(http, "caches", Cache(root, run, ("x", "1"), ("y", "2")), ct);
             workflow = await CreateAsync(http, "workflows", Workflow(run, [a, b, c], [cache]), ct);
             ownKeys.Add(L2ProjectionKeys.Workflow(workflow));
             ownKeys.Add(L2ProjectionKeys.Cache(workflow, root));
@@ -86,7 +86,7 @@ public sealed class L2AlignmentLiveTests
             var bKey = L2ProjectionKeys.StepEntity(b);
             await DeleteAsync(http, "steps", b, ct);
             b = Guid.Empty;
-            await UpdateAsync(http, "caches", cache, Cache(root, """{"x":"1-new"}""", run), ct);
+            await UpdateAsync(http, "caches", cache, Cache(root, run, ("x", "1-new")), ct);
 
             Assert.True(await db.KeyExistsAsync(L2ProjectionKeys.CacheEntry(workflow, root, "y")),
                 "a database edit reached L2 without a start");
@@ -163,9 +163,10 @@ public sealed class L2AlignmentLiveTests
         nextStepIds = Array.Empty<Guid>(), entryCondition = 4,
     };
 
-    private static object Cache(string root, string items, string run) => new
+    private static object Cache(string root, string run, params (string Key, string Value)[] items) => new
     {
-        name = $"l2align-cache-{run}", version = "1.0.0", description = (string?)null, root, items,
+        name = $"l2align-cache-{run}", version = "1.0.0", description = (string?)null, root,
+        items = items.Select(i => new { key = i.Key, value = i.Value }).ToArray(),
     };
 
     // No cron: a started workflow activates but never dispatches.

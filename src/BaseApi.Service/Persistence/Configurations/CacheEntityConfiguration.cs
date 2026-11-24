@@ -5,8 +5,8 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 namespace BaseApi.Service.Persistence.Configurations;
 
 /// <summary>
-/// Configuration for <see cref="CacheEntity"/>: the items column is stored as Postgres <c>jsonb</c>,
-/// and the root carries a named unique index.
+/// Configuration for <see cref="CacheEntity"/>: its items (rows of <c>cache_items</c>, see
+/// <c>CacheItemConfiguration</c>) always load with it, and the root carries a named unique index.
 /// <para>
 /// <b>The index name is <c>uq_cache_root</c>, not <c>uq_cache_entity_root</c>.</b> The exception
 /// mapper resolves the offending column by stripping a <c>{kind}_{owner}_</c> prefix, where the
@@ -19,9 +19,10 @@ internal sealed class CacheEntityConfiguration : IEntityTypeConfiguration<CacheE
 {
     public void Configure(EntityTypeBuilder<CacheEntity> entity)
     {
-        entity.Property(e => e.Items)
-            .IsRequired()
-            .HasColumnType("jsonb");
+        // Every reader (the generic repository, the graph loader, the refresh handler, the design save)
+        // queries the cache without naming its items; auto-include keeps each of them from seeing an
+        // empty dictionary.
+        entity.Navigation(e => e.Items).AutoInclude();
 
         // A generous upper bound for a key prefix, and documentation that this is not an unbounded
         // text column.

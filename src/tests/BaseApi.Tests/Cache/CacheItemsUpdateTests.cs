@@ -11,8 +11,8 @@ using Xunit;
 namespace BaseApi.Tests.Cache;
 
 /// <summary>
-/// <c>PUT /caches/{id}/items</c>: the items replaced in the row, every other field kept, and the refresh
-/// sent only once the row is saved.
+/// <c>PUT /caches/{id}/items</c>: the item rows replaced, every other field kept, and the refresh sent
+/// only once the rows are saved.
 /// </summary>
 public sealed class CacheItemsUpdateTests : IAsyncLifetime
 {
@@ -34,6 +34,8 @@ public sealed class CacheItemsUpdateTests : IAsyncLifetime
         }
     }
 
+    private static CacheItemDto I(string key, string value) => new(key, value);
+
     public async ValueTask InitializeAsync()
     {
         _db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
@@ -43,7 +45,7 @@ public sealed class CacheItemsUpdateTests : IAsyncLifetime
         _db.Set<CacheEntity>().Add(new CacheEntity
         {
             Id = _cache, Name = "artists", Version = "1.0.0", Description = "the whitelist", Root = "artists",
-            Items = """{"acme":"Acme"}""",
+            Items = [new CacheItem { Key = "acme", Value = "Acme" }],
         });
         await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
         _db.ChangeTracker.Clear();
@@ -55,7 +57,7 @@ public sealed class CacheItemsUpdateTests : IAsyncLifetime
         new CacheCreateDtoValidator(), new CacheUpdateDtoValidator(), new CacheItemsUpdateDtoValidator(),
         new CacheEntityMapper(), new Repository<CacheEntity>(_db), _db, _sender);
 
-    private Task<CacheReadDto> UpdateAsync(Guid id, Dictionary<string, string> items) =>
+    private Task<CacheReadDto> UpdateAsync(Guid id, List<CacheItemDto> items) =>
         Service().UpdateItemsAsync(id, new CacheItemsUpdateDto(items), TestContext.Current.CancellationToken);
 
     private async Task<CacheEntity> RowAsync()
@@ -64,35 +66,53 @@ public sealed class CacheItemsUpdateTests : IAsyncLifetime
         return await _db.Set<CacheEntity>().SingleAsync(c => c.Id == _cache, TestContext.Current.CancellationToken);
     }
 
-    [Fact]
-    public async Task TheItemsAreReplacedInTheRow()
+    /// <summary>The stored item rows of the cache, read from their own table, ordered by key.</summary>
+    private async Task<List<(string Key, string Value)>> StoredAsync()
     {
-        await UpdateAsync(_cache, new() { ["beta"] = "Beta" });
+        _db.ChangeTracker.Clear();
+        return (await _db.Set<CacheItem>().Where(i => i.CacheId == _cache).ToListAsync(TestContext.Current.CancellationToken))
+            .OrderBy(i => i.Key, StringComparer.Ordinal).Select(i => (i.Key, i.Value)).ToList();
+    }
 
-        Assert.Equal("""{"beta":"Beta"}""", (await RowAsync()).Items);
+    [Fact]
+    public async Task TheItemsAreReplacedInTheRows()
+    {
+        await UpdateAsync(_cache, [I("beta", "Beta")]);
+
+        Assert.Equal([("beta", "Beta")], await StoredAsync());
+    }
+
+    [Fact]
+    public async Task AKeptKeyTakesItsNewValueBesideAnAddedKey()
+    {
+        // The same key in the old and the new set is the case a naive remove-then-add trips on: two
+        // tracked rows with one primary key.
+        await UpdateAsync(_cache, [I("acme", "Acme (Approved)"), I("beta", "Beta")]);
+
+        Assert.Equal([("acme", "Acme (Approved)"), ("beta", "Beta")], await StoredAsync());
     }
 
     [Fact]
     public async Task EveryOtherFieldIsKept()
     {
-        await UpdateAsync(_cache, new() { ["beta"] = "Beta" });
+        await UpdateAsync(_cache, [I("beta", "Beta")]);
 
         var row = await RowAsync();
         Assert.Equal(("artists", "1.0.0", "the whitelist", "artists"), (row.Name, row.Version, row.Description, row.Root));
     }
 
     [Fact]
-    public async Task TheReadDtoCarriesTheNewItems()
+    public async Task TheReadDtoCarriesTheNewItemsOrderedByKey()
     {
-        var read = await UpdateAsync(_cache, new() { ["beta"] = "Beta" });
+        var read = await UpdateAsync(_cache, [I("gamma", "G"), I("beta", "Beta")]);
 
-        Assert.Equal("""{"beta":"Beta"}""", read.Items);
+        Assert.Equal([I("beta", "Beta"), I("gamma", "G")], read.Items);
     }
 
     [Fact]
     public async Task OneRefreshIsSentOnTheControlQueue()
     {
-        await UpdateAsync(_cache, new() { ["beta"] = "Beta" });
+        await UpdateAsync(_cache, [I("beta", "Beta")]);
 
         var sent = Assert.Single(_sender.Sent);
         Assert.Equal(OrchestratorQueues.Control, sent.Queue);
@@ -101,18 +121,18 @@ public sealed class CacheItemsUpdateTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task EmptyItemsAreAllowed()
+    public async Task EmptyItemsAreAllowedAndLeaveNoRows()
     {
         // "Allow nothing" is a whitelist too.
-        await UpdateAsync(_cache, new());
+        await UpdateAsync(_cache, []);
 
-        Assert.Equal("{}", (await RowAsync()).Items);
+        Assert.Empty(await StoredAsync());
     }
 
     [Fact]
     public async Task AnUnknownCacheIsNotFoundAndSendsNothing()
     {
-        await Assert.ThrowsAsync<NotFoundException>(() => UpdateAsync(Guid.NewGuid(), new() { ["beta"] = "Beta" }));
+        await Assert.ThrowsAsync<NotFoundException>(() => UpdateAsync(Guid.NewGuid(), [I("beta", "Beta")]));
 
         Assert.Empty(_sender.Sent);
     }
@@ -120,9 +140,18 @@ public sealed class CacheItemsUpdateTests : IAsyncLifetime
     [Fact]
     public async Task AKeyWithAColonIsRefusedAndSendsNothing()
     {
-        await Assert.ThrowsAsync<ValidationException>(() => UpdateAsync(_cache, new() { ["a:b"] = "x" }));
+        await Assert.ThrowsAsync<ValidationException>(() => UpdateAsync(_cache, [I("a:b", "x")]));
 
-        Assert.Equal("""{"acme":"Acme"}""", (await RowAsync()).Items);
+        Assert.Equal([("acme", "Acme")], await StoredAsync());
+        Assert.Empty(_sender.Sent);
+    }
+
+    [Fact]
+    public async Task AKeyTwiceIsRefusedAndSendsNothing()
+    {
+        await Assert.ThrowsAsync<ValidationException>(() => UpdateAsync(_cache, [I("beta", "1"), I("beta", "2")]));
+
+        Assert.Equal([("acme", "Acme")], await StoredAsync());
         Assert.Empty(_sender.Sent);
     }
 
@@ -136,13 +165,13 @@ public sealed class CacheItemsUpdateTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ASendFaultIsTaggedAfterTheRowIsSaved()
+    public async Task ASendFaultIsTaggedAfterTheRowsAreSaved()
     {
         _sender.Fault = new InvalidOperationException("broker down");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => UpdateAsync(_cache, new() { ["beta"] = "Beta" }));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => UpdateAsync(_cache, [I("beta", "Beta")]));
 
         Assert.Equal("SendRefreshCache", ex.Data["brokerOp"]);
-        Assert.Equal("""{"beta":"Beta"}""", (await RowAsync()).Items);
+        Assert.Equal([("beta", "Beta")], await StoredAsync());
     }
 }

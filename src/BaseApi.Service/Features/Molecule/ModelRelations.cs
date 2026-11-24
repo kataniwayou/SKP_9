@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using BaseApi.Core.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -11,7 +12,8 @@ namespace BaseApi.Service.Features.Molecule;
 /// Describes the schema's tables and foreign keys from the EF relational model, which is the database's own schema:
 /// BaseApi applies every migration at startup, so a running process never describes rules its database lacks.
 /// <para>
-/// Nothing here names a table, a column or a rule. A table is a <c>link</c> when its primary key is exactly its foreign
+/// Nothing here names a table, a column or a rule. A table that is neither a link nor a <c>BaseEntity</c>'s holds an entity's
+/// parts and is left out (see <see cref="Build"/>). A table is a <c>link</c> when its primary key is exactly its foreign
 /// keys; a key's strength (<see cref="ModelRelationDto.Bond"/>) follows from that, its nullability and its delete action.
 /// A migration that adds a table, adds a key or changes a rule changes the description with no edit here.
 /// </para>
@@ -40,6 +42,10 @@ internal static class ModelRelations
         {
             var link = IsLink(table);
             var entityType = table.EntityTypeMappings.Single().TypeBase.ClrType;
+
+            // A table that is neither a link nor an entity's own holds an entity's parts (a cache's items,
+            // 2026-11-24): it is described as that entity's list field, never as a table of its own.
+            if (!link && !typeof(BaseEntity).IsAssignableFrom(entityType)) continue;
             var label = link ? null : table.FindColumn("name");
             tableDtos.Add(new ModelTableDto(table.Name, link ? "link" : "entity", label?.Name));
 

@@ -102,7 +102,7 @@ public sealed class WorkflowDesignLiveTests : IAsyncLifetime
 
     private async Task<Guid> CacheAsync()
     {
-        var id = await PostAsync("caches", new { name = Tag(), version = "1.0.0", root = Tag(), items = "{}" });
+        var id = await PostAsync("caches", new { name = Tag(), version = "1.0.0", root = Tag(), items = Array.Empty<object>() });
         _caches.Add(id);
         return id;
     }
@@ -252,7 +252,7 @@ public sealed class WorkflowDesignLiveTests : IAsyncLifetime
         Guid n = Guid.NewGuid(), taken = Guid.NewGuid();
         _caches.Add(n);
         _caches.Add(taken);
-        object Cache(Guid id, string r) => new { id, copyOf = c, fields = new { name = Tag(), version = "1.0.0", description = (string?)null, root = r, items = "{}" } };
+        object Cache(Guid id, string r) => new { id, copyOf = c, fields = new { name = Tag(), version = "1.0.0", description = (string?)null, root = r, items = Array.Empty<object>() } };
 
         var (applied, errors) = await PutDesignAsync(wf, new
         {

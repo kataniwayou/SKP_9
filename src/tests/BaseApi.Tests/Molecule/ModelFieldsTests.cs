@@ -118,10 +118,14 @@ public sealed class ModelFieldsTests
     [Fact]
     public void JsonFieldsSayTheirJsonTypeAndLinkListsHaveNoColumn()
     {
-        // json keeps a definition's and a payload's property order (the user, 2026-11-15); the items stay jsonb
+        // json keeps a definition's and a payload's property order (the user, 2026-11-15)
         Assert.Equal("json", Field("schemas", "definition").StoreType);
         Assert.Equal("json", Field("assignments", "payload").StoreType);
-        Assert.Equal("jsonb", Field("caches", "items").StoreType);
+
+        // a cache's items are rows of cache_items (2026-11-24): a list field with no column of its own
+        var items = Field("caches", "items");
+        Assert.Equal(((string?)null, (string?)null), (items.Column, items.StoreType));
+        Assert.EndsWith("[]", items.Type);
 
         var next = Field("steps", "nextStepIds");
         Assert.Equal(("guid[]", (string?)null, (string?)null), (next.Type, next.Column, next.StoreType));

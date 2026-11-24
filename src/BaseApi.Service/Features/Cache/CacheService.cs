@@ -11,8 +11,9 @@ using Microsoft.EntityFrameworkCore;
 namespace BaseApi.Service.Features.Cache;
 
 /// <summary>
-/// The cache's service. The five CRUD verbs are the base class's, unchanged: there are no junctions to
-/// synchronize from this side and no collection to enrich on read. It adds one verb of its own,
+/// The cache's service. The five CRUD verbs are the base class's; the one collection it syncs is the
+/// cache's own item rows, which an update diffs in <see cref="SyncJunctionsAsync"/> (a create already
+/// carries them from the mapper, and a read has them auto-included). It adds one verb of its own,
 /// <see cref="UpdateItemsAsync"/>.
 /// </summary>
 public sealed class CacheService :
@@ -33,6 +34,21 @@ public sealed class CacheService :
     {
         _itemsValidator = itemsValidator ?? throw new ArgumentNullException(nameof(itemsValidator));
         _sender         = sender ?? throw new ArgumentNullException(nameof(sender));
+    }
+
+    /// <summary>
+    /// On update, makes the stored item rows the DTO's: a diff, so a kept key is one row changed in place,
+    /// and the cache is stamped when only its items changed. A create's rows came with the mapped entity.
+    /// </summary>
+    protected override Task SyncJunctionsAsync(
+        CacheEntity entity, CacheCreateDto? createDto, CacheUpdateDto? updateDto, CancellationToken ct)
+    {
+        if (updateDto is not null)
+        {
+            CacheItems.Apply(DbContext, entity, updateDto.Items);
+        }
+
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -58,7 +74,7 @@ public sealed class CacheService :
 
         // Through the ordinary update, so the row is held to exactly the rules a full PUT applies.
         var updated = await UpdateAsync(id, new CacheUpdateDto(
-            current.Name, current.Version, current.Description, current.Root, CacheRules.Serialize(dto.Items)), ct);
+            current.Name, current.Version, current.Description, current.Root, dto.Items), ct);
 
         try
         {

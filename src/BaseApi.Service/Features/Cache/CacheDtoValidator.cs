@@ -1,11 +1,10 @@
-using System.Text.Json;
 using BaseApi.Core.Validation;
 using FluentValidation;
 
 namespace BaseApi.Service.Features.Cache;
 
 /// <summary>
-/// The shape rules both cache validators apply.
+/// The shape rules every cache validator applies.
 /// <para>
 /// They are shared rather than duplicated — which is the local convention — because they are long
 /// enough that a copy would drift, and create and update disagreeing about what a valid dictionary
@@ -14,15 +13,16 @@ namespace BaseApi.Service.Features.Cache;
 /// </summary>
 internal static class CacheRules
 {
-    // FluentValidation's MaximumLength counts characters, not bytes -- the name says what this
-    // actually measures. The limit itself is unchanged: roughly 1 MB of characters, matching
-    // AssignmentEntity.Payload.
-    public const int MaxItemsChars = 1_048_576;
+    /// <summary>A key's bound: it is the <c>cache_items</c> key column's length and part of an L2 address.</summary>
+    public const int MaxKeyLength = 256;
+
+    /// <summary>
+    /// A value's bound, in characters. Since items became rows (2026-11-24) there is no bound on the
+    /// dictionary as a whole; this is the 1 MB the whole document used to be allowed, now per value.
+    /// </summary>
+    public const int MaxValueChars = 1_048_576;
 
     public const int MaxRootLength = 200;
-
-    /// <summary>The stored form of an items dictionary, as <c>PUT /caches/{id}/items</c> writes it.</summary>
-    public static string Serialize(Dictionary<string, string> items) => JsonSerializer.Serialize(items);
 
     /// <summary>
     /// Refuses a blank root, and one carrying a colon. See <c>CacheEntity</c> for why the colon
@@ -44,56 +44,64 @@ internal static class CacheRules
     }
 
     /// <summary>
-    /// Confirms the document parses, is an object, and holds only non-empty colon-free keys mapping
-    /// to string values. It reports the first offending pair rather than all of them: the author is
-    /// fixing a document by hand, and one precise name is more use than a list.
+    /// Confirms the items are a list of pairs with non-empty, colon-free, bounded keys, each once, and
+    /// bounded string values. It reports the first offending pair rather than all of them: the author is
+    /// fixing a dictionary by hand, and one precise name is more use than a list.
     /// </summary>
-    public static void CheckItems<T>(string items, ValidationContext<T> ctx, string property)
+    public static void CheckItems<T>(IReadOnlyList<CacheItemDto>? items, ValidationContext<T> ctx, string property)
     {
-        if (string.IsNullOrEmpty(items))
+        if (items is null)
         {
-            return; // NotEmpty has already reported this; a second failure would just be noise.
-        }
-
-        JsonDocument document;
-
-        try
-        {
-            document = JsonDocument.Parse(items);
-        }
-        catch (JsonException ex)
-        {
-            ctx.AddFailure(property, $"Items is not valid JSON: {ex.Message}");
+            ctx.AddFailure(property, "Items must be a list.");
             return;
         }
 
-        using (document)
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var item in items)
         {
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            if (item is null)
             {
-                ctx.AddFailure(property, "Items must be a JSON object.");
+                ctx.AddFailure(property, "Items must not contain a null item.");
                 return;
             }
 
-            foreach (var pair in document.RootElement.EnumerateObject())
+            var key = item.Key;
+
+            if (string.IsNullOrEmpty(key))
             {
-                if (pair.Name.Length == 0)
-                {
-                    ctx.AddFailure(property, "Items must not contain an empty key.");
-                    return;
-                }
+                ctx.AddFailure(property, "Items must not contain an empty key.");
+                return;
+            }
 
-                if (pair.Name.Contains(':'))
-                {
-                    ctx.AddFailure(property, $"Items key '{pair.Name}' must not contain ':'.");
-                    return;
-                }
+            if (key.Contains(':'))
+            {
+                ctx.AddFailure(property, $"Items key '{key}' must not contain ':'.");
+                return;
+            }
 
-                if (pair.Value.ValueKind != JsonValueKind.String)
-                {
-                    ctx.AddFailure(property, $"Items value for key '{pair.Name}' must be a string.");
-                    return;
-                }
+            if (key.Length > MaxKeyLength)
+            {
+                ctx.AddFailure(property, $"Items key '{key}' must be at most {MaxKeyLength} characters.");
+                return;
+            }
+
+            if (item.Value is null)
+            {
+                ctx.AddFailure(property, $"Items value for key '{key}' must be a string.");
+                return;
+            }
+
+            if (item.Value.Length > MaxValueChars)
+            {
+                ctx.AddFailure(property, $"Items value for key '{key}' must be at most {MaxValueChars} characters.");
+                return;
+            }
+
+            if (!seen.Add(key))
+            {
+                ctx.AddFailure(property, $"Items key '{key}' appears more than once.");
+                return;
             }
         }
     }
@@ -113,46 +121,12 @@ public sealed class CacheCreateDtoValidator : AbstractValidator<CacheCreateDto>
             .WithMessage($"Root must be at most {CacheRules.MaxRootLength} characters.")
             .Custom((root, ctx) => CacheRules.CheckRoot(root, ctx, nameof(CacheCreateDto.Root)));
 
-        // The cascade stop is load-bearing, not cosmetic: FluentValidation continues through a rule
-        // chain by default, so without it the parse below would still run on an oversized document —
-        // which is exactly the case the length cap exists to refuse.
         RuleFor(x => x.Items)
-            .Cascade(CascadeMode.Stop)
-            .NotEmpty()
-            .MaximumLength(CacheRules.MaxItemsChars)
-            .WithMessage($"Items must be at most {CacheRules.MaxItemsChars} characters.")
             .Custom((items, ctx) => CacheRules.CheckItems(items, ctx, nameof(CacheCreateDto.Items)));
     }
 }
 
 /// <summary>Update-side rules — identical, and sharing <see cref="CacheRules"/> so they stay so.</summary>
-/// <summary>
-/// The items edit's own rules: the same as a stored row's items, checked on the serialized form so the
-/// two can never disagree.
-/// </summary>
-public sealed class CacheItemsUpdateDtoValidator : AbstractValidator<CacheItemsUpdateDto>
-{
-    public CacheItemsUpdateDtoValidator()
-    {
-        RuleFor(x => x.Items)
-            .Cascade(CascadeMode.Stop)
-            .NotNull()
-            .WithMessage("Items must be a JSON object.")
-            .Custom((items, ctx) =>
-            {
-                var serialized = CacheRules.Serialize(items);
-                if (serialized.Length > CacheRules.MaxItemsChars)
-                {
-                    ctx.AddFailure(nameof(CacheItemsUpdateDto.Items),
-                        $"Items must be at most {CacheRules.MaxItemsChars} characters.");
-                    return;
-                }
-
-                CacheRules.CheckItems(serialized, ctx, nameof(CacheItemsUpdateDto.Items));
-            });
-    }
-}
-
 public sealed class CacheUpdateDtoValidator : AbstractValidator<CacheUpdateDto>
 {
     public CacheUpdateDtoValidator()
@@ -167,10 +141,16 @@ public sealed class CacheUpdateDtoValidator : AbstractValidator<CacheUpdateDto>
             .Custom((root, ctx) => CacheRules.CheckRoot(root, ctx, nameof(CacheUpdateDto.Root)));
 
         RuleFor(x => x.Items)
-            .Cascade(CascadeMode.Stop)
-            .NotEmpty()
-            .MaximumLength(CacheRules.MaxItemsChars)
-            .WithMessage($"Items must be at most {CacheRules.MaxItemsChars} characters.")
             .Custom((items, ctx) => CacheRules.CheckItems(items, ctx, nameof(CacheUpdateDto.Items)));
+    }
+}
+
+/// <summary>The items edit's own rules: exactly a stored row's items rules.</summary>
+public sealed class CacheItemsUpdateDtoValidator : AbstractValidator<CacheItemsUpdateDto>
+{
+    public CacheItemsUpdateDtoValidator()
+    {
+        RuleFor(x => x.Items)
+            .Custom((items, ctx) => CacheRules.CheckItems(items, ctx, nameof(CacheItemsUpdateDto.Items)));
     }
 }

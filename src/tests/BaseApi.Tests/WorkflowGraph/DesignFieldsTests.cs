@@ -76,9 +76,48 @@ public sealed class DesignFieldsTests
     public void AnUnknownFieldAndAValueOfTheWrongTypeAreErrorsOnThoseFields()
     {
         var errors = new List<FieldError>();
-        DesignFields.Apply(new CacheUpdateDto("c", "1.0.0", null, "root", "{}"), F("""{"colour":"red","root":7}"""), errors);
+        DesignFields.Apply(new CacheUpdateDto("c", "1.0.0", null, "root", []), F("""{"colour":"red","root":7}"""), errors);
 
         Assert.Equal(["colour", "root"], errors.Select(e => e.Field!).OrderBy(f => f, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void ACachesItemsFieldIsAListOfKeyValuePairs()
+    {
+        var errors = new List<FieldError>();
+        var dto = DesignFields.Apply(new CacheUpdateDto("c", "1.0.0", null, "root", [new CacheItemDto("old", "1")]),
+            F("""{"items":[{"key":"acme","value":"Acme"},{"key":"beta","value":""}]}"""), errors);
+
+        Assert.Empty(errors);
+        Assert.Equal([new CacheItemDto("acme", "Acme"), new CacheItemDto("beta", "")], dto.Items);
+    }
+
+    [Fact]
+    public void AnEmptyItemsListClearsTheDictionary()
+    {
+        var errors = new List<FieldError>();
+        var dto = DesignFields.Apply(new CacheUpdateDto("c", "1.0.0", null, "root", [new CacheItemDto("old", "1")]),
+            F("""{"items":[]}"""), errors);
+
+        Assert.Empty(errors);
+        Assert.Empty(dto.Items);
+    }
+
+    [Theory]
+    [InlineData("""{"items":"{\"acme\":\"Acme\"}"}""")]          // the old document-in-a-string form
+    [InlineData("""{"items":{"acme":"Acme"}}""")]                // an object, not a list
+    [InlineData("""{"items":null}""")]
+    [InlineData("""{"items":[{"key":"acme","value":1}]}""")]     // a value that is not a string
+    [InlineData("""{"items":[{"key":"acme"}]}""")]               // a pair without its value
+    [InlineData("""{"items":["acme"]}""")]                       // an element that is not a pair
+    public void ItemsOfAnyOtherShapeAreOneErrorOnTheItemsField(string fields)
+    {
+        var errors = new List<FieldError>();
+        var dto = DesignFields.Apply(new CacheUpdateDto("c", "1.0.0", null, "root", [new CacheItemDto("old", "1")]), F(fields), errors);
+
+        var error = Assert.Single(errors);
+        Assert.Equal("items", error.Field);
+        Assert.Equal([new CacheItemDto("old", "1")], dto.Items);
     }
 
     [Fact]

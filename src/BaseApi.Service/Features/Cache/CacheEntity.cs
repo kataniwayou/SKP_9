@@ -9,9 +9,10 @@ namespace BaseApi.Service.Features.Cache;
 /// nothing, and is referenced only through the <c>WorkflowCaches</c> junction.
 /// </para>
 /// <para>
-/// <c>Items</c> stores a flat JSON object of string to string as a Postgres <c>jsonb</c> column,
-/// wired by <c>CacheEntityConfiguration</c>. The validator enforces the shape — an object, string
-/// values, no empty or colon-bearing keys — before it is persisted.
+/// <c>Items</c> are rows of their own in <c>cache_items</c> (2026-11-24; one <c>jsonb</c> document
+/// before), one per key, so the dictionary has no cap as a whole: each key and value is bounded
+/// instead (<c>CacheRules</c>). The collection is auto-included, so every query of the cache sees
+/// them, and a write changes them through <c>CacheItems.Apply</c>, never by replacing the list.
 /// </para>
 /// <para>
 /// <b>Neither <c>Root</c> nor any key may contain a colon, and that is load-bearing.</b> The L2
@@ -41,7 +42,8 @@ public sealed class CacheEntity : BaseEntity
         set => _root = value?.Trim() ?? string.Empty;
     }
 
-    public string Items { get; set; } = string.Empty;
+    /// <summary>The dictionary's entries, one row per key. See the class remarks.</summary>
+    public List<CacheItem> Items { get; set; } = [];
 
     /// <summary>Where the Acto board draws this row, or null when it has never been placed. An update that carries no location leaves the stored one.</summary>
     public double? BoardX { get; set; }

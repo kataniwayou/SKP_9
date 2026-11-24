@@ -128,7 +128,7 @@ public sealed class DesignCreateDeleteTests
 
         var outcome = await h.Syncer().SaveAsync(wf, Of(
             workflow: new DesignWorkflowDto(loaded.Workflow.UpdatedAt, null, null, [cache, copy]),
-            newCaches: [new DesignNewCacheDto(copy, cache, F("""{"name":"cache","version":"1.0.0","description":null,"root":"root-a-copy","items":"{}"}"""))]), h.Ct);
+            newCaches: [new DesignNewCacheDto(copy, cache, F("""{"name":"cache","version":"1.0.0","description":null,"root":"root-a-copy","items":[]}"""))]), h.Ct);
 
         Assert.True(outcome.Applied, Describe(outcome));
         h.Forget();
@@ -320,7 +320,7 @@ public sealed class DesignCreateDeleteTests
             workflow: new DesignWorkflowDto(loaded.Workflow.UpdatedAt, null, null, [nc]),
             steps: [new DesignStepDto(a, stamp(a), null, [n])],
             newSteps: [new DesignNewStepDto(n, b, proc, StepFields("b"), null)],
-            newCaches: [new DesignNewCacheDto(nc, cache, F("""{"name":"cache","version":"1.0.0","root":"root-copy","items":"{}"}"""))],
+            newCaches: [new DesignNewCacheDto(nc, cache, F("""{"name":"cache","version":"1.0.0","root":"root-copy","items":[]}"""))],
             deletedSteps: [new DesignDeleteDto(b, stamp(b))],
             deletedCaches: [new DesignDeleteDto(cache, null)]), h.Ct);
 
@@ -359,7 +359,7 @@ public sealed class DesignCreateDeleteTests
 
         var outcome = await h.Syncer().SaveAsync(wf, Of(
             caches: [new DesignCacheDto(other, F("""{"root":"root-a"}"""))],
-            newCaches: [new DesignNewCacheDto(copy, cache, F("""{"name":"cache","version":"1.0.0","root":"root-a","items":"{}"}"""))]), h.Ct);
+            newCaches: [new DesignNewCacheDto(copy, cache, F("""{"name":"cache","version":"1.0.0","root":"root-a","items":[]}"""))]), h.Ct);
 
         Assert.False(outcome.Applied);
         Assert.Contains(outcome.Errors, e => (e.Id, e.Stage, e.Field, e.Message) == (copy, "caches", "root", "Root 'root-a' is already used by cache 'cache'."));
@@ -379,7 +379,7 @@ public sealed class DesignCreateDeleteTests
         DesignSaveRequest Body(DateTime stamp) => Of(
             workflow: new DesignWorkflowDto(stamp, null, null, [nc]),
             newSteps: [new DesignNewStepDto(n, a, proc, StepFields("a"), null)],
-            newCaches: [new DesignNewCacheDto(nc, null, F("""{"name":"c","version":"1.0.0","root":"r-copy","items":"{}"}"""))],
+            newCaches: [new DesignNewCacheDto(nc, null, F("""{"name":"c","version":"1.0.0","root":"r-copy","items":[]}"""))],
             assignments: [new DesignAssignmentDto("create", na, n, null, F("""{"name":"x","version":"1.0.0","payload":"{}"}"""))]);
 
         Assert.True((await h.Syncer().SaveAsync(wf, Body(loaded.Workflow.UpdatedAt), h.Ct)).Applied);
