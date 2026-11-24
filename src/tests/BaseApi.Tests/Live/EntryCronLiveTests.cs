@@ -52,6 +52,7 @@ public sealed class EntryCronLiveTests
         var run = Guid.NewGuid().ToString("N")[..12];
 
         Guid a = Guid.Empty, b = Guid.Empty, workflow = Guid.Empty;
+        var bodyCompleted = false;
         try
         {
             a = await CreateAsync(http, "steps", Step($"entrycron-a-{run}", processorId), ct);
@@ -102,23 +103,116 @@ public sealed class EntryCronLiveTests
 
             Assert.True(after.Count == 0,
                 $"{after.Count} dispatch(es) after the stop at {stopRequested:HH:mm:ss.fff} (+{StopSlack.TotalSeconds}s slack): {summary}");
+            bodyCompleted = true;
         }
         finally
         {
-            // Best effort, workflow first: the steps are referenced by it.
-            if (workflow != Guid.Empty)
+            // Never throws: a cleanup fault must not replace the test's own failure, nor skip a later delete.
+            var problems = await CleanupAsync(workflow, [a, b]);
+            foreach (var problem in problems)
             {
-                await TryAsync(() => http.PostAsJsonAsync("/api/v1/orchestration/stop", workflow));
-                await TryAsync(() => http.DeleteAsync($"/api/v1/workflows/{workflow}"));
+                TestContext.Current.TestOutputHelper?.WriteLine($"cleanup: {problem}");
             }
 
-            foreach (var id in new[] { a, b })
+            // Only a run that otherwise passed fails on its leftovers; a failed run already reports its own cause.
+            if (bodyCompleted && problems.Count > 0)
             {
-                if (id != Guid.Empty)
+                Assert.Fail($"the run passed but left rows behind: {string.Join("; ", problems)}");
+            }
+        }
+    }
+
+    private static readonly TimeSpan CleanupBudget = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan CleanupRetry = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Stop, then delete the workflow, then its steps, each delete retried until it succeeds (or the row is
+    /// already gone) within one bounded budget of its own — not the test's token, which may be what failed.
+    /// <para>
+    /// <b>The retry is for the stop.</b> It answers 202 and is applied asynchronously, so a delete sent straight
+    /// after can be refused while the workflow still reads running, and the step deletes are then refused because
+    /// the workflow still references them. Returns every non-success instead of discarding it.
+    /// </para>
+    /// </summary>
+    private static async Task<List<string>> CleanupAsync(Guid workflow, Guid[] steps)
+    {
+        var problems = new List<string>();
+        using var budget = new CancellationTokenSource(CleanupBudget);
+        using var http = new HttpClient { BaseAddress = new Uri(RealStack.BaseApiUrl), Timeout = TimeSpan.FromSeconds(10) };
+
+        if (workflow != Guid.Empty)
+        {
+            try
+            {
+                using var stop = await http.PostAsJsonAsync("/api/v1/orchestration/stop", workflow, budget.Token);
+                if (!stop.IsSuccessStatusCode)
                 {
-                    await TryAsync(() => http.DeleteAsync($"/api/v1/steps/{id}"));
+                    problems.Add($"stop {workflow:D} -> {(int)stop.StatusCode}: {await ReadSafeAsync(stop)}");
                 }
             }
+            catch (Exception ex)
+            {
+                problems.Add($"stop {workflow:D} threw {ex.GetType().Name}: {ex.Message}");
+            }
+
+            await DeleteUntilGoneAsync(http, $"/api/v1/workflows/{workflow:D}", problems, budget.Token);
+        }
+
+        foreach (var id in steps.Where(id => id != Guid.Empty))
+        {
+            await DeleteUntilGoneAsync(http, $"/api/v1/steps/{id:D}", problems, budget.Token);
+        }
+
+        return problems;
+    }
+
+    /// <summary>Retries a delete until 2xx or 404; records only the last refusal if the budget runs out.</summary>
+    private static async Task DeleteUntilGoneAsync(HttpClient http, string path, List<string> problems, CancellationToken budget)
+    {
+        string? last = null;
+        while (true)
+        {
+            try
+            {
+                using var response = await http.DeleteAsync(path, budget);
+                if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    return;
+                }
+
+                last = $"DELETE {path} -> {(int)response.StatusCode}: {await ReadSafeAsync(response)}";
+            }
+            catch (Exception ex) when (!budget.IsCancellationRequested)
+            {
+                last = $"DELETE {path} threw {ex.GetType().Name}: {ex.Message}";
+            }
+            catch (Exception)
+            {
+                break;
+            }
+
+            try
+            {
+                await Task.Delay(CleanupRetry, budget);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+
+        problems.Add(last ?? $"DELETE {path} did not complete within {CleanupBudget.TotalSeconds}s");
+    }
+
+    private static async Task<string> ReadSafeAsync(HttpResponseMessage response)
+    {
+        try
+        {
+            return await response.Content.ReadAsStringAsync();
+        }
+        catch (Exception ex)
+        {
+            return $"(body unreadable: {ex.GetType().Name})";
         }
     }
 
@@ -238,16 +332,5 @@ public sealed class EntryCronLiveTests
         using var response = await http.PostAsJsonAsync($"/api/v1/orchestration/{verb}", workflow, ct);
         Assert.True(response.StatusCode == HttpStatusCode.Accepted || response.IsSuccessStatusCode,
             $"{verb} returned {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync(ct)}");
-    }
-
-    private static async Task TryAsync(Func<Task<HttpResponseMessage>> call)
-    {
-        try
-        {
-            (await call()).Dispose();
-        }
-        catch (HttpRequestException)
-        {
-        }
     }
 }
