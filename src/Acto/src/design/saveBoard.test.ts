@@ -5,7 +5,7 @@ import { board } from './boardFixtures';
 import { createBoardStore } from './boardStore';
 import { saveBoard, takeStored } from './saveBoard';
 import { createGhostStore } from './ghosts';
-import { addStep } from './edits';
+import { addEntry, addStep, setEntryCron } from './edits';
 import { memoryStorage } from '../test/memoryStorage';
 
 vi.mock('../board/loadBoard', () => ({ loadBoard: vi.fn() }));
@@ -138,6 +138,19 @@ describe('saveBoard', () => {
     expect(s.workflows.daily!.entryStepIds).toEqual(['fetch', 'g-1']);
     expect(texts(t.output).some((x) => x.includes('Reload'))).toBe(true);
     expect(t.api.publishDiagram).toHaveBeenCalledWith('daily', expect.stringContaining('<svg'));
+  });
+
+  it('saveRekeysEntryCronsToNewStepIds', async () => {
+    const t = setup();
+    t.store.edit((b) => addStep(b, b.processors.p1!, { x: 1, y: 1 }, 'tmp-1'));
+    t.store.edit((b) => (addEntry(b, 'daily', 'tmp-1') as { state: ReturnType<typeof board> }).state);
+    t.store.edit((b) => setEntryCron(b, 'daily', 'tmp-1', '*/10 * * * * *'));
+    t.api.applyModel.mockResolvedValue({ ok: true, value: { ok: true, applied: true, results: [], made: { 'tmp-1': 'real-1' } } });
+    vi.mocked(loadBoard).mockResolvedValue({ ok: false, error: { kind: 'network', message: 'down' } });
+    expect(await saveBoard(t.studio, t.store, t.output)).toBe('saved');
+    expect(t.store.state().workflows.daily!.entryCrons).toEqual({ 'real-1': '*/10 * * * * *' });
+    const sent = (t.api.applyModel.mock.calls as unknown as unknown[][])[0]![0] as { table: string; id: string; row: { entryCrons?: unknown } }[];
+    expect(sent.find((c) => c.table === 'workflows' && c.id === 'daily')!.row.entryCrons).toEqual({ 'tmp-1': '*/10 * * * * *' });
   });
 
   it('always clears saving, also when the request throws', async () => {

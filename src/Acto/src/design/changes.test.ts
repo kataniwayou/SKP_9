@@ -3,7 +3,7 @@ import type { BoardState } from './board';
 import { NO_AUDIT } from './board';
 import { board } from './boardFixtures';
 import { affectedWorkflows, boardChanges, changedKeys, unsavedMarks } from './changes';
-import { addCache, addStep, addWire, deleteCaches, deleteSteps, moveItems } from './edits';
+import { addCache, addStep, addWire, deleteCaches, deleteSteps, moveItems, setEntryCron } from './edits';
 
 const b = board();
 const proc = b.processors.p1;
@@ -12,6 +12,12 @@ const withStep = (s: BoardState, id: string) => addStep(s, proc, { x: 1, y: 2 },
 const wire = (s: BoardState, from: string, to: string) => (addWire(s, from, to) as { state: BoardState }).state;
 
 describe('boardChanges', () => {
+  it('changing only an entry cron updates the workflow, and its body carries entryCrons', () => {
+    const cur = setEntryCron(b, 'daily', 'fetch', '*/10 * * * * *');
+    const cs = boardChanges(b, cur);
+    expect(names(cs)).toEqual(['update workflows daily']);
+    expect((cs[0]!.row as Record<string, unknown>).entryCrons).toEqual({ fetch: '*/10 * * * * *' });
+  });
   it('nothing changed, nothing sent', () => expect(boardChanges(b, b)).toEqual([]));
 
   it('a deleted saved workflow is sent as delete workflows/<id> with its stamp, before its assignments [user, 2026-11-23]', () => {

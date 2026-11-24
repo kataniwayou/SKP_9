@@ -3255,6 +3255,9 @@ export interface components {
             version?: string | null;
             description?: string | null;
             entryStepIds?: string[] | null;
+            entryCrons?: {
+                [key: string]: string;
+            } | null;
             assignmentIds?: string[] | null;
             cacheIds?: string[] | null;
             cronExpression?: string | null;
@@ -3300,6 +3303,9 @@ export interface components {
             version?: string | null;
             description?: string | null;
             entryStepIds?: string[] | null;
+            entryCrons?: {
+                [key: string]: string;
+            } | null;
             assignmentIds?: string[] | null;
             cacheIds?: string[] | null;
             cronExpression?: string | null;
@@ -3319,6 +3325,9 @@ export interface components {
             version?: string | null;
             description?: string | null;
             entryStepIds?: string[] | null;
+            entryCrons?: {
+                [key: string]: string;
+            } | null;
             assignmentIds?: string[] | null;
             cacheIds?: string[] | null;
             cronExpression?: string | null;

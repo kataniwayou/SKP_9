@@ -73,7 +73,7 @@ export function remapIds(b: BoardState, made: Record<string, string>): BoardStat
   const rekey = <T extends { id: Id }>(rows: Record<Id, T>, f: (r: T) => T): Record<Id, T> =>
     Object.fromEntries(Object.values(rows).map((r) => { const n = f({ ...r, id: m(r.id) }); return [n.id, n]; }));
   return {
-    workflows: rekey(b.workflows, (w) => ({ ...w, entryStepIds: w.entryStepIds.map(m), assignmentIds: w.assignmentIds.map(m), cacheIds: w.cacheIds.map(m) })),
+    workflows: rekey(b.workflows, (w) => ({ ...w, entryStepIds: w.entryStepIds.map(m), entryCrons: Object.fromEntries(Object.entries(w.entryCrons).map(([k, v]) => [m(k), v])), assignmentIds: w.assignmentIds.map(m), cacheIds: w.cacheIds.map(m) })),
     steps: rekey(b.steps, (s) => ({ ...s, nextStepIds: s.nextStepIds.map(m), processorId: mo(s.processorId) })),
     caches: rekey(b.caches, (c) => c),
     assignments: rekey(b.assignments, (a) => ({ ...a, stepId: m(a.stepId) })),

@@ -5831,6 +5831,13 @@
             },
             "nullable": true
           },
+          "entryCrons": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "nullable": true
+          },
           "assignmentIds": {
             "type": "array",
             "items": {
@@ -6004,6 +6011,13 @@
             },
             "nullable": true
           },
+          "entryCrons": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "nullable": true
+          },
           "assignmentIds": {
             "type": "array",
             "items": {
@@ -6073,6 +6087,13 @@
             "items": {
               "type": "string",
               "format": "uuid"
+            },
+            "nullable": true
+          },
+          "entryCrons": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
             },
             "nullable": true
           },

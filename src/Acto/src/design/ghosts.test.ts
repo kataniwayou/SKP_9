@@ -4,7 +4,7 @@ import type { BoardState, Edit } from './board';
 import { board } from './boardFixtures';
 import { createBoardStore } from './boardStore';
 import { changedKeys } from './changes';
-import { addStep, deleteSteps, withoutWorkflow } from './edits';
+import { addStep, deleteSteps, removeEntries, setEntryCron, withoutWorkflow } from './edits';
 import { createGhostStore, keepGhosts, placeIn, restoreGhosts, withTheirWires, type GhostItem } from './ghosts';
 import { memoryStorage } from '../test/memoryStorage';
 
@@ -295,5 +295,27 @@ describe('restoreGhosts', () => {
     store.edit((b) => ({ ...b, workflows: { ...b.workflows, daily: { ...b.workflows.daily!, entryStepIds: [], cacheIds: [] } } }));
     const after = stateOf(restoreGhosts(store.state(), store.base(), [ghosts.get('entry:daily:fetch')!, ghosts.get('cacheLink:daily:c1')!]));
     expect(changedKeys(store.base(), after)).toEqual(new Set());
+  });
+
+  it('restoringAnEntryArrowBringsItsCronBack', () => {
+    const { store, ghosts } = make();
+    const cron = '*/10 * * * * *';
+    store.edit((b) => setEntryCron(b, 'daily', 'fetch', cron));
+    store.edit((b) => removeEntries(b, [['daily', 'fetch']]));
+    const g = ghosts.get('entry:daily:fetch')!;
+    expect(g).toMatchObject({ kind: 'entry', cron });
+    const after = stateOf(restoreGhosts(store.state(), store.base(), [g]));
+    expect(after.workflows.daily!.entryStepIds).toEqual(['fetch']);
+    expect(after.workflows.daily!.entryCrons).toEqual({ fetch: cron });
+  });
+  it('a restored workflow keeps the crons of the entries that come back, and no others', () => {
+    const { store, ghosts } = make();
+    store.edit((b) => setEntryCron(b, 'daily', 'fetch', '*/5 * * * * *'));
+    store.edit((b) => withoutWorkflow(b, 'daily'));
+    const g = ghosts.get('workflow:daily')!;
+    const after = stateOf(restoreGhosts(store.state(), store.base(), [g]));
+    expect(after.workflows.daily!.entryCrons).toEqual({ fetch: '*/5 * * * * *' });
+    const noStep = stateOf(restoreGhosts({ ...store.state(), steps: {} }, store.base(), [g]));
+    expect(noStep.workflows.daily!.entryCrons).toEqual({});
   });
 });

@@ -16,7 +16,7 @@ export type GhostItem = { key: string } & (
   | { kind: 'cache'; row: CacheRow }
   | { kind: 'workflow'; row: WorkflowRow; assignments: AssignmentRow[] }
   | { kind: 'wire'; from: Id; to: Id; condition: number }
-  | { kind: 'entry'; workflowId: Id; stepId: Id }
+  | { kind: 'entry'; workflowId: Id; stepId: Id; cron?: string }
   | { kind: 'cacheLink'; workflowId: Id; cacheId: Id }
 );
 
@@ -58,7 +58,7 @@ function itemsOf(b: BoardState): Map<string, GhostItem> {
     const assignments = w.assignmentIds.map((a) => b.assignments[a]).filter((a): a is AssignmentRow => !!a);
     out.set(`workflow:${w.id}`, { key: `workflow:${w.id}`, kind: 'workflow', row: w, assignments });
     for (const st of w.entryStepIds) {
-      if (b.steps[st]) out.set(`entry:${w.id}:${st}`, { key: `entry:${w.id}:${st}`, kind: 'entry', workflowId: w.id, stepId: st });
+      if (b.steps[st]) out.set(`entry:${w.id}:${st}`, { key: `entry:${w.id}:${st}`, kind: 'entry', workflowId: w.id, stepId: st, ...(w.entryCrons[st] ? { cron: w.entryCrons[st] } : {}) });
     }
     for (const c of w.cacheIds) {
       if (b.caches[c]) out.set(`cacheLink:${w.id}:${c}`, { key: `cacheLink:${w.id}:${c}`, kind: 'cacheLink', workflowId: w.id, cacheId: c });
@@ -76,11 +76,11 @@ function remapItem(g: GhostItem, m: (id: Id) => Id): GhostItem {
     }
     case 'cache': return { key: `cache:${m(g.row.id)}`, kind: 'cache', row: { ...g.row, id: m(g.row.id) } };
     case 'workflow': {
-      const row = { ...g.row, id: m(g.row.id), entryStepIds: g.row.entryStepIds.map(m), assignmentIds: g.row.assignmentIds.map(m), cacheIds: g.row.cacheIds.map(m) };
+      const row = { ...g.row, id: m(g.row.id), entryStepIds: g.row.entryStepIds.map(m), entryCrons: Object.fromEntries(Object.entries(g.row.entryCrons).map(([k, v]) => [m(k), v])), assignmentIds: g.row.assignmentIds.map(m), cacheIds: g.row.cacheIds.map(m) };
       return { key: `workflow:${row.id}`, kind: 'workflow', row, assignments: g.assignments.map(asg) };
     }
     case 'wire': return { key: `wire:${m(g.from)}:${m(g.to)}`, kind: 'wire', from: m(g.from), to: m(g.to), condition: g.condition };
-    case 'entry': return { key: `entry:${m(g.workflowId)}:${m(g.stepId)}`, kind: 'entry', workflowId: m(g.workflowId), stepId: m(g.stepId) };
+    case 'entry': return { key: `entry:${m(g.workflowId)}:${m(g.stepId)}`, kind: 'entry', workflowId: m(g.workflowId), stepId: m(g.stepId), ...(g.cron ? { cron: g.cron } : {}) };
     case 'cacheLink': return { key: `cacheLink:${m(g.workflowId)}:${m(g.cacheId)}`, kind: 'cacheLink', workflowId: m(g.workflowId), cacheId: m(g.cacheId) };
   }
 }
@@ -260,6 +260,7 @@ export function restoreGhosts(
     workflows[g.row.id] = {
       ...g.row,
       entryStepIds: g.row.entryStepIds.filter((x) => !!steps[x]),
+      entryCrons: Object.fromEntries(Object.entries(g.row.entryCrons ?? {}).filter(([k]) => !!steps[k] && g.row.entryStepIds.includes(k))),
       cacheIds: g.row.cacheIds.filter((x) => !!caches[x]),
       assignmentIds,
       ...stamp(base.workflows, g.row.id),
@@ -295,7 +296,12 @@ export function restoreGhosts(
       if (!workflows[g.workflowId]) return refuse('workflow', g.workflowId);
       if (!steps[g.stepId]) return refuse('step', g.stepId);
       const w = workflows[g.workflowId]!;
-      if (!w.entryStepIds.includes(g.stepId)) workflows[g.workflowId] = { ...w, entryStepIds: placeIn(w.entryStepIds, g.stepId, wfOrder(g.workflowId)?.entryStepIds) };
+      if (!w.entryStepIds.includes(g.stepId)) {
+        workflows[g.workflowId] = {
+          ...w, entryStepIds: placeIn(w.entryStepIds, g.stepId, wfOrder(g.workflowId)?.entryStepIds),
+          entryCrons: g.cron ? { ...w.entryCrons, [g.stepId]: g.cron } : w.entryCrons,
+        };
+      }
     } else if (g.kind === 'cacheLink') {
       if (!workflows[g.workflowId]) return refuse('workflow', g.workflowId);
       if (!caches[g.cacheId]) return refuse('cache', g.cacheId);

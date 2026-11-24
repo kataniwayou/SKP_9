@@ -3,7 +3,7 @@ import { deepEqual, reachOf } from './board';
 import { board } from './boardFixtures';
 import {
   addCache, addEntry, addStep, addWire, addWorkflow, deleteCaches, deleteSteps, linkCache, moveItems,
-  removeEntries, removeWires, setCacheField, setStepField, setWorkflowField, unlinkCaches,
+  removeEntries, removeWires, setCacheField, setEntryCron, setStepField, setWorkflowField, unlinkCaches,
 } from './edits';
 
 describe('edits', () => {
@@ -86,4 +86,27 @@ describe('edits', () => {
   it('reachOf follows wires from the entry steps only', () => {
     expect(reachOf(board(), 'daily')).toEqual(new Set(['fetch', 'expand']));
   });
+
+describe('entry crons', () => {
+  const cron = '*/10 * * * * *';
+  it('setEntryCronSetsAndClears', () => {
+    const set = setEntryCron(board(), 'daily', 'fetch', cron);
+    expect(set.workflows.daily.entryCrons).toEqual({ fetch: cron });
+    expect(setEntryCron(set, 'daily', 'fetch', '  ').workflows.daily.entryCrons).toEqual({});
+    expect(setEntryCron(set, 'daily', 'fetch', null).workflows.daily.entryCrons).toEqual({});
+  });
+  it('setting the cron of a step that is not an entry changes nothing', () => {
+    const b = board();
+    expect(setEntryCron(b, 'daily', 'lonely', cron)).toBe(b);
+    expect(setEntryCron(b, 'nope', 'fetch', cron)).toBe(b);
+  });
+  it('removeEntriesDropsTheCron', () => {
+    const set = setEntryCron(board(), 'daily', 'fetch', cron);
+    expect(removeEntries(set, [['daily', 'fetch']]).workflows.daily.entryCrons).toEqual({});
+  });
+  it('deleting a step drops its entry cron', () => {
+    const set = setEntryCron(board(), 'daily', 'fetch', cron);
+    expect(deleteSteps(set, ['fetch']).workflows.daily.entryCrons).toEqual({});
+  });
+});
 });

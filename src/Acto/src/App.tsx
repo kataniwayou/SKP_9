@@ -64,7 +64,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 function freeTriangleSpot(b: BoardState): Point {
   const probe = '\u0000new';
   const placed = placeMissing({ ...b, workflows: { ...b.workflows, [probe]: {
-    id: probe, name: '', version: '', description: null, cronExpression: null, entryStepIds: [], assignmentIds: [], cacheIds: [], at: null, updatedAt: null, ...NO_AUDIT,
+    id: probe, name: '', version: '', description: null, cronExpression: null, entryStepIds: [], entryCrons: {}, assignmentIds: [], cacheIds: [], at: null, updatedAt: null, ...NO_AUDIT,
   } } });
   return placed.workflows[probe]?.at ?? { x: 0, y: 0 };
 }

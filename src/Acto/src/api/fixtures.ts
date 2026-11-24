@@ -29,7 +29,7 @@ export function cacheDto(id: string, over: Partial<CacheReadDto> = {}): CacheRea
 export function workflowDto(over: Partial<WorkflowReadDto> = {}): WorkflowReadDto {
   return {
     id: 'wf1', name: 'orders', version: '1.0.0', description: null, entryStepIds: ['s1'],
-    assignmentIds: [], cacheIds: [], cronExpression: null, ...audit, ...over,
+    assignmentIds: [], cacheIds: [], cronExpression: null, entryCrons: {}, ...audit, ...over,
   } as WorkflowReadDto;
 }
 

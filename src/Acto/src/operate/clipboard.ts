@@ -24,6 +24,8 @@ export interface ClipCache {
 export interface ClipWorkflow {
   id: Id; name: string; version: string; description: string | null; cronExpression: string | null;
   entryStepIds: Id[]; assignmentIds: Id[]; cacheIds: Id[]; at: Point;
+  /** The cron of each entry arrow by entry step; absent on a clip stored before entry crons. */
+  entryCrons?: Record<Id, string>;
 }
 export interface Clip { steps: ClipStep[]; wires: [Id, Id][]; caches: ClipCache[]; workflows: ClipWorkflow[]; pasted: number }
 
@@ -75,7 +77,7 @@ export function copyClip(b: BoardState, items: readonly ItemRef[]): Clip | null 
       if (!w) continue;
       clip.workflows.push({
         id: w.id, name: w.name, version: w.version, description: w.description, cronExpression: w.cronExpression,
-        entryStepIds: [...w.entryStepIds], assignmentIds: [...w.assignmentIds], cacheIds: [...w.cacheIds], at: at0(w.at),
+        entryStepIds: [...w.entryStepIds], entryCrons: { ...w.entryCrons }, assignmentIds: [...w.assignmentIds], cacheIds: [...w.cacheIds], at: at0(w.at),
       });
     }
     seen.add(key);
@@ -84,7 +86,7 @@ export function copyClip(b: BoardState, items: readonly ItemRef[]): Clip | null 
   // a workflow copied alone pastes like a step alone: its fields only — no entry arrows, cache lines or assignments
   // [user, 2026-11-23]; copied with steps or caches it keeps its links (they join the copies, or stay on the originals)
   if (clip.workflows.length === 1 && clip.steps.length === 0 && clip.caches.length === 0) {
-    clip.workflows[0] = { ...clip.workflows[0]!, entryStepIds: [], assignmentIds: [], cacheIds: [] };
+    clip.workflows[0] = { ...clip.workflows[0]!, entryStepIds: [], entryCrons: {}, assignmentIds: [], cacheIds: [] };
   }
   const chosen = new Set(clip.steps.map((s) => s.id));
   for (const s of clip.steps) {
@@ -177,6 +179,10 @@ export function pasteClip(b: BoardState, clip: Clip, newId: () => Id): { state: 
     const row: WorkflowRow = {
       id, name: workflowName(c.name), version: c.version, description: c.description, cronExpression: c.cronExpression,
       entryStepIds: relink(c.entryStepIds, madeStep, b.steps),
+      entryCrons: Object.fromEntries(c.entryStepIds.flatMap((x) => {
+        const cron = c.entryCrons?.[x], to = madeStep.get(x) ?? (b.steps[x] ? x : undefined);
+        return cron && to ? [[to, cron] as [Id, string]] : [];
+      })),
       assignmentIds: [...new Set(c.assignmentIds.filter((a) => b.assignments[a]))],
       cacheIds: relink(c.cacheIds, madeCache, b.caches),
       at: moved(c.at), updatedAt: null, ...NO_AUDIT,

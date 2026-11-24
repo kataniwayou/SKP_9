@@ -32,7 +32,7 @@ export function addCache(b: BoardState, at: Point, id: Id): BoardState {
 export function addWorkflow(b: BoardState, at: Point, id: Id): BoardState {
   const wf: WorkflowRow = {
     id, name: uniqueName(Object.values(b.workflows).map((w) => w.name), 'untitled'), version: '1.0.0',
-    description: null, cronExpression: null, entryStepIds: [], assignmentIds: [], cacheIds: [], at: { ...at }, updatedAt: null, ...NO_AUDIT,
+    description: null, cronExpression: null, entryStepIds: [], entryCrons: {}, assignmentIds: [], cacheIds: [], at: { ...at }, updatedAt: null, ...NO_AUDIT,
   };
   return { ...b, workflows: { ...b.workflows, [id]: wf } };
 }
@@ -74,10 +74,22 @@ export function removeEntries(b: BoardState, pairs: [Id, Id][]): BoardState {
   const workflows = { ...b.workflows };
   for (const [wf, step] of pairs) {
     const w = workflows[wf];
-    if (w) workflows[wf] = { ...w, entryStepIds: w.entryStepIds.filter((x) => x !== step) };
+    if (w) workflows[wf] = { ...w, entryStepIds: w.entryStepIds.filter((x) => x !== step), entryCrons: without(w.entryCrons, [step]) };
   }
   return { ...b, workflows };
 }
+
+/** The cron of one entry arrow; null or blank clears it. A step that is not an entry of the workflow changes nothing. */
+export function setEntryCron(b: BoardState, wf: Id, step: Id, cron: string | null): BoardState {
+  const w = b.workflows[wf];
+  if (!w || !w.entryStepIds.includes(step)) return b;
+  const text = cron?.trim() ?? '';
+  const entryCrons = text === '' ? without(w.entryCrons, [step]) : { ...w.entryCrons, [step]: text };
+  return { ...b, workflows: { ...b.workflows, [wf]: { ...w, entryCrons } } };
+}
+
+const without = (crons: Record<Id, string>, drop: Id[]): Record<Id, string> =>
+  Object.fromEntries(Object.entries(crons).filter(([k]) => !drop.includes(k)));
 
 export function linkCache(b: BoardState, wf: Id, cache: Id): Edit {
   const w = b.workflows[wf];
@@ -112,6 +124,7 @@ export function deleteSteps(b: BoardState, ids: Id[]): BoardState {
     workflows[id] = {
       ...w,
       entryStepIds: w.entryStepIds.filter((x) => !gone.has(x)),
+      entryCrons: without(w.entryCrons, [...gone]),
       assignmentIds: w.assignmentIds.filter((x) => !goneAssign.has(x)),
     };
   }

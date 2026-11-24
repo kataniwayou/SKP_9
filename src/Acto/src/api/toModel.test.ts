@@ -8,6 +8,14 @@ describe('stepFromDto', () => {
   });
 });
 
+describe('workflowRowFromDto entry crons', () => {
+  it('readsEntryCronsAndDefaultsToEmpty', () => {
+    expect(workflowRowFromDto(workflowDto({ entryCrons: { s1: '*/10 * * * * *' } })).entryCrons).toEqual({ s1: '*/10 * * * * *' });
+    expect(workflowRowFromDto(workflowDto({ entryCrons: null })).entryCrons).toEqual({});
+    expect(workflowRowFromDto(workflowDto()).entryCrons).toEqual({});
+  });
+});
+
 describe('the board rows keep the read-only audit fields', () => {
   it('createdAt, createdBy and updatedBy as sent; null when absent', () => {
     const row = stepRowFromDto(stepDto('s1', { createdBy: 'katan', updatedBy: 'acto' }));

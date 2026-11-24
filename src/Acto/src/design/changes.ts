@@ -37,7 +37,7 @@ const loc = (at: { x: number; y: number } | null) => ({ boardX: at ? at.x : null
 
 const workflowBody = (w: WorkflowRow): WorkflowCreateDto & WorkflowUpdateDto => ({
   name: w.name, version: w.version, description: w.description, cronExpression: w.cronExpression,
-  entryStepIds: [...w.entryStepIds], assignmentIds: [...w.assignmentIds], cacheIds: [...w.cacheIds], ...loc(w.at),
+  entryStepIds: [...w.entryStepIds], entryCrons: { ...w.entryCrons }, assignmentIds: [...w.assignmentIds], cacheIds: [...w.cacheIds], ...loc(w.at),
 });
 const stepBody = (s: StepRow): StepCreateDto & StepUpdateDto => ({
   name: s.name, version: s.version, description: s.description, processorId: s.processorId as string,
