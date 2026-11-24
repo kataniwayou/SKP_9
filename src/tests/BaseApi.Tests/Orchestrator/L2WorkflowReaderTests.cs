@@ -107,4 +107,49 @@ public sealed class L2WorkflowReaderTests
         Assert.True(await _reader.IsLiveAsync(W, CancellationToken.None));
         Assert.False(await _reader.IsLiveAsync(S1, CancellationToken.None));
     }
+
+    [Fact]
+    public async Task EntryCronsAreReadFromTheStore()
+    {
+        _db.HashGetAsync(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
+            .Returns((RedisValue)JsonSerializer.Serialize(
+                new WorkflowStoreProjection(
+                    EntryStepIds: [S1],
+                    Cron: "*/30 * * * * *",
+                    Steps: [new StepL1(S1, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: [])],
+                    EntryCrons: new Dictionary<Guid, string> { [S1] = "*/10 * * * * *" }),
+                MessagingJson.Options));
+
+        var definition = await _reader.ReadAsync(W, CancellationToken.None);
+
+        Assert.NotNull(definition);
+        Assert.NotNull(definition.EntryCrons);
+        var pair = Assert.Single(definition.EntryCrons);
+        Assert.Equal(S1, pair.Key);
+        Assert.Equal("*/10 * * * * *", pair.Value);
+    }
+
+    [Fact]
+    public async Task AStoreWrittenBeforeEntryCronsReadsNull()
+    {
+        // What a store written before the field existed holds: no "entryCrons" key at all — removed
+        // outright, not written as null.
+        var node = JsonSerializer.SerializeToNode(
+            new WorkflowStoreProjection(
+                EntryStepIds: [S1],
+                Cron: "0 * * * *",
+                Steps: [new StepL1(S1, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: [])],
+                EntryCrons: new Dictionary<Guid, string> { [S1] = "*/10 * * * * *" }),
+            MessagingJson.Options)!.AsObject();
+        Assert.True(node.Remove("entryCrons"));
+        var json = node.ToJsonString();
+        _db.HashGetAsync(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
+            .Returns((RedisValue)json);
+
+        var definition = await _reader.ReadAsync(W, CancellationToken.None);
+
+        Assert.NotNull(definition);
+        Assert.Equal([S1], definition.EntryStepIds);
+        Assert.Null(definition.EntryCrons);
+    }
 }

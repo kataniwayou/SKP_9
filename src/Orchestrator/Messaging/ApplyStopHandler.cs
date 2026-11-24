@@ -29,8 +29,8 @@ namespace Orchestrator.Messaging;
 /// <b>The stop unschedules but does not delete.</b> Tearing the L1 entry out settled the control plane
 /// instantly and broke the data plane for the length of one round trip: every step still running when
 /// the stop landed came back to <see cref="StepOutcomeHandler"/>, found no workflow in L1, and was
-/// parked. The job is still torn down here — a stopped workflow dispatches nothing from this moment —
-/// and the entry is marked instead, so those in-flight steps resolve and their run drains. The marked
+/// parked. The workflow's jobs are still torn down here — a stopped workflow dispatches nothing from
+/// this moment — and the entry is marked instead, so those in-flight steps resolve and their run drains. The marked
 /// entry then stays until the workflow restarts or the pod restarts — nothing prunes it.
 /// </para>
 /// <para>
@@ -95,20 +95,21 @@ internal sealed class ApplyStopHandler : IQueueMessageHandler
             if (_store.TryGetIncludingStopped(m.WorkflowId, out var entry))
             {
                 // An entry already marked has had both halves done to it, and neither is worth
-                // repeating. The unschedule would be a second DeleteJob against a job that is already
-                // gone, and the mark is deliberately not refreshed — see MarkDeleted: refreshing would
-                // move when the entry reads as having been stopped, for no benefit, since nothing
-                // prunes it by age either way.
+                // repeating. The unschedule would delete the workflow's Quartz group a second time and
+                // find it already empty, and the mark is deliberately not refreshed — see MarkDeleted:
+                // refreshing would move when the entry reads as having been stopped, for no benefit,
+                // since nothing prunes it by age either way.
                 if (entry.DeletedAt is not null)
                 {
                     _logger.LogInformation("stop applied; the workflow was already marked stopped");
                 }
                 else
                 {
-                    // Unschedule strictly first. This is what makes the stop take effect now rather
-                    // than only once the mark is read: the mark only keeps the definition resolvable
-                    // for outcomes already in flight, and the job is what would otherwise keep
-                    // dispatching new work.
+                    // Unschedule strictly first — one group delete keyed by the workflow id, which
+                    // removes every job of every entry-schedule group the activation scheduled. This
+                    // is what makes the stop take effect now rather than only once the mark is read:
+                    // the mark only keeps the definition resolvable for outcomes already in flight,
+                    // and the jobs are what would otherwise keep dispatching new work.
                     await _scheduler.UnscheduleWorkflowAsync(m.WorkflowId, ct).ConfigureAwait(false);
 
                     // False here would mean a concurrent delivery marked it between the read above and
@@ -121,7 +122,7 @@ internal sealed class ApplyStopHandler : IQueueMessageHandler
                         // API side and nowhere else: the fires simply cease, which is
                         // indistinguishable from a replica that never got the announcement at all.
                         _logger.LogInformation(
-                            "unscheduled the workflow's job and marked it stopped; steps still in "
+                            "unscheduled the workflow's jobs and marked it stopped; steps still in "
                           + "flight will resolve until it is reaped");
                     }
                 }

@@ -22,6 +22,7 @@ public sealed class WorkflowActivatorTests
     private static readonly Guid W = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid S = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid P = Guid.Parse("33333333-3333-3333-3333-333333333333");
+    private static readonly Guid S2 = Guid.Parse("44444444-4444-4444-4444-444444444444");
 
     private sealed class Harness
     {
@@ -58,6 +59,32 @@ public sealed class WorkflowActivatorTests
                     EntryStepIds: [entry],
                     Cron: cron,
                     Steps: [new StepL1(entry, EntryCondition: 0, ProcessorId: processor, Payload: "{}", NextStepIds: [])]),
+                MessagingJson.Options);
+            Db.HashGetAsync(L2ProjectionKeys.Workflow(workflowId), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
+                .Returns((RedisValue)store);
+
+            return this;
+        }
+
+        /// <summary>
+        /// A workflow with two entry steps, <see cref="S"/> and <see cref="S2"/>, where only
+        /// <see cref="S2"/> carries its own cron — the shape that splits one workflow into groups.
+        /// </summary>
+        public Harness WithTwoEntries(Guid workflowId, string? cron, string? s2Cron)
+        {
+            Db.SetContainsAsync(L2ProjectionKeys.Live(), workflowId.ToString("D"), Arg.Any<CommandFlags>())
+                .Returns(true);
+
+            var store = JsonSerializer.Serialize(
+                new WorkflowStoreProjection(
+                    EntryStepIds: [S, S2],
+                    Cron: cron,
+                    Steps:
+                    [
+                        new StepL1(S, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: []),
+                        new StepL1(S2, EntryCondition: 0, ProcessorId: P, Payload: "{}", NextStepIds: []),
+                    ],
+                    EntryCrons: s2Cron is null ? null : new Dictionary<Guid, string> { [S2] = s2Cron }),
                 MessagingJson.Options);
             Db.HashGetAsync(L2ProjectionKeys.Workflow(workflowId), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
                 .Returns((RedisValue)store);
@@ -140,5 +167,62 @@ public sealed class WorkflowActivatorTests
         // The replacement went out under the NEW job id, not the torn-down one. Assert.NotEqual above
         // says L1 moved on; this says the scheduler was told the same thing.
         Assert.Equal((W, e2.JobId, 0, "0 * * * *"), h.Scheduler.Scheduled[1]);
+    }
+
+    [Fact]
+    public async Task TwoCronsScheduleTwoGroupsUnderOneActivation()
+    {
+        var h = new Harness().WithTwoEntries(W, cron: "*/30 * * * * *", s2Cron: "*/10 * * * * *");
+
+        await h.Build().ActivateAsync(W, CancellationToken.None);
+
+        // One activation id for every group: the fire job's supersession check compares activation
+        // ids, so a later start retires every group's job at once only if they all share this one.
+        Assert.True(h.Store.TryGetActive(W, out var entry));
+        Assert.Equal(
+            [(W, entry.JobId, 0, "*/30 * * * * *"), (W, entry.JobId, 1, "*/10 * * * * *")],
+            h.Scheduler.Scheduled);
+    }
+
+    [Fact]
+    public async Task AnEntryCronEqualToTheWorkflowCronMakesOneGroup()
+    {
+        // Equal after normalization: whitespace alone does not make a second schedule.
+        var h = new Harness().WithTwoEntries(W, cron: "*/30 * * * * *", s2Cron: "  */30  * * * * * ");
+
+        await h.Build().ActivateAsync(W, CancellationToken.None);
+
+        Assert.True(h.Store.TryGetActive(W, out var entry));
+        Assert.Equal((W, entry.JobId, 0, "*/30 * * * * *"), Assert.Single(h.Scheduler.Scheduled));
+    }
+
+    [Fact]
+    public async Task ANullWorkflowCronSchedulesOnlyStepsWithTheirOwn()
+    {
+        var h = new Harness().WithTwoEntries(W, cron: null, s2Cron: "*/10 * * * * *");
+
+        await h.Build().ActivateAsync(W, CancellationToken.None);
+
+        Assert.True(h.Store.TryGetActive(W, out var entry));
+        Assert.Equal((W, entry.JobId, 0, "*/10 * * * * *"), Assert.Single(h.Scheduler.Scheduled));
+    }
+
+    [Fact]
+    public async Task ARestartUnschedulesTheWholeWorkflowBeforeScheduling()
+    {
+        // A workflow this replica already holds, under an activation whose jobs were never recorded
+        // by this scheduler: the teardown is one group delete keyed by the workflow, so it does not
+        // need to know how many jobs the previous activation had.
+        var h = new Harness().WithTwoEntries(W, cron: "*/30 * * * * *", s2Cron: "*/10 * * * * *");
+        var previous = Guid.NewGuid();
+        h.Store.Set(W, new WorkflowL1(W, [S, S2], "*/30 * * * * *", [], []), previous);
+
+        await h.Build().ActivateAsync(W, CancellationToken.None);
+
+        Assert.Equal(["UnscheduleWorkflowAsync", "ScheduleAsync", "ScheduleAsync"], h.Scheduler.Calls);
+        Assert.Equal([W], h.Scheduler.Unscheduled);
+        Assert.True(h.Store.TryGetActive(W, out var entry));
+        Assert.NotEqual(previous, entry.JobId);
+        Assert.All(h.Scheduler.Scheduled, s => Assert.Equal(entry.JobId, s.ActivationId));
     }
 }

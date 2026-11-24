@@ -21,16 +21,37 @@ internal sealed class RecordingWorkflowScheduler : IWorkflowScheduler
     public List<Guid> Unscheduled { get; } = [];
 
     /// <summary>
-    /// How many jobs this scheduler currently believes are live: every <see cref="ScheduleAsync"/>
-    /// call minus every <see cref="UnscheduleWorkflowAsync"/> call. That subtraction counts one job per
-    /// unscheduled workflow, so it holds only while each activation schedules a single job; a test of
-    /// a workflow with several entry-schedule groups should assert <see cref="Scheduled"/> and
-    /// <see cref="Unscheduled"/> directly. Deliberately a count, not a set kept in
-    /// step by <see cref="Scheduled"/> and <see cref="Unscheduled"/> — those two lists already are
-    /// the record of what happened, and a count derived from their lengths cannot fail to subtract a
-    /// teardown the way a count that only ever increments could.
+    /// How many jobs this scheduler currently believes are live, modelled the way Quartz keys them:
+    /// each <see cref="ScheduleAsync"/> adds the job <c>(workflow, activation, index)</c>, and each
+    /// <see cref="UnscheduleWorkflowAsync"/> removes every job of that workflow — the group delete —
+    /// however many groups it had. Replayed from <c>_events</c> on every read rather than kept
+    /// as a running set, so it is one more view of the record of what happened, not a second record
+    /// that could disagree with it. A plain <c>Scheduled.Count - Unscheduled.Count</c> was right only
+    /// while each activation scheduled a single job.
     /// </summary>
-    public int LiveJobCount => Scheduled.Count - Unscheduled.Count;
+    public int LiveJobCount
+    {
+        get
+        {
+            var live = new HashSet<(Guid WorkflowId, Guid ActivationId, int Index)>();
+            foreach (var (workflowId, activationId, index, isSchedule) in _events)
+            {
+                if (isSchedule)
+                {
+                    live.Add((workflowId, activationId, index));
+                }
+                else
+                {
+                    live.RemoveWhere(j => j.WorkflowId == workflowId);
+                }
+            }
+
+            return live.Count;
+        }
+    }
+
+    /// <summary>Schedules and group deletes interleaved in arrival order, for <see cref="LiveJobCount"/>.</summary>
+    private readonly List<(Guid WorkflowId, Guid ActivationId, int Index, bool IsSchedule)> _events = [];
 
     /// <summary>
     /// How many times a fire armed its own successor. Derived from <see cref="Rescheduled"/> rather
@@ -66,6 +87,7 @@ internal sealed class RecordingWorkflowScheduler : IWorkflowScheduler
     public Task ScheduleAsync(Guid workflowId, Guid activationId, int index, string cron, CancellationToken ct)
     {
         Scheduled.Add((workflowId, activationId, index, cron));
+        _events.Add((workflowId, activationId, index, true));
         Calls.Add(nameof(ScheduleAsync));
         return Task.CompletedTask;
     }
@@ -81,6 +103,7 @@ internal sealed class RecordingWorkflowScheduler : IWorkflowScheduler
     {
         OnUnscheduleAsync?.Invoke();
         Unscheduled.Add(workflowId);
+        _events.Add((workflowId, Guid.Empty, 0, false));
         Calls.Add(nameof(UnscheduleWorkflowAsync));
         return Task.CompletedTask;
     }

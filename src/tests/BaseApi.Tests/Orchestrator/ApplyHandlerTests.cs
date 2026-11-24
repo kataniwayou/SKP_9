@@ -28,6 +28,7 @@ public sealed class ApplyHandlerTests
     private static readonly Guid W = Guid.Parse("55555555-5555-5555-5555-555555555555");
     private static readonly Guid S = Guid.Parse("66666666-6666-6666-6666-666666666666");
     private static readonly Guid P = Guid.Parse("77777777-7777-7777-7777-777777777777");
+    private static readonly Guid S2 = Guid.Parse("88888888-8888-8888-8888-888888888888");
 
     private sealed class Harness
     {
@@ -60,7 +61,9 @@ public sealed class ApplyHandlerTests
         /// <see cref="L2WorkflowReader.IsLiveAsync"/> and <see cref="L2WorkflowReader.ReadAsync"/> both
         /// answer as they would against the live set and the store hash a start writes.
         /// </summary>
-        public Harness WithWorkflow(Guid workflowId, string? cron)
+        /// <param name="secondEntryCron">When set, a second entry step <see cref="S2"/> carrying this
+        /// cron of its own, so the workflow is scheduled as two groups.</param>
+        public Harness WithWorkflow(Guid workflowId, string? cron, string? secondEntryCron = null)
         {
             _live.Add(workflowId);
 
@@ -70,7 +73,12 @@ public sealed class ApplyHandlerTests
             // The store is NOT gated on _live: it outlives a stop.
             Db.HashGetAsync(L2ProjectionKeys.Workflow(workflowId), L2ProjectionKeys.StoreField, Arg.Any<CommandFlags>())
                 .Returns((RedisValue)JsonSerializer.Serialize(
-                    new WorkflowStoreProjection([S], cron, [new StepL1(S, 0, P, "{}", [])]),
+                    secondEntryCron is null
+                        ? new WorkflowStoreProjection([S], cron, [new StepL1(S, 0, P, "{}", [])])
+                        : new WorkflowStoreProjection(
+                            [S, S2], cron,
+                            [new StepL1(S, 0, P, "{}", []), new StepL1(S2, 0, P, "{}", [])],
+                            EntryCrons: new Dictionary<Guid, string> { [S2] = secondEntryCron }),
                     MessagingJson.Options));
 
             return this;
@@ -191,6 +199,30 @@ public sealed class ApplyHandlerTests
         // their order; the sequence pins that the stop's teardown is the one and only scheduler call
         // to follow the start's.
         Assert.Equal(new[] { "ScheduleAsync", "UnscheduleWorkflowAsync" }, h.Scheduler.Calls);
+    }
+
+    [Fact]
+    public async Task AStopUnschedulesTheWholeWorkflowThenMarks()
+    {
+        // Two groups, so two jobs, and still ONE teardown call: the stop deletes the workflow's whole
+        // Quartz group by workflow id rather than one job by id, which is what lets it stop a workflow
+        // without knowing how many groups its activation scheduled.
+        var h = new Harness().WithWorkflow(W, "*/30 * * * * *", secondEntryCron: "*/10 * * * * *");
+        await h.BuildStart().HandleAsync(Body(new OrchestrationStarted(W)), CancellationToken.None);
+        h.RemoveWorkflowFromL2(W);
+
+        var workflowStillActiveAtUnschedule = false;
+        h.Scheduler.OnUnscheduleAsync = () => workflowStillActiveAtUnschedule = h.Store.TryGetActive(W, out _);
+
+        await h.BuildStop().HandleAsync(Body(new OrchestrationStopped(W)), CancellationToken.None);
+
+        Assert.Equal(2, h.Scheduler.Scheduled.Count);
+        Assert.Equal([W], h.Scheduler.Unscheduled);
+        Assert.Equal(new[] { "ScheduleAsync", "ScheduleAsync", "UnscheduleWorkflowAsync" }, h.Scheduler.Calls);
+        Assert.Equal(0, h.Scheduler.LiveJobCount);
+        Assert.True(workflowStillActiveAtUnschedule, "unschedule must run before the workflow is marked");
+        Assert.True(h.Store.TryGetIncludingStopped(W, out var entry));
+        Assert.NotNull(entry.DeletedAt);
     }
 
     [Fact]

@@ -6,7 +6,8 @@ using Orchestrator.Scheduling;
 namespace Orchestrator.L1;
 
 /// <summary>
-/// Brings one workflow from L2 into this replica: mirrors it into L1 and puts it on the scheduler.
+/// Brings one workflow from L2 into this replica: mirrors it into L1 and puts it on the scheduler as
+/// one job per entry-schedule group — the entry steps that share an effective cron.
 /// <para>
 /// <b>This is the single activation path, and its being single is the design.</b> Two things activate
 /// workflows — hydration on start, and the start announcement while running — and they have no
@@ -16,11 +17,12 @@ namespace Orchestrator.L1;
 /// nowhere for the difference to live.
 /// </para>
 /// <para>
-/// <b>Teardown precedes apply.</b> An activation of a workflow already held unschedules the job L1
-/// records before minting a new one. Without that, a redelivered announcement would leave the previous
-/// job running alongside its replacement — two live jobs for one workflow, both firing every tick,
-/// double-dispatching every entry step. Tearing down first is what makes a redelivery converge instead
-/// of accumulate.
+/// <b>Teardown precedes apply.</b> An activation of a workflow already held deletes the workflow's
+/// whole Quartz group — one call keyed by the workflow id, covering every job of every group the
+/// previous activation scheduled — before minting a new activation. Without that, a redelivered
+/// announcement would leave the previous jobs running alongside their replacements, both firing every
+/// tick, double-dispatching every entry step. Tearing down first is what makes a redelivery converge
+/// instead of accumulate.
 /// </para>
 /// <para>
 /// <b>Not live means do nothing.</b> Not an error, and nothing to park: a stop may have taken the
@@ -43,8 +45,9 @@ public sealed class WorkflowActivator(
 {
     /// <summary>
     /// Spec §7.1, in order: return unless the workflow is live, read the definition, return if L2 holds
-    /// no usable store for it, unschedule the job L1 already holds for it, put the definition in L1 under
-    /// a fresh job id, schedule when the definition carries a cron, and preload its names.
+    /// no usable store for it, unschedule every job of the workflow when L1 holds it active, put the
+    /// definition in L1 under a fresh activation id, schedule one job per entry-schedule group under that
+    /// id, and preload its names.
     /// </summary>
     public async Task ActivateAsync(Guid workflowId, CancellationToken ct)
     {
@@ -70,27 +73,33 @@ public sealed class WorkflowActivator(
         }
 
         // ACTIVE, not merely held, and the distinction matters on the restart path. A marked entry has
-        // no job left to tear down: ApplyStopHandler unschedules strictly before it marks, so "marked"
-        // implies "already unscheduled". Tearing down again would be a second DeleteJob against a job
-        // that is gone — harmless in Quartz, but it would state a teardown that did not happen and put
-        // this method's convergence argument on a call that cannot be doing what it claims.
+        // no jobs left to tear down: ApplyStopHandler deletes the workflow's whole group strictly before
+        // it marks, so "marked" implies "already unscheduled". Deleting the group again would find it
+        // empty — harmless in Quartz, but it would state a teardown that did not happen and put this
+        // method's convergence argument on a call that cannot be doing what it claims. (A fire racing
+        // the stop can re-create its own job afterwards; that job carries the old activation id, so
+        // its next fire finds itself superseded and does not re-arm.)
         //
         // Store.Set below then writes a fresh entry carrying no DeletedAt, which is what clears the
         // stop. The un-marking is a side effect of the write rather than a separate call this path
         // could forget to make.
-        if (store.TryGetActive(workflowId, out var held))
+        if (store.TryGetActive(workflowId, out _))
         {
             await scheduler.UnscheduleWorkflowAsync(workflowId, ct).ConfigureAwait(false);
         }
 
-        var jobId = Guid.NewGuid();
-        store.Set(workflowId, definition, jobId);
+        // One activation id for every group. The fire job's supersession check compares it, so a later
+        // activation retires every group's job at once.
+        var activationId = Guid.NewGuid();
+        store.Set(workflowId, definition, activationId);
 
-        // A null cron means unscheduled, which is a valid projection: WorkflowL1's own doc puts that
-        // decision with whoever reads the root, and that is this method.
-        if (definition.Cron is { } cron)
+        // A step with no effective cron (neither its own nor the workflow's) is unscheduled, which is a
+        // valid projection, and EntrySchedule.Groups leaves it out: a workflow none of whose entry steps
+        // has a cron schedules nothing.
+        var groups = EntrySchedule.Groups(definition.EntryStepIds, definition.Cron, definition.EntryCrons);
+        foreach (var group in groups)
         {
-            await scheduler.ScheduleAsync(workflowId, jobId, index: 0, cron, ct).ConfigureAwait(false);
+            await scheduler.ScheduleAsync(workflowId, activationId, group.Index, group.Cron, ct).ConfigureAwait(false);
         }
 
         // Names for the records this workflow is about to produce, in one read. A REFRESH, not a
@@ -110,9 +119,10 @@ public sealed class WorkflowActivator(
         // and acted on it, and it fires once per start rather than once per anything hot. At Debug it
         // sat below the level shipped to the log store, which made "the announcement never arrived"
         // and "it arrived and applied" look identical from outside the process — the two cases a
-        // control-plane record exists to separate.
+        // control-plane record exists to separate. The group count, never the cron text: crons are
+        // user data.
         logger.LogInformation(
-            "activated workflow {WorkflowId} with {StepCount} steps, scheduled={Scheduled}",
-            workflowId, definition.Steps.Count, definition.Cron is not null);
+            "activated workflow {WorkflowId} with {StepCount} steps in {GroupCount} schedule groups, scheduled={Scheduled}",
+            workflowId, definition.Steps.Count, groups.Count, groups.Count > 0);
     }
 }
