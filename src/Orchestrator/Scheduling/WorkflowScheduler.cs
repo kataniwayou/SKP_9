@@ -1,11 +1,21 @@
-﻿using BaseConsole.Core.Naming;
+﻿using System.Globalization;
+using BaseConsole.Core.Naming;
 using Microsoft.Extensions.Logging;
 using Quartz;
+using Quartz.Impl.Matchers;
 
 namespace Orchestrator.Scheduling;
 
 /// <summary>
-/// One self-rescheduling one-shot Quartz job per workflow, keyed by the job id L1 minted for it.
+/// Self-rescheduling one-shot Quartz jobs, one per entry-schedule group of a workflow, all in a Quartz
+/// job group named after the workflow.
+/// <para>
+/// <b>The keys.</b> A job and its trigger share one key: name <c>{activationId}/{index}</c>, group the
+/// workflow id. The activation id is the one L1 minted for the start (the entry's <c>JobId</c>), and
+/// the index tells apart the workflow's several jobs — one per distinct entry-step cron. Grouping by
+/// workflow is what lets a stop remove every one of them in one call without knowing how many there
+/// were or which activation scheduled them; see <see cref="UnscheduleWorkflowAsync"/>.
+/// </para>
 /// <para>
 /// <b>Why the job type is a type parameter.</b> This class knows about keys, triggers and the job-data
 /// map; it does not know or care what runs when the trigger fires. Leaving the job type open lets the
@@ -23,9 +33,10 @@ namespace Orchestrator.Scheduling;
 /// </para>
 /// <para>
 /// <b>That is a claim about a third-party library, so it is checked rather than asserted.</b>
-/// <c>SelfReschedulingChainTests</c> runs a real started scheduler through two fires a second apart,
-/// and reaching the trigger half of the claim from that run takes two steps rather than one. Quartz
-/// raises <c>ObjectAlreadyExistsException</c> on the <i>job</i> key, so on its own it says only that
+/// <c>SelfReschedulingChainTests</c> runs a real started scheduler through two fires a second apart in
+/// each of two workflow groups, and reaching the trigger half of the claim from that run takes two
+/// steps rather than one. Quartz raises <c>ObjectAlreadyExistsException</c> on the <i>job</i> key,
+/// so on its own it says only that
 /// the job of a fire in progress is still in the store. The trigger's presence is what follows from
 /// the run being green at all: had the completed trigger already been evicted,
 /// <see cref="RescheduleAsync"/> would have found nothing to replace, taken its re-create fallback,
@@ -37,8 +48,9 @@ namespace Orchestrator.Scheduling;
 /// <b>And it must nonetheless be able to re-create job and trigger from nothing.</b> A non-durable job
 /// with no triggers is auto-purged, which is the ordinary state of affairs by the time a fire gets
 /// around to arming its successor. That is why <see cref="RescheduleAsync"/> takes the workflow id it
-/// would otherwise not need: a purged job took its job-data map with it, so the re-created job has to
-/// re-stamp both ids or the resurrected fire loses track of what it is firing.
+/// would otherwise not need, and the index and cron with it: a purged job took its job-data map with it,
+/// so the re-created job has to re-stamp all four values or the resurrected fire loses track of what
+/// it is firing.
 /// </para>
 /// <para>
 /// <b>It takes the <see cref="ISchedulerFactory"/> rather than an <see cref="IScheduler"/>, and that
@@ -65,64 +77,88 @@ public sealed class WorkflowScheduler<TJob>(
     : IWorkflowScheduler
     where TJob : IJob
 {
-    private static JobKey JobKeyFor(Guid jobId) => new(jobId.ToString("D"));
+    private static string KeyName(Guid activationId, int index) =>
+        string.Create(CultureInfo.InvariantCulture, $"{activationId:D}/{index}");
 
-    private static TriggerKey TriggerKeyFor(Guid jobId) => new(jobId.ToString("D"));
+    private static string GroupOf(Guid workflowId) => workflowId.ToString("D");
+
+    private static JobKey JobKeyFor(Guid workflowId, Guid activationId, int index) =>
+        new(KeyName(activationId, index), GroupOf(workflowId));
+
+    private static TriggerKey TriggerKeyFor(Guid workflowId, Guid activationId, int index) =>
+        new(KeyName(activationId, index), GroupOf(workflowId));
 
     /// <inheritdoc />
-    public async Task ScheduleAsync(Guid workflowId, Guid jobId, string cron, CancellationToken ct)
+    public async Task ScheduleAsync(
+        Guid workflowId, Guid activationId, int index, string cron, CancellationToken ct)
     {
-        if (NextFireTimeOrLogSkip(workflowId, cron) is not { } nextUtc)
+        if (NextFireTimeOrLogSkip(workflowId, index, cron) is not { } nextUtc)
         {
             return;
         }
 
         var scheduler = await schedulerFactory.GetScheduler(ct).ConfigureAwait(false);
 
-        var jobKey = JobKeyFor(jobId);
+        var jobKey = JobKeyFor(workflowId, activationId, index);
         await scheduler
-            .ScheduleJob(BuildJob(jobKey, workflowId, jobId), BuildTrigger(jobKey, jobId, nextUtc), ct)
+            .ScheduleJob(
+                BuildJob(jobKey, workflowId, activationId, index, cron),
+                BuildTrigger(jobKey, workflowId, activationId, index, nextUtc),
+                ct)
             .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task RescheduleAsync(Guid workflowId, Guid jobId, string cron, CancellationToken ct)
+    public async Task RescheduleAsync(
+        Guid workflowId, Guid activationId, int index, string cron, CancellationToken ct)
     {
-        if (NextFireTimeOrLogSkip(workflowId, cron) is not { } nextUtc)
+        if (NextFireTimeOrLogSkip(workflowId, index, cron) is not { } nextUtc)
         {
             return;
         }
 
         var scheduler = await schedulerFactory.GetScheduler(ct).ConfigureAwait(false);
 
-        var jobKey = JobKeyFor(jobId);
-        var trigger = BuildTrigger(jobKey, jobId, nextUtc);
+        var jobKey = JobKeyFor(workflowId, activationId, index);
+        var trigger = BuildTrigger(jobKey, workflowId, activationId, index, nextUtc);
 
         // Replaces the trigger on this key without touching the job, and returns null only when there
         // was no trigger on the key to replace — see the type remarks for why both halves matter.
-        var replaced = await scheduler.RescheduleJob(TriggerKeyFor(jobId), trigger, ct)
+        var replaced = await scheduler
+            .RescheduleJob(TriggerKeyFor(workflowId, activationId, index), trigger, ct)
             .ConfigureAwait(false);
 
         if (replaced is null)
         {
             // No trigger on the key, so the non-durable job is gone with it. The trigger built above
             // already names the job key, so it binds to the job re-created here.
-            await scheduler.ScheduleJob(BuildJob(jobKey, workflowId, jobId), trigger, ct)
+            await scheduler
+                .ScheduleJob(BuildJob(jobKey, workflowId, activationId, index, cron), trigger, ct)
                 .ConfigureAwait(false);
         }
     }
 
     /// <inheritdoc />
-    public async Task UnscheduleAsync(Guid jobId, CancellationToken ct)
+    public async Task UnscheduleWorkflowAsync(Guid workflowId, CancellationToken ct)
     {
         var scheduler = await schedulerFactory.GetScheduler(ct).ConfigureAwait(false);
 
-        // DeleteJob, not UnscheduleJob: it removes the job and every trigger of it in one step, so
-        // there is no interval in which a trigger outlives the job it fires.
-        await scheduler.DeleteJob(JobKeyFor(jobId), ct).ConfigureAwait(false);
+        // Every job in the workflow's group, whichever activation or index scheduled it — the caller
+        // need not know how many there are. DeleteJobs, not UnscheduleJob: it removes each job and
+        // every trigger of it in one step, so there is no interval in which a trigger outlives the job
+        // it fires. A key that vanished between the read and the delete (a non-durable job purged as
+        // its last trigger completed) is simply not there to delete, which is the outcome wanted.
+        var keys = await scheduler
+            .GetJobKeys(GroupMatcher<JobKey>.GroupEquals(GroupOf(workflowId)), ct)
+            .ConfigureAwait(false);
+
+        if (keys.Count > 0)
+        {
+            await scheduler.DeleteJobs([.. keys], ct).ConfigureAwait(false);
+        }
     }
 
-    private DateTime? NextFireTimeOrLogSkip(Guid workflowId, string cron)
+    private DateTime? NextFireTimeOrLogSkip(Guid workflowId, int index, string cron)
     {
         var next = CronInterval.NextOccurrence(cron, timeProvider.GetUtcNow().UtcDateTime);
         if (next is null)
@@ -135,7 +171,8 @@ public sealed class WorkflowScheduler<TJob>(
             using (logger.BeginCachedNamesScope(names, workflowId, Guid.Empty, Guid.Empty))
             {
                 logger.LogWarning(
-                    "cron for workflow {WorkflowId} yields no future fire time; nothing scheduled",
+                    "cron of entry group {EntryGroupIndex} of workflow {WorkflowId} yields no future fire time; nothing scheduled for it",
+                    index,
                     workflowId);
             }
         }
@@ -143,16 +180,20 @@ public sealed class WorkflowScheduler<TJob>(
         return next;
     }
 
-    private static IJobDetail BuildJob(JobKey jobKey, Guid workflowId, Guid jobId) =>
+    private static IJobDetail BuildJob(
+        JobKey jobKey, Guid workflowId, Guid activationId, int index, string cron) =>
         JobBuilder.Create<TJob>()
             .WithIdentity(jobKey)
             .UsingJobData(IWorkflowScheduler.WorkflowIdKey, workflowId.ToString("D"))
-            .UsingJobData(IWorkflowScheduler.JobIdKey, jobId.ToString("D"))
+            .UsingJobData(IWorkflowScheduler.JobIdKey, activationId.ToString("D"))
+            .UsingJobData(IWorkflowScheduler.IndexKey, index.ToString(CultureInfo.InvariantCulture))
+            .UsingJobData(IWorkflowScheduler.CronKey, cron)
             .Build();
 
-    private static ITrigger BuildTrigger(JobKey jobKey, Guid jobId, DateTime nextUtc) =>
+    private static ITrigger BuildTrigger(
+        JobKey jobKey, Guid workflowId, Guid activationId, int index, DateTime nextUtc) =>
         TriggerBuilder.Create()
-            .WithIdentity(TriggerKeyFor(jobId))
+            .WithIdentity(TriggerKeyFor(workflowId, activationId, index))
             .ForJob(jobKey)
             .StartAt(new DateTimeOffset(nextUtc, TimeSpan.Zero))
             // No repeat: the fire arms its own successor, so a fire time missed while the process was

@@ -109,7 +109,7 @@ internal sealed class ApplyStopHandler : IQueueMessageHandler
                     // than only once the mark is read: the mark only keeps the definition resolvable
                     // for outcomes already in flight, and the job is what would otherwise keep
                     // dispatching new work.
-                    await _scheduler.UnscheduleAsync(entry.JobId, ct).ConfigureAwait(false);
+                    await _scheduler.UnscheduleWorkflowAsync(m.WorkflowId, ct).ConfigureAwait(false);
 
                     // False here would mean a concurrent delivery marked it between the read above and
                     // this call. Nothing more to do in that case — the other delivery logged it — and

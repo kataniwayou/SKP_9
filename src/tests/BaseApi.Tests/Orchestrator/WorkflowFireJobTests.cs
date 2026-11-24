@@ -600,7 +600,7 @@ public sealed class WorkflowFireJobTests
 
         await h.Build().Execute(h.Context(W, h.JobId));
 
-        Assert.Equal((W, h.JobId, EveryHour), Assert.Single(h.Scheduler.Rescheduled));
+        Assert.Equal((W, h.JobId, 0, EveryHour), Assert.Single(h.Scheduler.Rescheduled));
     }
 
     // ---------------------------------------------------------------------------------------

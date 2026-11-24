@@ -80,7 +80,7 @@ public sealed class WorkflowActivator(
         // could forget to make.
         if (store.TryGetActive(workflowId, out var held))
         {
-            await scheduler.UnscheduleAsync(held.JobId, ct).ConfigureAwait(false);
+            await scheduler.UnscheduleWorkflowAsync(workflowId, ct).ConfigureAwait(false);
         }
 
         var jobId = Guid.NewGuid();
@@ -90,7 +90,7 @@ public sealed class WorkflowActivator(
         // decision with whoever reads the root, and that is this method.
         if (definition.Cron is { } cron)
         {
-            await scheduler.ScheduleAsync(workflowId, jobId, cron, ct).ConfigureAwait(false);
+            await scheduler.ScheduleAsync(workflowId, jobId, index: 0, cron, ct).ConfigureAwait(false);
         }
 
         // Names for the records this workflow is about to produce, in one read. A REFRESH, not a

@@ -125,10 +125,10 @@ public sealed class ApplyHandlerTests
 
         // LiveJobCount alone is a net count: it cannot tell teardown-then-apply from a broken order
         // that happens to net the same. The call sequence pins the order the test's name promises —
-        // the second activation's UnscheduleAsync (of the first job) must land between the two
+        // the second activation's UnscheduleWorkflowAsync must land between the two
         // ScheduleAsync calls, not after both.
         Assert.Equal(
-            new[] { "ScheduleAsync", "UnscheduleAsync", "ScheduleAsync" }, h.Scheduler.Calls);
+            new[] { "ScheduleAsync", "UnscheduleWorkflowAsync", "ScheduleAsync" }, h.Scheduler.Calls);
     }
 
     [Fact]
@@ -175,7 +175,7 @@ public sealed class ApplyHandlerTests
 
         // Spec section 7.3 states the sequence as "unschedule the stored jobId, then drop it from the
         // active set". Neither Calls nor LiveJobCount can see that order — the mark is not a scheduler
-        // call, so it is invisible to both. Sampling the store's own state from inside UnscheduleAsync
+        // call, so it is invisible to both. Sampling the store's own state from inside UnscheduleWorkflowAsync
         // is what makes the order observable: if unschedule genuinely ran first, the workflow is still
         // active at that instant.
         var workflowStillActiveAtUnschedule = false;
@@ -190,7 +190,7 @@ public sealed class ApplyHandlerTests
         // The net count above is satisfied by exactly one schedule and one unschedule regardless of
         // their order; the sequence pins that the stop's teardown is the one and only scheduler call
         // to follow the start's.
-        Assert.Equal(new[] { "ScheduleAsync", "UnscheduleAsync" }, h.Scheduler.Calls);
+        Assert.Equal(new[] { "ScheduleAsync", "UnscheduleWorkflowAsync" }, h.Scheduler.Calls);
     }
 
     [Fact]

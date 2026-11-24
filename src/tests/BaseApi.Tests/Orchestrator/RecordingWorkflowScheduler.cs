@@ -13,15 +13,19 @@ namespace BaseApi.Tests.Orchestrator;
 /// </summary>
 internal sealed class RecordingWorkflowScheduler : IWorkflowScheduler
 {
-    public List<(Guid WorkflowId, Guid JobId, string Cron)> Scheduled { get; } = [];
+    public List<(Guid WorkflowId, Guid ActivationId, int Index, string Cron)> Scheduled { get; } = [];
 
-    public List<(Guid WorkflowId, Guid JobId, string Cron)> Rescheduled { get; } = [];
+    public List<(Guid WorkflowId, Guid ActivationId, int Index, string Cron)> Rescheduled { get; } = [];
 
+    /// <summary>The workflow ids <see cref="UnscheduleWorkflowAsync"/> was called with, in order.</summary>
     public List<Guid> Unscheduled { get; } = [];
 
     /// <summary>
     /// How many jobs this scheduler currently believes are live: every <see cref="ScheduleAsync"/>
-    /// call minus every <see cref="UnscheduleAsync"/> call. Deliberately a count, not a set kept in
+    /// call minus every <see cref="UnscheduleWorkflowAsync"/> call. That subtraction counts one job per
+    /// unscheduled workflow, so it holds only while each activation schedules a single job; a test of
+    /// a workflow with several entry-schedule groups should assert <see cref="Scheduled"/> and
+    /// <see cref="Unscheduled"/> directly. Deliberately a count, not a set kept in
     /// step by <see cref="Scheduled"/> and <see cref="Unscheduled"/> — those two lists already are
     /// the record of what happened, and a count derived from their lengths cannot fail to subtract a
     /// teardown the way a count that only ever increments could.
@@ -46,7 +50,7 @@ internal sealed class RecordingWorkflowScheduler : IWorkflowScheduler
     public List<string> Calls { get; } = [];
 
     /// <summary>
-    /// Invoked at the top of <see cref="UnscheduleAsync"/>, before it records anything. Opt-in and
+    /// Invoked at the top of <see cref="UnscheduleWorkflowAsync"/>, before it records anything. Opt-in and
     /// null by default, so every caller that does not set it is unaffected.
     /// <para>
     /// <b>Why this exists.</b> Ordering against a call this recorder makes is visible in
@@ -59,25 +63,25 @@ internal sealed class RecordingWorkflowScheduler : IWorkflowScheduler
     /// </summary>
     public Action? OnUnscheduleAsync { get; set; }
 
-    public Task ScheduleAsync(Guid workflowId, Guid jobId, string cron, CancellationToken ct)
+    public Task ScheduleAsync(Guid workflowId, Guid activationId, int index, string cron, CancellationToken ct)
     {
-        Scheduled.Add((workflowId, jobId, cron));
+        Scheduled.Add((workflowId, activationId, index, cron));
         Calls.Add(nameof(ScheduleAsync));
         return Task.CompletedTask;
     }
 
-    public Task RescheduleAsync(Guid workflowId, Guid jobId, string cron, CancellationToken ct)
+    public Task RescheduleAsync(Guid workflowId, Guid activationId, int index, string cron, CancellationToken ct)
     {
-        Rescheduled.Add((workflowId, jobId, cron));
+        Rescheduled.Add((workflowId, activationId, index, cron));
         Calls.Add(nameof(RescheduleAsync));
         return Task.CompletedTask;
     }
 
-    public Task UnscheduleAsync(Guid jobId, CancellationToken ct)
+    public Task UnscheduleWorkflowAsync(Guid workflowId, CancellationToken ct)
     {
         OnUnscheduleAsync?.Invoke();
-        Unscheduled.Add(jobId);
-        Calls.Add(nameof(UnscheduleAsync));
+        Unscheduled.Add(workflowId);
+        Calls.Add(nameof(UnscheduleWorkflowAsync));
         return Task.CompletedTask;
     }
 }

@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Collections.Specialized;
+using System.Globalization;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orchestrator.Scheduling;
 using Quartz;
@@ -9,7 +11,9 @@ using Xunit;
 namespace BaseApi.Tests.Orchestrator;
 
 /// <summary>
-/// The one test in this branch that proves a workflow fires more than once.
+/// The one test in this branch that proves a workflow fires more than once — and, since each
+/// workflow's jobs live in a Quartz group of their own, that two such groups chain side by side
+/// without either one's keys colliding with the other's.
 /// <para>
 /// <b>Every other scheduling test proves a half that never meets the other.</b>
 /// <c>WorkflowSchedulerTests</c> reads the job store back through a scheduler it deliberately never
@@ -34,7 +38,8 @@ namespace BaseApi.Tests.Orchestrator;
 /// </summary>
 public sealed class SelfReschedulingChainTests
 {
-    private static readonly Guid W = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid W1 = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid W2 = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
     /// <summary>Six fields, so the leading one is seconds: every second.</summary>
     private const string EverySecond = "* * * * * *";
@@ -57,40 +62,51 @@ public sealed class SelfReschedulingChainTests
     /// <summary>
     /// A stand-in for <c>WorkflowFireJob</c> reduced to the one thing this test is about: it arms its
     /// successor from inside its own fire, exactly where the real job does (spec §8.3, step 4).
+    /// <para>
+    /// One instance serves every job in the store, so it identifies the fire from the job-data map
+    /// rather than from fields — which is also what the real job does, and what proves the map the
+    /// scheduler wrote carries enough to re-arm the very job it came from.
+    /// </para>
     /// </summary>
-    private sealed class ReschedulingJob : IJob
+    private sealed class ReschedulingJob(IReadOnlyCollection<Guid> workflows) : IJob
     {
         private readonly TaskCompletionSource _settled =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        private IWorkflowScheduler? _scheduler;
-        private Guid _jobId;
-        private int _fires;
+        private readonly ConcurrentDictionary<Guid, List<DateTimeOffset>> _fires = new();
 
-        /// <summary>Completes on the second fire, or on the first fire that throws.</summary>
+        private IWorkflowScheduler? _scheduler;
+
+        /// <summary>Completes once every workflow has fired twice, or on the first fire that throws.</summary>
         public Task Settled => _settled.Task;
 
-        /// <summary>How many times Quartz has run this job.</summary>
-        public int Fires => Volatile.Read(ref _fires);
+        /// <summary>When each workflow's fires were scheduled for, in the order they ran.</summary>
+        public IReadOnlyDictionary<Guid, List<DateTimeOffset>> Fires => _fires;
 
         /// <summary>What a fire threw, if one did. Null is what a working chain leaves behind.</summary>
         public Exception? Failure { get; private set; }
 
-        public void Arm(IWorkflowScheduler scheduler, Guid jobId)
-        {
-            _scheduler = scheduler;
-            _jobId = jobId;
-        }
+        public void Arm(IWorkflowScheduler scheduler) => _scheduler = scheduler;
 
         public async Task Execute(IJobExecutionContext context)
         {
-            var count = Interlocked.Increment(ref _fires);
+            var map = context.MergedJobDataMap;
+            var workflowId = Guid.Parse(map.GetString(IWorkflowScheduler.WorkflowIdKey)!);
+            var activationId = Guid.Parse(map.GetString(IWorkflowScheduler.JobIdKey)!);
+            var index = int.Parse(map.GetString(IWorkflowScheduler.IndexKey)!, CultureInfo.InvariantCulture);
+            var cron = map.GetString(IWorkflowScheduler.CronKey)!;
+
+            var fires = _fires.GetOrAdd(workflowId, _ => []);
+            lock (fires)
+            {
+                fires.Add(context.ScheduledFireTimeUtc ?? context.FireTimeUtc);
+            }
 
             try
             {
                 // Inside the fire, before anything else, which is the case the type remarks on
                 // WorkflowScheduler are about — and the case its own tests could not reach.
-                await _scheduler!.RescheduleAsync(W, _jobId, EverySecond, CancellationToken.None);
+                await _scheduler!.RescheduleAsync(workflowId, activationId, index, cron, CancellationToken.None);
             }
             catch (Exception ex)
             {
@@ -99,15 +115,23 @@ public sealed class SelfReschedulingChainTests
                 return;
             }
 
-            if (count >= 2)
+            if (workflows.All(w => _fires.TryGetValue(w, out var f) && Count(f) >= 2))
             {
                 _settled.TrySetResult();
+            }
+        }
+
+        private static int Count(List<DateTimeOffset> fires)
+        {
+            lock (fires)
+            {
+                return fires.Count;
             }
         }
     }
 
     [Fact]
-    public async Task AFireArmsItsOwnSuccessorSoTheWorkflowKeepsFiring()
+    public async Task EachWorkflowGroupFiresAndArmsItsOwnSuccessor()
     {
         // A unique instance name, as WorkflowSchedulerTests uses and for the same reason:
         // StdSchedulerFactory publishes into a process-wide repository keyed by that name.
@@ -116,11 +140,11 @@ public sealed class SelfReschedulingChainTests
             ["quartz.scheduler.instanceName"] = "chain-" + Guid.NewGuid().ToString("N"),
             ["quartz.jobStore.type"] = "Quartz.Simpl.RAMJobStore, Quartz",
             ["quartz.threadPool.type"] = "Quartz.Simpl.DefaultThreadPool, Quartz",
-            ["quartz.threadPool.maxConcurrency"] = "1",
+            ["quartz.threadPool.maxConcurrency"] = "2",
         });
 
         var scheduler = await factory.GetScheduler(TestContext.Current.CancellationToken);
-        var job = new ReschedulingJob();
+        var job = new ReschedulingJob([W1, W2]);
         scheduler.JobFactory = new FixedJobFactory(job);
 
         // The real clock, not a fake one: the trigger this schedules is fired by Quartz's own timer
@@ -129,19 +153,21 @@ public sealed class SelfReschedulingChainTests
         var sut = new WorkflowScheduler<ReschedulingJob>(
             factory, TimeProvider.System, NullLogger<WorkflowScheduler<ReschedulingJob>>.Instance);
 
-        var jobId = Guid.NewGuid();
-        job.Arm(sut, jobId);
+        job.Arm(sut);
 
         await scheduler.Start(TestContext.Current.CancellationToken);
 
         try
         {
-            await sut.ScheduleAsync(W, jobId, EverySecond, CancellationToken.None);
+            // Two groups, one job each, and the same index in both, so a key that dropped its group
+            // would collide on the second schedule.
+            await sut.ScheduleAsync(W1, Guid.NewGuid(), 0, EverySecond, CancellationToken.None);
+            await sut.ScheduleAsync(W2, Guid.NewGuid(), 0, EverySecond, CancellationToken.None);
 
-            // Two fires a second apart, so twenty seconds is a wide margin on a loaded machine and
-            // still a bound — a chain that stops after one fire ends the wait rather than hanging the
-            // run. WhenAny rather than WaitAsync so that a stopped chain is reported by the assertions
-            // below, which say what happened, instead of by a timeout, which does not.
+            // Two fires a second apart per workflow, so twenty seconds is a wide margin on a loaded
+            // machine and still a bound — a chain that stops after one fire ends the wait rather than
+            // hanging the run. WhenAny rather than WaitAsync so that a stopped chain is reported by
+            // the assertions below, which say what happened, instead of by a timeout, which does not.
             await Task.WhenAny(
                 job.Settled,
                 Task.Delay(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken));
@@ -152,11 +178,23 @@ public sealed class SelfReschedulingChainTests
                 waitForJobsToComplete: true, TestContext.Current.CancellationToken);
         }
 
-        // Asserted before the count, because it names the cause. A throw out of RescheduleAsync from
+        // Asserted before the counts, because it names the cause. A throw out of RescheduleAsync from
         // inside a fire is the shape the failure would take if a completed trigger were already gone
         // from the store: the reschedule finds no trigger to replace, re-adds a job whose key is still
         // taken, and Quartz swallows the result into a job exception nothing else would report.
         Assert.Null(job.Failure);
-        Assert.True(job.Fires >= 2, $"the chain stopped after {job.Fires} fire(s)");
+
+        foreach (var w in new[] { W1, W2 })
+        {
+            Assert.True(job.Fires.TryGetValue(w, out var fires), $"workflow {w} never fired");
+            DateTimeOffset[] times;
+            lock (fires)
+            {
+                times = [.. fires];
+            }
+
+            Assert.True(times.Length >= 2, $"workflow {w} stopped after {times.Length} fire(s)");
+            Assert.Equal(TimeSpan.FromSeconds(1), times[1] - times[0]);
+        }
     }
 }

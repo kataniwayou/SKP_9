@@ -311,8 +311,8 @@ public sealed class StartStopIdempotencyTests
         Assert.True(c.L1.TryGetActive(W, out var second));
         Assert.Equal(Shape(first.Definition), Shape(second.Definition));
         Assert.Equal(1, c.Scheduler.LiveJobCount);
-        Assert.Equal([first.JobId], c.Scheduler.Unscheduled);
-        Assert.Equal(["ScheduleAsync", "UnscheduleAsync", "ScheduleAsync"], c.Scheduler.Calls);
+        Assert.Equal([W], c.Scheduler.Unscheduled);
+        Assert.Equal(["ScheduleAsync", "UnscheduleWorkflowAsync", "ScheduleAsync"], c.Scheduler.Calls);
     }
 
     [Fact]
@@ -328,7 +328,7 @@ public sealed class StartStopIdempotencyTests
         Assert.True(c.L1.TryGetActive(W, out var entry));
         Assert.Equal([S1, S2], entry.Definition.Steps.Select(s => s.StepId));
         Assert.Equal(Cron, entry.Definition.Cron);
-        Assert.Equal([(W, entry.JobId, Cron)], c.Scheduler.Scheduled);
+        Assert.Equal([(W, entry.JobId, 0, Cron)], c.Scheduler.Scheduled);
     }
 
     [Fact]
@@ -355,7 +355,7 @@ public sealed class StartStopIdempotencyTests
         Assert.True(c.L1.TryGetIncludingStopped(W, out var marked));
         Assert.NotNull(marked.DeletedAt);
 
-        Assert.Equal([live.JobId], c.Scheduler.Unscheduled);
+        Assert.Equal([W], c.Scheduler.Unscheduled);
         Assert.Equal(0, c.Scheduler.LiveJobCount);
 
         // The stop takes the id out of the live set and nothing else: the store outlives it, so the

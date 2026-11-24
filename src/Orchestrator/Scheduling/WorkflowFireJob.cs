@@ -199,7 +199,7 @@ public sealed class WorkflowFireJob(
                 return;
             }
 
-            await scheduler.RescheduleAsync(workflowId, jobId, cron, context.CancellationToken)
+            await scheduler.RescheduleAsync(workflowId, jobId, index: 0, cron, context.CancellationToken)
                 .ConfigureAwait(false);
         }
     }

@@ -461,10 +461,12 @@ public sealed class HydrationServiceTests
         Assert.Single(h.Scheduler.Unscheduled);
         Assert.Equal(2, h.Scheduler.LiveJobCount);
 
-        // And the surviving job is the one L1 points at: what was torn down is the first pass's job,
-        // not the current one. A teardown that ran in the other order would leave these equal.
+        // And the surviving job is the one L1 points at: the teardown was of W1, and the schedule that
+        // followed it went out under the activation L1 now holds. A teardown that ran in the other
+        // order would have removed W1's whole group, current job included.
         Assert.True(h.Store.TryGetActive(W1, out var w1));
-        Assert.DoesNotContain(w1.JobId, h.Scheduler.Unscheduled);
+        Assert.Equal([W1], h.Scheduler.Unscheduled);
+        Assert.Equal(w1.JobId, h.Scheduler.Scheduled[1].ActivationId);
     }
 
     [Fact]
