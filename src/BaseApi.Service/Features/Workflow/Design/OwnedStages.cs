@@ -227,7 +227,7 @@ internal sealed class WorkflowStage : IDesignStage
             _mapper.Update(dto, entity);
             // entry, cache and assignment changes are junction-only: force the stamp, as the graph saver does
             _db.Entry(entity).Property(e => e.UpdatedAt).IsModified = true;
-            await WorkflowJunctions.SyncAsync(_db, run.WorkflowId, dto.EntryStepIds, dto.AssignmentIds, dto.CacheIds, replaceExisting: true, ct);
+            await WorkflowJunctions.SyncAsync(_db, run.WorkflowId, dto.EntryStepIds, entryCrons: null, dto.AssignmentIds, dto.CacheIds, replaceExisting: true, ct);
             // what the workflow listed before this save: what it lists now, and what the assignment stage unlinked
             change = await DescribeAsync(before, dto, oldEntry, oldCaches, [.. linked, .. run.UnlinkedAssignments.Where(id => !linked.Contains(id))], run.AssignmentNames, ct);
             return problems;

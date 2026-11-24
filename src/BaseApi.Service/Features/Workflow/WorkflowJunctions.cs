@@ -12,11 +12,16 @@ internal static class WorkflowJunctions
     /// <summary>
     /// Stages the workflow's junction rows. With <paramref name="replaceExisting"/> every stored row
     /// on all three junctions is removed first, so the arguments are the complete final state.
+    /// <para>
+    /// <paramref name="entryCrons"/> sets each entry row's own cron: a map is written exactly (a step not in it
+    /// gets none), and null keeps the cron of the removed row with the same step id, if any.
+    /// </para>
     /// </summary>
     internal static async Task SyncAsync(
         BaseDbContext db,
         Guid workflowId,
         IReadOnlyCollection<Guid> entryStepIds,
+        IReadOnlyDictionary<Guid, string>? entryCrons,
         IReadOnlyCollection<Guid>? assignmentIds,
         IReadOnlyCollection<Guid>? cacheIds,
         bool replaceExisting,
@@ -26,9 +31,19 @@ internal static class WorkflowJunctions
         var assignmentsSet = db.Set<WorkflowAssignments>();
         var cachesSet = db.Set<WorkflowCaches>();
 
+        Dictionary<Guid, string?> keptCrons = [];
+
         if (replaceExisting)
         {
             var existingEntrySteps = await entryStepsSet.Where(j => j.WorkflowId == workflowId).ToListAsync(ct);
+            if (entryCrons is null)
+            {
+                foreach (var row in existingEntrySteps)
+                {
+                    keptCrons[row.StepId] = row.CronExpression;
+                }
+            }
+
             if (existingEntrySteps.Count > 0)
             {
                 entryStepsSet.RemoveRange(existingEntrySteps);
@@ -50,7 +65,14 @@ internal static class WorkflowJunctions
         if (entryStepIds.Count > 0)
         {
             await entryStepsSet.AddRangeAsync(
-                entryStepIds.Select(stepId => new WorkflowEntrySteps { WorkflowId = workflowId, StepId = stepId }), ct);
+                entryStepIds.Select(stepId => new WorkflowEntrySteps
+                {
+                    WorkflowId = workflowId,
+                    StepId = stepId,
+                    CronExpression = entryCrons is null
+                        ? keptCrons.GetValueOrDefault(stepId)
+                        : entryCrons.GetValueOrDefault(stepId),
+                }), ct);
         }
 
         if (assignmentIds is { Count: > 0 })

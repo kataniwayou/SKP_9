@@ -15,4 +15,9 @@ public sealed class WorkflowEntrySteps
 {
     public Guid WorkflowId { get; set; }
     public Guid StepId { get; set; }
+
+    /// <summary>
+    /// This entry step's own schedule; null means it follows the workflow's <c>CronExpression</c>.
+    /// </summary>
+    public string? CronExpression { get; set; }
 }

@@ -1,5 +1,5 @@
 {
-  "etag": "6c4f53e0e4133a9d",
+  "etag": "61aa0c985c94264d",
   "entities": [
     {
       "table": "assignments",
@@ -228,6 +228,24 @@
               "conditional": false
             }
           ],
+          "values": null
+        },
+        {
+          "field": "boardX",
+          "column": "board_x",
+          "type": "number",
+          "nullable": true,
+          "storeType": "double precision",
+          "rules": [],
+          "values": null
+        },
+        {
+          "field": "boardY",
+          "column": "board_y",
+          "type": "number",
+          "nullable": true,
+          "storeType": "double precision",
+          "rules": [],
           "values": null
         }
       ],
@@ -644,6 +662,24 @@
               "name": "Never"
             }
           ]
+        },
+        {
+          "field": "boardX",
+          "column": "board_x",
+          "type": "number",
+          "nullable": true,
+          "storeType": "double precision",
+          "rules": [],
+          "values": null
+        },
+        {
+          "field": "boardY",
+          "column": "board_y",
+          "type": "number",
+          "nullable": true,
+          "storeType": "double precision",
+          "rules": [],
+          "values": null
         }
       ],
       "unique": []
@@ -800,6 +836,40 @@
               "kind": "code",
               "value": null,
               "message": "CronExpression must be a valid 5- or 6-field cron expression (e.g., '0 0 * * *' or '*/30 * * * * *').",
+              "conditional": true
+            }
+          ],
+          "values": null
+        },
+        {
+          "field": "boardX",
+          "column": "board_x",
+          "type": "number",
+          "nullable": true,
+          "storeType": "double precision",
+          "rules": [],
+          "values": null
+        },
+        {
+          "field": "boardY",
+          "column": "board_y",
+          "type": "number",
+          "nullable": true,
+          "storeType": "double precision",
+          "rules": [],
+          "values": null
+        },
+        {
+          "field": "entryCrons",
+          "column": null,
+          "type": "guid[]",
+          "nullable": true,
+          "storeType": null,
+          "rules": [
+            {
+              "kind": "code",
+              "value": null,
+              "message": null,
               "conditional": true
             }
           ],

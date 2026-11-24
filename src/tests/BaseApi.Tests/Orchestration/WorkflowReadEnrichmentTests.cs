@@ -142,4 +142,22 @@ public sealed class WorkflowReadEnrichmentTests : IAsyncLifetime
         Assert.Equal(2, after.EntryStepIds!.Count);
         Assert.Equal(2, after.AssignmentIds!.Count);
     }
+
+    [Fact]
+    public async Task EntryCronsAreReadBackAndEmptyWhenNone()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var created = await _service.CreateAsync(
+            new WorkflowCreateDto("wf-cron", "1.0.0", null, [_entryStep, _otherEntryStep], null, null, "0 * * * *",
+                EntryCrons: new Dictionary<Guid, string> { [_otherEntryStep] = "*/10 * * * * *" }), ct);
+
+        var read = await _service.GetByIdAsync(created.Id, ct);
+        var cron = Assert.Single(read.EntryCrons!);
+        Assert.Equal(_otherEntryStep, cron.Key);
+        Assert.Equal("*/10 * * * * *", cron.Value);
+
+        var bare = await _service.GetByIdAsync(_bare, ct);
+        Assert.NotNull(bare.EntryCrons);
+        Assert.Empty(bare.EntryCrons!);
+    }
 }

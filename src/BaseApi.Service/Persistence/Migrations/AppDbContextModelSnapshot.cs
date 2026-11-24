@@ -509,6 +509,11 @@ namespace BaseApi.Service.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("step_id");
 
+                    b.Property<string>("CronExpression")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("cron_expression");
+
                     b.HasKey("WorkflowId", "StepId")
                         .HasName("pk_workflow_entry_steps");
 

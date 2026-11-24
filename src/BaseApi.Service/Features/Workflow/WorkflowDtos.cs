@@ -23,7 +23,8 @@ public sealed record WorkflowCreateDto(
     List<Guid>? CacheIds,
     string? CronExpression,
     double? BoardX = null,
-    double? BoardY = null) : IBaseDto;
+    double? BoardY = null,
+    Dictionary<Guid, string>? EntryCrons = null) : IBaseDto;
 
 /// <summary>
 /// Update-side DTO. On update the existing rows in <i>all three</i> junctions for this workflow are
@@ -39,7 +40,8 @@ public sealed record WorkflowUpdateDto(
     List<Guid>? CacheIds,
     string? CronExpression,
     double? BoardX = null,
-    double? BoardY = null) : IBaseDto;
+    double? BoardY = null,
+    Dictionary<Guid, string>? EntryCrons = null) : IBaseDto;
 
 /// <summary>
 /// Read-side DTO returned to clients, carrying the id and the audit fields.
@@ -67,4 +69,5 @@ public sealed record WorkflowReadDto(
     string? CreatedBy,
     string? UpdatedBy,
     double? BoardX = null,
-    double? BoardY = null) : IBaseDto, IHasId;
+    double? BoardY = null,
+    Dictionary<Guid, string>? EntryCrons = null) : IBaseDto, IHasId;

@@ -53,6 +53,20 @@ public sealed class WorkflowCreateDtoValidator : AbstractValidator<WorkflowCreat
             .Must(BeValidStandardCron)
             .When(x => !string.IsNullOrWhiteSpace(x.CronExpression))
             .WithMessage("CronExpression must be a valid 5- or 6-field cron expression (e.g., '0 0 * * *' or '*/30 * * * * *').");
+
+        // Custom, not Must/WithMessage: the messages name the offending step, which only exists at validation time.
+        RuleFor(x => x.EntryCrons)
+            .Custom((crons, ctx) =>
+            {
+                foreach (var (stepId, cron) in crons!)
+                {
+                    if (ctx.InstanceToValidate.EntryStepIds is not { } entry || !entry.Contains(stepId))
+                        ctx.AddFailure(nameof(WorkflowCreateDto.EntryCrons), $"EntryCrons names step {stepId:D}, which is not an entry step.");
+                    else if (string.IsNullOrWhiteSpace(cron) || !BeValidStandardCron(cron))
+                        ctx.AddFailure(nameof(WorkflowCreateDto.EntryCrons), $"EntryCrons for step {stepId:D} must be a valid 5- or 6-field cron expression.");
+                }
+            })
+            .When(x => x.EntryCrons is { Count: > 0 });
     }
 
     /// <summary>
@@ -111,6 +125,20 @@ public sealed class WorkflowUpdateDtoValidator : AbstractValidator<WorkflowUpdat
             .Must(BeValidStandardCron)
             .When(x => !string.IsNullOrWhiteSpace(x.CronExpression))
             .WithMessage("CronExpression must be a valid 5- or 6-field cron expression (e.g., '0 0 * * *' or '*/30 * * * * *').");
+
+        // Custom, not Must/WithMessage: the messages name the offending step, which only exists at validation time.
+        RuleFor(x => x.EntryCrons)
+            .Custom((crons, ctx) =>
+            {
+                foreach (var (stepId, cron) in crons!)
+                {
+                    if (ctx.InstanceToValidate.EntryStepIds is not { } entry || !entry.Contains(stepId))
+                        ctx.AddFailure(nameof(WorkflowUpdateDto.EntryCrons), $"EntryCrons names step {stepId:D}, which is not an entry step.");
+                    else if (string.IsNullOrWhiteSpace(cron) || !BeValidStandardCron(cron))
+                        ctx.AddFailure(nameof(WorkflowUpdateDto.EntryCrons), $"EntryCrons for step {stepId:D} must be a valid 5- or 6-field cron expression.");
+                }
+            })
+            .When(x => x.EntryCrons is { Count: > 0 });
     }
 
     /// <summary>

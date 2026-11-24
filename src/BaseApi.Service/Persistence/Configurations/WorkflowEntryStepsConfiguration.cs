@@ -31,6 +31,10 @@ internal sealed class WorkflowEntryStepsConfiguration : IEntityTypeConfiguration
     {
         entity.HasKey(e => new { e.WorkflowId, e.StepId });
 
+        // Same bound as the workflow's own cron column.
+        entity.Property(e => e.CronExpression)
+            .HasMaxLength(120);
+
         entity.HasOne<WorkflowEntity>()
             .WithMany()
             .HasForeignKey(e => e.WorkflowId)

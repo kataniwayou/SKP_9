@@ -62,11 +62,66 @@ public sealed class JunctionHelperTests
             new WorkflowAssignments { WorkflowId = wf, AssignmentId = oldAsg });
         await db.SaveChangesAsync(ct);
 
-        await WorkflowJunctions.SyncAsync(db, wf, [newEntry], assignmentIds: null, cacheIds: [newCache], replaceExisting: true, ct);
+        await WorkflowJunctions.SyncAsync(db, wf, [newEntry], entryCrons: null, assignmentIds: null, cacheIds: [newCache], replaceExisting: true, ct);
         await db.SaveChangesAsync(ct);
 
         Assert.Equal([newEntry], await db.WorkflowEntrySteps.Where(j => j.WorkflowId == wf).Select(j => j.StepId).ToListAsync(ct));
         Assert.Empty(await db.WorkflowAssignments.Where(j => j.WorkflowId == wf).ToListAsync(ct));
         Assert.Equal([newCache], await db.WorkflowCaches.Where(j => j.WorkflowId == wf).Select(j => j.CacheId).ToListAsync(ct));
+    }
+
+    [Fact]
+    public async Task AGivenEntryCronsMapIsWrittenExactly()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = NewContext();
+        var wf = Guid.NewGuid();
+        var (a, b) = (Guid.NewGuid(), Guid.NewGuid());
+
+        await WorkflowJunctions.SyncAsync(db, wf, [a, b], new Dictionary<Guid, string> { [b] = "*/10 * * * * *" },
+            assignmentIds: null, cacheIds: null, replaceExisting: true, ct);
+        await db.SaveChangesAsync(ct);
+
+        var rows = await db.WorkflowEntrySteps.Where(j => j.WorkflowId == wf).ToListAsync(ct);
+        Assert.Null(rows.Single(r => r.StepId == a).CronExpression);
+        Assert.Equal("*/10 * * * * *", rows.Single(r => r.StepId == b).CronExpression);
+    }
+
+    [Fact]
+    public async Task NullEntryCronsKeepsCronsOfSurvivingEntriesOnly()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = NewContext();
+        var wf = Guid.NewGuid();
+        var (a, b) = (Guid.NewGuid(), Guid.NewGuid());
+        db.AddRange(
+            new WorkflowEntrySteps { WorkflowId = wf, StepId = a, CronExpression = "*/30 * * * * *" },
+            new WorkflowEntrySteps { WorkflowId = wf, StepId = b, CronExpression = "*/10 * * * * *" });
+        await db.SaveChangesAsync(ct);
+
+        await WorkflowJunctions.SyncAsync(db, wf, [a], entryCrons: null,
+            assignmentIds: null, cacheIds: null, replaceExisting: true, ct);
+        await db.SaveChangesAsync(ct);
+
+        var row = Assert.Single(await db.WorkflowEntrySteps.Where(j => j.WorkflowId == wf).ToListAsync(ct));
+        Assert.Equal(a, row.StepId);
+        Assert.Equal("*/30 * * * * *", row.CronExpression);
+    }
+
+    [Fact]
+    public async Task AnEmptyMapClearsEveryCron()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = NewContext();
+        var wf = Guid.NewGuid();
+        var a = Guid.NewGuid();
+        db.Add(new WorkflowEntrySteps { WorkflowId = wf, StepId = a, CronExpression = "*/30 * * * * *" });
+        await db.SaveChangesAsync(ct);
+
+        await WorkflowJunctions.SyncAsync(db, wf, [a], new Dictionary<Guid, string>(),
+            assignmentIds: null, cacheIds: null, replaceExisting: true, ct);
+        await db.SaveChangesAsync(ct);
+
+        Assert.Null((await db.WorkflowEntrySteps.SingleAsync(j => j.WorkflowId == wf, ct)).CronExpression);
     }
 }

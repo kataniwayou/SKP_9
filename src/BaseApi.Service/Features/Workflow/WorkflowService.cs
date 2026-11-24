@@ -47,6 +47,7 @@ public sealed class WorkflowService :
             DbContext,
             entity.Id,
             createDto?.EntryStepIds ?? updateDto?.EntryStepIds ?? new List<Guid>(),
+            createDto?.EntryCrons ?? updateDto?.EntryCrons,
             createDto?.AssignmentIds ?? updateDto?.AssignmentIds,
             createDto?.CacheIds ?? updateDto?.CacheIds,
             replaceExisting: updateDto is not null,
@@ -79,6 +80,8 @@ public sealed class WorkflowService :
             .ToListAsync(ct);
         var entryLookup = entryRows.GroupBy(j => j.WorkflowId)
             .ToDictionary(g => g.Key, g => g.Select(j => j.StepId).ToList());
+        var cronLookup = entryRows.Where(j => j.CronExpression is not null).GroupBy(j => j.WorkflowId)
+            .ToDictionary(g => g.Key, g => g.ToDictionary(j => j.StepId, j => j.CronExpression!));
 
         var assignmentRows = await DbContext.Set<WorkflowAssignments>().AsNoTracking()
             .Where(j => ids.Contains(j.WorkflowId))
@@ -99,6 +102,7 @@ public sealed class WorkflowService :
                 EntryStepIds = entryLookup.GetValueOrDefault(d.Id) ?? new List<Guid>(),
                 AssignmentIds = assignmentLookup.GetValueOrDefault(d.Id) ?? new List<Guid>(),
                 CacheIds = cacheLookup.GetValueOrDefault(d.Id) ?? new List<Guid>(),
+                EntryCrons = cronLookup.GetValueOrDefault(d.Id) ?? new Dictionary<Guid, string>(),
             })
             .ToList();
     }

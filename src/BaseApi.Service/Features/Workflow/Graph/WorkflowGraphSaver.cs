@@ -169,7 +169,7 @@ internal sealed class WorkflowGraphSaver : IWorkflowGraphSaver
             storedWorkflow.Layout = newLayout.GetRawText();
 
         await WorkflowJunctions.SyncAsync(
-            _db, workflowId, wf.EntryStepIds, assignmentIds, wf.CacheIds,
+            _db, workflowId, wf.EntryStepIds, entryCrons: null, assignmentIds, wf.CacheIds,
             replaceExisting: _db.Entry(storedWorkflow).State != EntityState.Added, ct);
 
         await _db.SaveChangesAsync(ct);
