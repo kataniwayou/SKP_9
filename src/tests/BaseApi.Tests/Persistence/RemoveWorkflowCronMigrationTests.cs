@@ -20,12 +20,13 @@ public sealed class RemoveWorkflowCronMigrationTests
     }
 
     [Fact]
-    public void MigrationCopiesTheWorkflowCronOntoEntriesWithoutOne()
+    public void MigrationCopiesANonBlankWorkflowCronOntoEntriesWithoutOne()
     {
         var up = Script(Previous, ThisOne);
 
         const string copy = "UPDATE workflow_entry_steps e SET cron_expression = w.cron_expression FROM workflows w " +
-                            "WHERE e.workflow_id = w.id AND e.cron_expression IS NULL AND w.cron_expression IS NOT NULL;";
+                            "WHERE e.workflow_id = w.id AND e.cron_expression IS NULL AND w.cron_expression IS NOT NULL " +
+                            "AND btrim(w.cron_expression) <> '';";
         const string drop = "ALTER TABLE workflows DROP COLUMN cron_expression;";
         var copyAt = up.IndexOf(copy, StringComparison.Ordinal);
         var dropAt = up.IndexOf(drop, StringComparison.Ordinal);

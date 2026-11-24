@@ -14,10 +14,11 @@ namespace BaseApi.Service.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // before the drop, or the crons are gone
+            // before the drop, or the crons are gone; a blank workflow cron is no schedule, so it is not copied
             migrationBuilder.Sql(
                 "UPDATE workflow_entry_steps e SET cron_expression = w.cron_expression FROM workflows w " +
-                "WHERE e.workflow_id = w.id AND e.cron_expression IS NULL AND w.cron_expression IS NOT NULL;");
+                "WHERE e.workflow_id = w.id AND e.cron_expression IS NULL AND w.cron_expression IS NOT NULL " +
+                "AND btrim(w.cron_expression) <> '';");
 
             migrationBuilder.DropColumn(
                 name: "cron_expression",
