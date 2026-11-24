@@ -10,4 +10,5 @@ namespace Messaging.Contracts.Projections;
 public sealed record WorkflowStoreProjection(
     [property: JsonPropertyName("entryStepIds")] List<Guid> EntryStepIds,
     [property: JsonPropertyName("cron")]         string? Cron,
-    [property: JsonPropertyName("steps")]        List<StepL1> Steps);
+    [property: JsonPropertyName("steps")]        List<StepL1> Steps,
+    [property: JsonPropertyName("entryCrons")]   Dictionary<Guid, string>? EntryCrons = null);

@@ -32,13 +32,16 @@ namespace Messaging.Contracts;
 /// name (see <see cref="EntityNames"/>). It rides this control message only, never a dispatch
 /// message. It is optional: a message published before it existed deserializes with null, and the
 /// workflow starts without names.</param>
+/// <param name="EntryCrons">Optional per-entry-step cron overrides. A step listed here fires on its own
+/// cron; the others use <see cref="Cron"/>. Null in a message published before it existed.</param>
 public sealed record WorkflowL1(
     Guid WorkflowId,
     List<Guid> EntryStepIds,
     string? Cron,
     List<StepL1> Steps,
     List<CacheL1> Caches,
-    Dictionary<Guid, string>? Names = null);
+    Dictionary<Guid, string>? Names = null,
+    Dictionary<Guid, string>? EntryCrons = null);
 
 /// <summary>
 /// One step of a <see cref="WorkflowL1"/> — the flat projection of a step plus its resolved payload
