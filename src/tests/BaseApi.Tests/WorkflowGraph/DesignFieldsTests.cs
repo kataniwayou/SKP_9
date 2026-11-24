@@ -33,6 +33,31 @@ public sealed class DesignFieldsTests
 
         Assert.Equal([new FieldError("cronExpression", "Unknown field 'cronExpression'.")], errors);
         Assert.Equal(("wf", "1.0.0", "d"), (dto.Name, dto.Version, dto.Description));
+
+        var created = CreateWorkflowStage.FieldsOf(new DesignNewWorkflowDto(F("""{"name":"wf","cronExpression":"0 0 * * *"}""")), errors = []);
+        Assert.Equal([new FieldError("cronExpression", "Unknown field 'cronExpression'.")], errors);
+        Assert.Equal("wf", created.Name);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"\"")]
+    [InlineData("\"  \"")]
+    public void TheDesignPathIgnoresANullCronExpression(string value)
+    {
+        // WorkflowStudio (out of scope, not redeployed) still sends the field, usually as null, on a new-workflow save
+        var stored = new WorkflowUpdateDto("wf", "1.0.0", "d", [Guid.NewGuid()], null, null);
+        var errors = new List<FieldError>();
+        var updated = DesignFields.Apply(stored, F($$"""{"cronExpression":{{value}}}"""), errors);
+
+        Assert.Empty(errors);
+        Assert.Equal(stored, updated);
+
+        var created = CreateWorkflowStage.FieldsOf(
+            new DesignNewWorkflowDto(F($$"""{"name":"orders","version":"1.0.0","description":null,"cronExpression":{{value}}}""")), errors);
+
+        Assert.Empty(errors);
+        Assert.Equal(("orders", "1.0.0", (string?)null), (created.Name, created.Version, created.Description));
     }
 
     [Fact]

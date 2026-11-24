@@ -26,10 +26,16 @@ internal static class DesignFields
                 "name" => dto with { Name = Text(v, key, errors) ?? "" },
                 "version" => dto with { Version = Text(v, key, errors) ?? "" },
                 "description" => dto with { Description = Text(v, key, errors) },
+                // a workflow has no cron (2026-11-24), but WorkflowStudio (out of scope, not redeployed) still sends the
+                // field, usually as null, on every new-workflow save: a null or blank one is ignored, any other is unknown
+                "cronExpression" when IsBlank(v) => dto,
                 _ => Unknown(dto, key, errors),
             };
         return dto;
     }
+
+    private static bool IsBlank(JsonElement v) =>
+        v.ValueKind == JsonValueKind.Null || (v.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(v.GetString()));
 
     public static StepUpdateDto Apply(StepUpdateDto dto, IReadOnlyDictionary<string, JsonElement>? fields, List<FieldError> errors)
     {
