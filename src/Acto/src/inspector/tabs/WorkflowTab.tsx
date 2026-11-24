@@ -4,9 +4,8 @@ import { removeEntries, setEntryCron, setWorkflowField, unlinkCaches } from '../
 import { assignmentsOf } from '../../design/payloads';
 import { useWorkflowStatus } from '../../live/LiveContext';
 import { payloadKeyCount } from '../../model/assignments';
-import type { Id } from '../../model/graph';
-import { scheduleSummary } from '../../model/scheduleSummary';
 import { cronText } from '../../model/cronText';
+import type { Id } from '../../model/graph';
 import { CronField, Ro, Row, Sec } from '../fields';
 import { EntityBase, LinkChip, locationText, metaOfRow, orNull, stepName, type Ctx } from './shared';
 
@@ -48,15 +47,14 @@ export function WorkflowTab({ state, edit, id, go }: Ctx & { id: Id }) {
         ))}
       </div>
       <Sec>Schedules</Sec>
-      <p className="in-note" data-testid="schedule-summary">{scheduleSummary(w)}</p>
       {w.entryStepIds.length === 0 ? <p className="none">No entry steps — draw an entry arrow to schedule this workflow.</p> : w.entryStepIds.map((sid) => {
         const own = w.entryCrons[sid] ?? null;
         const parsed = own ? cronText(own) : null;
         return (
           <div key={sid} data-testid={`schedule:${sid}`}>
             <div className="sec-sub">{stepName(state, sid)}</div>
-              <CronField key={`${id}:${sid}:cron`} value={own} placeholder="not scheduled"
-                onChange={(v) => edit((b) => setEntryCron(b, id, sid, orNull(v)), `entryCron:${id}:${sid}`)} />
+            <CronField key={`${id}:${sid}:cron`} value={own} placeholder="not scheduled"
+              onChange={(v) => edit((b) => setEntryCron(b, id, sid, orNull(v)), `entryCron:${id}:${sid}`)} />
             {parsed && <p className="in-note">{'text' in parsed ? parsed.text : own}</p>}
           </div>
         );

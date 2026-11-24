@@ -1,6 +1,6 @@
 import { conditionInfo, CONDITIONS } from '../model/entryConditions';
 import type { Id } from '../model/graph';
-import { distinctCrons } from '../model/scheduleSummary';
+import { distinctCrons, scheduleSummary } from '../model/scheduleSummary';
 import { reachOf, type BoardState } from './board';
 
 const FONT = "'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
@@ -241,22 +241,18 @@ export function diagramSvg(b: BoardState, workflowId: Id): string {
   }
 
   // the triangle and its cron badge
+  const cron = wf ? scheduleSummary(wf) : '⏱ not scheduled';
   const crons = wf ? distinctCrons(wf) : [];
-  const cron: string | null = crons.length === 0 ? null : crons.length === 1 ? crons[0]! : `${crons.length} schedules`;
   const reading = crons.length === 1 ? cronText(crons[0]!) : null;
   out.push(
     `<polygon points="${num(T.x)},${num(T.y)} ${num(T.x)},${num(T.y + T.h)} ${num(T.x + T.w)},${num(T.y + T.h / 2)}" fill="#EEF2FF" stroke="${TRI_STROKE}" stroke-width="2" stroke-linejoin="round"/>`,
     `<g data-part="cron">`,
     `<rect x="${num(B.x)}" y="${num(B.y)}" width="${B.w}" height="${B.h}" rx="8" ry="8" fill="#EEF2FF" stroke="#C7D2FE"/>`,
   );
-  if (cron) {
-    out.push(
-      `<text x="${num(B.x + B.w / 2)}" y="${num(B.y + (reading ? 17 : B.h / 2))}" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="600" font-family="${MONO}" fill="#3730A3">${esc(clip(cron, 17))}</text>`,
-    );
-    if (reading) out.push(`<text x="${num(B.x + B.w / 2)}" y="${num(B.y + 34)}" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#6366F1">${esc(clip(reading, 22))}</text>`);
-  } else {
-    out.push(`<text x="${num(B.x + B.w / 2)}" y="${num(B.y + B.h / 2)}" text-anchor="middle" dominant-baseline="central" font-size="12" font-style="italic" fill="#6366F1">manual start</text>`);
-  }
+  out.push(
+    `<text x="${num(B.x + B.w / 2)}" y="${num(B.y + (reading ? 17 : B.h / 2))}" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="600" font-family="${MONO}" fill="#3730A3">${esc(clip(cron, 17))}</text>`,
+  );
+  if (reading) out.push(`<text x="${num(B.x + B.w / 2)}" y="${num(B.y + 34)}" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#6366F1">${esc(clip(reading, 22))}</text>`);
   out.push('</g>');
 
   // a box: name header, a rule, then key/value rows (key left, value right in mono, both clipped to fit)

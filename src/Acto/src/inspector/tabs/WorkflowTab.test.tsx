@@ -18,7 +18,6 @@ describe('the Workflow tab schedules', () => {
     fireEvent.change(within(row('expand')).getByLabelText('Cron'), { target: { value: '*/10 * * * * *' } });
     expect(store.state().workflows.daily!.entryCrons).toEqual({ expand: '*/10 * * * * *' });
     expect(within(row('expand')).getByText(/10 seconds/i)).toBeTruthy();
-    expect(screen.getByTestId('schedule-summary')).toHaveTextContent('⏱ */10 * * * * *');
     expect(within(row('fetch')).queryByText(/seconds/i)).toBeNull();
     act(() => store.undo());
     expect(store.state().workflows.daily!.entryCrons).toEqual({});
