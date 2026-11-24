@@ -10,7 +10,7 @@ namespace BaseApi.Tests.Live;
 /// <summary>
 /// Entry-step crons against the real orchestrator: two entry steps of one workflow, each on its own
 /// cron (a workflow has no cron of its own), fire at their own rates, every fire under its own
-/// correlation id, and a stop silences both.
+/// correlation id, and a stop silences both. A workflow whose entry step has no cron starts and fires nothing.
 /// <para>
 /// <b>Self-contained.</b> The workflow and its two steps are created here and deleted in the
 /// <c>finally</c>. The only borrowed thing is a live processor: outcome-recorder by default, because it
@@ -121,6 +121,69 @@ public sealed class EntryCronLiveTests
         }
     }
 
+    /// <summary>
+    /// With no workflow cron left to fall back on, an entry step without a cron of its own is not scheduled:
+    /// the start is accepted, and nothing is dispatched for the workflow while it runs.
+    /// </summary>
+    [Fact]
+    public async Task AWorkflowWithNoEntryCronStartsAndDispatchesNothing()
+    {
+        RealStack.SkipUnlessEnabled();
+        var ct = TestContext.Current.CancellationToken;
+
+        using var http = new HttpClient { BaseAddress = new Uri(RealStack.BaseApiUrl), Timeout = TimeSpan.FromSeconds(20) };
+        var processorId = await FindProcessorAsync(http, ct);
+        var run = Guid.NewGuid().ToString("N")[..12];
+
+        Guid step = Guid.Empty, workflow = Guid.Empty;
+        var bodyCompleted = false;
+        try
+        {
+            step = await CreateAsync(http, "steps", Step($"nocron-s-{run}", processorId), ct);
+            workflow = await CreateAsync(http, "workflows", new
+            {
+                name = $"nocron-wf-{run}", version = "1.0.0", description = (string?)null,
+                entryStepIds = new[] { step }, assignmentIds = Array.Empty<Guid>(), cacheIds = Array.Empty<Guid>(),
+                entryCrons = new Dictionary<Guid, string>(),
+            }, ct);
+
+            using (var read = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/workflows/{workflow}", ct)))
+            {
+                Assert.False(read.RootElement.TryGetProperty("cronExpression", out _), "the workflow read still carries a cronExpression");
+                var crons = read.RootElement.TryGetProperty("entryCrons", out var c) && c.ValueKind == JsonValueKind.Object
+                    ? c.EnumerateObject().Count()
+                    : 0;
+                Assert.Equal(0, crons);
+            }
+
+            var started = DateTimeOffset.UtcNow;
+            await PostOrchestrationAsync(http, "start", workflow, ct);
+            await Task.Delay(TimeSpan.FromSeconds(30), ct);
+
+            await PostOrchestrationAsync(http, "stop", workflow, ct);
+            await Task.Delay(QuietFor, ct);
+            var quietEnd = DateTimeOffset.UtcNow;
+
+            var dispatches = await SettledDispatchesAsync(workflow, started, quietEnd, ct, settleOnEmpty: true);
+            var summary = string.Join("; ", dispatches.Select(d => $"{d.At:HH:mm:ss.fff} {d.StepId} {d.CorrelationId}"));
+            Assert.True(dispatches.Count == 0, $"a workflow with no entry cron dispatched {dispatches.Count} time(s): {summary}");
+            bodyCompleted = true;
+        }
+        finally
+        {
+            var problems = await CleanupAsync(workflow, [step]);
+            foreach (var problem in problems)
+            {
+                TestContext.Current.TestOutputHelper?.WriteLine($"cleanup: {problem}");
+            }
+
+            if (bodyCompleted && problems.Count > 0)
+            {
+                Assert.Fail($"the run passed but left rows behind: {string.Join("; ", problems)}");
+            }
+        }
+    }
+
     private static readonly TimeSpan CleanupBudget = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan CleanupRetry = TimeSpan.FromSeconds(2);
 
@@ -220,9 +283,10 @@ public sealed class EntryCronLiveTests
     /// <summary>
     /// This workflow's entry dispatches in the window, read until two polls agree. Ingest runs
     /// seconds behind, so one immediate query would undercount the last fires before the stop.
+    /// An empty result only settles when <paramref name="settleOnEmpty"/> says none is the expected answer.
     /// </summary>
     private static async Task<List<Dispatch>> SettledDispatchesAsync(
-        Guid workflow, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+        Guid workflow, DateTimeOffset from, DateTimeOffset to, CancellationToken ct, bool settleOnEmpty = false)
     {
         using var http = new HttpClient { BaseAddress = new Uri(ElasticUrl), Timeout = TimeSpan.FromSeconds(20) };
         var gte = from.AddSeconds(-5).ToUnixTimeMilliseconds();
@@ -261,7 +325,7 @@ public sealed class EntryCronLiveTests
                     s.GetProperty("attributes").GetProperty("CorrelationId").GetString()!))
                 .ToList();
 
-            if ((previous is not null && previous.Count == current.Count && current.Count > 0)
+            if ((previous is not null && previous.Count == current.Count && (current.Count > 0 || settleOnEmpty))
                 || DateTime.UtcNow > deadline)
             {
                 return current;
