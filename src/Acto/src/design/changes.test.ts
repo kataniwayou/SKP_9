@@ -18,6 +18,12 @@ describe('boardChanges', () => {
     expect(names(cs)).toEqual(['update workflows daily']);
     expect((cs[0]!.row as Record<string, unknown>).entryCrons).toEqual({ fetch: '*/10 * * * * *' });
   });
+  it('the save body trims an entry cron; a typed trailing space alone is no change', () => {
+    const cur = setEntryCron(b, 'daily', 'fetch', '  */10 * * * * *  ');
+    expect((boardChanges(b, cur)[0]!.row as Record<string, unknown>).entryCrons).toEqual({ fetch: '*/10 * * * * *' });
+    const saved = setEntryCron(b, 'daily', 'fetch', '0 0 * * * *');
+    expect(boardChanges(saved, setEntryCron(saved, 'daily', 'fetch', '0 0 * * * * '))).toEqual([]);
+  });
   it('nothing changed, nothing sent', () => expect(boardChanges(b, b)).toEqual([]));
 
   it('a deleted saved workflow is sent as delete workflows/<id> with its stamp, before its assignments [user, 2026-11-23]', () => {

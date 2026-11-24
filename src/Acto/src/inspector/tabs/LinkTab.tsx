@@ -45,7 +45,9 @@ function EntryCron({ state, edit, wf, step }: { state: BoardState; edit: Ctx['ed
     <>
       <CronField key={`${wf}:${step}:cron`} value={own} placeholder="not scheduled"
         onChange={(v) => edit((b) => setEntryCron(b, wf, step, orNull(v)), `entryCron:${wf}:${step}`)} />
-      {parsed && <p className="in-note sub">{'text' in parsed ? parsed.text : own}</p>}
+      {parsed && ('text' in parsed
+        ? <p className="in-note sub">{parsed.text}</p>
+        : <p className="in-note sub in-problem" role="alert">{parsed.problem}</p>)}
     </>
   );
 }

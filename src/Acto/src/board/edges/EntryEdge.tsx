@@ -18,7 +18,7 @@ export function EntryEdge({ id, data, selected, sourceX, sourceY, targetX, targe
       <path className="edge-hit" d={d} />
       <path className={`entry-line${running ? ' running' : ''}`} d={d} fill="none" markerEnd={`url(#${marker})`} />
       {/* beside the midpoint, on the side the curve leaves empty (below-left of a descending arrow, below-right of a rising one), and below the picked-state toolbar and multi-pick badge */}
-      {cron && <text className="entry-cron" x={targetY >= sourceY ? mx - 10 : mx + 10} y={my + 16} textAnchor={targetY >= sourceY ? 'end' : 'start'}>{`⏱ ${cron}`}</text>}
+      {cron && <text className="entry-cron" x={targetY >= sourceY ? mx - 10 : mx + 10} y={my + 16} textAnchor={targetY >= sourceY ? 'end' : 'start'}>{`⏱ ${cron.trim()}`}</text>}
       <EdgeExtras id={id} pick={pick} self={ghostKey ? { kind: 'ghost', key: ghostKey } : { kind: 'entry', workflowId, stepId }} selected={selected} x={mx} y={my - 4} />
     </g>
   );

@@ -32,6 +32,22 @@ describe('the Link tab', () => {
     fireEvent.change(presets, { target: { value: '5' } });
     expect(store.state().workflows.daily!.entryCrons).toEqual({});
   });
+  it('a cron typed key by key keeps its spaces, one undo step; an unreadable one says so', () => {
+    const store = openOn('Link', [ENTRY]);
+    const typed = '*/10 * * * * *';
+    for (let n = 1; n <= typed.length; n++) fireEvent.change(screen.getByLabelText('Cron'), { target: { value: typed.slice(0, n) } });
+    expect(screen.getByLabelText('Cron')).toHaveValue(typed);
+    expect(store.state().workflows.daily!.entryCrons).toEqual({ fetch: typed });
+    act(() => store.undo());
+    expect(store.state().workflows.daily!.entryCrons).toEqual({});
+    expect(store.canUndo()).toBe(false);
+    fireEvent.change(screen.getByLabelText('Cron'), { target: { value: '*/10 * *' } });
+    expect(screen.getByLabelText('Cron')).toHaveValue('*/10 * *');
+    expect(screen.getByRole('alert').textContent).toMatch(/has 3/);
+    expect(screen.getByRole('alert').getAttribute('role')).toBe('alert');
+    expect(screen.getByRole('alert').className).toContain('in-problem');
+    expect(screen.getByRole('alert').textContent).not.toBe('*/10 * *');
+  });
   it('aWireHasNoCronField', () => {
     openOn('Link', [{ kind: 'wire', from: 'fetch', to: 'expand' }]);
     expect(screen.queryByLabelText('Cron')).toBeNull();

@@ -58,7 +58,7 @@ test('a triangle\'s Inspector: name, version, the cron of its entry step with it
   await expect(inspector(page)).toContainText(/5 minutes/i);
   await field(page, 'Cron').fill('not a cron');
   // the reading under the field, not the row: the row also holds the presets list, whose options say "Every …"
-  await expect(inspector(page).getByTestId(`schedule:${id.s1}`).locator('.in-note')).toHaveText('not a cron');
+  await expect(inspector(page).getByTestId(`schedule:${id.s1}`).locator('.in-note')).toHaveText(/has 3/);
   await field(page, 'Cron').fill('');
   await expect(field(page, 'Cron')).toHaveAttribute('placeholder', 'not scheduled');
   await expect(inspector(page).getByTestId(`schedule:${id.s1}`).locator('.in-note')).toHaveCount(0);

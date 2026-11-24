@@ -95,6 +95,13 @@ describe('entry crons', () => {
     expect(setEntryCron(set, 'daily', 'fetch', '  ').workflows.daily.entryCrons).toEqual({});
     expect(setEntryCron(set, 'daily', 'fetch', null).workflows.daily.entryCrons).toEqual({});
   });
+  it('keeps the text exactly as typed, spaces included; only an all-blank text clears', () => {
+    let s = board();
+    for (const n of [...'*/10 * * * * *'].keys()) s = setEntryCron(s, 'daily', 'fetch', cron.slice(0, n + 1));
+    expect(s.workflows.daily.entryCrons).toEqual({ fetch: cron });
+    expect(setEntryCron(s, 'daily', 'fetch', '*/10 ').workflows.daily.entryCrons).toEqual({ fetch: '*/10 ' });
+    expect(setEntryCron(s, 'daily', 'fetch', ' 	 ').workflows.daily.entryCrons).toEqual({});
+  });
   it('setting the cron of a step that is not an entry changes nothing', () => {
     const b = board();
     expect(setEntryCron(b, 'daily', 'lonely', cron)).toBe(b);

@@ -55,7 +55,9 @@ export function WorkflowTab({ state, edit, id, go }: Ctx & { id: Id }) {
             <div className="sec-sub">{stepName(state, sid)}</div>
             <CronField key={`${id}:${sid}:cron`} value={own} placeholder="not scheduled"
               onChange={(v) => edit((b) => setEntryCron(b, id, sid, orNull(v)), `entryCron:${id}:${sid}`)} />
-            {parsed && <p className="in-note">{'text' in parsed ? parsed.text : own}</p>}
+            {parsed && ('text' in parsed
+        ? <p className="in-note">{parsed.text}</p>
+        : <p className="in-note in-problem" role="alert">{parsed.problem}</p>)}
           </div>
         );
       })}

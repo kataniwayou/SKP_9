@@ -12,6 +12,22 @@ const WF = [{ kind: 'workflow' as const, id: 'daily' }];
 const row = (sid: string) => screen.getByTestId(`schedule:${sid}`);
 
 describe('the Workflow tab schedules', () => {
+  it('a cron typed key by key keeps its spaces, one undo step; an unreadable one says so', () => {
+    const store = openOn('Workflow', WF, twoEntries());
+    const typed = '*/10 * * * * *';
+    for (let n = 1; n <= typed.length; n++) fireEvent.change(within(row('expand')).getByLabelText('Cron'), { target: { value: typed.slice(0, n) } });
+    expect(within(row('expand')).getByLabelText('Cron')).toHaveValue(typed);
+    expect(store.state().workflows.daily!.entryCrons).toEqual({ expand: typed });
+    act(() => store.undo());
+    expect(store.state().workflows.daily!.entryCrons).toEqual({});
+    expect(store.canUndo()).toBe(false);
+    fireEvent.change(within(row('expand')).getByLabelText('Cron'), { target: { value: '*/10 * *' } });
+    expect(within(row('expand')).getByLabelText('Cron')).toHaveValue('*/10 * *');
+    expect(within(row('expand')).getByRole('alert').textContent).toMatch(/has 3/);
+    expect(within(row('expand')).getByRole('alert').getAttribute('role')).toBe('alert');
+    expect(within(row('expand')).getByRole('alert').className).toContain('in-problem');
+    expect(within(row('expand')).getByRole('alert').textContent).not.toBe('*/10 * *');
+  });
   it('theSchedulesSectionEditsEachEntrysCron', () => {
     const store = openOn('Workflow', WF, twoEntries());
     expect(within(row('fetch')).getByLabelText('Cron')).toHaveProperty('placeholder', 'not scheduled');

@@ -49,22 +49,22 @@ async function twoEntries(prefix: string, crons: Record<string, string> = {}) {
 
 // ---- 1. design: the Inspector's Cron fields -------------------------------------------------------------------------------
 
-test('design: a Schedules row reads 5- and 6-field crons and presets, shows an unreadable cron as typed, clears to not scheduled; Link tab and Schedules agree; undo and redo', async ({ page }) => {
+test('design: a Schedules row reads 5- and 6-field crons and presets, says an unreadable cron cannot be read, clears to not scheduled; Link tab and Schedules agree; undo and redo', async ({ page }) => {
   const { w, a, b } = await twoEntries('e2e-cval-ui');
   await openAt(page);
   await selectWorkflowAlone(page, w);
   await expect(cronIn(page, a)).toHaveAttribute('placeholder', 'not scheduled');
   await expect(note(page, a), 'no cron: no reading').toHaveCount(0);
 
-  // an unreadable cron: the note under the field repeats the text (no reading), and the arrow carries it as typed
+  // an unreadable cron: the note under the field says it cannot be read, and the arrow carries it as typed
   await cronIn(page, a).fill('not a cron');
-  await expect(note(page, a)).toHaveText('not a cron');
+  await expect(note(page, a)).toHaveText('A cron expression has 5 fields, or 6 with seconds first; this has 3');
   await expect(label(page, w, a)).toHaveText('⏱ not a cron');
   // four and seven fields: no reading either
   await cronIn(page, a).fill('*/10 * * *');
-  await expect(note(page, a)).toHaveText('*/10 * * *');
+  await expect(note(page, a)).toHaveText('A cron expression has 5 fields, or 6 with seconds first; this has 4');
   await cronIn(page, a).fill('* * * * * * *');
-  await expect(note(page, a)).toHaveText('* * * * * * *');
+  await expect(note(page, a)).toHaveText('A cron expression has 5 fields, or 6 with seconds first; this has 7');
 
   // five fields (seconds 0), six fields (seconds first), a preset — each read in words
   await cronIn(page, a).fill('*/5 * * * *');
@@ -105,7 +105,7 @@ test('design: a Schedules row reads 5- and 6-field crons and presets, shows an u
   await expect(field(page, 'Cron')).toHaveValue('*/15 * * * * *');
   await expect(inspector(page)).toContainText(/15 seconds/i);
   await field(page, 'Cron').fill('not a cron either');
-  await expect(inspector(page).locator('.in-note.sub')).toHaveText('not a cron either');
+  await expect(inspector(page).locator('.in-note.sub')).toHaveText('A cron expression has 5 fields, or 6 with seconds first; this has 4');
   await field(page, 'Cron').fill('*/45 * * * * *');
   await expect(label(page, w, b)).toHaveText('⏱ */45 * * * * *');
   await selectWorkflowAlone(page, w);
@@ -132,23 +132,22 @@ test('design: a Schedules row reads 5- and 6-field crons and presets, shows an u
   await expect(saveButton(page)).toContainText('Save ·');
 });
 
-// BUG (found 2026-11-24): every keystroke goes through setEntryCron, which trims the value, and the field shows the trimmed value —
-// so a space typed at the end is dropped before the next field is typed: "*/10 * * * * *" typed key by key becomes "*/10*****".
-// Only a paste (or Playwright's fill) gets a multi-field cron in. Same in the Link tab. Expected to fail until Acto is fixed.
+// Regression (fixed 2026-11-24): the Cron field used to trim on every keystroke, so a typed space was lost ("*/10 * * * * *" -> "*/10*****").
 test('design: a cron typed key by key keeps its spaces, in a Schedules row and in the Link tab', async ({ page }) => {
-  test.fail(true, 'BUG: the Cron field trims on every keystroke, so a typed space is lost ("*/10 * * * * *" -> "*/10*****")');
   const { w, a, b } = await twoEntries('e2e-cval-keys');
   await openAt(page);
   await selectWorkflowAlone(page, w);
   await cronIn(page, a).click();
   await cronIn(page, a).pressSequentially('*/10 * * * * *', { delay: 40 });
   const schedulesTyped = await cronIn(page, a).inputValue();
+  await expect(note(page, a)).toContainText(/10 seconds/i);
   await clickEmptyBoard(page);
   await pickEdge(page, entryEdge(page, w, b));
   await tab(page, 'Link').click();
   await field(page, 'Cron').click();
   await field(page, 'Cron').pressSequentially('*/30 * * * * *', { delay: 40 });
   const linkTyped = await field(page, 'Cron').inputValue();
+  await expect(inspector(page).locator('.in-note.sub')).toContainText(/30 seconds/i);
   test.info().annotations.push({ type: 'typed key by key', description: JSON.stringify({ schedules: schedulesTyped, link: linkTyped }) });
   expect({ schedules: schedulesTyped, link: linkTyped }, 'what a designer types is what the field holds').toEqual({ schedules: '*/10 * * * * *', link: '*/30 * * * * *' });
 });

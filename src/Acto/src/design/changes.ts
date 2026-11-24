@@ -14,7 +14,12 @@ const KEY: Record<Table, string> = {
   workflows: 'workflow', steps: 'step', caches: 'cache', assignments: 'assignment', processors: 'processor', schemas: 'schema',
 };
 
-const minusStamp = (r: object) => ({ ...r, updatedAt: undefined });
+const trimCrons = (crons: Record<string, string>) => Object.fromEntries(Object.entries(crons).map(([k, v]) => [k, v.trim()]));
+/** The row without its stamp, and with entry crons trimmed: a typed trailing space is no change. */
+const minusStamp = (r: object) => {
+  const c = (r as { entryCrons?: Record<string, string> }).entryCrons;
+  return { ...r, updatedAt: undefined, ...(c ? { entryCrons: trimCrons(c) } : {}) };
+};
 
 /** Created: unstamped and not in base. Updated: in cur and (absent from base, or different). Deleted: in base, gone from cur. */
 function diffTable(table: Table, base: BoardState, cur: BoardState): Diff {
@@ -37,7 +42,7 @@ const loc = (at: { x: number; y: number } | null) => ({ boardX: at ? at.x : null
 
 const workflowBody = (w: WorkflowRow): WorkflowCreateDto & WorkflowUpdateDto => ({
   name: w.name, version: w.version, description: w.description,
-  entryStepIds: [...w.entryStepIds], entryCrons: { ...w.entryCrons }, assignmentIds: [...w.assignmentIds], cacheIds: [...w.cacheIds], ...loc(w.at),
+  entryStepIds: [...w.entryStepIds], entryCrons: trimCrons(w.entryCrons), assignmentIds: [...w.assignmentIds], cacheIds: [...w.cacheIds], ...loc(w.at),
 });
 const stepBody = (s: StepRow): StepCreateDto & StepUpdateDto => ({
   name: s.name, version: s.version, description: s.description, processorId: s.processorId as string,

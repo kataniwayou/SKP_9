@@ -79,12 +79,13 @@ export function removeEntries(b: BoardState, pairs: [Id, Id][]): BoardState {
   return { ...b, workflows };
 }
 
-/** The cron of one entry arrow; null or blank clears it. A step that is not an entry of the workflow changes nothing. */
+/** The cron of one entry arrow, exactly as typed; null or an all-blank text clears it. A step that is not an entry of the workflow changes nothing. */
 export function setEntryCron(b: BoardState, wf: Id, step: Id, cron: string | null): BoardState {
   const w = b.workflows[wf];
   if (!w || !w.entryStepIds.includes(step)) return b;
-  const text = cron?.trim() ?? '';
-  const entryCrons = text === '' ? without(w.entryCrons, [step]) : { ...w.entryCrons, [step]: text };
+  // kept as typed (spaces included) while editing; it is trimmed where it leaves Acto (the save body) and where crons are compared
+  const text = cron ?? '';
+  const entryCrons = text.trim() === '' ? without(w.entryCrons, [step]) : { ...w.entryCrons, [step]: text };
   return { ...b, workflows: { ...b.workflows, [wf]: { ...w, entryCrons } } };
 }
 

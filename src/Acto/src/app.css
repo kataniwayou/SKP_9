@@ -61,6 +61,8 @@
 .in-note.sub, .in-problem.sub { margin: 3px 0 8px 98px; }
 .in-lock { color: var(--warn-ink); font-weight: 600; margin-top: 0; }
 .in-problem { color: var(--danger); font-size: 12px; margin: 2px 0; }
+.in-note.in-problem { color: var(--danger); margin: -4px 0 10px; }
+.in-note.sub.in-problem { margin: 3px 0 8px 98px; }
 .in-act { margin: 0 0 10px; }
 .in-create { display: block; margin: 0 0 10px; }
 .in-picks { list-style: none; padding: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12.5px; margin: 4px 0 12px; }
