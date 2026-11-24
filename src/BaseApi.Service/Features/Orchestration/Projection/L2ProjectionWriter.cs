@@ -69,7 +69,7 @@ internal sealed class L2ProjectionWriter
         var stale = await FindOwnLeftoversAsync(db, workflowId, workflowKey, caches).ConfigureAwait(false);
         stale.AddRange(await FindRemovedStepsAsync(db, workflowKey, steps, ct).ConfigureAwait(false));
 
-        var store = new WorkflowStoreProjection(workflow.EntryStepIds ?? new List<Guid>(), workflow.Cron, steps);
+        var store = new WorkflowStoreProjection(workflow.EntryStepIds ?? new List<Guid>(), workflow.Cron, steps, workflow.EntryCrons);
 
         var batch = db.CreateBatch();
         var writes = new List<Task>();

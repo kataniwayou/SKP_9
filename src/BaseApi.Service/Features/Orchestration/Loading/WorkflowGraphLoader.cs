@@ -123,7 +123,14 @@ internal sealed class WorkflowGraphLoader : IWorkflowGraphLoader
             var entry = entryLookup.GetValueOrDefault(wf.Id) ?? new List<Guid>();
             var asg   = assignmentLookup.GetValueOrDefault(wf.Id) ?? new List<Guid>();
             var cch   = cacheLookup.GetValueOrDefault(wf.Id) ?? new List<Guid>();
-            snapshot.Workflows[wf.Id] = dto with { EntryStepIds = entry, AssignmentIds = asg, CacheIds = cch };
+            // Null, not empty, when no entry row carries a cron: the projection of an unchanged workflow stays as it was.
+            var crons = entryRows.Where(j => j.WorkflowId == wf.Id && j.CronExpression is not null)
+                .ToDictionary(j => j.StepId, j => j.CronExpression!);
+            snapshot.Workflows[wf.Id] = dto with
+            {
+                EntryStepIds = entry, AssignmentIds = asg, CacheIds = cch,
+                EntryCrons = crons.Count > 0 ? crons : null,
+            };
         }
 
         return snapshot;

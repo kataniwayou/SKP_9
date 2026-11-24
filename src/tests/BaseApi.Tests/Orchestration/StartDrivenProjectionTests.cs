@@ -49,7 +49,7 @@ public sealed class StartDrivenProjectionTests
                              CancellationToken.None);
     }
 
-    private static WorkflowL1 Def(Guid w, Guid[] steps, List<CacheL1>? caches = null)
+    private static WorkflowL1 Def(Guid w, Guid[] steps, List<CacheL1>? caches = null, Dictionary<Guid, string>? entryCrons = null)
     {
         // The workflow and every step are named, exactly as ToDefinition does; no processor.
         var names = new Dictionary<Guid, string> { [w] = "chain_1.0.0-aaaa-111111111111" };
@@ -64,7 +64,8 @@ public sealed class StartDrivenProjectionTests
             Cron: "0 0/5 * * * ?",
             Steps: steps.Select(s => new StepL1(s, 4, P, "{}", [])).ToList(),
             Caches: caches ?? [],
-            Names: names);
+            Names: names,
+            EntryCrons: entryCrons);
     }
 
     private static CacheL1 Whitelist(params string[] keys) =>
@@ -83,6 +84,30 @@ public sealed class StartDrivenProjectionTests
         Assert.Equal([S1], store.EntryStepIds);
         Assert.Equal([S1, S2], store.Steps.Select(s => s.StepId));
         Assert.Equal("[\"sk-whitelist\"]", h.L2.HashValue(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.RootsField));
+    }
+
+    [Fact]
+    public async Task AStartProjectsEntryCrons()
+    {
+        var h = new Harness();
+
+        await h.StartAsync(Def(W, [S1, S2], entryCrons: new() { [S1] = "*/10 * * * * *" }));
+
+        var store = JsonSerializer.Deserialize<WorkflowStoreProjection>(
+            h.L2.HashValue(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.StoreField)!, MessagingJson.Options)!;
+        Assert.Equal("*/10 * * * * *", store.EntryCrons![S1]);
+    }
+
+    [Fact]
+    public async Task AWorkflowWithoutEntryCronsProjectsNoMap()
+    {
+        var h = new Harness();
+
+        await h.StartAsync(Def(W, [S1, S2]));
+
+        var store = JsonSerializer.Deserialize<WorkflowStoreProjection>(
+            h.L2.HashValue(L2ProjectionKeys.Workflow(W), L2ProjectionKeys.StoreField)!, MessagingJson.Options)!;
+        Assert.Null(store.EntryCrons);
     }
 
     [Fact]

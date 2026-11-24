@@ -239,7 +239,8 @@ public sealed class OrchestrationService
             Cron: workflow.CronExpression,
             Steps: steps,
             Caches: caches,
-            Names: names);
+            Names: names,
+            EntryCrons: workflow.EntryCrons);
     }
 
     /// <summary>
