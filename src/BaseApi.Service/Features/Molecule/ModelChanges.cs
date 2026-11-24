@@ -144,13 +144,7 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
         var id = made.TryGetValue(change.Id, out var real) ? real : change.Id;
         // a row naming a row created earlier in this run names it by the id BaseApi gave it
         JsonElement? row = change.Row;
-        if (row is { ValueKind: JsonValueKind.Object } r && made.Count > 0)
-        {
-            var text = r.GetRawText();
-            foreach (var (client, given) in made) text = text.Replace($"\"{client:D}\"", $"\"{given:D}\"", StringComparison.OrdinalIgnoreCase);
-            using var doc = JsonDocument.Parse(text);
-            row = doc.RootElement.Clone();
-        }
+        if (row is { ValueKind: JsonValueKind.Object } r && made.Count > 0) row = RemapClientIds(r, made);
         if (!tables.TryGetValue(change.Table ?? "", out var entity))
             throw new ModelChangeException($"'{change.Table}' is not an entity table; one of: {string.Join(", ", tables.Keys.Order(StringComparer.Ordinal))}.");
         var service = _services.GetRequiredService(entity.Service);
@@ -190,6 +184,18 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
             default:
                 throw new ModelChangeException($"'{change.Op}' is not a change: create, update or delete.");
         }
+    }
+
+    /// <summary>
+    /// The row with every quoted client id of a row created earlier in this run replaced by the id BaseApi gave it. It is a
+    /// text replace of the quoted id, so it reaches ids used as JSON object keys (a workflow's entryCrons) as well as values.
+    /// </summary>
+    internal static JsonElement RemapClientIds(JsonElement row, IReadOnlyDictionary<Guid, Guid> made)
+    {
+        var text = row.GetRawText();
+        foreach (var (client, given) in made) text = text.Replace($"\"{client:D}\"", $"\"{given:D}\"", StringComparison.OrdinalIgnoreCase);
+        using var doc = JsonDocument.Parse(text);
+        return doc.RootElement.Clone();
     }
 
     private static async Task Invoke(MethodInfo method, object target, params object?[] args)
