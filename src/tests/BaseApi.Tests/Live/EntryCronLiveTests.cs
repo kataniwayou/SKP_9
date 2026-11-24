@@ -123,7 +123,8 @@ public sealed class EntryCronLiveTests
 
     /// <summary>
     /// With no workflow cron left to fall back on, an entry step without a cron of its own is not scheduled:
-    /// the start is accepted, and nothing is dispatched for the workflow while it runs.
+    /// the start is accepted, and nothing is dispatched for the workflow while it runs. The zero is only read
+    /// once ES shows some workflow dispatched in the last few minutes, so a dead ingest cannot pass it.
     /// </summary>
     [Fact]
     public async Task AWorkflowWithNoEntryCronStartsAndDispatchesNothing()
@@ -165,6 +166,14 @@ public sealed class EntryCronLiveTests
             var quietEnd = DateTimeOffset.UtcNow;
 
             var dispatches = await SettledDispatchesAsync(workflow, started, quietEnd, ct, settleOnEmpty: true);
+
+            // Positive control: zero only means something if ingest is alive. Some workflow on the stack
+            // (the user's chain fires every minute) must have logged an entry dispatch in the last few minutes.
+            var anyRecent = await RecentDispatchesOfAnyWorkflowAsync(quietEnd - RecentWindow, quietEnd, ct);
+            Assert.True(anyRecent > 0,
+                $"no workflow logged \"{EntryDispatched}\" in the {RecentWindow.TotalMinutes} minutes before {quietEnd:HH:mm:ss}: "
+                + "ingest looks dead, so the zero below proves nothing");
+
             var summary = string.Join("; ", dispatches.Select(d => $"{d.At:HH:mm:ss.fff} {d.StepId} {d.CorrelationId}"));
             Assert.True(dispatches.Count == 0, $"a workflow with no entry cron dispatched {dispatches.Count} time(s): {summary}");
             bodyCompleted = true;
@@ -334,6 +343,31 @@ public sealed class EntryCronLiveTests
             previous = current;
             await Task.Delay(TimeSpan.FromSeconds(5), ct);
         }
+    }
+
+    private static readonly TimeSpan RecentWindow = TimeSpan.FromMinutes(5);
+
+    /// <summary>How many entry dispatches ANY workflow logged in the window (a read-only count).</summary>
+    private static async Task<long> RecentDispatchesOfAnyWorkflowAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+    {
+        using var http = new HttpClient { BaseAddress = new Uri(ElasticUrl), Timeout = TimeSpan.FromSeconds(20) };
+        var query = $$$"""
+        {
+          "size": 0,
+          "track_total_hits": true,
+          "query": {"bool": {"filter": [
+            {"term": {"attributes.{OriginalFormat}": "{{{EntryDispatched}}}"}},
+            {"range": {"@timestamp": {"gte": {{{from.ToUnixTimeMilliseconds()}}}, "lte": {{{to.ToUnixTimeMilliseconds()}}}, "format": "epoch_millis"} } }
+          ]} }
+        }
+        """;
+        using var response = await http.PostAsync($"/{LogIndex}/_search",
+            new StringContent(query, Encoding.UTF8, "application/json"), ct);
+        var text = await response.Content.ReadAsStringAsync(ct);
+        Assert.True(response.IsSuccessStatusCode, $"elasticsearch search returned {(int)response.StatusCode}: {text}");
+
+        using var body = JsonDocument.Parse(text);
+        return body.RootElement.GetProperty("hits").GetProperty("total").GetProperty("value").GetInt64();
     }
 
     /// <summary>The collector writes @timestamp as epoch milliseconds with a fraction, as a string.</summary>
