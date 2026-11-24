@@ -1,6 +1,6 @@
 using BaseApi.Service;
 using BaseApi.Service.Features.Cache;
-using BaseApi.Tests.Molecule;
+using BaseApi.Tests.Support;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Xunit;
@@ -25,7 +25,7 @@ public sealed class CacheModelTests
 {
     // Npgsql-configured, never connected: table and column names are relational conventions, which the
     // InMemory provider does not apply.
-    private static AppDbContext NewContext() => ModelRelationsTests.NpgsqlModelContext();
+    private static AppDbContext NewContext() => NpgsqlModel.Context();
 
     private static IEntityType Items(AppDbContext db) => db.Model.FindEntityType(typeof(CacheItem))!;
 

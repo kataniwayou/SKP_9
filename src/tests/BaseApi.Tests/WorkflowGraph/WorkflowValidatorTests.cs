@@ -2,7 +2,6 @@ using System.Text.Json;
 using BaseApi.Core.Exceptions;
 using BaseApi.Service.Features.Orchestration;
 using BaseApi.Service.Features.Step;
-using BaseApi.Service.Features.Workflow.Graph;
 using FluentValidation;
 using Messaging.Contracts.Projections;
 using Microsoft.Extensions.Time.Testing;
@@ -59,27 +58,24 @@ public sealed class WorkflowValidatorTests
         var a = await h.StepAsync(await h.ProcessorAsync(), "a", b);
         var wf = await h.WorkflowAsync("wf", [a]);
 
-        var result = await h.Validator(RedisStub.AllLive(h.Clock)).ValidateAsync(wf, null, h.Ct);
+        var result = await h.Validator(RedisStub.AllLive(h.Clock)).ValidateAsync(wf, h.Ct);
 
         Assert.True(result.Valid);
         Assert.Empty(result.Problems);
     }
 
     [Fact]
-    public async Task ADraftThatCreatesACycleReportsItWithoutThrowing()
+    public async Task AStoredCycleIsReportedWithoutThrowing()
     {
         await using var h = new GraphHarness();
         var proc = await h.ProcessorAsync();
         var b = await h.StepAsync(proc, "b");
         var a = await h.StepAsync(proc, "a", b);
+        h.Db.StepNextSteps.Add(new StepNextSteps { StepId = b, NextStepId = a });
+        await h.Db.SaveChangesAsync(h.Ct);
         var wf = await h.WorkflowAsync("wf", [a]);
-        var loaded = await h.Reader.ReadAsync(wf, h.Ct);
-        var bLoaded = loaded.Steps.Single(s => s.Id == b);
-        h.Forget();
 
-        var draft = GraphHarness.Request([a], loaded.Workflow.UpdatedAt,
-            steps: [new GraphStepDto(b, bLoaded.UpdatedAt, "b", "1.0.0", null, proc, [a], StepEntryCondition.PreviousCompleted)]);
-        var result = await h.Validator(RedisStub.AllLive(h.Clock)).ValidateAsync(wf, draft, h.Ct);
+        var result = await h.Validator(RedisStub.AllLive(h.Clock)).ValidateAsync(wf, h.Ct);
 
         Assert.False(result.Valid);
         var cycle = Assert.Single(result.Problems);
@@ -98,45 +94,24 @@ public sealed class WorkflowValidatorTests
         var asg = await h.AssignmentAsync(child, "{}");
         var wf = await h.WorkflowAsync("wf", [parent], [asg]);
 
-        var result = await h.Validator(RedisStub.NoneLive()).ValidateAsync(wf, null, h.Ct);
+        var result = await h.Validator(RedisStub.NoneLive()).ValidateAsync(wf, h.Ct);
 
         Assert.False(result.Valid);
         Assert.Equal(["schemaEdge", "payloadConfigSchema", "processorLiveness", "processorLiveness"], result.Problems.Select(p => p.Gate));
     }
 
     [Fact]
-    public async Task ADraftForAWorkflowThatDoesNotExistYetIsValidated()
+    public async Task NoSuchWorkflowIsNotFound()
     {
         await using var h = new GraphHarness();
-        var proc = await h.ProcessorAsync();
-        var (wf, a) = (Guid.NewGuid(), Guid.NewGuid());
-
-        var result = await h.Validator(RedisStub.AllLive(h.Clock)).ValidateAsync(wf,
-            GraphHarness.Request([a], steps: [GraphHarness.NewStep(a, proc, "a", a)]), h.Ct);
-
-        Assert.Equal("cycle", Assert.Single(result.Problems).Gate);
-    }
-
-    [Fact]
-    public async Task NoDraftAndNoSuchWorkflowIsNotFound()
-    {
-        await using var h = new GraphHarness();
-        await Assert.ThrowsAsync<NotFoundException>(() => h.Validator(RedisStub.AllLive(h.Clock)).ValidateAsync(Guid.NewGuid(), null, h.Ct));
+        await Assert.ThrowsAsync<NotFoundException>(() => h.Validator(RedisStub.AllLive(h.Clock)).ValidateAsync(Guid.NewGuid(), h.Ct));
     }
 
     [Fact]
     public async Task AnEmptyIdIsAValidationFailure()
     {
         await using var h = new GraphHarness();
-        await Assert.ThrowsAsync<ValidationException>(() => h.Validator(RedisStub.AllLive(h.Clock)).ValidateAsync(Guid.Empty, null, h.Ct));
-    }
-
-    [Fact]
-    public async Task ADraftWithFieldErrorsIsStillA400()
-    {
-        await using var h = new GraphHarness();
-        await Assert.ThrowsAsync<ValidationException>(() =>
-            h.Validator(RedisStub.AllLive(h.Clock)).ValidateAsync(Guid.NewGuid(), GraphHarness.Request(entry: []), h.Ct));
+        await Assert.ThrowsAsync<ValidationException>(() => h.Validator(RedisStub.AllLive(h.Clock)).ValidateAsync(Guid.Empty, h.Ct));
     }
 
     [Fact]
@@ -147,7 +122,7 @@ public sealed class WorkflowValidatorTests
         var a = await h.StepAsync(await h.ProcessorAsync());
         var wf = await h.WorkflowAsync("wf", [a]);
 
-        var ex = await Assert.ThrowsAsync<RedisConnectionException>(() => h.Validator(RedisStub.Down()).ValidateAsync(wf, null, h.Ct));
+        var ex = await Assert.ThrowsAsync<RedisConnectionException>(() => h.Validator(RedisStub.Down()).ValidateAsync(wf, h.Ct));
 
         Assert.Equal("ValidateLiveness", ex.Data["redisOp"]);
     }

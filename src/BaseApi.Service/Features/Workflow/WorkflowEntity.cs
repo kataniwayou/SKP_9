@@ -52,28 +52,15 @@ public sealed class WorkflowEntity : BaseEntity
     public string? Diagram { get; set; }
 
     /// <summary>
-    /// The SKP Studio canvas layout as JSON, or null when the workflow has never been laid out.
-    /// <para>
-    /// <b>Positions only, never graph facts.</b> It holds where the sphere, steps, caches, parked blocks
-    /// and junctions are drawn. What exists is decided by the tables on every load; an id in here that
-    /// no longer exists is ignored by the editor. The server treats it as opaque and checks only that
-    /// it is a JSON object within the size cap (<see cref="Graph.WorkflowLayout"/>).
-    /// </para>
-    /// <para>
-    /// Like <see cref="Diagram"/>, it is absent from every DTO and travels only through the dedicated
-    /// layout and graph actions on <c>WorkflowsController</c>.
-    /// </para>
+    /// The canvas layout WorkflowStudio stored as JSON, or null. Studio and its layout endpoints were removed on
+    /// 2026-11-24; nothing writes it any more. It is kept for <c>LocationFill</c>, which seeds a board location for
+    /// an item that has none from the layout it was last drawn at. Absent from every DTO.
     /// </summary>
     public string? Layout { get; set; }
 
     /// <summary>
-    /// The SKP Studio's stored design (plan 8) as JSON, or null when the real entities hold the design.
-    /// <para>
-    /// It is the last <c>PUT /workflows/{id}/design</c> body without its layout (the layout goes to
-    /// <see cref="Layout"/>), stored whether or not the design could be applied, and emptied in the same
-    /// transaction that applies it. The server reads it only to return it; last write wins.
-    /// </para>
-    /// <para>Like <see cref="Layout"/>, it is absent from every DTO.</para>
+    /// WorkflowStudio's stored design (the last <c>PUT /workflows/{id}/design</c> body), or null. The design save went
+    /// with Studio on 2026-11-24: nothing reads or writes it now; the column is kept so no data is dropped unasked.
     /// </summary>
     public string? Design { get; set; }
 }

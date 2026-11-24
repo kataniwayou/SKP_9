@@ -15,7 +15,7 @@ public sealed class RemoveWorkflowCronMigrationTests
 
     private static string Script(string from, string to)
     {
-        using var db = Molecule.ModelRelationsTests.NpgsqlModelContext();
+        using var db = Support.NpgsqlModel.Context();
         return db.GetService<IMigrator>().GenerateScript(from, to);
     }
 

@@ -3,7 +3,6 @@ using BaseApi.Core.Persistence;
 using BaseApi.Service.Features.Orchestration.Loading;
 using BaseApi.Service.Features.Orchestration.Validation;
 using BaseApi.Service.Features.Workflow;
-using BaseApi.Service.Features.Workflow.Graph;
 using FluentValidation;
 using FluentValidation.Results;
 using Microsoft.EntityFrameworkCore;
@@ -12,30 +11,24 @@ using StackExchange.Redis;
 namespace BaseApi.Service.Features.Orchestration;
 
 /// <summary>
-/// The dry run behind <c>POST /workflows/{id}/validate</c>: apply the draft with the real graph saver,
-/// load the result with the loader the start path uses, collect every gate's problems in the start's
-/// locked order, and roll everything back.
+/// The dry run behind <c>POST /workflows/{id}/validate</c>: load the stored workflow with the loader the
+/// start path uses, collect every gate's problems in the start's locked order, and roll back.
 /// <para>
-/// <b>Liveness runs after the rollback.</b> Inside the dry run only the save (or existence check), the
+/// <b>Liveness runs after the rollback.</b> Inside the dry run only the existence check, the
 /// snapshot load and the three snapshot gates run. The liveness gate probes Redis once the transaction
 /// is rolled back, so no row locks or pooled connection are held across Redis round trips. The snapshot
 /// is in memory, so it outlives the transaction.
 /// </para>
 /// <para>
 /// <b>Nothing escapes.</b> This never builds a start definition, never sends to the broker and never
-/// writes Redis; its only Redis access is the read-only liveness probe. The draft's database writes live
-/// inside <see cref="IGraphDryRun"/>, which always rolls back.
-/// </para>
-/// <para>
-/// <b>Request-shape failures keep the save's statuses.</b> A draft with field errors is a 400, a stale
-/// draft a 409, an FK violation a 422, exactly as <c>PUT /graph</c> would answer; only the gates' own
-/// problems are returned as data.
+/// writes Redis; its only Redis access is the read-only liveness probe. The reads run inside
+/// <see cref="IGraphDryRun"/>, which always rolls back. (A draft body, saved with the graph saver inside the
+/// dry run, went with WorkflowStudio on 2026-11-24.)
 /// </para>
 /// </summary>
 internal sealed class WorkflowValidator : IWorkflowValidator
 {
     private readonly BaseDbContext _db;
-    private readonly IWorkflowGraphSaver _saver;
     private readonly IWorkflowGraphLoader _loader;
     private readonly CycleDetector _cycles;
     private readonly SchemaEdgeValidator _schemaEdges;
@@ -45,7 +38,6 @@ internal sealed class WorkflowValidator : IWorkflowValidator
 
     public WorkflowValidator(
         BaseDbContext db,
-        IWorkflowGraphSaver saver,
         IWorkflowGraphLoader loader,
         CycleDetector cycles,
         SchemaEdgeValidator schemaEdges,
@@ -54,7 +46,6 @@ internal sealed class WorkflowValidator : IWorkflowValidator
         IGraphDryRun dryRun)
     {
         _db = db;
-        _saver = saver;
         _loader = loader;
         _cycles = cycles;
         _schemaEdges = schemaEdges;
@@ -63,27 +54,23 @@ internal sealed class WorkflowValidator : IWorkflowValidator
         _dryRun = dryRun;
     }
 
-    public Task<WorkflowValidationDto> ValidateAsync(Guid workflowId, GraphSaveRequest? draft, CancellationToken ct)
+    public Task<WorkflowValidationDto> ValidateAsync(Guid workflowId, CancellationToken ct)
     {
         if (workflowId == Guid.Empty)
         {
             throw new ValidationException(new[] { new ValidationFailure(nameof(workflowId), "WorkflowId must not be Guid.Empty.") });
         }
 
-        return ValidateCoreAsync(workflowId, draft, ct);
+        return ValidateCoreAsync(workflowId, ct);
     }
 
-    private async Task<WorkflowValidationDto> ValidateCoreAsync(Guid workflowId, GraphSaveRequest? draft, CancellationToken ct)
+    private async Task<WorkflowValidationDto> ValidateCoreAsync(Guid workflowId, CancellationToken ct)
     {
         // Only the database work runs inside the dry-run transaction; it hands the in-memory snapshot
         // and the snapshot gates' problems out, and the liveness probe runs after the rollback.
         var (snapshot, problems) = await _dryRun.RunAsync(async c =>
         {
-            if (draft is not null)
-            {
-                await _saver.SaveAsync(workflowId, draft, c);
-            }
-            else if (!await _db.Set<WorkflowEntity>().AsNoTracking().AnyAsync(w => w.Id == workflowId, c))
+            if (!await _db.Set<WorkflowEntity>().AsNoTracking().AnyAsync(w => w.Id == workflowId, c))
             {
                 throw new NotFoundException(nameof(WorkflowEntity), workflowId);
             }

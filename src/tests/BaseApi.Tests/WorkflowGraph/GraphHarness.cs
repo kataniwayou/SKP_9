@@ -8,11 +8,8 @@ using BaseApi.Service.Features.Processor;
 using BaseApi.Service.Features.Schema;
 using BaseApi.Service.Features.Step;
 using BaseApi.Service.Features.Workflow;
-using BaseApi.Service.Features.Workflow.Design;
-using BaseApi.Service.Features.Workflow.Graph;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using BaseApi.Service.Features.Orchestration.Validation;
@@ -23,8 +20,7 @@ namespace BaseApi.Tests.WorkflowGraph;
 /// <summary>
 /// An InMemory context with the real audit interceptor on a fake clock, so <c>UpdatedAt</c> moves
 /// exactly as it does in production and the concurrency tests can step time deliberately. InMemory
-/// enforces no foreign keys and no transactions; what depends on Postgres is proven by
-/// <c>WorkflowGraphLiveTests</c>.
+/// enforces no foreign keys and no transactions; what depends on Postgres is proven by the live tests.
 /// </summary>
 internal sealed class GraphHarness : IAsyncDisposable
 {
@@ -32,15 +28,10 @@ internal sealed class GraphHarness : IAsyncDisposable
 
     // One root for the whole test run (each harness has its own database name): a root per harness would make
     // EF build a service provider per harness and trip ManyServiceProvidersCreatedWarning after twenty.
-    private static readonly InMemoryDatabaseRoot SharedRoot = new();
-
-    /// <summary>Shared by every context of this harness, so a second context (the design store's) sees the same rows.</summary>
-    public InMemoryDatabaseRoot Root => SharedRoot;
+    private static readonly Microsoft.EntityFrameworkCore.Storage.InMemoryDatabaseRoot Root = new();
 
     public FakeTimeProvider Clock { get; } = new(new DateTimeOffset(2026, 10, 5, 12, 0, 0, TimeSpan.Zero));
     public AppDbContext Db { get; }
-    public IWorkflowGraphReader Reader { get; }
-    public IWorkflowGraphSaver Saver { get; }
     public IWorkflowGraphLoader Loader { get; }
 
     public GraphHarness()
@@ -54,31 +45,8 @@ internal sealed class GraphHarness : IAsyncDisposable
             Db, NullLogger<WorkflowGraphSnapshot>.Instance,
             new SchemaEntityMapper(), new ProcessorEntityMapper(), new StepEntityMapper(),
             new AssignmentEntityMapper(), new WorkflowEntityMapper(), new CacheEntityMapper());
-        Reader = new WorkflowGraphReader(Db, Loader);
-        Saver = new WorkflowGraphSaver(
-            Db, Reader,
-            new WorkflowUpdateDtoValidator(),
-            new StepCreateDtoValidator(), new StepUpdateDtoValidator(),
-            new WorkflowEntityMapper(), new StepEntityMapper(),
-            new GraphAssignmentResolver(Db, new AssignmentCreateDtoValidator()),
-            new GraphSchemaEditor(Db, new SchemaCreateDtoValidator()));
     }
 
-
-    public static GraphSaveRequest Request(
-        Guid[] entry,
-        DateTime? workflowUpdatedAt = null,
-        GraphStepDto[]? steps = null,
-        GraphAssignmentIntent[]? assignments = null,
-        GraphSchemaEdit[]? schemaEdits = null,
-        string? layout = null,
-        string name = "wf") =>
-        new(new GraphWorkflowDto(name, "1.0.0", null, workflowUpdatedAt, entry.ToList(), null),
-            steps?.ToList(), assignments?.ToList(), schemaEdits?.ToList(),
-            layout is null ? null : System.Text.Json.JsonDocument.Parse(layout).RootElement.Clone());
-
-    public static GraphStepDto NewStep(Guid id, Guid processorId, string name = "step", params Guid[] next) =>
-        new(id, null, name, "1.0.0", null, processorId, next.ToList(), StepEntryCondition.PreviousCompleted);
 
     public CancellationToken Ct => Xunit.TestContext.Current.CancellationToken;
 
@@ -153,12 +121,11 @@ internal sealed class GraphHarness : IAsyncDisposable
 
     /// <summary>
     /// The dry-run validator over this harness. InMemory has no transactions, so the dry run is a pass
-    /// through here: what the draft writes stays written, and these tests assert problems only.
-    /// WorkflowValidationLiveTests proves on Postgres that nothing persists.
+    /// through here; these tests assert problems only.
     /// </summary>
     public IWorkflowValidator Validator(IConnectionMultiplexer redis) =>
         new WorkflowValidator(
-            Db, Saver, Loader,
+            Db, Loader,
             new CycleDetector(), new SchemaEdgeValidator(), new PayloadConfigSchemaValidator(),
             new ProcessorLivenessValidator(redis, Clock),
             new PassThroughDryRun(Db));
@@ -169,68 +136,6 @@ internal sealed class GraphHarness : IAsyncDisposable
         {
             try { return await work(ct); }
             finally { db.ChangeTracker.Clear(); }
-        }
-    }
-
-    /// <summary>
-    /// The design syncer over this harness. InMemory has no transactions, so the stages' writes are not
-    /// rolled back here: these tests assert the answer and what an applied design wrote;
-    /// WorkflowDesignLiveTests proves the rollback on Postgres.
-    /// </summary>
-    public IWorkflowDesignSyncer Syncer(IReadOnlyList<IDesignStage>? stages = null) =>
-        new WorkflowDesignSyncer(Db, new HarnessDesignStore(Root, _name), new PassThroughDesignTransactions(), stages ?? AllStages());
-
-    /// <summary>Every stage, in the spec's order (plan 8 §4.3); each stage task adds its own.</summary>
-    public IReadOnlyList<IDesignStage> AllStages() =>
-    [
-        new CreateWorkflowStage(Db, new WorkflowUpdateDtoValidator()),
-        new SchemaStage(Db, new SchemaCreateDtoValidator(), new SchemaEntityMapper()),
-        new ProcessorStage(Db, new ProcessorUpdateDtoValidator(), new ProcessorEntityMapper()),
-        new CacheStage(Db, new CacheUpdateDtoValidator(), new CacheCreateDtoValidator(), new CacheEntityMapper()),
-        new StepStage(Db, new StepUpdateDtoValidator(), new StepCreateDtoValidator(), new StepEntityMapper()),
-        new WireStage(Db, new StepUpdateDtoValidator()),
-        new AssignmentStage(Db, new AssignmentCreateDtoValidator(), new AssignmentUpdateDtoValidator(), new AssignmentEntityMapper()),
-        new WorkflowStage(Db, new WorkflowUpdateDtoValidator(), new WorkflowEntityMapper()),
-        new DeleteStage(Db),
-    ];
-
-    /// <summary>The store through a second context with no audit interceptor, as ExecuteUpdate bypasses it in production.</summary>
-    private sealed class HarnessDesignStore(InMemoryDatabaseRoot root, string name) : IDesignStore
-    {
-        private AppDbContext Plain() => new(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(name, root).Options);
-
-        public async Task<bool> StoreAsync(Guid workflowId, string design, string layout, CancellationToken ct)
-        {
-            await using var db = Plain();
-            var row = await db.Workflows.FirstOrDefaultAsync(w => w.Id == workflowId, ct);
-            if (row is null) return false;
-            row.Design = design;
-            row.Layout = layout;
-            await db.SaveChangesAsync(ct);
-            return true;
-        }
-
-        public async Task ClearAsync(Guid workflowId, CancellationToken ct)
-        {
-            await using var db = Plain();
-            var row = await db.Workflows.FirstAsync(w => w.Id == workflowId, ct);
-            row.Design = null;
-            await db.SaveChangesAsync(ct);
-        }
-    }
-
-    private sealed class PassThroughDesignTransactions : IDesignTransactions
-    {
-        public Task<IDesignTransaction> BeginAsync(CancellationToken ct) => Task.FromResult<IDesignTransaction>(new Nothing());
-
-        private sealed class Nothing : IDesignTransaction
-        {
-            public Task SavepointAsync(string name, CancellationToken ct) => Task.CompletedTask;
-            public Task RollbackToSavepointAsync(string name, CancellationToken ct) => Task.CompletedTask;
-            public Task ReleaseSavepointAsync(string name, CancellationToken ct) => Task.CompletedTask;
-            public Task CommitAsync(CancellationToken ct) => Task.CompletedTask;
-            public Task RollbackAsync(CancellationToken ct) => Task.CompletedTask;
-            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }
     }
 

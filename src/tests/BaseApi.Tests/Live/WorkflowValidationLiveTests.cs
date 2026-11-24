@@ -6,8 +6,8 @@ using Xunit;
 namespace BaseApi.Tests.Live;
 
 /// <summary>
-/// The dry run against Postgres: whatever the draft writes is rolled back. Each test builds its own
-/// rows and removes them afterwards.
+/// <c>POST /workflows/{id}/validate</c> against Postgres, on stored rows. Each test builds its own rows and
+/// removes them afterwards. (Draft bodies went with WorkflowStudio, 2026-11-24.)
 /// </summary>
 [Trait("Category", RealStack.Category)]
 public sealed class WorkflowValidationLiveTests : IAsyncLifetime
@@ -67,19 +67,6 @@ public sealed class WorkflowValidationLiveTests : IAsyncLifetime
         return JsonDocument.Parse(text).RootElement.GetProperty("id").GetGuid();
     }
 
-    private static object Step(Guid id, Guid processor, string? updatedAt = null, params Guid[] next) => new
-    {
-        id, updatedAt, name = $"v-{id:N}"[..12], version = "1.0.0", description = (string?)null,
-        processorId = processor, nextStepIds = next, entryCondition = 1,
-    };
-
-    private static object Body(string? updatedAt, Guid[] entry, object[]? steps = null) => new
-    {
-        workflow = new { name = $"validate-live-{Guid.NewGuid():N}"[..27], version = "1.0.0", description = (string?)null,
-            updatedAt, entryStepIds = entry, cacheIds = Array.Empty<Guid>() },
-        steps, assignments = (object[]?)null, schemaEdits = (object[]?)null, layout = (object?)null,
-    };
-
     private async Task<(HttpStatusCode Status, JsonElement Body)> SendAsync(HttpMethod method, string path, object? body)
     {
         using var request = new HttpRequestMessage(method, path) { Content = body is null ? null : JsonContent.Create(body) };
@@ -89,72 +76,21 @@ public sealed class WorkflowValidationLiveTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ADraftIsValidatedAndNothingOfItIsPersisted()
-    {
-        // Review focus 5: the draft creates the workflow and a self-looping step inside the transaction.
-        RealStack.SkipUnlessEnabled();
-        var (wf, a) = (Guid.NewGuid(), Guid.NewGuid());
-        _cleanup.AddRange([$"workflows/{wf}", $"steps/{a}"]);
-
-        var (status, result) = await SendAsync(HttpMethod.Post, $"/api/v1/workflows/{wf}/validate",
-            Body(null, [a], [Step(a, _processor, null, a)]));
-
-        Assert.Equal(HttpStatusCode.OK, status);
-        Assert.False(result.GetProperty("valid").GetBoolean());
-        var gates = result.GetProperty("problems").EnumerateArray().Select(p => p.GetProperty("gate").GetString()).ToList();
-        Assert.Contains("cycle", gates);
-        Assert.Contains("processorLiveness", gates);   // the throwaway processor has no replica
-        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/steps/{a}", Ct)).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/workflows/{wf}", Ct)).StatusCode);
-    }
-
-    [Fact]
-    public async Task ADraftEditOfAStoredWorkflowLeavesTheStoredGraphUnchanged()
+    public async Task TheStoredWorkflowIsValidated()
     {
         RealStack.SkipUnlessEnabled();
-        var (wf, a, b) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
-        _cleanup.AddRange([$"workflows/{wf}", $"steps/{a}", $"steps/{b}"]);
-        var (saved, graph) = await SendAsync(HttpMethod.Put, $"/api/v1/workflows/{wf}/graph",
-            Body(null, [a], [Step(a, _processor, null, b), Step(b, _processor)]));
-        Assert.Equal(HttpStatusCode.OK, saved);
-        var stamp = graph.GetProperty("workflow").GetProperty("updatedAt").GetString();
-        var bStamp = graph.GetProperty("steps").EnumerateArray().Single(s => s.GetProperty("id").GetGuid() == b).GetProperty("updatedAt").GetString();
-
-        // The draft wires b back to a: a cycle.
-        var (status, result) = await SendAsync(HttpMethod.Post, $"/api/v1/workflows/{wf}/validate",
-            Body(stamp, [a], [Step(b, _processor, bStamp, a)]));
-
-        Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Contains(result.GetProperty("problems").EnumerateArray(), p => p.GetProperty("gate").GetString() == "cycle");
-        var (_, after) = await SendAsync(HttpMethod.Get, $"/api/v1/workflows/{wf}/graph", null);
-        var bAfter = after.GetProperty("steps").EnumerateArray().Single(s => s.GetProperty("id").GetGuid() == b);
-        Assert.Equal(0, bAfter.GetProperty("nextStepIds").GetArrayLength());
-        Assert.Equal(stamp, after.GetProperty("workflow").GetProperty("updatedAt").GetString());
-    }
-
-    [Fact]
-    public async Task ADraftWithAnFkViolationIsA422AndLeavesNothing()
-    {
-        // Review focus 1: the second new step points at a processor that does not exist.
-        RealStack.SkipUnlessEnabled();
-        var (wf, a, b) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
-        _cleanup.AddRange([$"workflows/{wf}", $"steps/{a}", $"steps/{b}"]);
-
-        var (status, _) = await SendAsync(HttpMethod.Post, $"/api/v1/workflows/{wf}/validate",
-            Body(null, [a], [Step(a, _processor, null, b), Step(b, Guid.NewGuid())]));
-
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, status);
-        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/steps/{a}", Ct)).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await _http.GetAsync($"/api/v1/workflows/{wf}", Ct)).StatusCode);
-    }
-
-    [Fact]
-    public async Task TheStoredWorkflowIsValidatedWhenThereIsNoBody()
-    {
-        RealStack.SkipUnlessEnabled();
-        var (wf, a) = (Guid.NewGuid(), Guid.NewGuid());
-        _cleanup.AddRange([$"workflows/{wf}", $"steps/{a}"]);
-        await SendAsync(HttpMethod.Put, $"/api/v1/workflows/{wf}/graph", Body(null, [a], [Step(a, _processor)]));
+        var a = await PostAsync("steps", new
+        {
+            name = $"v-{Guid.NewGuid():N}"[..12], version = "1.0.0", description = (string?)null,
+            processorId = _processor, nextStepIds = Array.Empty<Guid>(), entryCondition = 1,
+        });
+        _cleanup.Add($"steps/{a}");
+        var wf = await PostAsync("workflows", new
+        {
+            name = $"validate-live-{Guid.NewGuid():N}"[..27], version = "1.0.0", description = (string?)null,
+            entryStepIds = new[] { a }, assignmentIds = Array.Empty<Guid>(), cacheIds = Array.Empty<Guid>(),
+        });
+        _cleanup.Add($"workflows/{wf}");
 
         var (status, result) = await SendAsync(HttpMethod.Post, $"/api/v1/workflows/{wf}/validate", null);
 

@@ -1,13 +1,9 @@
-using System.Text.Json;
 using BaseApi.Core.Controllers;
 using BaseApi.Core.Services;
 using BaseApi.Service.Features.Orchestration;
 using BaseApi.Service.Features.Workflow.Delete;
-using BaseApi.Service.Features.Workflow.Design;
-using BaseApi.Service.Features.Workflow.Graph;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
 
 namespace BaseApi.Service.Features.Workflow;
@@ -23,17 +19,16 @@ namespace BaseApi.Service.Features.Workflow;
 /// cannot resolve this controller's dependency.
 /// </para>
 /// <para>
-/// <b>The body is no longer empty.</b> The diagram and layout actions below sit outside CRUD deliberately.
+/// <b>The body is no longer empty.</b> The diagram actions below sit outside CRUD deliberately.
 /// The diagram is not on any DTO — see <see cref="WorkflowEntity.Diagram"/> — so it has nowhere to
 /// travel through the inherited verbs, and it should not: a read DTO is JSON returned to a client
 /// that wants a workflow, while a diagram is image bytes fetched by a browser that wants a picture.
 /// They differ in content type, in size and in who asks for them.
 /// </para>
 /// <para>
-/// The diagram and layout actions take the <see cref="AppDbContext"/> directly rather than going through the
+/// The diagram actions take the <see cref="AppDbContext"/> directly rather than going through the
 /// service. A diagram touches exactly one column on one row, and the service layer exists to keep
 /// the three junction tables in step with the DTO collections — none of which applies here.
-/// The graph actions instead delegate to <see cref="IWorkflowGraphReader"/> and <see cref="IWorkflowGraphSaver"/>.
 /// The validate action delegates to <see cref="IWorkflowValidator"/>.
 /// </para>
 /// </summary>
@@ -42,28 +37,16 @@ public sealed class WorkflowsController :
     BaseController<WorkflowEntity, WorkflowCreateDto, WorkflowUpdateDto, WorkflowReadDto>
 {
     private readonly AppDbContext _db;
-    private readonly IWorkflowGraphReader _graphReader;
-    private readonly IWorkflowGraphSaver _graphSaver;
     private readonly IWorkflowValidator _validator;
-    private readonly IWorkflowDesignSyncer _designSyncer;
-    private readonly IWorkflowDeleter? _deleter;
 
     public WorkflowsController(
         BaseService<WorkflowEntity, WorkflowCreateDto, WorkflowUpdateDto, WorkflowReadDto> service,
         AppDbContext db,
-        IWorkflowGraphReader graphReader,
-        IWorkflowGraphSaver graphSaver,
-        IWorkflowValidator validator,
-        IWorkflowDesignSyncer designSyncer,
-        IWorkflowDeleter? deleter = null)
+        IWorkflowValidator validator)
         : base(service)
     {
-        _deleter = deleter;
         _validator = validator;
         _db = db;
-        _graphReader = graphReader;
-        _graphSaver = graphSaver;
-        _designSyncer = designSyncer;
     }
 
     /// <summary>
@@ -155,120 +138,14 @@ public sealed class WorkflowsController :
     }
 
     /// <summary>
-    /// Returns the workflow's canvas layout as JSON, or the JSON literal <c>null</c> when it has never
-    /// been laid out. A missing workflow is 404, so "never laid out" stays distinguishable from a wrong id.
-    /// </summary>
-    [HttpGet("{id:guid}/layout")]
-    [Produces("application/json")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetLayout(Guid id, CancellationToken ct)
-    {
-        var row = await _db.Set<WorkflowEntity>()
-            .Where(w => w.Id == id)
-            .Select(w => new { w.Layout })
-            .FirstOrDefaultAsync(ct);
-
-        if (row is null)
-            return NotFound();
-
-        return Content(row.Layout ?? "null", "application/json");
-    }
-
-    /// <summary>
-    /// Stores the workflow's canvas layout. It moves blocks without touching the graph, so the editor
-    /// can keep positions when nothing else changed. The graph save writes the layout too.
-    /// The save moves the workflow's <c>UpdatedAt</c>, which the next graph save is checked against,
-    /// so the response carries the new stamp: without it the editor's next save would send the old
-    /// stamp and get a spurious 409. The stamp is truncated to microseconds, because the tracked
-    /// entity holds 100 ns ticks after the save while Postgres stores microseconds, and a graph save
-    /// echoing the unrounded value would compare newer than the stored one.
-    /// </summary>
-    [HttpPut("{id:guid}/layout")]
-    [Consumes("application/json")]
-    [ProducesResponseType(typeof(LayoutSavedDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> PutLayout(Guid id, [FromBody] JsonElement layout, CancellationToken ct)
-    {
-        if (WorkflowLayout.Validate(layout) is { } error)
-            return BadRequest(error);
-
-        var workflow = await _db.Set<WorkflowEntity>().FirstOrDefaultAsync(w => w.Id == id, ct);
-        if (workflow is null)
-            return NotFound();
-
-        workflow.Layout = layout.GetRawText();
-        await _db.SaveChangesAsync(ct);
-
-        var stamp = workflow.UpdatedAt;
-        return Ok(new LayoutSavedDto(new DateTime(stamp.Ticks - stamp.Ticks % 10, stamp.Kind)));
-    }
-
-    /// <summary>
-    /// The workflow's graph for the editor: the steps reachable from its entry steps, their
-    /// processors and schemas, its assignments and caches, and its layout.
-    /// </summary>
-    [HttpGet("{id:guid}/graph")]
-    [ProducesResponseType(typeof(WorkflowGraphDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetGraph(Guid id, CancellationToken ct)
-        => Ok(await _graphReader.ReadAsync(id, ct));
-
-    /// <summary>
-    /// Creates or replaces the workflow's whole graph in one commit and returns it re-read. The
-    /// editor never blocks a design, so this checks field rules and staleness only; cycles, broken
-    /// wires and payload-vs-schema are start checks.
-    /// </summary>
-    [HttpPut("{id:guid}/graph")]
-    [ProducesResponseType(typeof(WorkflowGraphDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public async Task<IActionResult> PutGraph(Guid id, [FromBody] GraphSaveRequest request, CancellationToken ct)
-        => Ok(await _graphSaver.SaveAsync(id, request, ct));
-
-    /// <summary>
-    /// Stores the studio's design on the workflow, then dry-runs it and aligns the real entities only when
-    /// it finds no errors (plan 8 §4.2). The answer is the outcome either way: <c>applied</c>, and every
-    /// error with its entity, stage and field. Only a body that is not a design is a 400.
-    /// </summary>
-    [HttpPut("{id:guid}/design")]
-    [ProducesResponseType(typeof(DesignOutcomeDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> PutDesign(Guid id, [FromBody] DesignSaveRequest request, CancellationToken ct)
-        => Ok(await _designSyncer.SaveAsync(id, request, ct));
-
-    /// <summary>
-    /// Deletes the workflow with its own steps and assignments (2026-10-10); its caches are only unlinked and processors
-    /// never touched. Refused while it runs or while another workflow uses a step or assignment of it. With
-    /// <c>dryRun</c>, everything is done in a transaction and rolled back: the answer says what would be deleted.
-    /// Refusals are a 200 with <c>applied: false</c> and the errors; a missing workflow is a 404.
-    /// </summary>
-    [HttpPost("{id:guid}/delete")]
-    [ProducesResponseType(typeof(WorkflowDeleteOutcomeDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeleteWorkflow(Guid id, [FromQuery] bool dryRun, CancellationToken ct)
-        => _deleter is null ? NotFound() : Ok(await _deleter.DeleteAsync(id, dryRun, ct));
-
-    /// <summary>
     /// Every problem a start of this workflow would refuse, from every gate -- cycles, missing steps,
     /// schema edges, payloads against config schemas, processor liveness -- without saving and without
-    /// starting. The body is an optional draft in the shape of <c>PUT /graph</c>; without one, the stored
-    /// workflow is checked. Gate problems are a 200 with <c>valid: false</c>; a draft the graph save would
-    /// reject keeps that save's status.
+    /// starting: the stored workflow is checked. Gate problems are a 200 with <c>valid: false</c>.
     /// </summary>
     [HttpPost("{id:guid}/validate")]
     [ProducesResponseType(typeof(WorkflowValidationDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public async Task<IActionResult> Validate(
-        Guid id,
-        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] GraphSaveRequest? request,
-        CancellationToken ct)
-        => Ok(await _validator.ValidateAsync(id, request, ct));
+    public async Task<IActionResult> Validate(Guid id, CancellationToken ct)
+        => Ok(await _validator.ValidateAsync(id, ct));
 }

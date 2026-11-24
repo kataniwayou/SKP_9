@@ -1,5 +1,3 @@
-using BaseApi.Service.Features.Workflow.Graph;
-
 namespace BaseApi.Service.Features.Orchestration;
 
 /// <summary>
@@ -12,10 +10,10 @@ public sealed record WorkflowProblemDto(string Gate, string Title, string Detail
 public sealed record WorkflowValidationDto(bool Valid, List<WorkflowProblemDto> Problems);
 
 /// <summary>
-/// Runs every workflow-start gate against a draft, or the stored workflow when there is none, without
-/// saving and without starting. One implementation of each rule: the studio never re-implements them.
+/// Runs every workflow-start gate against the stored workflow, without starting. One implementation of
+/// each rule: the board never re-implements them.
 /// </summary>
 public interface IWorkflowValidator
 {
-    Task<WorkflowValidationDto> ValidateAsync(Guid workflowId, GraphSaveRequest? draft, CancellationToken ct);
+    Task<WorkflowValidationDto> ValidateAsync(Guid workflowId, CancellationToken ct);
 }

@@ -1,8 +1,6 @@
-using BaseApi.Core.DependencyInjection;
 using BaseApi.Core.Persistence.Repositories;
 using BaseApi.Service;
 using BaseApi.Service.Features.Cache;
-using BaseApi.Service.Features.Molecule;
 using BaseApi.Service.Features.Step;
 using BaseApi.Service.Features.Workflow;
 using Messaging.Transport;
@@ -126,30 +124,11 @@ public sealed class BoardLocationTests : IAsyncLifetime
     }
 
     [Fact]
-    public void ModelFieldsDescribesTheLocationOfAllThreeTablesAsOptionalNumbers()
-    {
-        using var sp = new ServiceCollection().AddBaseApiValidation(typeof(AppDbContext).Assembly).BuildServiceProvider();
-        using var scope = sp.CreateScope();
-        using var db = Molecule.ModelRelationsTests.NpgsqlModelContext();
-        var dto = ModelFields.Build(db.Model, scope.ServiceProvider).Dto;
-
-        foreach (var table in new[] { "steps", "caches", "workflows" })
-        foreach (var name in new[] { "boardX", "boardY" })
-        {
-            var f = dto.Entities.Single(e => e.Table == table).Fields.Single(x => x.Field == name);
-            Assert.Equal("number", f.Type);
-            Assert.True(f.Nullable);
-            Assert.Equal(name == "boardX" ? "board_x" : "board_y", f.Column);
-            Assert.Equal("double precision", f.StoreType);
-        }
-    }
-
-    [Fact]
     public void TheMigrationSnapshotMatchesTheModel()
     {
         // Migrations are written by hand on this machine (no dotnet-ef); this fails when the snapshot and the
         // model disagree, e.g. a column the model has and no migration adds.
-        using var db = Molecule.ModelRelationsTests.NpgsqlModelContext();
+        using var db = Support.NpgsqlModel.Context();
         var snapshot = db.GetService<IMigrationsAssembly>().ModelSnapshot!.Model;
         var designTime = db.GetService<IDesignTimeModel>().Model;
         var differ = db.GetService<IMigrationsModelDiffer>();

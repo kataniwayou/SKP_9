@@ -1,8 +1,5 @@
 using BaseApi.Service.Features.Workflow.Delete;
-using BaseApi.Core.Persistence;
 using BaseApi.Core.Services;
-using BaseApi.Service.Features.Workflow.Design;
-using BaseApi.Service.Features.Workflow.Graph;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace BaseApi.Service.Features.Workflow;
@@ -23,35 +20,8 @@ internal static class WorkflowServiceCollectionExtensions
         services.AddScoped<BaseService<WorkflowEntity, WorkflowCreateDto, WorkflowUpdateDto, WorkflowReadDto>>(
             sp => sp.GetRequiredService<WorkflowService>());
 
-        // The SKP Studio graph endpoints. IWorkflowGraphLoader comes from AddOrchestrationFeature.
-        services.AddScoped<IWorkflowGraphReader, WorkflowGraphReader>();
-        services.AddScoped<GraphAssignmentResolver>();
-        services.AddScoped<GraphSchemaEditor>();
-        services.AddScoped<IWorkflowGraphSaver, WorkflowGraphSaver>();
-
-        // Plan 8: the design save (store, then the stages in one transaction).
-        services.AddScoped<IDesignStore, RelationalDesignStore>();
-        services.AddScoped<IDesignTransactions, RelationalDesignTransactions>();
-        services.AddScoped<SchemaStage>();
-        services.AddScoped<ProcessorStage>();
-        services.AddScoped<CacheStage>();
-        services.AddScoped<StepStage>();
-        services.AddScoped<WireStage>();
-        services.AddScoped<AssignmentStage>();
-        services.AddScoped<WorkflowStage>();
-        services.AddScoped<CreateWorkflowStage>();
-        services.AddScoped<DeleteStage>();
-        services.AddScoped<IWorkflowDesignSyncer>(sp => new WorkflowDesignSyncer(
-            sp.GetRequiredService<BaseDbContext>(), sp.GetRequiredService<IDesignStore>(),
-            sp.GetRequiredService<IDesignTransactions>(), DesignStages.Ordered(sp)));
-
-        // A workflow's deletion with its own steps and assignments (2026-10-10).
-        services.AddScoped<IWorkflowDeleter, WorkflowDeleter>();
         // the CRUD DELETE refused while the workflow runs or is being deleted
         services.AddScoped<WorkflowDeleteGuardFilter>();
-
-        // Runs via AddAppFeatures, so it lands after the core handlers and before the catch-all.
-        services.AddExceptionHandler<GraphConflictExceptionHandler>();
         return services;
     }
 }
