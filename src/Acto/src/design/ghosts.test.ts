@@ -135,6 +135,20 @@ describe('ghosts in storage [user, 2026-11-23: they belong to the draft]', () =>
     expect(() => b.ghosts.remap({ daily: 'real' })).not.toThrow();
     expect(b.ghosts.get('workflow:real')).toMatchObject({ kind: 'workflow', row: { id: 'real', entryCrons: {} } });
   });
+  it('a workflow ghost stored with the legacy cronExpression comes back, and restores, without it', () => {
+    const storage = memoryStorage();
+    const a = fresh(storage);
+    a.store.edit((b) => withoutWorkflow(b, 'daily'));
+    const stored = JSON.parse(storage.getItem('acto.ghosts')!) as Array<{ kind: string; row?: Record<string, unknown> }>;
+    for (const g of stored) if (g.kind === 'workflow') g.row!.cronExpression = '0 0 * * * *';
+    const old = memoryStorage();
+    old.setItem('acto.ghosts', JSON.stringify(stored));
+    const b = fresh(old, withoutWorkflow(board(), 'daily'));
+    const g = b.ghosts.get('workflow:daily')!;
+    expect(g.kind === 'workflow' && g.row).not.toHaveProperty('cronExpression');
+    const after = stateOf(restoreGhosts(b.store.state(), b.store.base(), [g]));
+    expect(after.workflows.daily).not.toHaveProperty('cronExpression');
+  });
   it('ghosts are written to storage and come back in a new store over the same storage', () => {
     const storage = memoryStorage();
     const a = fresh(storage);

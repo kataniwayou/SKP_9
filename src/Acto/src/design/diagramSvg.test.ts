@@ -87,6 +87,10 @@ describe('diagramSvg', () => {
     expect(svg).toContain('+3 more');
   });
 
+  it('the triangle badge reads "manual start" until Task 4 draws the entry crons', () => {
+    expect(parse(diagramSvg(board(), 'daily')).querySelector('g[data-part="cron"]')!.textContent!.trim()).toBe('manual start');
+  });
+
   it('shows a cache\'s root and item count', () => {
     const b = board();
     b.caches.c1!.items = '{"a":"1","b":"2","c":"3"}';

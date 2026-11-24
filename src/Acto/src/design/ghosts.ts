@@ -105,13 +105,20 @@ export function keepGhosts(ghosts: GhostStore, storage: Storage | null | undefin
   return ghosts.subscribe(write);
 }
 
+/** A workflow ghost stored before 2026-11-24 carries the removed workflow cronExpression: it is dropped on reading. */
+function withoutLegacyCron(g: GhostItem): GhostItem {
+  if (g.kind !== 'workflow') return g;
+  const { cronExpression: _legacy, ...row } = g.row as typeof g.row & { cronExpression?: unknown };
+  return { ...g, row };
+}
+
 /** The ghosts kept in `storage` (a JSON array of GhostItem); none when unreadable. */
 function readGhosts(storage: Storage | null | undefined): GhostItem[] {
   try {
     const raw = storage?.getItem(GHOSTS_KEY);
     if (!raw) return [];
     const v: unknown = JSON.parse(raw);
-    return Array.isArray(v) ? v.filter((g): g is GhostItem => !!g && typeof g === 'object' && typeof (g as GhostItem).key === 'string' && typeof (g as GhostItem).kind === 'string') : [];
+    return Array.isArray(v) ? v.filter((g): g is GhostItem => !!g && typeof g === 'object' && typeof (g as GhostItem).key === 'string' && typeof (g as GhostItem).kind === 'string').map(withoutLegacyCron) : [];
   } catch { return []; }
 }
 
