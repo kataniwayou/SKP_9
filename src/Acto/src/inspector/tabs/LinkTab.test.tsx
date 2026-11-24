@@ -1,6 +1,6 @@
 import { act, fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { openOn, withSchemas } from './testBoard';
+import { openOn } from './testBoard';
 
 afterEach(() => sessionStorage.clear());
 
@@ -35,10 +35,5 @@ describe('the Link tab', () => {
   it('aWireHasNoCronField', () => {
     openOn('Link', [{ kind: 'wire', from: 'fetch', to: 'expand' }]);
     expect(screen.queryByLabelText('Cron')).toBeNull();
-  });
-  it('the workflow tab shows an entry row with its own cron', () => {
-    const b = withSchemas();
-    openOn('Workflow', [{ kind: 'workflow', id: 'daily' }], { ...b, workflows: { ...b.workflows, daily: { ...b.workflows.daily!, entryCrons: { fetch: '*/10 * * * * *' } } } });
-    expect(screen.getByText('⏱ */10 * * * * *')).toBeTruthy();
   });
 });

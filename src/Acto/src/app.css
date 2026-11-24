@@ -57,6 +57,7 @@
 .cmark .lg-w { fill: none; stroke-width: 1.8; }
 .cmark .lg-head { fill: none; stroke-width: 1.8; stroke-linejoin: miter; }
 .in-note { margin: -4px 0 10px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.sec-sub { margin: 8px 0 0; font: 600 12px var(--sans); color: var(--ink); overflow-wrap: anywhere; }
 .in-note.sub, .in-problem.sub { margin: 3px 0 8px 98px; }
 .in-lock { color: var(--warn-ink); font-weight: 600; margin-top: 0; }
 .in-problem { color: var(--danger); font-size: 12px; margin: 2px 0; }

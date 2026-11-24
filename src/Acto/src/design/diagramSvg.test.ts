@@ -87,8 +87,16 @@ describe('diagramSvg', () => {
     expect(svg).toContain('+3 more');
   });
 
-  it('the triangle badge reads "manual start" until Task 4 draws the entry crons', () => {
+  it('the triangle badge reads manual start when no entry has a cron', () => {
     expect(parse(diagramSvg(board(), 'daily')).querySelector('g[data-part="cron"]')!.textContent!.trim()).toBe('manual start');
+  });
+
+  it('the triangle badge shows the shared entry cron, or the count when they differ', () => {
+    const b = board();
+    const w = (entryCrons: Record<string, string>) => ({ ...b, workflows: { ...b.workflows, daily: { ...b.workflows.daily!, entryStepIds: ['fetch', 'expand'], entryCrons } } });
+    const badge = (x: typeof b) => parse(diagramSvg(x, 'daily')).querySelector('g[data-part="cron"]')!.textContent!;
+    expect(badge(w({ fetch: '0 * * * * *', expand: '0  * * * * *' }))).toContain('0 * * * * *');
+    expect(badge(w({ fetch: '0 * * * * *', expand: '*/10 * * * * *' }))).toContain('2 schedules');
   });
 
   it('shows a cache\'s root and item count', () => {

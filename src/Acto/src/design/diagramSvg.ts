@@ -1,5 +1,6 @@
 import { conditionInfo, CONDITIONS } from '../model/entryConditions';
 import type { Id } from '../model/graph';
+import { distinctCrons } from '../model/scheduleSummary';
 import { reachOf, type BoardState } from './board';
 
 const FONT = "'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
@@ -240,8 +241,9 @@ export function diagramSvg(b: BoardState, workflowId: Id): string {
   }
 
   // the triangle and its cron badge
-  const cron: string | null = null; // Task 4 draws the entry crons here; a workflow has none of its own
-  const reading = cron ? cronText(cron) : null;
+  const crons = wf ? distinctCrons(wf) : [];
+  const cron: string | null = crons.length === 0 ? null : crons.length === 1 ? crons[0]! : `${crons.length} schedules`;
+  const reading = crons.length === 1 ? cronText(crons[0]!) : null;
   out.push(
     `<polygon points="${num(T.x)},${num(T.y)} ${num(T.x)},${num(T.y + T.h)} ${num(T.x + T.w)},${num(T.y + T.h / 2)}" fill="#EEF2FF" stroke="${TRI_STROKE}" stroke-width="2" stroke-linejoin="round"/>`,
     `<g data-part="cron">`,

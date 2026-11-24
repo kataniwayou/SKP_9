@@ -36,7 +36,7 @@ export function LinkTab({ state, edit, pick }: { state: BoardState; edit: Ctx['e
   );
 }
 
-/** The cron of one entry arrow: its own, or (placeholder) the workflow's. Blank clears it. */
+/** The cron of one entry arrow: blank clears it (placeholder: not scheduled). */
 function EntryCron({ state, edit, wf, step }: { state: BoardState; edit: Ctx['edit']; wf: string; step: string }) {
   const w = state.workflows[wf];
   const own = w?.entryCrons?.[step] ?? null;
