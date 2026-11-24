@@ -62,12 +62,17 @@ public sealed class WorkflowCreateDtoValidator : AbstractValidator<WorkflowCreat
                 {
                     if (ctx.InstanceToValidate.EntryStepIds is not { } entry || !entry.Contains(stepId))
                         ctx.AddFailure(nameof(WorkflowCreateDto.EntryCrons), $"EntryCrons names step {stepId:D}, which is not an entry step.");
+                    else if (cron is { Length: > MaxEntryCronLength })
+                        ctx.AddFailure(nameof(WorkflowCreateDto.EntryCrons), $"EntryCrons for step {stepId:D} must be at most {MaxEntryCronLength} characters.");
                     else if (string.IsNullOrWhiteSpace(cron) || !BeValidStandardCron(cron))
                         ctx.AddFailure(nameof(WorkflowCreateDto.EntryCrons), $"EntryCrons for step {stepId:D} must be a valid 5- or 6-field cron expression.");
                 }
             })
             .When(x => x.EntryCrons is { Count: > 0 });
     }
+
+    /// <summary>The workflow_entry_steps cron column's length (WorkflowEntryStepsConfiguration).</summary>
+    private const int MaxEntryCronLength = 120;
 
     /// <summary>
     /// Null or blank is valid, meaning the workflow is not scheduled. Otherwise the shared field-count
@@ -134,12 +139,16 @@ public sealed class WorkflowUpdateDtoValidator : AbstractValidator<WorkflowUpdat
                 {
                     if (ctx.InstanceToValidate.EntryStepIds is not { } entry || !entry.Contains(stepId))
                         ctx.AddFailure(nameof(WorkflowUpdateDto.EntryCrons), $"EntryCrons names step {stepId:D}, which is not an entry step.");
+                    else if (cron is { Length: > MaxEntryCronLength })
+                        ctx.AddFailure(nameof(WorkflowUpdateDto.EntryCrons), $"EntryCrons for step {stepId:D} must be at most {MaxEntryCronLength} characters.");
                     else if (string.IsNullOrWhiteSpace(cron) || !BeValidStandardCron(cron))
                         ctx.AddFailure(nameof(WorkflowUpdateDto.EntryCrons), $"EntryCrons for step {stepId:D} must be a valid 5- or 6-field cron expression.");
                 }
             })
             .When(x => x.EntryCrons is { Count: > 0 });
     }
+
+    private const int MaxEntryCronLength = 120;
 
     /// <summary>
     /// Behaviourally identical to the create-side predicate: null or blank is valid, anything that is

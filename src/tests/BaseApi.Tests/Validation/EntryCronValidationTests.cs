@@ -41,6 +41,21 @@ public sealed class EntryCronValidationTests
     }
 
     [Fact]
+    public void AnEntryCronLongerThanTheColumnIsRefusedNamingTheStep()
+    {
+        // a valid six-field cron (a list of every second) of more than 120 characters
+        var longCron = string.Join(",", Enumerable.Range(0, 60)) + " * * * * *";
+        Assert.True(longCron.Length > 120);
+
+        var expected = $"EntryCrons for step {B:D} must be at most 120 characters.";
+        var create = new WorkflowCreateDtoValidator().Validate(Create(new() { [B] = longCron }));
+        var update = new WorkflowUpdateDtoValidator().Validate(Update(new() { [B] = longCron }));
+
+        Assert.Contains(create.Errors, e => e.PropertyName.StartsWith(nameof(WorkflowCreateDto.EntryCrons)) && e.ErrorMessage == expected);
+        Assert.Contains(update.Errors, e => e.PropertyName.StartsWith(nameof(WorkflowUpdateDto.EntryCrons)) && e.ErrorMessage == expected);
+    }
+
+    [Fact]
     public void SixFieldAndFiveFieldEntryCronsAreAccepted()
     {
         var crons = new Dictionary<Guid, string> { [A] = "*/10 * * * * *", [B] = "*/5 * * * *" };
