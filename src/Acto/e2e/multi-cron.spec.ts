@@ -3,8 +3,6 @@ import { test, expect } from './fixtures';
 import { entryEdge, field, inspector, openAt, pickEdge, save, saveButton, selectWorkflowAlone, tab, toolbar, waitLoaded } from './helpers';
 import { seed } from './seed';
 import { getJson, type Row } from './stack';
-import { scheduleSummary } from '../src/model/scheduleSummary';
-import type { WorkflowRow } from '../src/design/board';
 
 // A workflow has no cron of its own: each entry arrow carries one, edited together in the Workflow tab's Schedules section (or one at a
 // time in the arrow's Link tab), saved as the row's entryCrons. Writes only a throwaway workflow and steps (e2e-...); never Start/Stop.
@@ -12,26 +10,13 @@ import type { WorkflowRow } from '../src/design/board';
 const FAST = '*/10 * * * * *';
 const SLOW = '*/30 * * * * *';
 const LINK_EDIT = '*/20 * * * * *';
-const CHIP_NONE = '⏱ not scheduled';
 
 const schedule = (page: Page, step: string) => inspector(page).getByTestId(`schedule:${step}`);
 const cronIn = (page: Page, step: string) => schedule(page, step).getByRole('textbox', { name: 'Cron' });
 const undo = (page: Page) => inspector(page).getByRole('button', { name: 'Undo', exact: true });
 const redo = (page: Page) => inspector(page).getByRole('button', { name: 'Redo', exact: true });
 
-/**
- * The workflow triangle's schedule badge (the one Kibana diagram carries) for what the Schedules section shows now: the board's own
- * summary function over the crons typed there. The live board has no such badge in its DOM, so this is the string the badge gets.
- */
-async function chip(page: Page, wf: string, steps: string[]): Promise<string> {
-  await selectWorkflowAlone(page, wf);
-  const entryCrons: Record<string, string> = {};
-  for (const s of steps) {
-    const v = await cronIn(page, s).inputValue();
-    if (v) entryCrons[s] = v;
-  }
-  return scheduleSummary({ entryCrons } as unknown as WorkflowRow);
-}
+const label = (page: Page, wf: string, step: string) => entryEdge(page, wf, step).locator('.entry-cron');
 
 const stored = async (name: string) => (await getJson<Row[]>('/workflows')).find((w) => w.name === name)!;
 
@@ -52,7 +37,6 @@ test('a workflow with two entry arrows: each arrow its own cron, edited from the
   await expect(schedule(page, A).locator('.sec-sub')).toHaveText('e2e-mcron-a');
   await expect(schedule(page, B).locator('.sec-sub')).toHaveText('e2e-mcron-b');
   await expect(cronIn(page, A)).toHaveAttribute('placeholder', 'not scheduled');
-  expect(await chip(page, id.w!, [A, B])).toBe(CHIP_NONE);
   await cronIn(page, A).fill(SLOW);
   await cronIn(page, B).fill(FAST);
   await expect(schedule(page, A)).toContainText(/30 seconds/i);
@@ -60,8 +44,7 @@ test('a workflow with two entry arrows: each arrow its own cron, edited from the
   await expect(entryEdge(page, id.w!, A).locator('.entry-cron')).toHaveText(`⏱ ${SLOW}`);
   await expect(entryEdge(page, id.w!, B).locator('.entry-cron')).toHaveText(`⏱ ${FAST}`);
 
-  // 2. the two differ: the badge counts schedules; Save keeps both through a reload
-  expect(await chip(page, id.w!, [A, B])).toBe('⏱ 2 schedules');
+  // 2. Save keeps both through a reload: the Schedules rows and the arrows' labels
   await expect(saveButton(page)).toContainText('Save ·');
   expect((await save(page)).applied).toBe(true);
   expect((await stored('e2e-mcron-wf')).entryCrons).toEqual({ [A]: SLOW, [B]: FAST });
@@ -70,7 +53,8 @@ test('a workflow with two entry arrows: each arrow its own cron, edited from the
   await selectWorkflowAlone(page, id.w!);
   await expect(cronIn(page, A)).toHaveValue(SLOW);
   await expect(cronIn(page, B)).toHaveValue(FAST);
-  expect(await chip(page, id.w!, [A, B])).toBe('⏱ 2 schedules');
+  await expect(label(page, id.w!, A)).toHaveText(`⏱ ${SLOW}`);
+  await expect(label(page, id.w!, B)).toHaveText(`⏱ ${FAST}`);
 
   // 3. B edited in its Link tab: the Schedules section shows it
   await pickEdge(page, entryEdge(page, id.w!, B));
@@ -82,7 +66,7 @@ test('a workflow with two entry arrows: each arrow its own cron, edited from the
   await expect(cronIn(page, B)).toHaveValue(LINK_EDIT);
   await expect(cronIn(page, A)).toHaveValue(SLOW);
 
-  // 4. undo takes B's edit back (the Schedules and Link edits of B are one undo step: same merge key, no other edit between), redo restores it
+  // 4. after the reload the history is empty, so undo takes back the Link-tab edit of B alone (B returns to its saved cron); redo restores it
   await expect(undo(page)).toBeEnabled();
   await undo(page).click();
   await expect(cronIn(page, B)).toHaveValue(FAST);
@@ -92,15 +76,20 @@ test('a workflow with two entry arrows: each arrow its own cron, edited from the
   await expect(cronIn(page, B)).toHaveValue(LINK_EDIT);
   await expect(cronIn(page, A)).toHaveValue(SLOW);
 
-  // 5. B cleared: only A's cron is left, and the badge shows it alone
+  // 5. B cleared: only A's cron is left, on A's arrow alone
   await cronIn(page, B).fill('');
-  await expect(entryEdge(page, id.w!, B).locator('.entry-cron')).toHaveCount(0);
-  expect(await chip(page, id.w!, [A, B])).toBe(`⏱ ${SLOW}`);
+  await expect(label(page, id.w!, B)).toHaveCount(0);
+  await expect(label(page, id.w!, A)).toHaveText(`⏱ ${SLOW}`);
+  await expect(cronIn(page, B)).toHaveValue('');
 
   // 6. A cleared too: not scheduled
   await cronIn(page, A).fill('');
-  await expect(entryEdge(page, id.w!, A).locator('.entry-cron')).toHaveCount(0);
-  expect(await chip(page, id.w!, [A, B])).toBe(CHIP_NONE);
+  await expect(label(page, id.w!, A)).toHaveCount(0);
+  await expect(label(page, id.w!, B)).toHaveCount(0);
+  for (const step of [A, B]) {
+    await expect(cronIn(page, step)).toHaveValue('');
+    await expect(cronIn(page, step)).toHaveAttribute('placeholder', 'not scheduled');
+  }
   expect((await save(page)).applied).toBe(true);
   expect((await stored('e2e-mcron-wf')).entryCrons ?? {}).toEqual({});
 
