@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { moveItems } from '../../design/edits';
+import { moveItems, setEntryCron } from '../../design/edits';
 import { liveStub } from '../../test/liveStub';
 import { call, done, setup } from './testContext';
 
@@ -25,8 +25,16 @@ describe('reading tools', () => {
     expect(d.caches).toEqual([{ id: 'c1', name: 'c1', version: '1.0.0', description: null, root: 'r', items: expect.any(String), at: { x: 0, y: -100 } }]);
     expect(d.steps[0]).toHaveProperty('description');
     const daily = d.workflows.find((w: { id: string }) => w.id === 'daily');
-    expect(daily).toMatchObject({ entrySteps: ['fetch'], caches: ['c1'], cronExpression: null, unsaved: false, saved: true, steps: ['fetch', 'expand'] });
+    expect(daily).toMatchObject({ entrySteps: [{ id: 'fetch', cron: null }], caches: ['c1'], cronExpression: null, unsaved: false, saved: true, steps: ['fetch', 'expand'] });
     expect(daily.payloads).toEqual([{ assignmentId: 'a-daily-fetch', name: 'fetch-assignment', version: '1.0.0', description: null, stepId: 'fetch', payload: '{}', sharedWith: [] }]);
+  });
+
+  it('readBoardShowsEntryCrons', async () => {
+    const { ctx, store } = setup();
+    store.edit((b) => setEntryCron(b, 'daily', 'fetch', '*/10 * * * * *'));
+    const d = JSON.parse(done(await call(ctx, 'read_board')).result);
+    expect(d.workflows.find((w: { id: string }) => w.id === 'daily').entrySteps).toEqual([{ id: 'fetch', cron: '*/10 * * * * *' }]);
+    expect(d.workflows.find((w: { id: string }) => w.id === 'hourly').entrySteps).toEqual([{ id: 'fetch', cron: null }]);
   });
 
   it('read_output gives the newest lines', async () => {

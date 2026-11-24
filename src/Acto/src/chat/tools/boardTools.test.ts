@@ -36,6 +36,23 @@ describe('graph edit tools', () => {
     expect(done(await call(ctx, 'disconnect', { from: 'expand', to: 'lonely' })).ok).toBe(false);
   });
 
+  it('setEntryCronSetsAndClears: one undoable edit per call', async () => {
+    const { ctx, store } = setup();
+    expect(done(await call(ctx, 'set_entry_cron', { workflow_id: 'daily', step_id: 'fetch', value: '*/10 * * * * *' })).ok).toBe(true);
+    expect(store.state().workflows.daily!.entryCrons).toEqual({ fetch: '*/10 * * * * *' });
+    store.undo();
+    expect(store.state().workflows.daily!.entryCrons).toEqual({});
+    store.redo();
+    expect(done(await call(ctx, 'set_entry_cron', { workflow_id: 'daily', step_id: 'fetch', value: null })).ok).toBe(true);
+    expect(store.state().workflows.daily!.entryCrons).toEqual({});
+  });
+
+  it('setEntryCronRefusesANonEntryStep', async () => {
+    const { ctx, store } = setup();
+    expect(done(await call(ctx, 'set_entry_cron', { workflow_id: 'daily', step_id: 'lonely', value: '* * * * * *' }))).toMatchObject({ ok: false, result: 'lonely is not an entry step of daily' });
+    expect(store.state().workflows.daily!.entryCrons).toEqual({});
+  });
+
   it('set_entry, remove_entry, link_cache and unlink_cache change the triangle', async () => {
     const { ctx, store } = setup();
     expect(done(await call(ctx, 'set_entry', { workflow_id: 'daily', step_id: 'lonely' })).ok).toBe(true);

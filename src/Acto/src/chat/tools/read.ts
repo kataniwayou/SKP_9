@@ -87,7 +87,7 @@ const listSchemas: ToolDef = {
 
 const readBoard: ToolDef = {
   name: 'read_board',
-  description: 'Read the whole board as it is now, unsaved edits included: every step (id, name, version, description, processor with health, entry condition, next step ids = wires, position), every cache (id, name, version, description, root, items as JSON text, position), and every workflow triangle (fields, cron, Running or Stopped, unsaved and saved flags, problems of the last refused Start, entry steps, the steps it reaches, linked caches, and its payloads: assignment id, name, version, description, step id, payload, and the other workflows sharing that payload).',
+  description: 'Read the whole board as it is now, unsaved edits included: every step (id, name, version, description, processor with health, entry condition, next step ids = wires, position), every cache (id, name, version, description, root, items as JSON text, position), and every workflow triangle (fields, cron, Running or Stopped, unsaved and saved flags, problems of the last refused Start, entry steps (id and its own cron, or null), the steps it reaches, linked caches, and its payloads: assignment id, name, version, description, step id, payload, and the other workflows sharing that payload).',
   parameters: NO_ARGS,
   async run(ctx) {
     const b = ctx.store.state();
@@ -106,7 +106,7 @@ const readBoard: ToolDef = {
     const workflows = Object.values(b.workflows).map((w) => ({
       id: w.id, name: w.name, version: w.version, description: w.description, cronExpression: w.cronExpression,
       status: runWord(ctx, w.id), unsaved: touched.has(w.id), saved: !!base.workflows[w.id], problems: ctx.store.problems(w.id),
-      entrySteps: w.entryStepIds, steps: [...reachOf(b, w.id)], caches: w.cacheIds, at: w.at,
+      entrySteps: w.entryStepIds.map((id) => ({ id, cron: w.entryCrons[id] ?? null })), steps: [...reachOf(b, w.id)], caches: w.cacheIds, at: w.at,
       payloads: assignmentsOf(b, w.id).map((a) => ({
         assignmentId: a.id, name: a.name, version: a.version, description: a.description, stepId: a.stepId, payload: a.payload,
         sharedWith: linkedBy(b, a.id).filter((x) => x !== w.id),

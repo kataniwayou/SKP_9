@@ -3,7 +3,7 @@ import { pickKey, livePicks, deletePicks, deleteRefusal } from '../../board/pick
 import { statusOf } from '../../live/liveState';
 import type { Pick } from '../../board/selection';
 import type { BoardState, ItemRef } from '../../design/board';
-import { addCache, addEntry, addStep, addWire, linkCache, moveItems, removeEntries, removeWires, setCacheField, unlinkCaches } from '../../design/edits';
+import { addCache, addEntry, addStep, addWire, linkCache, moveItems, removeEntries, removeWires, setCacheField, setEntryCron, unlinkCaches } from '../../design/edits';
 import { restoreGhosts, withTheirWires, type GhostItem } from '../../design/ghosts';
 import type { Rect } from '../../model/geometry';
 import type { Id } from '../../model/graph';
@@ -142,6 +142,22 @@ const removeEntry: ToolDef = {
     if ('out' in t) return t.out;
     if (!ctx.store.state().workflows[t.wf]!.entryStepIds.includes(t.other)) return fail(`${nameOf(ctx, t.wf)} has no entry arrow to ${t.other}`, 'remove entry');
     return applyState(ctx, (b) => removeEntries(b, [[t.wf, t.other]]), 'remove entry', `removed the entry arrow of ${nameOf(ctx, t.wf)} to ${t.other}`);
+  },
+};
+
+const setEntryCronTool: ToolDef = {
+  name: 'set_entry_cron', description: "Set or clear the cron of one entry arrow (an entry step of the workflow); value null or blank clears it.",
+  parameters: {
+    type: 'object',
+    properties: { workflow_id: WORKFLOW_ID, step_id: STEP_ID, value: { type: ['string', 'null'], description: 'The cron expression, or null to clear.' } },
+    required: ['workflow_id', 'step_id', 'value'], additionalProperties: false,
+  },
+  async run(ctx, args) {
+    const t = wfAnd(ctx, args, 'step', 'step_id', 'set entry cron');
+    if ('out' in t) return t.out;
+    if (!ctx.store.state().workflows[t.wf]!.entryStepIds.includes(t.other)) return fail(`${t.other} is not an entry step of ${nameOf(ctx, t.wf)}`, 'set entry cron');
+    const value = typeof args.value === 'string' ? args.value : null;
+    return applyState(ctx, (b) => setEntryCron(b, t.wf, t.other, value), 'set entry cron', `${value?.trim() ? `set the cron of ${nameOf(ctx, t.wf)}'s entry arrow to ${t.other} to ${value.trim()}` : `cleared the cron of ${nameOf(ctx, t.wf)}'s entry arrow to ${t.other}`}`);
   },
 };
 
@@ -403,6 +419,6 @@ const removeGhostsTool: ToolDef = {
 };
 
 export const DESIGN_TOOLS: ToolDef[] = [
-  addStepTool, addCacheTool, connect, disconnect, setEntry, removeEntry, linkCacheTool, unlinkCacheTool,
+  addStepTool, addCacheTool, connect, disconnect, setEntry, removeEntry, setEntryCronTool, linkCacheTool, unlinkCacheTool,
   moveBlocks, pickTool, copy, paste, deletePicked, undo, redo, restoreGhostsTool, removeGhostsTool,
 ];
