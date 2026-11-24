@@ -68,7 +68,9 @@ public sealed class RunningGraphTests
     [Fact]
     public void TheBriefingCarriesNamesScheduleAndLiveness()
     {
-        var text = GraphRenderer.Render(GraphBriefing.Of(Captured));
+        var entry = Captured.EntryStepIds[0];
+        var text = GraphRenderer.Render(GraphBriefing.Of(
+            Captured with { EntryCrons = new Dictionary<Guid, string> { [entry] = "0 * * * * *" } }));
 
         // Kept beside the test output for a human to read what the model is shown.
         Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "TestResults"));
@@ -77,6 +79,7 @@ public sealed class RunningGraphTests
         Assert.Contains("filefetcher-archiveexpander-chain_1.0.0", text, StringComparison.Ordinal);
         Assert.Contains("started (in the live set)", text, StringComparison.Ordinal);
         Assert.Contains("Schedule: each entry step runs on its own cron (six fields, seconds first).", text, StringComparison.Ordinal);
+        Assert.Contains("Entry S1 runs on cron \"0 * * * * *\".", text, StringComparison.Ordinal);
         Assert.Contains("runs processor kafka-importer_2.2.0", text, StringComparison.Ordinal);
         Assert.DoesNotContain("can never run", text, StringComparison.Ordinal);
     }
@@ -100,22 +103,58 @@ public sealed class RunningGraphTests
     }
 
     [Fact]
-    public void AWorkflowCronOnTheGraphIsNotRendered()
+    public void AGraphWithoutEntryCronsRendersItsCronOnEveryEntry()
     {
-        // RunningGraph still carries a Cron parameter, but a workflow has no cron: whatever it holds
-        // never reaches the briefing, and an entry with no cron of its own is unscheduled.
-        var text = GraphRenderer.Render(GraphBriefing.Of(Captured with { Cron = "0 * * * * *", EntryCrons = null }));
+        // In-memory rehearsal and replay graphs carry only a graph Cron and no entry crons; the evidence
+        // they come with fires on that cron, so the briefing must say so rather than "no schedule".
+        var a = Guid.NewGuid(); var b = Guid.NewGuid();
+        var graph = new RunningGraph(Guid.NewGuid(), true, "  0 *  * * * * ", [a, b],
+            [new StepL1(a, 4, Guid.NewGuid(), "{}", []), new StepL1(b, 4, Guid.NewGuid(), "{}", [])],
+            new Dictionary<Guid, string>(), EntryCrons: null);
 
-        Assert.DoesNotContain("0 * * * * *", text, StringComparison.Ordinal);
+        var text = GraphRenderer.Render(GraphBriefing.Of(graph));
+
+        Assert.Contains("Entry S1 runs on cron \"0 * * * * *\".", text, StringComparison.Ordinal);
+        Assert.Contains("Entry S2 runs on cron \"0 * * * * *\".", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("has no schedule", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EntryCronsWinOverTheGraphCron()
+    {
+        var a = Guid.NewGuid(); var b = Guid.NewGuid(); var c = Guid.NewGuid();
+        var graph = new RunningGraph(Guid.NewGuid(), true, "0 * * * * *", [a, b, c],
+            [new StepL1(a, 4, Guid.NewGuid(), "{}", []), new StepL1(b, 4, Guid.NewGuid(), "{}", []),
+             new StepL1(c, 4, Guid.NewGuid(), "{}", [])],
+            new Dictionary<Guid, string>(),
+            EntryCrons: new Dictionary<Guid, string> { [a] = " */30  * * * * * ", [b] = "   " });
+
+        var text = GraphRenderer.Render(GraphBriefing.Of(graph));
+
+        Assert.Contains("Entry S1 runs on cron \"*/30 * * * * *\".", text, StringComparison.Ordinal);
+        // A blank entry cron and a missing one are both unscheduled; the graph cron is not a fallback.
+        Assert.Contains("Entry S2 has no schedule.", text, StringComparison.Ordinal);
+        Assert.Contains("Entry S3 has no schedule.", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"0 * * * * *\"", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ABlankGraphCronWithoutEntryCronsIsNoSchedule()
+    {
+        var text = GraphRenderer.Render(GraphBriefing.Of(Captured with { Cron = " ", EntryCrons = null }));
+
         Assert.Contains("Entry S1 has no schedule.", text, StringComparison.Ordinal);
     }
 
     [Fact]
     public void AnEmptyEntryCronMapRendersLikeNone()
     {
-        var plain = GraphRenderer.Render(GraphBriefing.Of(Captured with { EntryCrons = null }));
+        // As the L2 source builds it: no graph Cron. Then an empty map and no map are the same: unscheduled.
+        var plain = GraphRenderer.Render(GraphBriefing.Of(Captured with { Cron = null, EntryCrons = null }));
 
-        Assert.Equal(plain, GraphRenderer.Render(GraphBriefing.Of(Captured with { EntryCrons = new Dictionary<Guid, string>() })));
+        Assert.Contains("Entry S1 has no schedule.", plain, StringComparison.Ordinal);
+        Assert.Equal(plain, GraphRenderer.Render(GraphBriefing.Of(
+            Captured with { Cron = null, EntryCrons = new Dictionary<Guid, string>() })));
     }
 
     [Fact]

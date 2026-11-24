@@ -14,8 +14,9 @@ namespace Processor.Analyst.Graph;
 /// <param name="Live">Whether the workflow is in the live set, i.e. started and not stopped.</param>
 /// <param name="Names">Display names by id, for the workflow, its steps and its processors. A missing
 /// name is not an error: the id stands in for it.</param>
-/// <param name="Cron">Retired: a workflow has no cron of its own. The L2 source always passes null and the
-/// renderer never reads it; it stays only because existing callers still construct the record with it.</param>
+/// <param name="Cron">A workflow has no cron of its own: the L2 source always passes null. In-memory graphs
+/// (rehearsals, replay fixtures) set it instead of <paramref name="EntryCrons"/>, and the renderer then
+/// shows it on every entry step; it is ignored whenever <paramref name="EntryCrons"/> is non-null.</param>
 /// <param name="EntryCrons">The cron of each scheduled entry step, by step id; an entry step not listed is
 /// unscheduled. Null or empty when no entry step is scheduled.</param>
 internal sealed record RunningGraph(

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using Messaging.Contracts;
+using Messaging.Contracts.Projections;
 
 namespace Processor.Analyst.Graph;
 
@@ -33,6 +34,26 @@ internal static class GraphRenderer
 
     private const int Always = 4;
 
+    /// <summary>
+    /// The normalised cron an entry step is rendered with, or null when it is unscheduled.
+    /// <para>
+    /// A graph with an entry-cron map (every graph read from L2) uses that map alone: an entry without
+    /// a cron there is unscheduled. A graph with no map at all is an in-memory one, built by a rehearsal
+    /// or loaded from a replay fixture, which carries only <see cref="RunningGraph.Cron"/> and whose
+    /// evidence fires on that cron; there every entry is rendered with it, so the briefing does not
+    /// contradict the evidence. The L2 source always passes Cron = null, so production never falls back.
+    /// </para>
+    /// </summary>
+    private static string? EntryCron(RunningGraph graph, Guid entry)
+    {
+        if (graph.EntryCrons is not null)
+        {
+            return EntrySchedule.EffectiveCron(entry, graph.EntryCrons);
+        }
+
+        return string.IsNullOrWhiteSpace(graph.Cron) ? null : EntrySchedule.Normalize(graph.Cron);
+    }
+
     internal static string Render(GraphBriefing briefing)
     {
         if (briefing.Graph is not { } graph)
@@ -56,11 +77,10 @@ internal static class GraphRenderer
                 + (graph.Live ? "started (in the live set)." : "NOT in the live set: it is not running."))
             .AppendLine("Schedule: each entry step runs on its own cron (six fields, seconds first).");
 
-        // A workflow has no cron: graph.Cron is never rendered, and an entry step without an entry
-        // cron is unscheduled.
         foreach (var entry in graph.EntryStepIds)
         {
-            text.AppendLine(graph.EntryCrons is { } crons && crons.TryGetValue(entry, out var cron)
+            var cron = EntryCron(graph, entry);
+            text.AppendLine(cron is not null
                 ? $"Entry {Ref(entry)} runs on cron \"{cron}\"."
                 : $"Entry {Ref(entry)} has no schedule.");
         }
