@@ -198,6 +198,21 @@ const stamp = (rows: Record<Id, { updatedAt: string | null; createdAt: string | 
 };
 
 /**
+ * The ghosts to restore with the ghost wires of every step among them [user, 2026-11-24: "a step with a wire that became a
+ * ghost — restore means restoring both"]: a wire into or out of a restored step comes along when its other end is on the
+ * board or restored too; one whose other end stays a ghost stays a ghost (no refusal).
+ */
+export function withTheirWires(b: BoardState, items: GhostItem[], all: readonly GhostItem[]): GhostItem[] {
+  const steps = new Set(items.flatMap((g) => (g.kind === 'step' ? [g.row.id] : [])));
+  if (steps.size === 0) return items;
+  const there = (id: Id) => steps.has(id) || !!b.steps[id];
+  const keys = new Set(items.map((g) => g.key));
+  const wires = all.filter((g) => g.kind === 'wire' && !keys.has(g.key)
+    && (steps.has(g.from) || steps.has(g.to)) && there(g.from) && there(g.to));
+  return wires.length ? [...items, ...wires] : items;
+}
+
+/**
  * Puts ghosts back as one edit: rows first (steps, caches, workflows with their assignments), then links. A restored
  * step keeps its wires to steps on the board after the restore and its assignment rows, linked into the workflows that
  * linked them and are on the board; a restored workflow its entry, cache and assignment links whose ends exist. A link

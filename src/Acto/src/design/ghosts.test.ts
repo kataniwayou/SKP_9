@@ -5,7 +5,7 @@ import { board } from './boardFixtures';
 import { createBoardStore } from './boardStore';
 import { changedKeys } from './changes';
 import { addStep, deleteSteps, withoutWorkflow } from './edits';
-import { createGhostStore, keepGhosts, placeIn, restoreGhosts, type GhostItem } from './ghosts';
+import { createGhostStore, keepGhosts, placeIn, restoreGhosts, withTheirWires, type GhostItem } from './ghosts';
 import { memoryStorage } from '../test/memoryStorage';
 
 /** board() with two entries in every link array, the first of each being the one the tests delete. */
@@ -260,6 +260,26 @@ describe('restoreGhosts', () => {
     store.edit((b) => ({ ...b, steps: { ...b.steps, fetch: { ...b.steps.fetch!, nextStepIds: ['lonely'] } } }));
     const after = stateOf(restoreGhosts(store.state(), store.base(), [ghosts.get('wire:fetch:expand')!]));
     expect(changedKeys(store.base(), after)).toEqual(new Set());
+  });
+
+  it('a restored step brings its ghost wires back, into it and out of it, when the other end is on the board [user, 2026-11-24]', () => {
+    const { store, ghosts } = make();
+    store.edit((b) => deleteSteps(b, ['expand']));
+    const items = withTheirWires(store.state(), [ghosts.get('step:expand')!], ghosts.ghosts());
+    expect(items.map((g) => g.key).sort()).toEqual(['step:expand', 'wire:fetch:expand']);
+    const after = stateOf(restoreGhosts(store.state(), store.base(), items, ghosts.get));
+    expect(after.steps.fetch!.nextStepIds).toEqual(['expand']);
+    expect(changedKeys(store.base(), after)).toEqual(new Set([]));
+  });
+
+  it('a ghost wire whose other end is still a ghost stays a ghost (nothing refused)', () => {
+    const { store, ghosts } = make();
+    store.edit((b) => deleteSteps(b, ['fetch', 'expand']));
+    const items = withTheirWires(store.state(), [ghosts.get('step:expand')!], ghosts.ghosts());
+    expect(items.map((g) => g.key)).toEqual(['step:expand']);
+    // restored together, the wire between them comes back too
+    const both = withTheirWires(store.state(), [ghosts.get('step:expand')!, ghosts.get('step:fetch')!], ghosts.ghosts());
+    expect(both.map((g) => g.key).sort()).toEqual(['step:expand', 'step:fetch', 'wire:fetch:expand']);
   });
 
   it('placeIn puts an id before the first one its order places after it', () => {

@@ -23,7 +23,7 @@ import { addEntry, addWire, linkCache, moveItems } from './design/edits';
 import { newId } from './design/ids';
 import { nudgeKey, pasteKey, undoRedoKey } from './design/keys';
 import { unsavedMarks } from './design/changes';
-import { createGhostStore, keepGhosts, restoreGhosts, type GhostItem, type GhostStore } from './design/ghosts';
+import { createGhostStore, keepGhosts, restoreGhosts, withTheirWires, type GhostItem, type GhostStore } from './design/ghosts';
 import { saveBoard, takeStored } from './design/saveBoard';
 import { InspectorPanel, pickName } from './inspector/InspectorPanel';
 import { createLiveStore, type LiveStore } from './live/liveClient';
@@ -238,7 +238,7 @@ export function App(props: AppProps) {
   const restore = useCallback((keys: string[]) => {
     const items = keys.flatMap((k) => { const g = ghostStore.get(k); return g ? [g] : []; });
     if (items.length === 0) return;
-    store.editOrRefuse((b) => restoreGhosts(b, store.base(), items, ghostStore.get));
+    store.editOrRefuse((b) => restoreGhosts(b, store.base(), withTheirWires(b, items, ghostStore.ghosts()), ghostStore.get));
   }, [store, ghostStore]);
   /** Remove: the ghosts leave the board for this page session; BaseAPI is not touched and it is no undo step. */
   const removeGhosts = useCallback((keys: string[]) => ghostStore.remove(keys), [ghostStore]);

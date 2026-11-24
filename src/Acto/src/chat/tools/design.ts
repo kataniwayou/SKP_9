@@ -4,7 +4,7 @@ import { statusOf } from '../../live/liveState';
 import type { Pick } from '../../board/selection';
 import type { BoardState, ItemRef } from '../../design/board';
 import { addCache, addEntry, addStep, addWire, linkCache, moveItems, removeEntries, removeWires, setCacheField, unlinkCaches } from '../../design/edits';
-import { restoreGhosts, type GhostItem } from '../../design/ghosts';
+import { restoreGhosts, withTheirWires, type GhostItem } from '../../design/ghosts';
 import type { Rect } from '../../model/geometry';
 import type { Id } from '../../model/graph';
 import { copyClip, copyMessage, countWords, pasteClip, pasteMessage, readClip, writeClip } from '../../operate/clipboard';
@@ -377,14 +377,14 @@ function ghostsOf(ctx: ToolContext, args: Record<string, unknown>, action: strin
 
 const restoreGhostsTool: ToolDef = {
   name: 'restore_ghosts',
-  description: "Put deleted items (ghosts) back on the board as one undoable edit, as the ghost toolbar's Restore does: the same row when BaseAPI still has it (an unsaved delete), else a new unsaved row. A wire, entry arrow or cache line comes back only when both its ends are on the board (else refused: restore <name> first).",
+  description: "Put deleted items (ghosts) back on the board as one undoable edit, as the ghost toolbar's Restore does: the same row when BaseAPI still has it (an unsaved delete), else a new unsaved row. A restored step brings back its ghost wires (in and out) whose other end is on the board. A wire, entry arrow or cache line restored on its own comes back only when both its ends are on the board (else refused: restore <name> first).",
   parameters: GHOSTS_ARG,
   async run(ctx, args) {
     const items = ghostsOf(ctx, args, 'restore ghosts');
     if ('out' in items) return items.out;
     const store = ctx.ghosts!;
     const names = items.map((g) => ghostName(g, store.get)).join(', ');
-    return applyEdit(ctx, (b) => restoreGhosts(b, ctx.store.base(), items, store.get), 'restore ghosts', `restored ${names}; not saved yet`);
+    return applyEdit(ctx, (b) => restoreGhosts(b, ctx.store.base(), withTheirWires(b, items, store.ghosts()), store.get), 'restore ghosts', `restored ${names}; not saved yet`);
   },
 };
 
