@@ -66,13 +66,21 @@ const isBoard = (v: unknown): v is BoardState =>
 /** The session draft: the unsaved board and the base it was diffed against. Nothing else (no undo history). */
 interface Draft { base: BoardState; present: BoardState }
 
+/** A draft saved before workflows carried entryCrons has none on its rows: they read as {} (no entry of its own cron). */
+function withEntryCrons(b: BoardState): BoardState {
+  return {
+    ...b,
+    workflows: Object.fromEntries(Object.entries(b.workflows).map(([id, w]) => [id, w.entryCrons ? w : { ...w, entryCrons: {} }])),
+  };
+}
+
 function readDraft(session: Storage | null): Draft | null {
   try {
     const raw = session?.getItem(KEY);
     if (!raw) return null;
     const d: unknown = JSON.parse(raw);
     if (!isObj(d) || !isBoard(d.base) || !isBoard(d.present)) return null;
-    return { base: d.base, present: d.present };
+    return { base: withEntryCrons(d.base), present: withEntryCrons(d.present) };
   } catch {
     return null;
   }

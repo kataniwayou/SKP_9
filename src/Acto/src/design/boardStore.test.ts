@@ -89,6 +89,21 @@ describe('board store', () => {
     const b = createBoardStore(createOutputStore(null), s2); b.load(board());
     expect(b.state().workflows.daily!.updatedAt).toBe('old');
   });
+  it('reads a draft saved before workflows had entryCrons as having none', () => {
+    const strip = (b: ReturnType<typeof board>) => ({
+      ...b,
+      workflows: Object.fromEntries(Object.entries(b.workflows).map(([id, w]) => { const { entryCrons: _drop, ...rest } = w; return [id, rest]; })),
+    });
+    const base = board();
+    const present = nameA('A')(board());
+    const session = memoryStorage({ 'acto.board': JSON.stringify({ base: strip(base), present: strip(present) }) });
+    const store = createBoardStore(createOutputStore(null), session);
+    store.load(board());
+    expect(store.state().workflows.daily!.name).toBe('A');
+    expect(store.state().workflows.daily!.entryCrons).toEqual({});
+    expect(store.base().workflows.daily!.entryCrons).toEqual({});
+    expect(() => deleteSteps(store.state(), Object.keys(store.state().steps))).not.toThrow();
+  });
   it('saved clears history and draft', () => {
     const session = memoryStorage();
     const { store } = make(session);
