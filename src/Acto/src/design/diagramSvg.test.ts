@@ -96,6 +96,16 @@ describe('diagramSvg', () => {
     expect(badge(w({ fetch: '0 * * * * *', expand: '*/10 * * * * *' }))).toContain('⏱ 2 schedules');
   });
 
+  it('the badge fits the longest preset whole, and the badge is wide enough for it', () => {
+    const b = board();
+    const x = { ...b, workflows: { ...b.workflows, daily: { ...b.workflows.daily!, entryStepIds: ['fetch'], entryCrons: { fetch: '0 0 8 * * MON-FRI' } } } };
+    const g = parse(diagramSvg(x, 'daily')).querySelector('g[data-part="cron"]')!;
+    const line = g.querySelector('text')!.textContent!;
+    expect(line).toBe('⏱ 0 0 8 * * MON-FRI');
+    // 13px monospace is about 7.2px a character; the text must sit inside the badge with some padding
+    expect(Number(g.querySelector('rect')!.getAttribute('width'))).toBeGreaterThanOrEqual(Math.ceil(line.length * 7.2) + 16);
+  });
+
   it('shows a cache\'s root and item count', () => {
     const b = board();
     b.caches.c1!.items = '{"a":"1","b":"2","c":"3"}';

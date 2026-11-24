@@ -10,7 +10,8 @@ const TITLE_H = 44;
 const LEGEND_H = 44;
 const TRI_W = 64;
 const TRI_H = 56;
-const BADGE_W = 128;
+// wide enough for "⏱ " plus the longest preset, `0 0 8 * * MON-FRI` (19 characters of 13px mono)
+const BADGE_W = 156;
 const BADGE_H = 44;
 const BADGE_GAP = 10;
 const BOX_W = 250;
@@ -250,7 +251,7 @@ export function diagramSvg(b: BoardState, workflowId: Id): string {
     `<rect x="${num(B.x)}" y="${num(B.y)}" width="${B.w}" height="${B.h}" rx="8" ry="8" fill="#EEF2FF" stroke="#C7D2FE"/>`,
   );
   out.push(
-    `<text x="${num(B.x + B.w / 2)}" y="${num(B.y + (reading ? 17 : B.h / 2))}" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="600" font-family="${MONO}" fill="#3730A3">${esc(clip(cron, 17))}</text>`,
+    `<text x="${num(B.x + B.w / 2)}" y="${num(B.y + (reading ? 17 : B.h / 2))}" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="600" font-family="${MONO}" fill="#3730A3">${esc(clip(cron, 19))}</text>`,
   );
   if (reading) out.push(`<text x="${num(B.x + B.w / 2)}" y="${num(B.y + 34)}" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#6366F1">${esc(clip(reading, 22))}</text>`);
   out.push('</g>');
