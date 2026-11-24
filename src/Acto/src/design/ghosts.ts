@@ -1,5 +1,6 @@
 import type { OutputStore } from '../output/outputStore';
 import type { Id } from '../model/graph';
+import type { Point } from '../model/geometry';
 import { NO_AUDIT, type AssignmentRow, type BoardState, type CacheRow, type Edit, type StepRow, type WorkflowRow } from './board';
 import type { BoardStore } from './boardStore';
 
@@ -26,6 +27,8 @@ export interface GhostStore {
   get(key: string): GhostItem | undefined;
   /** Drops these ghosts for this session (not an undo step); one comes back if its item is on the board and goes again. */
   remove(keys: string[]): void;
+  /** Moves ghost steps, caches and workflows to these places (their rows' `at`); kept with the ghosts, not an undo step. Other keys are ignored. */
+  moveGhosts(moves: { key: string; at: Point }[]): void;
   /** Saved creates take BaseAPI's ids: recorded keys and the ids inside the snapshots. Call before the board adopts the re-read. */
   remap(made: Record<string, string>): void;
   subscribe(fn: () => void): () => void;
@@ -165,6 +168,17 @@ export function createGhostStore(board: BoardStore, storage?: Storage | null): G
     remove(keys) {
       for (const k of keys) if (!present.has(k)) removed.add(k);
       recompute();
+    },
+    moveGhosts(moves) {
+      let changed = false;
+      for (const { key, at } of moves) {
+        const g = recorded.get(key);
+        if (!g || present.has(key) || (g.kind !== 'step' && g.kind !== 'cache' && g.kind !== 'workflow')) continue;
+        if (g.row.at?.x === at.x && g.row.at?.y === at.y) continue;
+        recorded.set(key, { ...g, row: { ...g.row, at: { x: at.x, y: at.y } } } as GhostItem);
+        changed = true;
+      }
+      if (changed) recompute();
     },
     remap(made) {
       if (Object.keys(made).length === 0) return;

@@ -253,6 +253,16 @@ describe('Board', () => {
       act(() => seen.props!.onNodeDragStop!({}, node('st:fetch', 200, 200)));
       expect(onMove).not.toHaveBeenCalled();
     });
+    it('a drag of ghosts and real items commits the real ones to onMove and the ghosts to onMoveGhosts', async () => {
+      const onMove = vi.fn(); const onMoveGhosts = vi.fn();
+      show({ onMove, onMoveGhosts });
+      await screen.findByText('fetch-orders');
+      const g = { ...node('ghost:step:gone', 50, 60), className: 'ghost' };
+      const all = [node('st:fetch', 260, 230), g];
+      act(() => seen.props!.onNodeDragStop!({}, all[0]!, all));
+      expect(onMove.mock.calls).toEqual([[[{ ref: { kind: 'step', id: 'fetch' }, at: { x: 260, y: 230 } }]]]);
+      expect(onMoveGhosts.mock.calls).toEqual([[[{ key: 'step:gone', at: { x: 50, y: 60 } }]]]);
+    });
     it('Esc during a drag puts the node back and the drag stop commits nothing', async () => {
       const onMove = vi.fn();
       show({ onMove });

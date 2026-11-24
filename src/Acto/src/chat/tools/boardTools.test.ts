@@ -299,7 +299,7 @@ describe('save', () => {
   it('gives the page ghost ghost store the made ids (the same remap as the Save button)', async () => {
     const { ctx, store, api } = setup();
     const remap = vi.fn();
-    ctx.ghosts = { ghosts: () => [], get: () => undefined, remove: vi.fn(), remap, subscribe: () => () => {} };
+    ctx.ghosts = { ghosts: () => [], get: () => undefined, remove: vi.fn(), remap, moveGhosts: vi.fn(), subscribe: () => () => {} };
     api.applyModel.mockResolvedValue({ ok: true, value: { ok: true, applied: true, results: [], made: { tmp1: 'real1' } } });
     store.edit((b) => moveItems(b, [{ ref: { kind: 'step', id: 'expand' }, at: { x: 5, y: 5 } }]));
     done(await call(ctx, 'save', {}, 'Save'));

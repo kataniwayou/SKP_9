@@ -23,7 +23,7 @@ export interface BoardView {
   failed?: (key: string) => boolean;
   /** Whether the item (`workflow:<id>`, `step:<id>`, `cache:<id>`) has unsaved changes: its unsaved mark. */
   unsaved?: (key: string) => boolean;
-  /** Deleted items seen earlier this session: drawn faded at their last place, not draggable. */
+  /** Deleted items seen earlier this session: drawn faded at their last place, draggable, not connectable. */
   ghosts?: GhostItem[];
 }
 
@@ -61,7 +61,7 @@ const TRIANGLE_HANDLES = [
 const STEP_HANDLES = [handle('target', 'in', Position.Left, 0, STEP_H / 2), handle('source', 'out', Position.Right, STEP_W, STEP_H / 2)];
 const CACHE_HANDLES = [handle('target', 'in', Position.Top, CACHE_W / 2, 0)];
 
-const GHOST = { draggable: false, connectable: false, zIndex: -1, className: 'ghost' } as const;
+const GHOST = { draggable: true, connectable: false, zIndex: -1, className: 'ghost' } as const;
 
 /** A chip's text: a workflow's payload on a step in a few words. */
 function chipText(payload: string, suffix: string): string {

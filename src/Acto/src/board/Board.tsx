@@ -39,6 +39,8 @@ export interface BoardProps {
   onBoxPick?: (picks: Pick[], additive: boolean) => void;
   /** One drag stop: everything the drag moved, to commit as one history step. Without onMove and onConnect the board is read-only. */
   onMove?: (moved: { ref: ItemRef; at: Point }[]) => void;
+  /** The ghosts a drag stop moved (same drag as onMove's, kept apart: ghosts are not board rows and no undo step). */
+  onMoveGhosts?: (moved: { key: string; at: Point }[]) => void;
   /**
    * A connection React Flow made: `wire` (a: from step, b: to step), `entry` (a: workflow, b: step) or `cacheLink`
    * (a: workflow, b: cache). The edit may refuse; that goes to Output, not here.
@@ -98,7 +100,7 @@ const isGhost = (n: Node) => (n.className ?? '').split(' ').includes('ghost');
 /** Whether a click landed on a node's handle: a connection, not a pick. */
 export const onHandle = (t: EventTarget | null): boolean => t instanceof Element && t.closest('.react-flow__handle') !== null;
 
-export function Board({ state, view, onPick, onBoxPick, onMove, onConnect, toolbar, initialZoom, initialView, onViewChange, onDropData, bar, settled = true, focusRef, centerRef, stateNow }: BoardProps) {
+export function Board({ state, view, onPick, onBoxPick, onMove, onMoveGhosts, onConnect, toolbar, initialZoom, initialView, onViewChange, onDropData, bar, settled = true, focusRef, centerRef, stateNow }: BoardProps) {
   const fitAtMount = useRef(settled);
   const flow = useRef<{
     getViewport: () => Viewport; fitBounds: (b: { x: number; y: number; width: number; height: number }, o?: { padding?: number }) => unknown; screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number };
@@ -227,12 +229,19 @@ export function Board({ state, view, onPick, onBoxPick, onMove, onConnect, toolb
     if (!onMove) return;
     if (cancelled) { setDragged(derivedRef.current); return; }
     const moved: { ref: ItemRef; at: Point }[] = [];
+    const movedGhosts: { key: string; at: Point }[] = [];
     for (const m of all && all.length > 0 ? all : [n]) {
+      const cur0 = derivedRef.current.find((x) => x.id === m.id)?.position;
+      if (isGhost(m)) {
+        if (m.id.startsWith(GHOST_PREFIX) && (!cur0 || cur0.x !== m.position.x || cur0.y !== m.position.y)) movedGhosts.push({ key: m.id.slice(GHOST_PREFIX.length), at: { x: m.position.x, y: m.position.y } });
+        continue;
+      }
       const ref = refOf(m);
       const cur = derivedRef.current.find((x) => x.id === m.id)?.position;
       if (ref && (!cur || cur.x !== m.position.x || cur.y !== m.position.y)) moved.push({ ref, at: { x: m.position.x, y: m.position.y } });
     }
     if (moved.length > 0) onMove(moved);
+    if (movedGhosts.length > 0) onMoveGhosts?.(movedGhosts);
     setDragged(derivedRef.current); // a refused or unchanged drag snaps back
   };
 

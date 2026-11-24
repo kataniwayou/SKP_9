@@ -108,9 +108,9 @@ describe('toFlow', () => {
     const gstep: GhostItem = { key: 'step:gone', kind: 'step', row: { ...lonely, id: 'gone', name: 'gone', at: { x: 5, y: 6 } } };
     const wire: GhostItem = { key: 'wire:fetch:gone', kind: 'wire', from: 'fetch', to: 'gone', condition: 2 };
     const ghostEdges = (x: { edges: { id: string }[] }) => x.edges.filter((e) => e.id.startsWith('ghost:'));
-    it('are drawn with ghost: true, not draggable or connectable', () => {
+    it('are drawn with ghost: true, draggable, not connectable', () => {
       const n = toFlow(b, view({ ghosts: [gstep] })).nodes.find((x) => x.id === 'ghost:step:gone')!;
-      expect(n).toMatchObject({ type: 'step', draggable: false, connectable: false, zIndex: -1, className: 'ghost', position: { x: 5, y: 6 } });
+      expect(n).toMatchObject({ type: 'step', draggable: true, connectable: false, zIndex: -1, className: 'ghost', position: { x: 5, y: 6 } });
       expect(n.data).toMatchObject({ ghost: true, ghostKey: 'step:gone', name: 'gone' });
     });
     it('a ghost wire between a real and a ghost step is drawn', () => {

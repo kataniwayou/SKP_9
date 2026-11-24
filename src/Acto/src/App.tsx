@@ -270,6 +270,7 @@ export function App(props: AppProps) {
   );
 
   const onMove = useCallback((moved: { ref: ItemRef; at: Point }[]) => store.edit((b) => moveItems(b, moved)), [store]);
+  const onMoveGhosts = useCallback((moved: { key: string; at: Point }[]) => ghostStore.moveGhosts(moved), [ghostStore]);
   const onConnect = useCallback((kind: ConnectionKind, a: Id, b: Id) => {
     if (kind === 'wire') store.editOrRefuse((s) => addWire(s, a, b));
     else if (kind === 'entry') store.editOrRefuse((s) => addEntry(s, a, b));
@@ -332,7 +333,7 @@ export function App(props: AppProps) {
             toolbox={<ToolboxPanel processors={processors} />}
             board={!loaded
               ? <div className="board-wait">Loading the board…</div>
-              : <Board state={state} view={view} onPick={onPick} onBoxPick={onBoxPick} onMove={onMove} onConnect={onConnect} onDropData={onDropData}
+              : <Board state={state} view={view} onPick={onPick} onBoxPick={onBoxPick} onMove={onMove} onMoveGhosts={onMoveGhosts} onConnect={onConnect} onDropData={onDropData}
                   toolbar={toolbar} bar={barView} settled={loaded} focusRef={boardFocus} centerRef={boardCenter} stateNow={stateNow} onViewChange={onViewChange}
                   {...(saved ? { initialView: { x: saved.x, y: saved.y, zoom: saved.zoom } } : {})} />}
             inspector={<InspectorPanel store={store} selection={sel} ghosts={ghostStore} onPicks={onInspectorPicks} onCenter={(r) => boardCenter.current?.(r)} />}

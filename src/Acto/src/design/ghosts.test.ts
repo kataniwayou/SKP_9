@@ -4,7 +4,7 @@ import type { BoardState, Edit } from './board';
 import { board } from './boardFixtures';
 import { createBoardStore } from './boardStore';
 import { changedKeys } from './changes';
-import { addStep, deleteSteps, removeEntries, setEntryCron, withoutWorkflow } from './edits';
+import { addStep, deleteSteps, moveItems, removeEntries, setEntryCron, withoutWorkflow } from './edits';
 import { createGhostStore, keepGhosts, placeIn, restoreGhosts, withTheirWires, type GhostItem } from './ghosts';
 import { memoryStorage } from '../test/memoryStorage';
 
@@ -33,6 +33,40 @@ const make = (start: BoardState = board()) => {
 };
 const keys = (g: { ghosts(): GhostItem[] }) => g.ghosts().map((x) => x.key).sort();
 const stateOf = (e: Edit): BoardState => { if ('refused' in e) throw new Error(e.refused); return e.state; };
+
+describe('moving ghosts', () => {
+  it('moves a ghost step: its stored at changes, it persists across a re-read, and Restore uses the moved place', () => {
+    const storage = memoryStorage();
+    const { store, ghosts } = make();
+    const stop = keepGhosts(ghosts, storage);
+    store.edit((b) => deleteSteps(b, ['lonely']));
+    ghosts.moveGhosts([{ key: 'step:lonely', at: { x: 777, y: 88 } }, { key: 'wire:nope', at: { x: 1, y: 1 } }]);
+    expect(ghosts.get('step:lonely')).toMatchObject({ kind: 'step', row: { at: { x: 777, y: 88 } } });
+    stop();
+    // a new page: the store reads the kept ghosts
+    const again = make();
+    again.store.edit((b) => deleteSteps(b, ['lonely']));
+    const ghosts2 = createGhostStore(again.store, storage);
+    expect(ghosts2.get('step:lonely')).toMatchObject({ row: { at: { x: 777, y: 88 } } });
+    // restore at the moved place
+    const g = ghosts.get('step:lonely')!;
+    const restored = stateOf(restoreGhosts(store.state(), store.base(), [g]));
+    expect(restored.steps.lonely!.at).toEqual({ x: 777, y: 88 });
+  });
+
+  it('a ghost move is no undo step; a mixed drag moves the real item through one undo step', () => {
+    const { store, ghosts } = make();
+    store.edit((b) => deleteSteps(b, ['lonely']));
+    store.edit((b) => moveItems(b, [{ ref: { kind: 'step', id: 'expand' }, at: { x: 5, y: 6 } }]));
+    ghosts.moveGhosts([{ key: 'step:lonely', at: { x: 9, y: 9 } }]);
+    expect(store.state().steps.expand!.at).toEqual({ x: 5, y: 6 });
+    store.undo(); // undoes the real move only
+    expect(store.state().steps.expand!.at).toEqual(board().steps.expand!.at);
+    expect(ghosts.get('step:lonely')).toMatchObject({ row: { at: { x: 9, y: 9 } } });
+    store.undo(); // the delete: the step is back and no ghost
+    expect(ghosts.ghosts()).toEqual([]);
+  });
+});
 
 describe('ghost store', () => {
   it('deleting a step leaves ghosts for it, its wires and its entry arrows', () => {

@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures';
 import {
-  ghost, inspector, openAt, outLine, pickStep, save, saveButton, selbar, stNode, tabLabels, toolbar, waitLoaded,
+  dragBy, flowPos, ghost, inspector, openAt, outLine, pickStep, save, saveButton, selbar, stNode, tabLabels, toolbar, waitLoaded,
 } from './helpers';
 import { seed } from './seed';
 import { getJson, type Row } from './stack';
@@ -117,4 +117,35 @@ test('Remove drops a ghost; Ctrl+click of two ghosts shows the bar Restore · Re
   await expect(stNode(page, id.b!)).toHaveCount(0);
   await expect(saveButton(page)).toContainText('Save ·');
   expect((await steps()).map((s) => s.name).sort()).toEqual(['e2e-gh-a', 'e2e-gh-b', 'e2e-gh-c']);
+});
+
+test('a ghost drags like a step: it keeps the new place across a reload, Restore puts the step there, Remove still works [user, 2026-11-24]', async ({ page }) => {
+  const id = await seed({ steps: [{ key: 's', name: 'e2e-gh-drag', at: { x: 300, y: 120 } }, { key: 'u', name: 'e2e-gh-drag2', at: { x: 300, y: 300 } }] });
+  await openAt(page);
+  await deleteStep(page, id.s!);
+  const g = ghost(page, 'e2e-gh-drag');
+  await expect(g).toHaveCount(1);
+  const start = await flowPos(g);
+  await dragBy(page, g, 150, 80, { x: 100, y: 25 });
+  const moved = await flowPos(g);
+  expect(moved.x - start.x).toBeGreaterThan(120);
+  expect(moved.y - start.y).toBeGreaterThan(60);
+
+  await page.reload();
+  await waitLoaded(page);
+  await expect(ghost(page, 'e2e-gh-drag')).toHaveCount(1);
+  expect(await flowPos(ghost(page, 'e2e-gh-drag'))).toEqual(moved);
+
+  await ghost(page, 'e2e-gh-drag').locator('.sn').click();
+  await toolbar(page, 'ghost').getByRole('button', { name: 'Restore' }).click();
+  await expect(stNode(page, id.s!)).toBeVisible();
+  expect(await flowPos(stNode(page, id.s!))).toEqual(moved);
+
+  // Remove still works on a moved ghost
+  await deleteStep(page, id.u!);
+  const g2 = ghost(page, 'e2e-gh-drag2');
+  await dragBy(page, g2, 40, 40, { x: 100, y: 25 });
+  await g2.locator('.sn').click();
+  await toolbar(page, 'ghost').getByRole('button', { name: 'Remove' }).click();
+  await expect(g2).toHaveCount(0);
 });
