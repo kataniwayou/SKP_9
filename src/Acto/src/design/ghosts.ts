@@ -125,22 +125,50 @@ function readGhosts(storage: Storage | null | undefined): GhostItem[] {
   } catch { return []; }
 }
 
+/** Whether a ghost's item was ever saved: a row BaseAPI stamped, or a link whose two ends both were. */
+function everSaved(g: GhostItem, base: BoardState, lookup: (key: string) => GhostItem | undefined): boolean {
+  const row = (kind: 'step' | 'cache' | 'workflow', id: Id): boolean => {
+    const table = kind === 'step' ? base.steps : kind === 'cache' ? base.caches : base.workflows;
+    if (table[id]) return true;
+    const s = lookup(`${kind}:${id}`);
+    return !!s && (s.kind === 'step' || s.kind === 'cache' || s.kind === 'workflow') && s.row.updatedAt !== null;
+  };
+  switch (g.kind) {
+    case 'step': case 'cache': case 'workflow': return g.row.updatedAt !== null;
+    case 'wire': return row('step', g.from) && row('step', g.to);
+    case 'entry': return row('workflow', g.workflowId) && row('step', g.stepId);
+    case 'cacheLink': return row('workflow', g.workflowId) && row('cache', g.cacheId);
+  }
+}
+
 /**
- * Records every item of the board's present on each change; ghosts = recorded − present − removed. The ghosts belong to
- * the draft [user, 2026-11-23]: `storage` holds the ones kept from an earlier page (written by keepGhosts); one whose
- * item is on the board again is no ghost.
+ * Records every item of the board's present on each change; ghosts = recorded ∩ active − present − removed. The ghosts
+ * belong to the draft [user, 2026-11-23]: `storage` holds the ones kept from an earlier page (written by keepGhosts); one
+ * whose item is on the board again is no ghost.
+ * <p>
+ * Only a delete makes a ghost [user, 2026-11-25]. `active` is the set of keys a delete took off the board, and it follows
+ * the undo history: each board state remembers the set it was reached with. An edit adds what it took off (a delete, a
+ * wire re-pointed); an undo or a redo goes back to the set of the state it lands on, so a Ctrl+Z of a create leaves no
+ * ghost, while a Ctrl+Z of a Restore, or a redo of a delete, brings the ghost back. A Discard adds nothing and also drops
+ * the ghosts of items never saved (created and deleted since the last Save): with the changes discarded, they were never
+ * made. A ghost of a saved item stays until Remove, as before.
+ * </p>
  */
 export function createGhostStore(board: BoardStore, storage?: Storage | null): GhostStore {
   let recorded = new Map<string, GhostItem>(readGhosts(storage).map((g) => [g.key, g]));
   let removed = new Set<string>();
   let present = new Set<string>();
+  /** Keys a delete took off the board, as of the present; the stored ghosts are active from the start. */
+  let active = new Set<string>(recorded.keys());
+  /** The active set each board state was reached with, so undo and redo find it again. */
+  let activeAt = new WeakMap<BoardState, Set<string>>();
   let seen: BoardState | null = null;
   let list: GhostItem[] = [];
   let byKey = new Map<string, GhostItem>();
   const subs = new Set<() => void>();
 
   const recompute = () => {
-    const next = [...recorded.values()].filter((g) => !present.has(g.key) && !removed.has(g.key));
+    const next = [...recorded.values()].filter((g) => active.has(g.key) && !present.has(g.key) && !removed.has(g.key));
     if (next.length === list.length && next.every((g, i) => g === list[i])) return;
     list = next;
     byKey = new Map(next.map((g) => [g.key, g]));
@@ -153,7 +181,23 @@ export function createGhostStore(board: BoardStore, storage?: Storage | null): G
     seen = b;
     const items = itemsOf(b);
     for (const [k, g] of items) recorded.set(k, g);
+    const before = present;
     present = new Set(items.keys());
+    const why = board.lastCause();
+    const gone = [...before].filter((k) => !present.has(k));
+    const kept = (from: Set<string>) => new Set([...from].filter((k) => !present.has(k)));
+    if (why === 'undo' || why === 'redo') {
+      // back (or forward again) to that state's own ghosts; a state this page never reached (none: history starts at load)
+      // keeps what it has, and nothing the step took off becomes a ghost
+      active = kept(activeAt.get(b) ?? active);
+    } else if (why === 'discard') {
+      const base = board.base();
+      active = new Set([...kept(active)].filter((k) => { const g = recorded.get(k); return !!g && everSaved(g, base, (x) => recorded.get(x)); }));
+    } else {
+      // an edit (a delete, a re-pointed wire), or a load / Save re-read / dropped workflow, as before: what it took off is a ghost
+      active = new Set([...kept(active), ...gone]);
+    }
+    activeAt.set(b, active);
     // an item back on the board is no longer removed: it is a ghost again when it goes again
     for (const k of removed) if (present.has(k)) removed.delete(k);
     recompute();
@@ -190,6 +234,8 @@ export function createGhostStore(board: BoardStore, storage?: Storage | null): G
       recorded = new Map([...recorded.values()].map((g) => { const n = remapItem(g, m); return [n.key, n]; }));
       removed = new Set([...removed].map(rekey));
       present = new Set([...present].map(rekey));
+      active = new Set([...active].map(rekey));
+      activeAt = new WeakMap();
       // the board still shows the client ids until it adopts the re-read: record it afresh then
       seen = null;
       recompute();

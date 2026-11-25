@@ -10,6 +10,13 @@ import type { Table } from './changes';
 const KEY = 'acto.board';
 
 export interface StaleRow { table: Table; id: Id }
+
+/**
+ * Why the board's present last changed [user, 2026-11-25]: the ghost store makes ghosts only of what an `edit` (a delete,
+ * say) or a `redo` of one took off the board, never of what an `undo` or a `discard` took back. `other`: a load, a Save's
+ * re-read, a workflow dropped after BaseAPI deleted it.
+ */
+export type ChangeCause = 'edit' | 'undo' | 'redo' | 'discard' | 'other';
 export const SAVING_REFUSAL = 'Saving — wait for it to finish';
 
 export interface BoardStore {
@@ -62,6 +69,8 @@ export interface BoardStore {
    * Clears the stale list and those rows' failures.
    */
   takeStored(fresh: BoardState): void;
+  /** Why the present last changed. */
+  lastCause(): ChangeCause;
   subscribe(fn: () => void): () => void;
 }
 
@@ -156,6 +165,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
   let draftFailed = false;
   let blocked = false;
   let unsavedFor: { base: BoardState; present: BoardState; keys: Set<string> } | null = null;
+  let cause: ChangeCause = 'other';
   const subs = new Set<() => void>();
 
   const dropDraft = () => { try { session?.removeItem(KEY); } catch { /* blocked storage: nothing to drop */ } };
@@ -174,8 +184,9 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     }
   };
   const notify = () => subs.forEach((f) => f());
-  const setHistory = (h: History<BoardState>) => {
+  const setHistory = (h: History<BoardState>, why: ChangeCause) => {
     if (h === history) return;
+    cause = why;
     // a count is what the last dry run found on a workflow not changed since: an edit that touches it clears it [user, 2026-11-23]
     if (problems.size > 0 && h.present !== history.present) {
       const touched = affectedWorkflows(history.present, h.present).filter((id) => problems.has(id));
@@ -197,6 +208,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       const start = draft ? rebaseDraft(draft, b, present) : { base: b, present };
       base = start.base;
       history = historyOf(start.present);
+      cause = 'other';
       unsavedFor = null;
       blocked = false;
       stale = [];
@@ -209,16 +221,16 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     base: () => base,
     edit(fn, merge) {
       if (refuseWhileSaving()) return;
-      setHistory(commit(history, fn(history.present), merge));
+      setHistory(commit(history, fn(history.present), merge), 'edit');
     },
     editOrRefuse(fn) {
       if (refuseWhileSaving()) return;
       const res = fn(history.present);
       if ('refused' in res) output.log(res.refused, 'warn');
-      else setHistory(commit(history, res.state));
+      else setHistory(commit(history, res.state), 'edit');
     },
-    undo() { if (!refuseWhileSaving()) setHistory(undo(history)); },
-    redo() { if (!refuseWhileSaving()) setHistory(redo(history)); },
+    undo() { if (!refuseWhileSaving()) setHistory(undo(history), 'undo'); },
+    redo() { if (!refuseWhileSaving()) setHistory(redo(history), 'redo'); },
     canUndo: () => canUndo(history),
     canRedo: () => canRedo(history),
     unsaved() {
@@ -235,6 +247,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       base = fresh;
       blocked = false;
       history = historyOf(fresh);
+      cause = 'other';
       failures = new Map();
       stale = [];
       unsavedFor = null;
@@ -249,7 +262,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       stale = [];
       // already there (only the startup placement is unsaved): nothing to discard
       if (deepEqual(present, history.present)) { notify(); return 0; }
-      setHistory(commit(history, present));
+      setHistory(commit(history, present), 'discard');
       return n - store.unsaved().size;
     },
     dropWorkflow(id, deletedAssignments) {
@@ -267,7 +280,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
         return { ...s, workflows, assignments: keep };
       };
       base = drop(base);
-      setHistory(compact({ past: history.past.map(drop), present: drop(history.present), future: history.future.map(drop), merge: history.merge }));
+      setHistory(compact({ past: history.past.map(drop), present: drop(history.present), future: history.future.map(drop), merge: history.merge }), 'other');
       // base may have changed even when the history did not
       writeDraft();
       notify();
@@ -302,8 +315,9 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       unsavedFor = null;
       const next = take(history.present);
       if (deepEqual(next, history.present)) { writeDraft(); notify(); }
-      else setHistory(commit(history, next));
+      else setHistory(commit(history, next), 'edit');
     },
+    lastCause: () => cause,
     subscribe(fn) { subs.add(fn); return () => { subs.delete(fn); }; },
   };
   return store;

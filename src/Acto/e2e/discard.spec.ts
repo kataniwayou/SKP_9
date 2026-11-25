@@ -1,5 +1,8 @@
 import { test, expect } from './fixtures';
-import { field, openAt, outLine, saveButton, selectWorkflowAlone, stNode, waitLoaded, wfNode } from './helpers';
+import {
+  cacheTool, dropTool, field, ghost, openAt, outLine, pickStep, PROC_B, regionPoint, renameTo, saveButton, selectWorkflowAlone, stNode, toolbar, toolboxStep,
+  waitLoaded, wfNode, workflowTool,
+} from './helpers';
 import { seed } from './seed';
 import { getJson, type Row } from './stack';
 
@@ -59,4 +62,38 @@ test('Discard drops every unsaved change: Save\'s count resets, both disable, th
   await expect(saveButton(page)).toHaveText('Save');
   await expect(discardButton(page)).toBeDisabled();
   await expect(wfNode(page, id.w!).locator('.tri-nm')).toHaveText('e2e-discard-wf');
+});
+
+// Only a delete makes a ghost [user, 2026-11-25]: a create taken back by Ctrl+Z or by Discard leaves nothing behind.
+test('a new triangle, step or cache taken back by Ctrl+Z or by Discard leaves no ghost; a delete does', async ({ page }) => {
+  await openAt(page);
+  const ghosts = page.locator('.react-flow__node.ghost');
+  const ghostsBefore = await ghosts.count();
+  const pane = page.locator('.react-flow__pane');
+
+  // Ctrl+Z of each create
+  for (const [tool, kind] of [[workflowTool(page), 'workflow'], [toolboxStep(page, PROC_B), 'step'], [cacheTool(page), 'cache']] as const) {
+    const made = await dropTool(page, tool, kind, await regionPoint(page, { x: 120, y: 140 }));
+    await pane.click({ position: { x: 20, y: 20 } });
+    await page.keyboard.press('Control+z');
+    await expect(page.locator(`.react-flow__node[data-id$="${made}"]`)).toHaveCount(0);
+    await expect(ghosts, `${kind} undone`).toHaveCount(ghostsBefore);
+  }
+
+  // Discard of all three at once
+  await dropTool(page, workflowTool(page), 'workflow', await regionPoint(page, { x: 120, y: 140 }));
+  await dropTool(page, toolboxStep(page, PROC_B), 'step', await regionPoint(page, { x: 400, y: 140 }));
+  await dropTool(page, cacheTool(page), 'cache', await regionPoint(page, { x: 120, y: 320 }));
+  await expect(saveButton(page)).toHaveText(/^Save · \d+$/);
+  await discardButton(page).click();
+  await expect(saveButton(page)).toHaveText('Save');
+  await expect(ghosts, 'discarded creates').toHaveCount(ghostsBefore);
+
+  // a delete still makes a ghost
+  const step = await dropTool(page, toolboxStep(page, PROC_B), 'step', await regionPoint(page, { x: 400, y: 140 }));
+  await renameTo(page, 'e2e-discard-ghost');
+  await pane.click({ position: { x: 20, y: 20 } });
+  await pickStep(page, step);
+  await toolbar(page, 'step').getByRole('button', { name: 'Delete' }).click();
+  await expect(ghost(page, 'e2e-discard-ghost')).toHaveCount(1);
 });

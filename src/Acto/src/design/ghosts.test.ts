@@ -4,7 +4,7 @@ import type { BoardState, Edit } from './board';
 import { board } from './boardFixtures';
 import { createBoardStore } from './boardStore';
 import { changedKeys } from './changes';
-import { addStep, deleteSteps, moveItems, removeEntries, setEntryCron, withoutWorkflow } from './edits';
+import { addStep, addWire, deleteSteps, moveItems, removeEntries, setEntryCron, withoutWorkflow } from './edits';
 import { createGhostStore, keepGhosts, placeIn, restoreGhosts, withTheirWires, type GhostItem } from './ghosts';
 import { memoryStorage } from '../test/memoryStorage';
 
@@ -145,6 +145,75 @@ describe('ghost store', () => {
     store.edit((b) => deleteSteps(b, ['lonely']));
     expect(ghosts.ghosts().length).toBe(1);
     expect(store.state().steps.lonely).toBeUndefined();
+  });
+});
+
+describe('only a delete makes a ghost [user, 2026-11-25]', () => {
+  const p = board().processors.p1!;
+  const create = (store: ReturnType<typeof make>['store']) => store.edit((b) => addStep(b, p, { x: 1, y: 1 }, 'tmp1'));
+
+  it('a create undone leaves no ghost, and neither does a create discarded', () => {
+    const { store, ghosts } = make();
+    create(store);
+    store.undo();
+    expect(store.state().steps.tmp1).toBeUndefined();
+    expect(ghosts.ghosts()).toEqual([]);
+    store.redo();
+    expect(store.discard()).toBe(1);
+    expect(store.state().steps.tmp1).toBeUndefined();
+    expect(ghosts.ghosts()).toEqual([]);
+  });
+
+  it('a create wired in and undone back past its creation leaves no ghost for the step or its wire', () => {
+    const { store, ghosts } = make();
+    create(store);
+    store.editOrRefuse((b) => addWire(b, 'lonely', 'tmp1'));
+    store.undo(); store.undo();
+    expect(ghosts.ghosts()).toEqual([]);
+  });
+
+  it('a delete is a ghost; its undo takes the ghost away, its redo brings it back', () => {
+    const { store, ghosts } = make();
+    store.edit((b) => deleteSteps(b, ['lonely']));
+    expect(keys(ghosts)).toEqual(['step:lonely']);
+    store.undo();
+    expect(ghosts.ghosts()).toEqual([]);
+    store.redo();
+    expect(keys(ghosts)).toEqual(['step:lonely']);
+  });
+
+  it('a created step deleted is a ghost until Discard, which drops it with the changes', () => {
+    const { store, ghosts } = make();
+    create(store);
+    store.edit((b) => deleteSteps(b, ['tmp1']));
+    expect(keys(ghosts)).toEqual(['step:tmp1']);
+    // create + delete nets to nothing unsaved (Discard would be disabled): one real change makes Discard do something
+    store.edit((b) => ({ ...b, workflows: { ...b.workflows, daily: { ...b.workflows.daily!, name: 'renamed' } } }));
+    expect(store.discard()).toBe(1);
+    expect(ghosts.ghosts()).toEqual([]);
+    // Ctrl+Z of the Discard puts the deleted state back, ghost and all
+    store.undo();
+    expect(keys(ghosts)).toEqual(['step:tmp1']);
+  });
+
+  it('Discard brings a saved step back from its unsaved delete, so it is no ghost', () => {
+    const { store, ghosts } = make();
+    store.edit((b) => deleteSteps(b, ['lonely']));
+    store.discard();
+    expect(store.state().steps.lonely).toBeDefined();
+    expect(ghosts.ghosts()).toEqual([]);
+  });
+
+  it('a ghost of a saved delete stays through a Discard of later changes', () => {
+    const { store, ghosts } = make();
+    store.edit((b) => deleteSteps(b, ['lonely']));
+    // Save: BaseAPI no longer has lonely; the ghost stays (until Remove)
+    const { lonely: _gone, ...steps } = store.state().steps;
+    store.saved({ ...store.state(), steps });
+    expect(keys(ghosts)).toEqual(['step:lonely']);
+    store.edit((b) => ({ ...b, workflows: { ...b.workflows, daily: { ...b.workflows.daily!, name: 'renamed' } } }));
+    store.discard();
+    expect(keys(ghosts)).toEqual(['step:lonely']);
   });
 });
 
