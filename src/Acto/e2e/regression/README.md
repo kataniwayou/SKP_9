@@ -38,3 +38,14 @@ a workflow the run made, and the teardown fails the run if a real row changed be
 | M | A dragged item is on top, "under" in amber, a drop slides aside, ghosts too (`a9067aed`) | 10 · drag |
 | N | Toolbox drops slide aside; nudges stop (`dc41011f`) | 10 · toolbox drop and nudge |
 | — | Analyst graph wording for entry crons (`ac36bc64`, `5c28a20a`, `14265340`) | not UI: the C# `Processor.Analyst` tests, not this suite |
+
+## Last full run — 2026-11-25
+
+| Run | Result |
+|---|---|
+| `$env:ACTO_E2E_LIVE='1'; npm run e2e:regression` (headed, slowed, live) | 38 passed, 1 failed: 9 · restore, a 1 px rounding of a ghost's place against the restored card's (now compared within 1 px; then 4/4 repeated and headed 3/3) |
+| `npx playwright test` (the whole e2e folder, unslowed, not live) | 153 passed, 26 skipped (the live-only ones) |
+| Teardown, every run | `e2e- rows left: 0; real rows changed beyond location: 0` |
+
+Evidence from the live runs: `src/Acto/test-results/cron-live-evidence.json` (6) and `src/Acto/test-results/regression-12-evidence.json` (12): per-tick
+dispatch stamps, step ids and correlation ids from Elasticsearch.
