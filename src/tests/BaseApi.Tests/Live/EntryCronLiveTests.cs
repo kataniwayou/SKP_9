@@ -193,6 +193,284 @@ public sealed class EntryCronLiveTests
         }
     }
 
+    // Four entry steps in three schedule groups: C shares B's cron, so one group's job dispatches two entries.
+    // Fast crons, so a job a stop missed would fire several times inside the quiet window.
+    private const string MultiACron = "*/3 * * * * *";
+    private const string MultiBCron = "*/5 * * * * *";
+    private const string MultiDCron = "*/4 * * * * *";
+    private const string FireJobScope = "Orchestrator.Scheduling.WorkflowFireJob";
+    private const string Activated = "activated workflow {WorkflowId} with {StepCount} steps in {GroupCount} schedule groups, scheduled={Scheduled}";
+    private const string Unscheduled = "unscheduled the workflow's jobs and marked it stopped; steps still in flight will resolve until it is reaped";
+    private const string StaleActivation = "this fire belongs to an activation L1 no longer holds; standing down without dispatching";
+
+    /// <summary>A fire already running when its replica unscheduled may still log its stand-down; one later is a live job.</summary>
+    private static readonly TimeSpan InFlightSlack = TimeSpan.FromSeconds(1);
+
+    private static int OrchestratorReplicas => int.Parse(RealStack.Get("SKP_ORCHESTRATOR_REPLICAS", "3"), CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// A stop of a workflow with several entry crons tears down every schedule group's job on every orchestrator
+    /// replica. Every replica schedules the jobs (only the leader dispatches), so the dispatches alone would only show
+    /// the leader stopping: the proof for the others is their own record — each replica that activated the workflow
+    /// logs that it unscheduled it, and no fire job of the workflow runs on that replica after that line. A job the
+    /// stop missed would fire within the quiet window (the slowest cron is 5 s) and log "not active in L1" at
+    /// Information, which ships from every replica.
+    /// </summary>
+    [Fact]
+    public async Task AStopTearsDownEveryEntryJobOnEveryReplica()
+    {
+        RealStack.SkipUnlessEnabled();
+        var ct = TestContext.Current.CancellationToken;
+
+        using var http = new HttpClient { BaseAddress = new Uri(RealStack.BaseApiUrl), Timeout = TimeSpan.FromSeconds(20) };
+        var processorId = await FindProcessorAsync(http, ct);
+        var run = Guid.NewGuid().ToString("N")[..12];
+
+        Guid a = Guid.Empty, b = Guid.Empty, c = Guid.Empty, d = Guid.Empty, workflow = Guid.Empty;
+        var bodyCompleted = false;
+        try
+        {
+            (workflow, a, b, c, d) = await CreateMultiCronWorkflowAsync(http, processorId, $"stopall-{run}", ct);
+
+            var started = DateTimeOffset.UtcNow;
+            await PostOrchestrationAsync(http, "start", workflow, ct);
+            await Task.Delay(TimeSpan.FromSeconds(30), ct);
+
+            var stopRequested = DateTimeOffset.UtcNow;
+            await PostOrchestrationAsync(http, "stop", workflow, ct);
+            await Task.Delay(TimeSpan.FromSeconds(30), ct);
+            var quietEnd = DateTimeOffset.UtcNow;
+
+            var dispatches = await SettledDispatchesAsync(workflow, started, quietEnd, ct);
+            var records = await SettledRecordsAsync(workflow, started, quietEnd, ct);
+            var summary = Describe(dispatches, records, a, b, c, d);
+
+            // While it ran, every entry dispatched: all three groups were scheduled and fired.
+            var during = dispatches.Where(x => x.At <= stopRequested + StopSlack).ToList();
+            foreach (var (step, label) in new[] { (a, "A"), (b, "B"), (c, "C"), (d, "D") })
+            {
+                Assert.True(during.Count(x => x.StepId == step) >= 3, $"entry {label} dispatched fewer than 3 times in 30 s: {summary}");
+            }
+            Assert.True(Math.Abs(during.Count(x => x.StepId == b) - during.Count(x => x.StepId == c)) <= 1,
+                $"B and C share one cron (one group) but dispatched different counts: {summary}");
+
+            // Nothing dispatched after the stop.
+            var after = dispatches.Where(x => x.At > stopRequested + StopSlack).ToList();
+            Assert.True(after.Count == 0, $"{after.Count} dispatch(es) after the stop at {stopRequested:HH:mm:ss.fff}: {summary}");
+
+            // Every replica activated it, with three groups, and every one of them unscheduled it.
+            var activated = records.Where(r => r.Template == Activated).ToList();
+            var activatedOn = activated.Select(r => r.Instance).ToHashSet();
+            Assert.True(activatedOn.Count == OrchestratorReplicas,
+                $"{activatedOn.Count} orchestrator replica(s) activated the workflow ({string.Join(", ", activatedOn)}), expected {OrchestratorReplicas}: {summary}");
+            Assert.All(activated, r => Assert.Equal("3", r.Attribute("GroupCount")));
+
+            var unscheduledAt = records.Where(r => r.Template == Unscheduled)
+                .GroupBy(r => r.Instance).ToDictionary(g => g.Key, g => g.Min(r => r.At));
+            Assert.True(activatedOn.SetEquals(unscheduledAt.Keys),
+                $"activated on [{string.Join(", ", activatedOn.Order())}] but unscheduled on [{string.Join(", ", unscheduledAt.Keys.Order())}]: {summary}");
+
+            // On no replica does a fire job of the workflow run after that replica unscheduled it.
+            var leaked = records
+                .Where(r => r.Scope == FireJobScope && unscheduledAt.TryGetValue(r.Instance, out var at) && r.At > at + InFlightSlack)
+                .ToList();
+            Assert.True(leaked.Count == 0, $"{leaked.Count} fire(s) after their replica unscheduled the workflow: {summary}");
+            bodyCompleted = true;
+        }
+        finally
+        {
+            await CleanupOrFailAsync(workflow, [a, b, c, d], bodyCompleted);
+        }
+    }
+
+    /// <summary>
+    /// A start after a stop runs only the new activation's jobs: a job the stop left behind would either fire beside the
+    /// new one (an entry dispatched twice in one tick) or stand down as a stale activation. Neither may happen, and the
+    /// second stop is as clean as the first.
+    /// </summary>
+    [Fact]
+    public async Task ARestartAfterAStopRunsOnlyTheNewActivationsJobs()
+    {
+        RealStack.SkipUnlessEnabled();
+        var ct = TestContext.Current.CancellationToken;
+
+        using var http = new HttpClient { BaseAddress = new Uri(RealStack.BaseApiUrl), Timeout = TimeSpan.FromSeconds(20) };
+        var processorId = await FindProcessorAsync(http, ct);
+        var run = Guid.NewGuid().ToString("N")[..12];
+
+        Guid a = Guid.Empty, b = Guid.Empty, c = Guid.Empty, d = Guid.Empty, workflow = Guid.Empty;
+        var bodyCompleted = false;
+        try
+        {
+            (workflow, a, b, c, d) = await CreateMultiCronWorkflowAsync(http, processorId, $"restart-{run}", ct);
+
+            var started = DateTimeOffset.UtcNow;
+            await PostOrchestrationAsync(http, "start", workflow, ct);
+            await Task.Delay(TimeSpan.FromSeconds(15), ct);
+            await PostOrchestrationAsync(http, "stop", workflow, ct);
+            await Task.Delay(TimeSpan.FromSeconds(5), ct);
+
+            var restarted = DateTimeOffset.UtcNow;
+            await PostOrchestrationAsync(http, "start", workflow, ct);
+            await Task.Delay(TimeSpan.FromSeconds(30), ct);
+
+            var stopRequested = DateTimeOffset.UtcNow;
+            await PostOrchestrationAsync(http, "stop", workflow, ct);
+            await Task.Delay(TimeSpan.FromSeconds(20), ct);
+            var quietEnd = DateTimeOffset.UtcNow;
+
+            var dispatches = await SettledDispatchesAsync(workflow, started, quietEnd, ct);
+            var records = await SettledRecordsAsync(workflow, started, quietEnd, ct);
+            var summary = Describe(dispatches, records, a, b, c, d);
+
+            // The second run: every entry fires, and none twice in one tick (a leftover job would double it).
+            var second = dispatches.Where(x => x.At > restarted + StopSlack && x.At <= stopRequested + StopSlack).ToList();
+            foreach (var (step, label) in new[] { (a, "A"), (b, "B"), (c, "C"), (d, "D") })
+            {
+                var ticks = second.Where(x => x.StepId == step).Select(x => x.At.ToUnixTimeSeconds()).ToList();
+                Assert.True(ticks.Count >= 4, $"entry {label} dispatched {ticks.Count} time(s) in the second 30 s run: {summary}");
+                Assert.True(ticks.Count == ticks.Distinct().Count(), $"entry {label} dispatched twice in one tick after the restart: {summary}");
+            }
+
+            var stale = records.Where(r => r.Template == StaleActivation && r.At > restarted).ToList();
+            Assert.True(stale.Count == 0, $"{stale.Count} fire(s) of the first activation ran after the restart: {summary}");
+
+            // Every replica activated twice and unscheduled twice.
+            foreach (var replica in records.Where(r => r.Template == Activated).GroupBy(r => r.Instance))
+            {
+                Assert.True(replica.Count() == 2, $"{replica.Key} activated {replica.Count()} time(s), expected 2: {summary}");
+                Assert.True(records.Count(r => r.Template == Unscheduled && r.Instance == replica.Key) == 2,
+                    $"{replica.Key} did not log two unschedules: {summary}");
+            }
+
+            var after = dispatches.Where(x => x.At > stopRequested + StopSlack).ToList();
+            Assert.True(after.Count == 0, $"{after.Count} dispatch(es) after the second stop at {stopRequested:HH:mm:ss.fff}: {summary}");
+            var lastUnscheduled = records.Where(r => r.Template == Unscheduled && r.At > stopRequested)
+                .GroupBy(r => r.Instance).ToDictionary(g => g.Key, g => g.Min(r => r.At));
+            var leaked = records
+                .Where(r => r.Scope == FireJobScope && lastUnscheduled.TryGetValue(r.Instance, out var at) && r.At > at + InFlightSlack)
+                .ToList();
+            Assert.True(leaked.Count == 0, $"{leaked.Count} fire(s) after the second stop's unschedule: {summary}");
+            bodyCompleted = true;
+        }
+        finally
+        {
+            await CleanupOrFailAsync(workflow, [a, b, c, d], bodyCompleted);
+        }
+    }
+
+    /// <summary>Four entry steps A..D, crons A=3 s, B=C=5 s (one group), D=4 s; the read must echo them.</summary>
+    private static async Task<(Guid Workflow, Guid A, Guid B, Guid C, Guid D)> CreateMultiCronWorkflowAsync(
+        HttpClient http, Guid processorId, string run, CancellationToken ct)
+    {
+        var a = await CreateAsync(http, "steps", Step($"{run}-a", processorId), ct);
+        var b = await CreateAsync(http, "steps", Step($"{run}-b", processorId), ct);
+        var c = await CreateAsync(http, "steps", Step($"{run}-c", processorId), ct);
+        var d = await CreateAsync(http, "steps", Step($"{run}-d", processorId), ct);
+        var crons = new Dictionary<Guid, string> { [a] = MultiACron, [b] = MultiBCron, [c] = MultiBCron, [d] = MultiDCron };
+        var workflow = await CreateAsync(http, "workflows", new
+        {
+            name = $"{run}-wf", version = "1.0.0", description = (string?)null,
+            entryStepIds = new[] { a, b, c, d }, assignmentIds = Array.Empty<Guid>(), cacheIds = Array.Empty<Guid>(),
+            entryCrons = crons,
+        }, ct);
+
+        using var read = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/workflows/{workflow}", ct));
+        var stored = read.RootElement.GetProperty("entryCrons");
+        foreach (var (step, cron) in crons)
+        {
+            Assert.Equal(cron, stored.GetProperty(step.ToString("D")).GetString());
+        }
+
+        return (workflow, a, b, c, d);
+    }
+
+    private static async Task CleanupOrFailAsync(Guid workflow, Guid[] steps, bool bodyCompleted)
+    {
+        var problems = await CleanupAsync(workflow, steps);
+        foreach (var problem in problems)
+        {
+            TestContext.Current.TestOutputHelper?.WriteLine($"cleanup: {problem}");
+        }
+
+        if (bodyCompleted && problems.Count > 0)
+        {
+            Assert.Fail($"the run passed but left rows behind: {string.Join("; ", problems)}");
+        }
+    }
+
+    private static string Describe(List<Dispatch> dispatches, List<LogRecord> records, Guid a, Guid b, Guid c, Guid d)
+    {
+        string Label(Guid s) => s == a ? "A" : s == b ? "B" : s == c ? "C" : s == d ? "D" : s.ToString();
+        var lines = dispatches.Select(x => (x.At, Text: $"dispatch {Label(x.StepId)}"))
+            .Concat(records.Where(r => r.Template != EntryDispatched).Select(r => (r.At, Text: $"{r.Instance} {r.Template.Split(';')[0]}")))
+            .OrderBy(x => x.At)
+            .Select(x => $"{x.At:HH:mm:ss.fff} {x.Text}");
+        return "\n" + string.Join("\n", lines);
+    }
+
+    private sealed record LogRecord(DateTimeOffset At, string Instance, string Scope, string Template, JsonElement Attributes)
+    {
+        public string? Attribute(string name) =>
+            Attributes.TryGetProperty(name, out var v) ? (v.ValueKind == JsonValueKind.String ? v.GetString() : v.GetRawText()) : null;
+    }
+
+    /// <summary>
+    /// Every orchestrator record of this workflow in the window, from every replica, read until two polls agree (as
+    /// <see cref="SettledDispatchesAsync"/>): its replica (<c>service.instance.id</c>), logger and message template.
+    /// </summary>
+    private static async Task<List<LogRecord>> SettledRecordsAsync(Guid workflow, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+    {
+        using var http = new HttpClient { BaseAddress = new Uri(ElasticUrl), Timeout = TimeSpan.FromSeconds(20) };
+        var gte = from.AddSeconds(-5).ToUnixTimeMilliseconds();
+        var lte = to.AddSeconds(5).ToUnixTimeMilliseconds();
+        var query = $$$"""
+        {
+          "size": 2000,
+          "sort": [{"@timestamp": "asc"}],
+          "_source": ["@timestamp", "resource.attributes.service.instance.id", "scope.name", "attributes"],
+          "query": {"bool": {"filter": [
+            {"term": {"resource.attributes.service.name": "orchestrator"}},
+            {"term": {"attributes.WorkflowId": "{{{workflow:D}}}"}},
+            {"range": {"@timestamp": {"gte": {{{gte}}}, "lte": {{{lte}}}, "format": "epoch_millis"} } }
+          ]} }
+        }
+        """;
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
+        List<LogRecord>? previous = null;
+        while (true)
+        {
+            using var response = await http.PostAsync($"/{LogIndex}/_search",
+                new StringContent(query, Encoding.UTF8, "application/json"), ct);
+            var text = await response.Content.ReadAsStringAsync(ct);
+            Assert.True(response.IsSuccessStatusCode, $"elasticsearch search returned {(int)response.StatusCode}: {text}");
+
+            using var body = JsonDocument.Parse(text);
+            var current = body.RootElement.GetProperty("hits").GetProperty("hits").EnumerateArray()
+                .Select(h => h.GetProperty("_source"))
+                .Select(s =>
+                {
+                    var attributes = s.GetProperty("attributes").Clone();
+                    return new LogRecord(
+                        ParseTimestamp(s.GetProperty("@timestamp")),
+                        s.GetProperty("resource").GetProperty("attributes").GetProperty("service.instance.id").GetString()!,
+                        s.TryGetProperty("scope", out var scope) && scope.TryGetProperty("name", out var n) ? n.GetString()! : "",
+                        attributes.TryGetProperty("{OriginalFormat}", out var f) ? f.GetString()! : "",
+                        attributes);
+                })
+                .ToList();
+
+            if ((previous is not null && previous.Count == current.Count && current.Count > 0) || DateTime.UtcNow > deadline)
+            {
+                return current;
+            }
+
+            previous = current;
+            await Task.Delay(TimeSpan.FromSeconds(5), ct);
+        }
+    }
+
     private static readonly TimeSpan CleanupBudget = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan CleanupRetry = TimeSpan.FromSeconds(2);
 
