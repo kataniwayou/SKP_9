@@ -73,7 +73,7 @@
 .sp2 { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: var(--b-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sn { font-weight: 600; font-size: 14px; color: var(--b-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cond-pill { flex: none; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px; display: grid; place-items: center; color: var(--on-colour); font: 700 10.5px var(--mono); }
-.bn-header .health-dot { width: 8px; height: 8px; flex: none; }
+.bn-header .health-dot { width: 13px; height: 13px; flex: none; }
 .key-chips { position: absolute; left: 0; top: calc(100% + 6px); display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%; pointer-events: none; }
 .key-chip { font: 10px var(--mono); color: var(--b-ink); background: var(--b-node); border: 1px solid var(--card-line); border-radius: 999px; padding: 1px 8px; white-space: nowrap;
   /* a long workflow name is cut at the card's width; the title shows it whole (hover reaches the chip) */

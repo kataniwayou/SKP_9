@@ -35,6 +35,24 @@ describe('live state', () => {
     expect(none).toHaveAttribute('data-health', 'undetermined');
     expect(ok).toHaveAttribute('aria-label', 'live · 2 of 2 replicas healthy');
   });
+  it('draws Grafana\'s alert-list icons: a heart when live, a broken heart when not, a question circle when nobody can say [user, 2026-11-25]', () => {
+    renderWithLive(<><HealthDot processorId="p1" /><HealthDot processorId="p2" /><HealthDot processorId="nope" /></>,
+      { processorsKnown: 'known', processors: new Map([
+        ['p1', { live: true, healthy: 1, replicas: 1, reason: null }],
+        ['p2', { live: false, healthy: 0, replicas: 1, reason: 'no healthy replica' }],
+      ]) });
+    const [live, down, unknown] = screen.getAllByTestId('health-dot');
+    const shape = (e: HTMLElement) => ({ paths: e.querySelectorAll('svg > path').length, mask: e.querySelector('mask') !== null, circle: e.querySelector('svg > circle') !== null });
+    expect(shape(live!)).toEqual({ paths: 1, mask: false, circle: false });
+    expect(shape(down!)).toEqual({ paths: 2, mask: true, circle: false });
+    expect(shape(unknown!)).toEqual({ paths: 1, mask: false, circle: true });
+    expect(live).toHaveStyle({ color: '#16A34A' });
+    expect(down).toHaveStyle({ color: '#DC2626' });
+    expect(unknown).toHaveStyle({ color: '#94A3B8' });
+    // each broken heart cuts its crack with its own mask
+    const ids = [...document.querySelectorAll('mask')].map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
   it('treats an empty processor id as no processor', () => {
     renderWithLive(<HealthDot processorId="" />, { processorsKnown: 'known', processors: new Map() });
     expect(screen.getByTestId('health-dot')).toHaveAttribute('data-health', 'undetermined');
