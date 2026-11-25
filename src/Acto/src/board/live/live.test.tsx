@@ -5,7 +5,7 @@ import { LiveStoreProvider } from '../../live/LiveContext';
 import type { LiveState } from '../../live/liveState';
 import { liveStub } from '../../test/liveStub';
 import { Board } from '../Board';
-import { board } from '../../design/boardFixtures';
+import { scheduledBoard } from '../../design/boardFixtures';
 import { useWorkflowStatus } from '../../live/LiveContext';
 import { HealthDot } from './HealthDot';
 import { StateBadge } from './StateBadge';
@@ -44,7 +44,7 @@ describe('live state', () => {
     stub.known(['daily'], {});
     const Live = () => {
       const daily = useWorkflowStatus('daily');
-      return <Board state={board()} view={{ workflows: [], picks: [], live: (id) => (id === 'daily' ? daily : 'stopped') }} onPick={() => {}} initialZoom={1} />;
+      return <Board state={scheduledBoard()} view={{ workflows: [], picks: [], live: (id) => (id === 'daily' ? daily : 'stopped') }} onPick={() => {}} initialZoom={1} />;
     };
     render(<LiveStoreProvider value={stub}><Live /></LiveStoreProvider>);
     await screen.findByText('fetch-orders');

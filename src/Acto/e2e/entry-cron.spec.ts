@@ -41,7 +41,7 @@ test('an entry arrow keeps its own cron through Save and a reload', async ({ pag
 
   // cleared again: the arrow is unscheduled (no workflow cron to fall back on)
   await field(page, 'Cron').fill('');
-  await expect(entryEdge(page, id.w!, id.b!).locator('.entry-cron')).toHaveCount(0);
+  await expect(entryEdge(page, id.w!, id.b!).locator('.entry-cron')).toHaveText('⏱ not scheduled'); // an arrow with no cron says so [user, 2026-11-25]
   await expect(entryEdge(page, id.w!, id.a!).locator('.entry-cron')).toHaveText('⏱ 0 0 * * * *');
   expect((await save(page)).applied).toBe(true);
 });

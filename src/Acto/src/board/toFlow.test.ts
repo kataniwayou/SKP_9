@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { board } from '../design/boardFixtures';
+import { board, scheduledBoard } from '../design/boardFixtures';
 import type { Pick } from './selection';
 import type { GhostItem } from '../design/ghosts';
 import { flowIdOf, toFlow, type BoardView } from './toFlow';
@@ -15,6 +15,9 @@ const dim = (x: { className?: string | undefined }) => (x.className ?? '').split
 
 describe('toFlow', () => {
   const b = board();
+  // both entry arrows scheduled: only a scheduled arrow fires, so motion needs a cron [user, 2026-11-25]
+  const sched = scheduledBoard();
+  const hourlyRuns = (id: string) => (id === 'hourly' ? 'running' : 'stopped') as 'running' | 'stopped';
   it('makes one node per workflow, step and cache, with the handles React Flow wires', () => {
     const { nodes } = toFlow(b, view());
     expect(nodes.map((n) => n.id).sort()).toEqual(['ca:c1', 'st:expand', 'st:fetch', 'st:lonely', 'wf:daily', 'wf:hourly']);
@@ -43,7 +46,7 @@ describe('toFlow', () => {
     ]);
   });
   it('takes the wire colour from the target step and runs it while a workflow reaching it runs', () => {
-    const w = (v: BoardView) => toFlow(b, v).edges.find((e) => e.id === 'wire:fetch:expand')!.data as { condition: number; running: boolean };
+    const w = (v: BoardView) => toFlow(sched, v).edges.find((e) => e.id === 'wire:fetch:expand')!.data as { condition: number; running: boolean };
     expect(w(view())).toMatchObject({ condition: 1, running: false });
     expect(w(view({ live: (id) => (id === 'hourly' ? 'running' : 'stopped') })).running).toBe(true);
   });
@@ -66,26 +69,58 @@ describe('toFlow', () => {
   });
   it('a step is running when a running workflow reaches it', () => {
     const live = (id: string) => (id === 'hourly' ? 'running' : 'stopped') as 'running' | 'stopped';
-    const n = toFlow(b, view({ live })).nodes;
+    const n = toFlow(sched, view({ live })).nodes;
     const run = (id: string) => (n.find((x) => x.id === id)!.data as { running: boolean }).running;
     expect([run('st:fetch'), run('st:expand'), run('st:lonely')]).toEqual([true, true, false]);
   });
   it('a wire runs only when a running workflow reaches its source', () => {
-    const w = (live: (id: string) => 'running' | 'stopped') => (toFlow(b, view({ live })).edges.find((e) => e.id === 'wire:fetch:expand')!.data as { running: boolean }).running;
+    const w = (live: (id: string) => 'running' | 'stopped') => (toFlow(sched, view({ live })).edges.find((e) => e.id === 'wire:fetch:expand')!.data as { running: boolean }).running;
     expect(w((id) => (id === 'hourly' ? 'running' : 'stopped'))).toBe(true);
     expect(w(() => 'stopped')).toBe(false);
   });
   it('a wire into a Never step never moves: it never fires, even while a running workflow reaches its source [user, 2026-11-23 item 4]', () => {
-    const never = { ...b, steps: { ...b.steps, expand: { ...b.steps.expand!, entryCondition: 5 } } };
+    const never = { ...sched, steps: { ...sched.steps, expand: { ...sched.steps.expand!, entryCondition: 5 } } };
     const d = toFlow(never, view({ live: (id) => (id === 'hourly' ? 'running' : 'stopped') })).edges.find((e) => e.id === 'wire:fetch:expand')!.data as { condition: number; running: boolean };
     expect(d).toMatchObject({ condition: 5, running: false });
   });
   it('an entry arrow runs only while its workflow runs; cache lines never run', () => {
-    const { edges } = toFlow(b, view({ live: (id) => (id === 'hourly' ? 'running' : 'stopped') }));
+    const { edges } = toFlow(sched, view({ live: (id) => (id === 'hourly' ? 'running' : 'stopped') }));
     const d = (id: string) => edges.find((e) => e.id === id)!.data as { running?: boolean };
     expect(d('entry:hourly:fetch').running).toBe(true);
     expect(d('entry:daily:fetch').running).toBe(false);
     expect(d('cache:daily:c1').running).toBeUndefined();
+  });
+  it('an unscheduled entry arrow (no cron) never fires: still and idle, and nothing it alone reaches runs [user, 2026-11-25]', () => {
+    const { nodes, edges } = toFlow(b, view({ live: hourlyRuns }));
+    const e = edges.find((x) => x.id === 'entry:hourly:fetch')!.data as { running: boolean; idle: string | null };
+    expect(e).toMatchObject({ running: false, idle: 'unscheduled' });
+    const run = (id: string) => (nodes.find((x) => x.id === id)!.data as { running: boolean }).running;
+    expect([run('st:fetch'), run('st:expand')]).toEqual([false, false]);
+    expect((edges.find((x) => x.id === 'wire:fetch:expand')!.data as { running: boolean }).running).toBe(false);
+    // a blank cron is no cron
+    const blank = { ...b, workflows: { ...b.workflows, hourly: { ...b.workflows.hourly!, entryCrons: { fetch: '   ' } } } };
+    expect((toFlow(blank, view({ live: hourlyRuns })).edges.find((x) => x.id === 'entry:hourly:fetch')!.data as { idle: string | null }).idle).toBe('unscheduled');
+  });
+  it('a Never entry step is frozen: its arrow is still and idle even with a cron, it gets no ring, and nothing past it moves [user, 2026-11-25]', () => {
+    const frozen = { ...sched, steps: { ...sched.steps, fetch: { ...sched.steps.fetch!, entryCondition: 5 } } };
+    const { nodes, edges } = toFlow(frozen, view({ live: hourlyRuns }));
+    expect(edges.find((x) => x.id === 'entry:hourly:fetch')!.data).toMatchObject({ running: false, idle: 'frozen', cron: '0 * * * * *' });
+    const run = (id: string) => (nodes.find((x) => x.id === id)!.data as { running: boolean }).running;
+    expect([run('st:fetch'), run('st:expand')]).toEqual([false, false]);
+    expect((edges.find((x) => x.id === 'wire:fetch:expand')!.data as { running: boolean }).running).toBe(false);
+    // frozen wins over a missing cron: the step is the operator's deliberate act
+    const both = { ...b, steps: frozen.steps };
+    expect((toFlow(both, view()).edges.find((x) => x.id === 'entry:hourly:fetch')!.data as { idle: string | null }).idle).toBe('frozen');
+  });
+  it('a Never step reached by a wire gets no ring, and neither does a step only it leads to', () => {
+    const chain = { ...sched, steps: { ...sched.steps, expand: { ...sched.steps.expand!, entryCondition: 5, nextStepIds: ['lonely'] } } };
+    const n = toFlow(chain, view({ live: hourlyRuns })).nodes;
+    const run = (id: string) => (n.find((x) => x.id === id)!.data as { running: boolean }).running;
+    expect([run('st:fetch'), run('st:expand'), run('st:lonely')]).toEqual([true, false, false]);
+  });
+  it('a scheduled entry arrow into a live step is not idle', () => {
+    const d = toFlow(sched, view()).edges.find((x) => x.id === 'entry:daily:fetch')!.data as { idle: string | null };
+    expect(d.idle).toBeNull();
   });
   it('anEntryEdgeWithItsOwnCronCarriesIt', () => {
     const withCron = { ...b, workflows: { ...b.workflows, daily: { ...b.workflows.daily!, entryCrons: { fetch: '*/10 * * * * *' } } } };

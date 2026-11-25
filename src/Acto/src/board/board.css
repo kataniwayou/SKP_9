@@ -202,3 +202,11 @@
 /* the entry arrow's own cron, on the paper above its middle */
 .entry-cron { font: 600 10px var(--mono); fill: var(--on-paper-2); paint-order: stroke; stroke: var(--b-node); stroke-width: 3px; pointer-events: none; }
 .entry-edge.ghost .entry-cron { fill: var(--ghost-wire); }
+
+/* an entry arrow that never fires [user, 2026-11-25]: faded line, hollow head, the reason in its cron spot; never dashed (dashes mean
+   running or ghost). Unscheduled (no cron): muted italic. Frozen (the step is Never): Never's pink, as the step's N pill. */
+.entry-edge.idle .entry-line { opacity: .45; animation: none; stroke-dasharray: none; }
+.entry-head.hollow { fill: none; stroke: var(--on-paper); stroke-width: 1.4; stroke-linejoin: round; opacity: .45; }
+.entry-edge.idle.on .entry-head.hollow { fill: none; stroke: var(--hue, var(--accent)); }
+.entry-cron.idle { font-style: italic; font-weight: 500; }
+.entry-cron.idle.frozen { fill: var(--never); font-style: normal; font-weight: 600; }

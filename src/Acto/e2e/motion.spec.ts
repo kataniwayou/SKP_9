@@ -15,10 +15,36 @@ const SEED = {
     { key: 's4', name: 'e2e-mo-other-next', at: { x: 600, y: 300 } },
   ],
   workflows: [
-    { key: 'w', name: 'e2e-mo-wf', at: { x: 0, y: 40 }, entry: ['s1'] },
-    { key: 'v', name: 'e2e-mo-still', at: { x: 0, y: 260 }, entry: ['s3'] },
+    { key: 'w', name: 'e2e-mo-wf', at: { x: 0, y: 40 }, entry: ['s1'], entryCrons: { s1: '0 * * * * *' } },
+    { key: 'v', name: 'e2e-mo-still', at: { x: 0, y: 260 }, entry: ['s3'], entryCrons: { s3: '0 * * * * *' } },
   ],
 } as const;
+
+// [user, 2026-11-25] an entry arrow that never fires stays still while its workflow runs: one into a Never entry step (frozen, even with a
+// cron) and one with no cron (unscheduled); neither the step nor anything only it leads to rings. The control arrow is scheduled.
+const IDLE_SEED = {
+  steps: [
+    { key: 'f', name: 'e2e-mo-frozen', at: { x: 300, y: 60 }, next: ['f2'], condition: 5 },
+    { key: 'f2', name: 'e2e-mo-after-frozen', at: { x: 600, y: 60 } },
+    { key: 'u', name: 'e2e-mo-unscheduled', at: { x: 300, y: 240 }, next: ['u2'] },
+    { key: 'u2', name: 'e2e-mo-after-unscheduled', at: { x: 600, y: 240 } },
+    { key: 'k', name: 'e2e-mo-scheduled', at: { x: 300, y: 420 } },
+  ],
+  workflows: [
+    { key: 'w', name: 'e2e-mo-idle', at: { x: 0, y: 220 }, entry: ['f', 'u', 'k'], entryCrons: { f: '0 * * * * *', k: '0 * * * * *' } },
+  ],
+} as const;
+
+/** The live read answers with these ids added (a read stub: nothing is started), and the hub is refused so the store polls. */
+async function fakeRunning(page: Page, ids: () => string[]) {
+  await page.routeWebSocket('**/api/hubs/liveness', (ws) => { ws.close(); });
+  await page.route('**/api/v1/orchestration/live', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const answer = await route.fetch();
+    const real = (await answer.json().catch(() => [])) as string[];
+    return route.fulfill({ response: answer, json: [...real, ...ids()] });
+  });
+}
 
 const status = (page: Page, wf: string) => wfNode(page, wf).locator('.tri-st');
 
@@ -52,7 +78,13 @@ test('stopped throwaway workflows: S1 triangles, and no running mark on their en
 
 test('a real running workflow (looked at only): its triangle runs and its entry arrows and entry steps carry the running mark', async ({ page, request, stack }) => {
   const live = new Set(((await (await request.get('/api/v1/orchestration/live')).json()) as string[]).map((x) => x.toLowerCase()));
-  const real = stack.snapshot.workflows.map((w) => ({ id: w.id, name: w.name, entry: (w.entryStepIds as string[] | undefined) ?? [], running: live.has(w.id.toLowerCase()) }));
+  // only an arrow that fires moves [user, 2026-11-25]: one into a Never step is frozen, one with no cron is unscheduled
+  const never = new Set(stack.snapshot.steps.filter((s) => s.entryCondition === 5).map((s) => s.id as string));
+  const real = stack.snapshot.workflows.map((w) => {
+    const crons = (w.entryCrons ?? {}) as Record<string, string>;
+    const idle = (s: string) => (never.has(s) ? 'frozen' : (crons[s] ?? '').trim() === '' ? 'unscheduled' : null);
+    return { id: w.id, name: w.name, entry: ((w.entryStepIds as string[] | undefined) ?? []).map((s) => ({ s, idle: idle(s) })), running: live.has(w.id.toLowerCase()) };
+  });
   const running = real.filter((w) => w.running);
   test.skip(running.length === 0, 'no real workflow runs on the stack');
   await openFitted(page);
@@ -61,7 +93,13 @@ test('a real running workflow (looked at only): its triangle runs and its entry 
     await expect(status(page, w.id)).toHaveText('● running');
     await expect(wfNode(page, w.id).locator('.tri')).toHaveClass(/\brunning\b/);
     await expect(wfNode(page, w.id).locator('.tri-ring')).toHaveCount(1);
-    for (const s of w.entry) {
+    for (const { s, idle } of w.entry) {
+      if (idle) {
+        // an arrow that never fires stays still and says why (its step may still ring if another firing path reaches it)
+        await expect(entryEdge(page, w.id, s).locator('.entry-line'), `${w.name} ${idle} entry arrow`).not.toHaveClass(/\brunning\b/);
+        await expect(entryEdge(page, w.id, s).locator('.entry-edge'), `${w.name} ${idle} entry arrow`).toHaveAttribute('data-idle', idle);
+        continue;
+      }
       await expect(entryEdge(page, w.id, s).locator('.entry-line'), `${w.name} entry arrow`).toHaveClass(/\brunning\b/);
       await expect(stNode(page, s).locator('.node'), `${w.name} entry step ring`).toHaveClass(/\brunning\b/);
     }
@@ -69,20 +107,13 @@ test('a real running workflow (looked at only): its triangle runs and its entry 
   // a stopped real workflow's entry arrows stay still
   for (const w of real.filter((x) => !x.running)) {
     await expect(status(page, w.id), w.name).toHaveAttribute('data-status', 'stopped');
-    for (const s of w.entry) await expect(entryEdge(page, w.id, s).locator('.entry-line'), `${w.name} entry arrow`).not.toHaveClass(/\brunning\b/);
+    for (const { s } of w.entry) await expect(entryEdge(page, w.id, s).locator('.entry-line'), `${w.name} entry arrow`).not.toHaveClass(/\brunning\b/);
   }
 });
 
 test('a throwaway faked running (stubbed live read): its entry arrow, the wire it reaches and its steps\' rings move; the other stays still', async ({ page }) => {
   const id = await seed(SEED);
-  // the hub refused, so the live store polls; the poll's answer gets the throwaway's id added (a read stub: nothing is started)
-  await page.routeWebSocket('**/api/hubs/liveness', (ws) => { ws.close(); });
-  await page.route('**/api/v1/orchestration/live', async (route) => {
-    if (route.request().method() !== 'GET') return route.fallback();
-    const answer = await route.fetch();
-    const ids = (await answer.json().catch(() => [])) as string[];
-    return route.fulfill({ response: answer, json: [...ids, id.w!] });
-  });
+  await fakeRunning(page, () => [id.w!]);
   await openAt(page);
   await expect(status(page, id.w!)).toHaveAttribute('data-status', 'running', { timeout: 20_000 });
   await expect(wfNode(page, id.w!).locator('.tri')).toHaveClass(/\brunning\b/);
@@ -94,4 +125,36 @@ test('a throwaway faked running (stubbed live read): its entry arrow, the wire i
   await expect(stNode(page, id.s2!).locator('.node')).toHaveClass(/\brunning\b/);
   // the other throwaway is stopped: nothing of it moves
   await stillAll(page, id, id.v!, id.s3!, [id.s3!, id.s4!], [id.s3!, id.s4!]);
+});
+
+test('a running workflow\'s idle entry arrows stay still: frozen (Never step) and unscheduled (no cron), faded with a hollow head and the reason [user, 2026-11-25]', async ({ page }) => {
+  const id = await seed(IDLE_SEED);
+  await fakeRunning(page, () => [id.w!]);
+  await openAt(page);
+  await expect(status(page, id.w!)).toHaveAttribute('data-status', 'running', { timeout: 20_000 });
+
+  // the control: a scheduled arrow into a live step moves, and the step rings
+  await expect(entryEdge(page, id.w!, id.k!).locator('.entry-line')).toHaveClass(/\brunning\b/);
+  await expect(entryEdge(page, id.w!, id.k!).locator('.entry-edge')).not.toHaveAttribute('data-idle', /.*/);
+  await expect(stNode(page, id.k!).locator('.node')).toHaveClass(/\brunning\b/);
+
+  for (const [key, next, idle, label] of [['f', 'f2', 'frozen', 'N frozen'], ['u', 'u2', 'unscheduled', '⏱ not scheduled']] as const) {
+    const edge = entryEdge(page, id.w!, id[key]!);
+    await expect(edge.locator('.entry-edge'), idle).toHaveAttribute('data-idle', idle);
+    const line = edge.locator('.entry-line');
+    await expect(line, idle).not.toHaveClass(/\brunning\b/);
+    const look = await line.evaluate((e) => { const cs = getComputedStyle(e); return { dash: cs.strokeDasharray, anim: cs.animationName, opacity: cs.opacity }; });
+    expect(look, idle).toEqual({ dash: 'none', anim: 'none', opacity: '0.45' });
+    expect(await edge.locator('.entry-head').evaluate((e) => getComputedStyle(e).fill), idle).toBe('none');
+    await expect(edge.locator('.entry-cron'), idle).toHaveText(label);
+    // the step and what only it leads to do not ring, and the wire between them is still
+    await expect(stNode(page, id[key]!).locator('.node'), idle).not.toHaveClass(/\brunning\b/);
+    await expect(stNode(page, id[next]!).locator('.node'), idle).not.toHaveClass(/\brunning\b/);
+    await expect(wireEdge(page, id[key]!, id[next]!).locator('.wire'), idle).not.toHaveClass(/\brunning\b/);
+  }
+  // frozen is said in Never's pink, the step's N pill colour; unscheduled in the muted label colour, italic
+  expect(await entryEdge(page, id.w!, id.f!).locator('.entry-cron').evaluate((e) => getComputedStyle(e).fill)).toBe('rgb(219, 39, 119)');
+  expect(await stNode(page, id.f!).locator('.cond-pill').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(219, 39, 119)');
+  expect(await entryEdge(page, id.w!, id.u!).locator('.entry-cron').evaluate((e) => getComputedStyle(e).fontStyle)).toBe('italic');
+  await page.screenshot({ path: test.info().outputPath('idle-entry-arrows.png') });
 });

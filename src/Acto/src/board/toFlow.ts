@@ -1,6 +1,7 @@
 import { Position, type Edge, type Node } from '@xyflow/react';
 import type { LiveStatus } from '../api/liveStatus';
-import { reachOf, type BoardState } from '../design/board';
+import type { BoardState } from '../design/board';
+import { reachableStepIds } from '../model/reachability';
 import type { GhostItem } from '../design/ghosts';
 import { assignmentOf } from '../design/payloads';
 import type { Id } from '../model/graph';
@@ -63,6 +64,20 @@ const CACHE_HANDLES = [handle('target', 'in', Position.Top, CACHE_W / 2, 0)];
 
 const GHOST = { draggable: true, connectable: false, zIndex: -1, className: 'ghost' } as const;
 
+/** The `Never` entry condition: the step is never entered, by a wire or by a fire. */
+const NEVER = 5;
+
+/**
+ * Why an entry arrow never fires, or null when it does [user, 2026-11-25]. `frozen`: the step is Never, so the fire skips it (it wins
+ * over a missing cron: it is the operator's deliberate act, and its fix is on the step). `unscheduled`: the arrow has no cron, so
+ * the orchestrator schedules nothing for it (a blank cron counts as none).
+ */
+export type EntryIdle = 'frozen' | 'unscheduled' | null;
+export function idleOf(b: BoardState, workflowId: Id, stepId: Id): EntryIdle {
+  if (b.steps[stepId]?.entryCondition === NEVER) return 'frozen';
+  return (b.workflows[workflowId]?.entryCrons?.[stepId] ?? '').trim() === '' ? 'unscheduled' : null;
+}
+
 /** A chip's text: a workflow's payload on a step in a few words. */
 function chipText(payload: string, suffix: string): string {
   const n = payloadKeyCount(payload);
@@ -78,10 +93,17 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
   const pickOf = (id: string): PickInfo | undefined => { const no = order.get(id); return no === undefined ? undefined : { no, solo: view.picks.length === 1 }; };
   const running = (wf: Id) => view.live(wf) === 'running';
 
-  // a step runs, and its wires flow, while any running workflow reaches it
-  const reaching = new Map<Id, Id[]>();
-  for (const w of Object.values(b.workflows)) for (const sid of reachOf(b, w.id)) reaching.set(sid, [...(reaching.get(sid) ?? []), w.id]);
-  const stepRuns = (sid: Id) => (reaching.get(sid) ?? []).some(running);
+  // a step runs, and its wires flow, while a running workflow reaches it through what actually fires [user, 2026-11-25]: an entry
+  // arrow fires only with a cron (none: the orchestrator schedules nothing for it) into a step that is not Never (the fire skips a
+  // frozen entry step), and a wire never fires into a Never step. So a Never step never runs, nor does anything only it leads to.
+  const live = new Set<Id>();
+  for (const w of Object.values(b.workflows)) {
+    if (!running(w.id)) continue;
+    const firing = [...new Set(w.entryStepIds)].filter((sid) => b.steps[sid] && idleOf(b, w.id, sid) === null);
+    const steps = new Map(Object.values(b.steps).map((s) => [s.id, { nextStepIds: s.nextStepIds.filter((to) => b.steps[to]?.entryCondition !== NEVER) }]));
+    for (const sid of reachableStepIds(firing, steps)) live.add(sid);
+  }
+  const stepRuns = (sid: Id) => live.has(sid);
 
   const nodes: Node[] = [];
   for (const w of Object.values(b.workflows)) {
@@ -137,7 +159,7 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
         id, type: 'wire', source: nodeId('step', s.id), sourceHandle: 'out', target: nodeId('step', to), targetHandle: 'in',
         selected: pick !== undefined,
         // a wire into a Never step never fires, so it never moves [user, 2026-11-23 item 4]
-        data: { condition: t.entryCondition, from: s.id, to, running: stepRuns(s.id) && t.entryCondition !== 5, ...(pick ? { pick } : {}) },
+        data: { condition: t.entryCondition, from: s.id, to, running: stepRuns(s.id) && t.entryCondition !== NEVER, ...(pick ? { pick } : {}) },
       });
     }
   }
@@ -146,10 +168,14 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
       if (!b.steps[sid]) continue;
       const id = edgeIdOf.entry(w.id, sid);
       const pick = pickOf(id);
+      const idle = idleOf(b, w.id, sid);
       edges.push({
         id, type: 'entry', source: nodeId('workflow', w.id), sourceHandle: 'tip', target: nodeId('step', sid), targetHandle: 'in',
         selected: pick !== undefined,
-        data: { workflowId: w.id, stepId: sid, hue: hue(w.id), running: running(w.id), ...(w.entryCrons?.[sid] ? { cron: w.entryCrons[sid] } : {}), ...(pick ? { pick } : {}) },
+        data: {
+          workflowId: w.id, stepId: sid, hue: hue(w.id), running: running(w.id) && idle === null, idle,
+          ...(w.entryCrons?.[sid] ? { cron: w.entryCrons[sid] } : {}), ...(pick ? { pick } : {}),
+        },
       });
     }
   }

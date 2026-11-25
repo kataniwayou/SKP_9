@@ -78,14 +78,14 @@ test('a workflow with two entry arrows: each arrow its own cron, edited from the
 
   // 5. B cleared: only A's cron is left, on A's arrow alone
   await cronIn(page, B).fill('');
-  await expect(label(page, id.w!, B)).toHaveCount(0);
+  await expect(label(page, id.w!, B)).toHaveText('⏱ not scheduled'); // an arrow with no cron says so [user, 2026-11-25]
   await expect(label(page, id.w!, A)).toHaveText(`⏱ ${SLOW}`);
   await expect(cronIn(page, B)).toHaveValue('');
 
   // 6. A cleared too: not scheduled
   await cronIn(page, A).fill('');
-  await expect(label(page, id.w!, A)).toHaveCount(0);
-  await expect(label(page, id.w!, B)).toHaveCount(0);
+  await expect(label(page, id.w!, A)).toHaveText('⏱ not scheduled'); // an arrow with no cron says so [user, 2026-11-25]
+  await expect(label(page, id.w!, B)).toHaveText('⏱ not scheduled'); // an arrow with no cron says so [user, 2026-11-25]
   for (const step of [A, B]) {
     await expect(cronIn(page, step)).toHaveValue('');
     await expect(cronIn(page, step)).toHaveAttribute('placeholder', 'not scheduled');

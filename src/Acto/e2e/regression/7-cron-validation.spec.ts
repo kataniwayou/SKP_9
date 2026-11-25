@@ -92,10 +92,10 @@ test('design: a Schedules row reads 5- and 6-field crons and presets, says an un
   await expect(cronIn(page, b)).toHaveValue('');
   await expect(cronIn(page, b)).toHaveAttribute('placeholder', 'not scheduled');
   await expect(note(page, b)).toHaveCount(0);
-  await expect(label(page, w, b)).toHaveCount(0);
+  await expect(label(page, w, b)).toHaveText('⏱ not scheduled'); // an arrow with no cron says so [user, 2026-11-25]
   await presets(page, a).selectOption({ label: 'Not scheduled' });
   await expect(cronIn(page, a)).toHaveValue('');
-  await expect(label(page, w, a)).toHaveCount(0);
+  await expect(label(page, w, a)).toHaveText('⏱ not scheduled'); // an arrow with no cron says so [user, 2026-11-25]
 
   // the Link tab and the Schedules row edit one value
   await cronIn(page, b).fill('*/15 * * * * *');
@@ -116,7 +116,7 @@ test('design: a Schedules row reads 5- and 6-field crons and presets, says an un
   // step — undo takes b back to no cron, redo restores */45; an edit of a's cron after it is its own step
   await undo(page).click();
   await expect(cronIn(page, b)).toHaveValue('');
-  await expect(label(page, w, b)).toHaveCount(0);
+  await expect(label(page, w, b)).toHaveText('⏱ not scheduled'); // an arrow with no cron says so [user, 2026-11-25]
   await redo(page).click();
   await expect(cronIn(page, b)).toHaveValue('*/45 * * * * *');
   await expect(label(page, w, b)).toHaveText('⏱ */45 * * * * *');

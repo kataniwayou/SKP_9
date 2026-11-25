@@ -38,6 +38,13 @@ export function board(): BoardState {
   };
 }
 
+/** `board()` with every entry arrow scheduled: only an arrow with a cron fires, so anything that shows motion needs one [user, 2026-11-25]. */
+export function scheduledBoard(cron = '0 * * * * *'): BoardState {
+  const b = board();
+  for (const w of Object.values(b.workflows)) w.entryCrons = Object.fromEntries(w.entryStepIds.map((s) => [s, cron]));
+  return b;
+}
+
 /** Like board(), but one assignment row `a-shared` (on fetch) is linked by both workflows. */
 export function shared(): BoardState {
   const b = board();

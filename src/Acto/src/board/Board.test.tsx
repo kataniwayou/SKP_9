@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Node } from '@xyflow/react';
 import { describe, expect, it, vi } from 'vitest';
-import { board } from '../design/boardFixtures';
+import { board, scheduledBoard } from '../design/boardFixtures';
 import { Board, type BoardProps } from './Board';
 import type { Pick } from './selection';
 import type { BoardView } from './toFlow';
@@ -64,7 +64,7 @@ describe('Board', () => {
     expect(screen.getByText('checking…')).toBeInTheDocument();
   });
   it('marks a running workflow\'s wire as flowing', async () => {
-    show({ view: view({ live: (id) => (id === 'daily' ? 'running' : 'stopped') }) });
+    show({ state: scheduledBoard(), view: view({ live: (id) => (id === 'daily' ? 'running' : 'stopped') }) });
     await screen.findByText('fetch-orders');
     expect(document.querySelector('.wire.running')).not.toBeNull();
   });
@@ -80,7 +80,7 @@ describe('Board', () => {
       expect(card).not.toHaveClass('running');
     });
     it('rings the steps a running workflow reaches, and animates only its entry arrows and wires', async () => {
-      show({ view: view({ live: (id) => (id === 'daily' ? 'running' : 'stopped') }) });
+      show({ state: scheduledBoard(), view: view({ live: (id) => (id === 'daily' ? 'running' : 'stopped') }) });
       await screen.findByText('fetch-orders');
       expect(screen.getByText('fetch-orders').closest('.node')).toHaveClass('running');
       expect(document.querySelectorAll('.entry-line.running')).toHaveLength(1);
