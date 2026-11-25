@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import {
-  applyNodeChanges, Background, BackgroundVariant, ControlButton, Controls, getNodesBounds, Panel, ReactFlow,
+  applyNodeChanges, Background, BackgroundVariant, ControlButton, Controls, getNodesBounds, Panel, ReactFlow, ViewportPortal,
   type Connection, type Edge, type EdgeChange, type EdgeTypes, type Node, type NodeChange, type NodeTypes, type Viewport,
 } from '@xyflow/react';
 import type { BoardState, ItemRef } from '../design/board';
@@ -12,6 +12,7 @@ import { BoardMiniMap } from './BoardMiniMap';
 import { connectionKind, itemOfNode, type ConnectionKind } from './connect';
 import { focusBounds, itemBounds } from './focus';
 import { CLICK_SLOP } from './geometry';
+import { covered, pushAside } from './overlap';
 import type { Pick } from './selection';
 import { flowIdOf, toFlow, type BoardView } from './toFlow';
 import { CacheLinkEdge } from './edges/CacheLinkEdge';
@@ -97,6 +98,13 @@ function pickOfEdge(e: Edge): Pick | null {
 
 const isGhost = (n: Node) => (n.className ?? '').split(' ').includes('ghost');
 
+/** A node's box on the board, measured once React Flow has drawn it (else its declared size). */
+const boxOf = (n: Node) => ({ x: n.position.x, y: n.position.y, w: n.measured?.width ?? n.width ?? 0, h: n.measured?.height ?? n.height ?? 0 });
+/** Above every other node, picked ones (React Flow adds 1000 for those) included, while it is dragged. */
+const LIFTED_Z = 3000;
+/** How long a drop slides to its free place (board.css .settling). */
+const SETTLE_MS = 280;
+
 /** Whether a click landed on a node's handle: a connection, not a pick. */
 export const onHandle = (t: EventTarget | null): boolean => t instanceof Element && t.closest('.react-flow__handle') !== null;
 
@@ -181,7 +189,26 @@ export function Board({ state, view, onPick, onBoxPick, onMove, onMoveGhosts, on
    */
   const [resync, setResync] = useState(0);
   const shown = editable ? dragged : derived;
-  const nodes = useMemo(() => (resync === 0 ? shown : shown.map((n) => ({ ...n }))), [shown, resync]);
+  // a drop sliding to its free place: those nodes animate there [user, 2026-11-25, option B]
+  const [settling, setSettling] = useState<ReadonlySet<string>>(new Set());
+  const nodes = useMemo(() => {
+    const lift = shown.some((n) => n.dragging) || settling.size > 0;
+    if (!lift) return resync === 0 ? shown : shown.map((n) => ({ ...n }));
+    // the dragged nodes rise above everything (ghosts too), so what is dragged is always what is seen
+    return shown.map((n) => {
+      const up = n.dragging === true;
+      const slide = settling.has(n.id);
+      if (!up && !slide) return resync === 0 ? n : { ...n };
+      return { ...n, zIndex: LIFTED_Z, className: [n.className, up ? 'lifted' : '', slide ? 'settling' : ''].filter(Boolean).join(' ') };
+    });
+  }, [shown, resync, settling]);
+  // what the dragged nodes lie over, outlined above everything with its name so nothing seems to vanish
+  const under = useMemo(() => {
+    const moving = shown.filter((n) => n.dragging);
+    if (moving.length === 0) return [];
+    const rest = shown.filter((n) => !n.dragging).map((n) => ({ id: n.id, box: boxOf(n), name: String((n.data as { name?: unknown }).name ?? '') }));
+    return covered(moving.map(boxOf), rest);
+  }, [shown]);
 
   // A drag in progress: where each dragged node began, and whether Esc has cancelled it.
   const drag = useRef<{ start: Map<string, Point>; cancelled: boolean } | null>(null);
@@ -222,15 +249,32 @@ export function Board({ state, view, onPick, onBoxPick, onMove, onMoveGhosts, on
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  /** One commit for everything a drag moved (React Flow drags every picked node together). */
+  /**
+   * One commit for everything a drag moved (React Flow drags every picked node together). A drop on another item, a
+   * ghost included, slides the whole group to the nearest free place first [user, 2026-11-25, option B], so the board never
+   * ends with one item hiding another.
+   */
   const dragStop = (n: Node, all?: Node[]) => {
     const cancelled = drag.current?.cancelled === true;
     drag.current = null;
     if (!onMove) return;
     if (cancelled) { setDragged(derivedRef.current); return; }
+    const group = all && all.length > 0 ? all : [n];
+    const ids = new Set(group.map((m) => m.id));
+    // sizes as drawn: the board's own copies carry React Flow's measurements
+    const sized = new Map(dragged.map((x) => [x.id, x]));
+    const box = (m: Node) => {
+      const own = sized.get(m.id);
+      return boxOf({ ...m, measured: m.measured ?? own?.measured, width: m.width ?? own?.width, height: m.height ?? own?.height });
+    };
+    const others = dragged.filter((x) => !ids.has(x.id)).map(box);
+    // a drag that ends where it began moved nothing: an overlap it already had (an older board) is not pushed
+    const still = group.every((m) => { const p = derivedRef.current.find((x) => x.id === m.id)?.position; return !!p && p.x === m.position.x && p.y === m.position.y; });
+    const off = still ? { x: 0, y: 0 } : pushAside(group.map(box), others);
+    const landed = group.map((m) => ({ ...m, position: { x: m.position.x + off.x, y: m.position.y + off.y } }));
     const moved: { ref: ItemRef; at: Point }[] = [];
     const movedGhosts: { key: string; at: Point }[] = [];
-    for (const m of all && all.length > 0 ? all : [n]) {
+    for (const m of landed) {
       const cur0 = derivedRef.current.find((x) => x.id === m.id)?.position;
       if (isGhost(m)) {
         if (m.id.startsWith(GHOST_PREFIX) && (!cur0 || cur0.x !== m.position.x || cur0.y !== m.position.y)) movedGhosts.push({ key: m.id.slice(GHOST_PREFIX.length), at: { x: m.position.x, y: m.position.y } });
@@ -242,7 +286,12 @@ export function Board({ state, view, onPick, onBoxPick, onMove, onMoveGhosts, on
     }
     if (moved.length > 0) onMove(moved);
     if (movedGhosts.length > 0) onMoveGhosts?.(movedGhosts);
-    setDragged(derivedRef.current); // a refused or unchanged drag snaps back
+    if (off.x === 0 && off.y === 0) { setDragged(derivedRef.current); return; } // a refused or unchanged drag snaps back
+    // slide from where it was let go to its free place, then take the committed board (a refused move snaps back from there)
+    const at = new Map(landed.map((m) => [m.id, m.position]));
+    setSettling(ids);
+    setDragged((ns) => ns.map((x) => { const p = at.get(x.id); return p ? { ...x, position: p, dragging: false } : x; }));
+    window.setTimeout(() => { setSettling(new Set()); setDragged(derivedRef.current); }, SETTLE_MS);
   };
 
   const connect = (c: Connection) => {
@@ -344,6 +393,16 @@ export function Board({ state, view, onPick, onBoxPick, onMove, onMoveGhosts, on
           proOptions={{ hideAttribution: true }}
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--dot)" />
+          {under.length > 0 && (
+            <ViewportPortal>
+              {under.map((u) => (
+                <div key={u.id} className="under-mark" data-testid="under-mark" data-under={u.id}
+                  style={{ left: u.box.x - 4, top: u.box.y - 4, width: u.box.w + 8, height: u.box.h + 8 }}>
+                  <span>{u.name ? `under: ${u.name}` : 'under'}</span>
+                </div>
+              ))}
+            </ViewportPortal>
+          )}
           {box && <div className="box-select" data-testid="box-select" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} />}
           {bar && <Panel position="top-center" className="selbar-panel">{bar}</Panel>}
           <BoardMiniMap nodes={nodes} picked={picked} />

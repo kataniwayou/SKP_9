@@ -237,21 +237,22 @@ describe('Board', () => {
       const onMove = vi.fn();
       show({ onMove });
       await screen.findByText('fetch-orders');
-      act(() => seen.props!.onNodeDragStop!({}, node('st:fetch', 260, 230)));
-      act(() => seen.props!.onNodeDragStop!({}, node('wf:daily', 40, 50)));
+      // dropped clear of everything (a drop on an item slides aside: tested below)
+      act(() => seen.props!.onNodeDragStop!({}, node('st:fetch', 3000, 3000)));
+      act(() => seen.props!.onNodeDragStop!({}, node('wf:daily', 5000, 5000)));
       expect(onMove.mock.calls).toEqual([
-        [[{ ref: { kind: 'step', id: 'fetch' }, at: { x: 260, y: 230 } }]],
-        [[{ ref: { kind: 'workflow', id: 'daily' }, at: { x: 40, y: 50 } }]]]);
+        [[{ ref: { kind: 'step', id: 'fetch' }, at: { x: 3000, y: 3000 } }]],
+        [[{ ref: { kind: 'workflow', id: 'daily' }, at: { x: 5000, y: 5000 } }]]]);
     });
     it('commits a multi-node drag as one onMove, and nothing when nothing moved', async () => {
       const onMove = vi.fn();
       show({ onMove });
       await screen.findByText('fetch-orders');
-      const all = [node('st:fetch', 260, 230), node('st:expand', 460, 230), node('ca:c1', 0, -100)];
+      const all = [node('st:fetch', 3000, 3000), node('st:expand', 3300, 3000), node('ca:c1', 0, -100)];
       act(() => seen.props!.onNodeDragStop!({}, all[0]!, all));
       expect(onMove).toHaveBeenCalledTimes(1);
       expect(onMove.mock.calls[0]![0]).toEqual([
-        { ref: { kind: 'step', id: 'fetch' }, at: { x: 260, y: 230 } }, { ref: { kind: 'step', id: 'expand' }, at: { x: 460, y: 230 } }]);
+        { ref: { kind: 'step', id: 'fetch' }, at: { x: 3000, y: 3000 } }, { ref: { kind: 'step', id: 'expand' }, at: { x: 3300, y: 3000 } }]);
       onMove.mockClear();
       act(() => seen.props!.onNodeDragStop!({}, node('st:fetch', 200, 200)));
       expect(onMove).not.toHaveBeenCalled();
@@ -260,11 +261,39 @@ describe('Board', () => {
       const onMove = vi.fn(); const onMoveGhosts = vi.fn();
       show({ onMove, onMoveGhosts });
       await screen.findByText('fetch-orders');
-      const g = { ...node('ghost:step:gone', 50, 60), className: 'ghost' };
-      const all = [node('st:fetch', 260, 230), g];
+      // dropped clear of everything, so nothing is pushed aside
+      const g = { ...node('ghost:step:gone', 3000, 3060), className: 'ghost' };
+      const all = [node('st:fetch', 3000, 3200), g];
       act(() => seen.props!.onNodeDragStop!({}, all[0]!, all));
-      expect(onMove.mock.calls).toEqual([[[{ ref: { kind: 'step', id: 'fetch' }, at: { x: 260, y: 230 } }]]]);
-      expect(onMoveGhosts.mock.calls).toEqual([[[{ key: 'step:gone', at: { x: 50, y: 60 } }]]]);
+      expect(onMove.mock.calls).toEqual([[[{ ref: { kind: 'step', id: 'fetch' }, at: { x: 3000, y: 3200 } }]]]);
+      expect(onMoveGhosts.mock.calls).toEqual([[[{ key: 'step:gone', at: { x: 3000, y: 3060 } }]]]);
+    });
+    it('a drop on another item slides to the nearest free place, clear of it [user, 2026-11-25, option B]', async () => {
+      const onMove = vi.fn();
+      show({ onMove });
+      await screen.findByText('fetch-orders');
+      // the expand step sits at its fixture place: drop fetch right on top of it
+      const expand = document.querySelector('.react-flow__node-step[data-id="st:expand"]') as HTMLElement;
+      const at = /translate\(([-\d.]+)px, *([-\d.]+)px\)/.exec(expand.style.transform)!;
+      const [ex, ey] = [Number(at[1]), Number(at[2])];
+      act(() => seen.props!.onNodeDragStop!({}, node('st:fetch', ex, ey), [node('st:fetch', ex, ey)]));
+      const [[moved]] = onMove.mock.calls as [[{ ref: unknown; at: { x: number; y: number } }[]]];
+      expect(moved![0]!.ref).toEqual({ kind: 'step', id: 'fetch' });
+      expect(moved![0]!.at).not.toEqual({ x: ex, y: ey });
+    });
+    it('a drop on a ghost slides too, and a dragged ghost is pushed off a real item [user, 2026-11-25]', async () => {
+      const onMove = vi.fn(); const onMoveGhosts = vi.fn();
+      const ghostAt = { x: 2000, y: 2000 };
+      show({ onMove, onMoveGhosts, view: view({ ghosts: [{ key: 'step:gone', kind: 'step', row: { ...board().steps.lonely!, id: 'gone', name: 'gone', at: ghostAt } }] }) });
+      await screen.findByText('fetch-orders');
+      act(() => seen.props!.onNodeDragStop!({}, node('st:fetch', ghostAt.x, ghostAt.y), [node('st:fetch', ghostAt.x, ghostAt.y)]));
+      expect((onMove.mock.calls[0]![0] as { at: { x: number; y: number } }[])[0]!.at).not.toEqual(ghostAt);
+      // and the other way round: the ghost dropped on the step
+      const lonely = document.querySelector('.react-flow__node-step[data-id="st:lonely"]') as HTMLElement;
+      const m = /translate\(([-\d.]+)px, *([-\d.]+)px\)/.exec(lonely.style.transform)!;
+      const g = { ...node('ghost:step:gone', Number(m[1]), Number(m[2])), className: 'ghost' };
+      act(() => seen.props!.onNodeDragStop!({}, g, [g]));
+      expect((onMoveGhosts.mock.calls[0]![0] as { at: { x: number; y: number } }[])[0]!.at).not.toEqual({ x: Number(m[1]), y: Number(m[2]) });
     });
     it('Esc during a drag puts the node back and the drag stop commits nothing', async () => {
       const onMove = vi.fn();

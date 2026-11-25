@@ -216,3 +216,16 @@
 .entry-never-sq rect { fill: var(--never); }
 .entry-never-sq text { font: 700 10.5px var(--mono); fill: var(--on-colour); }
 .entry-edge.ghost .entry-never-sq rect { fill: var(--ghost-wire); }
+
+/* dragging [user, 2026-11-25, option B]: the dragged item rises above everything, ghosts too, larger with a deep shadow and a
+   little see-through; what it lies over is outlined in amber above it, with its name; a drop on another item slides away */
+.react-flow__node.lifted { cursor: grabbing; }
+.react-flow__node.lifted > * { transform: scale(1.03); transform-origin: 50% 50%; transition: transform .12s ease; }
+.react-flow__node.lifted .node, .react-flow__node.lifted .cache-chip { box-shadow: var(--sh-lift); }
+.react-flow__node.lifted .tri { filter: drop-shadow(0 12px 14px var(--lift-shade)); }
+.react-flow__node.lifted:not(.ghost) { opacity: .82; }
+.react-flow__node.settling { transition: transform .28s cubic-bezier(.2, .8, .2, 1); }
+.board .react-flow__viewport-portal { pointer-events: none; }
+.under-mark { position: absolute; z-index: 4000; border: 2px dashed var(--warn); border-radius: 10px; background: color-mix(in srgb, var(--warn) 14%, transparent); pointer-events: none; }
+.under-mark span { position: absolute; left: 8px; top: -11px; font: 600 10.5px var(--mono); color: var(--on-colour); background: var(--warn); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .react-flow__node.lifted > *, .react-flow__node.settling { transition: none; } }
