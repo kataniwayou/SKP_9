@@ -323,4 +323,47 @@ describe('problem counts [user, 2026-11-23]', () => {
     expect(store.problems('daily')).toBe(0);
     expect(store.problems('hourly')).toBe(1);
   });
+  describe('discard [user, 2026-11-25]', () => {
+    it('drops every unsaved change at once: the count resets, the draft goes, and Ctrl+Z brings them back', () => {
+      const { store, session } = make();
+      store.edit(nameA('A')); store.edit(nameB('B'));
+      expect(store.unsaved().size).toBe(2);
+      expect(session!.getItem('acto.board')).not.toBeNull();
+      expect(store.discard()).toBe(2);
+      expect(store.unsaved().size).toBe(0);
+      expect(store.state()).toEqual(store.base());
+      expect(session!.getItem('acto.board')).toBeNull();
+      store.undo();
+      expect(store.unsaved().size).toBe(2);
+      expect(store.state().workflows.daily!.name).toBe('A');
+      store.redo();
+      expect(store.unsaved().size).toBe(0);
+    });
+    it('takes the board it is given (a fresh load\'s placement), not only the base', () => {
+      const { store } = make();
+      store.edit(nameA('A'));
+      const placed = setStepField(store.base(), 'lonely', 'name', 'placed');
+      store.discard(placed);
+      expect(store.state()).toEqual(placed);
+    });
+    it('clears Save\'s failures and the stale list with the changes they were about', () => {
+      const { store } = make();
+      store.edit(nameA('A'));
+      store.setFailures(new Map([['workflow:daily', 'bad']]));
+      store.setStale([{ table: 'workflows', id: 'daily' }]);
+      store.discard();
+      expect(store.failures().size).toBe(0);
+      expect(store.stale()).toEqual([]);
+    });
+    it('does nothing on a clean board, and is refused while saving', () => {
+      const { store, out } = make();
+      expect(store.discard()).toBe(0);
+      expect(store.canUndo()).toBe(false);
+      store.edit(nameA('A'));
+      store.setSaving(true);
+      expect(store.discard()).toBe(0);
+      expect(store.unsaved().size).toBe(1);
+      expect(out.lines().some((l) => l.text === 'Saving — wait for it to finish')).toBe(true);
+    });
+  });
 });

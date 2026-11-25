@@ -40,6 +40,12 @@ export interface BoardStore {
   blockSave(): void;
   /** base = present = fresh; history and draft cleared; failures cleared. */
   saved(fresh: BoardState): void;
+  /**
+   * Discard [user, 2026-11-25]: the present goes back to `present` (default: the base, BaseAPI's rows as read) as one undoable
+   * edit, so the unsaved count drops and Ctrl+Z brings the changes back. Save's failures and the stale list go with the changes
+   * they were about. Refused while saving; a board with nothing unsaved is left alone. Answers how many changes were discarded.
+   */
+  discard(present?: BoardState): number;
   /** withoutWorkflow on base and every history state; consecutive equal states merged. With `deletedAssignments` the base loses exactly those assignment rows. */
   dropWorkflow(id: Id, deletedAssignments?: Id[]): void;
   problems(wf: Id): number;
@@ -234,6 +240,17 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       unsavedFor = null;
       writeDraft();
       notify();
+    },
+    discard(present = base) {
+      if (refuseWhileSaving()) return 0;
+      const n = store.unsaved().size;
+      if (n === 0) return 0;
+      failures = new Map();
+      stale = [];
+      // already there (only the startup placement is unsaved): nothing to discard
+      if (deepEqual(present, history.present)) { notify(); return 0; }
+      setHistory(commit(history, present));
+      return n - store.unsaved().size;
     },
     dropWorkflow(id, deletedAssignments) {
       // with an explicit list the board loses exactly the rows BaseAPI deleted (plus this workflow's own never-saved rows no

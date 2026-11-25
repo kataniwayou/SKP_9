@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { SaveButton, saveLabel, TakeStoredButton } from './SaveButton';
+import { DiscardButton, SaveButton, saveLabel, TakeStoredButton } from './SaveButton';
 
 describe('SaveButton', () => {
   it('reads Save, Save · N or Saving…', () => {
@@ -34,5 +34,21 @@ describe('TakeStoredButton', () => {
     expect(onTake).toHaveBeenCalledTimes(1);
     rerender(<TakeStoredButton count={2} saving onTake={onTake} />);
     expect(screen.getByRole('button')).toBeDisabled();
+  });
+});
+
+describe('DiscardButton [user, 2026-11-25]', () => {
+  it('is disabled with nothing unsaved or while saving, and discards on a click otherwise', () => {
+    const onDiscard = vi.fn();
+    const { rerender } = render(<DiscardButton unsaved={0} saving={false} onDiscard={onDiscard} />);
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeDisabled();
+    rerender(<DiscardButton unsaved={3} saving={false} onDiscard={onDiscard} />);
+    const b = screen.getByRole('button', { name: 'Discard' });
+    expect(b).toBeEnabled();
+    expect(b).toHaveAttribute('title', 'Discard all 3 unsaved changes (Ctrl+Z brings them back)');
+    fireEvent.click(b);
+    expect(onDiscard).toHaveBeenCalledTimes(1);
+    rerender(<DiscardButton unsaved={3} saving onDiscard={onDiscard} />);
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeDisabled();
   });
 });

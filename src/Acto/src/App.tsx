@@ -38,7 +38,7 @@ import { watchTransitions } from './operate/transitions';
 import { OutputPanel } from './output/OutputPanel';
 import { createOutputStore, OutputProvider, type OutputStore } from './output/outputStore';
 import { readView, writeView, type SavedView } from './session/view';
-import { SaveButton, TakeStoredButton } from './shell/SaveButton';
+import { DiscardButton, SaveButton, TakeStoredButton } from './shell/SaveButton';
 import { Shell } from './shell/Shell';
 import { applyTheme, saveTheme, savedTheme, type Theme } from './shell/theme';
 import { dropOnBoard, parseToolboxDrag } from './toolbox/drag';
@@ -120,6 +120,15 @@ export function App(props: AppProps) {
   useEffect(() => { live.start(); return () => live.stop(); }, [live]);
   useEffect(() => watchTransitions(live, output,
     (id) => store.state().workflows[id]?.name ?? store.base().workflows[id]?.name ?? null), [live, output, store]);
+
+  /**
+   * Discard [user, 2026-11-25]: the board back to what a fresh load shows (BaseAPI's rows, every unplaced item given a spot),
+   * as one undo step. Output says how many changes went and that Ctrl+Z brings them back.
+   */
+  const discard = useCallback(() => {
+    const n = store.discard(placeMissing(store.base()));
+    if (n > 0) output.log(`Discarded ${plural(n, 'unsaved change')} — Ctrl+Z brings ${n === 1 ? 'it' : 'them'} back`, 'ok');
+  }, [store, output]);
 
   // startup: BaseAPI's lists, every unplaced item given a spot, then the store (which restores an unsaved board over it)
   useEffect(() => {
@@ -321,6 +330,7 @@ export function App(props: AppProps) {
       <OutputProvider store={output}>
         <div className="acto">
           <header className="topbar"><span className="brand">Act<span>o</span></span>
+            <DiscardButton unsaved={store.unsaved().size} saving={store.saving()} onDiscard={discard} />
             <SaveButton unsaved={store.unsaved().size} saving={store.saving()} blocked={store.saveBlocked()} onSave={() => { void saveBoard(api, store, output, ghostStore); }} />
             <TakeStoredButton count={store.stale().length} saving={store.saving()} onTake={() => { void takeStored(api, store, output); }} />
             <button type="button" className="pbtn theme-toggle" onClick={toggleTheme}>{theme === 'dark' ? 'Light' : 'Dark'}</button>
