@@ -210,3 +210,8 @@
 .entry-edge.idle.on .entry-head.hollow { fill: none; stroke: var(--hue, var(--accent)); }
 .entry-cron.idle { font-style: italic; font-weight: 500; }
 .entry-cron.idle.frozen { fill: var(--never); font-style: normal; font-weight: 600; }
+/* the step card's N square, beside "frozen": the cond-pill look in SVG */
+.entry-never-sq { pointer-events: none; }
+.entry-never-sq rect { fill: var(--never); }
+.entry-never-sq text { font: 700 10.5px var(--mono); fill: var(--on-colour); }
+.entry-edge.ghost .entry-never-sq rect { fill: var(--ghost-wire); }

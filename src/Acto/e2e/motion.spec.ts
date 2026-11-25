@@ -138,7 +138,7 @@ test('a running workflow\'s idle entry arrows stay still: frozen (Never step) an
   await expect(entryEdge(page, id.w!, id.k!).locator('.entry-edge')).not.toHaveAttribute('data-idle', /.*/);
   await expect(stNode(page, id.k!).locator('.node')).toHaveClass(/\brunning\b/);
 
-  for (const [key, next, idle, label] of [['f', 'f2', 'frozen', 'N frozen'], ['u', 'u2', 'unscheduled', '⏱ not scheduled']] as const) {
+  for (const [key, next, idle, label] of [['f', 'f2', 'frozen', 'frozen'], ['u', 'u2', 'unscheduled', '⏱ not scheduled']] as const) {
     const edge = entryEdge(page, id.w!, id[key]!);
     await expect(edge.locator('.entry-edge'), idle).toHaveAttribute('data-idle', idle);
     const line = edge.locator('.entry-line');
@@ -155,6 +155,13 @@ test('a running workflow\'s idle entry arrows stay still: frozen (Never step) an
   // frozen is said in Never's pink, the step's N pill colour; unscheduled in the muted label colour, italic
   expect(await entryEdge(page, id.w!, id.f!).locator('.entry-cron').evaluate((e) => getComputedStyle(e).fill)).toBe('rgb(219, 39, 119)');
   expect(await stNode(page, id.f!).locator('.cond-pill').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(219, 39, 119)');
+  // ...and leads with the step card's N square: pink, the letter in the pill's ink; an unscheduled arrow has none
+  const sq = entryEdge(page, id.w!, id.f!).locator('.entry-never-sq');
+  await expect(sq.locator('text')).toHaveText('N');
+  expect(await sq.locator('rect').evaluate((e) => getComputedStyle(e).fill)).toBe('rgb(219, 39, 119)');
+  expect(await sq.locator('text').evaluate((e) => getComputedStyle(e).fill))
+    .toBe(await stNode(page, id.f!).locator('.cond-pill').evaluate((e) => getComputedStyle(e).color));
+  await expect(entryEdge(page, id.w!, id.u!).locator('.entry-never-sq')).toHaveCount(0);
   expect(await entryEdge(page, id.w!, id.u!).locator('.entry-cron').evaluate((e) => getComputedStyle(e).fontStyle)).toBe('italic');
   await page.screenshot({ path: test.info().outputPath('idle-entry-arrows.png') });
 });
