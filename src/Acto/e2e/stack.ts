@@ -136,6 +136,11 @@ export const HANDED_OFF = 'handed off to {NextStepId} on {NextProcessorId} with 
 export const ENTRY_COMPLETED = 'the entry step completed with {Result}';
 /** A Failed or Cancelled step whose successors still accept it (OutcomeTemplates.AdvancedAnyway). */
 export const ADVANCED_ANYWAY = 'advancing {SuccessorCount} successor(s) on a {Result} step — their entry conditions accept it';
+/**
+ * A fire's record of skipping an entry step frozen with the Never condition (WorkflowFireJob.DispatchEntryStepsAsync): one per
+ * frozen step per fire of its cron group. Not a template: the body is constant, so match it on `body`, not {OriginalFormat}.
+ */
+export const FROZEN_SKIPPED = 'the entry step is frozen — its entry condition is Never; skipping it';
 /** The scheduler's warning for an entry group whose cron has no future fire (WorkflowScheduler). */
 export const NO_FUTURE_FIRE = 'cron of entry group {EntryGroupIndex} of workflow {WorkflowId} yields no future fire time; nothing scheduled for it';
 

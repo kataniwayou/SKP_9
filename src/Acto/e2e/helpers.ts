@@ -446,3 +446,17 @@ export function expectAt(row: Row, at: Pt, what = row.name) {
 }
 /** JSON text compared as data (BaseAPI and the editor may lay it out differently). */
 export const sameJson = (a: unknown, b: string) => expect(JSON.parse(String(a))).toEqual(JSON.parse(b));
+
+/** A step card's processor-health heart (HealthDot): data-health is healthy, unhealthy or undetermined. */
+export const heart = (page: Page, stepId: string) => stNode(page, stepId).locator('[data-testid="health-dot"]');
+
+/**
+ * The SVG a Save publishes as the workflow's Kibana diagram: waits for the `PUT …/workflows/{workflowId}/diagram` that `act`
+ * (a Save) causes and answers its body. Parse it in the page (`page.evaluate`, DOMParser) to assert on it.
+ */
+export async function captureDiagram(page: Page, workflowId: string, act: () => Promise<unknown>): Promise<string> {
+  const put = page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith(`/workflows/${workflowId}/diagram`));
+  await act();
+  return (await put).postData() ?? '';
+}
+
