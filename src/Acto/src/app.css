@@ -27,6 +27,10 @@
 /* a processor's health: Grafana's alert-list icons, heart / broken heart / question circle, in the health colour [user, 2026-11-25] */
 .health-dot { width: 14px; height: 14px; flex: none; display: inline-grid; place-items: center; }
 .health-dot svg { width: 100%; height: 100%; display: block; }
+/* a live processor's heart beats (step cards and the toolbox alike): two quick beats, then a rest */
+.health-dot[data-health="healthy"] svg { transform-origin: 50% 55%; animation: heartbeat 1.4s ease-in-out infinite; }
+@keyframes heartbeat { 0%, 40%, 100% { transform: scale(1); } 12% { transform: scale(1.22); } 24% { transform: scale(1.04); } 32% { transform: scale(1.16); } }
+@media (prefers-reduced-motion: reduce) { .health-dot[data-health="healthy"] svg { animation: none; } }
 .tool .health-dot { margin-left: auto; }
 
 /* inspector */

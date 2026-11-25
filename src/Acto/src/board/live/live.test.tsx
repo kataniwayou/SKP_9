@@ -35,17 +35,25 @@ describe('live state', () => {
     expect(none).toHaveAttribute('data-health', 'undetermined');
     expect(ok).toHaveAttribute('aria-label', 'live · 2 of 2 replicas healthy');
   });
-  it('draws Grafana\'s alert-list icons: a heart when live, a broken heart when not, a question circle when nobody can say [user, 2026-11-25]', () => {
+  it('draws solid hearts as Grafana\'s alert list does: whole when live, cracked when not, with a question mark when nobody can say [user, 2026-11-25]', () => {
     renderWithLive(<><HealthDot processorId="p1" /><HealthDot processorId="p2" /><HealthDot processorId="nope" /></>,
       { processorsKnown: 'known', processors: new Map([
         ['p1', { live: true, healthy: 1, replicas: 1, reason: null }],
         ['p2', { live: false, healthy: 0, replicas: 1, reason: 'no healthy replica' }],
       ]) });
     const [live, down, unknown] = screen.getAllByTestId('health-dot');
-    const shape = (e: HTMLElement) => ({ paths: e.querySelectorAll('svg > path').length, mask: e.querySelector('mask') !== null, circle: e.querySelector('svg > circle') !== null });
-    expect(shape(live!)).toEqual({ paths: 1, mask: false, circle: false });
-    expect(shape(down!)).toEqual({ paths: 2, mask: true, circle: false });
-    expect(shape(unknown!)).toEqual({ paths: 1, mask: false, circle: true });
+    // one solid heart each; the crack (a path) or the question mark (a path and its dot) is cut out by a mask
+    const shape = (e: HTMLElement) => {
+      const heart = e.querySelectorAll('svg > path');
+      const m = e.querySelector('mask');
+      return {
+        hearts: heart.length, fill: heart[0]?.getAttribute('fill'), masked: heart[0]?.getAttribute('mask') === (m ? `url(#${m.id})` : null),
+        cut: m ? [...m.children].slice(1).map((c) => c.tagName) : [],
+      };
+    };
+    expect(shape(live!)).toEqual({ hearts: 1, fill: 'currentColor', masked: true, cut: [] });
+    expect(shape(down!)).toEqual({ hearts: 1, fill: 'currentColor', masked: true, cut: ['path'] });
+    expect(shape(unknown!)).toEqual({ hearts: 1, fill: 'currentColor', masked: true, cut: ['path', 'circle'] });
     expect(live).toHaveStyle({ color: '#16A34A' });
     expect(down).toHaveStyle({ color: '#DC2626' });
     expect(unknown).toHaveStyle({ color: '#94A3B8' });
