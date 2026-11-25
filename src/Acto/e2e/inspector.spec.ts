@@ -99,7 +99,7 @@ test('a step\'s Inspector: shared name, version, description and entry condition
   await expect(stNode(page, id.s2!).locator('.sn')).toHaveText('e2e-ins-second-renamed');
   await field(page, 'Version').fill('3.0.0');
   await field(page, 'Description').fill('step description');
-  // the wire into this step names its entry condition (data-condition; it draws none of its own [user, 2026-11-25])
+  // the wire into this step follows its entry condition (its colour; no letter [user, 2026-11-25])
   const pill = wireEdge(page, id.s1!, id.s2!).locator('.link-wire');
   const was = await pill.getAttribute('data-condition');
   await field(page, /^Entry condition/).click();

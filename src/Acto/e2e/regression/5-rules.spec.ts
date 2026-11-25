@@ -123,10 +123,11 @@ test('item 4: a wire into a Never step stops moving while its workflow runs: it 
   await expect(wire).toHaveAttribute('data-condition', 'Never');
   await expect(wire.locator('.wire')).not.toHaveClass(/\brunning\b/);
   expect(await wire.locator('.wire').evaluate((w) => getComputedStyle(w).animationName)).toBe('none');
-  // [user, 2026-11-25] wires are ink with no letter; only a wire into a Never step looks different: faded, hollow head
+  // [user, 2026-11-25] a wire wears its target's condition colour with no letter; into a Never step: pink, faded, hollow head
   await expect(wire).toHaveClass(/\bnever\b/);
   await expect(wire.locator('.pill, .pilltx')).toHaveCount(0);
   expect(await wire.locator('.wire').evaluate((w) => getComputedStyle(w).opacity)).toBe('0.45');
+  expect(await wire.locator('.wire').evaluate((w) => getComputedStyle(w).stroke)).toBe('rgb(219, 39, 119)');
   expect(await wire.locator('.wire-head').evaluate((h) => getComputedStyle(h).fill)).toBe('none');
   // Escape the edit: the condition goes back and so does the plain look
   await page.keyboard.press('Control+z');

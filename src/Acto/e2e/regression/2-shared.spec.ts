@@ -197,7 +197,11 @@ test('a shared step\'s entry condition and name, edited once: every workflow\'s 
   // both wires into it, the one from W1/W2's stream and the one from W3's, follow the step's condition (wires draw none of
   // their own [user, 2026-11-25]: the step's pill shows it; the wire names it in data-condition)
   await expect(stNode(page, id.t).locator('.cond-pill')).toHaveText('F');
-  for (const w of into) await expect(w.locator('.link-wire')).toHaveAttribute('data-condition', 'Failed');
+  for (const w of into) {
+    await expect(w.locator('.link-wire')).toHaveAttribute('data-condition', 'Failed');
+    // the wire wears the condition's colour (Failed's red), the same on every wire into it
+    expect(await w.locator('path.wire').evaluate((p) => getComputedStyle(p).stroke)).toBe('rgb(224, 72, 47)');
+  }
   await expect(wireEdge(page, id.s, id.u).locator('.link-wire')).toHaveAttribute('data-condition', 'Completed');
   await expect(stNode(page, id.t).locator('.unsaved-mark')).toBeVisible();
   for (const s of [id.s, id.u]) await expect(stNode(page, s).locator('.unsaved-mark')).toHaveCount(0);

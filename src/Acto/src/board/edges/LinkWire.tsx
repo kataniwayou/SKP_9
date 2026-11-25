@@ -8,10 +8,10 @@ import { EdgeExtras } from './EdgeExtras';
 const NEVER = 5;
 
 /**
- * One wire (edge type `wire`): a 2.2 px ink curve and its arrowhead. Dashes move while it runs. It carries no condition of its
- * own [user, 2026-11-25]: the entry condition belongs to the step it leads into, whose pill already shows it, so the wire
- * draws no colour or letter for it. The one exception is Never: a wire into a Never step never fires, so it is faded with a
- * hollow head, as a frozen entry arrow is. `data-condition` still names the target's condition, for tests and tools.
+ * One wire (edge type `wire`): a 2.2 px curve and its arrowhead in the colour of the entry condition of the step it leads
+ * into. Dashes move while it runs. No letter [user, 2026-11-25]: the target step's pill already shows it. A wire into a
+ * Never step never fires, so it is faded with a hollow head, as a frozen entry arrow is. `data-condition` names the
+ * target's condition, for tests and tools.
  */
 export function LinkWire({ id, data, selected, sourceX, sourceY, targetX, targetY }: EdgeProps) {
   const { condition, from, to, running, ghost = false, ghostKey, pick } = data as { condition: number; from: string; to: string; running: boolean; ghost?: boolean; ghostKey?: string; pick?: PickInfo };
@@ -23,7 +23,7 @@ export function LinkWire({ id, data, selected, sourceX, sourceY, targetX, target
   const my = (sourceY + targetY) / 2;
   const marker = `arrow-${id}`;
   return (
-    <g className={`link-wire${selected ? ' sel' : ''}${never ? ' never' : ''}${ghost ? ' ghost' : ''}`} data-condition={style.name}>
+    <g className={`link-wire${selected ? ' sel' : ''}${never ? ' never' : ''}${ghost ? ' ghost' : ''}`} data-condition={style.name} style={{ color: style.colour }}>
       <defs>
         <marker id={marker} viewBox="0 0 10 10" refX="1" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">
           {/* the hollow head is inset a unit so its outline is not clipped by the marker box */}

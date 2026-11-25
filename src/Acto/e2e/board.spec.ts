@@ -60,7 +60,7 @@ test('a triangle\'s solid arrow leaves its tip, its dashed line leaves its back,
   // solid vs dashed
   expect(await entry.locator('path.entry-line').evaluate((el) => getComputedStyle(el).strokeDasharray)).toMatch(/^(none|)$/);
   expect(await line.locator('path.cache-line').evaluate((el) => getComputedStyle(el).strokeDasharray)).not.toMatch(/^(none|)$/);
-  // the step-to-step wire is drawn (ink, no letter of its own [user, 2026-11-25]) and not from the triangle
+  // the step-to-step wire is drawn (its target's condition colour, no letter [user, 2026-11-25]) and not from the triangle
   // (a level wire's path box is 0 px tall, so "visible" cannot be asked of it: its ink stroke is)
   expect(await wireEdge(page, ids.s1!, ids.s2!).locator('path.wire').evaluate((p) => getComputedStyle(p).stroke)).not.toMatch(/^(none|)$/);
   await expect(wireEdge(page, ids.s1!, ids.s2!).locator('.pill')).toHaveCount(0);

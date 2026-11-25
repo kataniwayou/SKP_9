@@ -89,18 +89,16 @@
 .node .react-flow__handle.source { cursor: crosshair; }
 .node .react-flow__handle.connectionindicator { pointer-events: all; }
 
-/* wires: ink, as entry arrows are; the entry condition is the target step's pill, not the wire's [user, 2026-11-25] */
+/* wires: the colour of the target step's entry condition (the g's color), no letter: the step's pill shows it [user, 2026-11-25] */
 .link-wire .wire-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; pointer-events: stroke; }
-.link-wire .wire { fill: none; stroke: var(--on-paper); stroke-width: 2.2; pointer-events: none; }
-.link-wire .wire-head { fill: var(--on-paper); }
-.link-wire .wire.sel { stroke: var(--accent); stroke-width: 3.6; }
-.link-wire.sel .wire-head { fill: var(--accent); }
+.link-wire .wire { fill: none; stroke: currentColor; stroke-width: 2.2; pointer-events: none; }
+.link-wire .wire-head { fill: currentColor; }
+.link-wire .wire.sel { stroke-width: 3.6; }
 .link-wire .wire.running { stroke-dasharray: 7 4; animation: wire-flow .6s linear infinite; }
 @keyframes wire-flow { to { stroke-dashoffset: -11; } }
 /* a wire into a Never step never fires: faded, hollow head, as a frozen entry arrow */
 .link-wire.never .wire { opacity: .45; animation: none; stroke-dasharray: none; }
-.link-wire .wire-head.hollow { fill: none; stroke: var(--on-paper); stroke-width: 1.4; stroke-linejoin: round; opacity: .45; }
-.link-wire.never.sel .wire-head.hollow { fill: none; stroke: var(--accent); }
+.link-wire .wire-head.hollow { fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; opacity: .45; }
 /* an Invalid wire (any stored value outside the five) follows the paper's muted ink so it shows in dark too */
 .link-wire[data-condition="Invalid"] .wire { stroke: var(--on-paper-2); }
 .link-wire[data-condition="Invalid"] .wire-head { fill: var(--on-paper-2); }
