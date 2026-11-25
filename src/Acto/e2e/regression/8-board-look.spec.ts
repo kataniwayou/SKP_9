@@ -37,6 +37,12 @@ const SEED = {
   workflows: [{ key: 'W', name: 'e2e-look-W', at: { x: 0, y: 200 }, entry: ['S', 'F', 'U'], entryCrons: { S: CRON, F: CRON } }],
 } as const;
 
+/** The app's own dark theme: its toggle sets html[data-theme] (it does not follow the system's colour scheme). */
+async function darkTheme(page: Page) {
+  await page.locator('button.theme-toggle').click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+}
+
 const style = (page: Page, selector: ReturnType<Page['locator']>, prop: 'stroke' | 'opacity' | 'fill' | 'color' | 'animationName' | 'fontStyle') =>
   selector.evaluate((e, p) => getComputedStyle(e)[p as 'stroke'], prop);
 
@@ -81,6 +87,12 @@ test('health hearts: a live heart beats, a down one is cracked, an unknown one a
   await expect(tool(LIVE)).toHaveAttribute('data-health', 'healthy');
   await expect(tool(DOWN)).toHaveAttribute('data-health', 'unhealthy');
   await expect(tool(UNREPORTED)).toHaveAttribute('data-health', 'undetermined');
+  // the dark theme keeps the three hearts in their colours, and the live one still beats
+  await darkTheme(page);
+  expect(await style(page, live, 'color')).toBe(HEALTH.healthy);
+  expect(await style(page, down, 'color')).toBe(HEALTH.unhealthy);
+  expect(await style(page, unknown, 'color')).toBe(HEALTH.undetermined);
+  expect(await style(page, live.locator('svg'), 'animationName')).toBe('heartbeat');
 });
 
 test('wires wear the target\'s condition colour with no letter; a wire into Never is faded with a hollow head', async ({ page }) => {
@@ -108,9 +120,10 @@ test('wires wear the target\'s condition colour with no letter; a wire into Neve
   expect(await style(page, w('C').locator('path.wire'), 'stroke')).toBe(COLOUR.completed);
   expect(await style(page, w('C').locator('path.wire'), 'opacity')).toBe('1');
 
-  // the same colours in the dark theme
-  await page.emulateMedia({ colorScheme: 'dark' });
+  // the same colours in the dark theme, the wires still drawn
+  await darkTheme(page);
   await checkColours();
+  expect(await style(page, w('N').locator('path.wire'), 'opacity')).toBe('0.45');
 });
 
 test('idle entry arrows: frozen and unscheduled stay still while running and say why; the scheduled one moves', async ({ page }) => {

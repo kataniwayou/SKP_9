@@ -20,6 +20,9 @@ const SEED = {
   workflows: [{ key: 'W', name: 'e2e-pl-W', at: { x: 300, y: 260 }, entry: ['A'] }],
 } as const;
 const GAP = 16;
+/** The amber of the "under" outline (--warn): light, then dark. */
+const AMBER = { light: 'rgb(217, 119, 6)', dark: 'rgb(245, 184, 65)' } as const;
+const markColour = (mark: Locator) => mark.evaluate((e) => getComputedStyle(e).borderTopColor);
 
 /** Deletes G so a ghost of it stands on the board. */
 async function makeGhost(page: Page, gId: string): Promise<Locator> {
@@ -56,6 +59,8 @@ test('whatever is dragged is on top, and what it covers is named in amber', asyn
     const mark = page.locator(`[data-testid="under-mark"][data-under="${targetId}"]`);
     await expect(mark).toBeVisible();
     await expect(mark).toHaveText(`under: ${name[targetId]}`);
+    expect(await markColour(mark), 'the outline is amber').toBe(AMBER.light);
+    expect(await mark.evaluate((e) => getComputedStyle(e).borderTopStyle)).toBe('dashed');
     if (!moverId.startsWith('ghost:')) expect(await mover.evaluate((e) => getComputedStyle(e).opacity)).toBe('0.82');
     // Esc cancels: no outline, the mover back where it started
     await page.keyboard.press('Escape');
@@ -64,6 +69,15 @@ test('whatever is dragged is on top, and what it covers is named in amber', asyn
     await expect.poll(async () => Math.round((await box(mover)).x)).toBe(Math.round(start.x));
     expect(Math.round((await box(mover)).y)).toBe(Math.round(start.y));
   }
+  // in the dark theme too (the app's own toggle sets html[data-theme])
+  await page.locator('button.theme-toggle').click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await holdOver(page, A, B);
+  const mark = page.locator(`[data-testid="under-mark"][data-under="st:${id.B}"]`);
+  await expect(mark).toBeVisible();
+  expect(await markColour(mark), 'the outline is amber in the dark theme').toBe(AMBER.dark);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
 });
 
 test('a drop slides clear by the gap; a drop that only comes near stays put', async ({ page }) => {
@@ -96,7 +110,11 @@ test('a drop slides clear by the gap; a drop that only comes near stays put', as
   }
   expect(Math.round((await box(A)).x), 'held 8 px left of B').toBe(Math.round(want.x));
   await page.mouse.up();
-  await expect.poll(async () => Math.round((await box(A)).x)).toBe(Math.round(want.x));
+  // the drop is committed once the card is no longer lifted; a slide, had there been one, starts in that same render
+  await expect(A).not.toHaveClass(/\blifted\b/);
+  await expect(A, 'a near drop starts no slide').not.toHaveClass(/\bsettling\b/);
+  await page.waitForTimeout(400); // longer than a slide (280 ms), so a late one would have moved it
+  expect(Math.round((await box(A)).x), 'stays where it was let go').toBe(Math.round(want.x));
   expect(Math.round((await box(A)).y)).toBe(Math.round(want.y));
 
   // ghosts take part both ways

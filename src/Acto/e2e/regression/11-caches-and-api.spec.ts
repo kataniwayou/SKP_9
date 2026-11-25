@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { test, expect } from '../fixtures';
 import { addItem, inspector, itemKey, openAt, pickCache, save, saveButton, waitLoaded } from '../helpers';
 import { seed } from '../seed';
@@ -48,8 +47,11 @@ test('cache items cross as pairs and survive a reload; a key over 256 characters
 });
 
 test('removed endpoints are gone, the ones Acto uses are not', async () => {
-  // plain requests to BaseApi, outside the page (so outside its write guard); a fresh id, so nothing real can be touched
-  const any = randomUUID();
+  // plain requests to BaseApi, outside the page (so outside its write guard), on a workflow this run made: it exists, so an
+  // endpoint still there would answer it (a random id would 404 either way); if one did, only this e2e- row is touched
+  const seeded = await seed({ steps: [{ key: 's', name: 'e2e-gone-s', at: { x: 0, y: 0 } }], workflows: [{ key: 'w', name: 'e2e-gone-w', at: { x: 0, y: 200 }, entry: ['s'] }] });
+  const any = seeded.w!;
+  expect((await fetch(`${API}/workflows/${any}`)).status, 'the workflow they are asked about exists').toBe(200);
   const gone: [string, string][] = [
     ['PUT', `/workflows/${any}/design`], ['GET', `/workflows/${any}/layout`], ['PUT', `/workflows/${any}/layout`],
     ['GET', `/workflows/${any}/graph`], ['PUT', `/workflows/${any}/graph`], ['POST', `/workflows/${any}/delete`],

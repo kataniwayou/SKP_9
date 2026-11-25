@@ -108,13 +108,14 @@ test('four entry crons on one branching workflow, built in the UI: saved, dry-ru
     await expect(inspector(page)).toContainText(/30 seconds/i);
 
     // ---- the UI before the Save: four ⏱ labels, the Schedules readings -------------------------------------------------------
-    // (the edit trims the cron, so E2 is held as "*/10  * * * * *": its inner double space stays for the server to normalise)
+    // (the field keeps E2 as typed; Save trims it to "*/10  * * * * *", its inner double space left for the server to normalise)
     const held = { E1: CRON.E1, E2: CRON.E2.trim(), E3: CRON.E3, E4: CRON.E4 };
     for (const e of ENTRIES) await expect(label(page, id.wf!, id[e]!), `${e}'s arrow label`).toHaveText(`⏱ ${held[e].replace(/\s+/g, ' ')}`);
     await selectWorkflowAlone(page, id.wf!);
     const readings: Record<string, string> = {};
     for (const e of ENTRIES) {
-      await expect(cronIn(page, id[e]!)).toHaveValue(held[e]);
+      // as typed (1b31a25d: kept as typed, trimmed on Save); after the Save and the reload below it reads trimmed
+      await expect(cronIn(page, id[e]!)).toHaveValue(CRON[e]);
       await expect(schedule(page, id[e]!).locator('.in-note')).toContainText(new RegExp(`${PERIOD_S[e]} seconds`, 'i'));
       readings[e] = await schedule(page, id[e]!).locator('.in-note').innerText();
     }
