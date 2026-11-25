@@ -14,7 +14,7 @@ From `src/Acto`, with BaseApi forwarded on `localhost:18080` and Elasticsearch o
 | Headed and slowed (350 ms a step), not live | `npm run e2e:regression` |
 | Headed, with the live runs (6 and 12 start and stop their own `e2e-` workflows) | PowerShell: `$env:ACTO_E2E_LIVE='1'; npm run e2e:regression` |
 | Unslowed, headless | `npx playwright test e2e/regression` |
-| One spec | `npm run e2e:regression -- 8-board-look` |
+| One spec, headed | `npm run e2e:watch -- e2e/regression/8-board-look.spec.ts` (not `e2e:regression -- <name>`: Playwright ORs the two filters and runs the whole folder) |
 
 The write guard in `e2e/fixtures.ts` holds as everywhere: only `e2e-` rows, Start/Stop only in the live run and only of
 a workflow the run made, and the teardown fails the run if a real row changed beyond its location.
