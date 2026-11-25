@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { caNode, ghost, openAt, pickStep, stNode, toolbar, wfNode } from './helpers';
+import { cacheTool, caNode, dropTool, ghost, openAt, pickStep, PROC_B, stNode, toolbar, toolboxStep, wfNode, workflowTool } from './helpers';
 import { seed } from './seed';
 
 // Option B of the drag mock [user, 2026-11-25]: a dragged item is always on top while it moves, what it lies over is
@@ -99,4 +99,34 @@ test('ghosts take part: a drop on a ghost slides aside, and a dragged ghost slid
   await expect.poll(() => topAt(page, at2.x, at2.y)).toMatch(/^ghost:/);
   await page.mouse.up();
   await expect.poll(() => clear(G, B)).toBe(true);
+});
+
+test('a new item dropped from the toolbox onto another slides aside too [user, 2026-11-25]', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  const B = stNode(page, id.b!);
+  const t = (await B.boundingBox())!;
+  const made = await dropTool(page, toolboxStep(page, PROC_B), 'step', { x: t.x + t.width / 2, y: t.y + t.height / 2 });
+  await expect.poll(() => clear(stNode(page, made), B)).toBe(true);
+  // a triangle and a cache dropped on it as well
+  const w = await dropTool(page, workflowTool(page), 'workflow', { x: t.x + t.width / 2, y: t.y + t.height / 2 });
+  await expect.poll(() => clear(wfNode(page, w), B)).toBe(true);
+  const c = await dropTool(page, cacheTool(page), 'cache', { x: t.x + t.width / 2, y: t.y + t.height / 2 });
+  await expect.poll(() => clear(caNode(page, c), B)).toBe(true);
+});
+
+test('arrow nudges stop against another item instead of going over it [user, 2026-11-25]', async ({ page }) => {
+  const id = await seed(SEED);
+  await openAt(page);
+  const A = stNode(page, id.a!), B = stNode(page, id.b!);
+  const x0 = (await A.boundingBox())!.x;
+  await pickStep(page, id.a!);
+  // A's right edge is ~110 px short of B: 30 nudges of 8 px would carry it well onto B
+  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await A.boundingBox())!.x).toBeGreaterThan(x0 + 40);
+  expect(await clear(A, B)).toBe(true);
+  // and back the other way it moves freely
+  const x1 = (await A.boundingBox())!.x;
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(async () => (await A.boundingBox())!.x).toBeLessThan(x1);
 });

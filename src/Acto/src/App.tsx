@@ -7,6 +7,8 @@ import { loadBoard } from './board/loadBoard';
 import type { ToolbarActions } from './board/nodes/boardContext';
 import { deletePicks, deleteRefusal, livePicks } from './board/picks';
 import { placeMissing } from './board/placement';
+import { nudgeBlocked, occupied, rectAt } from './board/occupied';
+import { pushAside } from './board/overlap';
 import { selectPick, synced, withPicks, type Pick, type SelectionState } from './board/selection';
 import { withBox } from './board/boxSelect';
 import { barOf } from './board/selectionBar';
@@ -221,15 +223,20 @@ export function App(props: AppProps) {
       if (!e.repeat) nudgeSeq.current++;
       // the first press says the board is saving; its repeats need not say it again
       if (e.repeat && store.saving()) return;
-      store.edit((b) => moveItems(b, refs.flatMap((ref) => {
-        const row = (ref.kind === 'step' ? b.steps : ref.kind === 'cache' ? b.caches : b.workflows)[ref.id];
+      const b0 = store.state();
+      const moves = refs.flatMap((ref) => {
+        const row = (ref.kind === 'step' ? b0.steps : ref.kind === 'cache' ? b0.caches : b0.workflows)[ref.id];
         return row?.at ? [{ ref, at: { x: row.at.x + d.dx, y: row.at.y + d.dy } }] : [];
-      })), `nudge:${nudgeSeq.current}`);
+      });
+      // a nudge stops against another item (a ghost included) rather than going over it [user, 2026-11-25]
+      const others = occupied(b0, ghostStore.ghosts(), new Set(refs.map((r) => `${r.kind}:${r.id}`)));
+      if (nudgeBlocked(moves.map((m) => rectAt(m.ref.kind, m.at)), others)) return;
+      store.edit((b) => moveItems(b, moves), `nudge:${nudgeSeq.current}`);
     };
     // capture, so it runs before the board stops the arrow reaching React Flow's own node movement
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [store]);
+  }, [store, ghostStore]);
 
   /**
    * Delete of triangles, steps, caches, wires, entry arrows and cache lines: one edit, one undo step, ghosts until Save
@@ -288,14 +295,24 @@ export function App(props: AppProps) {
   const onDropData = useCallback((raw: string, at: Point) => {
     const d = parseToolboxDrag(raw);
     if (!d || !Number.isFinite(at.x) || !Number.isFinite(at.y)) return;
-    const r = dropOnBoard(store.state(), d, at, newId);
-    if ('refused' in r) { output.log(r.refused, 'warn'); return; }
+    const r0 = dropOnBoard(store.state(), d, at, newId);
+    if ('refused' in r0) { output.log(r0.refused, 'warn'); return; }
+    // a new item dropped on another (a ghost included) slides to the nearest free place, as a dragged one does [user, 2026-11-25]
+    const r = (() => {
+      const p = r0.pick;
+      if (p.kind !== 'workflow' && p.kind !== 'step' && p.kind !== 'cache') return r0;
+      const row = (p.kind === 'step' ? r0.state.steps : p.kind === 'cache' ? r0.state.caches : r0.state.workflows)[p.id];
+      if (!row?.at) return r0;
+      const off = pushAside([rectAt(p.kind, row.at)], occupied(r0.state, ghostStore.ghosts(), new Set([`${p.kind}:${p.id}`])));
+      if (off.x === 0 && off.y === 0) return r0;
+      return { ...r0, state: moveItems(r0.state, [{ ref: { kind: p.kind, id: p.id }, at: { x: row.at.x + off.x, y: row.at.y + off.y } }]) };
+    })();
     store.edit(() => r.state);
     if (store.state() !== r.state) return; // refused while saving
     if (r.pick.kind === 'workflow') output.log(`${r.state.workflows[r.pick.id]!.name} created — it is saved only when you press Save`, 'ok');
     // a drop selects only the new item, so the Inspector is on it at once (it is named next)
     setSelection(withPicks(selRef.current, [r.pick]));
-  }, [store, output, setSelection]);
+  }, [store, output, setSelection, ghostStore]);
 
   const unsavedKeys = store.unsaved();
   const marks = useMemo(() => unsavedMarks(store.base(), state, unsavedKeys), [store, state, unsavedKeys]);
