@@ -141,11 +141,18 @@ test('toolbox drops slide aside; nudges stop against a neighbour', async ({ page
 
   // A is level with B, about 110 px short of it: 30 nudges of 8 px would carry it well onto B, so it must stop
   await page.locator('.react-flow__pane').click({ position: { x: 20, y: 20 } });
-  const x0 = (await box(A)).x;
+  const a0 = await box(A);
+  const x0 = a0.x;
   await pickStep(page, id.A!);
   for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowRight');
   await expect.poll(async () => (await box(A)).x).toBeGreaterThan(x0 + 40);
   expect(await clear(A, B)).toBe(true);
+  // it stopped against B on its own row, rather than going round it: y unchanged, right edge within one step short of B
+  const a1 = await box(A), b1 = await box(B);
+  expect(Math.round(a1.y), 'the nudge kept its row').toBe(Math.round(a0.y));
+  const short = b1.x - (a1.x + a1.width);
+  expect(short, 'stopped right before B').toBeGreaterThanOrEqual(0);
+  expect(short, 'stopped right before B').toBeLessThan(8);
   const x1 = (await box(A)).x;
   await page.keyboard.press('ArrowLeft');
   await expect.poll(async () => (await box(A)).x).toBeLessThan(x1);

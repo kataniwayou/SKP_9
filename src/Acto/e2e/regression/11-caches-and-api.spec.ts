@@ -44,6 +44,8 @@ test('cache items cross as pairs and survive a reload; a key over 256 characters
   await itemKey(page, 3).fill('k'.repeat(256));
   await itemKey(page, 3).press('Enter');
   await expect(inspector(page).getByText(/Key must be at most 256 characters/)).toHaveCount(0);
+  await expect(inspector(page).getByText('3 items')).toBeVisible();
+  await expect(saveButton(page)).toHaveText('Save · 1');
 });
 
 test('removed endpoints are gone, the ones Acto uses are not', async () => {

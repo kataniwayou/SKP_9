@@ -141,7 +141,9 @@ test('restore brings its wires, ghosts drag and keep their place, and the right-
   await waitLoaded(page);
   await expect.poll(async () => Math.abs((await boxOf(G)).y - moved.y)).toBeLessThanOrEqual(1);
 
-  // the right-click box picks a ghost, in the accent frame
+  // the right-click box picks a ghost, in the accent frame (nothing picked before it, so the pick is the box's)
+  await pane(page).click({ position: { x: 20, y: 20 } });
+  await expect(G.locator('.node.sel')).toHaveCount(0);
   const b = await boxOf(G);
   await page.mouse.move(b.x - 20, b.y - 20);
   await page.mouse.down({ button: 'right' });
@@ -154,7 +156,9 @@ test('restore brings its wires, ghosts drag and keep their place, and the right-
   await toolbar(page, 'ghost').getByRole('button', { name: 'Restore' }).click();
   await expect(stNode(page, id.B!)).toHaveCount(1);
   // (within a pixel: a drag leaves a fractional place, and a ghost's box and a card's box round it differently)
-  expect(Math.abs((await boxOf(stNode(page, id.B!))).y - moved.y), 'restored where the ghost was put').toBeLessThanOrEqual(1);
+  const back = await boxOf(stNode(page, id.B!));
+  expect(Math.abs(back.y - moved.y), 'restored where the ghost was put (y)').toBeLessThanOrEqual(1);
+  expect(Math.abs(back.x - moved.x), 'restored where the ghost was put (x)').toBeLessThanOrEqual(1);
   await expect(wireEdge(page, id.A!, id.B!)).toHaveCount(1);
   await expect(wireEdge(page, id.B!, id.C!)).toHaveCount(1);
   await expect(page.locator('.react-flow__node.ghost, .react-flow__edge.ghost')).toHaveCount(0);

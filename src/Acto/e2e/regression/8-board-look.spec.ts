@@ -83,7 +83,12 @@ test('health hearts: a live heart beats, a down one is cracked, an unknown one a
   expect(await style(live.locator('svg'), 'animationName')).toBe('none');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   // the toolbox's processor cards read the same
-  const tool = (name: string) => page.getByTestId('toolbox-step').filter({ hasText: new RegExp(`^\\s*\\S?\\s*${name}`) }).first().getByTestId('health-dot');
+  // the card whose name is exactly this one: in its text the name runs straight into the liveness line, so `file-fetcher` cannot
+  // match a `file-fetcher-x` card
+  const tool = (name: string) => page.getByTestId('toolbox-step')
+    .filter({ has: page.locator('.tx', { hasText: new RegExp(`^${name}(?:checking|unknown|not reported|live|not live)`) }) })
+    .getByTestId('health-dot');
+  for (const n of [LIVE, DOWN, UNREPORTED]) await expect(tool(n), `one toolbox card named ${n}`).toHaveCount(1);
   await expect(tool(LIVE)).toHaveAttribute('data-health', 'healthy');
   await expect(tool(DOWN)).toHaveAttribute('data-health', 'unhealthy');
   await expect(tool(UNREPORTED)).toHaveAttribute('data-health', 'undetermined');

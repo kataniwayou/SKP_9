@@ -19,7 +19,9 @@ import { ENTRY_DISPATCHED, FROZEN_SKIPPED, HANDED_OFF, getJson, orchestrate, set
 // Started from the toolbar, the orchestrator's own records in Elasticsearch must show: L dispatched on every */10 mark and
 // handed off to LC only; Z skipped (the frozen record) under each of L's ticks and never dispatched; U never dispatched.
 // Then Z is set to Completed and saved while running: nothing changes (L2 is the projection taken at Start) until Start is
-// re-issued, after which Z is dispatched with L under one correlation id per tick. Then Stop from the toolbar: nothing more.
+// re-issued, after which Z is dispatched with L under one correlation id per tick. The other way round too: Z frozen again and
+// saved while running keeps being dispatched until Start is re-issued once more, after which it is skipped again. Then Stop
+// from the toolbar: nothing more.
 // Live only (ACTO_E2E_LIVE=1); every step is outcome-recorder (no schema, always Completed, no side effect but its record).
 
 test.skip(process.env.ACTO_E2E_LIVE !== '1', 'the live run: set ACTO_E2E_LIVE=1');
@@ -99,6 +101,20 @@ test('frozen and unscheduled entries in the orchestrator\'s own records: skipped
     const t2 = Date.now();
     await sleep(25_000);
 
+    // ---- phase 4: Z frozen again, saved while running: it keeps being dispatched (the freeze lands on the next Start) -----
+    await offMark();
+    await setCondition(page, S.Z!, 'Never');
+    expect((await save(page)).applied).toBe(true);
+    const t5 = Date.now();
+    await sleep(22_000);
+
+    // ---- phase 5: Start re-issued again: Z is skipped once more, 25 s ------------------------------------------------------
+    await offMark();
+    const restart2 = await orchestrate('start', saved);
+    expect(restart2.ok, 'the second re-issued Start').toBe(true);
+    const t6 = Date.now();
+    await sleep(25_000);
+
     // ---- Stop from the toolbar, then a quiet period -------------------------------------------------------------------------
     await offMark();
     await clickEmptyBoard(page);
@@ -106,9 +122,10 @@ test('frozen and unscheduled entries in the orchestrator\'s own records: skipped
     await toolbar(page, 'workflow').getByRole('button', { name: '■ Stop' }).click();
     const t3 = Date.now();
     await expect(wfNode(page, saved).locator('.tri-st[data-status="stopped"]')).toBeVisible({ timeout: 30_000 });
-    await sleep(15_000);
+    // the quiet period: 25 s, two and a half */10 marks, so a job the stop missed would fire at least twice
+    await sleep(25_000);
     const t4 = Date.now();
-    evidence.window = Object.fromEntries(Object.entries({ t0, t1, t2, t3, t4 }).map(([k, v]) => [k, new Date(v).toISOString()]));
+    evidence.window = Object.fromEntries(Object.entries({ t0, t1, t2, t5, t6, t3, t4 }).map(([k, v]) => [k, new Date(v).toISOString()]));
 
     // ---- Elasticsearch ------------------------------------------------------------------------------------------------------
     const SLACK = 2_000;
@@ -133,12 +150,22 @@ test('frozen and unscheduled entries in the orchestrator\'s own records: skipped
     const skipCorr = new Set(skips.filter((r) => r.at <= t2 + SLACK).map((r) => r.attributes.CorrelationId));
     expect(skipCorr, 'one frozen skip under each of L\'s ticks before the re-start').toEqual(lCorr12);
 
-    // phase 3 (t2..t3): Z unfrozen, dispatched with L under one correlation id per tick; no more skips
-    const l3 = by('L', t2 + SLACK, t3 + SLACK);
-    const z3 = by('Z', t2 + SLACK, t3 + SLACK);
-    expect(z3.length, `Z dispatched after the re-start: ${summary}`).toBeGreaterThan(0);
-    expect(new Set(z3.map((d) => d.attributes.CorrelationId)), 'Z rides L\'s ticks').toEqual(new Set(l3.map((d) => d.attributes.CorrelationId)));
-    expect(skips.filter((r) => r.at > t2 + SLACK), 'no frozen skip after the re-start').toEqual([]);
+    // phases 3 and 4 (t2..t6): Z unfrozen, dispatched with L under one correlation id per tick, L on every mark (a doubled
+    // schedule would show here); no skips; and Z frozen again at t5 is still dispatched until the next Start
+    const l34 = by('L', t2 + SLACK, t6 + SLACK);
+    const z34 = by('Z', t2 + SLACK, t6 + SLACK);
+    expect(Math.abs(l34.length - marks(10, t2, t6)), `L ticks between the re-starts: ${summary}`).toBeLessThanOrEqual(1);
+    expect(z34.length, `Z dispatched after the re-start: ${summary}`).toBeGreaterThan(0);
+    expect(new Set(z34.map((d) => d.attributes.CorrelationId)), 'Z rides L\'s ticks').toEqual(new Set(l34.map((d) => d.attributes.CorrelationId)));
+    expect(by('Z', t5 + SLACK, t6 + SLACK).length, `Z still dispatched after its freeze was saved at ${hhmmss(t5)}, until the next Start: ${summary}`).toBeGreaterThan(0);
+    expect(skips.filter((r) => r.at > t2 + SLACK && r.at <= t6 + SLACK), 'no frozen skip between the re-starts').toEqual([]);
+
+    // phase 5 (t6..t3): frozen again by the second re-start: skipped under each of L's ticks, never dispatched
+    const l5 = by('L', t6 + SLACK, t3 + SLACK);
+    expect(Math.abs(l5.length - marks(10, t6, t3)), `L ticks after the second re-start: ${summary}`).toBeLessThanOrEqual(1);
+    expect(by('Z', t6 + SLACK, t3 + SLACK), `Z dispatched after it was frozen again: ${summary}`).toEqual([]);
+    expect(new Set(skips.filter((r) => r.at > t6 + SLACK).map((r) => r.attributes.CorrelationId)), 'one frozen skip under each of L\'s ticks after the second re-start')
+      .toEqual(new Set(l5.map((d) => d.attributes.CorrelationId)));
 
     // U, never; LN, never handed off; LC on every L tick finished before the stop
     expect(dispatches.filter((d) => d.attributes.StepId === S.U), `U (no cron) dispatched: ${summary}`).toEqual([]);
@@ -161,8 +188,14 @@ test('frozen and unscheduled entries in the orchestrator\'s own records: skipped
     mkdirSync(dir, { recursive: true });
     writeFileSync(resolve(dir, 'regression-12-evidence.json'), JSON.stringify(evidence, null, 2));
     if (saved) {
-      // never leave a running e2e workflow behind
-      await orchestrate('stop', saved);
+      // never leave a running e2e workflow behind: try the stop three times, and fail the test (softly, not masking the
+      // first error) if none was accepted
+      let stopped = false;
+      for (let i = 0; i < 3 && !stopped; i++) {
+        stopped = (await orchestrate('stop', saved).catch(() => null))?.ok === true;
+        if (!stopped) await sleep(3_000);
+      }
+      expect.soft(stopped, `the cleanup stop of ${saved} was accepted`).toBe(true);
       await sleep(15_000);
     }
   }
