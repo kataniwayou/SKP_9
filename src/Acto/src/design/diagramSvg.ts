@@ -1,4 +1,5 @@
-import { conditionInfo, CONDITIONS } from '../model/entryConditions';
+import { conditionStyle } from '../board/wires';
+import { CONDITIONS } from '../model/entryConditions';
 import type { Id } from '../model/graph';
 import { distinctCrons, scheduleSummary } from '../model/scheduleSummary';
 import { reachOf, type BoardState } from './board';
@@ -22,6 +23,13 @@ const BOX_PAD = 10;
 const MAX_ROWS = 12;
 const GAP = 24;
 const TRI_STROKE = '#4F46E5';
+/** Entry arrows are ink, as on the board; only step-to-step wires wear a condition's colour. */
+const INK = '#1A1D29';
+/** What a wire or arrow that never fires is drawn at, as the board fades it. */
+const IDLE_OPACITY = 0.45;
+const NEVER = 5;
+/** A condition's letter and colour exactly as the board draws them (its pills and wires), not the inspector's softer set. */
+const conditionInfo = conditionStyle;
 const CACHE_STROKE = '#64748B';
 const MASK = '••••••';
 
@@ -100,9 +108,12 @@ const overlaps = (a: Box, b: Box) =>
 /**
  * One standalone SVG of a workflow for its Kibana tab [user, 2026-11-22], in Acto's look on white: the name, version,
  * save time and counts; the triangle with its cron (and a plain reading of it) under it; each step it reaches with this
- * workflow's settings as key/value rows (secrets masked); its caches with root and item count on dashed lines; the wires
- * (colour and letter from the target's entry condition) at the box headers; the legend below. Boxes keep their board
- * places; a box grown by its rows pushes the ones under it down so nothing overlaps.
+ * workflow's settings as key/value rows (secrets masked) and its entry condition as the board's square pill; its caches
+ * with root and item count on dashed lines; the wires at the box headers, as the board draws them [user, 2026-11-25]: a
+ * step-to-step wire in its target's condition colour with no letter, a wire into a Never step faded with a hollow head;
+ * entry arrows in ink, faded with a hollow head and the reason when they never fire (frozen: the step is Never;
+ * not scheduled: no cron). The legend below. Boxes keep their board places; a box grown by its rows pushes the ones under
+ * it down so nothing overlaps.
  */
 export function diagramSvg(b: BoardState, workflowId: Id): string {
   const wf = b.workflows[workflowId];
@@ -189,11 +200,14 @@ export function diagramSvg(b: BoardState, workflowId: Id): string {
   );
 
   const arrowDefs = new Set<string>();
-  const arrow = (colour: string): string => {
-    const id = `arrow-${colour.replace('#', '')}`;
+  /** A filled head, or (hollow) an outline inset a unit so the marker box does not clip it. */
+  const arrow = (colour: string, hollow = false): string => {
+    const id = `arrow-${colour.replace('#', '')}${hollow ? '-hollow' : ''}`;
     if (!arrowDefs.has(id)) {
       arrowDefs.add(id);
-      out.push(`<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="${colour}"/></marker>`);
+      out.push(hollow
+        ? `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 9 5 L 1 9 z" fill="none" stroke="${colour}" stroke-width="1.4" stroke-linejoin="round"/></marker>`
+        : `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="${colour}"/></marker>`);
     }
     return id;
   };
@@ -201,10 +215,11 @@ export function diagramSvg(b: BoardState, workflowId: Id): string {
     const dx = Math.max(40, Math.abs(x2 - x1) / 2);
     return `M ${num(x1)} ${num(y1)} C ${num(x1 + dx)} ${num(y1)}, ${num(x2 - dx)} ${num(y2)}, ${num(x2)} ${num(y2)}`;
   };
+  /** The board's condition pill: an 18 px rounded square in the condition's colour, its letter in white, centred on (x, y). */
   const pill = (x: number, y: number, colour: string, letter: string) => {
     out.push(
-      `<circle cx="${num(x)}" cy="${num(y)}" r="8" fill="${colour}"/>`,
-      `<text x="${num(x)}" y="${num(y)}" text-anchor="middle" dominant-baseline="central" font-size="10" font-weight="700" fill="#FFFFFF">${esc(letter)}</text>`,
+      `<rect x="${num(x - 9)}" y="${num(y - 9)}" width="18" height="18" rx="4" ry="4" fill="${colour}"/>`,
+      `<text x="${num(x)}" y="${num(y)}" text-anchor="middle" dominant-baseline="central" font-size="10.5" font-weight="700" font-family="${MONO}" fill="#FFFFFF">${esc(letter)}</text>`,
     );
   };
 
@@ -221,23 +236,34 @@ export function diagramSvg(b: BoardState, workflowId: Id): string {
   }
 
   // entry arrows from the tip, and wires between reached steps, at the middle of the box headers
-  const wireOf = (from: { x: number; y: number }, to: Box, cond: number) => {
-    const info = conditionInfo(cond);
-    const m = arrow(info.colour);
+  const line = (from: { x: number; y: number }, to: Box, colour: string, idle: boolean, kind: 'entry' | 'wire') => {
     const x2 = to.x;
     const y2 = to.y + HEAD_H / 2;
-    out.push(`<path d="${curve(from.x, from.y, x2, y2)}" stroke="${info.colour}" stroke-width="2.2" fill="none" marker-end="url(#${m})"/>`);
-    pill((from.x + x2) / 2, (from.y + y2) / 2, info.colour, info.letter);
+    const m = arrow(colour, idle);
+    out.push(`<path data-part="${kind}" d="${curve(from.x, from.y, x2, y2)}" stroke="${colour}" stroke-width="2.2" fill="none"${idle ? ` opacity="${IDLE_OPACITY}"` : ''} marker-end="url(#${m})"/>`);
+    return { mx: (from.x + x2) / 2, my: (from.y + y2) / 2 };
   };
+  const never = conditionInfo(NEVER);
   for (const id of wf?.entryStepIds ?? []) {
     const to = S.get(id);
-    if (to) wireOf({ x: T.x + T.w, y: T.y + T.h / 2 }, to, b.steps[id]!.entryCondition);
+    if (!to) continue;
+    const frozen = b.steps[id]!.entryCondition === NEVER;
+    const unscheduled = !frozen && (wf!.entryCrons?.[id] ?? '').trim() === '';
+    const { mx, my } = line({ x: T.x + T.w, y: T.y + T.h / 2 }, to, INK, frozen || unscheduled, 'entry');
+    // why it never fires, below its middle, as the board says it
+    if (frozen) {
+      pill(mx - 22, my + 16, never.colour, never.letter);
+      out.push(`<text data-part="idle" x="${num(mx - 9)}" y="${num(my + 16)}" dominant-baseline="central" font-size="11" font-weight="600" font-family="${MONO}" fill="${never.colour}">frozen</text>`);
+    } else if (unscheduled) {
+      out.push(`<text data-part="idle" x="${num(mx)}" y="${num(my + 16)}" text-anchor="middle" dominant-baseline="central" font-size="11" font-style="italic" font-family="${MONO}" fill="#64748B">⏱ not scheduled</text>`);
+    }
   }
   for (const id of stepIds) {
     const from = S.get(id)!;
     for (const next of b.steps[id]!.nextStepIds) {
       const to = S.get(next);
-      if (to) wireOf({ x: from.x + from.w, y: from.y + HEAD_H / 2 }, to, b.steps[next]!.entryCondition);
+      const cond = b.steps[next]!.entryCondition;
+      if (to) line({ x: from.x + from.w, y: from.y + HEAD_H / 2 }, to, conditionInfo(cond).colour, cond === NEVER, 'wire');
     }
   }
 
@@ -257,13 +283,19 @@ export function diagramSvg(b: BoardState, workflowId: Id): string {
   out.push('</g>');
 
   // a box: name header, a rule, then key/value rows (key left, value right in mono, both clipped to fit)
-  const box = (p: Box, name: string, rows: Row[], fill: string, stroke: string, part: string, more = 0) => {
+  const box = (p: Box, name: string, rows: Row[], fill: string, stroke: string, part: string, more = 0, condition?: number) => {
+    // a step's header ends in its condition pill, as on the board's card: the name gives up its room
+    const nameW = p.w - 28 - (condition === undefined ? 0 : 26);
     out.push(
       `<g data-part="${part}">`,
       `<rect x="${num(p.x)}" y="${num(p.y)}" width="${p.w}" height="${p.h}" rx="8" ry="8" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`,
-      `<text x="${num(p.x + 14)}" y="${num(p.y + HEAD_H / 2)}" dominant-baseline="central" font-size="14" font-weight="600" fill="#0F172A">${esc(clip(name, Math.floor((p.w - 28) / 7.6)))}</text>`,
+      `<text x="${num(p.x + 14)}" y="${num(p.y + HEAD_H / 2)}" dominant-baseline="central" font-size="14" font-weight="600" fill="#0F172A">${esc(clip(name, Math.floor(nameW / 7.6)))}</text>`,
       `<line x1="${num(p.x)}" y1="${num(p.y + HEAD_H)}" x2="${num(p.x + p.w)}" y2="${num(p.y + HEAD_H)}" stroke="#E2E8F0"/>`,
     );
+    if (condition !== undefined) {
+      const c = conditionInfo(condition);
+      pill(p.x + p.w - 14 - 9, p.y + HEAD_H / 2, c.colour, c.letter);
+    }
     const inner = p.w - 28;
     rows.forEach((r, i) => {
       const y = p.y + HEAD_H + ROW_H * i + ROW_H / 2 + 4;
@@ -288,7 +320,7 @@ export function diagramSvg(b: BoardState, workflowId: Id): string {
 
   for (const id of stepIds) {
     const rows = rowsOf.get(id)!;
-    box(S.get(id)!, b.steps[id]!.name, rows.slice(0, MAX_ROWS), '#FFFFFF', '#CBD5E1', 'step', Math.max(0, rows.length - MAX_ROWS));
+    box(S.get(id)!, b.steps[id]!.name, rows.slice(0, MAX_ROWS), '#FFFFFF', '#CBD5E1', 'step', Math.max(0, rows.length - MAX_ROWS), b.steps[id]!.entryCondition);
   }
   for (const [id, c] of C) {
     const cache = b.caches[id]!;
@@ -298,7 +330,8 @@ export function diagramSvg(b: BoardState, workflowId: Id): string {
   // legend below: the five conditions and the cache line
   const ly = contentBottom + 22;
   let lx = PAD;
-  for (const c of CONDITIONS) {
+  for (const { value } of CONDITIONS) {
+    const c = conditionInfo(value);
     pill(lx + 8, ly, c.colour, c.letter);
     out.push(`<text x="${num(lx + 22)}" y="${num(ly)}" dominant-baseline="central" font-size="12" fill="#334155">${esc(c.name)}</text>`);
     lx += 30 + c.name.length * 7 + 12;

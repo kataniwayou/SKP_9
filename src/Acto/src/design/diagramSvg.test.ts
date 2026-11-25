@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { conditionInfo } from '../model/entryConditions';
+import { conditionStyle as conditionInfo } from '../board/wires';
 import { board } from './boardFixtures';
 import { cronText, diagramSvg, settingRows } from './diagramSvg';
 
@@ -24,10 +24,13 @@ describe('diagramSvg', () => {
     expect(text).not.toContain('hourly');
   });
 
-  it('draws the triangle, the wire in the target condition colour and a dashed cache line', () => {
+  it('draws the triangle, the wire in the target condition colour, the entry arrow in ink, and a dashed cache line', () => {
     expect(doc.querySelectorAll('polygon').length).toBe(1);
-    const strokes = [...doc.querySelectorAll('path[stroke]')].map((p) => p.getAttribute('stroke'));
-    expect(strokes.filter((s) => s === conditionInfo(1).colour).length).toBeGreaterThanOrEqual(2);
+    // as the board draws them [user, 2026-11-25]: the wire wears its target's condition colour, the entry arrow is ink
+    expect(doc.querySelector('path[data-part="wire"]')!.getAttribute('stroke')).toBe(conditionInfo(1).colour);
+    expect(doc.querySelector('path[data-part="entry"]')!.getAttribute('stroke')).toBe('#1A1D29');
+    // no letter circles on the lines any more
+    expect(doc.querySelectorAll('circle').length).toBe(0);
     // the cache line, and its key in the legend
     expect(doc.querySelectorAll('path[stroke-dasharray]').length).toBe(1);
     expect(doc.querySelectorAll('line[stroke-dasharray]').length).toBe(1);
@@ -62,7 +65,8 @@ describe('diagramSvg', () => {
     const d = parse(diagramSvg(b, 'daily'));
     const step = [...d.querySelectorAll('g[data-part="step"]')].find((g) => g.textContent!.includes('fetch-orders'))!;
     const texts = [...step.querySelectorAll('text')].map((t) => t.textContent);
-    expect(texts).toEqual(['fetch-orders', 'path', '/data/in', 'retry.count', '3', 'tags', '["a","b"]']);
+    // the name, its condition pill's letter (as on the board's card), then the rows
+    expect(texts).toEqual(['fetch-orders', 'C', 'path', '/data/in', 'retry.count', '3', 'tags', '["a","b"]']);
     expect(d.documentElement.textContent).not.toContain('/hourly-only');
     // a step with no settings says so
     const other = [...d.querySelectorAll('g[data-part="step"]')].find((g) => g.textContent!.includes('expand'))!;
@@ -150,5 +154,59 @@ describe('cronText', () => {
     expect(cronText('0 0 2 1 * *')).toBeNull();
     expect(cronText('0 0 9-17 * * *')).toBeNull();
     expect(cronText('nonsense')).toBeNull();
+  });
+
+  describe('lines that never fire, as the board draws them [user, 2026-11-25]', () => {
+    const lines = (b: ReturnType<typeof board>) => parse(diagramSvg(b, 'daily'));
+    const scheduled = () => {
+      const b = board();
+      b.workflows.daily!.entryCrons = { fetch: '0 * * * * *' };
+      return b;
+    };
+
+    it('a scheduled entry arrow into a live step is plain: no fade, a filled head, no reason', () => {
+      const d = lines(scheduled());
+      const entry = d.querySelector('path[data-part="entry"]')!;
+      expect(entry.hasAttribute('opacity')).toBe(false);
+      expect(entry.getAttribute('marker-end')).not.toContain('hollow');
+      expect(d.querySelectorAll('[data-part="idle"]').length).toBe(0);
+    });
+
+    it('an entry arrow with no cron is faded with a hollow head and says it is not scheduled', () => {
+      const d = lines(board());
+      const entry = d.querySelector('path[data-part="entry"]')!;
+      expect(entry.getAttribute('opacity')).toBe('0.45');
+      expect(entry.getAttribute('marker-end')).toContain('hollow');
+      expect(d.querySelector('[data-part="idle"]')!.textContent).toBe('⏱ not scheduled');
+    });
+
+    it('an entry arrow into a Never step is frozen: faded, hollow, the pink N square and "frozen"', () => {
+      const b = scheduled();
+      b.steps.fetch!.entryCondition = 5;
+      const d = lines(b);
+      const entry = d.querySelector('path[data-part="entry"]')!;
+      expect(entry.getAttribute('opacity')).toBe('0.45');
+      expect(entry.getAttribute('marker-end')).toContain('hollow');
+      const idle = d.querySelector('[data-part="idle"]')!;
+      expect(idle.textContent).toBe('frozen');
+      expect(idle.getAttribute('fill')).toBe(conditionInfo(5).colour);
+    });
+
+    it('a wire into a Never step is pink, faded, with a hollow head; others are full', () => {
+      const b = scheduled();
+      expect(lines(b).querySelector('path[data-part="wire"]')!.hasAttribute('opacity')).toBe(false);
+      b.steps.expand!.entryCondition = 5;
+      const wire = lines(b).querySelector('path[data-part="wire"]')!;
+      expect(wire.getAttribute('stroke')).toBe(conditionInfo(5).colour);
+      expect(wire.getAttribute('opacity')).toBe('0.45');
+      expect(wire.getAttribute('marker-end')).toContain('hollow');
+    });
+
+    it('the legend keys each condition with the board\'s square pill', () => {
+      const d = lines(board());
+      for (const c of [1, 2, 3, 4, 5]) {
+        expect([...d.querySelectorAll('rect')].some((r) => r.getAttribute('fill') === conditionInfo(c).colour && r.getAttribute('width') === '18')).toBe(true);
+      }
+    });
   });
 });
