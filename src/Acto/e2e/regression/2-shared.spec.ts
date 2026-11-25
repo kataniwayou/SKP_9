@@ -188,22 +188,17 @@ test('a shared step\'s entry condition and name, edited once: every workflow\'s 
   const id = remap(...await (async () => { const b = await buildShared(page, { payloads: false }); const a = await save(page); return [b, a.made] as const; })());
   await expect(saveButton(page)).toBeDisabled();
   const into = [wireEdge(page, id.s, id.t), wireEdge(page, id.u, id.t)];
-  for (const w of into) await expect(w.locator('.pilltx')).toHaveText('C');
-  const strokeBefore = await into[0]!.locator('path.wire').getAttribute('stroke');
+  for (const w of into) await expect(w.locator('.link-wire')).toHaveAttribute('data-condition', 'Completed');
 
   await setCondition(page, id.t, 'Failed');
   await field(page, 'Name').fill(`${N.t}-renamed`);
   await field(page, 'Description').fill('edited once, shared by three');
   expect(await unsavedCount(page), 'one row changed').toBe(1);
-  // both wires into it, the one from W1/W2's stream and the one from W3's, take the condition's letter and colour
-  const failedStroke = await into[0]!.locator('path.wire').getAttribute('stroke');
-  for (const w of into) {
-    await expect(w.locator('.pilltx')).toHaveText('F');
-    await expect(w.locator('path.wire'), 'the same colour on every wire into it').toHaveAttribute('stroke', failedStroke!);
-    await expect(w.locator('path.wire')).not.toHaveAttribute('stroke', strokeBefore!);
-    await expect(w.locator('g.link-wire, .link-wire').first()).toHaveAttribute('data-condition', 'Failed');
-  }
-  await expect(wireEdge(page, id.s, id.u).locator('.pilltx')).toHaveText('C');
+  // both wires into it, the one from W1/W2's stream and the one from W3's, follow the step's condition (wires draw none of
+  // their own [user, 2026-11-25]: the step's pill shows it; the wire names it in data-condition)
+  await expect(stNode(page, id.t).locator('.cond-pill')).toHaveText('F');
+  for (const w of into) await expect(w.locator('.link-wire')).toHaveAttribute('data-condition', 'Failed');
+  await expect(wireEdge(page, id.s, id.u).locator('.link-wire')).toHaveAttribute('data-condition', 'Completed');
   await expect(stNode(page, id.t).locator('.unsaved-mark')).toBeVisible();
   for (const s of [id.s, id.u]) await expect(stNode(page, s).locator('.unsaved-mark')).toHaveCount(0);
   for (const w of [id.w1, id.w2, id.w3]) await expect(wfNode(page, w).locator('.unsaved-mark')).toHaveCount(0);

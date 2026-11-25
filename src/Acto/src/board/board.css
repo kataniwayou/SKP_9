@@ -89,17 +89,21 @@
 .node .react-flow__handle.source { cursor: crosshair; }
 .node .react-flow__handle.connectionindicator { pointer-events: all; }
 
-/* wires */
+/* wires: ink, as entry arrows are; the entry condition is the target step's pill, not the wire's [user, 2026-11-25] */
 .link-wire .wire-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; pointer-events: stroke; }
-.link-wire .wire { fill: none; stroke-width: 2.2; pointer-events: none; }
-.link-wire .wire.sel { stroke-width: 3.6; }
+.link-wire .wire { fill: none; stroke: var(--on-paper); stroke-width: 2.2; pointer-events: none; }
+.link-wire .wire-head { fill: var(--on-paper); }
+.link-wire .wire.sel { stroke: var(--accent); stroke-width: 3.6; }
+.link-wire.sel .wire-head { fill: var(--accent); }
 .link-wire .wire.running { stroke-dasharray: 7 4; animation: wire-flow .6s linear infinite; }
 @keyframes wire-flow { to { stroke-dashoffset: -11; } }
-.link-wire .pill { stroke: var(--b-node); stroke-width: 1.5; pointer-events: none; }
-/* an Invalid wire (grey, any stored value outside the five) follows the paper so it shows in dark too */
+/* a wire into a Never step never fires: faded, hollow head, as a frozen entry arrow */
+.link-wire.never .wire { opacity: .45; animation: none; stroke-dasharray: none; }
+.link-wire .wire-head.hollow { fill: none; stroke: var(--on-paper); stroke-width: 1.4; stroke-linejoin: round; opacity: .45; }
+.link-wire.never.sel .wire-head.hollow { fill: none; stroke: var(--accent); }
+/* an Invalid wire (any stored value outside the five) follows the paper's muted ink so it shows in dark too */
 .link-wire[data-condition="Invalid"] .wire { stroke: var(--on-paper-2); }
-.link-wire[data-condition="Invalid"] marker path, .link-wire[data-condition="Invalid"] .pill { fill: var(--on-paper-2); }
-.link-wire .pilltx { font: 600 10px var(--mono); fill: var(--on-colour); pointer-events: none; }
+.link-wire[data-condition="Invalid"] .wire-head { fill: var(--on-paper-2); }
 @media (prefers-reduced-motion: reduce) {
   .state.on::before { animation: none; }
   .link-wire .wire.running, .entry-line.running, .tri-ring { animation: none; }
@@ -172,7 +176,7 @@
 .ghost .node.sel, .ghost.node.sel, .ghost .cache-chip.sel, .ghost.cache-chip.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--sh-node-hover); }
 .tri.ghost.sel .tri-body, .tri.ghost.stopped.sel .tri-body { stroke: var(--accent); stroke-width: 3; }
 .link-wire.ghost.sel .wire { stroke: var(--accent); stroke-width: 3.6; }
-.link-wire.ghost.sel marker path, .link-wire.ghost.sel .pill { fill: var(--accent); }
+.link-wire.ghost.sel marker path { fill: var(--accent); }
 .entry-edge.ghost.on .entry-line, .cache-edge.ghost.on .cache-line { stroke: var(--accent); stroke-width: 3; }
 .entry-edge.ghost.on .entry-head { fill: var(--accent); }
 .ghost-tag { position: absolute; right: 6px; bottom: 4px; font: 9px var(--mono); color: var(--ghost-tag-ink); background: var(--ghost-tag-bg); border-radius: 999px; padding: 0 7px; white-space: nowrap; pointer-events: none; }
@@ -180,7 +184,6 @@
 .ghost .tri-st { display: none; }
 .link-wire.ghost .wire { stroke: var(--ghost-wire); stroke-dasharray: 2 4; stroke-linecap: round; animation: none; }
 .link-wire.ghost marker path { fill: var(--ghost-wire); }
-.link-wire.ghost .pill { fill: var(--ghost-wire); }
 .entry-edge.ghost .entry-line, .cache-edge.ghost .cache-line { stroke: var(--ghost-wire); stroke-dasharray: 2 4; stroke-linecap: round; animation: none; }
 .entry-edge.ghost .entry-head { fill: var(--ghost-wire); }
 

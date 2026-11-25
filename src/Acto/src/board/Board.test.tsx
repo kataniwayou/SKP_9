@@ -48,7 +48,9 @@ describe('Board', () => {
     expect(document.querySelectorAll('.entry-edge')).toHaveLength(2);
     expect(document.querySelectorAll('.cache-edge')).toHaveLength(1);
     expect(document.querySelectorAll('.link-wire')).toHaveLength(1);
-    expect(screen.getByText('C', { selector: '.pilltx' })).toBeInTheDocument();
+    // a wire carries no letter or colour of its own: the condition is the target step's pill [user, 2026-11-25]
+    expect(document.querySelector('.link-wire')).toHaveAttribute('data-condition', 'Completed');
+    expect(document.querySelector('.link-wire .pilltx, .link-wire .pill')).toBeNull();
   });
   it('dims nothing when a triangle is selected, and shows its payload chip', async () => {
     show({ view: view({ workflows: ['daily'], picks: [{ kind: 'workflow', id: 'daily' }] }) });

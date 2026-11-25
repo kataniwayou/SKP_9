@@ -68,7 +68,9 @@ test('a wire from a step\'s right handle, an entry arrow from the triangle\'s ti
   // the wire s1 -> s2
   await drawWire(page, stNode(page, s1), stNode(page, s2));
   await expect(wireEdge(page, s1, s2)).toHaveCount(1);
-  await expect(wireEdge(page, s1, s2).locator('.pill')).toBeVisible();
+  // (a level wire's path box is 0 px tall, so "visible" cannot be asked of it: its ink stroke is)
+  await expect(wireEdge(page, s1, s2).locator('path.wire')).toHaveCount(1);
+  expect(await wireEdge(page, s1, s2).locator('path.wire').evaluate((p) => getComputedStyle(p).stroke)).not.toMatch(/^(none|)$/);
 
   // the entry arrow, tip -> s1: solid, from the triangle
   await drawEntry(page, wfNode(page, wf), stNode(page, s1));

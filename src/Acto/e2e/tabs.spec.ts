@@ -169,7 +169,7 @@ test('the entry-condition picker opens by mouse, picks by a keyboard letter, and
   await openAt(page);
   await pickStep(page, id.s2!);
   const pill = stNode(page, id.s2!).locator('.cond-pill');
-  const wire = wireEdge(page, id.s1!, id.s2!).locator('.pilltx');
+  const wire = wireEdge(page, id.s1!, id.s2!).locator('.link-wire');
   await expect(pill).toHaveText('C');
   const picker = field(page, 'Entry condition');
   await expect(picker).toHaveAttribute('data-value', '1');
@@ -186,7 +186,7 @@ test('the entry-condition picker opens by mouse, picks by a keyboard letter, and
   await expect(list).toHaveCount(0);
   await expect(picker).toHaveAttribute('data-value', '2');
   await expect(pill).toHaveText('F');
-  await expect(wire).toHaveText('F');
+  await expect(wire).toHaveAttribute('data-condition', 'Failed');
   // closed, a letter picks at once
   await page.keyboard.press('x');
   await expect(picker).toHaveAttribute('data-value', '3');

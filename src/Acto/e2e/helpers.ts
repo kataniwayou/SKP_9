@@ -430,7 +430,7 @@ export async function boardSnapshot(page: Page) {
   }).sort());
   const edges = await page.locator('.react-flow__edge:not(.ghost)').evaluateAll((es) => es
     .filter((e) => !e.querySelector('.ghost'))
-    .map((e) => `${(e as HTMLElement).dataset.id} ${e.querySelector('.pilltx')?.textContent ?? ''}`).sort());
+    .map((e) => `${(e as HTMLElement).dataset.id} ${e.querySelector('.link-wire')?.getAttribute('data-condition') ?? ''}`).sort());
   return { nodes, edges, save: await saveButton(page).innerText() };
 }
 
