@@ -482,3 +482,11 @@ export const clear = async (a: Locator, b: Locator) => {
   const p = (await a.boundingBox())!, q = (await b.boundingBox())!;
   return p.x + p.width <= q.x || q.x + q.width <= p.x || p.y + p.height <= q.y || q.y + q.height <= p.y;
 };
+
+// live runs (regressions 6 and 12): Start and Stop off the cron marks, and the marks a window holds
+/** Waits until the wall clock is `lo`..`hi` ms past a 10 s mark, so a Start or Stop never lands on a cron second. */
+export async function offMark(lo = 3_000, hi = 5_000) {
+  while (Date.now() % 10_000 < lo || Date.now() % 10_000 >= hi) await new Promise((r) => setTimeout(r, 100));
+}
+/** The cron marks of an every-p-seconds cron (p divides 60, so they are epoch-aligned) in (from, to]. */
+export const marks = (p: number, from: number, to: number) => Math.floor(to / (p * 1000)) - Math.floor(from / (p * 1000));

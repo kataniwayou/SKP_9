@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import type { Page } from '@playwright/test';
 import { test, expect } from '../fixtures';
 import {
-  EXPANDER, VALID_PAYLOAD, clickEmptyBoard, entry, entryEdge, field, inspector, newStep, newWorkflow, openAt, outLine, pickEdge, save,
+  EXPANDER, VALID_PAYLOAD, clickEmptyBoard, entry, entryEdge, field, inspector, marks, newStep, newWorkflow, offMark, openAt, outLine, pickEdge, save,
   selectWorkflowAlone, setCondition, tab, toolbar, typePayload, validateStored, waitLoaded, wfNode, wire,
 } from '../helpers';
 import {
@@ -73,10 +73,6 @@ const cronIn = (page: Page, step: string) => schedule(page, step).getByRole('tex
 const label = (page: Page, wf: string, step: string) => entryEdge(page, wf, step).locator('.entry-cron');
 const shot = (name: string) => resolve(process.cwd(), '../../.playwright-mcp', name);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-/** Waits until the wall clock is `lo`..`hi` ms past a 10 s mark, so a Start or Stop never lands on a cron second. */
-async function offMark(lo = 3_000, hi = 5_000) { while (Date.now() % 10_000 < lo || Date.now() % 10_000 >= hi) await sleep(100); }
-/** The cron marks of an every-p-seconds cron (p divides 60, so they are epoch-aligned) in (from, to]. */
-const marks = (p: number, from: number, to: number) => Math.floor(to / (p * 1000)) - Math.floor(from / (p * 1000));
 const hhmmss = (ms: number) => new Date(ms).toISOString().slice(11, 23);
 
 test('four entry crons on one branching workflow, built in the UI: saved, dry-run clean, started, and the orchestrator fires each group on its own marks with every branch handed off', async ({ page }) => {
