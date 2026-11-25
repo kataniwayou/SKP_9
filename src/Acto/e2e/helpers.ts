@@ -460,3 +460,25 @@ export async function captureDiagram(page: Page, workflowId: string, act: () => 
   return (await put).postData() ?? '';
 }
 
+// dragging over other items [user, 2026-11-25] (overlap.spec, regression 10)
+/** The node whose element is on top at a screen point. */
+export const topAt = (page: Page, x: number, y: number) => page.evaluate(([px, py]) =>
+  (document.elementFromPoint(px!, py!)?.closest('.react-flow__node') as HTMLElement | null)?.dataset.id ?? null, [x, y]);
+
+/** Holds `mover` with its centre on `target`'s centre; answers that point. The caller lets go. */
+export async function holdOver(page: Page, mover: Locator, target: Locator) {
+  const m = (await mover.boundingBox())!;
+  const t = (await target.boundingBox())!;
+  const grab = { x: m.x + m.width / 2, y: m.y + Math.min(14, m.height / 2) };
+  const to = { x: t.x + t.width / 2, y: t.y + t.height / 2 };
+  await page.mouse.move(grab.x, grab.y);
+  await page.mouse.down();
+  await page.mouse.move(grab.x + to.x - (m.x + m.width / 2), grab.y + to.y - (m.y + m.height / 2), { steps: 12 });
+  return to;
+}
+
+/** Whether two items' boxes do not overlap. */
+export const clear = async (a: Locator, b: Locator) => {
+  const p = (await a.boundingBox())!, q = (await b.boundingBox())!;
+  return p.x + p.width <= q.x || q.x + q.width <= p.x || p.y + p.height <= q.y || q.y + q.height <= p.y;
+};

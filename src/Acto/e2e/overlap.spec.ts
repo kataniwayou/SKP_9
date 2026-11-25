@@ -1,6 +1,7 @@
-import type { Locator, Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { cacheTool, caNode, dropTool, ghost, openAt, pickStep, PROC_B, stNode, toolbar, toolboxStep, wfNode, workflowTool } from './helpers';
+import {
+  cacheTool, caNode, clear, dropTool, ghost, holdOver, openAt, pickStep, PROC_B, stNode, toolbar, toolboxStep, topAt, wfNode, workflowTool,
+} from './helpers';
 import { seed } from './seed';
 
 // Option B of the drag mock [user, 2026-11-25]: a dragged item is always on top while it moves, what it lies over is
@@ -16,27 +17,6 @@ const SEED = {
   caches: [{ key: 'c', name: 'e2e-ov-cache', at: { x: 620, y: 260 } }],
   workflows: [{ key: 'w', name: 'e2e-ov-wf', at: { x: 300, y: 260 }, entry: ['a'] }],
 } as const;
-
-/** The node whose element is on top at a screen point. */
-const topAt = (page: Page, x: number, y: number) => page.evaluate(([px, py]) =>
-  (document.elementFromPoint(px!, py!)?.closest('.react-flow__node') as HTMLElement | null)?.dataset.id ?? null, [x, y]);
-
-/** Holds `mover` with its centre on `target`'s centre; answers that point. The caller lets go. */
-async function holdOver(page: Page, mover: Locator, target: Locator) {
-  const m = (await mover.boundingBox())!;
-  const t = (await target.boundingBox())!;
-  const grab = { x: m.x + m.width / 2, y: m.y + Math.min(14, m.height / 2) };
-  const to = { x: t.x + t.width / 2, y: t.y + t.height / 2 };
-  await page.mouse.move(grab.x, grab.y);
-  await page.mouse.down();
-  await page.mouse.move(grab.x + to.x - (m.x + m.width / 2), grab.y + to.y - (m.y + m.height / 2), { steps: 12 });
-  return to;
-}
-
-const clear = async (a: Locator, b: Locator) => {
-  const p = (await a.boundingBox())!, q = (await b.boundingBox())!;
-  return p.x + p.width <= q.x || q.x + q.width <= p.x || p.y + p.height <= q.y || q.y + q.height <= p.y;
-};
 
 test('a dragged item is on top of whatever it crosses, in either order and picked or not', async ({ page }) => {
   const id = await seed(SEED);
