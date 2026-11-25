@@ -43,7 +43,7 @@ async function darkTheme(page: Page) {
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 }
 
-const style = (page: Page, selector: ReturnType<Page['locator']>, prop: 'stroke' | 'opacity' | 'fill' | 'color' | 'animationName' | 'fontStyle') =>
+const style = (selector: ReturnType<Page['locator']>, prop: 'stroke' | 'opacity' | 'fill' | 'color' | 'animationName' | 'fontStyle') =>
   selector.evaluate((e, p) => getComputedStyle(e)[p as 'stroke'], prop);
 
 let id: Record<string, string>;
@@ -65,13 +65,13 @@ test('health hearts: a live heart beats, a down one is cracked, an unknown one a
   await expect(live).toHaveAttribute('data-health', 'healthy', { timeout: 20_000 });
   await expect(down).toHaveAttribute('data-health', 'unhealthy');
   await expect(unknown).toHaveAttribute('data-health', 'undetermined');
-  expect(await style(page, live, 'color')).toBe(HEALTH.healthy);
-  expect(await style(page, down, 'color')).toBe(HEALTH.unhealthy);
-  expect(await style(page, unknown, 'color')).toBe(HEALTH.undetermined);
+  expect(await style(live, 'color')).toBe(HEALTH.healthy);
+  expect(await style(down, 'color')).toBe(HEALTH.unhealthy);
+  expect(await style(unknown, 'color')).toBe(HEALTH.undetermined);
   // only the live heart beats
-  expect(await style(page, live.locator('svg'), 'animationName')).toBe('heartbeat');
-  expect(await style(page, down.locator('svg'), 'animationName')).toBe('none');
-  expect(await style(page, unknown.locator('svg'), 'animationName')).toBe('none');
+  expect(await style(live.locator('svg'), 'animationName')).toBe('heartbeat');
+  expect(await style(down.locator('svg'), 'animationName')).toBe('none');
+  expect(await style(unknown.locator('svg'), 'animationName')).toBe('none');
   // the crack and the question mark are cut out of the solid heart by a mask
   const cuts = (h: typeof live) => h.evaluate((e) => [...(e.querySelector('mask')?.children ?? [])].slice(1).map((c) => c.tagName));
   expect(await cuts(live)).toEqual([]);
@@ -80,7 +80,7 @@ test('health hearts: a live heart beats, a down one is cracked, an unknown one a
   await expect(live).toHaveAttribute('title', 'live · 1 of 1 replica healthy');
   // no beat for someone who asked for less motion
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  expect(await style(page, live.locator('svg'), 'animationName')).toBe('none');
+  expect(await style(live.locator('svg'), 'animationName')).toBe('none');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   // the toolbox's processor cards read the same
   const tool = (name: string) => page.getByTestId('toolbox-step').filter({ hasText: new RegExp(`^\\s*\\S?\\s*${name}`) }).first().getByTestId('health-dot');
@@ -89,41 +89,41 @@ test('health hearts: a live heart beats, a down one is cracked, an unknown one a
   await expect(tool(UNREPORTED)).toHaveAttribute('data-health', 'undetermined');
   // the dark theme keeps the three hearts in their colours, and the live one still beats
   await darkTheme(page);
-  expect(await style(page, live, 'color')).toBe(HEALTH.healthy);
-  expect(await style(page, down, 'color')).toBe(HEALTH.unhealthy);
-  expect(await style(page, unknown, 'color')).toBe(HEALTH.undetermined);
-  expect(await style(page, live.locator('svg'), 'animationName')).toBe('heartbeat');
+  expect(await style(live, 'color')).toBe(HEALTH.healthy);
+  expect(await style(down, 'color')).toBe(HEALTH.unhealthy);
+  expect(await style(unknown, 'color')).toBe(HEALTH.undetermined);
+  expect(await style(live.locator('svg'), 'animationName')).toBe('heartbeat');
 });
 
 test('wires wear the target\'s condition colour with no letter; a wire into Never is faded with a hollow head', async ({ page }) => {
   await openAt(page);
   const w = (to: string) => wireEdge(page, id.S!, id[to]!);
   const checkColours = async () => {
-    expect(await style(page, w('C').locator('path.wire'), 'stroke')).toBe(COLOUR.completed);
-    expect(await style(page, w('X').locator('path.wire'), 'stroke')).toBe(COLOUR.failed);
-    expect(await style(page, w('N').locator('path.wire'), 'stroke')).toBe(COLOUR.never);
+    expect(await style(w('C').locator('path.wire'), 'stroke')).toBe(COLOUR.completed);
+    expect(await style(w('X').locator('path.wire'), 'stroke')).toBe(COLOUR.failed);
+    expect(await style(w('N').locator('path.wire'), 'stroke')).toBe(COLOUR.never);
   };
   await checkColours();
   await expect(page.locator('.link-wire .pill, .link-wire .pilltx')).toHaveCount(0);
-  expect(await style(page, w('N').locator('path.wire'), 'opacity')).toBe('0.45');
-  expect(await style(page, w('N').locator('.wire-head'), 'fill')).toBe('none');
-  for (const to of ['C', 'X']) expect(await style(page, w(to).locator('path.wire'), 'opacity')).toBe('1');
+  expect(await style(w('N').locator('path.wire'), 'opacity')).toBe('0.45');
+  expect(await style(w('N').locator('.wire-head'), 'fill')).toBe('none');
+  for (const to of ['C', 'X']) expect(await style(w(to).locator('path.wire'), 'opacity')).toBe('1');
 
   // the wire follows its target: C made Never turns pink and faded, Ctrl+Z puts it back
   await setCondition(page, id.C!, 'Never');
   await expect(w('C').locator('.link-wire')).toHaveAttribute('data-condition', 'Never');
-  expect(await style(page, w('C').locator('path.wire'), 'stroke')).toBe(COLOUR.never);
-  expect(await style(page, w('C').locator('path.wire'), 'opacity')).toBe('0.45');
+  expect(await style(w('C').locator('path.wire'), 'stroke')).toBe(COLOUR.never);
+  expect(await style(w('C').locator('path.wire'), 'opacity')).toBe('0.45');
   await page.locator('.react-flow__pane').click({ position: { x: 20, y: 20 } });
   await page.keyboard.press('Control+z');
   await expect(w('C').locator('.link-wire')).toHaveAttribute('data-condition', 'Completed');
-  expect(await style(page, w('C').locator('path.wire'), 'stroke')).toBe(COLOUR.completed);
-  expect(await style(page, w('C').locator('path.wire'), 'opacity')).toBe('1');
+  expect(await style(w('C').locator('path.wire'), 'stroke')).toBe(COLOUR.completed);
+  expect(await style(w('C').locator('path.wire'), 'opacity')).toBe('1');
 
   // the same colours in the dark theme, the wires still drawn
   await darkTheme(page);
   await checkColours();
-  expect(await style(page, w('N').locator('path.wire'), 'opacity')).toBe('0.45');
+  expect(await style(w('N').locator('path.wire'), 'opacity')).toBe('0.45');
 });
 
 test('idle entry arrows: frozen and unscheduled stay still while running and say why; the scheduled one moves', async ({ page }) => {
@@ -141,16 +141,16 @@ test('idle entry arrows: frozen and unscheduled stay still while running and say
   for (const [to, why] of [['F', 'frozen'], ['U', 'unscheduled']] as const) {
     await expect(arrow(to).locator('.entry-line'), to).not.toHaveClass(/\brunning\b/);
     await expect(arrow(to).locator('.entry-edge'), to).toHaveAttribute('data-idle', why);
-    expect(await style(page, arrow(to).locator('.entry-line'), 'opacity'), to).toBe('0.45');
-    expect(await style(page, arrow(to).locator('.entry-head'), 'fill'), to).toBe('none');
+    expect(await style(arrow(to).locator('.entry-line'), 'opacity'), to).toBe('0.45');
+    expect(await style(arrow(to).locator('.entry-head'), 'fill'), to).toBe('none');
   }
   // frozen: the step card's pink N square, then "frozen"; unscheduled: a muted italic note
   const sq = arrow('F').locator('.entry-never-sq');
   await expect(sq.locator('text')).toHaveText('N');
-  expect(await style(page, sq.locator('rect'), 'fill')).toBe(COLOUR.never);
+  expect(await style(sq.locator('rect'), 'fill')).toBe(COLOUR.never);
   await expect(arrow('F').locator('.entry-cron')).toHaveText('frozen');
   await expect(arrow('U').locator('.entry-cron')).toHaveText('⏱ not scheduled');
-  expect(await style(page, arrow('U').locator('.entry-cron'), 'fontStyle')).toBe('italic');
+  expect(await style(arrow('U').locator('.entry-cron'), 'fontStyle')).toBe('italic');
   // only what fires rings: S and the step it reaches; not the frozen, the unscheduled or the Never successor
   for (const s of ['S', 'C']) await expect(stNode(page, id[s]!).locator('.node'), s).toHaveClass(/\brunning\b/);
   for (const s of ['F', 'U', 'N']) await expect(stNode(page, id[s]!).locator('.node'), s).not.toHaveClass(/\brunning\b/);
