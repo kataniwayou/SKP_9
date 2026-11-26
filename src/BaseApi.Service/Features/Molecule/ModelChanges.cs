@@ -1,7 +1,9 @@
 using System.Reflection;
 using System.Text.Json;
+using BaseApi.Service.Features.Cache;
 using BaseApi.Service.Features.Orchestration;
 using BaseApi.Service.Features.Workflow.Delete;
+using FluentValidation;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -51,21 +53,47 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
 
     public async Task<ModelValidateResultDto> DryRunAsync(IReadOnlyList<ModelChangeDto> changes, HttpContext http, CancellationToken ct)
     {
-        var (results, _, _) = await RunAllAsync(changes, http, commit: false, ct);
+        var (results, _, _, _) = await RunAllAsync(changes, http, commit: false, ct);
         return new ModelValidateResultDto(results.All(r => r.Ok), results);
     }
 
     public async Task<ModelApplyResultDto> ApplyAsync(IReadOnlyList<ModelChangeDto> changes, HttpContext http, CancellationToken ct)
     {
-        var (results, made, applied) = await RunAllAsync(changes, http, commit: true, ct);
-        return new ModelApplyResultDto(results.All(r => r.Ok), applied, results, made);
+        var (results, made, applied, touched) = await RunAllAsync(changes, http, commit: true, ct);
+        // The running workflows hear of an item edit only once it is committed (their handler reads the rows); a send that
+        // fails does not undo the Save, it is a warning: they catch up at their next start.
+        var warnings = applied ? await RefreshAsync(touched, ct) : null;
+        return new ModelApplyResultDto(results.All(r => r.Ok), applied, results, made, warnings);
+    }
+
+    /// <summary>
+    /// After the commit: one per-key refresh for each cache whose items were edited. A cache deleted later in the same
+    /// Save has nothing to refresh. A failed send becomes a warning naming the cache.
+    /// </summary>
+    private async Task<IReadOnlyList<string>?> RefreshAsync(Dictionary<Guid, List<string>> touched, CancellationToken ct)
+    {
+        if (touched.Count == 0) return null;
+        var ids = touched.Keys.ToArray();
+        var names = await _db.Set<CacheEntity>().AsNoTracking().Where(c => ids.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+        var sender = _services.GetRequiredService<CacheRefreshSender>();
+        List<string>? warnings = null;
+        foreach (var (cacheId, keys) in touched)
+        {
+            if (!names.TryGetValue(cacheId, out var name)) continue;
+            try { await sender.SendKeysAsync(cacheId, keys, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                (warnings ??= []).Add($"cache {name}: running workflows not refreshed ({ex.Message}); they catch up at their next start");
+            }
+        }
+        return warnings;
     }
 
     /// <summary>
     /// Every change in order in one transaction, a savepoint each. A dry run always rolls back; an apply commits when
     /// every change passed, and otherwise rolls back too — all of them, or none.
     /// </summary>
-    private async Task<(List<ModelChangeResultDto> Results, Dictionary<Guid, Guid> Made, bool Applied)> RunAllAsync(IReadOnlyList<ModelChangeDto> changes, HttpContext http, bool commit, CancellationToken ct)
+    private async Task<(List<ModelChangeResultDto> Results, Dictionary<Guid, Guid> Made, bool Applied, Dictionary<Guid, List<string>> Touched)> RunAllAsync(IReadOnlyList<ModelChangeDto> changes, HttpContext http, bool commit, CancellationToken ct)
     {
         var tables = ModelEntities.ByTable(_db.Model);
         var strategy = _db.Database.CreateExecutionStrategy();
@@ -77,6 +105,11 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
             // the rows whose updatedAt was checked: only a row's first change in the run is checked (a later one sees the
             // updatedAt this run gave it, e.g. a deleted step's next-step rows cleared first)
             var checkedRows = new HashSet<(string, Guid)>();
+            // a cache's updatedAt as it was before this run's first item edit of it: an append or remove stamps the row itself,
+            // so a later update of the cache row is judged against what the client could have read, not against that stamp
+            var itemBaseline = new Dictionary<Guid, DateTime>();
+            // the keys each cache's item edits touched, for the refresh sent after the commit
+            var touched = new Dictionary<Guid, List<string>>();
             var applied = false;
             await using var tx = await _db.Database.BeginTransactionAsync(ct);
             try
@@ -88,9 +121,9 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
                     await tx.CreateSavepointAsync(savepoint, ct);
                     try
                     {
-                        await CheckFreshAsync(change, tables, made, checkedRows, ct);
-                        var status = await RunAsync(change, tables, made, ct);
-                        list.Add(new ModelChangeResultDto(i, change.Op, change.Table, change.Id, true, status, null));
+                        await CheckFreshAsync(change, tables, made, checkedRows, itemBaseline, ct);
+                        var (status, report) = await RunAsync(change, tables, made, itemBaseline, touched, ct);
+                        list.Add(new ModelChangeResultDto(i, change.Op, change.Table, change.Id, true, status, null, report));
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                     {
@@ -117,7 +150,7 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
                 }
                 _db.ChangeTracker.Clear();
             }
-            return (list, made, applied);
+            return (list, made, applied, touched);
         });
     }
 
@@ -126,10 +159,16 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
     /// updatedAt differs, to the microsecond the database keeps). A row created in this run, or already changed by an
     /// earlier change of it, is not checked; a row that is gone is left to the service (its 404).
     /// </summary>
-    private async Task CheckFreshAsync(ModelChangeDto change, IReadOnlyDictionary<string, ModelEntity> tables, Dictionary<Guid, Guid> made, HashSet<(string, Guid)> checkedRows, CancellationToken ct)
+    private async Task CheckFreshAsync(ModelChangeDto change, IReadOnlyDictionary<string, ModelEntity> tables, Dictionary<Guid, Guid> made, HashSet<(string, Guid)> checkedRows, Dictionary<Guid, DateTime> itemBaseline, CancellationToken ct)
     {
         if (change.UpdatedAt is not { } read || change.Op is not ("update" or "delete") || made.ContainsKey(change.Id)) return;
         if (!tables.TryGetValue(change.Table ?? "", out var entity) || !checkedRows.Add((entity.Table, change.Id))) return;
+        if (entity.Table == "caches" && itemBaseline.TryGetValue(change.Id, out var before))
+        {
+            // this run's own append or remove moved the row's updatedAt: compare with what it was before them
+            if (Micros(before) != Micros(read)) throw new ModelStaleException(entity.Table, change.Id, read, before);
+            return;
+        }
         var found = await _db.FindAsync(entity.Entity, [change.Id], ct);
         if (found is not BaseApi.Core.Entities.BaseEntity row) return;
         _db.Entry(found).State = EntityState.Detached; // the service reads it afresh
@@ -139,14 +178,16 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
     private static long Micros(DateTime t) => (t.Kind == DateTimeKind.Local ? t.ToUniversalTime() : t).Ticks / 10;
 
     /// <summary>One change through its entity's service; the status the real call would answer on success.</summary>
-    private async Task<int> RunAsync(ModelChangeDto change, IReadOnlyDictionary<string, ModelEntity> tables, Dictionary<Guid, Guid> made, CancellationToken ct)
+    private async Task<(int Status, JsonElement? Report)> RunAsync(ModelChangeDto change, IReadOnlyDictionary<string, ModelEntity> tables, Dictionary<Guid, Guid> made, Dictionary<Guid, DateTime> itemBaseline, Dictionary<Guid, List<string>> touched, CancellationToken ct)
     {
         var id = made.TryGetValue(change.Id, out var real) ? real : change.Id;
         // a row naming a row created earlier in this run names it by the id BaseApi gave it
         JsonElement? row = change.Row;
         if (row is { ValueKind: JsonValueKind.Object } r && made.Count > 0) row = RemapClientIds(r, made);
+        // cache_items is no entity of its own: its edits go through the items store, not a BaseService
+        if (change.Table == CacheItemsTable) return await RunCacheItemsAsync(change, row, made, itemBaseline, touched, ct);
         if (!tables.TryGetValue(change.Table ?? "", out var entity))
-            throw new ModelChangeException($"'{change.Table}' is not an entity table; one of: {string.Join(", ", tables.Keys.Order(StringComparer.Ordinal))}.");
+            throw new ModelChangeException($"'{change.Table}' is not an entity table; one of: {string.Join(", ", tables.Keys.Append(CacheItemsTable).Order(StringComparer.Ordinal))}.");
         var service = _services.GetRequiredService(entity.Service);
 
         switch (change.Op)
@@ -160,7 +201,7 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
                 if (dto is null) throw new ModelChangeException("A create carries its row: the body a POST would send.");
                 var read = await InvokeFor(entity.Service.GetMethod("CreateAsync")!, service, dto, ct);
                 if (read is BaseApi.Core.Contracts.IHasId hasId) made[change.Id] = hasId.Id;
-                return StatusCodes.Status201Created;
+                return (StatusCodes.Status201Created, null);
             }
             case "update":
             {
@@ -170,7 +211,7 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
                 catch (JsonException ex) { throw new ModelChangeException($"The row could not be read as a {entity.Table} update: {ex.Message}"); }
                 if (dto is null) throw new ModelChangeException("An update carries its row: the body a PUT would send.");
                 await Invoke(entity.Service.GetMethod("UpdateAsync")!, service, id, dto, ct);
-                return StatusCodes.Status200OK;
+                return (StatusCodes.Status200OK, null);
             }
             case "delete":
                 // DELETE /workflows/{id} runs the delete guard first (WorkflowDeleteGuardFilter); so does its dry run
@@ -180,10 +221,64 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
                     if (await _guard.IsDeletionRunningAsync(id, ct)) throw OrchestrationValidationException.WorkflowDeleting(id, "deleted again");
                 }
                 await Invoke(entity.Service.GetMethod("DeleteAsync")!, service, id, ct);
-                return StatusCodes.Status204NoContent;
+                return (StatusCodes.Status204NoContent, null);
             default:
                 throw new ModelChangeException($"'{change.Op}' is not a change: create, update or delete.");
         }
+    }
+
+    private const string CacheItemsTable = "cache_items";
+
+    private sealed record ItemsRow(Guid CacheId, List<CacheItemDto>? Items, List<string>? Keys);
+
+    /// <summary>
+    /// An append or remove of a cache's items, through the same validator and store the endpoints use, inside the run's
+    /// transaction (the store joins it and never commits). No stale check: an item edit carries no row version. The
+    /// report is the endpoint's own.
+    /// </summary>
+    private async Task<(int Status, JsonElement? Report)> RunCacheItemsAsync(ModelChangeDto change, JsonElement? row, Dictionary<Guid, Guid> made, Dictionary<Guid, DateTime> itemBaseline, Dictionary<Guid, List<string>> touched, CancellationToken ct)
+    {
+        if (change.Op is not ("append" or "remove"))
+            throw new ModelChangeException($"'{change.Op}' is not a change of cache_items: append or remove.");
+        var shape = change.Op == "append" ? "{cacheId, items}" : "{cacheId, keys}";
+        if (row is not { ValueKind: JsonValueKind.Object } body) throw new ModelChangeException($"A cache_items {change.Op} carries its row: {shape}.");
+        ItemsRow? parsed;
+        try { parsed = body.Deserialize<ItemsRow>(_json); }
+        catch (JsonException ex) { throw new ModelChangeException($"The row could not be read as a cache_items {change.Op}: {ex.Message}"); }
+        if (parsed is null || parsed.CacheId == Guid.Empty) throw new ModelChangeException($"A cache_items {change.Op} names its cache: {shape}.");
+        var cacheId = made.TryGetValue(parsed.CacheId, out var real) ? real : parsed.CacheId;
+
+        IReadOnlyList<string> keys;
+        object report;
+        if (change.Op == "append")
+        {
+            var dto = new CacheItemsAppendDto(parsed.Items ?? []);
+            await _services.GetRequiredService<IValidator<CacheItemsAppendDto>>().ValidateAndThrowAsync(dto, ct);
+            await NoteBaselineAsync(cacheId, itemBaseline, ct);
+            report = await _services.GetRequiredService<CacheItemsStore>().AppendAsync(cacheId, dto.Items, ct);
+            keys = dto.Items.Select(i => i.Key).ToList();
+        }
+        else
+        {
+            var dto = new CacheItemsRemoveDto(parsed.Keys ?? []);
+            await _services.GetRequiredService<IValidator<CacheItemsRemoveDto>>().ValidateAndThrowAsync(dto, ct);
+            await NoteBaselineAsync(cacheId, itemBaseline, ct);
+            report = await _services.GetRequiredService<CacheItemsStore>().RemoveAsync(cacheId, dto.Keys, ct);
+            keys = dto.Keys;
+        }
+
+        // only an edit that passed is noted (a failed one is rolled back to its savepoint; the run is then not committed anyway)
+        if (!touched.TryGetValue(cacheId, out var seen)) touched[cacheId] = seen = [];
+        foreach (var k in keys) if (!seen.Contains(k, StringComparer.Ordinal)) seen.Add(k);
+        return (StatusCodes.Status200OK, JsonSerializer.SerializeToElement(report, _json));
+    }
+
+    /// <summary>The cache's updatedAt before this run's first item edit of it (the store's stamp moves it).</summary>
+    private async Task NoteBaselineAsync(Guid cacheId, Dictionary<Guid, DateTime> itemBaseline, CancellationToken ct)
+    {
+        if (itemBaseline.ContainsKey(cacheId)) return;
+        var at = await _db.Set<CacheEntity>().AsNoTracking().Where(c => c.Id == cacheId).Select(c => (DateTime?)c.UpdatedAt).FirstOrDefaultAsync(ct);
+        if (at is { } t) itemBaseline[cacheId] = t;
     }
 
     /// <summary>
