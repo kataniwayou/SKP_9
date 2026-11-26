@@ -16,6 +16,10 @@ export interface ActoCommands {
   setPicks(picks: Pick[]): void;
   picks(): Pick[];
   newWorkflowAt(): Point;            // a free spot on the board, for new_workflow
+  /** Whether the board's Schemas mode is on: schema and processor cards are drawn and can be picked, moved and deleted. */
+  schemasMode(): boolean;
+  /** Turns the Schemas mode on or off, as the toggle above the board does (no board change: Undo does not reverse it). */
+  setSchemasMode(on: boolean): void;
 }
 
 /**

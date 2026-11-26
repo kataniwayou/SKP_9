@@ -1,7 +1,7 @@
 import type { Locator, Page, Request } from '@playwright/test';
 import { test, expect } from '../fixtures';
 import {
-  clickEmptyBoard, dragBy, field, flowPos, holdOver, inspector, openAt, pickStep, save, saveButton, selbar, stNode, tab, waitLoaded,
+  clickEmptyBoard, dragBy, field, flowPos, zoomOf, holdOver, inspector, openAt, pickStep, save, saveButton, selbar, stNode, tab, waitLoaded,
 } from '../helpers';
 import { seed, type Seeded } from '../seed';
 import { getJson, type Row } from '../stack';
@@ -91,12 +91,15 @@ async function openSeeded(page: Page): Promise<Seeded> {
   await openAt(page);
   return id;
 }
-/** The clear space between two boxes along the axis that separates them (negative when they overlap). */
+/**
+ * The clear space between two boxes along the axis that separates them (negative when they overlap), in board units (the
+ * screen's pixels over the zoom), so a gap reads the same at any zoom: turning the mode on frames the whole board.
+ */
 async function spacing(a: Locator, b: Locator) {
   const p = await box(a), q = await box(b);
   const h = Math.max(q.x - (p.x + p.width), p.x - (q.x + q.width));
   const v = Math.max(q.y - (p.y + p.height), p.y - (q.y + q.height));
-  return Math.max(h, v);
+  return Math.max(h, v) / (await zoomOf(a.page()));
 }
 /** A right-button box from one screen point to another. */
 async function rightBox(page: Page, from: { x: number; y: number }, to: { x: number; y: number }) {
@@ -383,8 +386,10 @@ test('5 · delete an orphan: a ghost that drags and restores; undone it leaves n
 });
 
 test('6 · drag, nudge and settle: a drop slides clear, a nudge stops, turning on pushes a covered card aside', async ({ page }) => {
+  // opened with the mode already on: the seeded view stays (turning it on would frame the whole board, cards a few pixels big)
+  await page.addInitScript(() => { try { localStorage.setItem('acto.schemas', '1'); } catch { /* no storage */ } });
   const id = await openSeeded(page);
-  await modeOn(page);
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
   await flushPlacements(page);
   const [S1, S2, O2, O3] = [stNode(page, id.S1!), stNode(page, id.S2!), scNode(page, id.O2!), scNode(page, id.O3!)];
 
@@ -638,4 +643,33 @@ test('9 · a dragged card stays lifted: hovering on and off schema cards mid-dra
   const lastS = frames.map((f) => f.lifted).lastIndexOf(true);
   expect(frames.slice(0, lastS + 1).filter((f) => !f.lifted).length, 'frames in which the step lost its lift over a schema card').toBe(0);
   await expect(saveButton(page), 'nothing to save: both drags were cancelled').toHaveText('Save');
+});
+
+test('10 · turning the mode on frames the board with every schema and processor card in it; turning it off keeps the view', async ({ page }) => {
+  await openSeeded(page);
+  await modeOff(page);
+  await viewStill(page);
+  const before = await page.evaluate(() => (document.querySelector('.react-flow__viewport') as HTMLElement).style.transform);
+  await modeOn(page);
+  await viewStill(page);
+  const board = await box(pane(page));
+  const cards = page.locator('.react-flow__node-schema:not(.ghost), .react-flow__node-processor');
+  const n = await cards.count();
+  expect(n, 'the mode shows schema and processor cards').toBeGreaterThan(0);
+  const outside: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const c = cards.nth(i);
+    const b = await c.boundingBox();
+    if (!b || b.x < board.x - 1 || b.y < board.y - 1 || b.x + b.width > board.x + board.width + 1 || b.y + b.height > board.y + board.height + 1) {
+      outside.push(`${await c.getAttribute('data-id')} ${b ? `${Math.round(b.x)},${Math.round(b.y)}` : 'no box'}`);
+    }
+  }
+  expect(outside, `every card inside the board (${Math.round(board.x)},${Math.round(board.y)} ${Math.round(board.width)}×${Math.round(board.height)})`).toEqual([]);
+  expect(await page.evaluate(() => (document.querySelector('.react-flow__viewport') as HTMLElement).style.transform), 'the view moved to frame them').not.toBe(before);
+
+  // turning it off leaves the view where it is
+  const framed = await page.evaluate(() => (document.querySelector('.react-flow__viewport') as HTMLElement).style.transform);
+  await modeOff(page);
+  await page.waitForTimeout(400);
+  expect(await page.evaluate(() => (document.querySelector('.react-flow__viewport') as HTMLElement).style.transform)).toBe(framed);
 });

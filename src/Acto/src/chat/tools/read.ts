@@ -11,6 +11,7 @@ import { withPicks } from '../../board/selection';
 import { focusOf, listOf as pickListOf, processorTabsOf, stepTabsOf, tabsOf } from '../../inspector/tabs';
 import type { ToolContext, ToolDef } from '../toolTypes';
 import { ghostName } from './design';
+import { cardsOf } from './cards';
 import { done, fail, NO_ARGS } from './common';
 
 const json = (value: unknown, action: string) => done(true, JSON.stringify(value), action);
@@ -87,7 +88,7 @@ const listSchemas: ToolDef = {
 
 const readBoard: ToolDef = {
   name: 'read_board',
-  description: 'Read the whole board as it is now, unsaved edits included: every step (id, name, version, description, processor with health, entry condition, next step ids = wires, position), every cache (id, name, version, description, root, items as JSON text, position), and every workflow triangle (fields, Running or Stopped, unsaved and saved flags, problems of the last refused Start, entry steps (id and its own cron, or null), the steps it reaches, linked caches, and its payloads: assignment id, name, version, description, step id, payload, and the other workflows sharing that payload).',
+  description: 'Read the whole board as it is now, unsaved edits included: every step (id, name, version, description, processor with health, entry condition, next step ids = wires, position), every cache (id, name, version, description, root, items as JSON text, position), and every workflow triangle (fields, Running or Stopped, unsaved and saved flags, problems of the last refused Start, entry steps (id and its own cron, or null), the steps it reaches, linked caches, and its payloads: assignment id, name, version, description, step id, payload, and the other workflows sharing that payload). Also the Schemas mode (on or off) and, drawn as cards only while it is on, every schema (id, name, version, description, state: wired = a processor some step runs fills one of its slots, held = only a processor no step uses does, orphan = none; the steps using it and the processor holding it, with the slot; position) and the processor cards (a processor no step uses that holds a schema: id, name, version, the schemas it holds, position).',
   parameters: NO_ARGS,
   async run(ctx) {
     const b = ctx.store.state();
@@ -112,7 +113,7 @@ const readBoard: ToolDef = {
         sharedWith: linkedBy(b, a.id).filter((x) => x !== w.id),
       })),
     }));
-    return json({ steps, caches, workflows }, `read board (${workflows.length} workflows)`);
+    return json({ steps, caches, workflows, ...cardsOf(ctx) }, `read board (${workflows.length} workflows)`);
   },
 };
 

@@ -12,6 +12,7 @@ import { copyClip, copyMessage, countWords, pasteClip, pasteMessage, readClip, w
 import { freeOffset } from '../../operate/freeOffset';
 import type { ToolContext, ToolDef, ToolOutcome } from '../toolTypes';
 import { applyEdit, applyState, CACHE_ID, done, fail, linesSince, NO_ARGS, onBoard, STEP_ID, text, WORKFLOW_ID } from './common';
+import { cardDeleteRefusal, onCard } from './cards';
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -190,10 +191,10 @@ const unlinkCacheTool: ToolDef = {
 
 const moveBlocks: ToolDef = {
   name: 'move_blocks',
-  description: 'Move steps, caches or triangles to new board positions (their top-left corner), as one change.',
+  description: 'Move steps, caches or triangles, and (while the Schemas mode is on) schema and processor cards, to new board positions (their top-left corner), as one change. A card move saves only its place: it changes nothing a workflow runs.',
   parameters: {
     type: 'object',
-    properties: { blocks: { type: 'array', items: { type: 'object', properties: { kind: { type: 'string', enum: ['step', 'cache', 'workflow'] }, id: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } }, required: ['kind', 'id', 'x', 'y'], additionalProperties: false } } },
+    properties: { blocks: { type: 'array', items: { type: 'object', properties: { kind: { type: 'string', enum: ['step', 'cache', 'workflow', 'schema', 'processor'] }, id: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } }, required: ['kind', 'id', 'x', 'y'], additionalProperties: false } } },
     required: ['blocks'], additionalProperties: false,
   },
   async run(ctx, args) {
@@ -201,9 +202,9 @@ const moveBlocks: ToolDef = {
     const moved: { ref: ItemRef; at: { x: number; y: number } }[] = [];
     for (const raw of list) {
       const r = (raw ?? {}) as Record<string, unknown>;
-      const kind = r.kind === 'step' || r.kind === 'cache' || r.kind === 'workflow' ? r.kind : null;
-      if (kind === null) return fail('each block needs a kind: step, cache or workflow', 'move blocks');
-      const t = onBoard(ctx, kind, text(r, 'id'), 'move blocks');
+      const kind = r.kind === 'step' || r.kind === 'cache' || r.kind === 'workflow' || r.kind === 'schema' || r.kind === 'processor' ? r.kind : null;
+      if (kind === null) return fail('each block needs a kind: step, cache, workflow, schema or processor', 'move blocks');
+      const t = kind === 'schema' || kind === 'processor' ? onCard(ctx, kind, text(r, 'id'), 'move blocks') : onBoard(ctx, kind, text(r, 'id'), 'move blocks');
       if ('out' in t) return t.out;
       if (typeof r.x !== 'number' || typeof r.y !== 'number') return fail(`block ${t.id} needs a number x and y`, 'move blocks');
       moved.push({ ref: { kind, id: t.id }, at: { x: r.x, y: r.y } });
@@ -222,6 +223,10 @@ function toPick(ctx: ToolContext, r: Record<string, unknown>): Pick | { out: Too
       const t = onBoard(ctx, r.kind, text(r, 'id'), 'pick');
       return 'out' in t ? t : ({ kind: r.kind, id: t.id } as Pick);
     }
+    case 'schema': case 'processor': {
+      const t = onCard(ctx, r.kind, text(r, 'id'), 'pick');
+      return 'out' in t ? t : ({ kind: r.kind, id: t.id } as Pick);
+    }
     case 'wire': {
       const from = text(r, 'from'), to = text(r, 'to');
       return b.steps[from]?.nextStepIds.includes(to) ? { kind: 'wire', from, to } : bad(`no wire ${from} > ${to} on the board`);
@@ -234,17 +239,17 @@ function toPick(ctx: ToolContext, r: Record<string, unknown>): Pick | { out: Too
       const w = text(r, 'workflow_id'), c = text(r, 'cache_id');
       return b.workflows[w]?.cacheIds.includes(c) ? { kind: 'cacheLink', workflowId: w, cacheId: c } : bad(`no cache line ${w} > ${c} on the board`);
     }
-    default: return bad('each item needs a kind: workflow, step, cache, wire, entry or cacheLink');
+    default: return bad('each item needs a kind: workflow, step, cache, wire, entry, cacheLink, schema or processor');
   }
 }
 
 const pickTool: ToolDef = {
   name: 'pick',
-  description: 'Replace what is picked on the board (what copy and delete_picked act on; an empty list picks nothing). Items: {kind: step|cache|workflow, id}, {kind: wire, from, to}, {kind: entry, workflow_id, step_id}, {kind: cacheLink, workflow_id, cache_id}. Taken as given: the picked triangles are the selected workflows, and nothing else stays selected.',
+  description: 'Replace what is picked on the board (what copy and delete_picked act on; an empty list picks nothing). Items: {kind: step|cache|workflow, id}, {kind: wire, from, to}, {kind: entry, workflow_id, step_id}, {kind: cacheLink, workflow_id, cache_id}, and while the Schemas mode is on {kind: schema|processor, id} (a processor card is a processor no step uses). Taken as given: the picked triangles are the selected workflows, and nothing else stays selected.',
   parameters: {
     type: 'object',
     properties: { items: { type: 'array', items: { type: 'object', properties: {
-      kind: { type: 'string', enum: ['workflow', 'step', 'cache', 'wire', 'entry', 'cacheLink'] }, id: { type: 'string' },
+      kind: { type: 'string', enum: ['workflow', 'step', 'cache', 'wire', 'entry', 'cacheLink', 'schema', 'processor'] }, id: { type: 'string' },
       from: { type: 'string' }, to: { type: 'string' }, workflow_id: { type: 'string' }, step_id: { type: 'string' }, cache_id: { type: 'string' },
     }, required: ['kind'], additionalProperties: false } } },
     required: ['items'], additionalProperties: false,
@@ -280,6 +285,10 @@ const copy: ToolDef = {
         for (const id of xs ?? []) { const t = onBoard(ctx, kind, id, 'copy'); if ('out' in t) return t.out; refs.push({ kind, id }); }
       }
     } else {
+      // [user, 2026-11-26] no Copy on schemas, and a processor is never copied: a pick with a card copies nothing
+      if (ctx.commands.picks().some((p) => p.kind === 'schema' || p.kind === 'processor')) {
+        return fail('schemas and processors are never copied: pick only workflows, steps or caches', 'copy');
+      }
       refs = ctx.commands.picks().flatMap((p) => (p.kind === 'workflow' || p.kind === 'step' || p.kind === 'cache' ? [{ kind: p.kind, id: p.id }] : []));
     }
     const clip = copyClip(ctx.store.state(), refs);
@@ -313,7 +322,7 @@ const paste: ToolDef = {
 
 const describePicks = (picks: Pick[]): string => {
   const n = (k: Pick['kind']) => picks.filter((p) => p.kind === k).length;
-  return ([['workflow', 'workflow'], ['step', 'step'], ['cache', 'cache'], ['wire', 'wire'], ['entry', 'entry arrow'], ['cacheLink', 'cache line']] as const)
+  return ([['workflow', 'workflow'], ['step', 'step'], ['cache', 'cache'], ['wire', 'wire'], ['entry', 'entry arrow'], ['cacheLink', 'cache line'], ['schema', 'orphan schema'], ['processor', 'processor']] as const)
     .flatMap(([k, w]) => (n(k) > 0 ? [plural(n(k), w)] : [])).join(', ');
 };
 
@@ -323,7 +332,7 @@ const parsePicks = (pin: string | undefined): Pick[] | null => {
 
 const deletePicked: ToolDef = {
   name: 'delete_picked',
-  description: 'Delete what is picked: workflows (with the payloads only they use), steps (with their wires, entry arrows and payloads), caches, wires, entry arrows and cache lines, as one change; each is a ghost until Save. Nothing is deleted when a picked workflow runs (or its run state is not known). The user is asked first; what they confirm is exactly what was picked then.',
+  description: 'Delete what is picked: workflows (with the payloads only they use), steps (with their wires, entry arrows and payloads), caches, wires, entry arrows and cache lines, as one change; or, picked on their own, orphan schemas. Each is a ghost until Save. Nothing is deleted when a picked workflow runs (or its run state is not known), nor when the picks hold a wired or held schema, a processor (never deleted), or orphan schemas mixed with other items. The user is asked first; what they confirm is exactly what was picked then.',
   parameters: NO_ARGS,
   async run(ctx, _args, answer, pin) {
     const asked = answer === undefined;
@@ -331,7 +340,7 @@ const deletePicked: ToolDef = {
     if (picks === null) return fail('the question lost what it named: pick again', 'delete picked');
     const live = livePicks(picks, ctx.store.state());
     if (live.length === 0) return fail('nothing is picked: pick what to delete first', 'delete picked');
-    const refused = deleteRefusal(live, ctx.store.state(), ctx.store.base(), (wf) => statusOf(ctx.live.getState(), wf));
+    const refused = [...cardDeleteRefusal(live, ctx.store.state()), ...deleteRefusal(live, ctx.store.state(), ctx.store.base(), (wf) => statusOf(ctx.live.getState(), wf))];
     if (refused.length) {
       for (const line of refused) ctx.output.log(line, 'warn');
       return fail(refused.join('; '), 'delete picked refused');
@@ -424,7 +433,20 @@ const removeGhostsTool: ToolDef = {
   },
 };
 
+const setSchemasModeTool: ToolDef = {
+  name: 'set_schemas_mode',
+  description: "Turn the board's Schemas mode on or off, as the Schemas toggle above the board does (the browser remembers it). On: every schema is drawn as a card (wired, held or orphan), with the processors no step uses as read-only cards and the dotted reference wires, and the board is fitted to show them all; they can then be picked, moved, and orphans deleted. Off: they are hidden and let go of if picked. No board change: undo does not reverse it.",
+  parameters: { type: 'object', properties: { on: { type: 'boolean' } }, required: ['on'], additionalProperties: false },
+  async run(ctx, args) {
+    if (typeof args.on !== 'boolean') return fail('on must be true or false', 'set schemas mode');
+    const was = ctx.commands.schemasMode();
+    if (was === args.on) return done(true, `the Schemas mode is already ${was ? 'on' : 'off'}`, `schemas mode ${was ? 'on' : 'off'}`);
+    ctx.commands.setSchemasMode(args.on);
+    return done(true, args.on ? 'turned the Schemas mode on: schema and processor cards are on the board' : 'turned the Schemas mode off: schema and processor cards are hidden', `schemas mode ${args.on ? 'on' : 'off'}`);
+  },
+};
+
 export const DESIGN_TOOLS: ToolDef[] = [
   addStepTool, addCacheTool, connect, disconnect, setEntry, removeEntry, setEntryCronTool, linkCacheTool, unlinkCacheTool,
-  moveBlocks, pickTool, copy, paste, deletePicked, undo, redo, restoreGhostsTool, removeGhostsTool,
+  moveBlocks, pickTool, copy, paste, deletePicked, undo, redo, restoreGhostsTool, removeGhostsTool, setSchemasModeTool,
 ];

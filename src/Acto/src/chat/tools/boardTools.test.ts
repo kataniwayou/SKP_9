@@ -1,7 +1,7 @@
 import { withPicks } from '../../board/selection';
 import { describe, expect, it, vi } from 'vitest';
 import { createGhostStore } from '../../design/ghosts';
-import { shared } from '../../design/boardFixtures';
+import { schemaBoard, shared } from '../../design/boardFixtures';
 import { moveItems } from '../../design/edits';
 import { liveStub } from '../../test/liveStub';
 import { call, done, setup } from './testContext';
@@ -357,5 +357,100 @@ describe('set_field on a cache\'s items (final review, 2026-11-24)', () => {
     const { ctx, store } = setup();
     expect(done(await call(ctx, 'set_field', { kind: 'cache', id: 'c1', field: 'items', value: '{"usd":"3.7"}' })).ok).toBe(true);
     expect(store.state().caches.c1!.items).toBe('{"usd":"3.7"}');
+  });
+});
+
+describe('the Schemas mode cards (2026-11-26): the chat does what the user\'s own clicks can do', () => {
+  // schemaBoard: sx (input) and sc (config) are wired through p1, which steps run; sh is held by p2, which no step uses; so is an orphan
+  const onSchemas = () => { const s = setup(); s.store.load(schemaBoard()); return s; };
+
+  it('set_schemas_mode turns the mode on and off; off lets go of picked cards; the same mode twice is said', async () => {
+    const { ctx } = onSchemas();
+    expect(done(await call(ctx, 'set_schemas_mode', { on: true })).result).toMatch(/turned the Schemas mode on/);
+    expect(ctx.commands.schemasMode()).toBe(true);
+    expect(done(await call(ctx, 'set_schemas_mode', { on: true })).result).toBe('the Schemas mode is already on');
+    ctx.commands.setPicks([{ kind: 'schema', id: 'so' }, { kind: 'step', id: 'fetch' }]);
+    done(await call(ctx, 'set_schemas_mode', { on: false }));
+    expect(ctx.commands.schemasMode()).toBe(false);
+    expect(ctx.commands.picks()).toEqual([{ kind: 'step', id: 'fetch' }]);
+    expect(done(await call(ctx, 'set_schemas_mode', { on: 'yes' })).ok).toBe(false);
+  });
+
+  it('pick takes schema cards and processor cards only while the mode is on, and only a processor no step uses', async () => {
+    const { ctx } = onSchemas();
+    const off = done(await call(ctx, 'pick', { items: [{ kind: 'schema', id: 'so' }] }));
+    expect(off.ok).toBe(false);
+    expect(off.result).toMatch(/Schemas mode is off.*set_schemas_mode/);
+    ctx.commands.setSchemasMode(true);
+    expect(done(await call(ctx, 'pick', { items: [{ kind: 'schema', id: 'so' }, { kind: 'processor', id: 'p2' }] })).ok).toBe(true);
+    expect(ctx.commands.picks()).toEqual([{ kind: 'schema', id: 'so' }, { kind: 'processor', id: 'p2' }]);
+    const used = done(await call(ctx, 'pick', { items: [{ kind: 'processor', id: 'p1' }] }));
+    expect(used.ok).toBe(false);
+    expect(used.result).toMatch(/has no card: only a processor no step uses/);
+    expect(done(await call(ctx, 'pick', { items: [{ kind: 'schema', id: 'nope' }] })).result).toBe('no schema nope on the board');
+  });
+
+  it('move_blocks moves schema and processor cards, their place only, in one history step', async () => {
+    const { ctx, store } = onSchemas();
+    expect(done(await call(ctx, 'move_blocks', { blocks: [{ kind: 'schema', id: 'so', x: 1, y: 2 }] })).result).toMatch(/Schemas mode is off/);
+    ctx.commands.setSchemasMode(true);
+    const before = store.state();
+    expect(done(await call(ctx, 'move_blocks', { blocks: [{ kind: 'schema', id: 'so', x: 1300, y: 420 }, { kind: 'processor', id: 'p2', x: 950, y: 520 }] })).ok).toBe(true);
+    expect(store.state().schemas.so!.at).toEqual({ x: 1300, y: 420 });
+    expect(store.state().processors.p2!.at).toEqual({ x: 950, y: 520 });
+    expect({ ...store.state().schemas.so!, at: null }).toEqual({ ...before.schemas.so!, at: null });
+    store.undo();
+    expect(store.state().schemas.so!.at).toEqual(before.schemas.so!.at);
+    expect(store.state().processors.p2!.at).toEqual(before.processors.p2!.at);
+  });
+
+  it('delete_picked deletes orphan schemas picked alone, naming them, and refuses every other card with its reason', async () => {
+    const { ctx, store } = onSchemas();
+    ctx.commands.setSchemasMode(true);
+    ctx.commands.setPicks([{ kind: 'schema', id: 'so' }]);
+    const asked = await call(ctx, 'delete_picked');
+    expect(asked.kind).toBe('ask');
+    if (asked.kind !== 'ask') return;
+    expect(asked.question.text).toBe('Delete 1 orphan schema?');
+    const out = done(await call(ctx, 'delete_picked', {}, 'Delete', asked.question.pin));
+    expect(out.ok).toBe(true);
+    expect(out.result).toBe('deleted 1 orphan schema');
+    expect(store.state().schemas.so).toBeUndefined();
+
+    const refused = async (picks: Parameters<typeof ctx.commands.setPicks>[0]) => {
+      const s = onSchemas(); s.ctx.commands.setSchemasMode(true); s.ctx.commands.setPicks(picks);
+      const o = done(await call(s.ctx, 'delete_picked'));
+      expect(o.ok).toBe(false);
+      expect(s.store.state().schemas).toEqual(schemaBoard().schemas);
+      return o.result;
+    };
+    expect(await refused([{ kind: 'schema', id: 'sx' }])).toMatch(/schema orders-in 1\.0\.0 is wired \(used by step .*fetch.*\): only an orphan schema can be deleted/);
+    expect(await refused([{ kind: 'schema', id: 'sh' }])).toBe('schema held-out 1.0.0 is held by processor idle-proc 2.0.0, which no step uses: only an orphan schema can be deleted');
+    expect(await refused([{ kind: 'processor', id: 'p2' }])).toBe('processor idle-proc 2.0.0 is never deleted: Acto does not change, copy or delete a processor');
+    expect(await refused([{ kind: 'schema', id: 'so' }, { kind: 'step', id: 'fetch' }])).toBe('orphan schemas are deleted on their own: pick them without other items');
+  });
+
+  it('copy refuses a pick with a schema or processor card (no Copy on schemas; a processor is never copied)', async () => {
+    const { ctx } = onSchemas();
+    ctx.commands.setSchemasMode(true);
+    ctx.commands.setPicks([{ kind: 'schema', id: 'so' }, { kind: 'step', id: 'fetch' }]);
+    const o = done(await call(ctx, 'copy'));
+    expect(o.ok).toBe(false);
+    expect(o.result).toBe('schemas and processors are never copied: pick only workflows, steps or caches');
+  });
+
+  it('read_board gives the mode, every schema with its state, users and place, and the processor cards', async () => {
+    const { ctx } = onSchemas();
+    const read = () => call(ctx, 'read_board').then((o) => JSON.parse(done(o).result) as { schemasMode: string; schemas: { id: string; state: string; usedBy: { stepId: string; slot: string }[]; heldBy: { processorId: string }[]; at: unknown }[]; processorCards: { id: string; holds: { schemaId: string; slot: string }[] }[] });
+    expect((await read()).schemasMode).toBe('off');
+    ctx.commands.setSchemasMode(true);
+    const r = await read();
+    expect(r.schemasMode).toBe('on');
+    const by = Object.fromEntries(r.schemas.map((s) => [s.id, s]));
+    expect(Object.fromEntries(r.schemas.map((s) => [s.id, s.state]))).toEqual({ sx: 'wired', sc: 'wired', sh: 'held', so: 'orphan' });
+    expect(by.sx!.usedBy.map((u) => u.slot)).toContain('input');
+    expect(by.sh!.heldBy).toEqual([{ processorId: 'p2', slot: 'output' }]);
+    expect(by.so!.at).toEqual({ x: 1200, y: 400 });
+    expect(r.processorCards).toEqual([expect.objectContaining({ id: 'p2', holds: [{ schemaId: 'sh', slot: 'output' }] })]);
   });
 });

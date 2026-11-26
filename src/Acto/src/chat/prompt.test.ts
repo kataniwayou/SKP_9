@@ -31,11 +31,11 @@ describe('systemPrompt', () => {
 
   it('names every tool', () => {
     for (const t of TOOL_DEFS) expect(prompt).toContain(t.name);
-    for (const name of ['list_workflows', 'read_board', 'read_entity', 'read_output', 'list_processors', 'list_caches', 'list_schemas', 'new_workflow', 'add_step', 'add_cache', 'connect', 'disconnect', 'set_entry', 'remove_entry', 'set_entry_cron', 'link_cache', 'unlink_cache', 'set_field', 'set_payload', 'remove_assignment', 'set_processor', 'move_blocks', 'pick', 'copy', 'paste', 'delete_picked', 'delete_workflow', 'save', 'undo', 'redo', 'start', 'stop', 'list_ghosts', 'read_selection', 'restore_ghosts', 'remove_ghosts', 'take_stored', 'check_workflow']) {
+    for (const name of ['list_workflows', 'read_board', 'read_entity', 'read_output', 'list_processors', 'list_caches', 'list_schemas', 'new_workflow', 'add_step', 'add_cache', 'connect', 'disconnect', 'set_entry', 'remove_entry', 'set_entry_cron', 'link_cache', 'unlink_cache', 'set_field', 'set_payload', 'remove_assignment', 'set_processor', 'move_blocks', 'pick', 'copy', 'paste', 'delete_picked', 'delete_workflow', 'save', 'undo', 'redo', 'start', 'stop', 'list_ghosts', 'read_selection', 'restore_ghosts', 'remove_ghosts', 'take_stored', 'check_workflow', 'set_schemas_mode']) {
       expect(TOOL_DEFS.map((t) => t.name)).toContain(name);
       expect(prompt).toContain(name);
     }
-    expect(TOOL_DEFS).toHaveLength(38);
+    expect(TOOL_DEFS).toHaveLength(39);
   });
 
   it('says once that a workflow is scheduled only by its entry arrows, and names no workflow cron', () => {

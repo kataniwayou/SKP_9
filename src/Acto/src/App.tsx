@@ -382,8 +382,10 @@ export function App(props: AppProps) {
       setPicks: (picks) => setSelection(withPicks(selRef.current, picks)),
       picks: () => selRef.current.picks,
       newWorkflowAt: () => freeTriangleSpot(store.state()),
+      schemasMode: () => schemasRef.current,
+      setSchemasMode: (on) => { if (on !== schemasRef.current) toggleSchemas(); },
     },
-  }), [store, api, output, live, session, ghostStore, setSelection]);
+  }), [store, api, output, live, session, ghostStore, setSelection, toggleSchemas]);
 
   return (
     <LiveStoreProvider value={live}>

@@ -23,10 +23,16 @@ export function setup(live: ReturnType<typeof liveStub> = liveStub()) {
   });
   let n = 0;
   let picked: Pick[] = [];
+  let schemas = false;
   const focus = vi.fn();
   const ctx: ToolContext = {
     store, api: api as StudioApi, output, live,
-    commands: { focus, setPicks: (p) => { picked = p; }, picks: () => picked, newWorkflowAt: () => ({ x: 700, y: 40 }) },
+    commands: {
+      focus, setPicks: (p) => { picked = p; }, picks: () => picked, newWorkflowAt: () => ({ x: 700, y: 40 }),
+      // as the page does: turning the mode off lets go of the picked schema and processor cards
+      schemasMode: () => schemas,
+      setSchemasMode: (on) => { schemas = on; if (!on) picked = picked.filter((p) => p.kind !== 'schema' && p.kind !== 'processor'); },
+    },
     processors: () => Object.values(store.state().processors), caches: () => [], session: memoryStorage(), newId: () => `n${++n}`,
   };
   return { ctx, live, api: api as unknown as Record<string, ReturnType<typeof vi.fn>>, store, output, focus };

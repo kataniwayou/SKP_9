@@ -52,6 +52,8 @@ a workflow the run made, and the teardown fails the run if a real row changed be
 | T | Toggle, cards, wires, hover, minimap, drag/nudge, light and dark tokens (`929dc667`, `0b62983e`) | 13 · toggle; 13 · cards and wires; 13 · look in both themes |
 | U | Inspector read-only forms, chips, Undo/Redo locked (`2ed57a3e`) | 13 · Inspector |
 | W | A dragged card stays lifted and a dragged schema's wires stay thick: hover is not followed mid-drag, and a board derived anew mid-drag keeps the drag (2026-11-26) | 13 · a dragged card stays lifted |
+| X | Turning the Schemas mode on fits the board to every schema and processor card; off keeps the view (2026-11-26) | 13 · turning the mode on frames the board |
+| Y | The chat follows the Schemas rules: set_schemas_mode; pick, move, delete (orphans alone) and copy of cards as the board allows; read_board gives the cards (2026-11-26) | `e2e/chat-schemas.spec.ts` (real model); chat tool unit tests |
 | V | Real workflows keep running after real schema and processor locations are saved | 14 (ES, live) |
 
 ## Last full run — 2026-11-26

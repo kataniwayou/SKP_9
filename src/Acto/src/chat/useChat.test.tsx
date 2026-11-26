@@ -74,7 +74,7 @@ function setup(...answers: Scripted[]) {
   store.load(oneWorkflow());
   const ctx: ToolContext = {
     store, api: fakeApi(), output, live: liveStub(),
-    commands: { focus: vi.fn(), setPicks: vi.fn(), picks: () => [], newWorkflowAt: () => ({ x: 0, y: 0 }) },
+    commands: { focus: vi.fn(), setPicks: vi.fn(), picks: () => [], newWorkflowAt: () => ({ x: 0, y: 0 }), schemasMode: () => false, setSchemasMode: vi.fn() },
     processors: () => [], caches: () => [], session: null, newId: () => 'n1',
   };
   const chat = createChatStore(null);

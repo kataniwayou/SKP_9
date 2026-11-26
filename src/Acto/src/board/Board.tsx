@@ -186,6 +186,20 @@ export function Board({ state, view, onPick, onBoxPick, onMove, onMoveGhosts, on
     void flow.current.fitBounds(getNodesBounds(real), { padding: 0.1 });
   };
   /*
+   * Turning the Schemas mode on frames the board again, the schema and processor cards it shows included, so none is left
+   * outside the view [user, 2026-11-26]. Turning it off keeps the view; the first fit (or a remembered view) is left alone.
+   */
+  const schemasShown = useRef(view.schemas === true);
+  useEffect(() => {
+    const on = view.schemas === true;
+    const was = schemasShown.current;
+    schemasShown.current = on;
+    if (!on || was || !fitAtMount.current) return;
+    // after React Flow has the new cards
+    const raf = requestAnimationFrame(() => fitAll());
+    return () => cancelAnimationFrame(raf);
+  }, [view.schemas]);
+  /*
    * A board derived anew mid-drag (a hover, a live status) must not end the drag: the dragged nodes keep where the pointer
    * has them and their `dragging`, or the card drops its lift for a frame and flashes [user, 2026-11-26].
    */
