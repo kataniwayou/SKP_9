@@ -1,5 +1,8 @@
 import { test as base, expect } from '@playwright/test';
 import { baseline, deleteE2eRows, isE2e, type Baseline, type Row } from './stack';
+import { refusal } from './refusal';
+
+export { refusal };
 
 /**
  * Every spec imports `test` from here. It adds:
@@ -8,29 +11,11 @@ import { baseline, deleteE2eRows, isE2e, type Baseline, type Row } from './stack
  *     - POST /model/apply (or /validate) whose changes create rows named e2e-..., update or delete rows the run made, or
  *       update a real row with nothing changed but its location (controller ruling R5: Save is board-wide);
  *     - a validate or Kibana diagram publish of a workflow (what a Save does for every workflow it touched).
- *   A processor or schema change, Start/Stop and every other write are aborted and fail the test.
+ *   A schema create that is not e2e-, a processor create or delete, a real schema's or processor's fields beyond its location, Start/Stop and every other write are aborted and fail the test.
  * - the throwaway rows (e2e-...) left by a test are deleted through /model/apply after it.
  */
 export interface Stack extends Baseline {
   real: Map<string, Row>;
-}
-
-const isEmptyMap = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length === 0;
-const norm = (v: unknown) => (v === undefined || v === '' || isEmptyMap(v) ? null : Array.isArray(v) ? [...v].sort() : v);
-const sameValue = (a: unknown, b: unknown) => JSON.stringify(norm(a)) === JSON.stringify(norm(b));
-
-/** Why a /model change must not go out, or null. */
-export function refusal(c: { op?: string; table?: string; id?: string; row?: Record<string, unknown> }, real: Map<string, Row>): string | null {
-  if (c.table !== 'workflows' && c.table !== 'steps' && c.table !== 'caches' && c.table !== 'assignments') return `a ${c.table} change (only workflows, steps, caches and assignments may be written)`;
-  const was = real.get(c.id ?? '');
-  if (c.op === 'create') return isE2e(c.row?.name) ? null : `create of "${String(c.row?.name)}": a throwaway must be named e2e-...`;
-  if (!was) return null; // a row the run made
-  if (c.op === 'delete') return `delete of the real ${c.table} row ${was.name}`;
-  for (const [k, v] of Object.entries(c.row ?? {})) {
-    if (k === 'boardX' || k === 'boardY') continue;
-    if (!sameValue(was[k], v)) return `update of the real ${c.table} row ${was.name}: ${k} would change (${JSON.stringify(was[k])} -> ${JSON.stringify(v)})`;
-  }
-  return null;
 }
 
 /**

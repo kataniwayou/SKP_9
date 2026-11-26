@@ -8,8 +8,8 @@ export const PREFIX = 'e2e-';
 export const isE2e = (name: unknown): boolean => typeof name === 'string' && name.startsWith(PREFIX);
 
 export type Row = Record<string, unknown> & { id: string; name: string };
-export type TableName = 'workflows' | 'steps' | 'caches' | 'assignments';
-export const TABLES: readonly TableName[] = ['workflows', 'steps', 'caches', 'assignments'];
+export type TableName = 'workflows' | 'steps' | 'caches' | 'assignments' | 'schemas' | 'processors';
+export const TABLES: readonly TableName[] = ['workflows', 'steps', 'caches', 'assignments', 'schemas', 'processors'];
 export type Snapshot = Record<TableName, Row[]>;
 
 /** Fields a Save may change on a real row (controller ruling R5: Acto's placed locations, and the stamp that comes with them). */
@@ -73,8 +73,8 @@ export const itemsOf = (r: Row): Record<string, string> =>
   Object.fromEntries((r.items as { key: string; value: string }[]).map((i) => [i.key, i.value]));
 
 /**
- * Deletes every e2e- workflow, step, cache and assignment through /model/apply, in the order BaseAPI's keys need: the
- * workflows (their junction rows go with them), the e2e steps' wires cleared, then assignments, steps and caches.
+ * Deletes every e2e- workflow, step, cache, assignment, processor and schema through /model/apply, in the order BaseAPI's keys need: the
+ * workflows (their junction rows go with them), the e2e steps' wires cleared, then assignments, steps and caches, then the e2e processors and last the e2e schemas (a processor references its schemas).
  * Returns how many rows went.
  */
 export async function deleteE2eRows(): Promise<number> {
@@ -84,7 +84,9 @@ export async function deleteE2eRows(): Promise<number> {
   const stepIds = new Set(steps.map((s) => s.id));
   const assignments = all.assignments.filter((a) => isE2e(a.name) || stepIds.has(a.stepId as string));
   const caches = all.caches.filter((c) => isE2e(c.name));
-  const total = wf.length + steps.length + assignments.length + caches.length;
+  const procs = all.processors.filter((p) => isE2e(p.name));
+  const schemas = all.schemas.filter((x) => isE2e(x.name));
+  const total = wf.length + steps.length + assignments.length + caches.length + procs.length + schemas.length;
   if (total === 0) return 0;
   const changes: Change[] = [];
   for (const w of wf) changes.push({ op: 'delete', table: 'workflows', id: w.id });
@@ -96,6 +98,8 @@ export async function deleteE2eRows(): Promise<number> {
   for (const a of assignments) changes.push({ op: 'delete', table: 'assignments', id: a.id });
   for (const s of steps) changes.push({ op: 'delete', table: 'steps', id: s.id });
   for (const c of caches) changes.push({ op: 'delete', table: 'caches', id: c.id });
+  for (const p of procs) changes.push({ op: 'delete', table: 'processors', id: p.id });
+  for (const x of schemas) changes.push({ op: 'delete', table: 'schemas', id: x.id });
   await apply(changes);
   return total;
 }
