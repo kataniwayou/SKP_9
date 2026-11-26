@@ -26,6 +26,8 @@ namespace BaseApi.Tests.Live;
 /// <c>R5_READY</c> into <c>SKP_SCALE_HANDSHAKE_DIR</c> and waits for <c>R5_GO</c> (the operator restarts the
 /// Redis statefulset, re-opens the port-forward, then creates the file). Without the directory R5 is skipped.
 /// </para>
+/// <b>R1-R5 need raised memory on the dev cluster</b> (BaseApi well above its 512Mi limit and Redis above its 144 MB maxmemory): a
+/// million-item start does not fit the defaults; see <c>src/Acto/e2e/regression/BIG-CACHE-REPORT.md</c>. Do not run it on the stock limits.
 /// On demand: <c>SKP_SCALE=1</c> and <c>SKP_REALSTACK=1</c>.
 /// </summary>
 [Trait("Category", RealStack.Category)]
@@ -159,48 +161,50 @@ public sealed class CacheItemsRedisScaleLiveTests
             await sender.SendAsync(OrchestratorQueues.Control, MessageTypes.RefreshCacheItems, msg, ct);
             await Task.Delay(TimeSpan.FromSeconds(20), ct);
             await CompareAsync("R4", http, redis, cache, workflow, root, prefix, keySet, ct,
-                r => Verdict("R4", r.Mismatches == 0, $"7 refresh messages (2,000 stale keys twice + once more, 3,000 newer edits, 1,000 removed + 1 never-existing); {r.Summary}"));
+                r => Verdict("R4", r.Mismatches == 0, $"5 published refresh messages (2,000 stale keys twice and once more, then the keys of 3,000 newer edits, then 1,000 removed keys + 1 never-existing; plus the server's own refresh for the HTTP edit); {r.Summary}"));
 
             // ---------------- R5 ----------------
             var dir = Environment.GetEnvironmentVariable("SKP_SCALE_HANDSHAKE_DIR");
             if (string.IsNullOrEmpty(dir))
             {
+                // No return: execution must reach the final assert so R1-R4 verdicts are not swallowed.
                 ScaleGate.Log("R5 skipped: SKP_SCALE_HANDSHAKE_DIR not set");
-                return;
             }
-
-            File.WriteAllText(Path.Combine(dir, "R5_READY"), DateTime.UtcNow.ToString("O"));
-            ScaleGate.Log("R5 waiting for R5_GO (operator restarts Redis and the port-forward)");
-            var waitUntil = DateTime.UtcNow.AddMinutes(20);
-            while (!File.Exists(Path.Combine(dir, "R5_GO")) && DateTime.UtcNow < waitUntil) await Task.Delay(500, ct);
-            Assert.True(File.Exists(Path.Combine(dir, "R5_GO")), "R5_GO never appeared");
-            redis.Dispose();
-            redis = await ConnectRedisAsync();
-            db = redis.GetDatabase();
-            var wiped = !await db.KeyExistsAsync(keySet) && !await db.SetContainsAsync(L2ProjectionKeys.Live(), workflow.ToString("D"));
-            ScaleGate.Log($"R5 after restart: cache key set absent and workflow not live = {wiped}");
-
-            // The liveness gate refuses until processors have re-registered; retry the start.
-            sw.Restart();
-            var started = false;
-            var giveUp = DateTime.UtcNow.AddMinutes(5);
-            string last = "";
-            while (!started && DateTime.UtcNow < giveUp)
+            else
             {
-                using var res = await http.PostAsync("/api/v1/orchestration/start",
-                    new StringContent(JsonSerializer.Serialize(workflow), Encoding.UTF8, "application/json"), ct);
-                if (res.StatusCode == HttpStatusCode.Accepted) { started = true; break; }
-                last = $"{(int)res.StatusCode} {await res.Content.ReadAsStringAsync(ct)}";
-                await Task.Delay(3000, ct);
+                File.WriteAllText(Path.Combine(dir, "R5_READY"), DateTime.UtcNow.ToString("O"));
+                ScaleGate.Log("R5 waiting for R5_GO (operator restarts Redis and the port-forward)");
+                var waitUntil = DateTime.UtcNow.AddMinutes(20);
+                while (!File.Exists(Path.Combine(dir, "R5_GO")) && DateTime.UtcNow < waitUntil) await Task.Delay(500, ct);
+                Assert.True(File.Exists(Path.Combine(dir, "R5_GO")), "R5_GO never appeared");
+                redis.Dispose();
+                redis = await ConnectRedisAsync();
+                db = redis.GetDatabase();
+                var wiped = !await db.KeyExistsAsync(keySet) && !await db.SetContainsAsync(L2ProjectionKeys.Live(), workflow.ToString("D"));
+                ScaleGate.Log($"R5 after restart: cache key set absent and workflow not live = {wiped}");
+
+                // The liveness gate refuses until processors have re-registered; retry the start.
+                sw.Restart();
+                var started = false;
+                var giveUp = DateTime.UtcNow.AddMinutes(5);
+                string last = "";
+                while (!started && DateTime.UtcNow < giveUp)
+                {
+                    using var res = await http.PostAsync("/api/v1/orchestration/start",
+                        new StringContent(JsonSerializer.Serialize(workflow), Encoding.UTF8, "application/json"), ct);
+                    if (res.StatusCode == HttpStatusCode.Accepted) { started = true; break; }
+                    last = $"{(int)res.StatusCode} {await res.Content.ReadAsStringAsync(ct)}";
+                    await Task.Delay(3000, ct);
+                }
+                Assert.True(started, "start after the Redis restart was refused for 5 minutes: " + last);
+                var expected = (await ItemCountAsync(http, cache, ct));
+                await WaitCardAsync(redis, keySet, expected);
+                await WaitLiveAsync(redis, workflow);
+                var r5Ms = sw.ElapsedMilliseconds;
+                await CompareAsync("R5", http, redis, cache, workflow, root, prefix, keySet, ct,
+                    r => Verdict("R5", wiped && r.Mismatches == 0,
+                        $"Redis restarted (L2 empty before start: {wiped}); start to SCARD {expected:N0} in {r5Ms} ms ({r5Ms / 1000.0:F1} s, includes {(r5Ms > 0 ? "the liveness-gate retries" : "")}); {r.Summary}"));
             }
-            Assert.True(started, "start after the Redis restart was refused for 5 minutes: " + last);
-            var expected = (await ItemCountAsync(http, cache, ct));
-            await WaitCardAsync(redis, keySet, expected);
-            await WaitLiveAsync(redis, workflow);
-            var r5Ms = sw.ElapsedMilliseconds;
-            await CompareAsync("R5", http, redis, cache, workflow, root, prefix, keySet, ct,
-                r => Verdict("R5", wiped && r.Mismatches == 0,
-                    $"Redis restarted (L2 empty before start: {wiped}); start to SCARD {expected:N0} in {r5Ms} ms ({r5Ms / 1000.0:F1} s, includes {(r5Ms > 0 ? "the liveness-gate retries" : "")}); {r.Summary}"));
         }
         finally
         {

@@ -199,6 +199,35 @@ describe('saveBoard', () => {
     });
   });
 
+  describe('the request size', () => {
+    const big = 'x'.repeat(1_000_000);
+    const withItems = (n: number) => {
+      const t = setup();
+      for (let i = 0; i < n; i++) t.store.edit((b) => setItem(b, 'c1', `big-${i}`, big));
+      return t;
+    };
+
+    it('over 30,000,000 bytes: nothing is sent, the exact refusal is logged, the edits stay and Save is not blocked', async () => {
+      const t = withItems(31);
+      const before = t.store.state();
+      expect(await saveBoard(t.studio, t.store, t.output)).toBe('refused');
+      expect(t.api.applyModel).not.toHaveBeenCalled();
+      const line = t.output.lines().at(-1)!;
+      expect(line.level).toBe('error');
+      expect(line.text).toMatch(/^Save refused: the changes are 31\.\d MB, over BaseApi's 30 MB request limit — save fewer item edits at a time$/);
+      expect(t.store.state()).toBe(before);
+      expect(t.store.saveBlocked()).toBe(false);
+      expect(t.store.saving()).toBe(false);
+    });
+
+    it('just under the limit: the apply is made', async () => {
+      const t = withItems(29);
+      vi.mocked(loadBoard).mockResolvedValue({ ok: true, value: board() });
+      await saveBoard(t.studio, t.store, t.output);
+      expect(t.api.applyModel).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('is refused while a delete (or another save) holds the board, with the saving warning', async () => {
     const t = setup();
     rename(t.store, 'daily', 'daily-2');

@@ -120,6 +120,9 @@ export function remapIds(b: BoardState, made: Record<string, string>): BoardStat
 
 const transport = (e: ApiError) => describeError(e);
 
+/** BaseAPI's request body limit (Kestrel's default), in bytes. */
+export const MAX_REQUEST_BYTES = 30_000_000;
+
 export const OUTCOME_UNKNOWN = 'Save outcome unknown — reload before saving again';
 /** No answer we can read (network, unreadable body, a gateway's 5xx): BaseAPI may have committed. A 4xx is a refusal. */
 const outcomeUnknown = (e: ApiError) => e.kind === 'network' || e.status === 0 || e.status >= 500;
@@ -149,6 +152,13 @@ export async function saveBoard(
     return 'refused';
   }
   if (changes.length === 0) { output.log('Nothing to save'); return 'nothing'; }
+  // BaseAPI refuses a body over its request limit by cutting the connection, which the browser reports as a network error and a Save of
+  // unknown outcome: measure what would go out and refuse it here, with the edits kept and Save left usable
+  const bytes = new TextEncoder().encode(JSON.stringify({ changes })).length;
+  if (bytes > MAX_REQUEST_BYTES) {
+    output.log(`Save refused: the changes are ${(bytes / 1_000_000).toFixed(1)} MB, over BaseApi's 30 MB request limit — save fewer item edits at a time`, 'error');
+    return 'refused';
+  }
   store.setSaving(true);
   /** A refused row: failures on the board, stale rows offered to Take stored. */
   const refuse = (results: ModelChangeResultDto[] | null | undefined) => {
