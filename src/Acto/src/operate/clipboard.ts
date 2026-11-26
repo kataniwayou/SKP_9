@@ -15,7 +15,9 @@ export interface ClipStep {
  * paste's root is named on like the name (BaseAPI keeps roots unique: a shared root would mix two caches' items).
  */
 export interface ClipCache {
-  id: Id; name: string; version: string; description: string | null; root: string; items: string; at: Point;
+  id: Id; name: string; version: string; description: string | null; root: string; at: Point;
+  /** The unsaved item pairs; the stored items (millions, only in BaseApi) are not copied, only counted. */
+  itemSet?: Record<string, string>; storedCount?: number;
 }
 /**
  * A copied workflow: every field and where it stood [user, 2026-11-19]. Its entry steps, caches and assignments are
@@ -75,7 +77,7 @@ export function copyClip(b: BoardState, items: readonly ItemRef[]): Clip | null 
     } else if (ref.kind === 'cache') {
       const c = b.caches[ref.id];
       if (!c) continue;
-      clip.caches.push({ id: c.id, name: c.name, version: c.version, description: c.description, root: c.root, items: c.items, at: at0(c.at) });
+      clip.caches.push({ id: c.id, name: c.name, version: c.version, description: c.description, root: c.root, itemSet: { ...c.itemEdits.set }, storedCount: c.itemCount, at: at0(c.at) });
     } else {
       const w = b.workflows[ref.id];
       if (!w) continue;
@@ -123,12 +125,13 @@ function namer(names: Iterable<string>) {
 /**
  * Pastes the clip as new rows (new ids, unique names, unsaved), (pasted + 1) grid cells down-right of where they were
  * copied from, moved on to the nearest free offset when that is taken. Every other field is the copied one
- * [user, 2026-11-19], but a cache's root, which is named on like the name (unique in BaseAPI). A link between two
+ * [user, 2026-11-19], but a cache's unsaved item edits are copied while its stored items are not (`notes` says so), and a cache's root, which is named on like the name (unique in BaseAPI). A link between two
  * copied items joins the copies (wires, a workflow's entry arrows and cache lines); a workflow's link to anything not copied stays on the original (dropped if that is gone from the board); its
  * assignments are the same rows. Steps get no payloads.
  */
-export function pasteClip(b: BoardState, clip: Clip, newId: () => Id): { state: BoardState; pasted: PastedRef[] } {
-  if (clip.steps.length + clip.caches.length + clip.workflows.length === 0) return { state: b, pasted: [] };
+export function pasteClip(b: BoardState, clip: Clip, newId: () => Id): { state: BoardState; pasted: PastedRef[]; notes: string[] } {
+  if (clip.steps.length + clip.caches.length + clip.workflows.length === 0) return { state: b, pasted: [], notes: [] };
+  const notes: string[] = [];
   const cell = (clip.pasted + 1) * PASTE_CELL;
   const group: Rect[] = [
     ...clip.steps.map((c) => ({ ...c.at, w: STEP_W, h: STEP_H })),
@@ -166,10 +169,11 @@ export function pasteClip(b: BoardState, clip: Clip, newId: () => Id): { state: 
     madeCache.set(c.id, id);
     pasted.push({ kind: 'cache', id });
     const row: CacheRow = {
-      id, name: cacheName(c.name), version: c.version, description: c.description, root: cacheRoot(c.root), items: c.items,
-      at: moved(c.at), updatedAt: null, ...NO_AUDIT,
+      id, name: cacheName(c.name), version: c.version, description: c.description, root: cacheRoot(c.root),
+      itemCount: 0, itemEdits: { set: { ...c.itemSet }, removed: [] }, at: moved(c.at), updatedAt: null, ...NO_AUDIT,
     };
     caches[id] = row;
+    if ((c.storedCount ?? 0) > 0) notes.push(`${row.name}: stored items are not copied (${c.storedCount})`);
   }
 
   const workflowName = namer(Object.values(b.workflows).map((w) => w.name));
@@ -193,7 +197,7 @@ export function pasteClip(b: BoardState, clip: Clip, newId: () => Id): { state: 
     };
     workflows[id] = row;
   }
-  return { state: { ...b, steps, caches, workflows }, pasted };
+  return { state: { ...b, steps, caches, workflows }, pasted, notes };
 }
 
 /** "Pasted 1 workflow and 2 steps". */

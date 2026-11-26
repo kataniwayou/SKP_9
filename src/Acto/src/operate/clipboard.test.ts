@@ -70,11 +70,12 @@ describe('copy and paste of caches and workflows [user, 2026-11-19: a new id, ev
   const T = { kind: 'workflow', id: 'daily' } as const, C = { kind: 'cache', id: 'c1' } as const;
   it('a cache: every field but the name and the root (unique in BaseAPI, named on like the name), unsaved, on free board', () => {
     const b = board();
-    b.caches.c1 = { ...b.caches.c1!, description: 'd', version: '2.0.0', root: 'orders', items: '{"a":1}' };
-    const { state, pasted } = pasteClip(b, copyClip(b, [C])!, ids());
+    b.caches.c1 = { ...b.caches.c1!, description: 'd', version: '2.0.0', root: 'orders', itemCount: 5, itemEdits: { set: { a: '1' }, removed: ['gone'] } };
+    const { state, pasted, notes } = pasteClip(b, copyClip(b, [C])!, ids());
     expect(pasted).toEqual([{ kind: 'cache', id: 'new-1' }]);
     const c = state.caches['new-1']!;
-    expect(c).toMatchObject({ name: 'c1-2', version: '2.0.0', description: 'd', root: 'orders-2', items: '{"a":1}', updatedAt: null, createdAt: null });
+    expect(c).toMatchObject({ name: 'c1-2', version: '2.0.0', description: 'd', root: 'orders-2', itemCount: 0, itemEdits: { set: { a: '1' }, removed: [] }, updatedAt: null, createdAt: null });
+    expect(notes).toEqual(['c1-2: stored items are not copied (5)']);
     expect(c.at).not.toEqual(b.caches.c1!.at);
     expect(state.caches.c1).toBe(b.caches.c1);
   });

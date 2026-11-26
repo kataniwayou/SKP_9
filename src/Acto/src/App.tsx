@@ -239,12 +239,14 @@ export function App(props: AppProps) {
       const clip = readClip(session);
       if (!clip) { output.log('Nothing copied yet', 'warn'); return; }
       let pasted: PastedRef[] = [];
-      store.edit((b) => { const r = pasteClip(b, clip, newId); pasted = r.pasted; return r.state; });
+      let notes: string[] = [];
+      store.edit((b) => { const r = pasteClip(b, clip, newId); pasted = r.pasted; notes = r.notes; return r.state; });
       if (pasted.length === 0) return;
       writeClip(session, { ...clip, pasted: clip.pasted + 1 });
       const triangles = pasted.flatMap((p) => (p.kind === 'workflow' ? [p.id] : []));
       setSelection({ workflows: triangles.length > 0 ? triangles : selRef.current.workflows, picks: pasted.map((p) => ({ ...p })) });
       output.log(pasteMessage(pasted), 'ok');
+      for (const n of notes) output.log(n, 'warn');
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);

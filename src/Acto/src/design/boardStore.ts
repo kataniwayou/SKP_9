@@ -5,11 +5,11 @@ import { deepEqual, type BoardState, type Edit } from './board';
 import { affectedWorkflows, changedKeys } from './changes';
 import { withoutWorkflow } from './edits';
 import { canRedo, canUndo, commit, historyOf, redo, undo, type History } from './history';
-import type { Table } from './changes';
+import type { BoardTable } from './changes';
 
 const KEY = 'acto.board';
 
-export interface StaleRow { table: Table; id: Id }
+export interface StaleRow { table: BoardTable; id: Id }
 
 /**
  * Why the board's present last changed [user, 2026-11-25]: the ghost store makes ghosts only of what an `edit` (a delete,
@@ -109,11 +109,11 @@ function readDraft(session: Storage | null): Draft | null {
   }
 }
 
-const KIND_OF: Record<Table, string> = {
+const KIND_OF: Record<BoardTable, string> = {
   workflows: 'workflow', steps: 'step', caches: 'cache', assignments: 'assignment', processors: 'processor', schemas: 'schema',
 };
 
-const TABLES: readonly Table[] = ['workflows', 'steps', 'caches', 'assignments', 'processors', 'schemas'];
+const TABLES: readonly BoardTable[] = ['workflows', 'steps', 'caches', 'assignments', 'processors', 'schemas'];
 
 /**
  * The draft's own changes (draft.base vs. draft.present) replayed onto a fresh read (`base` as read, `present` as placed).
@@ -123,8 +123,8 @@ const TABLES: readonly Table[] = ['workflows', 'steps', 'caches', 'assignments',
  * they deleted that is gone from the fresh read as well is left alone.
  */
 export function rebaseDraft(draft: Draft, base: BoardState, present: BoardState): Draft {
-  const nb = { ...base } as Record<Table, Record<Id, unknown>>;
-  const np = { ...present } as Record<Table, Record<Id, unknown>>;
+  const nb = { ...base } as Record<BoardTable, Record<Id, unknown>>;
+  const np = { ...present } as Record<BoardTable, Record<Id, unknown>>;
   for (const t of TABLES) {
     const db = draft.base[t] as Record<Id, unknown>;
     const dp = draft.present[t] as Record<Id, unknown>;
@@ -310,7 +310,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       if (refuseWhileSaving() || stale.length === 0) return;
       const rows = stale;
       const take = (s: BoardState): BoardState => {
-        const out = { ...s } as Record<Table, Record<Id, unknown>>;
+        const out = { ...s } as Record<BoardTable, Record<Id, unknown>>;
         for (const { table, id } of rows) {
           const rows = { ...out[table] };
           const row = (fresh[table] as Record<Id, unknown>)[id];

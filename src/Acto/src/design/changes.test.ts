@@ -3,7 +3,7 @@ import type { BoardState } from './board';
 import { NO_AUDIT } from './board';
 import { board } from './boardFixtures';
 import { affectedWorkflows, boardChanges, changedKeys, unsavedMarks } from './changes';
-import { addCache, addStep, addWire, deleteCaches, deleteSteps, moveItems, setEntryCron } from './edits';
+import { addCache, addStep, addWire, deleteCaches, deleteSteps, moveItems, removeCacheItem, revertCacheItem, setCacheField, setCacheItem, setEntryCron } from './edits';
 
 const b = board();
 const proc = b.processors.p1;
@@ -134,16 +134,60 @@ describe('boardChanges', () => {
     expect(cs[1]!.row).toEqual(expect.objectContaining({ configSchemaId: 's9', sourceHash: 'a'.repeat(64) }));
   });
 
-  it('creates a cache with its location', () => {
-    expect(boardChanges(b, addCache(b, { x: 3, y: 4 }, 'k1'))).toEqual([
-      { op: 'create', table: 'caches', id: 'k1', row: expect.objectContaining({ boardX: 3, boardY: 4, items: [] }) }]);
+  it('creates a cache with its location and no items field', () => {
+    const cs = boardChanges(b, addCache(b, { x: 3, y: 4 }, 'k1'));
+    expect(cs).toEqual([{ op: 'create', table: 'caches', id: 'k1', row: expect.objectContaining({ boardX: 3, boardY: 4 }) }]);
+    expect(cs[0]!.row).not.toHaveProperty('items');
   });
 
-  it("sends a cache's items as the list of pairs BaseApi stores, in the order the board shows them", () => {
-    const k = addCache(b, { x: 3, y: 4 }, 'k1');
-    const cur: BoardState = { ...k, caches: { ...k.caches, k1: { ...k.caches.k1!, items: '{"zeta":"Z","acme":""}' } } };
-    expect(boardChanges(b, cur)[0]!.row).toEqual(expect.objectContaining({
-      items: [{ key: 'zeta', value: 'Z' }, { key: 'acme', value: '' }] }));
+  describe('cache item edits', () => {
+    const ok = (e: ReturnType<typeof setCacheItem>) => { if ('refused' in e) throw new Error(e.refused); return e.state; };
+    it('item-only edit sends no caches update', () => {
+      const cur = ok(setCacheItem(b, 'c1', 'k', 'v'));
+      expect(boardChanges(b, cur)).toEqual([{ op: 'append', table: 'cache_items', id: 'c1', row: { cacheId: 'c1', items: [{ key: 'k', value: 'v' }] } }]);
+      expect([...changedKeys(b, cur)]).toEqual(['cache:c1']);
+    });
+    it('remove then re-add a stored key sends one append and no remove', () => {
+      const cur = ok(setCacheItem(removeCacheItem(b, 'c1', 'k', true), 'c1', 'k', 'v2'));
+      expect(names(boardChanges(b, cur))).toEqual(['append cache_items c1']);
+    });
+    it('a stored key removed sends one remove', () => {
+      expect(boardChanges(b, removeCacheItem(b, 'c1', 'k', true))).toEqual([
+        { op: 'remove', table: 'cache_items', id: 'c1', row: { cacheId: 'c1', keys: ['k'] } }]);
+    });
+    it('add then remove a never-stored key sends nothing', () => {
+      const cur = removeCacheItem(ok(setCacheItem(b, 'c1', 'k', 'v')), 'c1', 'k', false);
+      expect(boardChanges(b, cur)).toEqual([]);
+      expect(changedKeys(b, cur).size).toBe(0);
+    });
+    it('revert drops a set value and a pending removal', () => {
+      const cur = revertCacheItem(removeCacheItem(ok(setCacheItem(b, 'c1', 'a', '1')), 'c1', 'k', true), 'c1', 'k');
+      expect(cur.caches.c1!.itemEdits).toEqual({ set: { a: '1' }, removed: [] });
+      expect(revertCacheItem(cur, 'c1', 'a').caches.c1!.itemEdits).toEqual({ set: {}, removed: [] });
+    });
+    it('field + item edit sends update then append', () => {
+      const cur = ok(setCacheItem(setCacheField(b, 'c1', 'root', 'r2'), 'c1', 'k', 'v'));
+      expect(names(boardChanges(b, cur))).toEqual(['update caches c1', 'append cache_items c1']);
+    });
+    it('new cache with items sends create then append with the client id', () => {
+      const cur = ok(setCacheItem(addCache(b, { x: 1, y: 1 }, 'k1'), 'k1', 'a', 'b'));
+      expect(names(boardChanges(b, cur))).toEqual(['create caches k1', 'append cache_items k1']);
+    });
+    it('append goes before remove and both before deletes', () => {
+      let cur = ok(setCacheItem(b, 'c1', 'a', '1'));
+      cur = removeCacheItem(cur, 'c1', 'k', true);
+      cur = deleteSteps(cur, ['lonely']);
+      expect(names(boardChanges(b, cur))).toEqual(['append cache_items c1', 'remove cache_items c1', 'delete steps lonely']);
+    });
+    it('deleted cache sends no item ops', () => {
+      const cur = deleteCaches(removeCacheItem(ok(setCacheItem(b, 'c1', 'a', '1')), 'c1', 'k', true), ['c1']);
+      expect(names(boardChanges(b, cur))).toEqual(['update workflows daily', 'delete caches c1']);
+    });
+    it('item edits mark the cache unsaved and its workflows affected', () => {
+      const cur = ok(setCacheItem(b, 'c1', 'k', 'v'));
+      expect([...unsavedMarks(b, cur)]).toEqual(['cache:c1']);
+      expect(affectedWorkflows(b, cur)).toEqual(['daily']);
+    });
   });
 
   const idx = (ops: string[], x: string) => { const n = ops.indexOf(x); expect(n).toBeGreaterThanOrEqual(0); return n; };

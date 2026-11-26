@@ -125,14 +125,6 @@ export function diagramSvg(b: BoardState, workflowId: Id): string {
   const mine = (wf?.assignmentIds ?? []).map((id) => b.assignments[id]).filter((a) => !!a);
   const rowsOf = new Map(stepIds.map((id) => [id, mine.filter((a) => a.stepId === id).flatMap((a) => settingRows(a.payload))]));
   const shown = (rows: Row[]) => (rows.length > MAX_ROWS ? MAX_ROWS : rows.length);
-  const cacheItems = (items: string) => {
-    try {
-      const v = JSON.parse(items);
-      return v && typeof v === 'object' ? Object.keys(v).length : 0;
-    } catch {
-      return 0;
-    }
-  };
 
   // places, raw board coordinates; a row with no place is put in a row below the others
   let spare = 0;
@@ -324,7 +316,7 @@ export function diagramSvg(b: BoardState, workflowId: Id): string {
   }
   for (const [id, c] of C) {
     const cache = b.caches[id]!;
-    box(c, cache.name, [{ key: 'root', value: cache.root }, { key: 'items', value: String(cacheItems(cache.items)) }], '#F8FAFC', CACHE_STROKE, 'cache');
+    box(c, cache.name, [{ key: 'root', value: cache.root }, { key: 'items', value: String(cache.itemCount) }], '#F8FAFC', CACHE_STROKE, 'cache');
   }
 
   // legend below: the five conditions and the cache line

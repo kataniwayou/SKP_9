@@ -112,7 +112,7 @@ describe('diagramSvg', () => {
 
   it('shows a cache\'s root and item count', () => {
     const b = board();
-    b.caches.c1!.items = '{"a":"1","b":"2","c":"3"}';
+    b.caches.c1!.itemCount = 3;
     const cache = parse(diagramSvg(b, 'daily')).querySelector('g[data-part="cache"]')!;
     expect([...cache.querySelectorAll('text')].map((t) => t.textContent)).toEqual(['c1', 'root', 'r', 'items', '3']);
   });

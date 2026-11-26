@@ -307,7 +307,8 @@ const paste: ToolDef = {
     const clip = readClip(ctx.session);
     if (!clip) return fail('nothing copied yet', 'paste');
     let pasted: PastedRef[] = [];
-    const out = applyState(ctx, (b) => { const r = pasteClip(b, clip, ctx.newId); pasted = r.pasted; return r.state; }, 'paste', '');
+    let notes: string[] = [];
+    const out = applyState(ctx, (b) => { const r = pasteClip(b, clip, ctx.newId); pasted = r.pasted; notes = r.notes; return r.state; }, 'paste', '');
     if (!out.ok) return out;
     writeClip(ctx.session, { ...clip, pasted: clip.pasted + 1 });
     ctx.commands.setPicks(pasted.map((p) => ({ ...p })));
@@ -315,6 +316,7 @@ const paste: ToolDef = {
     const names = pasted.map((p) => `${p.kind} ${(p.kind === 'step' ? s.steps : p.kind === 'cache' ? s.caches : s.workflows)[p.id]!.name}`).join(', ');
     const msg = pasteMessage(pasted);
     ctx.output.log(msg, 'ok');
+    for (const note of notes) ctx.output.log(note, 'warn');
     const n = (k: ItemRef['kind']) => pasted.filter((p) => p.kind === k).length;
     return done(true, `pasted ${countWords({ workflows: n('workflow'), steps: n('step'), caches: n('cache') })}: ${names}; they are picked and not saved yet`, 'paste');
   },

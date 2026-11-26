@@ -6,7 +6,7 @@ import type { Id } from '../model/graph';
 import type { OutputStore } from '../output/outputStore';
 import type { BoardState } from './board';
 import { SAVING_REFUSAL, type BoardStore } from './boardStore';
-import { affectedWorkflows, boardChanges, type ModelChange, type Table } from './changes';
+import { affectedWorkflows, boardChanges, type ModelChange, type BoardTable } from './changes';
 import { diagramSvg } from './diagramSvg';
 import type { GhostStore } from './ghosts';
 
@@ -20,7 +20,7 @@ export const kindOf = (table: string): string => KIND[table] ?? table;
 /** The row's name on the first board that holds it; its id otherwise. */
 export function nameOf(boards: BoardState[], table: string, id: Id): string {
   for (const b of boards) {
-    const row = (b[table as Table] as Record<Id, { name?: string }> | undefined)?.[id];
+    const row = (b[table as BoardTable] as Record<Id, { name?: string }> | undefined)?.[id];
     if (row?.name) return row.name;
   }
   return id;
@@ -121,7 +121,7 @@ export async function saveBoard(
     store.setFailures(map);
     store.setStale((results ?? [])
       .filter((r) => r.ok === false && (isStale(r) || r.status === 404) && r.table && r.id && r.table in KIND)
-      .map((r) => ({ table: r.table as Table, id: r.id! })));
+      .map((r) => ({ table: r.table as BoardTable, id: r.id! })));
   };
   try {
     const res = await api.applyModel(changes);

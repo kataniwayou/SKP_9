@@ -3,6 +3,7 @@ import type { Point } from '../model/geometry';
 import { NO_AUDIT, SLOT_FIELD } from './board';
 import type { BoardState, CacheRow, Edit, ItemRef, SchemaCopy, SchemaRow, Slot, StepRow, WorkflowRow } from './board';
 import { linkedBy } from './payloads';
+import { keyProblem, valueProblem } from '../model/dict';
 
 const stepName = (b: BoardState, id: Id) => b.steps[id]?.name ?? id;
 
@@ -27,6 +28,35 @@ export function addCache(b: BoardState, at: Point, id: Id): BoardState {
     description: null, root: '', itemCount: 0, itemEdits: { set: {}, removed: [] }, at: { ...at }, updatedAt: null, ...NO_AUDIT,
   };
   return { ...b, caches: { ...b.caches, [id]: cache } };
+}
+
+/** Sets (adds or overwrites) one item of a cache, unsaved; a key marked removed is un-removed. Refused when BaseApi would refuse it. */
+export function setCacheItem(b: BoardState, cacheId: Id, key: string, value: string): Edit {
+  const c = b.caches[cacheId];
+  if (!c) return { state: b };
+  const why = keyProblem(key, []) ?? valueProblem(value);
+  if (why) return { refused: why };
+  const itemEdits = { set: { ...c.itemEdits.set, [key]: value }, removed: c.itemEdits.removed.filter((k) => k !== key) };
+  return { state: { ...b, caches: { ...b.caches, [cacheId]: { ...c, itemEdits } } } };
+}
+
+/** Removes one item: a stored one is marked for removal at Save; an unsaved one is just forgotten. */
+export function removeCacheItem(b: BoardState, cacheId: Id, key: string, stored: boolean): BoardState {
+  const c = b.caches[cacheId];
+  if (!c) return b;
+  const set = { ...c.itemEdits.set };
+  delete set[key];
+  const removed = stored && !c.itemEdits.removed.includes(key) ? [...c.itemEdits.removed, key] : c.itemEdits.removed;
+  return { ...b, caches: { ...b.caches, [cacheId]: { ...c, itemEdits: { set, removed } } } };
+}
+
+/** Drops this session's unsaved change to one item (a set value or a pending removal). */
+export function revertCacheItem(b: BoardState, cacheId: Id, key: string): BoardState {
+  const c = b.caches[cacheId];
+  if (!c) return b;
+  const set = { ...c.itemEdits.set };
+  delete set[key];
+  return { ...b, caches: { ...b.caches, [cacheId]: { ...c, itemEdits: { set, removed: c.itemEdits.removed.filter((k) => k !== key) } } } };
 }
 
 export function addWorkflow(b: BoardState, at: Point, id: Id): BoardState {

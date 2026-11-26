@@ -3,10 +3,22 @@ import { deepEqual, reachOf, type BoardState } from './board';
 import { board } from './boardFixtures';
 import {
   addCache, addEntry, addStep, addWire, addWorkflow, deleteCaches, deleteSteps, linkCache, moveItems,
-  removeEntries, removeWires, setCacheField, setSlotSchema, setEntryCron, setStepField, setWorkflowField, unlinkCaches,
+  removeCacheItem, removeEntries, removeWires, setCacheField, setCacheItem, setSlotSchema, setEntryCron, setStepField, setWorkflowField, unlinkCaches,
 } from './edits';
 
 describe('edits', () => {
+  it('setCacheItem refuses a key with a colon, an empty key and an over-long value', () => {
+    expect(setCacheItem(board(), 'c1', 'a:b', 'v')).toEqual({ refused: "Key must not contain ':'" });
+    expect(setCacheItem(board(), 'c1', '', 'v')).toEqual({ refused: 'Key is empty' });
+    expect('refused' in setCacheItem(board(), 'c1', 'k', 'x'.repeat(1_048_577))).toBe(true);
+  });
+  it('setCacheItem un-removes the key; removeCacheItem of a stored key leaves set', () => {
+    const b = removeCacheItem(board(), 'c1', 'k', true);
+    expect(b.caches.c1!.itemEdits).toEqual({ set: {}, removed: ['k'] });
+    const s = setCacheItem(b, 'c1', 'k', 'v') as { state: BoardState };
+    expect(s.state.caches.c1!.itemEdits).toEqual({ set: { k: 'v' }, removed: [] });
+    expect(removeCacheItem(s.state, 'c1', 'k', true).caches.c1!.itemEdits).toEqual({ set: {}, removed: ['k'] });
+  });
   it('moveItems moves a schema and a processor', () => {
     const b = board();
     const withS: BoardState = { ...b, schemas: { s1: { id: 's1', name: 's', version: '1', description: null, definition: '{}', audit: b.processors.p1!.audit, at: null, updatedAt: null } } };

@@ -2,16 +2,17 @@ import type { CacheCreateDto, CacheUpdateDto, ProcessorUpdateDto, SchemaCreateDt
 import type { Id } from '../model/graph';
 import type { AssignmentRow, BoardState, CacheRow, ProcessorRow, SchemaRow, StepRow, WorkflowRow } from './board';
 import { deepEqual, reachOf } from './board';
-import { itemsFromText } from '../api/cacheItems';
 
-export type Table = 'workflows' | 'steps' | 'caches' | 'assignments' | 'processors' | 'schemas';
-export interface ModelChange { op: 'create' | 'update' | 'delete'; table: Table; id: Id; row?: object; updatedAt?: string }
+export type Table = 'workflows' | 'steps' | 'caches' | 'assignments' | 'processors' | 'schemas' | 'cache_items';
+export interface ModelChange { op: 'create' | 'update' | 'delete' | 'append' | 'remove'; table: Table; id: Id; row?: object; updatedAt?: string }
 
 type Rows = Record<Id, { updatedAt: string | null }>;
 interface Diff { created: Id[]; updated: Id[]; deleted: Id[] }
 
-const TABLES: readonly Table[] = ['workflows', 'steps', 'caches', 'assignments', 'processors', 'schemas'];
-const KEY: Record<Table, string> = {
+/** The tables that have rows on the board (cache_items only appears as changes). */
+export type BoardTable = Exclude<Table, 'cache_items'>;
+const TABLES: readonly BoardTable[] = ['workflows', 'steps', 'caches', 'assignments', 'processors', 'schemas'];
+const KEY: Record<BoardTable, string> = {
   workflows: 'workflow', steps: 'step', caches: 'cache', assignments: 'assignment', processors: 'processor', schemas: 'schema',
 };
 
@@ -19,11 +20,15 @@ const trimCrons = (crons: Record<string, string>) => Object.fromEntries(Object.e
 /** The row without its stamp, and with entry crons trimmed: a typed trailing space is no change. */
 const minusStamp = (r: object) => {
   const c = (r as { entryCrons?: Record<string, string> }).entryCrons;
-  return { ...r, updatedAt: undefined, ...(c ? { entryCrons: trimCrons(c) } : {}) };
+  // item edits are saved as their own changes, so they are no field difference
+  const { itemEdits: _items, ...rest } = r as { itemEdits?: unknown };
+  return { ...rest, updatedAt: undefined, ...(c ? { entryCrons: trimCrons(c) } : {}) };
 };
 
+const hasItemEdits = (c: CacheRow) => Object.keys(c.itemEdits.set).length > 0 || c.itemEdits.removed.length > 0;
+
 /** Created: unstamped and not in base. Updated: in cur and (absent from base, or different). Deleted: in base, gone from cur. */
-function diffTable(table: Table, base: BoardState, cur: BoardState): Diff {
+function diffTable(table: BoardTable, base: BoardState, cur: BoardState): Diff {
   const b = base[table] as Rows;
   const c = cur[table] as Rows;
   const out: Diff = { created: [], updated: [], deleted: [] };
@@ -49,16 +54,8 @@ const stepBody = (s: StepRow): StepCreateDto & StepUpdateDto => ({
   name: s.name, version: s.version, description: s.description, processorId: s.processorId as string,
   nextStepIds: [...s.nextStepIds], entryCondition: s.entryCondition as StepCreateDto['entryCondition'], ...loc(s.at),
 });
-/** A cache's items as pairs; text that cannot be converted names its cache (Save reports it and sends nothing). */
-function cacheItems(c: CacheRow) {
-  try {
-    return itemsFromText(c.items);
-  } catch (e) {
-    throw new Error(`cache ${c.name}: items: ${(e as Error).message}`);
-  }
-}
 const cacheBody = (c: CacheRow): CacheCreateDto & CacheUpdateDto => ({
-  name: c.name, version: c.version, description: c.description, root: c.root, items: cacheItems(c), ...loc(c.at),
+  name: c.name, version: c.version, description: c.description, root: c.root, ...loc(c.at),
 });
 const assignmentBody = (a: AssignmentRow) => ({
   name: a.name, version: a.version, description: a.description, stepId: a.stepId, payload: a.payload,
@@ -71,20 +68,20 @@ const schemaBody = (s: SchemaRow): SchemaCreateDto => ({
   name: s.name, version: s.version, description: s.description, definition: s.definition ?? null, ...loc(s.at),
 });
 
-const BODY: Record<Table, (r: never) => object> = {
+const BODY: Record<BoardTable, (r: never) => object> = {
   workflows: workflowBody as (r: never) => object, steps: stepBody as (r: never) => object, caches: cacheBody as (r: never) => object,
   assignments: assignmentBody as (r: never) => object, processors: processorBody as (r: never) => object, schemas: schemaBody as (r: never) => object,
 };
 
 export function boardChanges(base: BoardState, cur: BoardState): ModelChange[] {
-  const d = Object.fromEntries(TABLES.map((t) => [t, diffTable(t, base, cur)])) as Record<Table, Diff>;
-  const body = (t: Table, id: Id) => BODY[t](cur[t][id] as never);
-  const create = (t: Table, id: Id, row?: object): ModelChange => ({ op: 'create', table: t, id, row: row ?? body(t, id) });
-  const update = (t: Table, id: Id): ModelChange => {
+  const d = Object.fromEntries(TABLES.map((t) => [t, diffTable(t, base, cur)])) as Record<BoardTable, Diff>;
+  const body = (t: BoardTable, id: Id) => BODY[t](cur[t][id] as never);
+  const create = (t: BoardTable, id: Id, row?: object): ModelChange => ({ op: 'create', table: t, id, row: row ?? body(t, id) });
+  const update = (t: BoardTable, id: Id): ModelChange => {
     const stamp = (cur[t][id] as { updatedAt: string | null }).updatedAt;
     return { op: 'update', table: t, id, row: body(t, id), ...(stamp ? { updatedAt: stamp } : {}) };
   };
-  const remove = (t: Table, id: Id): ModelChange => {
+  const remove = (t: BoardTable, id: Id): ModelChange => {
     const stamp = (base[t][id] as { updatedAt: string | null }).updatedAt;
     return { op: 'delete', table: t, id, ...(stamp ? { updatedAt: stamp } : {}) };
   };
@@ -116,6 +113,13 @@ export function boardChanges(base: BoardState, cur: BoardState): ModelChange[] {
     if (was.nextStepIds.length) out.push({ op: 'update', table: 'steps', id, row: { ...stepBody(was), nextStepIds: [] }, ...(was.updatedAt ? { updatedAt: was.updatedAt } : {}) });
   }
   d.caches.updated.forEach((id) => out.push(update('caches', id)));
+  // item edits: after the cache exists (a new cache goes by its client id, which BaseApi remaps), before any delete
+  for (const c of Object.values(cur.caches)) {
+    const { set, removed } = c.itemEdits;
+    const pairs = Object.entries(set).map(([key, value]) => ({ key, value }));
+    if (pairs.length) out.push({ op: 'append', table: 'cache_items', id: c.id, row: { cacheId: c.id, items: pairs } });
+    if (removed.length) out.push({ op: 'remove', table: 'cache_items', id: c.id, row: { cacheId: c.id, keys: [...removed] } });
+  }
   d.assignments.updated.forEach((id) => out.push(update('assignments', id)));
   d.workflows.updated.forEach((id) => out.push(update('workflows', id)));
 
@@ -135,6 +139,7 @@ export function changedKeys(base: BoardState, cur: BoardState): Set<string> {
     const d = diffTable(t, base, cur);
     for (const id of [...d.created, ...d.updated, ...d.deleted]) keys.add(`${KEY[t]}:${id}`);
   }
+  for (const c of Object.values(cur.caches)) if (hasItemEdits(c)) keys.add(`cache:${c.id}`);
   return keys;
 }
 
@@ -172,7 +177,8 @@ export function affectedWorkflows(base: BoardState, cur: BoardState): Id[] {
   const touchedSteps = new Set([...ds.created, ...ds.updated, ...ds.deleted]);
 
   const dc = diffTable('caches', base, cur);
-  const touchedCaches = new Set([...dc.created, ...dc.updated, ...dc.deleted]);
+  const touchedCaches = new Set([...dc.created, ...dc.updated, ...dc.deleted,
+    ...Object.values(cur.caches).filter(hasItemEdits).map((c) => c.id)]);
   const touchedProcessors = new Set(diffTable('processors', base, cur).updated);
   const dsc = diffTable('schemas', base, cur);
   const touchedSchemas = new Set([...dsc.created, ...dsc.updated, ...dsc.deleted]);
