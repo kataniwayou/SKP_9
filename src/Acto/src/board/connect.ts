@@ -3,12 +3,15 @@ import type { BoardState } from '../design/board';
 
 export type ConnectionKind = 'wire' | 'entry' | 'cacheLink';
 
-/** Node ids: `wf:<id>`, `st:<id>`, `ca:<id>`. */
-export const nodeId = (kind: 'workflow' | 'step' | 'cache', id: string) => `${kind === 'workflow' ? 'wf' : kind === 'step' ? 'st' : 'ca'}:${id}`;
-export function itemOfNode(node: string): { kind: 'workflow' | 'step' | 'cache'; id: string } | null {
+type NodeKind = 'workflow' | 'step' | 'cache' | 'schema' | 'processor';
+const TAG: Record<NodeKind, string> = { workflow: 'wf', step: 'st', cache: 'ca', schema: 'sc', processor: 'pr' };
+const KIND_OF = new Map<string, NodeKind>(Object.entries(TAG).map(([k, t]) => [t, k as NodeKind]));
+
+/** Node ids: `wf:<id>`, `st:<id>`, `ca:<id>`, and in the Schemas mode `sc:<id>` (a schema card) and `pr:<id>` (a processor card). */
+export const nodeId = (kind: NodeKind, id: string) => `${TAG[kind]}:${id}`;
+export function itemOfNode(node: string): { kind: NodeKind; id: string } | null {
   const i = node.indexOf(':');
-  const tag = node.slice(0, i);
-  const kind = tag === 'wf' ? 'workflow' : tag === 'st' ? 'step' : tag === 'ca' ? 'cache' : null;
+  const kind = i < 0 ? undefined : KIND_OF.get(node.slice(0, i));
   return kind ? { kind, id: node.slice(i + 1) } : null;
 }
 

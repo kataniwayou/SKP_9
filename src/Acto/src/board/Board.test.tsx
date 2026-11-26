@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Node } from '@xyflow/react';
 import { describe, expect, it, vi } from 'vitest';
-import { board, scheduledBoard } from '../design/boardFixtures';
+import { board, scheduledBoard, schemaBoard } from '../design/boardFixtures';
 import { Board, type BoardProps } from './Board';
 import type { Pick } from './selection';
 import type { BoardView } from './toFlow';
@@ -70,6 +70,34 @@ describe('Board', () => {
     show({ state: scheduledBoard(), view: view({ live: (id) => (id === 'daily' ? 'running' : 'stopped') }) });
     await screen.findByText('fetch-orders');
     expect(document.querySelector('.wire.running')).not.toBeNull();
+  });
+
+  describe('schemas mode', () => {
+    it('draws schema and processor cards with their tags, and the dotted reference wires with their slot letters', async () => {
+      show({ state: schemaBoard(), view: view({ schemas: true }) });
+      const sx = (await screen.findByText('orders-in')).closest('.react-flow__node') as HTMLElement;
+      expect(sx).toHaveClass('react-flow__node-schema');
+      expect(sx.querySelector('.schema-card')).toHaveTextContent(/SCHEMA/);
+      expect(sx.querySelector('.schema-tag')).toBeNull();
+      const tag = (name: string) => (screen.getByText(name).closest('.schema-card') as HTMLElement).querySelector('.schema-tag');
+      expect(tag('held-out')).toHaveTextContent('held');
+      expect(tag('old-copy')).toHaveTextContent('orphan');
+      const proc = screen.getByText('idle-proc').closest('.proc-card') as HTMLElement;
+      expect(proc).toHaveTextContent('PROCESSOR');
+      expect(proc).toHaveTextContent('no step');
+      expect(proc).toHaveTextContent('2.0.0 · inst-7');
+      expect(document.querySelectorAll('.schema-ref')).toHaveLength(7);
+      expect([...document.querySelectorAll('.schema-ref .schema-ref-slot')].map((t) => t.textContent).sort().join('')).toBe('CCCIIIO');
+    });
+    it('hovering a schema card thickens its wires', async () => {
+      show({ state: schemaBoard(), view: view({ schemas: true }) });
+      const sc = (await screen.findByText('orders-cfg')).closest('.react-flow__node') as HTMLElement;
+      expect(document.querySelectorAll('.schema-ref.lit')).toHaveLength(0);
+      fireEvent.mouseEnter(sc);
+      await waitFor(() => expect(document.querySelectorAll('.schema-ref.lit')).toHaveLength(3));
+      fireEvent.mouseLeave(sc);
+      await waitFor(() => expect(document.querySelectorAll('.schema-ref.lit')).toHaveLength(0));
+    });
   });
 
   describe('the React Flow look', () => {
@@ -294,6 +322,19 @@ describe('Board', () => {
       const g = { ...node('ghost:step:gone', Number(m[1]), Number(m[2])), className: 'ghost' };
       act(() => seen.props!.onNodeDragStop!({}, g, [g]));
       expect((onMoveGhosts.mock.calls[0]![0] as { at: { x: number; y: number } }[])[0]!.at).not.toEqual({ x: Number(m[1]), y: Number(m[2]) });
+    });
+    it('dropping a schema card on a step pushes it aside, and commits it as a schema move', async () => {
+      const onMove = vi.fn();
+      show({ onMove, state: schemaBoard(), view: view({ schemas: true }) });
+      await screen.findByText('orders-in');
+      const expand = document.querySelector('.react-flow__node-step[data-id="st:expand"]') as HTMLElement;
+      const at = /translate\(([-\d.]+)px, *([-\d.]+)px\)/.exec(expand.style.transform)!;
+      const [ex, ey] = [Number(at[1]), Number(at[2])];
+      const card = { ...node('sc:so', ex, ey), measured: { width: 190, height: 52 } };
+      act(() => seen.props!.onNodeDragStop!({}, card, [card]));
+      const [[moved]] = onMove.mock.calls as [[{ ref: unknown; at: { x: number; y: number } }[]]];
+      expect(moved![0]!.ref).toEqual({ kind: 'schema', id: 'so' });
+      expect(moved![0]!.at).not.toEqual({ x: ex, y: ey });
     });
     it('Esc during a drag puts the node back and the drag stop commits nothing', async () => {
       const onMove = vi.fn();

@@ -31,6 +31,8 @@ export function occupied(b: BoardState, ghosts: readonly GhostItem[], except: Re
     for (const id of steplessProcessors(b)) add(`processor:${id}`, 'processor', b.processors[id]!.at);
   }
   for (const g of ghosts) {
+    // a schema ghost is drawn only in the Schemas mode, and only while its schema is gone
+    if (g.kind === 'schema') { if (withSchemas && !b.schemas[g.row.id]) add(`ghost:${g.key}`, 'schema', g.row.at); continue; }
     if (g.kind !== 'step' && g.kind !== 'cache' && g.kind !== 'workflow') continue;
     // a ghost whose item is back on the board is not drawn
     const live = g.kind === 'step' ? b.steps[g.row.id] : g.kind === 'cache' ? b.caches[g.row.id] : b.workflows[g.row.id];

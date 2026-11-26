@@ -229,3 +229,43 @@
 .under-mark { position: absolute; z-index: 4000; border: 2px dashed var(--warn); border-radius: 10px; background: color-mix(in srgb, var(--warn) 14%, transparent); pointer-events: none; }
 .under-mark span { position: absolute; left: 8px; top: -11px; font: 600 10.5px var(--mono); color: var(--on-colour); background: var(--warn); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .react-flow__node.lifted > *, .react-flow__node.settling { transition: none; } }
+
+/* Schemas mode [spec 2026-11-26, option B]: schema cards (light blue), processor cards no step uses (React Flow's dark node),
+   3px corners; a small mono label row with the tag at its right, then the name */
+.schema-card, .proc-card { position: relative; width: 100%; height: 100%; border-radius: 3px; padding: 6px 9px 7px; cursor: grab; font-family: var(--sans);
+  box-shadow: var(--sh-node); display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; }
+.schema-card { background: var(--schema-bg); border: 1px solid var(--schema-line); color: var(--schema-ink); }
+.proc-card { background: var(--proc-bg); border: 1px solid var(--proc-line); color: var(--proc-ink); }
+.card-k { display: flex; justify-content: space-between; align-items: center; gap: 6px; font: 500 9.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.schema-card .card-k > span:first-child { opacity: .75; }
+.proc-card .card-k { color: var(--proc-muted); }
+.card-t { display: flex; align-items: baseline; gap: 4px; min-width: 0; }
+.card-nm { font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.card-t small { font: 11px var(--mono); opacity: .8; flex: none; }
+.card-s { font: 11px var(--mono); color: var(--proc-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.schema-tag { font: 500 9.5px var(--mono); letter-spacing: .04em; text-transform: none; border-radius: 999px; padding: 0 6px; white-space: nowrap; }
+.schema-tag.orphan { background: var(--danger); color: var(--on-colour); }
+.schema-tag.held { background: var(--held-bg); color: var(--held-ink); }
+.proc-card .schema-tag { background: color-mix(in srgb, var(--proc-ink) 12%, transparent); color: var(--proc-ink); }
+.schema-card.sel, .proc-card.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--sh-node-hover); }
+.schema-card .pick-no, .proc-card .pick-no { right: -9px; top: -9px; }
+.react-flow__node-schema.dragging .schema-card, .react-flow__node-processor.dragging .proc-card { cursor: grabbing; }
+.react-flow__node.lifted .schema-card, .react-flow__node.lifted .proc-card { box-shadow: var(--sh-lift); }
+/* reference handles: never a connection; a step's are hidden, a card's are small grey dots */
+.board .react-flow__handle.ref-handle { width: 7px; height: 7px; min-width: 0; min-height: 0; border-radius: 50%; pointer-events: none; cursor: default; }
+.board .react-flow__handle.ref-handle::after { display: none; }
+.board .react-flow__handle.ref-handle.hidden { visibility: hidden; }
+.schema-card .react-flow__handle.ref-handle { background: var(--schema-line); border: 1px solid var(--schema-bg); }
+.proc-card .react-flow__handle.ref-handle { background: var(--proc-muted); border: 1px solid var(--proc-bg); }
+/* a schema ghost: the existing ghost look */
+.ghost .schema-card, .schema-card.ghost { border: 1px dashed var(--ghost-line); box-shadow: none; background: var(--b-node); color: var(--b-muted); }
+.ghost .schema-card .card-nm, .schema-card.ghost .card-nm { text-decoration: line-through; }
+.ghost .schema-card.sel, .schema-card.ghost.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--sh-node-hover); }
+.ghost .schema-card .react-flow__handle.ref-handle { visibility: hidden; }
+
+/* reference wires: dotted, round caps, a dot at the schema's end, the slot letter in a pill midway; never picked */
+.schema-ref { pointer-events: none; }
+.schema-ref-line { stroke: var(--schema-ref); }
+.schema-ref-end { fill: var(--schema-ref); }
+.schema-ref-pill { fill: var(--card); stroke: var(--schema-ref); }
+.schema-ref-slot { font: 600 9.5px var(--mono); fill: var(--schema-ref); }

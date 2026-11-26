@@ -1,12 +1,13 @@
-import { pickKey } from './picks';
 import { Position, type Edge, type Node } from '@xyflow/react';
 import type { LiveStatus } from '../api/liveStatus';
-import type { BoardState } from '../design/board';
+import type { BoardState, Slot } from '../design/board';
+import { schemaRefs, schemaStates, steplessProcessors } from '../design/schemaStates';
 import { reachableStepIds } from '../model/reachability';
 import type { GhostItem } from '../design/ghosts';
 import { assignmentOf } from '../design/payloads';
 import type { Id } from '../model/graph';
 import { payloadKeyCount } from '../model/assignments';
+import { PROCESSOR_H, PROCESSOR_W, SCHEMA_H, SCHEMA_W } from '../model/geometry';
 import { CACHE_H, CACHE_W, STEP_H, STEP_W, TRIANGLE_H, TRIANGLE_W, TRI_SHAPE_H, TRI_SHAPE_W } from './geometry';
 import { nodeId } from './connect';
 import { hueOf } from './hues';
@@ -27,6 +28,10 @@ export interface BoardView {
   unsaved?: (key: string) => boolean;
   /** Deleted items seen earlier this session: drawn faded at their last place, draggable, not connectable. */
   ghosts?: GhostItem[];
+  /** The Schemas mode: schema cards, processor cards no step uses and the reference wires join the board. Off (or absent) is today's board. */
+  schemas?: boolean;
+  /** The schema card under the pointer: its reference wires are drawn thicker. */
+  hotSchema?: Id | null;
 }
 
 export interface PickInfo { no: number; solo: boolean }
@@ -37,7 +42,11 @@ export const edgeIdOf = {
   wire: (from: Id, to: Id) => `wire:${from}:${to}`,
   entry: (wf: Id, step: Id) => `entry:${wf}:${step}`,
   cacheLink: (wf: Id, cache: Id) => `cache:${wf}:${cache}`,
+  schemaRef: (ownerKind: 'step' | 'processor', ownerId: Id, slot: Slot, schemaId: Id) => `sr:${ownerKind}:${ownerId}:${slot}:${schemaId}`,
 };
+
+/** A slot's letter: on a reference wire's pill and in its source handle's id (`ref-I`, `ref-O`, `ref-C`). */
+export const SLOT_LETTER: Readonly<Record<Slot, 'I' | 'O' | 'C'>> = { input: 'I', output: 'O', config: 'C' };
 
 /** The React Flow node or edge id of a ghost item key. */
 const ghostId = (key: string) => `ghost:${key}`;
@@ -49,7 +58,7 @@ export function flowIdOf(p: Pick): string {
     case 'wire': return edgeIdOf.wire(p.from, p.to);
     case 'entry': return edgeIdOf.entry(p.workflowId, p.stepId);
     case 'cacheLink': return edgeIdOf.cacheLink(p.workflowId, p.cacheId);
-    case 'schema': case 'processor': return pickKey(p); // the card nodes of Task 6 take this id
+    case 'schema': case 'processor': return nodeId(p.kind, p.id);
     case 'ghost': return ghostId(p.key);
   }
 }
@@ -63,6 +72,11 @@ const TRIANGLE_HANDLES = [
 ];
 const STEP_HANDLES = [handle('target', 'in', Position.Left, 0, STEP_H / 2), handle('source', 'out', Position.Right, STEP_W, STEP_H / 2)];
 const CACHE_HANDLES = [handle('target', 'in', Position.Top, CACHE_W / 2, 0)];
+/** The three reference sources along a block's bottom, at 30 %, 50 % and 70 % of its width: I, O, C. */
+const refSources = (w: number, h: number) => (['I', 'O', 'C'] as const).map((l, i) => handle('source', `ref-${l}`, Position.Bottom, w * (0.3 + 0.2 * i), h));
+const STEP_REF_HANDLES = [...STEP_HANDLES, ...refSources(STEP_W, STEP_H)];
+const SCHEMA_HANDLES = [handle('target', 'ref', Position.Top, SCHEMA_W / 2, 0)];
+const PROCESSOR_HANDLES = refSources(PROCESSOR_W, PROCESSOR_H);
 
 const GHOST = { draggable: true, connectable: false, zIndex: -1, className: 'ghost' } as const;
 
@@ -94,6 +108,7 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
   const unsaved = (key: string) => view.unsaved?.(key) ?? false;
   const pickOf = (id: string): PickInfo | undefined => { const no = order.get(id); return no === undefined ? undefined : { no, solo: view.picks.length === 1 }; };
   const running = (wf: Id) => view.live(wf) === 'running';
+  const schemasOn = view.schemas === true;
 
   // a step runs, and its wires flow, while a running workflow reaches it through what actually fires [user, 2026-11-25]: an entry
   // arrow fires only with a cron (none: the orchestrator schedules nothing for it) into a step that is not Never (the fire skips a
@@ -133,10 +148,11 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
     }
     nodes.push({
       id, type: 'step', position: { ...(s.at ?? { x: 0, y: 0 }) }, width: STEP_W, height: STEP_H, style: { width: STEP_W, height: STEP_H },
-      handles: STEP_HANDLES, selected: pick !== undefined,
+      handles: schemasOn ? STEP_REF_HANDLES : STEP_HANDLES, selected: pick !== undefined,
       data: {
         stepId: s.id, name: s.name, processor: s.processorId ? b.processors[s.processorId]?.name ?? null : null, processorId: s.processorId,
         condition: s.entryCondition, running: stepRuns(s.id), chips, failed: failed(`step:${s.id}`), unsaved: unsaved(`step:${s.id}`), ...(pick ? { pick } : {}),
+        ...(schemasOn ? { refs: true } : {}),
       },
     });
   }
@@ -148,6 +164,28 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
       handles: CACHE_HANDLES, selected: pick !== undefined,
       data: { cacheId: c.id, name: c.name, failed: failed(`cache:${c.id}`), unsaved: unsaved(`cache:${c.id}`), ...(pick ? { pick } : {}) },
     });
+  }
+  if (schemasOn) {
+    const states = schemaStates(b);
+    for (const row of Object.values(b.schemas)) {
+      const id = nodeId('schema', row.id);
+      const pick = pickOf(id);
+      nodes.push({
+        id, type: 'schema', position: { ...(row.at ?? { x: 0, y: 0 }) }, width: SCHEMA_W, height: SCHEMA_H, style: { width: SCHEMA_W, height: SCHEMA_H },
+        handles: SCHEMA_HANDLES, selected: pick !== undefined,
+        data: { row, state: states[row.id] ?? 'orphan', ...(pick ? { pick } : {}) },
+      });
+    }
+    for (const pid of steplessProcessors(b)) {
+      const row = b.processors[pid]!;
+      const id = nodeId('processor', pid);
+      const pick = pickOf(id);
+      nodes.push({
+        id, type: 'processor', position: { ...(row.at ?? { x: 0, y: 0 }) }, width: PROCESSOR_W, height: PROCESSOR_H, style: { width: PROCESSOR_W, height: PROCESSOR_H },
+        handles: PROCESSOR_HANDLES, selected: pick !== undefined,
+        data: { row, ...(pick ? { pick } : {}) },
+      });
+    }
   }
 
   const edges: Edge[] = [];
@@ -194,11 +232,23 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
     }
   }
 
+  if (schemasOn) {
+    // drawn from the data, never by hand: not pickable, not deletable [spec rule 4]
+    for (const r of schemaRefs(b)) {
+      edges.push({
+        id: edgeIdOf.schemaRef(r.owner.kind, r.owner.id, r.slot, r.schemaId), type: 'schemaRef',
+        source: nodeId(r.owner.kind, r.owner.id), sourceHandle: `ref-${SLOT_LETTER[r.slot]}`, target: nodeId('schema', r.schemaId), targetHandle: 'ref',
+        selectable: false, deletable: false, data: { slot: r.slot, lit: view.hotSchema === r.schemaId },
+      });
+    }
+  }
+
   // ghosts: deleted items at their last place; a ghost edge is drawn only when both ends are on the board (real or ghost)
   const ghosts = (view.ghosts ?? []).filter((g) => {
     if (g.kind === 'step') return !b.steps[g.row.id];
     if (g.kind === 'cache') return !b.caches[g.row.id];
     if (g.kind === 'workflow') return !b.workflows[g.row.id];
+    if (g.kind === 'schema') return schemasOn && !b.schemas[g.row.id]; // a schema ghost shows only in the Schemas mode
     return true;
   });
   const ghostNodes = new Set(ghosts.filter((g) => g.kind === 'step' || g.kind === 'cache' || g.kind === 'workflow').map((g) => g.key));
@@ -232,6 +282,11 @@ export function toFlow(b: BoardState, view: BoardView): { nodes: Node[]; edges: 
         id, type: 'workflow', position: { ...(g.row.at ?? { x: 0, y: 0 }) }, width: TRIANGLE_W, height: TRIANGLE_H, style: { width: TRIANGLE_W, height: TRIANGLE_H },
         handles: TRIANGLE_HANDLES, ...ghostBase(g.key),
         data: { workflowId: g.row.id, name: g.row.name, status: 'stopped', hue: null, problems: 0, failed: false, unsaved: false, ...extra },
+      });
+    } else if (g.kind === 'schema') {
+      nodes.push({
+        id, type: 'schema', position: { ...(g.row.at ?? { x: 0, y: 0 }) }, width: SCHEMA_W, height: SCHEMA_H, style: { width: SCHEMA_W, height: SCHEMA_H },
+        handles: SCHEMA_HANDLES, ...ghostBase(g.key), data: { row: g.row, state: 'orphan', ...extra },
       });
     }
   }

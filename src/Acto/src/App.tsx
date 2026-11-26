@@ -6,13 +6,13 @@ import type { ConnectionKind } from './board/connect';
 import { loadBoard } from './board/loadBoard';
 import type { ToolbarActions } from './board/nodes/boardContext';
 import { deletePicks, deleteRefusal, livePicks } from './board/picks';
-import { placeMissing } from './board/placement';
+import { placeMissing, settleSchemas } from './board/placement';
 import { nudgeBlocked, occupied, rectAt } from './board/occupied';
 import { pushAside } from './board/overlap';
 import { selectPick, synced, withPicks, type Pick, type SelectionState } from './board/selection';
 import { withBox } from './board/boxSelect';
 import { barOf } from './board/selectionBar';
-import { schemaStates } from './design/schemaStates';
+import { orphanCount, schemaStates, steplessProcessors } from './design/schemaStates';
 import { SelectionBar } from './board/SelectionBarView';
 import { toolbarFor } from './board/Toolbar';
 import type { BoardView } from './board/toFlow';
@@ -43,6 +43,7 @@ import { createOutputStore, OutputProvider, type OutputStore } from './output/ou
 import { readView, writeView, type SavedView } from './session/view';
 import { DiscardButton, SaveButton, TakeStoredButton } from './shell/SaveButton';
 import { Shell } from './shell/Shell';
+import { readSchemasMode, writeSchemasMode } from './shell/schemasMode';
 import { applyTheme, saveTheme, savedTheme, type Theme } from './shell/theme';
 import { dropOnBoard, parseToolboxDrag } from './toolbox/drag';
 import { ToolboxPanel } from './toolbox/ToolboxPanel';
@@ -80,6 +81,14 @@ function trimmed(s: SelectionState, b: BoardState, ghosts: readonly GhostItem[])
   return picks.length === s.picks.length && workflows.length === s.workflows.length ? s : { workflows, picks };
 }
 
+/** Whether a pick belongs to the Schemas mode: a schema or processor card, or a schema's ghost. */
+const schemaPick = (p: Pick) => p.kind === 'schema' || p.kind === 'processor' || (p.kind === 'ghost' && p.key.startsWith('schema:'));
+
+/** Whether a schema card or a card of a processor no step uses has no place yet (Discard, say, brought back BaseAPI's nulls). */
+function unplacedCards(b: BoardState): boolean {
+  return Object.values(b.schemas).some((s) => !s.at) || steplessProcessors(b).some((id) => !b.processors[id]!.at);
+}
+
 export function App(props: AppProps) {
   const [api] = useState<StudioApi>(() => props.api ?? createApi());
   const [live] = useState<LiveStore>(() => props.live ?? createLiveStore({ api, hub: signalRHub() }));
@@ -111,6 +120,10 @@ export function App(props: AppProps) {
   const chatEntries = useSyncExternalStore(chat.subscribe, () => chat.getState().entries);
 
   const [loaded, setLoaded] = useState(false);
+  // the Schemas mode [spec rule 1]: remembered per browser; a ref for the key handlers
+  const [schemasOn, setSchemasOn] = useState(() => readSchemasMode(storage));
+  const schemasRef = useRef(schemasOn);
+  schemasRef.current = schemasOn;
   const [sel, setSel] = useState<SelectionState>(() => saved?.selection ?? NONE);
   const selRef = useRef(sel);
   selRef.current = sel;
@@ -163,6 +176,31 @@ export function App(props: AppProps) {
     const s = trimmed(selRef.current, state, ghosts);
     if (s !== selRef.current) { selRef.current = s; setSel(s); persist(s); }
   }, [loaded, state, ghosts, persist]);
+
+  /**
+   * The Schemas toggle [spec rules 9, 10]. On: the cards with no place, or lying over a block, are placed or pushed aside
+   * first, as a layout change (saved with the next Save, no undo step). Off: the cards and wires go, and so do their picks;
+   * the draft, the ghosts and unsaved moves stay.
+   */
+  const toggleSchemas = useCallback(() => {
+    const on = !schemasRef.current;
+    if (on) store.place((b) => settleSchemas(b, ghostStore.ghosts()));
+    else {
+      const picks = selRef.current.picks.filter((p) => !schemaPick(p));
+      if (picks.length !== selRef.current.picks.length) setSelection(withPicks(selRef.current, picks));
+    }
+    schemasRef.current = on;
+    setSchemasOn(on);
+    writeSchemasMode(storage, on);
+  }, [store, ghostStore, storage, setSelection]);
+  // the mode left on: the board as loaded is settled once; later, a card that lost its place (Discard) is given one
+  const settledAtLoad = useRef(false);
+  useEffect(() => {
+    if (!loaded || !schemasOn) return;
+    if (settledAtLoad.current && !unplacedCards(state)) return;
+    settledAtLoad.current = true;
+    store.place((b) => settleSchemas(b, ghostStore.ghosts()));
+  }, [loaded, schemasOn, state, store, ghostStore]);
 
   const onInspectorPicks = useCallback((picks: Pick[]) => setSelection(withPicks(selRef.current, picks)), [setSelection]);
   const onPick = useCallback((p: Pick | null, additive: boolean) => setSelection(selectPick(selRef.current, p, additive)), [setSelection]);
@@ -218,7 +256,8 @@ export function App(props: AppProps) {
       const d = nudgeKey(e);
       if (!d) return;
       const refs: ItemRef[] = selRef.current.picks.flatMap((p) =>
-        p.kind === 'workflow' || p.kind === 'step' || p.kind === 'cache' ? [{ kind: p.kind, id: p.id }] : []);
+        p.kind === 'workflow' || p.kind === 'step' || p.kind === 'cache' || (schemasRef.current && (p.kind === 'schema' || p.kind === 'processor'))
+          ? [{ kind: p.kind, id: p.id }] : []);
       if (refs.length === 0) return;
       e.preventDefault();
       if (!e.repeat) nudgeSeq.current++;
@@ -226,11 +265,12 @@ export function App(props: AppProps) {
       if (e.repeat && store.saving()) return;
       const b0 = store.state();
       const moves = refs.flatMap((ref) => {
-        const row = (ref.kind === 'step' ? b0.steps : ref.kind === 'cache' ? b0.caches : b0.workflows)[ref.id];
+        const row = (ref.kind === 'step' ? b0.steps : ref.kind === 'cache' ? b0.caches : ref.kind === 'schema' ? b0.schemas
+          : ref.kind === 'processor' ? b0.processors : b0.workflows)[ref.id];
         return row?.at ? [{ ref, at: { x: row.at.x + d.dx, y: row.at.y + d.dy } }] : [];
       });
       // a nudge stops against another item (a ghost included) rather than going over it [user, 2026-11-25]
-      const others = occupied(b0, ghostStore.ghosts(), new Set(refs.map((r) => `${r.kind}:${r.id}`)));
+      const others = occupied(b0, ghostStore.ghosts(), new Set(refs.map((r) => `${r.kind}:${r.id}`)), schemasRef.current);
       if (nudgeBlocked(moves.map((m) => rectAt(m.ref.kind, m.at)), others)) return;
       store.edit((b) => moveItems(b, moves), `nudge:${nudgeSeq.current}`);
     };
@@ -305,7 +345,7 @@ export function App(props: AppProps) {
       if (p.kind !== 'workflow' && p.kind !== 'step' && p.kind !== 'cache') return r0;
       const row = (p.kind === 'step' ? r0.state.steps : p.kind === 'cache' ? r0.state.caches : r0.state.workflows)[p.id];
       if (!row?.at) return r0;
-      const off = pushAside([rectAt(p.kind, row.at)], occupied(r0.state, ghostStore.ghosts(), new Set([`${p.kind}:${p.id}`])));
+      const off = pushAside([rectAt(p.kind, row.at)], occupied(r0.state, ghostStore.ghosts(), new Set([`${p.kind}:${p.id}`]), schemasRef.current));
       if (off.x === 0 && off.y === 0) return r0;
       return { ...r0, state: moveItems(r0.state, [{ ref: { kind: p.kind, id: p.id }, at: { x: row.at.x + off.x, y: row.at.y + off.y } }]) };
     })();
@@ -325,8 +365,9 @@ export function App(props: AppProps) {
     failed: (key) => store.failures().has(key),
     unsaved: (key) => marks.has(key),
     ghosts,
+    schemas: schemasOn,
   // tick: the problems and failures are read through the store, so a change of theirs is a new view
-  }), [sel, liveState, store, tick, marks, ghosts]);
+  }), [sel, liveState, store, tick, marks, ghosts, schemasOn]);
 
   const processors = useMemo(() => Object.values(state.processors).sort((a, b) => a.name.localeCompare(b.name)), [state.processors]);
   const stateNow = useCallback(() => store.state(), [store]);
@@ -357,6 +398,7 @@ export function App(props: AppProps) {
           <Shell
             storage={storage}
             marks={{ output: outputLines, chat: chatEntries }}
+            schemas={{ on: schemasOn, orphans: orphanCount(state), toggle: toggleSchemas }}
             inspectorNote={sel.picks.length > 1 ? `${sel.picks.length} selected`
               : sel.picks[0] ? (pickName(sel.picks[0], state, ghostStore) ?? '') : ''}
             toolbox={<ToolboxPanel processors={processors} />}

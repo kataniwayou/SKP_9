@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import type { StudioApi } from './api/client';
 import { boardApi, fakeApi } from './board/testApi';
+import { processorDto, schemaDto } from './api/fixtures';
 import { liveStub } from './test/liveStub';
 import { memoryStorage } from './test/memoryStorage';
 
@@ -403,6 +404,58 @@ describe('App', () => {
       fireEvent.click(card('expand'));
       fireEvent.keyDown(await inspector().findByDisplayValue('expand'), { key: 'v', ctrlKey: true });
       expect(steps()).toBe(3);
+    });
+  });
+
+  describe('schemas mode', () => {
+    // p1 (used by every step) takes sx as its input; sx's stored place lies right under fetch-orders (300, 0); sn is an orphan beside lonely (900..1110, 0)
+    const schemaApi = () => boardApi({
+      processors: [processorDto('p1', { name: 'proc', inputSchemaId: 'sx' })],
+      schemas: [schemaDto('sx', { boardX: 300, boardY: 0 } as object), schemaDto('sn', { boardX: 1120, boardY: 0 } as object)],
+    });
+    const schemasButton = () => screen.getByRole('button', { name: /^Schemas/ });
+    const xy = (id: string) => {
+      const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec((screen.getByTestId(`rf__node-${id}`) as HTMLElement).style.transform)!;
+      return { x: Number(m[1]), y: Number(m[2]) };
+    };
+    it('turning the mode on settles a schema hidden under a step and adds no undo step', async () => {
+      const storage = view();
+      renderApp(schemaApi(), { storage });
+      await loaded();
+      expect(screen.queryByTestId('rf__node-sc:sx')).toBeNull();
+      expect(schemasButton().querySelector('.schemas-n')).toHaveTextContent('1');
+      fireEvent.click(schemasButton());
+      expect(storage.getItem('acto.schemas')).toBe('1');
+      await screen.findByTestId('rf__node-sc:sx');
+      const at = xy('sc:sx');
+      // clear of fetch-orders (300, 0, 210 × 92)
+      expect(at.x >= 510 || at.x + 190 <= 300 || at.y >= 92 || at.y + 52 <= 0).toBe(true);
+      fireEvent.keyDown(document.body, { key: 'z', ctrlKey: true });
+      expect(xy('sc:sx')).toEqual(at);
+    });
+    it('turning it off drops schema and processor picks', async () => {
+      const storage = memoryStorage({ 'acto.view': JSON.stringify({ x: 0, y: 0, zoom: 1, selection: null }), 'acto.schemas': '1' });
+      renderApp(schemaApi(), { storage });
+      await loaded();
+      fireEvent.click(await screen.findByText('schema-sn'));
+      fireEvent.click(card('expand'), { ctrlKey: true });
+      expect(JSON.parse(storage.getItem('acto.view')!).selection.picks).toEqual([{ kind: 'schema', id: 'sn' }, { kind: 'step', id: 'expand' }]);
+      fireEvent.click(schemasButton());
+      expect(storage.getItem('acto.schemas')).toBe('0');
+      expect(screen.queryByTestId('rf__node-sc:sn')).toBeNull();
+      expect(JSON.parse(storage.getItem('acto.view')!).selection.picks).toEqual([{ kind: 'step', id: 'expand' }]);
+    });
+    it('a nudge of a schema into a step is refused', async () => {
+      const storage = memoryStorage({ 'acto.view': JSON.stringify({ x: 0, y: 0, zoom: 1, selection: null }), 'acto.schemas': '1' });
+      renderApp(schemaApi(), { storage });
+      await loaded();
+      fireEvent.click(await screen.findByText('schema-sn'));
+      expect(xy('sc:sn')).toEqual({ x: 1120, y: 0 });
+      fireEvent.keyDown(document.body, { key: 'ArrowLeft' });
+      await waitFor(() => expect(xy('sc:sn')).toEqual({ x: 1112, y: 0 }));
+      // 8 more would lie over lonely (900..1110): refused
+      fireEvent.keyDown(document.body, { key: 'ArrowLeft' });
+      expect(xy('sc:sn')).toEqual({ x: 1112, y: 0 });
     });
   });
 

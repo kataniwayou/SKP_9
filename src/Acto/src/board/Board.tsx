@@ -18,14 +18,17 @@ import { flowIdOf, toFlow, type BoardView } from './toFlow';
 import { CacheLinkEdge } from './edges/CacheLinkEdge';
 import { EntryEdge } from './edges/EntryEdge';
 import { LinkWire } from './edges/LinkWire';
+import { SchemaRefEdge } from './edges/SchemaRefEdge';
 import { ToolbarContext, type ToolbarActions } from './nodes/boardContext';
 import { CacheNode } from './nodes/CacheNode';
+import { ProcessorCard } from './nodes/ProcessorCard';
+import { SchemaCard } from './nodes/SchemaCard';
 import { StepCard } from './nodes/StepCard';
 import { TriangleNode } from './nodes/TriangleNode';
 import './board.css';
 
-const nodeTypes: NodeTypes = { workflow: TriangleNode, step: StepCard, cache: CacheNode };
-const edgeTypes: EdgeTypes = { wire: LinkWire, entry: EntryEdge, cacheLink: CacheLinkEdge };
+const nodeTypes: NodeTypes = { workflow: TriangleNode, step: StepCard, cache: CacheNode, schema: SchemaCard, processor: ProcessorCard };
+const edgeTypes: EdgeTypes = { wire: LinkWire, entry: EntryEdge, cacheLink: CacheLinkEdge, schemaRef: SchemaRefEdge };
 
 export interface BoardProps {
   state: BoardState;
@@ -160,7 +163,9 @@ export function Board({ state, view, onPick, onBoxPick, onMove, onMoveGhosts, on
   const keySelect = useRef(false);
   const picked = useMemo(() => new Set(view.picks.map(flowIdOf)), [view.picks]);
   const editable = onMove !== undefined || onConnect !== undefined;
-  const { nodes: derived, edges } = useMemo(() => toFlow(state, view), [state, view]);
+  // the schema card under the pointer: its reference wires thicken [spec rule 4]
+  const [hotSchema, setHotSchema] = useState<Id | null>(null);
+  const { nodes: derived, edges } = useMemo(() => toFlow(state, hotSchema === null ? view : { ...view, hotSchema }), [state, view, hotSchema]);
 
   // Editing: React Flow needs the nodes in state so a drag moves them before anything is committed.
   const [dragged, setDragged] = useState<Node[]>(derived);
@@ -390,6 +395,8 @@ export function Board({ state, view, onPick, onBoxPick, onMove, onMoveGhosts, on
           }}
           onEdgeClick={(ev, e) => { keySelect.current = false; const p = pickOfEdge(e); if (p) select(p, ev.ctrlKey || ev.metaKey); }}
           onPaneClick={(ev) => select(null, ev.ctrlKey || ev.metaKey)}
+          onNodeMouseEnter={(_, n) => { if (n.type === 'schema' && !isGhost(n)) setHotSchema(itemOfNode(n.id)?.id ?? null); }}
+          onNodeMouseLeave={(_, n) => { if (n.type === 'schema') setHotSchema(null); }}
           proOptions={{ hideAttribution: true }}
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--dot)" />

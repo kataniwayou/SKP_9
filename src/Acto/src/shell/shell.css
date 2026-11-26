@@ -38,9 +38,14 @@
 .hide-panel svg { width: 14px; height: 14px; }
 .ph:has(.hide-panel) { padding-right: 8px; }
 .app > .board { position: relative; }
-.board-only { position: absolute; top: 14px; right: 14px; z-index: 5; display: inline-flex; align-items: center; gap: 6px; background: var(--card); }
-.board-only svg { width: 14px; height: 14px; }
-.pbtn.board-only.on { background: var(--accent); border-color: var(--accent); color: var(--on-colour); }
+/* top right of the board: Schemas, then Board only */
+.board-btns { position: absolute; top: 14px; right: 14px; z-index: 5; display: flex; gap: 6px; }
+.board-only, .schemas-toggle { display: inline-flex; align-items: center; gap: 6px; background: var(--card); }
+.board-only svg, .schemas-toggle svg { width: 14px; height: 14px; }
+.pbtn.board-only.on, .pbtn.schemas-toggle.on { background: var(--accent); border-color: var(--accent); color: var(--on-colour); }
+/* the orphan count: red on the button, white on the filled one */
+.schemas-n { font: 500 10.5px var(--mono); background: var(--danger); color: var(--on-colour); border-radius: 999px; padding: 0 6px; }
+.schemas-toggle.on .schemas-n { background: var(--on-colour); color: var(--accent); }
 
 /* a panel: the same rounded card as the toolbox */
 .pane { background: var(--card); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }

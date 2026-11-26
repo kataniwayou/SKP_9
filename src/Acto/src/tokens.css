@@ -33,6 +33,10 @@
   --st-on: #16A34A; --st-off: #DC2626; --st-wait: #D97706;
   --mini-frame: #EEF0F4; --mini-ink: #5D6478; --mini-mask: rgba(26, 29, 41, .05); --mini-mask-line: rgba(26, 29, 41, .55);
   --cache-bg: #FBF4DC; --cache-line: #B8A36A; --cache-ink: #4A3D10; --cache-sel: #2563EB; --cache-halo: rgba(37, 99, 235, .3);
+  /* schemas mode (React Flow core, option B): schema cards, processor cards no step uses, reference wires, the held tag */
+  --schema-bg: #E6EEFB; --schema-line: #0059DC; --schema-ink: #0B3D91; --schema-ref: #0059DC;
+  --proc-bg: #1e1e1e; --proc-line: #3c3c3c; --proc-ink: #f8f8f8; --proc-muted: #bebebe;
+  --held-bg: #E2E8F0; --held-ink: #334155;
   /* step cards (React Flow UI BaseNode), the stopped triangle (S1), the running ring, ghosts: the board keeps its look in both themes */
   --b-ink-2: #3F3F46; --hue: var(--accent); /* --hue: a selected workflow's colour, set inline on its arrows */
   --card-line: #D4D4D8; --handle-dark: #1A192B; --ring-run: #22C55E; --ink-run: #15803D;
@@ -70,6 +74,9 @@
   --st-on: #16A34A; --st-off: #DC2626; --st-wait: #D97706;
   --mini-frame: #EEF0F4; --mini-ink: #5D6478; --mini-mask: rgba(26, 29, 41, .05); --mini-mask-line: rgba(26, 29, 41, .55);
   --cache-bg: #FBF4DC; --cache-line: #B8A36A; --cache-ink: #4A3D10; --cache-sel: #2563EB; --cache-halo: rgba(37, 99, 235, .3);
+  --schema-bg: #E6EEFB; --schema-line: #3D7CF0; --schema-ink: #0B3D91; --schema-ref: #7AA7FF;
+  --proc-bg: #2b2b2b; --proc-line: #727272; --proc-ink: #f8f8f8; --proc-muted: #bebebe;
+  --held-bg: #E2E8F0; --held-ink: #334155;
   /* step cards (React Flow UI BaseNode), the stopped triangle (S1), the running ring, ghosts: the board keeps its look in both themes */
   --b-ink-2: #3F3F46; --hue: var(--accent); /* --hue: a selected workflow's colour, set inline on its arrows */
   --card-line: #D4D4D8; --handle-dark: #1A192B; --ring-run: #22C55E; --ink-run: #15803D;

@@ -12,6 +12,8 @@ export interface ShellProps {
   marks?: { output?: unknown; chat?: unknown };
   /** What the Inspector is on, shown on its tab while it is hidden. */
   inspectorNote?: string;
+  /** The Schemas mode's toggle, left of Board only [spec rule 1]: on, the orphan count (red, on or off) and what a click does. */
+  schemas?: { on: boolean; orphans: number; toggle(): void };
 }
 
 function browserStorage(): Storage | null {
@@ -25,12 +27,14 @@ const LABEL: Record<PanelId, string> = { toolbox: 'Toolbox', inspector: 'Inspect
 const DIR: Record<PanelId, PanelHide['dir']> = { toolbox: 'left', inspector: 'right', output: 'down', chat: 'down' };
 const ICON_ONLY = 'M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10';
 const ICON_RESTORE = 'M6 2.5V6H2.5M13.5 6H10V2.5M10 13.5V10h3.5M2.5 10H6v3.5';
+/** Braces round lines: the mock's Schemas icon. */
+const ICON_SCHEMAS = 'M5 2.5H3.5v11H5M11 2.5h1.5v11H11M6.5 6h3M6.5 8h3M6.5 10h2';
 
 /**
  * The window layout. Every panel but the board hides from its header's button to a tab on its edge; the tab shows it
  * again at its old size. "Board only" hides them all, then "Restore layout" puts back the layout from before [user, 2026-11-23].
  */
-export function Shell({ toolbox, board, inspector, output, chat, storage, marks, inspectorNote }: ShellProps) {
+export function Shell({ toolbox, board, inspector, output, chat, storage, marks, inspectorNote, schemas }: ShellProps) {
   const store = useRef<Storage | null>(storage === undefined ? browserStorage() : storage).current;
   const [sizes, setSizes] = useState<PanelSizes>(() => readSizes(store));
   const [layout, setLayout] = useState<PanelLayout>(() => readLayout(store));
@@ -122,11 +126,21 @@ export function Shell({ toolbox, board, inspector, output, chat, storage, marks,
       <div className="s1">{splitter('tools', 'x', 1, 'Resize toolbox', hidden.toolbox)}</div>
       <div className="pane board" data-panel="board">
         {board}
-        <button type="button" className={`pbtn board-only${layout.saved ? ' on' : ''}`} onClick={() => change(toggleBoardOnly)}
-          title={layout.saved ? 'Put the panels back as they were' : 'Hide every panel'}>
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d={layout.saved ? ICON_RESTORE : ICON_ONLY} /></svg>
-          {layout.saved ? 'Restore layout' : 'Board only'}
-        </button>
+        <div className="board-btns">
+          {schemas && (
+            <button type="button" className={`pbtn schemas-toggle${schemas.on ? ' on' : ''}`} aria-pressed={schemas.on} onClick={schemas.toggle}
+              title={schemas.on ? 'Hide schemas' : 'Show schemas'}>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d={ICON_SCHEMAS} /></svg>
+              Schemas
+              {schemas.orphans > 0 && <span className="schemas-n" title={`${schemas.orphans} orphan schema${schemas.orphans === 1 ? '' : 's'}`}>{schemas.orphans}</span>}
+            </button>
+          )}
+          <button type="button" className={`pbtn board-only${layout.saved ? ' on' : ''}`} onClick={() => change(toggleBoardOnly)}
+            title={layout.saved ? 'Put the panels back as they were' : 'Hide every panel'}>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d={layout.saved ? ICON_RESTORE : ICON_ONLY} /></svg>
+            {layout.saved ? 'Restore layout' : 'Board only'}
+          </button>
+        </div>
       </div>
       <div className="s2">{splitter('inspector', 'x', -1, 'Resize inspector', hidden.inspector)}</div>
       <div className="pane insp" data-panel="inspector" hidden={hidden.inspector}>

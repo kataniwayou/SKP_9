@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { board, scheduledBoard } from '../design/boardFixtures';
+import { board, scheduledBoard, schemaBoard } from '../design/boardFixtures';
 import type { Pick } from './selection';
 import type { GhostItem } from '../design/ghosts';
 import { flowIdOf, toFlow, type BoardView } from './toFlow';
@@ -184,5 +184,60 @@ describe('toFlow', () => {
     const n = toFlow(b, view({ live: (id) => (id === 'daily' ? 'running' : 'unknown') })).nodes;
     expect(n.find((x) => x.id === 'wf:daily')!.data).toMatchObject({ status: 'running' });
     expect(n.find((x) => x.id === 'wf:hourly')!.data).toMatchObject({ status: 'unknown' });
+  });
+});
+
+describe('toFlow: schemas mode', () => {
+  const sb = schemaBoard();
+  const schemaGhost: GhostItem = { key: 'schema:gone', kind: 'schema', row: { ...sb.schemas.so!, id: 'gone', name: 'gone', at: { x: 1500, y: 400 } } };
+  it("without schemas the nodes and edges equal today's", () => {
+    const today = toFlow({ ...sb, schemas: {} }, view());
+    expect(toFlow(sb, view({ ghosts: [schemaGhost] }))).toEqual(today);
+    expect(toFlow(sb, view({ schemas: false, hotSchema: 'sx', ghosts: [schemaGhost] }))).toEqual(today);
+  });
+  it('with schemas: one schema node per schema, one processor node per stepless processor, one schemaRef edge per ref with handles ref-<slot> → ref', () => {
+    const { nodes, edges } = toFlow(sb, view({ schemas: true }));
+    const schemas = nodes.filter((n) => n.type === 'schema');
+    expect(schemas.map((n) => n.id).sort()).toEqual(['sc:sc', 'sc:sh', 'sc:so', 'sc:sx']);
+    const sx = schemas.find((n) => n.id === 'sc:sx')!;
+    expect([sx.width, sx.height, sx.position]).toEqual([190, 52, { x: 200, y: 400 }]);
+    expect(sx.handles!.map((h) => `${h.type}:${h.id}:${h.position}`)).toEqual(['target:ref:top']);
+    expect((sx.data as { row: { name: string }; state: string }).row.name).toBe('orders-in');
+    expect(Object.fromEntries(schemas.map((n) => [n.id, (n.data as { state: string }).state]))).toEqual({ 'sc:sx': 'wired', 'sc:sc': 'wired', 'sc:sh': 'held', 'sc:so': 'orphan' });
+    const procs = nodes.filter((n) => n.type === 'processor');
+    expect(procs.map((n) => n.id)).toEqual(['pr:p2']);
+    expect([procs[0]!.width, procs[0]!.height]).toEqual([210, 64]);
+    expect(procs[0]!.handles!.map((h) => `${h.type}:${h.id}:${h.position}`)).toEqual(['source:ref-I:bottom', 'source:ref-O:bottom', 'source:ref-C:bottom']);
+    expect(nodes.find((n) => n.id === 'st:fetch')!.handles!.map((h) => h.id)).toEqual(['in', 'out', 'ref-I', 'ref-O', 'ref-C']);
+    const refs = edges.filter((e) => e.type === 'schemaRef');
+    expect(refs.map((e) => [e.id, e.source, e.sourceHandle, e.target, e.targetHandle])).toEqual([
+      ['sr:step:expand:input:sx', 'st:expand', 'ref-I', 'sc:sx', 'ref'],
+      ['sr:step:expand:config:sc', 'st:expand', 'ref-C', 'sc:sc', 'ref'],
+      ['sr:step:fetch:input:sx', 'st:fetch', 'ref-I', 'sc:sx', 'ref'],
+      ['sr:step:fetch:config:sc', 'st:fetch', 'ref-C', 'sc:sc', 'ref'],
+      ['sr:step:lonely:input:sx', 'st:lonely', 'ref-I', 'sc:sx', 'ref'],
+      ['sr:step:lonely:config:sc', 'st:lonely', 'ref-C', 'sc:sc', 'ref'],
+      ['sr:processor:p2:output:sh', 'pr:p2', 'ref-O', 'sc:sh', 'ref'],
+    ]);
+    expect(refs.every((e) => e.selectable === false && e.deletable === false)).toBe(true);
+    expect(refs[0]!.data).toEqual({ slot: 'input', lit: false });
+    // today's nodes and edges are all still there
+    const today = toFlow(sb, view());
+    expect(today.nodes.every((n) => nodes.some((m) => m.id === n.id))).toBe(true);
+    expect(edges.filter((e) => e.type !== 'schemaRef')).toEqual(today.edges);
+  });
+  it('hotSchema lights only its edges', () => {
+    const { edges } = toFlow(sb, view({ schemas: true, hotSchema: 'sc' }));
+    const lit = edges.filter((e) => e.type === 'schemaRef' && (e.data as { lit: boolean }).lit).map((e) => e.id);
+    expect(lit).toEqual(['sr:step:expand:config:sc', 'sr:step:fetch:config:sc', 'sr:step:lonely:config:sc']);
+  });
+  it('picked cards are selected and numbered; a schema ghost is a ghost schema node only in the mode', () => {
+    expect(flowIdOf({ kind: 'schema', id: 'sx' })).toBe('sc:sx');
+    expect(flowIdOf({ kind: 'processor', id: 'p2' })).toBe('pr:p2');
+    const { nodes } = toFlow(sb, view({ schemas: true, picks: [{ kind: 'schema', id: 'so' }, { kind: 'processor', id: 'p2' }], ghosts: [schemaGhost] }));
+    expect(nodes.find((n) => n.id === 'sc:so')!).toMatchObject({ selected: true, data: { pick: { no: 1, solo: false } } });
+    expect(nodes.find((n) => n.id === 'pr:p2')!).toMatchObject({ selected: true, data: { pick: { no: 2, solo: false } } });
+    const g = nodes.find((n) => n.id === 'ghost:schema:gone')!;
+    expect(g).toMatchObject({ type: 'schema', className: 'ghost', position: { x: 1500, y: 400 }, data: { ghost: true, ghostKey: 'schema:gone' } });
   });
 });

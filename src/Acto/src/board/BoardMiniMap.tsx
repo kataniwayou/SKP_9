@@ -8,16 +8,19 @@ import { TRI_SHAPE_H, TRI_SHAPE_W } from './geometry';
 /** The mock's minimap: 210 × 130. */
 const SIZE = { w: 210, h: 130 };
 
-interface Mark { kind: 'workflow' | 'step' | 'cache'; colour: string }
+interface Mark { kind: 'workflow' | 'step' | 'cache' | 'schema' | 'processor'; colour: string }
 interface MiniInfo { marks: ReadonlyMap<string, Mark>; picked: ReadonlySet<string> }
 const MiniContext = createContext<MiniInfo>({ marks: new Map(), picked: new Set() });
 
-/** Triangles by run state (green running, red stopped, amber unknown), steps by processor tone, caches grey. */
+/** Triangles by run state (green running, red stopped, amber unknown), steps by processor tone, caches grey; schema cards blue, processor cards dark. */
 export function markOf(n: Node): Mark | null {
   if ((n.className ?? '').split(' ').includes('ghost')) return null; // a ghost has no mark
   const d = n.data as { status?: LiveStatus; processor?: string | null };
   if (n.type === 'workflow') return { kind: 'workflow', colour: STATE_COLOUR[d.status ?? 'unknown'] };
   if (n.type === 'cache') return { kind: 'cache', colour: 'var(--idle)' };
+  // Schemas mode: schema cards in their line blue, processor cards dark like the card
+  if (n.type === 'schema') return { kind: 'schema', colour: 'var(--schema-line)' };
+  if (n.type === 'processor') return { kind: 'processor', colour: 'var(--proc-bg)' };
   return { kind: 'step', colour: processorColour(d.processor ?? '') };
 }
 
@@ -31,7 +34,8 @@ function MiniNode({ id, x, y, width, height, onClick }: MiniMapNodeProps) {
   const style = { cursor: 'pointer', fill: m.colour, stroke: on ? 'var(--accent)' : 'none', strokeWidth: on ? 6 : 0, opacity: 0.85 } as const;
   return m.kind === 'workflow'
     ? <polygon data-mini-triangle={id.slice(3)} points={`${x},${y} ${x + (width * TRI_SHAPE_W) / 120},${y + (TRI_SHAPE_H / 2) * (height / 104)} ${x},${y + TRI_SHAPE_H * (height / 104)}`} style={style} onClick={click} />
-    : <rect data-mini-step={m.kind === 'step' ? '' : undefined} data-mini-cache={m.kind === 'cache' ? '' : undefined} x={x} y={y} width={width} height={height}
+    : <rect data-mini-step={m.kind === 'step' ? '' : undefined} data-mini-cache={m.kind === 'cache' ? '' : undefined}
+      data-mini-schema={m.kind === 'schema' ? '' : undefined} data-mini-processor={m.kind === 'processor' ? '' : undefined} x={x} y={y} width={width} height={height}
       rx={Math.min(14, height / 6)} style={style} onClick={click} />;
 }
 

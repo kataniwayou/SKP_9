@@ -67,3 +67,20 @@ export function oneWorkflow(id = 'wf1', name = 'orders'): BoardState {
     steps: {}, caches: {}, assignments: {}, processors: {}, schemas: {},
   };
 }
+
+/**
+ * `board()` with schemas: p1 (which fetch, expand and lonely use) takes `sx` as its input and `sc` as its config; p2, which no
+ * step uses, holds `sh` as its output; `so` is an orphan. Every schema and p2 have a place below the steps.
+ */
+export function schemaBoard(): BoardState {
+  const b = board();
+  const schema = (id: string, name: string, x: number, y: number) => ({ id, name, version: '1.0.0', description: null, definition: '{}', audit, at: { x, y }, updatedAt: T });
+  b.processors.p1 = { ...b.processors.p1!, inputSchemaId: 'sx', configSchemaId: 'sc' };
+  b.processors.p2 = { id: 'p2', name: 'idle-proc', version: '2.0.0', description: null, sourceHash: 'b'.repeat(64), instanceId: 'inst-7',
+    inputSchemaId: null, outputSchemaId: 'sh', configSchemaId: null, audit, at: { x: 900, y: 500 }, updatedAt: T };
+  b.schemas = {
+    sx: schema('sx', 'orders-in', 200, 400), sc: schema('sc', 'orders-cfg', 450, 400),
+    sh: schema('sh', 'held-out', 900, 650), so: schema('so', 'old-copy', 1200, 400),
+  };
+  return b;
+}

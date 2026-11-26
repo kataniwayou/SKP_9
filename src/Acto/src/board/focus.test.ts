@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { board } from '../design/boardFixtures';
+import { board, schemaBoard } from '../design/boardFixtures';
 import { focusBounds, itemBounds } from './focus';
 import { CACHE_H, CACHE_W, STEP_H, STEP_W, TRIANGLE_W } from './geometry';
 
@@ -28,5 +28,11 @@ describe('itemBounds', () => {
     expect(itemBounds(b, { kind: 'step', id: 'expand' })).toEqual({ x: 400, y: 200, w: STEP_W, h: STEP_H });
     expect(itemBounds(b, { kind: 'cache', id: 'c1' })).toEqual({ x: 0, y: -100, w: CACHE_W, h: CACHE_H });
     expect(itemBounds(b, { kind: 'step', id: 'nope' })).toBeNull();
+  });
+  it('is the schema and processor card boxes; null for a card with no place', () => {
+    const s = schemaBoard();
+    expect(itemBounds(s, { kind: 'schema', id: 'sx' })).toEqual({ x: 200, y: 400, w: 190, h: 52 });
+    expect(itemBounds(s, { kind: 'processor', id: 'p2' })).toEqual({ x: 900, y: 500, w: 210, h: 64 });
+    expect(itemBounds(s, { kind: 'processor', id: 'p1' })).toBeNull();
   });
 });

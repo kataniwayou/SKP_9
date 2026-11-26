@@ -39,6 +39,12 @@ describe('occupied [user, 2026-11-25]', () => {
     expect(occupied(withS, [], new Set(['schema:s1', 'processor:p9']), true)).toEqual(occupied(b, []));
   });
 
+  it('withSchemas counts a schema ghost whose schema is gone; without it, never', () => {
+    const b = board();
+    const g: GhostItem = { key: 'schema:gone', kind: 'schema', row: { id: 'gone', name: 'gone', version: '1', description: null, audit: b.processors.p1!.audit, at: { x: 5000, y: 5000 }, updatedAt: null } };
+    expect(occupied(b, [g], new Set(), true)).toContainEqual(rectAt('schema', { x: 5000, y: 5000 }));
+    expect(occupied(b, [g])).not.toContainEqual(rectAt('schema', { x: 5000, y: 5000 }));
+  });
   it('blocks a nudge onto another item, not one that only comes near it', () => {
     const other = rectAt('step', { x: 300, y: 0 });
     expect(nudgeBlocked([rectAt('step', { x: 100, y: 0 })], [other])).toBe(true);

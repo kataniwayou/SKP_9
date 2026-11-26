@@ -84,6 +84,26 @@ describe('Shell', () => {
     expect(screen.getByRole('button', { name: 'Board only' })).toBeInTheDocument();
   });
 
+  it('the Schemas button shows the orphan count when off, is pressed when on, sits before Board only', () => {
+    const toggle = vi.fn();
+    const { rerender } = render(<Shell toolbox="T" board="B" inspector="I" output="O" chat="C" storage={null} schemas={{ on: false, orphans: 2, toggle }} />);
+    const btn = screen.getByRole('button', { name: /^Schemas/ });
+    expect(btn).toHaveClass('pbtn', 'schemas-toggle');
+    expect(btn).not.toHaveClass('on');
+    expect(btn).toHaveAttribute('aria-pressed', 'false');
+    expect(btn).toHaveAttribute('title', 'Show schemas');
+    expect(btn.querySelector('.schemas-n')).toHaveTextContent('2');
+    expect(btn.nextElementSibling).toBe(screen.getByRole('button', { name: 'Board only' }));
+    fireEvent.click(btn);
+    expect(toggle).toHaveBeenCalledTimes(1);
+    rerender(<Shell toolbox="T" board="B" inspector="I" output="O" chat="C" storage={null} schemas={{ on: true, orphans: 0, toggle }} />);
+    const on = screen.getByRole('button', { name: /^Schemas/ });
+    expect(on).toHaveClass('on');
+    expect(on).toHaveAttribute('aria-pressed', 'true');
+    expect(on).toHaveAttribute('title', 'Hide schemas');
+    expect(on.querySelector('.schemas-n')).toBeNull();
+  });
+
   it('in Board only, showing a panel from its tab ends Board only: the button reads Board only again', () => {
     render(<Shell toolbox="T" board="B" inspector="I" output="O" chat="C" storage={null} />);
     fireEvent.click(screen.getByRole('button', { name: 'Board only' }));

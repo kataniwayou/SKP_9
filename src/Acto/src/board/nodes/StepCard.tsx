@@ -20,9 +20,11 @@ export function processorColour(name: string): string {
  * workflow reaching it draws the green ring.
  */
 export function StepCard({ data, selected }: NodeProps) {
-  const { stepId, name, processor, processorId, condition = 1, running = false, chips = [], ghost = false, ghostKey, failed = false, unsaved, pick } = data as {
+  const { stepId, name, processor, processorId, condition = 1, running = false, chips = [], ghost = false, ghostKey, failed = false, unsaved, pick, refs = false } = data as {
     stepId: string; name: string; processor: string | null; processorId: string | null; condition?: number; running?: boolean; chips?: StepChip[];
     ghost?: boolean; ghostKey?: string; failed?: boolean; unsaved?: boolean; pick?: PickInfo;
+    /** Schemas mode: the hidden sources its processor's reference wires leave from. */
+    refs?: boolean;
   };
   const self: Pick = ghostKey ? { kind: 'ghost', key: ghostKey } : { kind: 'step', id: stepId };
   const toolbar = useHasToolbar(self);
@@ -36,6 +38,9 @@ export function StepCard({ data, selected }: NodeProps) {
       )}
       <Handle id="in" type="target" position={Position.Left} />
       <Handle id="out" type="source" position={Position.Right} />
+      {refs && (['I', 'O', 'C'] as const).map((l, i) => (
+        <Handle key={l} id={`ref-${l}`} type="source" position={Position.Bottom} isConnectable={false} className="ref-handle hidden" style={{ left: `${30 + 20 * i}%` }} />
+      ))}
       <div className="bn-header">
         <span className="ico" style={{ background: processorColour(processor ?? '') }}>{(processor ?? '?').charAt(0).toUpperCase()}</span>
         <span className="sp2">{processor ?? 'no processor'}</span>
