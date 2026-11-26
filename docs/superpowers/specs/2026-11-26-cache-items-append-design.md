@@ -214,7 +214,7 @@ changes so a Save stays one transaction:
 
 - **Board state:** caches load without items (only `itemCount`). Per cache, the board holds an **overlay of unsaved
   item edits**: keys set (with value) and keys removed. Undo/redo work on the overlay like any other board edit; the
-  unsaved count counts edited items (today's per-key counting in `changes.ts`). Discarding the board clears it.
+  cache counts once in the unsaved count while it has item edits (rows are counted per `cache:<id>` key in `changes.ts`). Discarding the board clears it.
 - **"Take stored" after a stale-row refusal** (the user, 2026-11-26): drops only the cache's **field** edits and **keeps
   its unsaved item edits** — item ops can't conflict (last write wins per key), and a large paste must not be lost
   because someone else changed the cache's description. Item-only edits never trigger a stale refusal.
