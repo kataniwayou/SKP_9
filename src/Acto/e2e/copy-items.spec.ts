@@ -84,7 +84,7 @@ test('a cache\'s toolbar has Copy; the paste is a new cache with every field but
   const rows = await getJson<Row[]>('/caches');
   const orig = byName(rows, 'e2e-cp-cache')!, made = byName(rows, 'e2e-cp-cache-2')!;
   expect(made.id).not.toBe(orig.id);
-  for (const k of ['version', 'description', 'items']) expect(made[k], k).toEqual(orig[k]);
+  for (const k of ['version', 'description', 'itemCount']) expect(made[k], k).toEqual(orig[k]);
   // the root is unique in BaseAPI, so it is named on like the name [user, 2026-11-19]
   expect([orig.root, made.root]).toEqual(['e2e-cp-root', 'e2e-cp-root-2']);
 });

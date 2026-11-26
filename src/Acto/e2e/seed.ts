@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { apply, baseline, getJson, type Change, type Row } from './stack';
+import { appendItems, apply, baseline, getJson, type Change, type Row } from './stack';
 
 /** A point in the e2e region of the board (flow units, from the region's corner). */
 export interface Pt { x: number; y: number }
@@ -9,7 +9,7 @@ export interface StepSeed { key: string; name: string; at: Pt; /** A real proces
 export interface SchemaSeed { key: string; name: string; definition?: string; at?: Pt }
 /** A throwaway processor, made through the API only (Acto never creates one). The slots are SchemaSeed keys. */
 export interface ProcessorSeed { key: string; name: string; sourceHash: string; input?: string; output?: string; config?: string; at?: Pt }
-export interface CacheSeed { key: string; name: string; at: Pt; root?: string }
+export interface CacheSeed { key: string; name: string; at: Pt; root?: string; /** Stored items, appended over HTTP after the cache is created empty. */ items?: Readonly<Record<string, string>> }
 /** A payload row: one step's payload, which any number of workflows may link. */
 export interface PayloadSeed { key: string; step: string; payload: string }
 export interface WorkflowSeed { key: string; name: string; at: Pt; entry?: readonly string[]; caches?: readonly string[]; payloads?: readonly string[]; /** An entry arrow's own cron, by the entry step's key (a workflow has no cron of its own). */ entryCrons?: Readonly<Record<string, string>> }
@@ -61,7 +61,7 @@ export async function seed(spec: SeedSpec): Promise<Seeded> {
   }
 
   for (const k of spec.caches ?? []) {
-    changes.push({ op: 'create', table: 'caches', id: make(k.key), row: { name: k.name, version: '1.0.0', description: null, root: k.root ?? 'e2e', items: [], ...at(k.at) } });
+    changes.push({ op: 'create', table: 'caches', id: make(k.key), row: { name: k.name, version: '1.0.0', description: null, root: k.root ?? 'e2e', ...at(k.at) } });
   }
   for (const s of spec.steps ?? []) {
     changes.push({ op: 'create', table: 'steps', id: make(s.key), row: {
@@ -87,5 +87,8 @@ export async function seed(spec: SeedSpec): Promise<Seeded> {
     } });
   }
   const done = await apply(changes);
+  for (const k of spec.caches ?? []) {
+    if (k.items && Object.keys(k.items).length) await appendItems(done.made?.[ref(k.key)] ?? ref(k.key), { ...k.items });
+  }
   return Object.fromEntries([...id].map(([key, client]) => [key, done.made?.[client] ?? client]));
 }

@@ -68,9 +68,34 @@ const READ_ONLY = new Set(['id', 'createdAt', 'updatedAt', 'createdBy', 'updated
 /** A read DTO as the write body of its row. */
 export const bodyOf = (r: Row): Record<string, unknown> => Object.fromEntries(Object.entries(r).filter(([k]) => !READ_ONLY.has(k)));
 
-/** A cache row's items as one object, for comparing: BaseAPI sends them as [{ key, value }] (rows since 2026-11-24). */
-export const itemsOf = (r: Row): Record<string, string> =>
-  Object.fromEntries((r.items as { key: string; value: string }[]).map((i) => [i.key, i.value]));
+/** Appends items to a cache over HTTP (`POST /caches/{id}/items`): the way items get in since 2026-11-26. */
+export async function appendItems(cacheId: string, items: Record<string, string>): Promise<void> {
+  const r = await fetch(`${API}/caches/${cacheId}/items`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: Object.entries(items).map(([key, value]) => ({ key, value })) }) });
+  if (!r.ok) throw new Error(`POST /caches/${cacheId}/items answered ${r.status}: ${(await r.text()).slice(0, 300)}`);
+}
+
+/** Removes items by key (`POST /caches/{id}/items/remove`). */
+export async function removeItems(cacheId: string, keys: string[]): Promise<void> {
+  const r = await fetch(`${API}/caches/${cacheId}/items/remove`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ keys }) });
+  if (!r.ok) throw new Error(`POST /caches/${cacheId}/items/remove answered ${r.status}: ${(await r.text()).slice(0, 300)}`);
+}
+
+/** One page of a cache's stored items, as BaseAPI answers it. */
+export const itemsPage = (cacheId: string, after?: string, limit?: number) =>
+  getJson<{ items: { key: string; value: string }[]; next: string | null }>(
+    `/caches/${cacheId}/items?${[after ? `after=${encodeURIComponent(after)}` : '', limit ? `limit=${limit}` : ''].filter(Boolean).join('&')}`);
+
+/** A cache's stored items as one object, for comparing: every page read from `GET /caches/{id}/items` (a cache row carries only `itemCount`). */
+export async function storedItems(cacheId: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  let after: string | undefined;
+  for (;;) {
+    const p = await itemsPage(cacheId, after, 500);
+    for (const i of p.items) out[i.key] = i.value;
+    if (!p.next) return out;
+    after = p.next;
+  }
+}
 
 /**
  * Deletes every e2e- workflow, step, cache, assignment, processor and schema through /model/apply, in the order BaseAPI's keys need: the

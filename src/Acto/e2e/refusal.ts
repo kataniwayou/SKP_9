@@ -24,6 +24,11 @@ const TABLES_OK = ['workflows', 'steps', 'caches', 'assignments', 'schemas', 'pr
 
 /** Why a /model change must not go out, or null. */
 export function refusal(c: { op?: string; table?: string; id?: string; row?: Record<string, unknown> }, real: Map<string, Row>): string | null {
+  // a cache's items (append/remove, id = the cache): only on a cache the run made, never a real one's
+  if (c.table === 'cache_items') {
+    if (c.op !== 'append' && c.op !== 'remove') return `a cache_items ${c.op} (only append and remove)`;
+    return real.has(c.id ?? '') ? `${c.op} of items on the real cache ${real.get(c.id ?? '')?.name}` : null;
+  }
   if (!TABLES_OK.includes(c.table ?? '')) return `a ${c.table} change (only workflows, steps, caches, assignments, schemas and processors may be written)`;
   if (c.table === 'processors' && (c.op === 'create' || c.op === 'delete')) return `${c.op} of a processor (Acto never creates or deletes one)`;
   const was = real.get(c.id ?? '');

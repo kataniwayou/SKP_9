@@ -27,7 +27,7 @@ a workflow the run made, and the teardown fails the run if a real row changed be
 | A | Restore brings a step's ghost wires (`aa35f43e`) | 9 · restore brings its wires |
 | B | Entry-step crons end to end, workflow cron removed (`a3a8c0db`…`1ccf9af5`, 41 commits) | 6-cron-live (ES), 7-cron-validation |
 | C | Ghosts drag and keep their place; the right-click box picks ghosts (`4a0de8dd`, `d2840634`) | 9 · ghosts drag, box-pick and restore |
-| D | Cache items are `[{key,value}]` rows; per-entry limits; bad items refused (`cde15e7d`, `233a74da`, `5b369e9e`) | 11 · cache items cross as pairs |
+| D | Cache items are `cache_items` rows, not part of the cache row (`itemCount` only); append/remove/page endpoints; per-entry limits; Cache tab edits cross as `cache_items` append/remove and bad items are refused (`cde15e7d`, `233a74da`, `5b369e9e`, 2026-11-26 items model) | 11 · the cache row carries itemCount and no items; 11 · Cache tab edits cross as append/remove |
 | E | Valence/Studio and their endpoints removed (`3b421fbd`, `6a6c2b1a`) | 11 · removed endpoints are gone |
 | F | A stop tears down every entry-cron job; a restart runs only the new activation (`2d2e10fe`) | 12 (ES) |
 | G | An entry arrow moves only when it fires; frozen and unscheduled arrows say why (`6ea3960e`, `5eab52c1`) | 8 · idle entry arrows; 12 (ES) |
@@ -66,6 +66,7 @@ a workflow the run made, and the teardown fails the run if a real row changed be
 | The rest of the e2e folder (headless, three batches) | 24 passed + 21 skipped (live-only), 38 passed, 55 passed |
 | 13 alone (with 9 · a dragged card stays lifted), `--repeat-each 5` | 45 passed, none flaky |
 | `npm run typecheck`; `npm test` | clean; 902 passed |
+| 2026-11-27, items model (BaseApi + Acto deployed): `npx playwright test e2e/regression` headless, then cache/save/inspector/copy-items/chat-skills | 47 passed, 4 skipped (live-only) in regression; the others below |
 | Teardown, every run | `e2e- rows left: 0; real rows changed beyond location: 0` |
 
 Evidence from the live runs: `src/Acto/test-results/cron-live-evidence.json` (6), `src/Acto/test-results/regression-12-evidence.json` (12), and `src/Acto/test-results/regression-14-evidence.json` (14): per-tick

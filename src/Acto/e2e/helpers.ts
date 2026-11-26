@@ -272,17 +272,16 @@ export async function save(page: Page) {
   return answer;
 }
 
-/** The Items table of a cache's Inspector (the key/value editor). */
-export const itemKey = (page: Page, n: number) => inspector(page).getByRole('textbox', { name: `Key ${n}`, exact: true });
-export const itemValue = (page: Page, n: number) => inspector(page).getByRole('textbox', { name: `Value ${n}`, exact: true });
+/** The Items table of a cache's Inspector: the stored page (read-only keys, editable values), the Unsaved section, the add row. */
+export const storedKey = (page: Page, key: string) => inspector(page).getByRole('textbox', { name: `Key ${key}`, exact: true });
+export const storedValue = (page: Page, key: string) => inspector(page).getByRole('textbox', { name: `Value ${key}`, exact: true });
+export const unsavedValue = (page: Page, key: string) => inspector(page).getByRole('textbox', { name: `Unsaved value ${key}`, exact: true });
 
-/** Adds an item as row `n` (1-based) of the Items table: "+ Add item", its key, its value (each committed with Enter). */
-export async function addItem(page: Page, n: number, key: string, value: string) {
-  await inspector(page).getByRole('button', { name: '+ Add item' }).click();
-  await itemKey(page, n).fill(key);
-  await itemKey(page, n).press('Enter');
-  await itemValue(page, n).fill(value);
-  await itemValue(page, n).press('Enter');
+/** Adds an item through the add row (New key, New value, Add item). A refused key shows the table's alert and stays typed. */
+export async function addItem(page: Page, key: string, value: string) {
+  await inspector(page).getByRole('textbox', { name: 'New key', exact: true }).fill(key);
+  await inspector(page).getByRole('textbox', { name: 'New value', exact: true }).fill(value);
+  await inspector(page).getByRole('button', { name: 'Add item', exact: true }).click();
 }
 
 // ---- Regression suite (e2e/regression): build through the UI, read BaseAPI back ------------------------------------
