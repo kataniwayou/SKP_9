@@ -141,6 +141,22 @@ describe('board store', () => {
     expect(store.base().workflows.daily!.entryCrons).toEqual({});
     expect(() => deleteSteps(store.state(), Object.keys(store.state().steps))).not.toThrow();
   });
+  it('reads a draft saved before cache items were an overlay as having clean overlays', () => {
+    const old = (b: ReturnType<typeof board>) => ({
+      ...b,
+      caches: Object.fromEntries(Object.entries(b.caches).map(([id, c]) => { const { itemCount: _c, itemEdits: _e, ...rest } = c; return [id, { ...rest, items: '{"a":"1"}' }]; })),
+    });
+    const present = nameA('A')(board());
+    const session = memoryStorage({ 'acto.board': JSON.stringify({ base: old(board()), present: old(present) }) });
+    const store = createBoardStore(createOutputStore(null), session);
+    store.load(board());
+    expect(store.state().workflows.daily!.name).toBe('A');
+    expect(store.state().caches.c1).not.toHaveProperty('items');
+    expect(store.state().caches.c1!.itemEdits).toEqual({ set: {}, removed: [] });
+    expect(store.state().caches.c1!.itemCount).toBe(0);
+    expect(store.base().caches.c1!.itemEdits).toEqual({ set: {}, removed: [] });
+    expect([...store.unsaved()]).toEqual(['workflow:daily']);
+  });
   it('saved clears history and draft', () => {
     const session = memoryStorage();
     const { store } = make(session);

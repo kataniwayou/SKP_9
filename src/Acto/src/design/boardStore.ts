@@ -97,13 +97,28 @@ function withEntryCrons(b: BoardState): BoardState {
   };
 }
 
+/** An old draft's caches: the items text (removed 2026-11-26) is dropped, and no itemCount/itemEdits reads as none. */
+function withItemEdits(b: BoardState): BoardState {
+  return {
+    ...b,
+    caches: Object.fromEntries(Object.entries(b.caches).map(([id, c]) => {
+      const { items: _legacy, ...rest } = c as typeof c & { items?: unknown };
+      return [id, {
+        ...rest,
+        itemCount: typeof rest.itemCount === 'number' ? rest.itemCount : 0,
+        itemEdits: isObj(rest.itemEdits) ? rest.itemEdits : { set: {}, removed: [] },
+      }];
+    })),
+  };
+}
+
 function readDraft(session: Storage | null): Draft | null {
   try {
     const raw = session?.getItem(KEY);
     if (!raw) return null;
     const d: unknown = JSON.parse(raw);
     if (!isObj(d) || !isBoard(d.base) || !isBoard(d.present)) return null;
-    return { base: withEntryCrons(d.base), present: withEntryCrons(d.present) };
+    return { base: withItemEdits(withEntryCrons(d.base)), present: withItemEdits(withEntryCrons(d.present)) };
   } catch {
     return null;
   }
