@@ -44,7 +44,7 @@ describe('G1 set_field on an assignment (the Step > workflow tab fields)', () =>
     const { ctx, store } = setup();
     const b0 = store.state();
     store.load({ ...b0, processors: { ...b0.processors, p1: { ...b0.processors.p1!, configSchemaId: 's1' } },
-      schemas: { s1: { id: 's1', name: 'cfg', version: '1.0.0', description: null, definition: '{}', audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, updatedAt: 'x' } } });
+      schemas: { s1: { id: 's1', name: 'cfg', version: '1.0.0', description: null, definition: '{}', audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, at: null, updatedAt: 'x' } } });
     const before = store.state();
     expect(done(await call(ctx, 'set_field', { kind: 'schema', id: 's1', field: 'definition', value: '{"type":"object"}' }))).toMatchObject({
       ok: false, result: 'a schema definition is read-only: a change needs the processor restarted' });

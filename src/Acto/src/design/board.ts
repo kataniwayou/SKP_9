@@ -23,8 +23,8 @@ export interface AssignmentRow extends RowAudit {
   id: Id; stepId: Id; name: string; version: string; description: string | null; payload: string;
   updatedAt: string | null;
 }
-export interface ProcessorRow extends Processor { updatedAt: string }
-export interface SchemaRow extends Schema { updatedAt: string | null }
+export interface ProcessorRow extends Processor { updatedAt: string; at: Point | null }
+export interface SchemaRow extends Schema { updatedAt: string | null; at: Point | null }
 
 export interface BoardState {
   workflows: Record<Id, WorkflowRow>;

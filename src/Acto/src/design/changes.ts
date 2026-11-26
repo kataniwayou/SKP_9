@@ -65,10 +65,10 @@ const assignmentBody = (a: AssignmentRow) => ({
 });
 const processorBody = (p: ProcessorRow): ProcessorUpdateDto => ({
   name: p.name, version: p.version, description: p.description, sourceHash: p.sourceHash, instanceId: p.instanceId,
-  inputSchemaId: p.inputSchemaId, outputSchemaId: p.outputSchemaId, configSchemaId: p.configSchemaId,
+  inputSchemaId: p.inputSchemaId, outputSchemaId: p.outputSchemaId, configSchemaId: p.configSchemaId, ...loc(p.at),
 });
 const schemaBody = (s: SchemaRow): SchemaCreateDto => ({
-  name: s.name, version: s.version, description: s.description, definition: s.definition ?? null,
+  name: s.name, version: s.version, description: s.description, definition: s.definition ?? null, ...loc(s.at),
 });
 
 const BODY: Record<Table, (r: never) => object> = {
@@ -157,6 +157,13 @@ export function unsavedMarks(base: BoardState, cur: BoardState, keys: ReadonlySe
 
 /** Workflows (still on the board) whose row changed, whose linked payload rows changed, or that reach a changed step before or after. */
 export function affectedWorkflows(base: BoardState, cur: BoardState): Id[] {
+  // a processor or schema moved on the board is saved, but it changes nothing a workflow runs
+  const unplaced = (b: BoardState): BoardState => ({
+    ...b,
+    processors: Object.fromEntries(Object.entries(b.processors).map(([k, r]) => [k, { ...r, at: null }])),
+    schemas: Object.fromEntries(Object.entries(b.schemas).map(([k, r]) => [k, { ...r, at: null }])),
+  });
+  base = unplaced(base); cur = unplaced(cur);
   const dw = diffTable('workflows', base, cur);
   const touchedWf = new Set([...dw.created, ...dw.updated]);
   const da = diffTable('assignments', base, cur);

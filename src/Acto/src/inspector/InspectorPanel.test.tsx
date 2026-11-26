@@ -96,7 +96,7 @@ describe('InspectorPanel', () => {
     it('each parent keeps its own child while the pick stays: Step child, Processor, back to Step', () => {
       const b0 = board();
       const slots = { ...b0, processors: { p1: { ...b0.processors.p1!, configSchemaId: 's-cfg' } },
-        schemas: { 's-cfg': { id: 's-cfg', name: 'cfg', version: '1.0.0', description: null, definition: '{}', audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, updatedAt: null } } };
+        schemas: { 's-cfg': { id: 's-cfg', name: 'cfg', version: '1.0.0', description: null, definition: '{}', audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, at: null, updatedAt: null } } };
       const { rerender } = setup({ workflows: ['daily'], picks: [wfP('daily'), step('fetch')] }, slots);
       openTab('daily');
       openTab('Processor');
@@ -135,7 +135,7 @@ describe('InspectorPanel', () => {
     it("Processor's children are its schemas; none chosen at first; the chosen one kept while the pick stays and it exists", () => {
       const b0 = board();
       const slots = { ...b0, processors: { p1: { ...b0.processors.p1!, configSchemaId: 's-cfg' } },
-        schemas: { 's-cfg': { id: 's-cfg', name: 'cfg', version: '1.0.0', description: null, definition: '{}', audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, updatedAt: null } } };
+        schemas: { 's-cfg': { id: 's-cfg', name: 'cfg', version: '1.0.0', description: null, definition: '{}', audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, at: null, updatedAt: null } } };
       const { store, rerender } = setup({ workflows: [], picks: [step('fetch')] }, slots);
       openTab('Processor');
       expect(childNames('Processor')).toEqual(['Config schema']);
@@ -246,7 +246,7 @@ describe('InspectorPanel', () => {
     const withConfig = (definition: string | null): BoardState => {
       const b0 = board();
       return { ...b0, processors: { p1: { ...b0.processors.p1!, configSchemaId: 's-cfg' } },
-        schemas: { 's-cfg': { id: 's-cfg', name: 'cfg', version: '1.0.0', description: null, definition, audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, updatedAt: null } } };
+        schemas: { 's-cfg': { id: 's-cfg', name: 'cfg', version: '1.0.0', description: null, definition, audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, at: null, updatedAt: null } } };
     };
     const KAFKA = JSON.stringify({ type: 'object', required: ['topic', 'partitions'], properties: {
       topic: { type: 'string' }, partitions: { type: 'integer' }, acks: { type: 'string', default: 'all' }, compress: { type: 'boolean' } } });

@@ -20,8 +20,8 @@ export function withSchemas(): BoardState {
     ...b,
     processors: { p1: { ...b.processors.p1!, configSchemaId: 's-cfg', inputSchemaId: 's-in' } },
     schemas: {
-      's-cfg': { id: 's-cfg', name: 'cfg', version: '1.0.0', description: null, definition: REQUIRED, audit, updatedAt: T },
-      's-in': { id: 's-in', name: 'in', version: '1.0.0', description: null, definition: null, audit, updatedAt: T },
+      's-cfg': { id: 's-cfg', name: 'cfg', version: '1.0.0', description: null, definition: REQUIRED, audit, at: null, updatedAt: T },
+      's-in': { id: 's-in', name: 'in', version: '1.0.0', description: null, definition: null, audit, at: null, updatedAt: T },
     },
   };
 }

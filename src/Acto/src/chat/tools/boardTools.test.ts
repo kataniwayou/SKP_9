@@ -146,7 +146,7 @@ describe('field and payload tools', () => {
     const b0 = store.state();
     const def = JSON.stringify({ type: 'object', required: ['topic'], properties: { topic: { type: 'string' }, acks: { type: 'string', default: 'all' } } });
     store.load({ ...b0, processors: { ...b0.processors, p1: { ...b0.processors.p1!, configSchemaId: 's1' } },
-      schemas: { s1: { id: 's1', name: 'cfg', version: '1.0.0', description: null, definition: def, audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, updatedAt: 'x' } } });
+      schemas: { s1: { id: 's1', name: 'cfg', version: '1.0.0', description: null, definition: def, audit: { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, at: null, updatedAt: 'x' } } });
     // expand: daily reaches it, has no payload there yet
     const r = done(await call(ctx, 'set_payload', { workflow_id: 'daily', step_id: 'expand' }));
     const laidOut = JSON.stringify({ topic: '<string>', acks: 'all' }, null, 2);

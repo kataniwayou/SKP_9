@@ -189,7 +189,7 @@ export function setSlotSchema(b: BoardState, processorId: Id, slot: Slot, copy: 
   const id = cur && cur.updatedAt === null ? cur.id : newId();
   const row: SchemaRow = {
     id, name: copy.name, version: copy.version, description: copy.description, definition: copy.definition,
-    audit: cur?.audit ?? { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, updatedAt: null,
+    audit: cur?.audit ?? { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, at: null, updatedAt: null,
   };
   return {
     ...b,

@@ -125,12 +125,12 @@ describe('boardChanges', () => {
   it('a schema copy is created before the processor update pointing at it', () => {
     const cur: BoardState = {
       ...b,
-      schemas: { s9: { id: 's9', name: 's', version: '1.0.0', description: null, definition: '{}', audit: proc.audit, updatedAt: null } },
+      schemas: { s9: { id: 's9', name: 's', version: '1.0.0', description: null, definition: '{}', audit: proc.audit, at: null, updatedAt: null } },
       processors: { p1: { ...proc, configSchemaId: 's9' } },
     };
     const cs = boardChanges(b, cur);
     expect(names(cs)).toEqual(['create schemas s9', 'update processors p1']);
-    expect(cs[0]!.row).toEqual({ name: 's', version: '1.0.0', description: null, definition: '{}' });
+    expect(cs[0]!.row).toEqual({ name: 's', version: '1.0.0', description: null, definition: '{}', boardX: null, boardY: null });
     expect(cs[1]!.row).toEqual(expect.objectContaining({ configSchemaId: 's9', sourceHash: 'a'.repeat(64) }));
   });
 
@@ -212,7 +212,7 @@ describe('affectedWorkflows and changedKeys', () => {
     expect(affectedWorkflows(b, cur).sort()).toEqual(['daily', 'hourly']);
   });
   it('a created or changed schema a processor points at affects workflows reaching its steps', () => {
-    const s1 = { id: 's1', name: 's', version: '1.0.0', description: null, definition: '{}', audit: proc.audit, updatedAt: 'T' };
+    const s1 = { id: 's1', name: 's', version: '1.0.0', description: null, definition: '{}', audit: proc.audit, at: null, updatedAt: 'T' };
     const withSchema = { ...b, processors: { p1: { ...proc, inputSchemaId: 's1' } }, schemas: { s1 } };
     const edited = { ...withSchema, schemas: { s1: { ...s1, definition: '{"a":1}' } } };
     expect(affectedWorkflows(withSchema, edited).sort()).toEqual(['daily', 'hourly']);
@@ -225,6 +225,30 @@ describe('affectedWorkflows and changedKeys', () => {
     expect([...changedKeys(b, deleteSteps(b, ['fetch']))].sort()).toEqual([
       'assignment:a-daily-fetch', 'assignment:a-hourly-fetch', 'step:fetch', 'workflow:daily', 'workflow:hourly']);
     expect(changedKeys(b, b).size).toBe(0);
+  });
+});
+
+describe('schema and processor places', () => {
+  const sch = { id: 's1', name: 's', version: '1.0.0', description: null, definition: '{"a":1}', audit: proc.audit, at: null, updatedAt: 'T1' };
+  const base = { ...b, schemas: { s1: sch } };
+  it('moving a schema sends update schemas/<id> with boardX, boardY, its definition and its stamp', () => {
+    const cur = { ...base, schemas: { s1: { ...sch, at: { x: 5, y: 6 } } } };
+    expect(boardChanges(base, cur)).toEqual([
+      { op: 'update', table: 'schemas', id: 's1', updatedAt: 'T1', row: { name: 's', version: '1.0.0', description: null, definition: '{"a":1}', boardX: 5, boardY: 6 } }]);
+  });
+  it('moving a processor sends update processors/<id> with boardX, boardY and its stored fields unchanged', () => {
+    const cur = { ...b, processors: { p1: { ...proc, at: { x: 7, y: 8 } } } };
+    expect(boardChanges(b, cur)).toEqual([
+      { op: 'update', table: 'processors', id: 'p1', updatedAt: proc.updatedAt, row: {
+        name: proc.name, version: proc.version, description: proc.description, sourceHash: proc.sourceHash, instanceId: proc.instanceId,
+        inputSchemaId: proc.inputSchemaId, outputSchemaId: proc.outputSchemaId, configSchemaId: proc.configSchemaId, boardX: 7, boardY: 8 } }]);
+  });
+  it('a schema or processor move alone affects no workflow; a schema name change still affects the workflows using it', () => {
+    const wired = { ...base, processors: { p1: { ...proc, inputSchemaId: 's1' } } };
+    const moved = { ...wired, schemas: { s1: { ...sch, at: { x: 1, y: 1 } } }, processors: { p1: { ...wired.processors.p1, at: { x: 2, y: 2 } } } };
+    expect(affectedWorkflows(wired, moved)).toEqual([]);
+    const renamed = { ...wired, schemas: { s1: { ...sch, name: 'other' } } };
+    expect(affectedWorkflows(wired, renamed).sort()).toEqual(['daily', 'hourly']);
   });
 });
 

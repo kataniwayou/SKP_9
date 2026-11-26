@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { assignmentDto, cacheDto, stepDto, workflowDto } from './fixtures';
-import { assignmentRowFromDto, cacheRowFromDto, stepFromDto, stepRowFromDto, workflowRowFromDto } from './toModel';
+import { assignmentDto, cacheDto, processorDto, schemaDto, stepDto, workflowDto } from './fixtures';
+import { assignmentRowFromDto, cacheRowFromDto, processorRowFromDto, schemaRowFromDto, stepFromDto, stepRowFromDto, workflowRowFromDto } from './toModel';
 
 describe('stepFromDto', () => {
   it('rejects a DTO without an id, because nothing downstream can key it', () => {
@@ -37,5 +37,16 @@ describe('a cache\'s items arrive as a list of pairs', () => {
   it('an empty or missing list is the empty dictionary', () => {
     expect(cacheRowFromDto(cacheDto('c1', { items: [] } as never)).items).toBe('{}');
     expect(cacheRowFromDto(cacheDto('c1', { items: null } as never)).items).toBe('{}');
+  });
+});
+
+describe('schema and processor rows keep a board place', () => {
+  it('a schema read with boardX/boardY has at; without them at is null', () => {
+    expect(schemaRowFromDto(schemaDto('s1', { boardX: 3, boardY: 4 })).at).toEqual({ x: 3, y: 4 });
+    expect(schemaRowFromDto(schemaDto('s1')).at).toBeNull();
+  });
+  it('a processor read with boardX/boardY has at; without them at is null', () => {
+    expect(processorRowFromDto(processorDto('p1', { boardX: 3, boardY: 4 })).at).toEqual({ x: 3, y: 4 });
+    expect(processorRowFromDto(processorDto('p1')).at).toBeNull();
   });
 });

@@ -32,7 +32,7 @@ export function board(): BoardState {
     },
     processors: {
       p1: { id: 'p1', name: 'proc', version: '1.0.0', description: null, sourceHash: 'a'.repeat(64), instanceId: null,
-        inputSchemaId: null, outputSchemaId: null, configSchemaId: null, audit, updatedAt: T },
+        inputSchemaId: null, outputSchemaId: null, configSchemaId: null, audit, at: null, updatedAt: T },
     },
     schemas: {},
   };

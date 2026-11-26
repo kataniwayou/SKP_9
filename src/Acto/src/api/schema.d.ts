@@ -3108,6 +3108,10 @@ export interface components {
             outputSchemaId?: string | null;
             /** Format: uuid */
             configSchemaId?: string | null;
+            /** Format: double */
+            boardX?: number | null;
+            /** Format: double */
+            boardY?: number | null;
         };
         ProcessorLivenessDto: {
             /** Format: uuid */
@@ -3146,6 +3150,10 @@ export interface components {
             updatedAt?: string;
             createdBy?: string | null;
             updatedBy?: string | null;
+            /** Format: double */
+            boardX?: number | null;
+            /** Format: double */
+            boardY?: number | null;
         };
         ProcessorUpdateDto: {
             name?: string | null;
@@ -3159,12 +3167,20 @@ export interface components {
             outputSchemaId?: string | null;
             /** Format: uuid */
             configSchemaId?: string | null;
+            /** Format: double */
+            boardX?: number | null;
+            /** Format: double */
+            boardY?: number | null;
         };
         SchemaCreateDto: {
             name?: string | null;
             version?: string | null;
             description?: string | null;
             definition?: string | null;
+            /** Format: double */
+            boardX?: number | null;
+            /** Format: double */
+            boardY?: number | null;
         };
         SchemaReadDto: {
             /** Format: uuid */
@@ -3179,12 +3195,20 @@ export interface components {
             updatedAt?: string;
             createdBy?: string | null;
             updatedBy?: string | null;
+            /** Format: double */
+            boardX?: number | null;
+            /** Format: double */
+            boardY?: number | null;
         };
         SchemaUpdateDto: {
             name?: string | null;
             version?: string | null;
             description?: string | null;
             definition?: string | null;
+            /** Format: double */
+            boardX?: number | null;
+            /** Format: double */
+            boardY?: number | null;
         };
         StepCreateDto: {
             name?: string | null;

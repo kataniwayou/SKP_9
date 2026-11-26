@@ -123,9 +123,9 @@ export function assignmentRowFromDto(dto: AssignmentReadDto): AssignmentRow {
 }
 
 export function processorRowFromDto(dto: ProcessorReadDto): ProcessorRow {
-  return { ...processorFromDto(dto), updatedAt: stamp(dto) };
+  return { ...processorFromDto(dto), at: atOf(dto), updatedAt: stamp(dto) };
 }
 
 export function schemaRowFromDto(dto: SchemaReadDto): SchemaRow {
-  return { ...schemaFromDto(dto), updatedAt: stamp(dto) };
+  return { ...schemaFromDto(dto), at: atOf(dto), updatedAt: stamp(dto) };
 }
