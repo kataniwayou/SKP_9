@@ -33,6 +33,13 @@ namespace BaseApi.Service.Features.Cache;
 /// </summary>
 public sealed class CacheItemsStore(BaseDbContext db, TimeProvider clock, IHttpContextAccessor http)
 {
+    /// <summary>
+    /// Most rows one statement carries. One statement over a whole 50,000-item batch (two <c>text[]</c>
+    /// parameters of ~25 MB) is what the database holds in memory at once; slices keep that small. All
+    /// slices run in the one transaction, after the stamp.
+    /// </summary>
+    public const int SliceSize = 5_000;
+
     private const string StampSql =
         "UPDATE caches SET updated_at = @now, updated_by = @user, item_count = item_count WHERE id = @id";
 
@@ -56,21 +63,26 @@ public sealed class CacheItemsStore(BaseDbContext db, TimeProvider clock, IHttpC
     {
         var (unique, repeated) = LastWins(items);
         var keys = unique.Select(i => i.Key).ToArray();
-        var values = unique.Select(i => i.Value).ToArray();
 
         var existing = await InTransactionAsync(async (conn, tx) =>
         {
             await StampAsync(conn, tx, cacheId, ct);
 
             var found = new HashSet<string>(StringComparer.Ordinal);
-            await using (var cmd = Command(conn, tx, ExistingSql, cacheId, keys))
-            await using (var reader = await cmd.ExecuteReaderAsync(ct))
-                while (await reader.ReadAsync(ct)) found.Add(reader.GetString(0));
-
-            await using (var cmd = Command(conn, tx, UpsertSql, cacheId, keys))
+            foreach (var slice in Slices(unique, SliceSize))
             {
-                cmd.Parameters.Add(new NpgsqlParameter("values", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = values });
-                await cmd.ExecuteNonQueryAsync(ct);
+                var sliceKeys = slice.Select(i => i.Key).ToArray();
+                var sliceValues = slice.Select(i => i.Value).ToArray();
+
+                await using (var cmd = Command(conn, tx, ExistingSql, cacheId, sliceKeys))
+                await using (var reader = await cmd.ExecuteReaderAsync(ct))
+                    while (await reader.ReadAsync(ct)) found.Add(reader.GetString(0));
+
+                await using (var cmd = Command(conn, tx, UpsertSql, cacheId, sliceKeys))
+                {
+                    cmd.Parameters.Add(new NpgsqlParameter("values", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = sliceValues });
+                    await cmd.ExecuteNonQueryAsync(ct);
+                }
             }
 
             var added = keys.Length - found.Count;
@@ -94,16 +106,18 @@ public sealed class CacheItemsStore(BaseDbContext db, TimeProvider clock, IHttpC
     public async Task<CacheRemoveReport> RemoveAsync(Guid cacheId, IReadOnlyList<string> keys, CancellationToken ct)
     {
         var (unique, repeated) = Distinct(keys);
-        var arr = unique.ToArray();
 
         var removed = await InTransactionAsync(async (conn, tx) =>
         {
             await StampAsync(conn, tx, cacheId, ct);
 
             var gone = new HashSet<string>(StringComparer.Ordinal);
-            await using (var cmd = Command(conn, tx, DeleteSql, cacheId, arr))
-            await using (var reader = await cmd.ExecuteReaderAsync(ct))
+            foreach (var slice in Slices(unique, SliceSize))
+            {
+                await using var cmd = Command(conn, tx, DeleteSql, cacheId, slice.ToArray());
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct)) gone.Add(reader.GetString(0));
+            }
 
             if (gone.Count != 0) await AddToCountAsync(conn, tx, cacheId, -gone.Count, ct);
             return gone;
@@ -216,6 +230,18 @@ public sealed class CacheItemsStore(BaseDbContext db, TimeProvider clock, IHttpC
             else if (named.Add(key)) repeated.Add(key);
         }
         return (unique, repeated);
+    }
+
+    /// <summary>The list cut into runs of at most <paramref name="size"/>, in order.</summary>
+    public static IEnumerable<IReadOnlyList<T>> Slices<T>(IReadOnlyList<T> list, int size)
+    {
+        for (var at = 0; at < list.Count; at += size)
+        {
+            var take = Math.Min(size, list.Count - at);
+            var slice = new T[take];
+            for (var i = 0; i < take; i++) slice[i] = list[at + i];
+            yield return slice;
+        }
     }
 
     private static List<string> Cap(List<string> names) =>

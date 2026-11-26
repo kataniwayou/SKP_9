@@ -9,6 +9,7 @@ using BaseApi.Service.Features.Schema;
 using BaseApi.Service.Features.Step;
 using BaseApi.Service.Features.Workflow;
 using Microsoft.Extensions.Configuration;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace BaseApi.Service.Composition;
@@ -28,6 +29,7 @@ internal static class AppFeatures
 {
     public static IServiceCollection AddAppFeatures(this IServiceCollection services, IConfiguration cfg)
     {
+        services.AddExceptionHandler<BadHttpRequestExceptionHandler>();   // Kestrel's 413 etc., ahead of the catch-all
         services.AddSchemaFeature();
         services.AddCacheFeature();
         services.AddProcessorFeature();

@@ -141,6 +141,73 @@ public sealed class CacheItemsStoreTests(PostgresFixture fixture)
         Assert.Equal("bob", cache.UpdatedBy);
     }
 
+    private static List<CacheItemDto> Many(int from, int count, string value = "v") =>
+        Enumerable.Range(from, count).Select(n => new CacheItemDto($"k{n:D6}", value)).ToList();
+
+    [Fact]
+    public void SlicesSplitABatchIntoAtMost5000Rows()
+    {
+        Assert.Equal(5_000, CacheItemsStore.SliceSize);
+        var sizes = CacheItemsStore.Slices(Many(0, 12_345), CacheItemsStore.SliceSize).Select(s => s.Count).ToArray();
+        Assert.Equal([5_000, 5_000, 2_345], sizes);
+        Assert.Empty(CacheItemsStore.Slices(new List<string>(), CacheItemsStore.SliceSize));
+    }
+
+    [Fact]
+    public async Task AppendAcrossSliceBoundariesReportsAddedThenOverwritten()
+    {
+        var id = await NewCacheAsync();
+        await using var db = fixture.NewContext();
+        var r = await Store(db).AppendAsync(id, Many(0, 12_345), Ct);
+        Assert.Equal(12_345, r.Added);
+        Assert.Equal(0, r.Overwritten);
+        Assert.Equal(12_345, (await CacheAsync(id)).ItemCount);
+
+        var again = await Store(db).AppendAsync(id, Many(0, 12_345, "w"), Ct);
+        Assert.Equal(0, again.Added);
+        Assert.Equal(12_345, again.Overwritten);
+        Assert.True(again.KeysTruncated);
+        Assert.Equal(CacheRules.ReportKeyCap, again.OverwrittenKeys.Count);
+        Assert.Equal(12_345, (await CacheAsync(id)).ItemCount);
+        var stored = await StoredAsync(id);
+        Assert.Equal(12_345, stored.Count);
+        Assert.All(stored.Values, v => Assert.Equal("w", v));
+    }
+
+    [Fact]
+    public async Task MixedAppendAcrossSlicesSplitsAddedAndOverwritten()
+    {
+        var id = await NewCacheAsync();
+        await using var db = fixture.NewContext();
+        await Store(db).AppendAsync(id, Many(0, 6_000), Ct);   // k000000..k005999
+
+        // 4,000 stored keys spread over both ends, 8,345 new ones, in one batch of 12,345.
+        var batch = Many(5_000, 1_000, "x").Concat(Many(0, 3_000, "x")).Concat(Many(6_000, 8_345, "x")).ToList();
+        var r = await Store(db).AppendAsync(id, batch, Ct);
+
+        Assert.Equal(8_345, r.Added);
+        Assert.Equal(4_000, r.Overwritten);
+        Assert.Equal(6_000 + 8_345, (await CacheAsync(id)).ItemCount);
+        Assert.Equal(14_345, (await StoredAsync(id)).Count);
+    }
+
+    [Fact]
+    public async Task RemoveAcrossSliceBoundariesCountsRemovedAndNotFound()
+    {
+        var id = await NewCacheAsync();
+        await using var db = fixture.NewContext();
+        await Store(db).AppendAsync(id, Many(0, 10_000), Ct);
+
+        // 12,345 keys: 10,000 stored plus 2,345 never stored, interleaved so every slice has both.
+        var keys = Many(0, 12_345).Select(i => i.Key).OrderBy(k => k.GetHashCode()).ToList();
+        var r = await Store(db).RemoveAsync(id, keys, Ct);
+
+        Assert.Equal(10_000, r.Removed);
+        Assert.Equal(2_345, r.NotFound);
+        Assert.Equal(0, (await CacheAsync(id)).ItemCount);
+        Assert.Empty(await StoredAsync(id));
+    }
+
     [Fact]
     public async Task AppendToMissingCacheThrowsNotFound()
     {
