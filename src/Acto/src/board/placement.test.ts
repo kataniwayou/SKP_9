@@ -3,7 +3,8 @@ import { board as fixture } from '../design/boardFixtures';
 import type { BoardState } from '../design/board';
 import { STEP_H, STEP_W } from './geometry';
 import { overlaps } from './overlap';
-import { placeMissing, placeSchemas, settleSchemas } from './placement';
+import { moveItems } from '../design/edits';
+import { placeMissing, placeSchemas, settledPlaces, settleSchemas } from './placement';
 
 /** The fixture with its cards moved well apart, so only the rule under test decides a position. */
 const board = (): BoardState => {
@@ -115,5 +116,24 @@ describe('placeSchemas / settleSchemas', () => {
     expect(at).not.toEqual({ x: 210, y: 210 });
     for (const s of Object.values(r.steps)) expect(overlaps({ ...at, w: 190, h: 52 }, { ...s.at!, w: STEP_W, h: STEP_H })).toBe(false);
     expect(r.steps).toEqual(b.steps);
+  });
+  it('settledPlaces gives every state the settled places of the present, so undoing the move that covered a card keeps it settled', () => {
+    const b0 = board();
+    // the past: the schema sits clear of everything; the present: a step was moved onto it
+    const past: BoardState = { ...b0, schemas: { s1: { ...sch('s1', b0), at: { x: 2000, y: 2000 } } } };
+    const present = moveItems(past, [{ ref: { kind: 'step', id: 'expand' }, at: { x: 1990, y: 1990 } }]);
+    const place = settledPlaces(present, []);
+    const now = place(present).schemas.s1!.at!;
+    expect(now).not.toEqual({ x: 2000, y: 2000 });
+    expect(now).toEqual(settleSchemas(present, []).schemas.s1!.at);
+    // settling the past on its own would keep the old place (nothing covers it there): the undo would bring it back
+    expect(settleSchemas(past, []).schemas.s1!.at).toEqual({ x: 2000, y: 2000 });
+    expect(place(past).schemas.s1!.at).toEqual(now);
+    expect(place(past).steps).toEqual(past.steps);
+  });
+  it('settledPlaces changes nothing when nothing needs settling', () => {
+    const b0 = board();
+    const b: BoardState = { ...b0, schemas: { s1: { ...sch('s1', b0), at: { x: 2000, y: 2000 } } } };
+    expect(settledPlaces(b, [])(b)).toBe(b);
   });
 });

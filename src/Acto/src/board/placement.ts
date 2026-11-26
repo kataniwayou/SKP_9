@@ -202,3 +202,18 @@ export function settleSchemas(b: BoardState, ghosts: readonly GhostItem[]): Boar
   }
   return cur;
 }
+
+/**
+ * Turning the mode on as one layout change [spec rule 9]: the places `settleSchemas` gives the present, as a function that
+ * puts those same places on any state, for `BoardStore.place` to apply to every past and future state too. Settling each
+ * past state on its own would leave a card at its old place wherever nothing covered it then, so an undo of the move that
+ * covered it would bring the old place back.
+ */
+export function settledPlaces(present: BoardState, ghosts: readonly GhostItem[]): (b: BoardState) => BoardState {
+  const settled = settleSchemas(present, ghosts);
+  const moved = (a: Point | null | undefined, b: Point | null | undefined) => !!a && (!b || a.x !== b.x || a.y !== b.y);
+  const moves: { ref: { kind: 'schema' | 'processor'; id: Id }; at: Point }[] = [];
+  for (const [id, s] of Object.entries(settled.schemas)) if (moved(s.at, present.schemas[id]?.at)) moves.push({ ref: { kind: 'schema', id }, at: s.at! });
+  for (const [id, p] of Object.entries(settled.processors)) if (moved(p.at, present.processors[id]?.at)) moves.push({ ref: { kind: 'processor', id }, at: p.at! });
+  return moves.length === 0 ? (b) => b : (b) => moveItems(b, moves);
+}

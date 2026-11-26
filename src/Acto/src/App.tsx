@@ -6,7 +6,7 @@ import type { ConnectionKind } from './board/connect';
 import { loadBoard } from './board/loadBoard';
 import type { ToolbarActions } from './board/nodes/boardContext';
 import { deletePicks, deleteRefusal, livePicks } from './board/picks';
-import { placeMissing, settleSchemas } from './board/placement';
+import { placeMissing, settledPlaces } from './board/placement';
 import { nudgeBlocked, occupied, rectAt } from './board/occupied';
 import { pushAside } from './board/overlap';
 import { selectPick, synced, withPicks, type Pick, type SelectionState } from './board/selection';
@@ -184,7 +184,7 @@ export function App(props: AppProps) {
    */
   const toggleSchemas = useCallback(() => {
     const on = !schemasRef.current;
-    if (on) store.place((b) => settleSchemas(b, ghostStore.ghosts()));
+    if (on) store.place(settledPlaces(store.state(), ghostStore.ghosts()));
     else {
       const picks = selRef.current.picks.filter((p) => !schemaPick(p));
       if (picks.length !== selRef.current.picks.length) setSelection(withPicks(selRef.current, picks));
@@ -199,7 +199,7 @@ export function App(props: AppProps) {
     if (!loaded || !schemasOn) return;
     if (settledAtLoad.current && !unplacedCards(state)) return;
     settledAtLoad.current = true;
-    store.place((b) => settleSchemas(b, ghostStore.ghosts()));
+    store.place(settledPlaces(store.state(), ghostStore.ghosts()));
   }, [loaded, schemasOn, state, store, ghostStore]);
 
   const onInspectorPicks = useCallback((picks: Pick[]) => setSelection(withPicks(selRef.current, picks)), [setSelection]);
