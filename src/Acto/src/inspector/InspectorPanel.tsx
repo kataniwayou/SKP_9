@@ -1,4 +1,5 @@
 import { useState, useSyncExternalStore } from 'react';
+import type { StudioApi } from '../api/client';
 import { pickKey } from '../board/picks';
 import { synced, type Pick } from '../board/selection';
 import type { BoardState, ItemRef, Slot } from '../design/board';
@@ -118,13 +119,13 @@ function ParentTab({ tab, ctx, sel, stepId, child, choose }: {
   );
 }
 
-function TabBody({ tab, focus, state, base, edit, ghosts, sel, child, choose, go }: {
+function TabBody({ tab, focus, state, base, edit, ghosts, sel, child, choose, go, api }: {
   tab: TabId; focus: Pick; state: BoardState; base: BoardState; edit: Edit; ghosts: Ghosts;
-  sel: InspectorSelection; child: ChildId | null; choose: (c: ChildId) => void; go?: Go;
+  sel: InspectorSelection; child: ChildId | null; choose: (c: ChildId) => void; go?: Go; api?: StudioApi;
 }) {
   const ctx = { state, base, edit, ...(go ? { go } : {}) };
   if (tab === 'workflow' && focus.kind === 'workflow') return <WorkflowTab {...ctx} id={focus.id} />;
-  if (tab === 'cache' && focus.kind === 'cache') return <CacheTab {...ctx} id={focus.id} />;
+  if (tab === 'cache' && focus.kind === 'cache') return <CacheTab {...ctx} api={api} id={focus.id} />;
   if (tab === 'link' && (focus.kind === 'wire' || focus.kind === 'entry' || focus.kind === 'cacheLink')) return <LinkTab state={state} edit={edit} pick={focus} />;
   if (tab === 'ghost' && focus.kind === 'ghost') {
     const g = ghosts.get(focus.key);
@@ -143,10 +144,12 @@ function TabBody({ tab, focus, state, base, edit, ghosts, sel, child, choose, go
  * history). A new pick opens its first tab with no child; the chosen tab and child are kept while the same thing stays
  * picked and they still exist. Rule 2: one thing, or one triangle with one step, shows tabs; anything else the numbered pick list.
  */
-export function InspectorPanel({ store, selection: given, ghosts, onPicks, onCenter }: {
+export function InspectorPanel({ store, selection: given, ghosts, onPicks, onCenter, api }: {
   store: BoardStore; selection: InspectorSelection; ghosts: Ghosts; onPicks?: (picks: Pick[]) => void;
   /** Centres an item on the board: a chip's link centres the step (or cache) it opens [user, 2026-11-19]. */
   onCenter?: (ref: ItemRef) => void;
+  /** Reads a cache's stored items page by page; absent, the Cache tab shows only the unsaved ones. */
+  api?: StudioApi;
 }) {
   // one shape: the selected workflows are the picked triangles (rule 1)
   const selection = synced(given);
@@ -187,7 +190,7 @@ export function InspectorPanel({ store, selection: given, ghosts, onPicks, onCen
         {list ? <PickList picks={list} state={state} ghosts={ghosts} />
           : tab !== null && focus ? <TabBody key={`${key}|${tab}|${child ?? ''}`} tab={tab} focus={focus} state={state} base={store.base()} edit={edit} ghosts={ghosts}
             sel={selection} child={child} choose={(c) => { if (tab === 'step' || tab === 'processor' || tab === 'stepless') setChosen(chooseChild(chosen, key, tab, c)); }}
-            {...(go ? { go } : {})} />
+            {...(go ? { go } : {})} {...(api ? { api } : {})} />
           : <BoardSummary state={state} />}
       </div>
     </>

@@ -411,7 +411,7 @@ export function App(props: AppProps) {
               : <Board state={state} view={view} onPick={onPick} onBoxPick={onBoxPick} onMove={onMove} onMoveGhosts={onMoveGhosts} onConnect={onConnect} onDropData={onDropData}
                   toolbar={toolbar} bar={barView} settled={loaded} focusRef={boardFocus} centerRef={boardCenter} stateNow={stateNow} onViewChange={onViewChange}
                   {...(saved ? { initialView: { x: saved.x, y: saved.y, zoom: saved.zoom } } : {})} />}
-            inspector={<InspectorPanel store={store} selection={sel} ghosts={ghostStore} onPicks={onInspectorPicks} onCenter={(r) => boardCenter.current?.(r)} />}
+            inspector={<InspectorPanel store={store} selection={sel} ghosts={ghostStore} onPicks={onInspectorPicks} onCenter={(r) => boardCenter.current?.(r)} api={api} />}
             output={<OutputPanel />}
             chat={<ChatHost chat={chat} ctx={chatCtx} ready={loaded} storage={storage} {...(props.aiFetch ? { fetchFn: props.aiFetch } : {})} />}
           />

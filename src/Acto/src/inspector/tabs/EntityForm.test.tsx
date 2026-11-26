@@ -33,49 +33,29 @@ describe('one entity form', () => {
   });
 });
 
-// A cache's items are a key/value table: add and remove an item, the Save count and undo follow [user, 2026-11-18]
-describe('a cache\'s items', () => {
-  const c1 = (store: ReturnType<typeof openOn>) => store.state().caches.c1!.items;
-  it('add and remove an item through the table: one undo step each, unsaved while it differs from the saved items', () => {
+// A cache's items are an overlay of unsaved changes: add and revert an item, the Save count and undo follow
+describe("a cache's items", () => {
+  const overlay = (store: ReturnType<typeof openOn>) => store.state().caches.c1!.itemEdits;
+  const addItem = (k: string, v: string) => {
+    fireEvent.change(screen.getByLabelText('New key'), { target: { value: k } });
+    fireEvent.change(screen.getByLabelText('New value'), { target: { value: v } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+  };
+  it('add an item then revert it: one undo step each, unsaved while the overlay holds a change', () => {
     const store = openOn('Cache', [{ kind: 'cache', id: 'c1' }]);
-    expect(screen.getByText('0 items')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '+ Add item' }));
-    const key = screen.getByRole('textbox', { name: 'Key 1' });
-    fireEvent.change(key, { target: { value: 'usd' } });
-    fireEvent.blur(key);
-    const value = screen.getByRole('textbox', { name: 'Value 1' });
-    fireEvent.focus(value);
-    fireEvent.change(value, { target: { value: '3.7' } });
-    fireEvent.blur(value);
-    expect(c1(store)).toBe('{"usd":"3.7"}');
+    expect(screen.getByText('0 stored')).toBeInTheDocument();
+    addItem('usd', '3.7');
+    expect(overlay(store).set).toEqual({ usd: '3.7' });
     expect(store.unsaved().size).toBe(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Delete item 1' }));
-    expect(c1(store)).toBe('{}');
-    expect(store.unsaved().size).toBe(0); // back to the saved items: nothing to save
-    // each commit is its own undo step: undo takes back the delete, then the value, then the key
-    act(() => store.undo());
-    expect(c1(store)).toBe('{"usd":"3.7"}');
-    expect(screen.getByRole('textbox', { name: 'Key 1' })).toHaveValue('usd');
-    expect(store.unsaved().size).toBe(1);
-    act(() => store.undo());
-    expect(c1(store)).toBe('{"usd":""}');
-    act(() => store.undo());
-    expect(c1(store)).toBe('{}');
-    expect(screen.queryByRole('textbox', { name: 'Key 1' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Revert usd' }));
+    expect(overlay(store).set).toEqual({});
     expect(store.unsaved().size).toBe(0);
+    act(() => store.undo());
+    expect(overlay(store).set).toEqual({ usd: '3.7' });
+    expect(screen.getByLabelText('Unsaved value usd')).toHaveValue('3.7');
+    act(() => store.undo());
+    expect(overlay(store).set).toEqual({});
+    expect(screen.queryByLabelText('Unsaved value usd')).toBeNull();
     expect(store.canUndo()).toBe(false);
-  });
-
-  it('undo after an add puts the table back to the saved items', () => {
-    const store = openOn('Cache', [{ kind: 'cache', id: 'c1' }]);
-    fireEvent.click(screen.getByRole('button', { name: '+ Add item' }));
-    const key = screen.getByRole('textbox', { name: 'Key 1' });
-    fireEvent.change(key, { target: { value: 'a' } });
-    fireEvent.blur(key);
-    expect(store.unsaved().size).toBe(1);
-    act(() => store.undo());
-    expect(c1(store)).toBe('{}');
-    expect(screen.queryByRole('textbox', { name: 'Key 1' })).toBeNull();
-    expect(store.unsaved().size).toBe(0);
   });
 });

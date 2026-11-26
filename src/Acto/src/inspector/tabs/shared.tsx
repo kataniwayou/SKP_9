@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { StudioApi } from '../../api/client';
 import type { Pick } from '../../board/selection';
 import type { BoardState, RowAudit } from '../../design/board';
 import type { Id } from '../../model/graph';
@@ -8,7 +9,7 @@ import { MetaToggle, type Meta } from '../MetaToggle';
 
 export type Edit = (fn: (b: BoardState) => BoardState, merge?: string) => void;
 /** `base`: the board as BaseAPI last gave it (the saved values JSON is compared with). */
-export interface Ctx { state: BoardState; base: BoardState; edit: Edit; go?: Go }
+export interface Ctx { state: BoardState; base: BoardState; edit: Edit; go?: Go; api?: StudioApi | undefined }
 /** Moves the selection to `picks` and opens `tab` (and Step's `child`) for it; absent where the Inspector cannot select. */
 export type Go = (picks: Pick[], open?: { tab: 'step'; child?: string }) => void;
 

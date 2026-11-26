@@ -439,20 +439,15 @@ describe('InspectorPanel', () => {
     });
   });
 
-  it('a cache shows its fields, its items as a table and who uses it', () => {
+  it('a cache shows its fields, its unsaved items and who uses it', () => {
     const b0 = board();
-    const { store } = setup({ workflows: [], picks: [{ kind: 'cache', id: 'c1' }] }, { ...b0, caches: { c1: { ...b0.caches.c1!, items: '{"k":"v"}' } } });
+    const { store } = setup({ workflows: [], picks: [{ kind: 'cache', id: 'c1' }] }, { ...b0, caches: { c1: { ...b0.caches.c1!, itemCount: 2, itemEdits: { set: { k: 'v' }, removed: ['gone'] } } } });
     expect(screen.getByRole('tab', { name: 'Cache' })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Root'), { target: { value: 'new-root' } });
     expect(store.state().caches.c1!.root).toBe('new-root');
-    expect(screen.getByRole('textbox', { name: 'Key 1' })).toHaveValue('k');
-    expect(screen.getByRole('textbox', { name: 'Value 1' })).toHaveValue('v');
-    fireEvent.click(screen.getByRole('button', { name: 'JSON' }));
-    const json = screen.getByRole('textbox', { name: 'Items as JSON' });
-    expect(json).toHaveValue('{\n  "k": "v"\n}');
-    fireEvent.change(json, { target: { value: '{"k" :"v"}' } });
-    fireEvent.blur(json);
-    expect(store.state().caches.c1!.items).toBe('{"k":"v"}'); // the same JSON: no edit
+    expect(screen.getByText('2 stored · 2 unsaved')).toBeInTheDocument();
+    expect(screen.getByLabelText('Unsaved value k')).toHaveValue('v');
+    expect(screen.getByLabelText('Removed key gone')).toBeInTheDocument();
     expect(screen.getByText('Used by').nextSibling).toHaveTextContent('daily');
   });
 

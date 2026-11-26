@@ -4,7 +4,6 @@ import type { GhostItem, GhostStore } from '../../design/ghosts';
 import { conditionInfo } from '../../model/entryConditions';
 import type { Id } from '../../model/graph';
 import { Ro, Row } from '../fields';
-import { JsonView } from '../JsonField';
 import { MetaToggle } from '../MetaToggle';
 import { EntityHead, metaOfRow } from './shared';
 
@@ -71,8 +70,8 @@ export function GhostTab({ state, ghosts, item }: { state: BoardState; ghosts: L
         {item.kind === 'step' && <Row k="Entry condition">{conditionInfo(item.row.entryCondition).name}</Row>}
         {item.kind === 'workflow' && <Row k="Assignments">{String(item.assignments.length)}</Row>}
         {item.kind === 'cache' && <Row k="Root">{item.row.root}</Row>}
+        {item.kind === 'cache' && <Row k="Items">{`${item.row.itemCount} stored`}</Row>}
       </Ro>
-      {item.kind === 'cache' && <JsonView label="Items" value={item.row.items} />}
       {note}
     </>
   );
