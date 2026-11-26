@@ -291,6 +291,29 @@ public sealed class ModelChangesCacheItemsTests(PostgresFixture fixture) : IAsyn
     }
 
     [Fact]
+    public async Task AnUpdateAfterAnAppendIsStillStaleWhenAForeignEditCameBeforeTheBatch()
+    {
+        var read = (await RowAsync()).UpdatedAt;
+        await Task.Delay(20, Ct);
+        await using (var other = fixture.NewContext())
+        {
+            var foreign = await other.Set<CacheEntity>().SingleAsync(c => c.Id == _cache, Ct);
+            foreign.Description = "foreign";
+            await other.SaveChangesAsync(Ct);
+        }
+
+        var result = await ApplyAsync(Append(_cache, null, ("a", "A")), UpdateCache(_cache, _root, "mine", read));
+
+        Assert.False(result.Applied);
+        Assert.True(result.Results[0].Ok);
+        Assert.Equal(409, result.Results[1].Status);
+        Assert.Equal("stale", result.Results[1].Problem!.Value.GetProperty("code").GetString());
+        var row = await RowAsync();
+        Assert.Equal("foreign", row.Description);
+        Assert.Equal([("acme", "Acme")], await StoredAsync());
+    }
+
+    [Fact]
     public async Task OtherOpsOnCacheItemsAreRefused()
     {
         var result = await ApplyAsync(new ModelChangeDto("update", "cache_items", _cache, Json(new { cacheId = _cache, items = Array.Empty<object>() })));
