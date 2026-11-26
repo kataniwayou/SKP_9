@@ -2,14 +2,13 @@ import { SLOT_FIELD, type Slot } from '../../design/board';
 import { setCacheField, setProcessorField, setSlotSchema, setStepField, setWorkflowField } from '../../design/edits';
 import { assignmentOf, newPayloadOf, removeAssignment, setAssignmentField, setPayload } from '../../design/payloads';
 import { CONDITIONS } from '../../model/entryConditions';
-import { parseDict } from '../../model/dict';
 import type { ToolDef, ToolOutcome } from '../toolTypes';
 import { applyState, done, fail, onBoard, STEP_ID, text, WORKFLOW_ID } from './common';
 
 const FIELDS = {
   workflow: ['name', 'version', 'description'],
   step: ['name', 'version', 'description', 'entryCondition'],
-  cache: ['name', 'version', 'description', 'root', 'items'],
+  cache: ['name', 'version', 'description', 'root'],
   processor: ['name', 'version', 'description'],
   schema: ['name', 'version', 'description', 'definition'],
   assignment: ['name', 'version', 'description'],
@@ -19,7 +18,7 @@ const NULLABLE = new Set(['description']);
 
 const setField: ToolDef = {
   name: 'set_field',
-  description: "Set one field of a workflow (name, version, description), step (name, version, description, entryCondition: 1 Completed, 2 Failed, 3 Cancelled, 4 Always, 5 Never), cache (name, version, description, root, items), processor (name, version, description), schema (name, version, description; its definition is read-only: a change needs the processor restarted) or assignment (name, version, description: a workflow's payload row, id from read_board's payloads, with that workflow's workflow_id), as the Inspector does. A processor or schema shared with other things is changed for all of them; a schema edit gives the processor a schema of its own; an assignment other workflows also link is copied for this workflow only. `value` null clears a description.",
+  description: "Set one field of a workflow (name, version, description), step (name, version, description, entryCondition: 1 Completed, 2 Failed, 3 Cancelled, 4 Always, 5 Never), cache (name, version, description, root; its items go through read_cache_items, set_cache_items and remove_cache_items), processor (name, version, description), schema (name, version, description; its definition is read-only: a change needs the processor restarted) or assignment (name, version, description: a workflow's payload row, id from read_board's payloads, with that workflow's workflow_id), as the Inspector does. A processor or schema shared with other things is changed for all of them; a schema edit gives the processor a schema of its own; an assignment other workflows also link is copied for this workflow only. `value` null clears a description.",
   parameters: {
     type: 'object',
     properties: {
@@ -44,6 +43,7 @@ const setField: ToolDef = {
       if (!w) return fail(`no workflow ${wfId === '' ? '(none given)' : wfId} on the board: an assignment is set through the workflow whose payload it is`, 'set field');
       if (!w.assignmentIds.includes(id)) return fail(`workflow ${w.name} has no assignment ${id}`, 'set field');
     }
+    if (kind === 'cache' && field === 'items') return fail("a cache's items are not a field: use read_cache_items, set_cache_items and remove_cache_items", 'set field');
     const names: readonly string[] = FIELDS[kind];
     if (!names.includes(field)) return fail(`a ${kind} has no field ${field}: the fields are ${names.join(', ')}`, 'set field');
     // [user, 2026-11-19] a definition change needs the processor restarted: read-only, as in the Inspector
@@ -59,11 +59,6 @@ const setField: ToolDef = {
       value = null;
     } else if (typeof raw === 'string') value = raw;
     else return fail(`${field} takes a text`, 'set field');
-    // a cache's items go to BaseAPI as pairs: text the board could not convert would stop the whole Save
-    if (kind === 'cache' && field === 'items' && typeof value === 'string') {
-      const parsed = parseDict(value);
-      if (!parsed.ok) return fail(`items: ${parsed.reason}`, 'set field');
-    }
     const what = `${kind} ${(table[id] as { name: string }).name}`;
     const edit = (cur: typeof b) => {
       switch (kind) {

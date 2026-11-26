@@ -35,7 +35,7 @@ describe('systemPrompt', () => {
       expect(TOOL_DEFS.map((t) => t.name)).toContain(name);
       expect(prompt).toContain(name);
     }
-    expect(TOOL_DEFS).toHaveLength(39);
+    expect(TOOL_DEFS).toHaveLength(42);
   });
 
   it('says once that a workflow is scheduled only by its entry arrows, and names no workflow cron', () => {

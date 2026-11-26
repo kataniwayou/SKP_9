@@ -39,6 +39,7 @@ export function fakeApi(o: FakeLists = {}): StudioApi {
     startWorkflow: notFoundFn,
     stopWorkflow: notFoundFn,
     publishDiagram: vi.fn().mockResolvedValue(ok(null)),
+    cacheItemsPage: vi.fn().mockResolvedValue(ok({ items: [], next: null })),
   } as unknown as StudioApi;
 }
 

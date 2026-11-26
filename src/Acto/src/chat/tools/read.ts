@@ -88,7 +88,7 @@ const listSchemas: ToolDef = {
 
 const readBoard: ToolDef = {
   name: 'read_board',
-  description: 'Read the whole board as it is now, unsaved edits included: every step (id, name, version, description, processor with health, entry condition, next step ids = wires, position), every cache (id, name, version, description, root, items as JSON text, position), and every workflow triangle (fields, Running or Stopped, unsaved and saved flags, problems of the last refused Start, entry steps (id and its own cron, or null), the steps it reaches, linked caches, and its payloads: assignment id, name, version, description, step id, payload, and the other workflows sharing that payload). Also the Schemas mode (on or off) and, drawn as cards only while it is on, every schema (id, name, version, description, state: wired = a processor some step runs fills one of its slots, held = only a processor no step uses does, orphan = none; the steps using it and the processor holding it, with the slot; position) and the processor cards (a processor no step uses that holds a schema: id, name, version, the schemas it holds, position).',
+  description: 'Read the whole board as it is now, unsaved edits included: every step (id, name, version, description, processor with health, entry condition, next step ids = wires, position), every cache (id, name, version, description, root, item_count (stored items; read them with read_cache_items), unsaved_items {set, removed} (the unsaved item edits of this session), position), and every workflow triangle (fields, Running or Stopped, unsaved and saved flags, problems of the last refused Start, entry steps (id and its own cron, or null), the steps it reaches, linked caches, and its payloads: assignment id, name, version, description, step id, payload, and the other workflows sharing that payload). Also the Schemas mode (on or off) and, drawn as cards only while it is on, every schema (id, name, version, description, state: wired = a processor some step runs fills one of its slots, held = only a processor no step uses does, orphan = none; the steps using it and the processor holding it, with the slot; position) and the processor cards (a processor no step uses that holds a schema: id, name, version, the schemas it holds, position).',
   parameters: NO_ARGS,
   async run(ctx) {
     const b = ctx.store.state();
@@ -103,7 +103,7 @@ const readBoard: ToolDef = {
         description: st.description, entryCondition: conditionInfo(st.entryCondition).name, next: st.nextStepIds, at: st.at,
       };
     });
-    const caches = Object.values(b.caches).map((c) => ({ id: c.id, name: c.name, version: c.version, description: c.description, root: c.root, items: c.items, at: c.at }));
+    const caches = Object.values(b.caches).map((c) => ({ id: c.id, name: c.name, version: c.version, description: c.description, root: c.root, item_count: c.itemCount, unsaved_items: { set: c.itemEdits.set, removed: c.itemEdits.removed }, at: c.at }));
     const workflows = Object.values(b.workflows).map((w) => ({
       id: w.id, name: w.name, version: w.version, description: w.description,
       status: runWord(ctx, w.id), unsaved: touched.has(w.id), saved: !!base.workflows[w.id], problems: ctx.store.problems(w.id),

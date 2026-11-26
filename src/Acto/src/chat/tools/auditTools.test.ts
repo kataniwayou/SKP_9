@@ -110,9 +110,10 @@ describe('G2 ghosts through the chat: list_ghosts, restore_ghosts, remove_ghosts
 describe('G3 read_board holds the board\'s unsaved cache items and descriptions', () => {
   it('an unsaved items edit is what read_board answers', async () => {
     const { ctx, store } = setup();
-    store.edit((b) => setCacheField(setCacheField(b, 'c1', 'items', '{"usd":"3.7"}'), 'c1', 'description', 'rates'));
+    store.edit((b) => setCacheField(b, 'c1', 'description', 'rates'));
+    done(await call(ctx, 'set_cache_items', { cache_id: 'c1', items: [{ key: 'usd', value: '3.7' }] }));
     const d = JSON.parse(done(await call(ctx, 'read_board')).result);
-    expect(d.caches[0]).toMatchObject({ id: 'c1', items: '{"usd":"3.7"}', description: 'rates' });
+    expect(d.caches[0]).toMatchObject({ id: 'c1', unsaved_items: { set: { usd: '3.7' }, removed: [] }, description: 'rates' });
   });
 });
 

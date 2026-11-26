@@ -23,7 +23,7 @@ describe('reading tools', () => {
     const d = JSON.parse(done(await call(ctx, 'read_board')).result);
     expect(d.steps.map((s: { id: string; next: string[] }) => [s.id, s.next])).toEqual([['fetch', ['expand']], ['expand', []], ['lonely', []]]);
     expect(d.steps[0].processor).toMatchObject({ id: 'p1', name: 'proc' });
-    expect(d.caches).toEqual([{ id: 'c1', name: 'c1', version: '1.0.0', description: null, root: 'r', items: expect.any(String), at: { x: 0, y: -100 } }]);
+    expect(d.caches).toEqual([{ id: 'c1', name: 'c1', version: '1.0.0', description: null, root: 'r', item_count: 0, unsaved_items: { set: {}, removed: [] }, at: { x: 0, y: -100 } }]);
     expect(d.steps[0]).toHaveProperty('description');
     const daily = d.workflows.find((w: { id: string }) => w.id === 'daily');
     expect(daily).toMatchObject({ entrySteps: [{ id: 'fetch', cron: null }], caches: ['c1'], unsaved: false, saved: true, steps: ['fetch', 'expand'] });
