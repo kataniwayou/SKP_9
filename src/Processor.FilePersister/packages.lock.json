@@ -329,7 +329,7 @@
         "type": "CentralTransitive",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "SLbVlPXntTBJfUji/xfCNBhrNZ9R4j+1DG6oXoki7JIIUJzpW2uLrr0CukBKnxFXaikE0JzwYp+BXHfJmqtofw=="
+        "contentHash": "UwrTOi8DBLK11EV7jTysUZqOx2Wn+anlzmU8usxSzcIaFxec3vBJxS3//iNqJ99gx6ZNOYloXlp2rEkMMM31wQ=="
       },
       "Messaging.Transport": {
         "type": "CentralTransitive",

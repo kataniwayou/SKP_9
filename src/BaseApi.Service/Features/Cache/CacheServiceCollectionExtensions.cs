@@ -7,6 +7,8 @@ internal static class CacheServiceCollectionExtensions
 {
     public static IServiceCollection AddCacheFeature(this IServiceCollection services)
     {
+        services.AddScoped<CacheItemsStore>();
+        services.AddScoped<CacheRefreshSender>();
         services.AddScoped<CacheService>();
         services.AddScoped<BaseService<CacheEntity, CacheCreateDto, CacheUpdateDto, CacheReadDto>>(
             sp => sp.GetRequiredService<CacheService>());

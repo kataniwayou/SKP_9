@@ -31,7 +31,7 @@ namespace BaseApi.Service.Features.Cache;
 /// context throws a concurrency conflict, because the row's <c>xmin</c> moved.
 /// </para>
 /// </summary>
-internal sealed class CacheItemsStore(BaseDbContext db, TimeProvider clock, IHttpContextAccessor http)
+public sealed class CacheItemsStore(BaseDbContext db, TimeProvider clock, IHttpContextAccessor http)
 {
     private const string StampSql =
         "UPDATE caches SET updated_at = @now, updated_by = @user, item_count = item_count WHERE id = @id";

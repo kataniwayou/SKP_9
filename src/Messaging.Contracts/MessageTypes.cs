@@ -26,6 +26,9 @@ public static class MessageTypes
     /// <summary>Body is a <see cref="Messaging.Contracts.RefreshCache"/>.</summary>
     public const string RefreshCache = "refresh-cache";
 
+    /// <summary>Body is a <see cref="Messaging.Contracts.RefreshCacheItems"/>: a chunk of keys of one cache.</summary>
+    public const string RefreshCacheItems = "refresh-cache-items";
+
     /// <summary>Request body is a <see cref="Messaging.Contracts.GetProcessorBySourceHash"/>.</summary>
     public const string GetProcessorBySourceHash = "get-processor-by-source-hash";
 

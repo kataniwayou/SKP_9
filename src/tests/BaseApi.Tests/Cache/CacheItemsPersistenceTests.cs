@@ -1,9 +1,7 @@
-using BaseApi.Core.Persistence.Interceptors;
-using BaseApi.Core.Persistence.Repositories;
 using BaseApi.Service;
 using BaseApi.Service.Features.Cache;
+using BaseApi.Tests.Support;
 using Messaging.Transport;
-using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -16,7 +14,8 @@ namespace BaseApi.Tests.Cache;
 /// rows gone with their cache, every read — tracked or not — seeing the items without naming them, and
 /// an items-only edit still stamping the cache row (the board's stale-edit check reads its UpdatedAt).
 /// </summary>
-public sealed class CacheItemsPersistenceTests : IAsyncLifetime
+[Collection("Postgres")]
+public sealed class CacheItemsPersistenceTests(PostgresFixture fixture) : IAsyncLifetime
 {
     private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 11, 24, 12, 0, 0, TimeSpan.Zero));
     private AppDbContext _db = null!;
@@ -33,24 +32,23 @@ public sealed class CacheItemsPersistenceTests : IAsyncLifetime
 
     public ValueTask InitializeAsync()
     {
-        _db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase($"cache-items-rows-{Guid.NewGuid():N}")
-            .AddInterceptors(new AuditInterceptor(new HttpContextAccessor(), _clock))
-            .Options);
+        PostgresFixture.SkipUnlessEnabled();
+        _db = fixture.NewContext(_clock);
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask DisposeAsync() => await _db.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        if (_db is not null) await _db.DisposeAsync();
+    }
 
-    private CacheService Service() => new(
-        new CacheCreateDtoValidator(), new CacheUpdateDtoValidator(), new CacheItemsUpdateDtoValidator(),
-        new CacheEntityMapper(), new Repository<CacheEntity>(_db), _db, new NoSender());
+    private CacheService Service() => CacheServiceFactory.Create(_db, new NoSender());
 
     // A cache is created empty (its DTO carries no items); the rows are then seeded directly, as the
     // item verbs of a later step write them.
     private async Task<CacheReadDto> CreateAsync(string root, List<CacheItemDto> items)
     {
-        var created = await Service().CreateAsync(new CacheCreateDto($"cache-{root}", "1.0.0", null, root), Ct);
+        var created = await Service().CreateAsync(new CacheCreateDto($"cache-{root}", "1.0.0", null, $"{root}-{Guid.NewGuid():N}"), Ct);
         var row = await _db.Set<CacheEntity>().SingleAsync(c => c.Id == created.Id, Ct);
         _db.Set<CacheItem>().AddRange(items.Select(i => new CacheItem { CacheId = row.Id, Key = i.Key, Value = i.Value }));
         row.ItemCount = items.Count;

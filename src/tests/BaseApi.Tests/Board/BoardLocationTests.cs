@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
+using BaseApi.Tests.Support;
 using Xunit;
 
 namespace BaseApi.Tests.Board;
@@ -37,9 +38,7 @@ public sealed class BoardLocationTests : IAsyncLifetime
             .UseInMemoryDatabase($"board-locations-{Guid.NewGuid():N}").Options);
         _steps = new StepService(new StepCreateDtoValidator(), new StepUpdateDtoValidator(),
             new StepEntityMapper(), new Repository<StepEntity>(_db), _db);
-        _caches = new CacheService(new CacheCreateDtoValidator(), new CacheUpdateDtoValidator(),
-            new CacheItemsUpdateDtoValidator(), new CacheEntityMapper(), new Repository<CacheEntity>(_db), _db,
-            Substitute.For<IQueueSender>());
+        _caches = CacheServiceFactory.Create(_db, Substitute.For<IQueueSender>());
         _workflows = new WorkflowService(new WorkflowCreateDtoValidator(), new WorkflowUpdateDtoValidator(),
             new WorkflowEntityMapper(), new Repository<WorkflowEntity>(_db), _db);
         _schemas = new SchemaService(new SchemaCreateDtoValidator(), new SchemaUpdateDtoValidator(),
@@ -117,9 +116,7 @@ public sealed class BoardLocationTests : IAsyncLifetime
         Assert.Equal((300.0, 10.0), Pair(await _caches.GetByIdAsync(cache.Id, Ct)));
         await _caches.UpdateAsync(cache.Id, new CacheUpdateDto("c", "1.0.0", null, "sk-c"), Ct);
         Assert.Equal((300.0, 10.0), Pair(await _caches.GetByIdAsync(cache.Id, Ct)));
-        // The items-only edit builds its update without a location and must not erase it either.
-        await _caches.UpdateItemsAsync(cache.Id, new CacheItemsUpdateDto([new CacheItemDto("k", "v")]), Ct);
-        Assert.Equal((300.0, 10.0), Pair(await _caches.GetByIdAsync(cache.Id, Ct)));
+        // The items-only edit keeping the location is CacheItemsUpdateTests' (it needs Postgres for its lock).
 
         var entry = Guid.NewGuid();
         var wf = await _workflows.CreateAsync(
