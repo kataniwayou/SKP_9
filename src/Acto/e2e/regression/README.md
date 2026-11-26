@@ -71,3 +71,7 @@ a workflow the run made, and the teardown fails the run if a real row changed be
 
 Evidence from the live runs: `src/Acto/test-results/cron-live-evidence.json` (6), `src/Acto/test-results/regression-12-evidence.json` (12), and `src/Acto/test-results/regression-14-evidence.json` (14): per-tick
 dispatch stamps, step ids and correlation ids from Elasticsearch.
+
+## Big cache, 2026-11-27
+
+`15-big-cache.spec.ts` (A1-A5) runs only with `SKP_SCALE=1`: it builds a 1,000,000-item `e2e-` cache over HTTP (about 30 s each test), and A3 starts a workflow on it. Results of the whole big-data proof (S1-S10, R1-R7, A1-A5), the dev limits it needed and what it found: [BIG-CACHE-REPORT.md](BIG-CACHE-REPORT.md).
