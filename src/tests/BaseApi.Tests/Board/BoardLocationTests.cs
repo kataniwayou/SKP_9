@@ -1,6 +1,8 @@
 using BaseApi.Core.Persistence.Repositories;
 using BaseApi.Service;
 using BaseApi.Service.Features.Cache;
+using BaseApi.Service.Features.Processor;
+using BaseApi.Service.Features.Schema;
 using BaseApi.Service.Features.Step;
 using BaseApi.Service.Features.Workflow;
 using Messaging.Transport;
@@ -25,6 +27,8 @@ public sealed class BoardLocationTests : IAsyncLifetime
     private StepService _steps = null!;
     private CacheService _caches = null!;
     private WorkflowService _workflows = null!;
+    private SchemaService _schemas = null!;
+    private ProcessorService _processors = null!;
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     public ValueTask InitializeAsync()
@@ -38,6 +42,10 @@ public sealed class BoardLocationTests : IAsyncLifetime
             Substitute.For<IQueueSender>());
         _workflows = new WorkflowService(new WorkflowCreateDtoValidator(), new WorkflowUpdateDtoValidator(),
             new WorkflowEntityMapper(), new Repository<WorkflowEntity>(_db), _db);
+        _schemas = new SchemaService(new SchemaCreateDtoValidator(), new SchemaUpdateDtoValidator(),
+            new SchemaEntityMapper(), new Repository<SchemaEntity>(_db), _db);
+        _processors = new ProcessorService(new ProcessorCreateDtoValidator(), new ProcessorUpdateDtoValidator(),
+            new ProcessorEntityMapper(), new Repository<ProcessorEntity>(_db), _db);
         return ValueTask.CompletedTask;
     }
 
@@ -121,6 +129,47 @@ public sealed class BoardLocationTests : IAsyncLifetime
         Assert.Equal((300.0, 10.0), Pair(await _workflows.GetByIdAsync(wf.Id, Ct)));
         await _workflows.UpdateAsync(wf.Id, new WorkflowUpdateDto("w", "1.0.0", null, [entry], null, null), Ct);
         Assert.Equal((300.0, 10.0), Pair(await _workflows.GetByIdAsync(wf.Id, Ct)));
+    }
+
+    private const string Def = "{\"type\":\"object\"}";
+    private const string Hash = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
+
+    [Fact]
+    public async Task SchemasAndProcessorsCarryLocationsTheSameWay()
+    {
+        var sc = await _schemas.CreateAsync(new SchemaCreateDto("sc", "1.0.0", null, Def, 10, 20), Ct);
+        Assert.Equal((10.0, 20.0), (sc.BoardX, sc.BoardY));
+        await _schemas.UpdateAsync(sc.Id, new SchemaUpdateDto("sc", "1.0.0", null, Def), Ct);
+        var s = await _schemas.GetByIdAsync(sc.Id, Ct);
+        Assert.Equal((10.0, 20.0), (s.BoardX, s.BoardY));
+        await _schemas.UpdateAsync(sc.Id, new SchemaUpdateDto("sc", "1.0.0", null, Def, 5), Ct);
+        s = await _schemas.GetByIdAsync(sc.Id, Ct);
+        Assert.Equal((5.0, 20.0), (s.BoardX, s.BoardY));
+
+        var pr = await _processors.CreateAsync(
+            new ProcessorCreateDto("p", "1.0.0", null, Hash, null, null, null, null, 10, 20), Ct);
+        Assert.Equal((10.0, 20.0), (pr.BoardX, pr.BoardY));
+        await _processors.UpdateAsync(pr.Id, new ProcessorUpdateDto("p", "1.0.0", null, Hash, null, null, null, null), Ct);
+        var p = await _processors.GetByIdAsync(pr.Id, Ct);
+        Assert.Equal((10.0, 20.0), (p.BoardX, p.BoardY));
+        await _processors.UpdateAsync(pr.Id,
+            new ProcessorUpdateDto("p", "1.0.0", null, Hash, null, null, null, null, 5), Ct);
+        p = await _processors.GetByIdAsync(pr.Id, Ct);
+        Assert.Equal((5.0, 20.0), (p.BoardX, p.BoardY));
+    }
+
+    [Fact]
+    public async Task AReferencedSchemaMovedWithItsDefinitionSaves()
+    {
+        var sc = await _schemas.CreateAsync(new SchemaCreateDto("sc", "1.0.0", null, Def), Ct);
+        await _processors.CreateAsync(
+            new ProcessorCreateDto("p", "1.0.0", null, Hash, null, sc.Id, null, null), Ct);
+
+        // Same schema, different whitespace: the frozen guard compares canonical JSON, so this is a location move.
+        var moved = await _schemas.UpdateAsync(sc.Id,
+            new SchemaUpdateDto("sc", "1.0.0", null, "{ \"type\" : \"object\" }", 300, 40), Ct);
+
+        Assert.Equal((300.0, 40.0), (moved.BoardX, moved.BoardY));
     }
 
     [Fact]

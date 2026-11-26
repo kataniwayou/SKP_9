@@ -30,7 +30,22 @@ public sealed partial class ProcessorEntityMapper :
     [MapperIgnoreTarget(nameof(ProcessorEntity.UpdatedAt))]
     [MapperIgnoreTarget(nameof(ProcessorEntity.CreatedBy))]
     [MapperIgnoreTarget(nameof(ProcessorEntity.UpdatedBy))]
-    public partial void Update(ProcessorUpdateDto dto, ProcessorEntity target);
+    [MapperIgnoreTarget(nameof(ProcessorEntity.BoardX))]
+    [MapperIgnoreTarget(nameof(ProcessorEntity.BoardY))]
+    [MapperIgnoreSource(nameof(ProcessorUpdateDto.BoardX))]
+    [MapperIgnoreSource(nameof(ProcessorUpdateDto.BoardY))]
+    private partial void UpdateFields(ProcessorUpdateDto dto, ProcessorEntity target);
+
+    /// <summary>
+    /// The generated field copy, then the location: BoardX and BoardY are each written only when the DTO
+    /// carries them, so a caller that does not know locations never erases them.
+    /// </summary>
+    public void Update(ProcessorUpdateDto dto, ProcessorEntity target)
+    {
+        UpdateFields(dto, target);
+        if (dto.BoardX is { } x) target.BoardX = x;
+        if (dto.BoardY is { } y) target.BoardY = y;
+    }
 
     public partial ProcessorReadDto ToRead(ProcessorEntity entity);
 }

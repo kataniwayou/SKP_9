@@ -15,7 +15,9 @@ public sealed record ProcessorCreateDto(
     string? InstanceId,
     Guid? InputSchemaId,
     Guid? OutputSchemaId,
-    Guid? ConfigSchemaId) : IBaseDto;
+    Guid? ConfigSchemaId,
+    double? BoardX = null,
+    double? BoardY = null) : IBaseDto;
 
 /// <summary>
 /// Update-side DTO. Server-controlled fields are absent here, and the mapper's <c>Update</c> method
@@ -29,7 +31,9 @@ public sealed record ProcessorUpdateDto(
     string? InstanceId,
     Guid? InputSchemaId,
     Guid? OutputSchemaId,
-    Guid? ConfigSchemaId) : IBaseDto;
+    Guid? ConfigSchemaId,
+    double? BoardX = null,
+    double? BoardY = null) : IBaseDto;
 
 /// <summary>
 /// Read-side DTO returned to clients, carrying the id and the audit fields. It implements
@@ -49,4 +53,6 @@ public sealed record ProcessorReadDto(
     DateTime CreatedAt,
     DateTime UpdatedAt,
     string? CreatedBy,
-    string? UpdatedBy) : IBaseDto, IHasId;
+    string? UpdatedBy,
+    double? BoardX = null,
+    double? BoardY = null) : IBaseDto, IHasId;

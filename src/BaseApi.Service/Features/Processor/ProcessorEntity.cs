@@ -55,4 +55,8 @@ public sealed class ProcessorEntity : BaseEntity
     public Guid? InputSchemaId { get; set; }
     public Guid? OutputSchemaId { get; set; }
     public Guid? ConfigSchemaId { get; set; }
+
+    /// <summary>Where the processor is drawn on the Acto board; null means never placed.</summary>
+    public double? BoardX { get; set; }
+    public double? BoardY { get; set; }
 }

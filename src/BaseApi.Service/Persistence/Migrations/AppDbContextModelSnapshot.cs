@@ -179,6 +179,14 @@ namespace BaseApi.Service.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<double?>("BoardX")
+                        .HasColumnType("double precision")
+                        .HasColumnName("board_x");
+
+                    b.Property<double?>("BoardY")
+                        .HasColumnType("double precision")
+                        .HasColumnName("board_y");
+
                     b.Property<Guid?>("ConfigSchemaId")
                         .HasColumnType("uuid")
                         .HasColumnName("config_schema_id");
@@ -269,6 +277,14 @@ namespace BaseApi.Service.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
+
+                    b.Property<double?>("BoardX")
+                        .HasColumnType("double precision")
+                        .HasColumnName("board_x");
+
+                    b.Property<double?>("BoardY")
+                        .HasColumnType("double precision")
+                        .HasColumnName("board_y");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")

@@ -14,4 +14,8 @@ namespace BaseApi.Service.Features.Schema;
 public sealed class SchemaEntity : BaseEntity
 {
     public string Definition { get; set; } = string.Empty;
+
+    /// <summary>Where the schema is drawn on the Acto board; null means never placed.</summary>
+    public double? BoardX { get; set; }
+    public double? BoardY { get; set; }
 }

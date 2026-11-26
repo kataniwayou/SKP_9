@@ -30,7 +30,22 @@ public sealed partial class SchemaEntityMapper :
     [MapperIgnoreTarget(nameof(SchemaEntity.UpdatedAt))]
     [MapperIgnoreTarget(nameof(SchemaEntity.CreatedBy))]
     [MapperIgnoreTarget(nameof(SchemaEntity.UpdatedBy))]
-    public partial void Update(SchemaUpdateDto dto, SchemaEntity target);
+    [MapperIgnoreTarget(nameof(SchemaEntity.BoardX))]
+    [MapperIgnoreTarget(nameof(SchemaEntity.BoardY))]
+    [MapperIgnoreSource(nameof(SchemaUpdateDto.BoardX))]
+    [MapperIgnoreSource(nameof(SchemaUpdateDto.BoardY))]
+    private partial void UpdateFields(SchemaUpdateDto dto, SchemaEntity target);
+
+    /// <summary>
+    /// The generated field copy, then the location: BoardX and BoardY are each written only when the DTO
+    /// carries them, so a caller that does not know locations never erases them.
+    /// </summary>
+    public void Update(SchemaUpdateDto dto, SchemaEntity target)
+    {
+        UpdateFields(dto, target);
+        if (dto.BoardX is { } x) target.BoardX = x;
+        if (dto.BoardY is { } y) target.BoardY = y;
+    }
 
     public partial SchemaReadDto ToRead(SchemaEntity entity);
 }
