@@ -20,13 +20,17 @@ describe('SchemaCardTab', () => {
     const go = vi.fn();
     const b = withSchemas();
     render(<SchemaCardTab state={b} id="s-cfg" go={go} />);
-    expect(screen.getByText('schema · C of proc, C of proc, C of proc')).toBeInTheDocument();
+    expect(screen.getByText('schema · C of proc')).toBeInTheDocument();
     expect(screen.getByText('In use. Only orphans can be deleted.')).toBeInTheDocument();
     const chips = screen.getAllByRole('button', { name: /Open step/ });
     expect(chips).toHaveLength(3);
     expect(screen.getAllByText('Config schema · proc')).toHaveLength(3);
     fireEvent.click(screen.getByRole('button', { name: 'Open step expand' }));
     expect(go).toHaveBeenCalledWith([{ kind: 'step', id: 'expand' }]);
+  });
+  it('three steps sharing one processor list the slot-of-processor once in the kind line', () => {
+    render(<SchemaCardTab state={withSchemas()} id="s-cfg" />);
+    expect(screen.getAllByText('schema · C of proc')).toHaveLength(1);
   });
   it('a held schema lists its processor under Held by', () => {
     const go = vi.fn();

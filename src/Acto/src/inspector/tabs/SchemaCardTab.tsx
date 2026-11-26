@@ -23,7 +23,7 @@ export function SchemaCardTab({ state, id, go }: { state: BoardState; id: Id; go
   const holders = heldBy(state, id);
   const kind = st === 'orphan' ? 'schema · orphan'
     : st === 'held' ? `schema · held by ${holders.map((h) => `${procName(h)} ${state.processors[h]?.version ?? ''}`.trim()).join(', ')}`
-      : `schema · ${refs.filter((r) => r.owner.kind === 'step').map((r) => `${LETTER[r.slot]} of ${procName(procOf(r))}`).join(', ')}`;
+      : `schema · ${[...new Set(refs.filter((r) => r.owner.kind === 'step').map((r) => `${LETTER[r.slot]} of ${procName(procOf(r))}`))].join(', ')}`;
   const stateNote = st === 'orphan' ? <p className="in-problem sub">Orphan: no processor references this schema.</p>
     : st === 'held' ? <p className="in-note sub">{`Held by ${holders.map((h) => `${procName(h)} ${state.processors[h]?.version ?? ''}`.trim()).join(', ')}, a processor no step uses.`}</p>
       : <p className="in-note sub">In use. Only orphans can be deleted.</p>;
