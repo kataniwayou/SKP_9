@@ -2945,7 +2945,6 @@ export interface components {
             version?: string | null;
             description?: string | null;
             root?: string | null;
-            items?: components["schemas"]["CacheItemDto"][] | null;
             /** Format: double */
             boardX?: number | null;
             /** Format: double */
@@ -3004,7 +3003,6 @@ export interface components {
             version?: string | null;
             description?: string | null;
             root?: string | null;
-            items?: components["schemas"]["CacheItemDto"][] | null;
             /** Format: double */
             boardX?: number | null;
             /** Format: double */
