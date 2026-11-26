@@ -210,6 +210,17 @@ describe('saveBoard', () => {
 });
 
 describe('takeStored after a refusal on stale rows', () => {
+  it('a stale cache with no item edits gets the generic wording', async () => {
+    const t = setup();
+    t.store.edit((b) => ({ ...b, caches: { ...b.caches, c1: { ...b.caches.c1!, root: 'mine' } } }));
+    t.api.applyModel.mockResolvedValue({ ok: true, value: { ok: false, applied: false, made: {}, results: [{ index: 0, op: 'update', table: 'caches', id: 'c1', ok: false, status: 409, problem: { code: 'stale' } }] } } as never);
+    await saveBoard(t.studio, t.store, t.output);
+    const b = board();
+    vi.mocked(loadBoard).mockResolvedValue({ ok: true, value: { ...b, caches: { ...b.caches, c1: { ...b.caches.c1!, root: 'theirs', updatedAt: T2 } } } });
+    await takeStored(t.studio, t.store, t.output);
+    expect(texts(t.output).at(-1)).toBe('Took the stored c1 — your changes to it are dropped (Undo brings them back)');
+  });
+
   it('keeps the item edits of a stale cache and drops its field edits', async () => {
     const t = setup();
     t.store.edit((b) => ({ ...b, caches: { ...b.caches, c1: { ...b.caches.c1!, root: 'mine' } } }));
