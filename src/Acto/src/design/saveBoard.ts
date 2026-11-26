@@ -58,6 +58,11 @@ const rowOf = (r: Result): { table: string; id: string } =>
 export function failureText(r: Result, boards: BoardState[]): string {
   const row = rowOf(r);
   const name = nameOf(boards, row.table, row.id);
+  if (r.table === 'cache_items') {
+    // no stored version to take: the cache's item edits stay in the draft
+    if (r.status === 404) return `${name} is gone — reload the board; its item edits were not saved`;
+    return `${name}: items not saved — ${problemMessage(r.problem)}`;
+  }
   if (isStale(r)) return `${name} changed elsewhere — Take stored drops your change to it`;
   if (r.status === 404) return `${kindOf(r.table ?? '')} ${name} is gone — Take stored drops your change to it`;
   return `${kindOf(row.table)} ${name}: ${problemMessage(r.problem)}`;
@@ -91,7 +96,8 @@ export function logItemReports(results: ModelApplyResultDto['results'], made: Re
     per.set(r.id, e);
   }
   for (const [id, e] of per) {
-    const name = nameOf(boards, 'caches', id) !== id ? nameOf(boards, 'caches', id) : nameOf(boards, 'caches', made[id] ?? id);
+    const client = Object.keys(made).find((k) => made[k] === id);
+    const name = [id, made[id], client].map((i) => (i ? nameOf(boards, 'caches', i) : id)).find((n) => n !== id) ?? id;
     output.log(`${name}: ${e.added} added, ${e.overwritten} overwritten, ${e.removed} removed${e.repeated > 0 ? `, ${e.repeated} repeated` : ''}`, 'ok');
   }
 }
@@ -205,7 +211,10 @@ export async function takeStored(api: StudioApi, store: BoardStore, output: Outp
   try { fresh = await loadBoard(api); } finally { store.setSaving(false); }
   if (!fresh.ok) { output.log(`Could not read the stored rows: ${transport(fresh.error)}`, 'error'); return; }
   const names = rows.map((r) => nameOf([fresh.value, store.state()], r.table, r.id));
-  const kept = rows.some((r) => r.table === 'caches' && fresh.value.caches[r.id] && store.state().caches[r.id]);
+  const kept = rows.some((r) => {
+    const e = r.table === 'caches' && fresh.value.caches[r.id] ? store.state().caches[r.id]?.itemEdits : undefined;
+    return !!e && (Object.keys(e.set).length > 0 || e.removed.length > 0);
+  });
   store.takeStored(fresh.value);
   output.log(kept
     ? `Took the stored ${names.join(', ')} — your field changes are dropped, your item edits are kept (Undo brings them back)`

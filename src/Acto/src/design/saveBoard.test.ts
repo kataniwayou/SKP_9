@@ -5,7 +5,7 @@ import { board } from './boardFixtures';
 import { createBoardStore } from './boardStore';
 import { saveBoard, takeStored } from './saveBoard';
 import { createGhostStore } from './ghosts';
-import { addEntry, addStep, removeCacheItem, setCacheItem, setEntryCron } from './edits';
+import { addCache, addEntry, addStep, removeCacheItem, setCacheItem, setEntryCron } from './edits';
 import { memoryStorage } from '../test/memoryStorage';
 
 vi.mock('../board/loadBoard', () => ({ loadBoard: vi.fn() }));
@@ -327,15 +327,28 @@ describe('item reports and warnings', () => {
     expect(t.output.lines()).toContainEqual(expect.objectContaining({ level: 'warn', text: 'could not refresh workflow daily' }));
   });
 
-  it('a refused item op marks the cache by name and is never offered to Take stored', async () => {
+  it.each([
+    [404, { title: 'Not Found' }, 'c1 is gone — reload the board; its item edits were not saved'],
+    [400, { detail: 'value too large' }, 'c1: items not saved — value too large'],
+  ])('a refused item op (%i) marks the cache, names it and offers no Take stored', async (status, problem, text) => {
     const t = setup();
     items(t);
     t.api.applyModel.mockResolvedValue({ ok: true, value: { ok: false, applied: false, made: {}, results: [
-      { index: 0, op: 'append', table: 'cache_items', id: 'c1', ok: false, status: 409, problem: { detail: 'too big', code: 'stale' } },
+      { index: 0, op: 'append', table: 'cache_items', id: 'c1', ok: false, status, problem },
     ] } } as never);
     await saveBoard(t.studio, t.store, t.output);
     expect([...t.store.failures().keys()]).toEqual(['cache:c1']);
-    expect(texts(t.output)).toContain('c1 changed elsewhere — Take stored drops your change to it');
+    expect(texts(t.output)).toContain(text);
     expect(t.store.stale()).toEqual([]);
+  });
+
+  it('names a cache created in the same Save by its client id in the report', async () => {
+    const t = setup();
+    t.store.edit((b) => addCache(b, { x: 0, y: 0 }, 'tmp1'));
+    t.store.edit((b) => setItem(b, 'tmp1', 'k', 'v'));
+    const name = t.store.state().caches.tmp1!.name;
+    applied(t, { made: { tmp1: 'real1' } }, [{ index: 1, op: 'append', table: 'cache_items', id: 'tmp1', ok: true, status: 200, report: { ...rep, added: 1 } }]);
+    await saveBoard(t.studio, t.store, t.output);
+    expect(texts(t.output)).toContain(`${name}: 1 added, 0 overwritten, 0 removed`);
   });
 });
