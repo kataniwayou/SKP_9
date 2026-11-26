@@ -1,6 +1,6 @@
 import { ENTITY_PATH, type EntityKind, type ReadDtoOf, type UpdateDtoOf } from './entities';
 import type { ModelChange } from '../design/changes';
-import type { AssignmentCreateDto, AssignmentReadDto, CacheReadDto, ModelApplyResultDto, ModelValidateResultDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowReadDto, WorkflowValidationDto } from './types';
+import type { AssignmentCreateDto, AssignmentReadDto, CacheItemsPage, CacheReadDto, ModelApplyResultDto, ModelValidateResultDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowReadDto, WorkflowValidationDto } from './types';
 
 /**
  * Every way a request can fail, as data. The UI shows these in its status line (Output in plan 5);
@@ -31,6 +31,8 @@ export interface StudioApi {
   listProcessors?(): Promise<ApiResult<ProcessorReadDto[]>>;
   listCaches?(): Promise<ApiResult<CacheReadDto[]>>;
   listSchemas?(): Promise<ApiResult<SchemaReadDto[]>>;
+  /** `GET /caches/{id}/items?after=&limit=`: one page of a cache's items, ordered by key; `next` is the cursor for the following page, or null at the end. */
+  cacheItemsPage(cacheId: string, after?: string | null, limit?: number): Promise<ApiResult<CacheItemsPage>>;
   /** `GET /{entity}/{id}`: the entity's read DTO, the Inspector's baseline (spec §7.1). */
   getEntity<K extends EntityKind>(kind: K, id: string): Promise<ApiResult<ReadDtoOf[K]>>;
   /** `PUT /{entity}/{id}` with the full update DTO; BaseApi answers 200 with the entity read back. */
@@ -145,6 +147,10 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
     listProcessors: () => get<ProcessorReadDto[]>('/processors'),
     listCaches: () => get<CacheReadDto[]>('/caches'),
     listSchemas: () => get<SchemaReadDto[]>('/schemas'),
+    cacheItemsPage: (cacheId, after, limit) => {
+      const query = [after ? `after=${encodeURIComponent(after)}` : '', limit === undefined ? '' : `limit=${limit}`].filter(Boolean).join('&');
+      return get<CacheItemsPage>(`/caches/${id(cacheId)}/items${query ? `?${query}` : ''}`);
+    },
     listSteps: () => get<StepReadDto[]>('/steps'),
     listAssignments: () => get<AssignmentReadDto[]>('/assignments'),
     applyModel: (changes) => request<ModelApplyResultDto>('POST', '/model/apply', { changes }),

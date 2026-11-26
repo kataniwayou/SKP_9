@@ -28,15 +28,16 @@ describe('the board rows keep the read-only audit fields', () => {
   });
 });
 
-describe('a cache\'s items arrive as a list of pairs', () => {
-  it('becomes the board\'s dictionary text, in the order sent', () => {
-    const dto = cacheDto('c1', { items: [{ key: 'zeta', value: 'Z' }, { key: 'acme', value: 'A "quoted"' }] } as never);
-    expect(cacheRowFromDto(dto).items).toBe('{"zeta":"Z","acme":"A \\"quoted\\""}');
+describe('a cache row carries the item count, not the items', () => {
+  it('toCacheRow maps itemCount and empty itemEdits', () => {
+    const row = cacheRowFromDto(cacheDto('c1', { itemCount: 42 }));
+    expect(row.itemCount).toBe(42);
+    expect(row.itemEdits).toEqual({ set: {}, removed: [] });
+    expect(row).not.toHaveProperty('items');
   });
 
-  it('an empty or missing list is the empty dictionary', () => {
-    expect(cacheRowFromDto(cacheDto('c1', { items: [] } as never)).items).toBe('{}');
-    expect(cacheRowFromDto(cacheDto('c1', { items: null } as never)).items).toBe('{}');
+  it('a missing count is 0', () => {
+    expect(cacheRowFromDto(cacheDto('c1', { itemCount: undefined })).itemCount).toBe(0);
   });
 });
 

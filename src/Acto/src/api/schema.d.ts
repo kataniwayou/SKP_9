@@ -265,7 +265,58 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: {
+            parameters: {
+                query?: {
+                    after?: string;
+                    limit?: number;
+                };
+                header?: {
+                    /** @description Optional correlation ID for request tracking. If absent, the server generates a new 32-char hex value and echoes it on the response header. */
+                    "X-Correlation-Id"?: string;
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CacheItemsPage"];
+                        "application/json": components["schemas"]["CacheItemsPage"];
+                        "text/json": components["schemas"]["CacheItemsPage"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ValidationProblemDetails"];
+                        "application/json": components["schemas"]["ValidationProblemDetails"];
+                        "text/json": components["schemas"]["ValidationProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         put: {
             parameters: {
                 query?: never;
@@ -321,7 +372,131 @@ export interface paths {
                 };
             };
         };
-        post?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional correlation ID for request tracking. If absent, the server generates a new 32-char hex value and echoes it on the response header. */
+                    "X-Correlation-Id"?: string;
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CacheItemsAppendDto"];
+                    "text/json": components["schemas"]["CacheItemsAppendDto"];
+                    "application/*+json": components["schemas"]["CacheItemsAppendDto"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CacheAppendReport"];
+                        "application/json": components["schemas"]["CacheAppendReport"];
+                        "text/json": components["schemas"]["CacheAppendReport"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ValidationProblemDetails"];
+                        "application/json": components["schemas"]["ValidationProblemDetails"];
+                        "text/json": components["schemas"]["ValidationProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/Caches/{id}/items/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional correlation ID for request tracking. If absent, the server generates a new 32-char hex value and echoes it on the response header. */
+                    "X-Correlation-Id"?: string;
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CacheItemsRemoveDto"];
+                    "text/json": components["schemas"]["CacheItemsRemoveDto"];
+                    "application/*+json": components["schemas"]["CacheItemsRemoveDto"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CacheRemoveReport"];
+                        "application/json": components["schemas"]["CacheRemoveReport"];
+                        "text/json": components["schemas"]["CacheRemoveReport"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ValidationProblemDetails"];
+                        "application/json": components["schemas"]["ValidationProblemDetails"];
+                        "text/json": components["schemas"]["ValidationProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -2754,6 +2929,17 @@ export interface components {
             stepId?: string;
             payload?: string | null;
         };
+        CacheAppendReport: {
+            /** Format: int32 */
+            added?: number;
+            /** Format: int32 */
+            overwritten?: number;
+            /** Format: int32 */
+            repeatedInBatch?: number;
+            overwrittenKeys?: string[] | null;
+            repeatedKeys?: string[] | null;
+            keysTruncated?: boolean;
+        };
         CacheCreateDto: {
             name?: string | null;
             version?: string | null;
@@ -2769,6 +2955,16 @@ export interface components {
             key?: string | null;
             value?: string | null;
         };
+        CacheItemsAppendDto: {
+            items?: components["schemas"]["CacheItemDto"][] | null;
+        };
+        CacheItemsRemoveDto: {
+            keys?: string[] | null;
+        };
+        CacheItemsPage: {
+            items?: components["schemas"]["CacheItemDto"][] | null;
+            next?: string | null;
+        };
         CacheItemsUpdateDto: {
             items?: components["schemas"]["CacheItemDto"][] | null;
         };
@@ -2779,7 +2975,8 @@ export interface components {
             version?: string | null;
             description?: string | null;
             root?: string | null;
-            items?: components["schemas"]["CacheItemDto"][] | null;
+            /** Format: int32 */
+            itemCount?: number;
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
@@ -2790,6 +2987,17 @@ export interface components {
             boardX?: number | null;
             /** Format: double */
             boardY?: number | null;
+        };
+        CacheRemoveReport: {
+            /** Format: int32 */
+            removed?: number;
+            /** Format: int32 */
+            notFound?: number;
+            /** Format: int32 */
+            repeatedInBatch?: number;
+            notFoundKeys?: string[] | null;
+            repeatedKeys?: string[] | null;
+            keysTruncated?: boolean;
         };
         CacheUpdateDto: {
             name?: string | null;
@@ -2979,6 +3187,7 @@ export interface components {
             made?: {
                 [key: string]: string;
             } | null;
+            warnings?: string[] | null;
         };
         ModelChangeDto: {
             op?: string | null;
@@ -3000,6 +3209,7 @@ export interface components {
             /** Format: int32 */
             status?: number;
             problem?: unknown;
+            report?: unknown;
         };
         ModelChangesDto: {
             changes?: components["schemas"]["ModelChangeDto"][] | null;

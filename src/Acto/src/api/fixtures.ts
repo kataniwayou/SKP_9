@@ -23,7 +23,7 @@ export function schemaDto(id: string, over: Partial<SchemaReadDto> = {}): Schema
 }
 
 export function cacheDto(id: string, over: Partial<CacheReadDto> = {}): CacheReadDto {
-  return { id, name: `cache-${id}`, version: '1.0.0', description: null, root: id, items: [], ...audit, ...over } as CacheReadDto;
+  return { id, name: `cache-${id}`, version: '1.0.0', description: null, root: id, itemCount: 0, ...audit, ...over } as CacheReadDto;
 }
 
 export function workflowDto(over: Partial<WorkflowReadDto> = {}): WorkflowReadDto {

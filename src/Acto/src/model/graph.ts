@@ -87,7 +87,7 @@ export interface Cache {
   version: string;
   description: string | null;
   root: string;
-  /** JSON text of an object of string items. */
-  items: string;
+  /** How many items the cache holds; the items themselves are paged (GET /caches/{id}/items). */
+  itemCount: number;
   audit: Audit;
 }

@@ -24,7 +24,7 @@ export function board(): BoardState {
       lonely: step('lonely', 'lonely', [], 600),
     },
     caches: {
-      c1: { id: 'c1', name: 'c1', version: '1.0.0', description: null, root: 'r', items: '{}', at: { x: 0, y: -100 }, updatedAt: T, ...seen },
+      c1: { id: 'c1', name: 'c1', version: '1.0.0', description: null, root: 'r', itemCount: 0, itemEdits: { set: {}, removed: [] }, at: { x: 0, y: -100 }, updatedAt: T, ...seen },
     },
     assignments: {
       'a-daily-fetch': { id: 'a-daily-fetch', stepId: 'fetch', name: 'fetch-assignment', version: '1.0.0', description: null, payload: '{}', updatedAt: T, ...seen },

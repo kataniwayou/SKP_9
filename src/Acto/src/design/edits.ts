@@ -24,7 +24,7 @@ export function addStep(b: BoardState, processor: Processor, at: Point, id: Id):
 export function addCache(b: BoardState, at: Point, id: Id): BoardState {
   const cache: CacheRow = {
     id, name: uniqueName(Object.values(b.caches).map((c) => c.name), 'cache'), version: '1.0.0',
-    description: null, root: '', items: '{}', at: { ...at }, updatedAt: null, ...NO_AUDIT,
+    description: null, root: '', itemCount: 0, itemEdits: { set: {}, removed: [] }, at: { ...at }, updatedAt: null, ...NO_AUDIT,
   };
   return { ...b, caches: { ...b.caches, [id]: cache } };
 }

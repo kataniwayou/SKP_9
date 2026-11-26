@@ -9,8 +9,12 @@ export interface StepRow extends RowAudit {
   id: Id; name: string; version: string; description: string | null; processorId: Id | null;
   nextStepIds: Id[]; entryCondition: number; at: Point | null; updatedAt: string | null;
 }
+/** The unsaved item changes of a cache: pairs to set (added or overwritten) and keys to remove. */
+export interface ItemEdits { set: Record<string, string>; removed: string[] }
 export interface CacheRow extends RowAudit {
-  id: Id; name: string; version: string; description: string | null; root: string; items: string;
+  id: Id; name: string; version: string; description: string | null; root: string;
+  /** How many items the server holds, and this session's unsaved changes to them. */
+  itemCount: number; itemEdits: ItemEdits;
   at: Point | null; updatedAt: string | null;
 }
 export interface WorkflowRow extends RowAudit {

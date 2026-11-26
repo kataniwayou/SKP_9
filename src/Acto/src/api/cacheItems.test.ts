@@ -1,38 +1,27 @@
-import { describe, expect, it } from 'vitest';
-import { itemsFromText, itemsToText } from './cacheItems';
+import { describe, expect, it, vi } from 'vitest';
+import { createApi } from './client';
 
-// BaseApi stores a cache's items as rows (2026-11-24) and sends them as [{ key, value }]; the board keeps its
-// dictionary text, so the API boundary converts both ways.
-describe('itemsToText', () => {
-  it('writes the pairs as a compact object in their order', () => {
-    expect(itemsToText([{ key: 'b', value: '2' }, { key: 'a', value: '1' }])).toBe('{"b":"2","a":"1"}');
+// A cache's items no longer ride on its read DTO; they are paged (GET /caches/{id}/items).
+describe('cacheItemsPage', () => {
+  const page = { items: [{ key: 'a', value: '1' }], next: 'b' };
+  const respond = () => vi.fn().mockResolvedValue(new Response(JSON.stringify(page), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+  it('builds the query (after encoded, limit)', async () => {
+    const fetchImpl = respond();
+    const result = await createApi('/api/v1', fetchImpl).cacheItemsPage('c 1', 'a/b&c=d', 50);
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/caches/c%201/items?after=a%2Fb%26c%3Dd&limit=50', expect.objectContaining({ method: 'GET' }));
+    expect(result).toEqual({ ok: true, value: page });
   });
 
-  it('writes nothing as the empty dictionary', () => {
-    expect(itemsToText([])).toBe('{}');
-    expect(itemsToText(null)).toBe('{}');
-    expect(itemsToText(undefined)).toBe('{}');
-  });
-});
-
-describe('itemsFromText', () => {
-  it('reads the dictionary text back as pairs in its order', () => {
-    expect(itemsFromText('{"b":"2","a":"1","10":"x"}')).toEqual([
-      { key: 'b', value: '2' }, { key: 'a', value: '1' }, { key: '10', value: 'x' }]);
+  it('sends no query for the first page with the default limit', async () => {
+    const fetchImpl = respond();
+    await createApi('/api/v1', fetchImpl).cacheItemsPage('c1');
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/caches/c1/items', expect.anything());
   });
 
-  it('reads blank text and {} as no pairs', () => {
-    expect(itemsFromText('')).toEqual([]);
-    expect(itemsFromText('{}')).toEqual([]);
-  });
-
-  it('round-trips with itemsToText', () => {
-    const pairs = [{ key: 'é', value: 'line\nbreak' }, { key: 'empty', value: '' }];
-    expect(itemsFromText(itemsToText(pairs))).toEqual(pairs);
-  });
-
-  it('refuses text the board would not have kept, naming why', () => {
-    expect(() => itemsFromText('{"a":"1","a":"2"}')).toThrow(/appears twice/);
-    expect(() => itemsFromText('not json')).toThrow(/valid JSON/);
+  it('sends only the parts given', async () => {
+    const fetchImpl = respond();
+    await createApi('/api/v1', fetchImpl).cacheItemsPage('c1', null, 5);
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/caches/c1/items?limit=5', expect.anything());
   });
 });
