@@ -3,7 +3,8 @@
 Narrative end-to-end runs, each built through the UI (or seeded where building is not the point) and checked with
 Playwright; the live ones also read the orchestrator's own records in Elasticsearch. Specs 1–7 predate 2026-11-24;
 8–12 cover every change from 2026-11-24 to `dc41011f` (plan:
-`docs/superpowers/plans/2026-11-25-acto-regression-since-11-24.md`).
+`docs/superpowers/plans/2026-11-25-acto-regression-since-11-24.md`); 13–14 cover Schemas mode (plan:
+`docs/superpowers/plans/2026-11-26-acto-schemas-mode-regression.md`).
 
 ## Running
 
@@ -12,7 +13,7 @@ From `src/Acto`, with BaseApi forwarded on `localhost:18080` and Elasticsearch o
 | What | Command |
 |---|---|
 | Headed and slowed (350 ms a step), not live | `npm run e2e:regression` |
-| Headed, with the live runs (6 and 12 start and stop their own `e2e-` workflows) | PowerShell: `$env:ACTO_E2E_LIVE='1'; npm run e2e:regression` |
+| Headed, with the live runs (6, 12 and 14 start and stop their own `e2e-` workflows; 5 and 14 need a real workflow the cluster already runs) | PowerShell: `$env:ACTO_E2E_LIVE='1'; npm run e2e:regression` |
 | Unslowed, headless | `npx playwright test e2e/regression` |
 | One spec, headed | `npm run e2e:watch -- e2e/regression/8-board-look.spec.ts` (not `e2e:regression -- <name>`: Playwright ORs the two filters and runs the whole folder) |
 
@@ -39,13 +40,30 @@ a workflow the run made, and the teardown fails the run if a real row changed be
 | N | Toolbox drops slide aside; nudges stop (`dc41011f`) | 10 · toolbox drop and nudge |
 | — | Analyst graph wording for entry crons (`ac36bc64`, `5c28a20a`, `14265340`) | not UI: the C# `Processor.Analyst` tests, not this suite |
 
-## Last full run — 2026-11-25
+## Coverage, Schemas mode, 2026-11-26
+
+| # | Change (commit) | Pinned by |
+|---|---|---|
+| O | BaseAPI stores boardX/boardY on schemas and processors (`490c41b8`) | 13 · moves save; 14 (API read-back) |
+| P | Rows carry the place; Save sends it; a move affects no workflow, so no dry run (`a4bf0704`) | 13 · moves save (no `/workflows/*/validate` call for a move alone) |
+| Q | Wired / held / orphan, stepless processors, reference wires (`a69e8109`) | 13 · cards and wires |
+| R | Card sizes, obstacles only while on, placement, settle on turn-on outside history (`6036c62e`, `c5e219ae`) | 13 · drag, nudge and settle |
+| S | Picks, toolbar, bar, box select, schema ghosts; Delete only on orphans (`ecaa8e77`) | 13 · toolbar and bar; 13 · delete, ghost, restore, save |
+| T | Toggle, cards, wires, hover, minimap, drag/nudge, light and dark tokens (`929dc667`, `0b62983e`) | 13 · toggle; 13 · cards and wires; 13 · look in both themes |
+| U | Inspector read-only forms, chips, Undo/Redo locked (`2ed57a3e`) | 13 · Inspector |
+| V | Real workflows keep running after real schema and processor locations are saved | 14 (ES, live) |
+
+## Last full run — 2026-11-26
 
 | Run | Result |
 |---|---|
-| `$env:ACTO_E2E_LIVE='1'; npm run e2e:regression` (headed, slowed, live) | 38 passed, 1 failed: 9 · restore, a 1 px rounding of a ghost's place against the restored card's (now compared within 1 px; then 4/4 repeated and headed 3/3) |
-| `npx playwright test` (the whole e2e folder, unslowed, not live) | 153 passed, 26 skipped (the live-only ones) |
+| `$env:ACTO_E2E_LIVE='1'; npm run e2e:regression` (headed, slowed, live, specs 1–14) | 42 passed |
+| `npx playwright test e2e/regression` (headless, one spec per process; the single process was stopped for memory after 26 passes) | 44 passed, 4 skipped (live-only: 6, 12, 14 and one in 7). Spec 5 first failed 4 of 6 after a machine reboot left no real workflow running ("the cluster runs at least one workflow"); with `filefetcher-archiveexpander-chain` restarted, 6/6 |
+| 14 again, headed and live, after the reboot | 1 passed: the real workflow dispatched at 16:10, 16:11 and 16:12 after the moves, every correlation finished; the `e2e-` run dispatched and completed 4×, then stopped |
+| The rest of the e2e folder (headless, three batches) | 24 passed + 21 skipped (live-only), 38 passed, 55 passed |
+| 13 alone, `--repeat-each 3` | 24 passed, none flaky |
+| `npm run typecheck`; `npm test` | clean; 902 passed |
 | Teardown, every run | `e2e- rows left: 0; real rows changed beyond location: 0` |
 
-Evidence from the live runs: `src/Acto/test-results/cron-live-evidence.json` (6) and `src/Acto/test-results/regression-12-evidence.json` (12): per-tick
+Evidence from the live runs: `src/Acto/test-results/cron-live-evidence.json` (6), `src/Acto/test-results/regression-12-evidence.json` (12), and `src/Acto/test-results/regression-14-evidence.json` (14): per-tick
 dispatch stamps, step ids and correlation ids from Elasticsearch.
