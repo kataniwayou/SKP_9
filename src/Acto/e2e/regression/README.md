@@ -51,17 +51,18 @@ a workflow the run made, and the teardown fails the run if a real row changed be
 | S | Picks, toolbar, bar, box select, schema ghosts; Delete only on orphans (`ecaa8e77`) | 13 · toolbar and bar; 13 · delete, ghost, restore, save |
 | T | Toggle, cards, wires, hover, minimap, drag/nudge, light and dark tokens (`929dc667`, `0b62983e`) | 13 · toggle; 13 · cards and wires; 13 · look in both themes |
 | U | Inspector read-only forms, chips, Undo/Redo locked (`2ed57a3e`) | 13 · Inspector |
+| W | A dragged card stays lifted and a dragged schema's wires stay thick: hover is not followed mid-drag, and a board derived anew mid-drag keeps the drag (2026-11-26) | 13 · a dragged card stays lifted |
 | V | Real workflows keep running after real schema and processor locations are saved | 14 (ES, live) |
 
 ## Last full run — 2026-11-26
 
 | Run | Result |
 |---|---|
-| `$env:ACTO_E2E_LIVE='1'; npm run e2e:regression` (headed, slowed, live, specs 1–14) | 42 passed |
+| `$env:ACTO_E2E_LIVE='1'; npm run e2e:regression` (headed, slowed, live, specs 1–14) | 48 passed (27.2 min) |
 | `npx playwright test e2e/regression` (headless, one spec per process; the single process was stopped for memory after 26 passes) | 44 passed, 4 skipped (live-only: 6, 12, 14 and one in 7). Spec 5 first failed 4 of 6 after a machine reboot left no real workflow running ("the cluster runs at least one workflow"); with `filefetcher-archiveexpander-chain` restarted, 6/6 |
 | 14 again, headed and live, after the reboot | 1 passed: the real workflow dispatched at 16:10, 16:11 and 16:12 after the moves, every correlation finished; the `e2e-` run dispatched and completed 4×, then stopped |
 | The rest of the e2e folder (headless, three batches) | 24 passed + 21 skipped (live-only), 38 passed, 55 passed |
-| 13 alone, `--repeat-each 3` | 24 passed, none flaky |
+| 13 alone (with 9 · a dragged card stays lifted), `--repeat-each 5` | 45 passed, none flaky |
 | `npm run typecheck`; `npm test` | clean; 902 passed |
 | Teardown, every run | `e2e- rows left: 0; real rows changed beyond location: 0` |
 

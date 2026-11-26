@@ -196,6 +196,36 @@ test('2 · cards and wires: wired, held, orphan; I and C pills; hover thickens; 
   await expect(selbar(page)).toHaveCount(0);
   await expect(inspector(page).getByRole('tablist', { name: 'Inspector tabs' })).toHaveCount(0);
 });
+/** Waits until the view has stopped moving (a chip's centring glides for 300 ms): the same transform 150 ms apart. */
+async function viewStill(page: Page) {
+  const vp = () => page.evaluate(() => (document.querySelector('.react-flow__viewport') as HTMLElement).style.transform);
+  let prev = '';
+  await expect.poll(async () => { const now = await vp(); const still = now === prev; prev = now; return still; }, { intervals: [150] }).toBe(true);
+}
+/**
+ * Waits for the view to stop moving, then, if something (a panel) covers the element's centre, drags the empty board until
+ * the element sits in the middle of the board.
+ */
+async function bringIntoClear(page: Page, l: Locator) {
+  await viewStill(page);
+  const covered = async () => { const c = await centreOf(l); return l.evaluate((e, p) => !e.contains(document.elementFromPoint(p.x, p.y)), c); };
+  if (!(await covered())) return;
+  const board = await box(pane(page));
+  const c = await centreOf(l);
+  const start = await page.evaluate(() => {
+    const b = document.querySelector('.react-flow__pane')!.getBoundingClientRect();
+    for (let y = b.top + b.height / 2; y > b.top + 40; y -= 20) for (let x = b.left + 300; x < b.right - 260; x += 20) {
+      if (document.elementFromPoint(x, y)?.classList.contains('react-flow__pane')) return { x, y };
+    }
+    return null;
+  });
+  expect(start, 'an empty spot to pan from').not.toBeNull();
+  await page.mouse.move(start!.x, start!.y);
+  await page.mouse.down();
+  await page.mouse.move(start!.x + (board.x + board.width / 2 - c.x), start!.y + (board.y + board.height / 2 - c.y), { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(covered, 'the element is in the clear').toBe(false);
+}
 async function centreOf(l: Locator) {
   const b = await box(l);
   return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
@@ -446,7 +476,11 @@ test('7 · the Inspector: read-only schema and processor forms, Used by and Held
   await expect(undoBtn(page)).toBeEnabled();
 
   // held: held by e2e-proc-b; its chip picks the processor card
+  // the chip above centred the view on e2e-s1 (a 300 ms glide): a click on "empty" board mid-glide can land on a card sliding
+  // into that spot (and pick it, so the pick below would unpick it), and the glide leaves e2e-held under the log panel
+  await viewStill(page);
   await clickEmptyBoard(page);
+  await bringIntoClear(page, scNode(page, id.HELD!).locator('.card-nm'));
   await pickSchema(page, id.HELD!);
   await expect(inspector(page).getByText('Held by e2e-proc-b 1.0.0, a processor no step uses.', { exact: true })).toBeVisible();
   await inspector(page).getByRole('button', { name: 'Open processor e2e-proc-b' }).click();
@@ -527,4 +561,81 @@ test('8 · moves save: a real wired schema and a real stepless processor, locati
       expect(pRow[k], `processor ${k} unchanged`).toEqual(stepless[k]);
     }
   }
+});
+
+/**
+ * Records, every animation frame from now on, whether the node stays lifted and how thick the given wires are drawn, until
+ * `stop` is called; the frames before the node first lifts (the press, the drag threshold) are dropped.
+ */
+async function watchLift(page: Page, nodeId: string, wiresInto?: string) {
+  await page.evaluate(({ nodeId, wiresInto }) => {
+    const w = window as unknown as { __lift: { lifted: boolean; widths: string }[]; __liftOn: boolean };
+    w.__lift = []; w.__liftOn = true;
+    const tick = () => {
+      const n = document.querySelector(`.react-flow__node[data-id="${nodeId}"]`);
+      const widths = wiresInto === undefined ? '' : [...document.querySelectorAll(`.react-flow__edge-schemaRef[data-id$=":${wiresInto}"] path.schema-ref-line`)]
+        .map((p) => p.getAttribute('stroke-width')).join(',');
+      const lifted = !!n?.classList.contains('lifted');
+      if (lifted || w.__lift.length > 0) w.__lift.push({ lifted, widths });
+      if (w.__liftOn) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, { nodeId, wiresInto });
+  return async () => page.evaluate(() => {
+    const w = window as unknown as { __lift: { lifted: boolean; widths: string }[]; __liftOn: boolean };
+    w.__liftOn = false;
+    return w.__lift;
+  });
+}
+/** A slow, wobbling drag (the pointer slips on and off the card's edge and over others), held, then Esc: nothing moves. */
+async function wobbleAndCancel(page: Page, from: { x: number; y: number }, dx: number, dy: number) {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  // jumps of ~30 px a move: the pointer leaves the card before the card has followed it, and meets it again once it has
+  // (React Flow moves a node a frame after the pointer), so the card sees a leave and an enter at nearly every move
+  for (let i = 1; i <= 16; i++) {
+    await page.mouse.move(from.x + (dx * i) / 16, from.y + (dy * i) / 16 + (i % 2 ? 24 : -24));
+    await page.waitForTimeout(60);
+  }
+}
+
+test('9 · a dragged card stays lifted: hovering on and off schema cards mid-drag never drops it, nor the wires\' thickness', async ({ page }) => {
+  const id = await openSeeded(page);
+  await modeOn(page);
+  await flushPlacements(page);
+
+  // a wired schema, dragged with a wobble: lifted in every frame from its lift to the release, its two wires thick throughout
+  const IN = scNode(page, id.IN!);
+  const before = await flowPos(IN);
+  const nm = await centreOf(IN.locator('.card-nm'));
+  await page.mouse.move(nm.x, nm.y);
+  await expect.poll(() => refsInto(page, id.IN!).locator('path.schema-ref-line').evaluateAll((ps) => ps.map((p) => p.getAttribute('stroke-width'))), 'hovered before the press: its wires thick').toEqual(['2.6', '2.6']);
+  let stop = await watchLift(page, `sc:${id.IN}`, id.IN);
+  await wobbleAndCancel(page, nm, 200, 60);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  let frames = await stop();
+  expect(frames.length, 'the card lifted').toBeGreaterThan(20);
+  // the frames after the release may drop the lift: only those up to the last lifted one count
+  const last = frames.map((f) => f.lifted).lastIndexOf(true);
+  const held = frames.slice(0, last + 1);
+  expect(held.filter((f) => !f.lifted).length, 'frames in which the dragged schema card lost its lift').toBe(0);
+  expect([...new Set(held.map((f) => f.widths))], 'its wires stayed thick the whole drag').toEqual(['2.6,2.6']);
+  await expect.poll(() => flowPos(IN), 'Esc put it back').toEqual(before);
+
+  // a step dragged across a schema card (e2e-s2 down over e2e-cfg and beyond): lifted in every frame too
+  await page.mouse.move(5, 5);
+  const S2 = stNode(page, id.S2!);
+  const s2 = await box(S2);
+  const from = { x: s2.x + s2.width / 2, y: s2.y + Math.min(14, s2.height / 2) };
+  const cfg = await centreOf(scNode(page, id.CFG!));
+  stop = await watchLift(page, `st:${id.S2}`);
+  await wobbleAndCancel(page, from, cfg.x - from.x, cfg.y - from.y + 120);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  frames = await stop();
+  expect(frames.length, 'the step lifted').toBeGreaterThan(20);
+  const lastS = frames.map((f) => f.lifted).lastIndexOf(true);
+  expect(frames.slice(0, lastS + 1).filter((f) => !f.lifted).length, 'frames in which the step lost its lift over a schema card').toBe(0);
+  await expect(saveButton(page), 'nothing to save: both drags were cancelled').toHaveText('Save');
 });

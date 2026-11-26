@@ -185,7 +185,18 @@ export function Board({ state, view, onPick, onBoxPick, onMove, onMoveGhosts, on
     if (real.length === 0 || !flow.current) return;
     void flow.current.fitBounds(getNodesBounds(real), { padding: 0.1 });
   };
-  useEffect(() => { setDragged(derived); }, [derived]);
+  /*
+   * A board derived anew mid-drag (a hover, a live status) must not end the drag: the dragged nodes keep where the pointer
+   * has them and their `dragging`, or the card drops its lift for a frame and flashes [user, 2026-11-26].
+   */
+  useEffect(() => {
+    const d = drag.current;
+    if (!d) { setDragged(derived); return; }
+    setDragged((prev) => {
+      const held = new Map(prev.filter((n) => d.start.has(n.id)).map((n) => [n.id, n]));
+      return derived.map((n) => { const h = held.get(n.id); return h ? { ...n, position: h.position, dragging: h.dragging } : n; });
+    });
+  }, [derived]);
   /*
    * React Flow selects a clicked node itself before onNodeClick, writing `selected` straight onto its internal nodes (its
    * own "hack" for drags). A click that picks re-derives the nodes from the picks, which puts that right; a click that
@@ -238,6 +249,8 @@ export function Board({ state, view, onPick, onBoxPick, onMove, onMoveGhosts, on
   };
   const dragStart = (n: Node, all?: Node[]) => {
     drag.current = { start: new Map((all && all.length > 0 ? all : [n]).map((m) => [m.id, { ...m.position }])), cancelled: false };
+    // a dragged schema is the one under the pointer the whole drag: its wires stay thick (hovers are not followed mid-drag)
+    if (n.type === 'schema' && !isGhost(n)) setHotSchema(itemOfNode(n.id)?.id ?? null);
   };
   const pickNow = useRef({ onPick, any: view.picks.length > 0 });
   pickNow.current = { onPick, any: view.picks.length > 0 };
@@ -395,8 +408,11 @@ export function Board({ state, view, onPick, onBoxPick, onMove, onMoveGhosts, on
           }}
           onEdgeClick={(ev, e) => { keySelect.current = false; const p = pickOfEdge(e); if (p) select(p, ev.ctrlKey || ev.metaKey); }}
           onPaneClick={(ev) => select(null, ev.ctrlKey || ev.metaKey)}
-          onNodeMouseEnter={(_, n) => { if (n.type === 'schema' && !isGhost(n)) setHotSchema(itemOfNode(n.id)?.id ?? null); }}
-          onNodeMouseLeave={(_, n) => { if (n.type === 'schema') setHotSchema(null); }}
+          // not while a drag runs: the pointer slips off and back onto the card it drags (React Flow moves a node a frame after
+          // the pointer) and over other cards, and each change of the hot schema derives the board anew, which hands React Flow
+          // fresh nodes without `dragging`: the card dropped its lift and flashed [user, 2026-11-26]. What was hot at the press stays hot.
+          onNodeMouseEnter={(_, n) => { if (!drag.current && n.type === 'schema' && !isGhost(n)) setHotSchema(itemOfNode(n.id)?.id ?? null); }}
+          onNodeMouseLeave={(_, n) => { if (!drag.current && n.type === 'schema') setHotSchema(null); }}
           proOptions={{ hideAttribution: true }}
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--dot)" />
