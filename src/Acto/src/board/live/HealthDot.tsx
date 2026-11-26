@@ -42,7 +42,12 @@ export function HealthDot({ processorId }: { processorId: string | null }) {
             </mask>
           </defs>
         )}
-        <path d={HEART} fill="currentColor" mask={cut ? `url(#${mask})` : undefined} />
+        {/* the beat moves this group, not the <svg> root: a transform on an inner SVG element is painted by the SVG
+            renderer, while one on the root gets its own compositor layer, which flashed a black shape behind the card's
+            bottom when the board was zoomed out [user, 2026-11-26] */}
+        <g className="beat">
+          <path d={HEART} fill="currentColor" mask={cut ? `url(#${mask})` : undefined} />
+        </g>
       </svg>
     </span>
   );

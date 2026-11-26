@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { act, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
@@ -44,7 +45,7 @@ describe('live state', () => {
     const [live, down, unknown] = screen.getAllByTestId('health-dot');
     // one solid heart each; the crack (a path) or the question mark (a path and its dot) is cut out by a mask
     const shape = (e: HTMLElement) => {
-      const heart = e.querySelectorAll('svg > path');
+      const heart = e.querySelectorAll('svg > g.beat > path');
       const m = e.querySelector('mask');
       return {
         hearts: heart.length, fill: heart[0]?.getAttribute('fill'), masked: heart[0]?.getAttribute('mask') === (m ? `url(#${m.id})` : null),
@@ -60,6 +61,22 @@ describe('live state', () => {
     // each broken heart cuts its crack with its own mask
     const ids = [...document.querySelectorAll('mask')].map((m) => m.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+  it('beats an inner <g>, never the <svg> root: the SVG renderer paints it, so no compositor layer and no black flash at small zoom [user, 2026-11-26]', () => {
+    renderWithLive(<HealthDot processorId="p1" />,
+      { processorsKnown: 'known', processors: new Map([['p1', { live: true, healthy: 1, replicas: 1, reason: null }]]) });
+    const svg = screen.getByTestId('health-dot').querySelector('svg')!;
+    // the root holds only the beating group (and the mask defs); the heart is inside the group
+    expect([...svg.children].filter((c) => c.tagName !== 'defs').map((c) => `${c.tagName}.${c.getAttribute('class')}`)).toEqual(['g.beat']);
+    const css = readFileSync('src/app.css', 'utf8');
+    const animated = [...css.matchAll(/([^{}\n]+)\{[^}]*animation:\s*heartbeat[^}]*\}/g)].map((m) => m[1]!.trim());
+    expect(animated).toEqual(['.health-dot[data-health="healthy"] .beat']);
+    const rule = css.match(/\.health-dot\[data-health="healthy"\] \.beat \{([^}]*)\}/)![1]!;
+    // the same origin as before: 50% 55% of the 24-unit view box, which an inner element measures only with view-box
+    expect(rule).toContain('transform-box: view-box');
+    expect(rule).toContain('transform-origin: 50% 55%');
+    expect(css).not.toMatch(/\.health-dot[^{]*svg\s*\{[^}]*animation/);
+    expect(css).toMatch(/prefers-reduced-motion: reduce\) \{ \.health-dot\[data-health="healthy"\] \.beat \{ animation: none; \}/);
   });
   it('treats an empty processor id as no processor', () => {
     renderWithLive(<HealthDot processorId="" />, { processorsKnown: 'known', processors: new Map() });

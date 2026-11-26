@@ -68,10 +68,12 @@ test('health hearts: a live heart beats, a down one is cracked, an unknown one a
   expect(await style(live, 'color')).toBe(HEALTH.healthy);
   expect(await style(down, 'color')).toBe(HEALTH.unhealthy);
   expect(await style(unknown, 'color')).toBe(HEALTH.undetermined);
-  // only the live heart beats
-  expect(await style(live.locator('svg'), 'animationName')).toBe('heartbeat');
-  expect(await style(down.locator('svg'), 'animationName')).toBe('none');
-  expect(await style(unknown.locator('svg'), 'animationName')).toBe('none');
+  // only the live heart beats, and it is the inner <g> that beats, never the <svg> root (a root transform gets a compositor
+  // layer that flashed black behind the card at small zoom) [user, 2026-11-26]
+  expect(await style(live.locator('g.beat'), 'animationName')).toBe('heartbeat');
+  expect(await style(live.locator('svg'), 'animationName')).toBe('none');
+  expect(await style(down.locator('g.beat'), 'animationName')).toBe('none');
+  expect(await style(unknown.locator('g.beat'), 'animationName')).toBe('none');
   // the crack and the question mark are cut out of the solid heart by a mask
   const cuts = (h: typeof live) => h.evaluate((e) => [...(e.querySelector('mask')?.children ?? [])].slice(1).map((c) => c.tagName));
   expect(await cuts(live)).toEqual([]);
@@ -80,7 +82,7 @@ test('health hearts: a live heart beats, a down one is cracked, an unknown one a
   await expect(live).toHaveAttribute('title', 'live · 1 of 1 replica healthy');
   // no beat for someone who asked for less motion
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  expect(await style(live.locator('svg'), 'animationName')).toBe('none');
+  expect(await style(live.locator('g.beat'), 'animationName')).toBe('none');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   // the toolbox's processor cards read the same
   // the card whose name is exactly this one: in its text the name runs straight into the liveness line, so `file-fetcher` cannot
@@ -97,7 +99,7 @@ test('health hearts: a live heart beats, a down one is cracked, an unknown one a
   expect(await style(live, 'color')).toBe(HEALTH.healthy);
   expect(await style(down, 'color')).toBe(HEALTH.unhealthy);
   expect(await style(unknown, 'color')).toBe(HEALTH.undetermined);
-  expect(await style(live.locator('svg'), 'animationName')).toBe('heartbeat');
+  expect(await style(live.locator('g.beat'), 'animationName')).toBe('heartbeat');
 });
 
 test('wires wear the target\'s condition colour with no letter; a wire into Never is faded with a hollow head', async ({ page }) => {
