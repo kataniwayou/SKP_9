@@ -27,7 +27,8 @@ namespace BaseApi.Service.Features.Cache;
 /// <para>
 /// It is SQL only: a <see cref="CacheEntity"/> already tracked by the context keeps its old
 /// <c>UpdatedAt</c>, <c>UpdatedBy</c> and <c>ItemCount</c> until it is reloaded. Callers that go on to save
-/// that entity should reload it first (or not track it).
+/// that entity should reload it first (or not track it): saving it after an append or remove in the same
+/// context throws a concurrency conflict, because the row's <c>xmin</c> moved.
 /// </para>
 /// </summary>
 internal sealed class CacheItemsStore(BaseDbContext db, TimeProvider clock, IHttpContextAccessor http)

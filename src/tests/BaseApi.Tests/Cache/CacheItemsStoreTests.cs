@@ -106,18 +106,39 @@ public sealed class CacheItemsStoreTests(PostgresFixture fixture)
 
     private sealed record XminRow(string Key, string Xmin);
 
+    private static IHttpContextAccessor SignedIn(string name) => new HttpContextAccessor
+    {
+        HttpContext = new DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, name)], "test",
+                System.Security.Claims.ClaimTypes.Name, System.Security.Claims.ClaimTypes.Role))
+        }
+    };
+
     [Fact]
-    public async Task AppendStampsCacheUpdatedAtAndItemCount()
+    public async Task AppendAndRemoveStampCacheUpdatedAtUpdatedByAndItemCount()
     {
         var id = await NewCacheAsync();
-        var t0 = DateTime.UtcNow.AddSeconds(-1);
+        // A day after the insert's own UpdatedAt, so only the store's stamp can produce it.
+        var instant = new DateTimeOffset(DateTime.UtcNow.AddDays(1).Ticks / 10 * 10, TimeSpan.Zero);
+        var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(instant);
         await using var db = fixture.NewContext();
-        await Store(db).AppendAsync(id, Items(("a", "1"), ("b", "2")), Ct);
-        await Store(db).AppendAsync(id, Items(("b", "3"), ("c", "4")), Ct);
+        await new CacheItemsStore(db, clock, SignedIn("alice")).AppendAsync(id, Items(("a", "1"), ("b", "2")), Ct);
 
         var cache = await CacheAsync(id);
-        Assert.Equal(3, cache.ItemCount);
-        Assert.True(cache.UpdatedAt > t0);
+        Assert.Equal(2, cache.ItemCount);
+        Assert.Equal(instant.UtcDateTime, cache.UpdatedAt);
+        Assert.Equal("alice", cache.UpdatedBy);
+
+        var later = instant.AddHours(1);
+        clock.SetUtcNow(later);
+        await new CacheItemsStore(db, clock, SignedIn("bob")).RemoveAsync(id, ["a"], Ct);
+
+        cache = await CacheAsync(id);
+        Assert.Equal(1, cache.ItemCount);
+        Assert.Equal(later.UtcDateTime, cache.UpdatedAt);
+        Assert.Equal("bob", cache.UpdatedBy);
     }
 
     [Fact]
