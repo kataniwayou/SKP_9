@@ -175,6 +175,8 @@ const readSelection: ToolDef = {
         case 'wire': return `wire ${b.steps[p.from]?.name ?? p.from} > ${b.steps[p.to]?.name ?? p.to}`;
         case 'entry': return `entry arrow ${b.workflows[p.workflowId]?.name ?? p.workflowId} > ${b.steps[p.stepId]?.name ?? p.stepId}`;
         case 'cacheLink': return `cache line ${b.workflows[p.workflowId]?.name ?? p.workflowId} > ${b.caches[p.cacheId]?.name ?? p.cacheId}`;
+        case 'schema': return `schema ${b.schemas[p.id]?.name ?? p.id}`;
+        case 'processor': return `processor ${b.processors[p.id]?.name ?? p.id}`;
         case 'ghost': { const g = ghosts.get(p.key); return `ghost ${g ? ghostName(g, ghosts.get) : p.key}`; }
       }
     };

@@ -65,6 +65,7 @@ export function tabsOf(sel: SelectionState, b: BoardState, ghosts: GhostLookup):
     case 'workflow': return b.workflows[f.id] ? [{ id: 'workflow', label: 'Workflow' }] : [];
     case 'cache': return b.caches[f.id] ? [{ id: 'cache', label: 'Cache' }] : [];
     case 'wire': case 'entry': case 'cacheLink': return [{ id: 'link', label: 'Link' }];
+    case 'schema': case 'processor': return []; // their tabs come with the Inspector work
     case 'ghost': return ghosts.get(f.key) ? [{ id: 'ghost', label: 'Deleted' }] : [];
     case 'step': return b.steps[f.id] ? [{ id: 'step', label: 'Step' }, { id: 'processor', label: 'Processor' }] : [];
   }

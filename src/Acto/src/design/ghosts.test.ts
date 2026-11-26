@@ -6,6 +6,7 @@ import { createBoardStore } from './boardStore';
 import { changedKeys } from './changes';
 import { addStep, addWire, deleteSteps, moveItems, removeEntries, setEntryCron, withoutWorkflow } from './edits';
 import { createGhostStore, keepGhosts, placeIn, restoreGhosts, withTheirWires, type GhostItem } from './ghosts';
+import type { SchemaRow } from './board';
 import { memoryStorage } from '../test/memoryStorage';
 
 /** board() with two entries in every link array, the first of each being the one the tests delete. */
@@ -446,5 +447,37 @@ describe('restoreGhosts', () => {
     expect(after.workflows.daily!.entryCrons).toEqual({ fetch: '*/5 * * * * *' });
     const noStep = stateOf(restoreGhosts({ ...store.state(), steps: {} }, store.base(), [g]));
     expect(noStep.workflows.daily!.entryCrons).toEqual({});
+  });
+});
+
+describe('schema ghosts', () => {
+  const sch = (id: string, updatedAt: string | null) => ({ id, name: id, version: '1', description: null, audit: {}, updatedAt, at: { x: 10, y: 20 } }) as unknown as SchemaRow;
+  const withSchema = (): BoardState => ({ ...board(), schemas: { so: sch('so', '2026-01-01T00:00:00Z') } });
+  const drop = (b: BoardState): BoardState => ({ ...b, schemas: {} });
+
+  it("deleting an orphan records a schema ghost; Restore puts it back at the ghost's place; Undo removes the ghost and Save then sends nothing", () => {
+    const { store, ghosts } = make(withSchema());
+    store.edit(drop);
+    expect(keys(ghosts)).toEqual(['schema:so']);
+    ghosts.moveGhosts([{ key: 'schema:so', at: { x: 300, y: 400 } }]);
+    const g = ghosts.get('schema:so')!;
+    expect(g).toMatchObject({ kind: 'schema', row: { at: { x: 300, y: 400 } } });
+    const restored = stateOf(restoreGhosts(store.state(), store.base(), [g]));
+    expect(restored.schemas.so!.at).toEqual({ x: 300, y: 400 });
+    expect(restored.schemas.so!.updatedAt).toBe('2026-01-01T00:00:00Z');
+    store.edit(() => restored);
+    expect(keys(ghosts)).toEqual([]);
+    store.undo(); // back to the deleted state: the ghost returns
+    expect(keys(ghosts)).toEqual(['schema:so']);
+    store.undo(); // the delete undone: no ghost, and nothing to save
+    expect(keys(ghosts)).toEqual([]);
+    expect(changedKeys(store.base(), store.state())).toEqual(new Set());
+  });
+
+  it('a schema ghost is remapped with a Save', () => {
+    const { store, ghosts } = make(withSchema());
+    store.edit(drop);
+    ghosts.remap({ so: 'so2' });
+    expect(keys(ghosts)).toEqual(['schema:so2']);
   });
 });

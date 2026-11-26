@@ -1,6 +1,7 @@
 import type { LiveStatus } from '../api/liveStatus';
 import type { BoardState } from '../design/board';
 import { deleteCaches, deleteSteps, removeEntries, removeWires, unlinkCaches, withoutWorkflow } from '../design/edits';
+import { schemaStates } from '../design/schemaStates';
 import type { Id } from '../model/graph';
 import type { Pick } from './selection';
 
@@ -15,6 +16,8 @@ export function pickKey(p: Pick): string {
     case 'wire': return `wi:${p.from}>${p.to}`;
     case 'entry': return `en:${p.workflowId}:${p.stepId}`;
     case 'cacheLink': return `cl:${p.workflowId}:${p.cacheId}`;
+    case 'schema': return `sc:${p.id}`;
+    case 'processor': return `pr:${p.id}`;
     case 'ghost': return `gh:${p.key}`;
   }
 }
@@ -34,6 +37,8 @@ const exists = (b: BoardState, p: Pick): boolean => {
     case 'wire': return !!b.steps[p.from]?.nextStepIds.includes(p.to);
     case 'entry': return !!b.workflows[p.workflowId]?.entryStepIds.includes(p.stepId);
     case 'cacheLink': return !!b.workflows[p.workflowId]?.cacheIds.includes(p.cacheId);
+    case 'schema': return !!b.schemas[p.id];
+    case 'processor': return !!b.processors[p.id];
     case 'ghost': return true; // a ghost's life is decided elsewhere
   }
 };
@@ -57,7 +62,7 @@ export function deleteRefusal(picks: readonly Pick[], b: BoardState, base: Board
 }
 
 /**
- * Delete of picked workflows, steps, caches, wires, entry arrows and cache lines as one board state (one history step):
+ * Delete of picked orphan schemas (every other schema, and every processor, is left), workflows, steps, caches, wires, entry arrows and cache lines as one board state (one history step):
  * the links first, then the workflows (with the assignments only they link), the steps (with their wires, entry arrows
  * and payloads) and the caches (with their lines). Every delete is a ghost until Save [user, 2026-11-23]; a running
  * workflow is refused before this (deleteRefusal).
@@ -69,6 +74,8 @@ export function deletePicks(b: BoardState, picks: readonly Pick[]): BoardState {
   const steps: string[] = [];
   const caches: string[] = [];
   const workflows: string[] = [];
+  const states = schemaStates(b);
+  const schemas = new Set<string>();
   for (const p of picks) {
     if (p.kind === 'wire') wires.push([p.from, p.to]);
     else if (p.kind === 'entry') entries.push([p.workflowId, p.stepId]);
@@ -76,6 +83,7 @@ export function deletePicks(b: BoardState, picks: readonly Pick[]): BoardState {
     else if (p.kind === 'step') steps.push(p.id);
     else if (p.kind === 'cache') caches.push(p.id);
     else if (p.kind === 'workflow') workflows.push(p.id);
+    else if (p.kind === 'schema' && states[p.id] === 'orphan') schemas.add(p.id); // only an orphan is deleted; processors never
   }
   let s = b;
   if (wires.length) s = removeWires(s, wires);
@@ -84,5 +92,6 @@ export function deletePicks(b: BoardState, picks: readonly Pick[]): BoardState {
   for (const wf of workflows) s = withoutWorkflow(s, wf);
   if (steps.length) s = deleteSteps(s, steps);
   if (caches.length) s = deleteCaches(s, caches);
+  if (schemas.size) s = { ...s, schemas: Object.fromEntries(Object.entries(s.schemas).filter(([id]) => !schemas.has(id))) };
   return s;
 }

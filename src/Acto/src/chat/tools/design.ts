@@ -367,7 +367,7 @@ const redo: ToolDef = {
 export function ghostName(g: GhostItem, lookup: (key: string) => GhostItem | undefined): string {
   const named = (key: string, id: string) => { const x = lookup(key); return x && 'row' in x ? x.row.name : id; };
   switch (g.kind) {
-    case 'step': case 'cache': case 'workflow': return g.row.name;
+    case 'step': case 'cache': case 'workflow': case 'schema': return g.row.name;
     case 'wire': return `${named(`step:${g.from}`, g.from)} > ${named(`step:${g.to}`, g.to)}`;
     case 'entry': return `${named(`workflow:${g.workflowId}`, g.workflowId)} > ${named(`step:${g.stepId}`, g.stepId)}`;
     case 'cacheLink': return `${named(`workflow:${g.workflowId}`, g.workflowId)} > ${named(`cache:${g.cacheId}`, g.cacheId)}`;

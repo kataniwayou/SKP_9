@@ -49,4 +49,13 @@ describe('withBox', () => {
       .toEqual([...cur, { kind: 'cache', id: 'c' }]);
     expect(withBox(cur, [], true)).toEqual(cur);
   });
+
+  it('a box over a schema card and a processor card picks both', () => {
+    const cards: Placed[] = [
+      { pick: { kind: 'schema', id: 's' }, box: at(0, 0, 150, 40) },
+      { pick: { kind: 'processor', id: 'p' }, box: at(200, 0, 150, 60) },
+      { pick: { kind: 'schema', id: 'far' }, box: at(2000, 0, 150, 40) },
+    ];
+    expect(boxPicks(cards, at(-5, -5, 400, 100))).toEqual([{ kind: 'schema', id: 's' }, { kind: 'processor', id: 'p' }]);
+  });
 });

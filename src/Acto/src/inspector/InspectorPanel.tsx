@@ -42,6 +42,8 @@ export function pickName(p: Pick, b: BoardState, ghosts: Ghosts): string | null 
     case 'wire': return `${stepName(b, p.from)} → ${stepName(b, p.to)}`;
     case 'entry': return `${b.workflows[p.workflowId]?.name ?? p.workflowId} → ${stepName(b, p.stepId)}`;
     case 'cacheLink': return `${b.workflows[p.workflowId]?.name ?? p.workflowId} → ${b.caches[p.cacheId]?.name ?? p.cacheId}`;
+    case 'schema': return b.schemas[p.id]?.name ?? null;
+    case 'processor': return b.processors[p.id]?.name ?? null;
     case 'ghost': { const g = ghosts.get(p.key); return g ? ghostName(g, b, ghosts) : null; }
   }
 }

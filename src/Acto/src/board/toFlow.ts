@@ -1,3 +1,4 @@
+import { pickKey } from './picks';
 import { Position, type Edge, type Node } from '@xyflow/react';
 import type { LiveStatus } from '../api/liveStatus';
 import type { BoardState } from '../design/board';
@@ -48,6 +49,7 @@ export function flowIdOf(p: Pick): string {
     case 'wire': return edgeIdOf.wire(p.from, p.to);
     case 'entry': return edgeIdOf.entry(p.workflowId, p.stepId);
     case 'cacheLink': return edgeIdOf.cacheLink(p.workflowId, p.cacheId);
+    case 'schema': case 'processor': return pickKey(p); // the card nodes of Task 6 take this id
     case 'ghost': return ghostId(p.key);
   }
 }

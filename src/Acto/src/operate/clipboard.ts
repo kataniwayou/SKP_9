@@ -64,6 +64,7 @@ export function copyClip(b: BoardState, items: readonly ItemRef[]): Clip | null 
   for (const ref of items) {
     const key = `${ref.kind}:${ref.id}`;
     if (seen.has(key)) continue;
+    if (ref.kind === 'schema' || ref.kind === 'processor') continue; // never copied
     if (ref.kind === 'step') {
       const st = b.steps[ref.id];
       if (!st) continue;

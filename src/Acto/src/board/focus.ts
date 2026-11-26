@@ -24,6 +24,7 @@ export function focusBounds(b: BoardState, workflowId: Id, stepIds: readonly Id[
 
 /** One board item's box, for centring on it (an Inspector chip's link [user, 2026-11-19]); null when it is not on the board or not placed. */
 export function itemBounds(b: BoardState, ref: ItemRef): Rect | null {
+  if (ref.kind === 'schema' || ref.kind === 'processor') return null; // their card boxes are the flow nodes' (Task 6)
   const row = ref.kind === 'step' ? b.steps[ref.id] : ref.kind === 'cache' ? b.caches[ref.id] : b.workflows[ref.id];
   if (!row?.at) return null;
   const [w, h] = ref.kind === 'step' ? [STEP_W, STEP_H] : ref.kind === 'cache' ? [CACHE_W, CACHE_H] : [TRIANGLE_W, TRIANGLE_H];

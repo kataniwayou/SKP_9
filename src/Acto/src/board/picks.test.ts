@@ -4,6 +4,19 @@ import { deletePicks, deleteRefusal, lastPick, livePicks, pickKey, togglePick } 
 import { shared } from '../design/boardFixtures';
 import type { LiveStatus } from '../api/liveStatus';
 import type { Pick } from './selection';
+import type { BoardState, ProcessorRow, SchemaRow } from '../design/board';
+
+const sch = (id: string) => ({ id, name: id, version: '1', description: null, audit: {}, updatedAt: null, at: null }) as unknown as SchemaRow;
+function schemaBoard(): BoardState {
+  const b = board();
+  const proc = (id: string, i: string | null) => ({ id, name: id, inputSchemaId: i, outputSchemaId: null, configSchemaId: null, updatedAt: 't', at: null }) as unknown as ProcessorRow;
+  return {
+    ...b,
+    steps: { ...b.steps, fetch: { ...b.steps.fetch!, processorId: 'pw' } },
+    processors: { pw: proc('pw', 'sw'), ph: proc('ph', 'sh') },
+    schemas: { sw: sch('sw'), sh: sch('sh'), so: sch('so') },
+  };
+}
 
 const a: Pick = { kind: 'step', id: 'fetch' };
 const b: Pick = { kind: 'step', id: 'expand' };
@@ -97,5 +110,22 @@ describe('deleteRefusal', () => {
     expect(deleteRefusal([{ kind: 'workflow', id: 'daily' }, a], b, b, status({}))).toEqual([]);
     const base = { ...b, workflows: { hourly: b.workflows.hourly } };
     expect(deleteRefusal([{ kind: 'workflow', id: 'daily' }], b, base, status({ daily: 'unknown' }))).toEqual([]);
+  });
+});
+
+describe('schema and processor picks', () => {
+  it('keys them and sees them on the board', () => {
+    expect(pickKey({ kind: 'schema', id: 'so' })).toBe('sc:so');
+    expect(pickKey({ kind: 'processor', id: 'pw' })).toBe('pr:pw');
+    const live = livePicks([{ kind: 'schema', id: 'so' }, { kind: 'schema', id: 'zz' }, { kind: 'processor', id: 'pw' }, { kind: 'processor', id: 'zz' }], schemaBoard());
+    expect(live).toEqual([{ kind: 'schema', id: 'so' }, { kind: 'processor', id: 'pw' }]);
+  });
+  it('deletePicks removes an orphan schema and leaves a wired schema, a held schema and a processor', () => {
+    const after = deletePicks(schemaBoard(), [
+      { kind: 'schema', id: 'so' }, { kind: 'schema', id: 'sw' }, { kind: 'schema', id: 'sh' },
+      { kind: 'processor', id: 'pw' }, { kind: 'processor', id: 'ph' },
+    ]);
+    expect(Object.keys(after.schemas).sort()).toEqual(['sh', 'sw']);
+    expect(Object.keys(after.processors).sort()).toEqual(['ph', 'pw']);
   });
 });

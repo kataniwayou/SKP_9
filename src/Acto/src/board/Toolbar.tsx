@@ -1,6 +1,7 @@
 import type { LiveStatus } from '../api/liveStatus';
 import type { ItemRef } from '../design/board';
 import type { Id } from '../model/graph';
+import type { SchemaState } from '../design/schemaStates';
 import type { ToolbarItem } from './nodes/boardContext';
 import { pickKey, type Pick } from './picks';
 
@@ -22,6 +23,8 @@ export interface ToolbarDeps {
   restore(keys: string[]): void;
   /** Drops these ghosts for this page session; not an undo step. */
   removeGhosts(keys: string[]): void;
+  /** A schema's state now (orphan: Delete is offered). */
+  schemaState(id: Id): SchemaState;
 }
 
 /**
@@ -40,6 +43,8 @@ export function toolbarFor(p: Pick, d: ToolbarDeps): ToolbarItem[] | null {
     }
     case 'step': case 'cache': return [{ label: 'Copy', onClick: () => d.copy({ kind: p.kind, id: p.id }) }, del];
     case 'wire': case 'entry': case 'cacheLink': return [del];
+    case 'schema': return d.schemaState(p.id) === 'orphan' ? [del] : null;
+    case 'processor': return null; // processors are never deleted
     case 'ghost': return [
       { label: 'Restore', onClick: () => d.restore([p.key]) },
       { label: 'Remove', tone: 'danger', onClick: () => d.removeGhosts([p.key]) },

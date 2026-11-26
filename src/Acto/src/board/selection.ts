@@ -8,6 +8,8 @@ export type Pick =
   | { kind: 'wire'; from: Id; to: Id }
   | { kind: 'entry'; workflowId: Id; stepId: Id }
   | { kind: 'cacheLink'; workflowId: Id; cacheId: Id }
+  | { kind: 'schema'; id: Id }
+  | { kind: 'processor'; id: Id }
   | { kind: 'ghost'; key: string };
 
 export interface SelectionState { workflows: Id[]; picks: Pick[] }

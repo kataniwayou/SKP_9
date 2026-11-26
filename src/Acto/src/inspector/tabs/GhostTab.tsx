@@ -1,3 +1,4 @@
+import type { SchemaRow } from '../../design/board';
 import type { BoardState } from '../../design/board';
 import type { GhostItem, GhostStore } from '../../design/ghosts';
 import { conditionInfo } from '../../model/entryConditions';
@@ -33,7 +34,7 @@ export function ghostName(g: GhostItem, b: BoardState, ghosts: Lookup): string {
 }
 
 const KIND: Readonly<Record<GhostItem['kind'], string>> = {
-  step: 'step', cache: 'cache', workflow: 'workflow', wire: 'wire', entry: 'entry arrow', cacheLink: 'cache line',
+  step: 'step', cache: 'cache', workflow: 'workflow', schema: 'schema', wire: 'wire', entry: 'entry arrow', cacheLink: 'cache line',
 };
 
 /** A deleted item as it was last seen: read-only. */
@@ -63,7 +64,7 @@ export function GhostTab({ state, ghosts, item }: { state: BoardState; ghosts: L
         <Row k="Name">{r.name}</Row>
         <Row k="Version">{r.version}</Row>
       </Ro>
-      <MetaToggle meta={metaOfRow(r)} />
+      <MetaToggle meta={item.kind === 'schema' ? { id: r.id, ...item.row.audit } : metaOfRow(r as Exclude<typeof r, SchemaRow>)} />
       <Ro>
         <Row k="Description">{r.description ?? '—'}</Row>
         {item.kind === 'step' && <Row k="Processor">{item.row.processorId === null ? 'none' : state.processors[item.row.processorId]?.name ?? item.row.processorId}</Row>}

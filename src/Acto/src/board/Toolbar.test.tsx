@@ -9,6 +9,7 @@ function deps(over: Partial<ToolbarDeps> = {}): ToolbarDeps {
     picks: [tri], run: () => 'stopped' as LiveStatus, saved: () => true,
     start: vi.fn(), stop: vi.fn(), copy: vi.fn(), remove: vi.fn(),
     restore: vi.fn(), removeGhosts: vi.fn(),
+    schemaState: (id: string) => (id === 'o' ? 'orphan' : id === 'h' ? 'held' : 'wired'),
     ...over,
   };
 }
@@ -56,5 +57,12 @@ describe('toolbarFor', () => {
     expect(labels(g, d)).toEqual(['Restore', 'Remove']);
     toolbarFor(g, d)![0]!.onClick(); expect(d.restore).toHaveBeenCalledWith(['step:s']);
     toolbarFor(g, d)![1]!.onClick(); expect(d.removeGhosts).toHaveBeenCalledWith(['step:s']);
+  });
+  it("an orphan's toolbar is Delete; a held schema, a wired schema and a processor have none", () => {
+    const d = deps();
+    expect(labels({ kind: 'schema', id: 'o' }, d)).toEqual(['Delete']);
+    expect(labels({ kind: 'schema', id: 'h' }, d)).toBeNull();
+    expect(labels({ kind: 'schema', id: 'w' }, d)).toBeNull();
+    expect(labels({ kind: 'processor', id: 'p' }, d)).toBeNull();
   });
 });

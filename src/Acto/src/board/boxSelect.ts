@@ -4,7 +4,7 @@ import { pickKey } from './picks';
 
 /**
  * Box select [user, 2026-11-22]: a right-button drag on the board draws a dashed rectangle; on release every triangle,
- * step and cache fully or partly inside it is picked (never wires, entry arrows, cache lines or ghosts).
+ * step, cache, schema and processor card fully or partly inside it is picked (never wires, entry arrows, cache lines or ghosts).
  */
 
 /** A node as the board places it: its pick (null: not a component) and its box in board coordinates. */
@@ -21,7 +21,7 @@ const touches = (a: Rect, b: Rect) => a.x <= b.x + b.w && b.x <= a.x + a.w && a.
 export function boxPicks(placed: readonly Placed[], box: Rect): Pick[] {
   return placed
     .filter((n): n is Placed & { pick: Pick } =>
-      n.pick !== null && (n.pick.kind === 'workflow' || n.pick.kind === 'step' || n.pick.kind === 'cache' || n.pick.kind === 'ghost') && touches(n.box, box))
+      n.pick !== null && (n.pick.kind === 'workflow' || n.pick.kind === 'step' || n.pick.kind === 'cache' || n.pick.kind === 'schema' || n.pick.kind === 'processor' || n.pick.kind === 'ghost') && touches(n.box, box))
     .sort((a, b) => a.box.x - b.box.x || a.box.y - b.box.y)
     .map((n) => n.pick);
 }

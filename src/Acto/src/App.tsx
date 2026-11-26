@@ -12,6 +12,7 @@ import { pushAside } from './board/overlap';
 import { selectPick, synced, withPicks, type Pick, type SelectionState } from './board/selection';
 import { withBox } from './board/boxSelect';
 import { barOf } from './board/selectionBar';
+import { schemaStates } from './design/schemaStates';
 import { SelectionBar } from './board/SelectionBarView';
 import { toolbarFor } from './board/Toolbar';
 import type { BoardView } from './board/toFlow';
@@ -269,9 +270,10 @@ export function App(props: AppProps) {
     copy: (ref) => copyItems([ref]),
     remove: (x) => removePicks([x]),
     restore, removeGhosts,
-  }), [sel.picks, live, run, copyItems, removePicks, restore, removeGhosts]);
+    schemaState: (id) => schemaStates(store.state())[id] ?? 'orphan',
+  }), [sel.picks, live, run, copyItems, removePicks, restore, removeGhosts, store]);
 
-  const bar = barOf(sel.picks);
+  const bar = barOf(sel.picks, store.state());
   const ghostKeys = () => selRef.current.picks.flatMap((p) => (p.kind === 'ghost' ? [p.key] : []));
   const triangleIds = () => selRef.current.picks.flatMap((p) => (p.kind === 'workflow' ? [p.id] : []));
   const barView = bar && (
