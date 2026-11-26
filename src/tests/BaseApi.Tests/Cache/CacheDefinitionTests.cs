@@ -1,3 +1,4 @@
+using Messaging.Contracts;
 using BaseApi.Service.Features.Cache;
 using BaseApi.Service.Features.Orchestration;
 using BaseApi.Service.Features.Workflow;
@@ -26,52 +27,45 @@ public sealed class CacheDefinitionTests
         foreach (var cache in caches)
         {
             snapshot.Caches[cache.Id] = cache;
-            snapshot.CacheItemRows[cache.Id] = Rows[cache.Id];
         }
 
         return snapshot;
     }
 
-    // The item rows travel beside the read DTO, which carries only their count.
-    private static readonly Dictionary<Guid, List<CacheItemDto>> Rows = new();
-
     private static CacheReadDto Cache(string root, params (string Key, string Value)[] items)
     {
         var dto = new CacheReadDto(
             Guid.NewGuid(), $"cache-{root}", "1.0.0", null, root, items.Length, DateTime.UtcNow, DateTime.UtcNow, null, null);
-        Rows[dto.Id] = items.Select(i => new CacheItemDto(i.Key, i.Value)).ToList();
         return dto;
     }
 
     [Fact]
-    public void EveryCacheOnTheWorkflowReachesTheDefinition()
+    public void EveryCacheOnTheWorkflowReachesTheDefinitionAsARef()
     {
-        using var snapshot = Snapshot(
-            Cache("sk-whitelist", ("acme", "1")),
-            Cache("other-list", ("beta", "2")));
+        var a = Cache("sk-whitelist", ("acme", "1"));
+        var b = Cache("other-list", ("beta", "2"));
+        using var snapshot = Snapshot(a, b);
 
         var definition = OrchestrationService.ToDefinitionForTests(snapshot, W);
 
         Assert.Equal(
-            new[] { "other-list", "sk-whitelist" },
-            definition.Caches.Select(c => c.Root).OrderBy(r => r, StringComparer.Ordinal));
+            new[] { new CacheRefL1(b.Id, "other-list"), new CacheRefL1(a.Id, "sk-whitelist") }.OrderBy(r => r.Root, StringComparer.Ordinal),
+            definition.CacheRefs!.OrderBy(r => r.Root, StringComparer.Ordinal));
     }
 
     [Fact]
-    public void TheDictionaryArrivesIntact()
+    public void TheDefinitionCarriesNoInlineItems()
     {
         using var snapshot = Snapshot(Cache("sk-whitelist", ("acme", "1"), ("alphabeta", "2")));
 
         var definition = OrchestrationService.ToDefinitionForTests(snapshot, W);
 
-        var items = definition.Caches.Single().Items;
-        Assert.Equal(2, items.Count);
-        Assert.Equal("1", items["acme"]);
-        Assert.Equal("2", items["alphabeta"]);
+        Assert.Empty(definition.Caches);
+        Assert.Single(definition.CacheRefs!);
     }
 
     [Fact]
-    public void AnEmptyDictionaryIsCarriedRatherThanDropped()
+    public void AnEmptyCacheIsStillARef()
     {
         // "Allow nothing" is a legitimate configuration. Dropping the cache here would make it
         // indistinguishable from a workflow that named no cache at all.
@@ -79,8 +73,7 @@ public sealed class CacheDefinitionTests
 
         var definition = OrchestrationService.ToDefinitionForTests(snapshot, W);
 
-        Assert.Empty(definition.Caches.Single().Items);
-        Assert.Single(definition.Caches);
+        Assert.Single(definition.CacheRefs!);
     }
 
     [Fact]
@@ -92,6 +85,7 @@ public sealed class CacheDefinitionTests
         var definition = OrchestrationService.ToDefinitionForTests(snapshot, W);
 
         Assert.Empty(definition.Caches);
+        Assert.Empty(definition.CacheRefs!);
     }
 
     [Fact]
@@ -106,7 +100,7 @@ public sealed class CacheDefinitionTests
 
         var definition = OrchestrationService.ToDefinitionForTests(snapshot, W);
 
-        Assert.Empty(definition.Caches);
+        Assert.Empty(definition.CacheRefs!);
     }
 
     [Fact]

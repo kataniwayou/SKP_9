@@ -46,9 +46,6 @@ internal sealed record WorkflowGraphSnapshot(ILogger<WorkflowGraphSnapshot> Logg
     public Dictionary<Guid, SchemaReadDto>     Schemas     { get; init; } = new();
     public Dictionary<Guid, CacheReadDto>      Caches      { get; init; } = new();
 
-    /// <summary>The item rows of each cache in <see cref="Caches"/>, loaded for the start (a cache read carries only a count).</summary>
-    public Dictionary<Guid, List<CacheItemDto>> CacheItemRows { get; init; } = new();
-
     public bool IsDisposed { get; private set; }
 
     public void Dispose()
@@ -60,7 +57,6 @@ internal sealed record WorkflowGraphSnapshot(ILogger<WorkflowGraphSnapshot> Logg
         Processors.Clear();
         Schemas.Clear();
         Caches.Clear();
-        CacheItemRows.Clear();
         IsDisposed = true;
         Logger.LogDebug("L1 snapshot disposed");
     }

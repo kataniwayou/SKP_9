@@ -99,7 +99,7 @@ internal sealed class WorkflowGraphLoader : IWorkflowGraphLoader
             .Where(a => assignmentIds.Contains(a.Id)).ToListAsync(ct);
 
         var cacheIds = cacheLookup.Values.SelectMany(x => x).Distinct().ToList();
-        var caches = await _db.Set<CacheEntity>().AsNoTracking().Include(c => c.Items)
+        var caches = await _db.Set<CacheEntity>().AsNoTracking()
             .Where(c => cacheIds.Contains(c.Id)).ToListAsync(ct);
 
         // Stage 4 — map each entity, then enrich the collections that live only on the junctions.
@@ -108,11 +108,7 @@ internal sealed class WorkflowGraphLoader : IWorkflowGraphLoader
         foreach (var s in schemas)     snapshot.Schemas[s.Id]     = _schemaMapper.ToRead(s);
         foreach (var p in processors)  snapshot.Processors[p.Id]  = _processorMapper.ToRead(p);
         foreach (var a in assignments) snapshot.Assignments[a.Id] = _assignmentMapper.ToRead(a);
-        foreach (var c in caches)
-        {
-            snapshot.Caches[c.Id]        = _cacheMapper.ToRead(c);
-            snapshot.CacheItemRows[c.Id] = CacheItems.ToDtos(c.Items);
-        }
+        foreach (var c in caches) snapshot.Caches[c.Id] = _cacheMapper.ToRead(c);
 
         foreach (var st in stepEntities)
         {

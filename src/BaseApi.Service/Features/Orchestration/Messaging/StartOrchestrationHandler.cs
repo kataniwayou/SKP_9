@@ -1,8 +1,11 @@
 using System.Text.Json;
 using BaseApi.Service.Features.Orchestration.Projection;
 using BaseApi.Service.Features.Workflow.Delete;
+using BaseApi.Core.Persistence;
+using BaseApi.Service.Features.Cache;
 using Messaging.Contracts;
 using Messaging.Transport;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace BaseApi.Service.Features.Orchestration.Messaging;
@@ -37,11 +40,16 @@ internal sealed class StartOrchestrationHandler : IQueueMessageHandler
     private readonly IQueueFanoutPublisher _publisher;
     private readonly ILogger<StartOrchestrationHandler> _logger;
     private readonly IWorkflowRunGuard? _runGuard;
+    private readonly BaseDbContext? _db;
+    private readonly CacheItemsStore? _items;
 
     public StartOrchestrationHandler(
         L2ProjectionWriter writer, L2LiveSet live, IQueueFanoutPublisher publisher,
-        ILogger<StartOrchestrationHandler> logger, IWorkflowRunGuard? runGuard = null)
+        ILogger<StartOrchestrationHandler> logger, IWorkflowRunGuard? runGuard = null,
+        BaseDbContext? db = null, CacheItemsStore? items = null)
     {
+        _db        = db;
+        _items     = items;
         _runGuard  = runGuard;
         _writer    = writer ?? throw new ArgumentNullException(nameof(writer));
         _live      = live ?? throw new ArgumentNullException(nameof(live));
@@ -79,7 +87,7 @@ internal sealed class StartOrchestrationHandler : IQueueMessageHandler
             "projecting workflow {WorkflowId} with {StepCount} step(s)",
             workflow.WorkflowId, workflow.Steps?.Count ?? 0);
 
-        await _writer.WriteAsync(workflow, ct).ConfigureAwait(false);
+        await _writer.WriteAsync(await ResolveCachesAsync(workflow, ct).ConfigureAwait(false), ct).ConfigureAwait(false);
 
         // Live only once written: a replica hydrating from the live set must never find an id whose
         // store is not there yet.
@@ -96,5 +104,42 @@ internal sealed class StartOrchestrationHandler : IQueueMessageHandler
         await _publisher.PublishAsync(
             OrchestratorFanout.Exchange, MessageTypes.OrchestrationStarted,
             new OrchestrationStarted(workflow.WorkflowId), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The message carries each bound cache as (id, root); the rows are read here, so the write sees
+    /// them as they are now. A cache deleted since the start was queued is skipped: a cache a workflow
+    /// is bound to cannot be deleted, so this is a race the next start settles. Caches carried inline
+    /// (a message from before refs existed) are kept as they came.
+    /// </summary>
+    private async Task<WorkflowL1> ResolveCachesAsync(WorkflowL1 workflow, CancellationToken ct)
+    {
+        if (workflow.CacheRefs is not { Count: > 0 } refs)
+        {
+            return workflow;
+        }
+
+        if (_db is null || _items is null)
+        {
+            throw new InvalidOperationException("start message carries cache refs but the handler has no database");
+        }
+
+        var ids = refs.Select(r => r.CacheId).Distinct().ToList();
+        var existing = (await _db.Set<CacheEntity>().AsNoTracking()
+            .Where(c => ids.Contains(c.Id)).Select(c => c.Id).ToListAsync(ct).ConfigureAwait(false)).ToHashSet();
+
+        var caches = new List<CacheL1>(workflow.Caches ?? []);
+        foreach (var r in refs)
+        {
+            if (!existing.Contains(r.CacheId))
+            {
+                _logger.LogWarning("cache {CacheId} ({CacheRoot}) no longer exists; not projected", r.CacheId, r.Root);
+                continue;
+            }
+
+            caches.Add(new CacheL1(r.Root, await _items.ReadAllAsync(r.CacheId, ct).ConfigureAwait(false)));
+        }
+
+        return workflow with { Caches = caches };
     }
 }

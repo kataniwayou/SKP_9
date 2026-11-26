@@ -32,7 +32,7 @@
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "neReBKv8QnJzJLTad93G4QzwmkdPkwrT8cXdsLCGYK7VYCoS8xeqpojVgmThEN7eVKCViyDKieBEKfh1/RqsyA=="
+        "contentHash": "A5Evx7Q2X1gVAaGECDStEXIE9ULCRJq3V1CC7Aif/IvG3WWIyLtG+es0YvwMETyL+jalzZgqFLTK4cD4gz+G7g=="
       },
       "Messaging.Transport": {
         "type": "Direct",

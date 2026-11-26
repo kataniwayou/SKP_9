@@ -27,7 +27,8 @@ namespace Messaging.Contracts;
 /// <param name="EntryStepIds">The steps a fire begins from. The BFS that discovers this graph's key
 /// set on a later clean walks outward from exactly these.</param>
 /// <param name="Steps">Every step in the validated graph, one entry per L2 step key to be written.</param>
-/// <param name="Caches">Every dictionary this workflow projects into L2 for the duration of a run.</param>
+/// <param name="Caches">Dictionaries carried inline. The API no longer fills this: a cache's items can be larger
+/// than one broker message, so the start carries <paramref name="CacheRefs"/> and the consumer reads the rows.</param>
 /// <param name="Names">Maps every workflow, step and processor id in the started graph to its display
 /// name (see <see cref="EntityNames"/>). It rides this control message only, never a dispatch
 /// message. It is optional: a message published before it existed deserializes with null, and the
@@ -35,13 +36,24 @@ namespace Messaging.Contracts;
 /// <param name="EntryCrons">Each scheduled entry step's cron, by step id. A step listed here fires on
 /// that cron; an entry step that is not listed is unscheduled — there is no workflow cron to fall back
 /// to. Null when no entry step is scheduled.</param>
+/// <param name="CacheRefs">The caches this workflow is bound to, to be resolved into dictionaries by the
+/// consumer. Null on a message published before it existed.</param>
 public sealed record WorkflowL1(
     Guid WorkflowId,
     List<Guid> EntryStepIds,
     List<StepL1> Steps,
     List<CacheL1> Caches,
     Dictionary<Guid, string>? Names = null,
-    Dictionary<Guid, string>? EntryCrons = null);
+    Dictionary<Guid, string>? EntryCrons = null,
+    List<CacheRefL1>? CacheRefs = null);
+
+/// <summary>
+/// A cache bound to a started workflow, by identity only. The start consumer reads the cache's item
+/// rows when it writes L2, so the start message stays small however large the cache is.
+/// </summary>
+/// <param name="CacheId">The cache row.</param>
+/// <param name="Root">The cache's root, the second segment of its L2 keys.</param>
+public sealed record CacheRefL1(Guid CacheId, string Root);
 
 /// <summary>
 /// One step of a <see cref="WorkflowL1"/> — the flat projection of a step plus its resolved payload

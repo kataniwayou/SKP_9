@@ -210,12 +210,13 @@ public sealed class OrchestrationService
         // A cache id naming no loaded row is skipped rather than throwing. The foreign key makes
         // that unreachable, and turning an impossible state into a failed start would refuse a
         // workflow for a reason no operator could act on.
-        var caches = (workflow.CacheIds ?? new List<Guid>())
-            .Select(id => snapshot.Caches.TryGetValue(id, out var dto) ? (dto, id) : (null, id))
-            .Where(p => p.Item1 is not null)
-            .Select(p => new CacheL1(
-                p.Item1!.Root,
-                CacheItems.ToDictionary(snapshot.CacheItemRows.GetValueOrDefault(p.id) ?? [])))
+        //
+        // Identity and root only: a cache's items can outgrow one broker message, so the start
+        // consumer reads the rows when it writes L2.
+        var cacheRefs = (workflow.CacheIds ?? new List<Guid>())
+            .Select(id => snapshot.Caches.TryGetValue(id, out var dto) ? new CacheRefL1(id, dto.Root) : null)
+            .Where(r => r is not null)
+            .Select(r => r!)
             .ToList();
 
         // The workflow and each of its steps, each id once. Processors are absent on purpose: every
@@ -235,9 +236,10 @@ public sealed class OrchestrationService
             WorkflowId: workflowId,
             EntryStepIds: workflow.EntryStepIds ?? new List<Guid>(),
             Steps: steps,
-            Caches: caches,
+            Caches: [],
             Names: names,
-            EntryCrons: workflow.EntryCrons);
+            EntryCrons: workflow.EntryCrons,
+            CacheRefs: cacheRefs);
     }
 
     /// <summary>
