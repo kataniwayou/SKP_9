@@ -92,11 +92,11 @@ internal sealed class L2ProjectionWriter
         {
             var items = cache.Items ?? new Dictionary<string, string>();
 
-            // The key list goes at the cache root, so the next start can find the entries it has to
-            // delete without a scan, and an operator reading one key sees the dictionary by name.
-            writes.Add(batch.StringSetAsync(
-                L2ProjectionKeys.Cache(workflowId, cache.Root),
-                JsonSerializer.Serialize(items.Keys.ToList(), MessagingJson.Options)));
+            // The root is only the "was projected" marker (a processor tells an absent root from an
+            // empty whitelist by it); the key names go in the set, so the next start, a delete and an
+            // incremental apply can find them without parsing a list.
+            writes.Add(batch.StringSetAsync(L2ProjectionKeys.Cache(workflowId, cache.Root), EmptyMarker));
+            writes.AddRange(QueueKeySet(batch, L2ProjectionKeys.CacheKeySet(workflowId, cache.Root), items.Keys));
 
             foreach (var (key, value) in items)
             {
@@ -160,23 +160,25 @@ internal sealed class L2ProjectionWriter
         }
 
         var rootKey = L2ProjectionKeys.Cache(workflowId, cache.Root);
+        var setKey = L2ProjectionKeys.CacheKeySet(workflowId, cache.Root);
         var items = cache.Items ?? new Dictionary<string, string>();
 
-        var stale = ReadList(await db.StringGetAsync(rootKey).ConfigureAwait(false))
+        var stale = (await ReadKeyNamesAsync(db, workflowId, cache.Root).ConfigureAwait(false))
             .Where(k => !string.IsNullOrEmpty(k) && !items.ContainsKey(k))
             .Distinct(StringComparer.Ordinal)
             .Select(k => (RedisKey)L2ProjectionKeys.CacheEntry(workflowId, cache.Root, k))
+            .Append(setKey)
             .ToArray();
 
         var batch = db.CreateBatch();
-        var writes = new List<Task>();
-
-        if (stale.Length > 0)
+        var writes = new List<Task>
         {
-            writes.Add(batch.KeyDeleteAsync(stale));
-        }
+            // The stale entries and the old set go in one DEL, first; the set is rebuilt below.
+            batch.KeyDeleteAsync(stale),
+            batch.StringSetAsync(rootKey, EmptyMarker),
+        };
 
-        writes.Add(batch.StringSetAsync(rootKey, JsonSerializer.Serialize(items.Keys.ToList(), MessagingJson.Options)));
+        writes.AddRange(QueueKeySet(batch, setKey, items.Keys));
 
         foreach (var (key, value) in items)
         {
@@ -186,6 +188,118 @@ internal sealed class L2ProjectionWriter
         batch.Execute();
         await Task.WhenAll(writes).ConfigureAwait(false);
         return true;
+    }
+
+    /// <summary>
+    /// Applies a delta to one cache of an already projected workflow: each key with a value is written
+    /// (<c>SET entry</c> + <c>SADD</c>), each key with a null value is dropped (<c>DEL entry</c> +
+    /// <c>SREM</c>). Nothing else is read or written, so the cost follows the keys passed - except once
+    /// per cache after the deploy that introduced the key set: a root still holding the old JSON list
+    /// has no set, so the set is seeded from that list and the root rewritten to the <c>[]</c> marker.
+    /// <para>
+    /// False, with nothing written, when the root is not among the workflow's <c>roots</c> (never
+    /// started, or bound after the start - see <see cref="WriteCacheAsync"/>).
+    /// </para>
+    /// <para>
+    /// <b>One batch, deletes first, idempotent.</b> The seed's SADD precedes the root rewrite, so a torn
+    /// batch leaves either the legacy root (the rerun seeds again) or both. Applying the same delta twice
+    /// leaves the same L2, which is what a redelivered refresh needs.
+    /// </para>
+    /// </summary>
+    public async Task<bool> ApplyCacheKeysAsync(
+        Guid workflowId, string root, IReadOnlyDictionary<string, string?> current, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentNullException.ThrowIfNull(current);
+        ct.ThrowIfCancellationRequested();
+
+        var db = _multiplexer.GetDatabase();
+
+        var roots = ReadList(await db.HashGetAsync(L2ProjectionKeys.Workflow(workflowId), L2ProjectionKeys.RootsField)
+            .ConfigureAwait(false));
+        if (!roots.Contains(root, StringComparer.Ordinal))
+        {
+            return false;
+        }
+
+        var rootKey = L2ProjectionKeys.Cache(workflowId, root);
+        var setKey = L2ProjectionKeys.CacheKeySet(workflowId, root);
+
+        // The legacy seed: no set yet, and a root that lists names. An empty or marker root seeds nothing.
+        List<string> legacy = [];
+        if (!await db.KeyExistsAsync(setKey).ConfigureAwait(false))
+        {
+            legacy = ReadList(await db.StringGetAsync(rootKey).ConfigureAwait(false))
+                .Where(k => !string.IsNullOrEmpty(k))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+        }
+
+        var dropped = current.Where(p => p.Value is null && !string.IsNullOrEmpty(p.Key)).Select(p => p.Key).ToList();
+        var written = current.Where(p => p.Value is not null && !string.IsNullOrEmpty(p.Key)).ToList();
+
+        var batch = db.CreateBatch();
+        var writes = new List<Task>();
+
+        if (dropped.Count > 0)
+        {
+            writes.Add(batch.KeyDeleteAsync(
+                dropped.Select(k => (RedisKey)L2ProjectionKeys.CacheEntry(workflowId, root, k)).ToArray()));
+        }
+
+        if (legacy.Count > 0)
+        {
+            writes.AddRange(QueueKeySet(batch, setKey, legacy));
+        }
+
+        foreach (var (key, value) in written)
+        {
+            writes.Add(batch.StringSetAsync(L2ProjectionKeys.CacheEntry(workflowId, root, key), value!));
+        }
+
+        writes.AddRange(QueueKeySet(batch, setKey, written.Select(p => p.Key)));
+
+        if (dropped.Count > 0)
+        {
+            writes.Add(batch.SetRemoveAsync(setKey, dropped.Select(k => (RedisValue)k).ToArray()));
+        }
+
+        if (legacy.Count > 0)
+        {
+            // Last: only once the names are in the set is the root reduced to the marker.
+            writes.Add(batch.StringSetAsync(rootKey, EmptyMarker));
+        }
+
+        batch.Execute();
+        await Task.WhenAll(writes).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>The root's content now: the "was projected" marker, an empty JSON list.</summary>
+    private const string EmptyMarker = "[]";
+
+    /// <summary>SADD in chunks, so a large dictionary is not one oversized command.</summary>
+    private static IEnumerable<Task> QueueKeySet(IBatch batch, string setKey, IEnumerable<string> names)
+    {
+        foreach (var chunk in names.Where(k => !string.IsNullOrEmpty(k)).Distinct(StringComparer.Ordinal).Chunk(1000))
+        {
+            yield return batch.SetAddAsync(setKey, chunk.Select(k => (RedisValue)k).ToArray());
+        }
+    }
+
+    /// <summary>
+    /// The key names of one projected dictionary: the set's members; when there is no set, the root's
+    /// JSON list, which is how a start before the key set existed recorded them.
+    /// </summary>
+    private static async Task<List<string>> ReadKeyNamesAsync(IDatabase db, Guid workflowId, string root)
+    {
+        var members = await db.SetMembersAsync(L2ProjectionKeys.CacheKeySet(workflowId, root)).ConfigureAwait(false);
+        if (members.Length > 0)
+        {
+            return members.Select(m => m.ToString()).ToList();
+        }
+
+        return ReadList(await db.StringGetAsync(L2ProjectionKeys.Cache(workflowId, root)).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -235,7 +349,8 @@ internal sealed class L2ProjectionWriter
     /// <summary>
     /// The cache keys the previous start of this workflow wrote that this start does not: every key of
     /// a root no longer bound, and every item no longer in a root that still is. Read before anything is
-    /// written, from what the previous start recorded. A root or list that is missing or unreadable
+    /// written, from what the previous start recorded (each root's key set, or the JSON list of a start
+    /// before the set existed). A root or list that is missing or unreadable
     /// contributes nothing — its keys are already unreachable, and aborting would strand the rest.
     /// </summary>
     private static async Task<List<RedisKey>> FindOwnLeftoversAsync(
@@ -249,17 +364,19 @@ internal sealed class L2ProjectionWriter
         foreach (var root in previousRoots.Where(r => !string.IsNullOrWhiteSpace(r)).Distinct(StringComparer.Ordinal))
         {
             var rootKey = L2ProjectionKeys.Cache(workflowId, root);
-            var previousKeys = ReadList(await db.StringGetAsync(rootKey).ConfigureAwait(false))
+            var previousKeys = (await ReadKeyNamesAsync(db, workflowId, root).ConfigureAwait(false))
                 .Where(k => !string.IsNullOrEmpty(k))
                 .Distinct(StringComparer.Ordinal);
 
             if (!nextByRoot.TryGetValue(root, out var items))
             {
                 stale.Add(rootKey);
+                stale.Add(L2ProjectionKeys.CacheKeySet(workflowId, root));
                 stale.AddRange(previousKeys.Select(k => (RedisKey)L2ProjectionKeys.CacheEntry(workflowId, root, k)));
                 continue;
             }
 
+            stale.Add(L2ProjectionKeys.CacheKeySet(workflowId, root));
             stale.AddRange(previousKeys
                 .Where(k => !items.ContainsKey(k))
                 .Select(k => (RedisKey)L2ProjectionKeys.CacheEntry(workflowId, root, k)));

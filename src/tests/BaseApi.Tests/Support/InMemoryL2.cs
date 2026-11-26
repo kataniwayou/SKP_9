@@ -251,6 +251,39 @@ internal sealed class InMemoryL2
             .Returns(ci => _sets.TryGetValue(ci.ArgAt<RedisKey>(0).ToString(), out var set)
                            && set.Remove(ci.ArgAt<RedisValue>(1).ToString()));
 
+        // SADD / SREM with many members, as the cache key set is written. Counts follow the server:
+        // members actually added or removed. A set emptied by SREM ceases to exist.
+        target.SetAddAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue[]>(), Arg.Any<CommandFlags>())
+            .Returns(ci =>
+            {
+                var key = ci.ArgAt<RedisKey>(0).ToString();
+                if (!_sets.TryGetValue(key, out var set))
+                {
+                    set = new SortedSet<string>(StringComparer.Ordinal);
+                    _sets[key] = set;
+                }
+
+                return (long)ci.ArgAt<RedisValue[]>(1).Count(m => set.Add(m.ToString()));
+            });
+
+        target.SetRemoveAsync(Arg.Any<RedisKey>(), Arg.Any<RedisValue[]>(), Arg.Any<CommandFlags>())
+            .Returns(ci =>
+            {
+                var key = ci.ArgAt<RedisKey>(0).ToString();
+                if (!_sets.TryGetValue(key, out var set))
+                {
+                    return 0L;
+                }
+
+                var removed = (long)ci.ArgAt<RedisValue[]>(1).Count(m => set.Remove(m.ToString()));
+                if (set.Count == 0)
+                {
+                    _sets.Remove(key);
+                }
+
+                return removed;
+            });
+
         target.SetMembersAsync(Arg.Any<RedisKey>())
             .Returns(ci => _sets.TryGetValue(ci.ArgAt<RedisKey>(0).ToString(), out var set)
                 ? set.Select(m => (RedisValue)m).ToArray()

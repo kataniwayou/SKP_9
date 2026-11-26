@@ -65,9 +65,7 @@ public sealed class CacheRefreshWriteTests
             new CacheL1("artists", new() { ["acme"] = "Acme", ["beta"] = "Beta" }),
             TestContext.Current.CancellationToken);
 
-        var listed = JsonSerializer.Deserialize<List<string>>(
-            l2.Value(L2ProjectionKeys.Cache(W, "artists"))!, MessagingJson.Options)!;
-        Assert.Equal(new[] { "acme", "beta" }, listed.Order(StringComparer.Ordinal));
+        Assert.Equal(new[] { "acme", "beta" }, l2.Members(L2ProjectionKeys.CacheKeySet(W, "artists")));
     }
 
     [Fact]

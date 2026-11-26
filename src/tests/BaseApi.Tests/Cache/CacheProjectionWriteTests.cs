@@ -53,10 +53,9 @@ public sealed class CacheProjectionWriteTests
         var l2 = await WriteAsync(Definition(
             new CacheL1("sk-whitelist", new() { ["acme"] = "1", ["alphabeta"] = "2" })));
 
-        var listed = JsonSerializer.Deserialize<List<string>>(
-            l2.Value(L2ProjectionKeys.Cache(W, "sk-whitelist"))!, MessagingJson.Options)!;
-
-        Assert.Equal(new[] { "acme", "alphabeta" }, listed.OrderBy(k => k, StringComparer.Ordinal));
+        // The names are in the key set; the root is only the "was projected" marker.
+        Assert.Equal(new[] { "acme", "alphabeta" }, l2.Members(L2ProjectionKeys.CacheKeySet(W, "sk-whitelist")));
+        Assert.Equal("[]", l2.Value(L2ProjectionKeys.Cache(W, "sk-whitelist")));
     }
 
     [Fact]

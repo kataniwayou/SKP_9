@@ -89,8 +89,14 @@ internal sealed class RedisWorkflowRunGuard : IWorkflowRunGuard
             foreach (var root in ReadList(await db.HashGetAsync(workflowKey, L2ProjectionKeys.RootsField)).Where(r => !string.IsNullOrWhiteSpace(r)).Distinct(StringComparer.Ordinal))
             {
                 var rootKey = L2ProjectionKeys.Cache(workflowId, root);
+                var setKey = L2ProjectionKeys.CacheKeySet(workflowId, root);
                 gone.Add(rootKey);
-                gone.AddRange(ReadList(await db.StringGetAsync(rootKey)).Where(k => !string.IsNullOrEmpty(k)).Distinct(StringComparer.Ordinal)
+                gone.Add(setKey);
+                // The key names are the set's members; a start before the set existed left them as the
+                // root's JSON list, so that is read too (the root is only a marker now).
+                var names = (await db.SetMembersAsync(setKey)).Select(m => m.ToString())
+                    .Concat(ReadList(await db.StringGetAsync(rootKey)));
+                gone.AddRange(names.Where(k => !string.IsNullOrEmpty(k)).Distinct(StringComparer.Ordinal)
                     .Select(k => (RedisKey)L2ProjectionKeys.CacheEntry(workflowId, root, k)));
             }
             // its steps' name keys: their rows are gone with it

@@ -104,6 +104,18 @@ public static class L2ProjectionKeys
         => $"{Workflow(workflowId)}:cache:{root}";
 
     /// <summary>
+    /// The SET holding the key names of one projected dictionary: <see cref="Cache"/> followed by
+    /// <c>::keys</c>. The root itself stays as the "this dictionary was projected" marker (holding
+    /// <c>[]</c>); the names live here so one key can be added or dropped without rewriting a list.
+    /// <para>
+    /// It cannot collide with an entry: an entry key is <see cref="Cache"/> + <c>:</c> + the key name,
+    /// and a key name is never empty and never contains a colon, so no entry is spelt <c>:keys</c>.
+    /// </para>
+    /// </summary>
+    public static string CacheKeySet(Guid workflowId, string root)
+        => $"{Cache(workflowId, root)}::keys";
+
+    /// <summary>
     /// One entry of a projected dictionary: exactly <see cref="Cache"/> followed by the key. The two
     /// must stay in that relationship, because cleanup reads the key list from the cache root and
     /// rebuilds every entry key from it.
