@@ -11,6 +11,7 @@ import { LiveStoreProvider } from '../live/LiveContext';
 import { createOutputStore } from '../output/outputStore';
 import { liveStub } from '../test/liveStub';
 import { InspectorPanel } from './InspectorPanel';
+import { withSchemas } from './tabs/testBoard';
 
 type Sel = { workflows: string[]; picks: Pick[] };
 
@@ -577,5 +578,34 @@ describe('InspectorPanel', () => {
       expect(selectedTab()).toBe('Step');
       expect(screen.getByLabelText('Name')).toHaveValue('expand');
     });
+  });
+});
+
+describe('InspectorPanel Undo and Redo lock', () => {
+  it('Undo and Redo are disabled while a schema is the focus even when the board can undo; enabled again for a step', () => {
+    const b = withSchemas();
+    const { store, rerender } = setup({ workflows: [], picks: [step('fetch')] }, b);
+    act(() => { store.edit((s) => ({ ...s, steps: { ...s.steps, fetch: { ...s.steps.fetch!, name: 'renamed' } } })); });
+    expect(store.canUndo()).toBe(true);
+    const undo = () => screen.getByRole('button', { name: 'Undo' });
+    expect(undo()).toBeEnabled();
+    rerender({ workflows: [], picks: [{ kind: 'schema', id: 's-cfg' }] });
+    expect(undo()).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Redo' })).toBeDisabled();
+    expect(screen.getByRole('tab', { name: 'Schema' })).toBeInTheDocument();
+    rerender({ workflows: [], picks: [{ kind: 'processor', id: 'p1' }] });
+    expect(undo()).toBeDisabled();
+    rerender({ workflows: [], picks: [step('fetch')] });
+    expect(undo()).toBeEnabled();
+  });
+});
+
+describe('InspectorPanel processor card', () => {
+  it('a stepless processor shows its slot schemas as read-only child tabs', () => {
+    setup({ workflows: [], picks: [{ kind: 'processor', id: 'p1' }] }, withSchemas());
+    expect(childNames('Processor')).toEqual(['Input schema', 'Config schema']);
+    fireEvent.click(rowTabs('Processor tabs').find((t) => t.textContent === 'Config schema')!);
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    expect(screen.getByLabelText('Definition')).toBeDisabled();
   });
 });

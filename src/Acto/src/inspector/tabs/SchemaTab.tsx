@@ -9,17 +9,17 @@ import type { Meta } from '../MetaToggle';
 import { EntityBase, EntityHead, type Ctx } from './shared';
 
 /** A schema copy made on the board has no audit of its own yet. */
-const schemaMeta = (s: SchemaRow): Meta => (s.updatedAt === null
+export const schemaMeta = (s: SchemaRow): Meta => (s.updatedAt === null
   ? { id: s.id, createdAt: null, createdBy: null, updatedAt: null, updatedBy: null }
   : { id: s.id, createdAt: s.audit.createdAt, createdBy: s.audit.createdBy, updatedAt: s.audit.updatedAt, updatedBy: s.audit.updatedBy });
 
 /**
  * The schema in one slot of the picked step's processor [user, 2026-11-18]: its fields and its Definition (pretty JSON).
  * Name, Version and Description edits go to the processor's own copy of the schema (setSlotSchema), never to the shared
- * row. The Definition is read-only [user, 2026-11-19: "if you change any schema you will need to restart the processor"].
+ * row. `readOnly` (a processor card's slots, no step) disables every field. The Definition is read-only [user, 2026-11-19: "if you change any schema you will need to restart the processor"].
  */
-export function SchemaTab({ state, edit, stepId, slot }: Ctx & { stepId: Id; slot: Slot }) {
-  const processorId = state.steps[stepId]?.processorId ?? null;
+export function SchemaTab({ state, edit, stepId, slot, processorId: given, readOnly }: Ctx & { stepId: Id | null; slot: Slot; processorId?: Id; readOnly?: boolean }) {
+  const processorId = given ?? (stepId === null ? null : state.steps[stepId]?.processorId ?? null);
   const processor = processorId === null ? undefined : state.processors[processorId];
   if (processorId === null || !processor) return null;
   const schemaId = processor[SLOT_FIELD[slot]];
@@ -40,7 +40,7 @@ export function SchemaTab({ state, edit, stepId, slot }: Ctx & { stepId: Id; slo
   const unread = definition === null;
   return (
     <>
-      <EntityBase head={`${schema.name} ${schema.version}`} kind={kind} k={k} row={schema} meta={schemaMeta(schema)} set={set} disabled={unread} />
+      <EntityBase head={`${schema.name} ${schema.version}`} kind={kind} k={k} row={schema} meta={schemaMeta(schema)} set={set} disabled={unread || readOnly === true} />
       {definition === null
         ? <Ro><Row k="Definition">not loaded</Row></Ro>
         : <JsonField key={`${k}:definition`} label="Definition" value={definition} onChange={() => {}} disabled />}

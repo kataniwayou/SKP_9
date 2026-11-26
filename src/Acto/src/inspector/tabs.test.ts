@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Pick, SelectionState } from '../board/selection';
 import { board } from '../design/boardFixtures';
+
 import type { GhostItem } from '../design/ghosts';
 import { activeChild, activeTab, chooseChild, chooseTab, focusKey, formatInstant, keepChosen, listOf, processorTabsOf, stepTabsOf, tabsOf, type Chosen } from './tabs';
 
@@ -172,5 +173,18 @@ describe('formatInstant', () => {
     expect(formatInstant(null)).toBe('—');
     expect(formatInstant('')).toBe('—');
     expect(formatInstant('soon')).toBe('soon');
+  });
+});
+
+describe('schema and processor picks', () => {
+  const full = {
+    ...withSlots,
+    schemas: { 's-in': { id: 's-in' } as never, 's-cfg': { id: 's-cfg' } as never },
+  };
+  it('a schema pick gives the Schema tab; a processor pick gives Processor with its slot child tabs', () => {
+    expect(tabsOf(sel({ kind: 'schema', id: 's-cfg' }), full, noGhosts)).toEqual([{ id: 'schema', label: 'Schema' }]);
+    expect(tabsOf(sel({ kind: 'processor', id: 'p1' }), full, noGhosts)).toEqual([{ id: 'stepless', label: 'Processor' }]);
+    expect(processorTabsOf(full, 'p1').map((t) => t.id)).toEqual(['schema:input', 'schema:config']);
+    expect(tabsOf(sel({ kind: 'schema', id: 'gone' }), full, noGhosts)).toEqual([]);
   });
 });

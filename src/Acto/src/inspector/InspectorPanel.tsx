@@ -12,7 +12,9 @@ import { CacheTab } from './tabs/CacheTab';
 import { GhostTab, ghostName } from './tabs/GhostTab';
 import { HideButton } from '../shell/HideButton';
 import { LinkTab } from './tabs/LinkTab';
+import { ProcessorCardTab } from './tabs/ProcessorCardTab';
 import { ProcessorTab } from './tabs/ProcessorTab';
+import { SchemaCardTab } from './tabs/SchemaCardTab';
 import { SchemaTab } from './tabs/SchemaTab';
 import { stepName, type Edit, type Go } from './tabs/shared';
 import { StepTab } from './tabs/StepTab';
@@ -62,11 +64,12 @@ function PickList({ picks, state, ghosts }: { picks: Pick[]; state: BoardState; 
   );
 }
 
-function Header({ store, kind }: { store: BoardStore; kind: string }) {
+/** `locked`: a schema or processor card is the focus, which has no history of its own, so Undo and Redo are off whatever the board holds. */
+function Header({ store, kind, locked }: { store: BoardStore; kind: string; locked?: boolean }) {
   return (
     <div className="ph"><span>Inspector</span><span className="cnt">{kind}</span><span className="sp" />
-      <button type="button" className="pbtn" disabled={!store.canUndo()} onClick={() => store.undo()}>Undo</button>
-      <button type="button" className="pbtn" disabled={!store.canRedo()} onClick={() => store.redo()}>Redo</button>
+      <button type="button" className="pbtn" disabled={locked === true || !store.canUndo()} onClick={() => store.undo()}>Undo</button>
+      <button type="button" className="pbtn" disabled={locked === true || !store.canRedo()} onClick={() => store.redo()}>Redo</button>
       <HideButton />
     </div>
   );
@@ -93,11 +96,13 @@ function TabBar<T extends string>({ tabs, active, choose, label = 'Inspector tab
  * assignment, Processor: a schema). The child row is drawn only when it has tabs; none is chosen at first.
  */
 function ParentTab({ tab, ctx, sel, stepId, child, choose }: {
-  tab: 'step' | 'processor'; ctx: { state: BoardState; base: BoardState; edit: Edit; go?: Go }; sel: InspectorSelection; stepId: string;
+  tab: 'step' | 'processor' | 'stepless'; ctx: { state: BoardState; base: BoardState; edit: Edit; go?: Go }; sel: InspectorSelection; stepId: string;
   child: ChildId | null; choose: (c: ChildId) => void;
 }) {
-  const children = tab === 'step' ? stepTabsOf(sel, ctx.state, stepId) : processorTabsOf(ctx.state, ctx.state.steps[stepId]?.processorId ?? null);
-  const own = tab === 'step' ? <StepTab {...ctx} id={stepId} sel={sel} /> : <ProcessorTab {...ctx} stepId={stepId} />;
+  const stepless = tab === 'stepless';
+  const children = tab === 'step' ? stepTabsOf(sel, ctx.state, stepId) : processorTabsOf(ctx.state, stepless ? stepId : ctx.state.steps[stepId]?.processorId ?? null);
+  const own = tab === 'step' ? <StepTab {...ctx} id={stepId} sel={sel} />
+    : stepless ? <ProcessorCardTab state={ctx.state} id={stepId} {...(ctx.go ? { go: ctx.go } : {})} /> : <ProcessorTab {...ctx} stepId={stepId} />;
   if (children.length === 0) return own;
   return (
     <>
@@ -106,7 +111,7 @@ function ParentTab({ tab, ctx, sel, stepId, child, choose }: {
         <div role="tabpanel" id="ins-subpanel" aria-labelledby={`ins-subtab-${child}`}>
           {child.startsWith('assignment:')
             ? <AssignmentTab key={child} {...ctx} stepId={stepId} workflowId={child.slice('assignment:'.length)} />
-            : <SchemaTab key={child} {...ctx} stepId={stepId} slot={child.slice('schema:'.length) as Slot} />}
+            : <SchemaTab key={child} {...ctx} stepId={stepless ? null : stepId} {...(stepless ? { processorId: stepId, readOnly: true } : {})} slot={child.slice('schema:'.length) as Slot} />}
         </div>
       )}
     </>
@@ -128,6 +133,8 @@ function TabBody({ tab, focus, state, base, edit, ghosts, sel, child, choose, go
   if (focus.kind === 'step' && (tab === 'step' || tab === 'processor')) {
     return <ParentTab tab={tab} ctx={ctx} sel={sel} stepId={focus.id} child={child} choose={choose} />;
   }
+  if (tab === 'schema' && focus.kind === 'schema') return <SchemaCardTab state={state} id={focus.id} {...(go ? { go } : {})} />;
+  if (tab === 'stepless' && focus.kind === 'processor') return <ParentTab tab={tab} ctx={ctx} sel={sel} stepId={focus.id} child={child} choose={choose} />;
   return null;
 }
 
@@ -160,7 +167,8 @@ export function InspectorPanel({ store, selection: given, ghosts, onPicks, onCen
   const tabs = tabsOf(selection, state, ghosts);
   const tab = activeTab(tabs, key, chosen);
   const children = focus?.kind === 'step' && tab === 'step' ? stepTabsOf(selection, state, focus.id)
-    : focus?.kind === 'step' && tab === 'processor' ? processorTabsOf(state, state.steps[focus.id]?.processorId ?? null) : [];
+    : focus?.kind === 'step' && tab === 'processor' ? processorTabsOf(state, state.steps[focus.id]?.processorId ?? null)
+      : focus?.kind === 'processor' && tab === 'stepless' ? processorTabsOf(state, focus.id) : [];
   const child = activeChild(children, key, tab, chosen);
   // a chip's name [user, 2026-11-19]: the selection moves to its picks, and the tab (and Step's child) it names opens
   const go: Go | undefined = onPicks && ((picks, open) => {
@@ -173,12 +181,12 @@ export function InspectorPanel({ store, selection: given, ghosts, onPicks, onCen
   });
   return (
     <>
-      <Header store={store} kind={list ? `${list.length} selected` : tab !== null && focus ? focus.kind : ''} />
+      <Header store={store} locked={!list && (focus?.kind === 'schema' || focus?.kind === 'processor')} kind={list ? `${list.length} selected` : tab !== null && focus ? focus.kind : ''} />
       {!list && tab !== null && focus && <TabBar tabs={tabs} active={tab} choose={(t) => setChosen(chooseTab(chosen, key, tab, t))} />}
       <div className="pb" {...(!list && tab !== null ? { role: 'tabpanel', id: 'ins-tabpanel', 'aria-labelledby': `ins-tab-${tab}` } : {})}>
         {list ? <PickList picks={list} state={state} ghosts={ghosts} />
           : tab !== null && focus ? <TabBody key={`${key}|${tab}|${child ?? ''}`} tab={tab} focus={focus} state={state} base={store.base()} edit={edit} ghosts={ghosts}
-            sel={selection} child={child} choose={(c) => { if (tab === 'step' || tab === 'processor') setChosen(chooseChild(chosen, key, tab, c)); }}
+            sel={selection} child={child} choose={(c) => { if (tab === 'step' || tab === 'processor' || tab === 'stepless') setChosen(chooseChild(chosen, key, tab, c)); }}
             {...(go ? { go } : {})} />
           : <BoardSummary state={state} />}
       </div>

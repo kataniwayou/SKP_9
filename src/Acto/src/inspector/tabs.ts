@@ -9,7 +9,7 @@ import type { GhostStore } from '../design/ghosts';
  * One top Inspector tab (spec §5). Step and Processor are the only parents [user, 2026-11-18]: each shows its own fields
  * and has a child row (Step: the one assignment, Processor: the schemas).
  */
-export type TabId = 'workflow' | 'step' | 'processor' | 'cache' | 'link' | 'ghost';
+export type TabId = 'workflow' | 'step' | 'processor' | 'cache' | 'link' | 'ghost' | 'schema' | 'stepless';
 export interface Tab { id: TabId; label: string }
 
 /** A child tab: `assignment:<workflow id>` (under Step) is that workflow's payload on the step; `schema:<slot>` (under Processor) the schema in that slot. */
@@ -65,7 +65,8 @@ export function tabsOf(sel: SelectionState, b: BoardState, ghosts: GhostLookup):
     case 'workflow': return b.workflows[f.id] ? [{ id: 'workflow', label: 'Workflow' }] : [];
     case 'cache': return b.caches[f.id] ? [{ id: 'cache', label: 'Cache' }] : [];
     case 'wire': case 'entry': case 'cacheLink': return [{ id: 'link', label: 'Link' }];
-    case 'schema': case 'processor': return []; // their tabs come with the Inspector work
+    case 'schema': return b.schemas[f.id] ? [{ id: 'schema', label: 'Schema' }] : [];
+    case 'processor': return b.processors[f.id] ? [{ id: 'stepless', label: 'Processor' }] : [];
     case 'ghost': return ghosts.get(f.key) ? [{ id: 'ghost', label: 'Deleted' }] : [];
     case 'step': return b.steps[f.id] ? [{ id: 'step', label: 'Step' }, { id: 'processor', label: 'Processor' }] : [];
   }
@@ -101,8 +102,8 @@ export function keepChosen<C extends { key: string | null }>(chosen: C | null, k
 }
 
 /** A parent tab: the tabs with a child row. */
-export type Parent = 'step' | 'processor';
-const isParent = (t: TabId | null): t is Parent => t === 'step' || t === 'processor';
+export type Parent = 'step' | 'processor' | 'stepless';
+const isParent = (t: TabId | null): t is Parent => t === 'step' || t === 'processor' || t === 'stepless';
 
 /**
  * What the designer chose for the current pick: a top tab and, per parent, its child (absent or null = the parent's own
