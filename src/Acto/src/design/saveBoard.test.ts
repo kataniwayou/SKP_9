@@ -5,7 +5,7 @@ import { board } from './boardFixtures';
 import { createBoardStore } from './boardStore';
 import { saveBoard, takeStored } from './saveBoard';
 import { createGhostStore } from './ghosts';
-import { addEntry, addStep, setEntryCron } from './edits';
+import { addEntry, addStep, removeCacheItem, setCacheItem, setEntryCron } from './edits';
 import { memoryStorage } from '../test/memoryStorage';
 
 vi.mock('../board/loadBoard', () => ({ loadBoard: vi.fn() }));
@@ -24,6 +24,7 @@ function setup(start = board()) {
   };
   return { output, store, api, studio: api as unknown as StudioApi };
 }
+const setItem = (b: ReturnType<typeof board>, id: string, k: string, v: string) => { const e = setCacheItem(b, id, k, v); if (!('state' in e)) throw new Error('refused'); return e.state; };
 const texts = (o: ReturnType<typeof createOutputStore>) => o.lines().map((l) => l.text);
 const rename = (s: ReturnType<typeof setup>['store'], wf: string, name: string) =>
   s.edit((b) => ({ ...b, workflows: { ...b.workflows, [wf]: { ...b.workflows[wf]!, name } } }));
@@ -209,6 +210,21 @@ describe('saveBoard', () => {
 });
 
 describe('takeStored after a refusal on stale rows', () => {
+  it('keeps the item edits of a stale cache and drops its field edits', async () => {
+    const t = setup();
+    t.store.edit((b) => ({ ...b, caches: { ...b.caches, c1: { ...b.caches.c1!, root: 'mine' } } }));
+    t.store.edit((b) => setItem(b, 'c1', 'k1', 'v'));
+    t.api.applyModel.mockResolvedValue({ ok: true, value: { ok: false, applied: false, made: {}, results: [{ index: 0, op: 'update', table: 'caches', id: 'c1', ok: false, status: 409, problem: { code: 'stale' } }] } } as never);
+    await saveBoard(t.studio, t.store, t.output);
+    const b = board();
+    const stored = { ...b.caches.c1!, root: 'theirs', updatedAt: T2 };
+    vi.mocked(loadBoard).mockResolvedValue({ ok: true, value: { ...b, caches: { ...b.caches, c1: stored } } });
+    await takeStored(t.studio, t.store, t.output);
+    expect(t.store.base().caches.c1).toEqual(stored);
+    expect(t.store.state().caches.c1).toEqual({ ...stored, itemEdits: { set: { k1: 'v' }, removed: [] } });
+    expect(texts(t.output).at(-1)).toBe('Took the stored c1 — your field changes are dropped, your item edits are kept (Undo brings them back)');
+  });
+
   const refuse = (t: ReturnType<typeof setup>, results: unknown[]) =>
     t.api.applyModel.mockResolvedValue({ ok: true, value: { ok: false, applied: false, made: {}, results } } as never);
 
@@ -268,5 +284,58 @@ describe('takeStored after a refusal on stale rows', () => {
     expect(t.store.state()).toBe(before);
     expect(t.store.stale()).toHaveLength(1);
     expect(t.store.saving()).toBe(false);
+  });
+});
+
+describe('item reports and warnings', () => {
+  const items = (t: ReturnType<typeof setup>) => {
+    t.store.edit((b) => setItem(b, 'c1', 'k1', 'v'));
+    t.store.edit((b) => setItem(b, 'c1', 'k2', 'v'));
+    t.store.edit((b) => removeCacheItem(b, 'c1', 'k3', true));
+  };
+  const applied = (t: ReturnType<typeof setup>, extra: object, results: unknown[] = []) => {
+    t.api.applyModel.mockResolvedValue({ ok: true, value: { ok: true, applied: true, made: {}, results, ...extra } } as never);
+    vi.mocked(loadBoard).mockResolvedValue({ ok: true, value: board() });
+  };
+  const rep = { added: 0, overwritten: 0, repeatedInBatch: 0, overwrittenKeys: [], repeatedKeys: [], keysTruncated: false };
+  const rem = { removed: 0, notFound: 0, repeatedInBatch: 0, notFoundKeys: [], repeatedKeys: [], keysTruncated: false };
+
+  it('save logs the item report per cache', async () => {
+    const t = setup();
+    items(t);
+    applied(t, {}, [
+      { index: 0, op: 'append', table: 'cache_items', id: 'c1', ok: true, status: 200, report: { ...rep, added: 1, overwritten: 1, repeatedInBatch: 1 } },
+      { index: 1, op: 'remove', table: 'cache_items', id: 'c1', ok: true, status: 200, report: { ...rem, removed: 1, repeatedInBatch: 1 } },
+    ]);
+    await saveBoard(t.studio, t.store, t.output);
+    expect(t.output.lines().filter((l) => l.level === 'ok').map((l) => l.text)).toContain('c1: 1 added, 1 overwritten, 1 removed, 2 repeated');
+  });
+
+  it('omits the repeated part when there are none', async () => {
+    const t = setup();
+    t.store.edit((b) => setItem(b, 'c1', 'k1', 'v'));
+    applied(t, {}, [{ index: 0, op: 'append', table: 'cache_items', id: 'c1', ok: true, status: 200, report: { ...rep, added: 1 } }]);
+    await saveBoard(t.studio, t.store, t.output);
+    expect(texts(t.output)).toContain('c1: 1 added, 0 overwritten, 0 removed');
+  });
+
+  it('save logs refresh warnings', async () => {
+    const t = setup();
+    rename(t.store, 'daily', 'daily-2');
+    applied(t, { warnings: ['could not refresh workflow daily'] });
+    await saveBoard(t.studio, t.store, t.output);
+    expect(t.output.lines()).toContainEqual(expect.objectContaining({ level: 'warn', text: 'could not refresh workflow daily' }));
+  });
+
+  it('a refused item op marks the cache by name and is never offered to Take stored', async () => {
+    const t = setup();
+    items(t);
+    t.api.applyModel.mockResolvedValue({ ok: true, value: { ok: false, applied: false, made: {}, results: [
+      { index: 0, op: 'append', table: 'cache_items', id: 'c1', ok: false, status: 409, problem: { detail: 'too big', code: 'stale' } },
+    ] } } as never);
+    await saveBoard(t.studio, t.store, t.output);
+    expect([...t.store.failures().keys()]).toEqual(['cache:c1']);
+    expect(texts(t.output)).toContain('c1 changed elsewhere — Take stored drops your change to it');
+    expect(t.store.stale()).toEqual([]);
   });
 });

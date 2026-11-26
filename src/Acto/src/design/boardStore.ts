@@ -324,12 +324,15 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
     takeStored(fresh) {
       if (refuseWhileSaving() || stale.length === 0) return;
       const rows = stale;
-      const take = (s: BoardState): BoardState => {
+      // the designer's item edits are not field edits and are not stale: the present keeps them on the stored row
+      const take = (s: BoardState, keepItems = false): BoardState => {
         const out = { ...s } as Record<BoardTable, Record<Id, unknown>>;
         for (const { table, id } of rows) {
           const rows = { ...out[table] };
           const row = (fresh[table] as Record<Id, unknown>)[id];
-          if (row === undefined) delete rows[id]; else rows[id] = row;
+          if (row === undefined) delete rows[id];
+          else if (keepItems && table === 'caches' && (s.caches[id] !== undefined)) rows[id] = { ...(row as object), itemEdits: s.caches[id]!.itemEdits };
+          else rows[id] = row;
           out[table] = rows;
         }
         return out as unknown as BoardState;
@@ -338,7 +341,7 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       failures = new Map([...failures].filter(([k]) => !rows.some((r) => k === `${KIND_OF[r.table]}:${r.id}`)));
       stale = [];
       unsavedFor = null;
-      const next = take(history.present);
+      const next = take(history.present, true);
       if (deepEqual(next, history.present)) { writeDraft(); notify(); }
       else setHistory(commit(history, next), 'edit');
     },

@@ -47,12 +47,20 @@ export function problemMessage(problem: unknown): string {
 export const isStale = (r: Result): boolean =>
   r.status === 409 && !!r.problem && typeof r.problem === 'object' && (r.problem as { code?: unknown }).code === 'stale';
 
+const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
+const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' ? (v as Record<string, unknown>) : null);
+
+/** A cache's item ops are failures of the cache: keyed and named by it. */
+const rowOf = (r: Result): { table: string; id: string } =>
+  r.table === 'cache_items' ? { table: 'caches', id: r.id ?? '' } : { table: r.table ?? '', id: r.id ?? '' };
+
 /** The Output line for one failed change result. */
 export function failureText(r: Result, boards: BoardState[]): string {
-  const name = nameOf(boards, r.table ?? '', r.id ?? '');
+  const row = rowOf(r);
+  const name = nameOf(boards, row.table, row.id);
   if (isStale(r)) return `${name} changed elsewhere — Take stored drops your change to it`;
   if (r.status === 404) return `${kindOf(r.table ?? '')} ${name} is gone — Take stored drops your change to it`;
-  return `${kindOf(r.table ?? '')} ${name}: ${problemMessage(r.problem)}`;
+  return `${kindOf(row.table)} ${name}: ${problemMessage(r.problem)}`;
 }
 
 /** Logs every failed result; returns changedKeys-style key to message. */
@@ -61,9 +69,31 @@ export function reportFailures(results: ModelApplyResultDto['results'], boards: 
   for (const r of (results ?? []).filter((x) => x.ok === false)) {
     const text = failureText(r, boards);
     output.log(text, 'error');
-    map.set(`${kindOf(r.table ?? '')}:${r.id}`, text);
+    map.set(`${kindOf(rowOf(r).table)}:${r.id}`, text);
   }
   return map;
+}
+
+/**
+ * One line per cache with item ops, from the reports BaseAPI returned (append and remove combined). The report is
+ * `unknown` in the schema: each count reads as 0 when absent.
+ */
+export function logItemReports(results: ModelApplyResultDto['results'], made: Record<string, string>, boards: BoardState[], output: OutputStore): void {
+  const per = new Map<string, { added: number; overwritten: number; removed: number; repeated: number }>();
+  for (const r of results ?? []) {
+    const rep = obj(r.report);
+    if (r.table !== 'cache_items' || r.ok === false || !rep || !r.id) continue;
+    const e = per.get(r.id) ?? { added: 0, overwritten: 0, removed: 0, repeated: 0 };
+    if (r.op === 'append') { e.added += num(rep.added); e.overwritten += num(rep.overwritten); }
+    else if (r.op === 'remove') e.removed += num(rep.removed);
+    else continue;
+    e.repeated += num(rep.repeatedInBatch);
+    per.set(r.id, e);
+  }
+  for (const [id, e] of per) {
+    const name = nameOf(boards, 'caches', id) !== id ? nameOf(boards, 'caches', id) : nameOf(boards, 'caches', made[id] ?? id);
+    output.log(`${name}: ${e.added} added, ${e.overwritten} overwritten, ${e.removed} removed${e.repeated > 0 ? `, ${e.repeated} repeated` : ''}`, 'ok');
+  }
 }
 
 /** Created rows take BaseAPI's ids: keys, own ids and every reference. */
@@ -120,7 +150,7 @@ export async function saveBoard(
     if (map.size === 0) output.log('Save refused: BaseAPI gave no reason', 'error');
     store.setFailures(map);
     store.setStale((results ?? [])
-      .filter((r) => r.ok === false && (isStale(r) || r.status === 404) && r.table && r.id && r.table in KIND)
+      .filter((r) => r.ok === false && r.table !== 'cache_items' && (isStale(r) || r.status === 404) && r.table && r.id && r.table in KIND)
       .map((r) => ({ table: r.table as BoardTable, id: r.id! })));
   };
   try {
@@ -139,6 +169,9 @@ export async function saveBoard(
     const affected = affectedWorkflows(base, present).map((id) => made[id] ?? id);
     onApplied?.(made, affected);
     output.log(`Pushed ${changes.length} change${changes.length === 1 ? '' : 's'}`, 'ok');
+
+    logItemReports(res.value.results, made, [present, base], output);
+    for (const w of res.value.warnings ?? []) output.log(w, 'warn');
 
     const fresh = await loadBoard(api);
     let after: BoardState;
@@ -172,6 +205,9 @@ export async function takeStored(api: StudioApi, store: BoardStore, output: Outp
   try { fresh = await loadBoard(api); } finally { store.setSaving(false); }
   if (!fresh.ok) { output.log(`Could not read the stored rows: ${transport(fresh.error)}`, 'error'); return; }
   const names = rows.map((r) => nameOf([fresh.value, store.state()], r.table, r.id));
+  const kept = rows.some((r) => r.table === 'caches' && fresh.value.caches[r.id] && store.state().caches[r.id]);
   store.takeStored(fresh.value);
-  output.log(`Took the stored ${names.join(', ')} — your changes to ${rows.length === 1 ? 'it' : 'them'} are dropped (Undo brings them back)`, 'ok');
+  output.log(kept
+    ? `Took the stored ${names.join(', ')} — your field changes are dropped, your item edits are kept (Undo brings them back)`
+    : `Took the stored ${names.join(', ')} — your changes to ${rows.length === 1 ? 'it' : 'them'} are dropped (Undo brings them back)`, 'ok');
 }

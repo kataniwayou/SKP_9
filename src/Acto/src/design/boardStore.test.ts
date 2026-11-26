@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createOutputStore } from '../output/outputStore';
 import { memoryStorage } from '../test/memoryStorage';
 import { board } from './boardFixtures';
-import { addEntry, deleteSteps, setStepField, setWorkflowField } from './edits';
+import { addEntry, deleteSteps, removeCacheItem, setCacheItem, setStepField, setWorkflowField } from './edits';
 import { createBoardStore } from './boardStore';
 import { boardChanges } from './changes';
 
@@ -16,6 +16,7 @@ const make = (session: Storage | null = memoryStorage()) => {
   store.load(board());
   return { store, out, session };
 };
+const setItem = (b: ReturnType<typeof board>, id: string, k: string, v: string) => { const e = setCacheItem(b, id, k, v); if (!('state' in e)) throw new Error('refused'); return e.state; };
 const nameA = (n: string) => (b: ReturnType<typeof board>) => setWorkflowField(b, 'daily', 'name', n);
 const nameB = (n: string) => (b: ReturnType<typeof board>) => setWorkflowField(b, 'hourly', 'name', n);
 
@@ -140,6 +141,15 @@ describe('board store', () => {
     expect(store.state().workflows.daily!.entryCrons).toEqual({});
     expect(store.base().workflows.daily!.entryCrons).toEqual({});
     expect(() => deleteSteps(store.state(), Object.keys(store.state().steps))).not.toThrow();
+  });
+  it('draft round-trips item edits', () => {
+    const session = memoryStorage();
+    const a = make(session).store;
+    a.edit((b) => setItem(b, 'c1', 'k1', 'v'));
+    a.edit((b) => removeCacheItem(b, 'c1', 'k3', true));
+    const { store } = make(session);
+    expect(store.state().caches.c1!.itemEdits).toEqual({ set: { k1: 'v' }, removed: ['k3'] });
+    expect(store.base().caches.c1!.itemEdits).toEqual({ set: {}, removed: [] });
   });
   it('reads a draft saved before cache items were an overlay as having clean overlays', () => {
     const old = (b: ReturnType<typeof board>) => ({
