@@ -20,14 +20,6 @@ internal static class CacheItems
     public static Dictionary<string, string> ToDictionary(IEnumerable<CacheItemDto> items) =>
         items.ToDictionary(i => i.Key, i => i.Value, StringComparer.Ordinal);
 
-    /// <summary>The same pairs, whatever their order.</summary>
-    public static bool Same(IReadOnlyList<CacheItemDto> a, IReadOnlyList<CacheItemDto> b)
-    {
-        if (a.Count != b.Count) return false;
-        var x = ToDictionary(a);
-        return b.All(i => x.TryGetValue(i.Key, out var v) && v == i.Value);
-    }
-
     /// <summary>
     /// Makes <paramref name="target"/>'s loaded rows hold exactly <paramref name="items"/>: a kept key's value
     /// is set in place, a dropped key's row is removed (EF deletes the orphan), a new key is added. Never a

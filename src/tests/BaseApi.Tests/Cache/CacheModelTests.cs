@@ -98,17 +98,27 @@ public sealed class CacheModelTests
     }
 
     [Fact]
-    public void ACacheAlwaysLoadsItsItems()
+    public void CacheItemsIsNotAutoIncluded()
     {
-        // Every reader (the generic repository, the graph loader, the refresh handler, the design
-        // save) queries CacheEntity without naming the items; auto-include is what keeps each of them
-        // from seeing an empty dictionary.
+        // A cache can hold millions of rows; a reader that needs them says so, and the stored count
+        // answers a listing.
         using var db = NewContext();
 
         var navigation = db.Model.FindEntityType(typeof(CacheEntity))!.FindNavigation(nameof(CacheEntity.Items))!;
 
         Assert.True(navigation.IsCollection);
-        Assert.True(navigation.IsEagerLoaded);
+        Assert.False(navigation.IsEagerLoaded);
+    }
+
+    [Fact]
+    public void CacheReadDtoHasItemCountNotItems()
+    {
+        var names = typeof(CacheReadDto).GetProperties().Select(p => p.Name).ToList();
+
+        Assert.Contains("ItemCount", names);
+        Assert.DoesNotContain("Items", names);
+        Assert.DoesNotContain("Items", typeof(CacheCreateDto).GetProperties().Select(p => p.Name));
+        Assert.DoesNotContain("Items", typeof(CacheUpdateDto).GetProperties().Select(p => p.Name));
     }
 
     [Fact]

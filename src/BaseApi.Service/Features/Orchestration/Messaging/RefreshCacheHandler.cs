@@ -58,7 +58,7 @@ internal sealed class RefreshCacheHandler : IQueueMessageHandler
             throw new JsonException("refresh message carries an empty cache id");
         }
 
-        var cache = await _db.Set<CacheEntity>().AsNoTracking()
+        var cache = await _db.Set<CacheEntity>().AsNoTracking().Include(c => c.Items)
             .FirstOrDefaultAsync(c => c.Id == message.CacheId, ct).ConfigureAwait(false);
 
         // Deleted since the edit. A cache any workflow is bound to cannot be deleted, so nothing ran on it.
@@ -74,7 +74,7 @@ internal sealed class RefreshCacheHandler : IQueueMessageHandler
 
         var live = (await _live.ListAsync(ct).ConfigureAwait(false)).ToHashSet();
 
-        // The item rows came with the cache (auto-included).
+        // The item rows came with the cache (explicit Include; Task 6 chunks this).
         var items = new CacheL1(cache.Root, CacheItems.ToDictionary(cache.Items));
 
         foreach (var workflowId in bound.Where(live.Contains))

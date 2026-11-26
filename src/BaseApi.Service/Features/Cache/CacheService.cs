@@ -12,8 +12,7 @@ namespace BaseApi.Service.Features.Cache;
 
 /// <summary>
 /// The cache's service. The five CRUD verbs are the base class's; the one collection it syncs is the
-/// cache's own item rows, which an update diffs in <see cref="SyncJunctionsAsync"/> (a create already
-/// carries them from the mapper, and a read has them auto-included). It adds one verb of its own,
+/// cache's items are not part of them (they have their own verbs). It adds one verb of its own,
 /// <see cref="UpdateItemsAsync"/>.
 /// </summary>
 public sealed class CacheService :
@@ -21,6 +20,7 @@ public sealed class CacheService :
 {
     private readonly IValidator<CacheItemsUpdateDto> _itemsValidator;
     private readonly IQueueSender _sender;
+    private readonly IEntityMapper<CacheEntity, CacheCreateDto, CacheUpdateDto, CacheReadDto> _cacheMapper;
 
     public CacheService(
         IValidator<CacheCreateDto> createValidator,
@@ -34,21 +34,7 @@ public sealed class CacheService :
     {
         _itemsValidator = itemsValidator ?? throw new ArgumentNullException(nameof(itemsValidator));
         _sender         = sender ?? throw new ArgumentNullException(nameof(sender));
-    }
-
-    /// <summary>
-    /// On update, makes the stored item rows the DTO's: a diff, so a kept key is one row changed in place,
-    /// and the cache is stamped when only its items changed. A create's rows came with the mapped entity.
-    /// </summary>
-    protected override Task SyncJunctionsAsync(
-        CacheEntity entity, CacheCreateDto? createDto, CacheUpdateDto? updateDto, CancellationToken ct)
-    {
-        if (updateDto is not null)
-        {
-            CacheItems.Apply(DbContext, entity, updateDto.Items);
-        }
-
-        return Task.CompletedTask;
+        _cacheMapper    = mapper;
     }
 
     /// <summary>
@@ -68,13 +54,17 @@ public sealed class CacheService :
     {
         await _itemsValidator.ValidateAndThrowAsync(dto, ct);
 
-        var current = await DbContext.Set<CacheEntity>().AsNoTracking()
+        // The items are not auto-included, so the replace loads them itself. Task 4 of the append plan
+        // replaces this with a set-based write.
+        var row = await DbContext.Set<CacheEntity>().Include(c => c.Items)
             .FirstOrDefaultAsync(c => c.Id == id, ct)
             ?? throw new NotFoundException(nameof(CacheEntity), id);
 
-        // Through the ordinary update, so the row is held to exactly the rules a full PUT applies.
-        var updated = await UpdateAsync(id, new CacheUpdateDto(
-            current.Name, current.Version, current.Description, current.Root, dto.Items), ct);
+        CacheItems.Apply(DbContext, row, dto.Items);
+        row.ItemCount = row.Items.Count;
+        await DbContext.SaveChangesAsync(ct);
+
+        var updated = _cacheMapper.ToRead(row);
 
         try
         {

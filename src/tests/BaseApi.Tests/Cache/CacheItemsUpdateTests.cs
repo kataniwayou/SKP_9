@@ -44,7 +44,7 @@ public sealed class CacheItemsUpdateTests : IAsyncLifetime
 
         _db.Set<CacheEntity>().Add(new CacheEntity
         {
-            Id = _cache, Name = "artists", Version = "1.0.0", Description = "the whitelist", Root = "artists",
+            Id = _cache, Name = "artists", Version = "1.0.0", Description = "the whitelist", Root = "artists", ItemCount = 1,
             Items = [new CacheItem { Key = "acme", Value = "Acme" }],
         });
         await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -102,11 +102,11 @@ public sealed class CacheItemsUpdateTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TheReadDtoCarriesTheNewItemsOrderedByKey()
+    public async Task TheReadDtoCarriesTheNewItemCount()
     {
         var read = await UpdateAsync(_cache, [I("gamma", "G"), I("beta", "Beta")]);
 
-        Assert.Equal([I("beta", "Beta"), I("gamma", "G")], read.Items);
+        Assert.Equal(2, read.ItemCount);
     }
 
     [Fact]

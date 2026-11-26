@@ -211,9 +211,11 @@ public sealed class OrchestrationService
         // that unreachable, and turning an impossible state into a failed start would refuse a
         // workflow for a reason no operator could act on.
         var caches = (workflow.CacheIds ?? new List<Guid>())
-            .Select(id => snapshot.Caches.TryGetValue(id, out var dto) ? dto : null)
-            .Where(dto => dto is not null)
-            .Select(dto => new CacheL1(dto!.Root, CacheItems.ToDictionary(dto.Items ?? [])))
+            .Select(id => snapshot.Caches.TryGetValue(id, out var dto) ? (dto, id) : (null, id))
+            .Where(p => p.Item1 is not null)
+            .Select(p => new CacheL1(
+                p.Item1!.Root,
+                CacheItems.ToDictionary(snapshot.CacheItemRows.GetValueOrDefault(p.id) ?? [])))
             .ToList();
 
         // The workflow and each of its steps, each id once. Processors are absent on purpose: every

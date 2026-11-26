@@ -111,11 +111,11 @@ public sealed class BoardLocationTests : IAsyncLifetime
     [Fact]
     public async Task CachesAndWorkflowsCarryLocationsTheSameWay()
     {
-        var cache = await _caches.CreateAsync(new CacheCreateDto("c", "1.0.0", null, "sk-c", [], 120.5, -40), Ct);
+        var cache = await _caches.CreateAsync(new CacheCreateDto("c", "1.0.0", null, "sk-c", 120.5, -40), Ct);
         Assert.Equal((120.5, -40.0), Pair(await _caches.GetByIdAsync(cache.Id, Ct)));
-        await _caches.UpdateAsync(cache.Id, new CacheUpdateDto("c", "1.0.0", null, "sk-c", [], 300, 10), Ct);
+        await _caches.UpdateAsync(cache.Id, new CacheUpdateDto("c", "1.0.0", null, "sk-c", 300, 10), Ct);
         Assert.Equal((300.0, 10.0), Pair(await _caches.GetByIdAsync(cache.Id, Ct)));
-        await _caches.UpdateAsync(cache.Id, new CacheUpdateDto("c", "1.0.0", null, "sk-c", []), Ct);
+        await _caches.UpdateAsync(cache.Id, new CacheUpdateDto("c", "1.0.0", null, "sk-c"), Ct);
         Assert.Equal((300.0, 10.0), Pair(await _caches.GetByIdAsync(cache.Id, Ct)));
         // The items-only edit builds its update without a location and must not erase it either.
         await _caches.UpdateItemsAsync(cache.Id, new CacheItemsUpdateDto([new CacheItemDto("k", "v")]), Ct);

@@ -110,6 +110,12 @@ namespace BaseApi.Service.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("description");
 
+                    b.Property<int>("ItemCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("item_count");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text")

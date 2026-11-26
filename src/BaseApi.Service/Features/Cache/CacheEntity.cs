@@ -11,8 +11,9 @@ namespace BaseApi.Service.Features.Cache;
 /// <para>
 /// <c>Items</c> are rows of their own in <c>cache_items</c> (2026-11-24; one <c>jsonb</c> document
 /// before), one per key, so the dictionary has no cap as a whole: each key and value is bounded
-/// instead (<c>CacheRules</c>). The collection is auto-included, so every query of the cache sees
-/// them, and a write changes them through <c>CacheItems.Apply</c>, never by replacing the list.
+/// instead (<c>CacheRules</c>). The collection is <b>not</b> auto-included (2026-11-27): it can be
+/// millions of rows, so a reader that needs them loads them explicitly, and <see cref="ItemCount"/> is
+/// stored so a listing never touches them.
 /// </para>
 /// <para>
 /// <b>Neither <c>Root</c> nor any key may contain a colon, and that is load-bearing.</b> The L2
@@ -41,6 +42,9 @@ public sealed class CacheEntity : BaseEntity
         get => _root;
         set => _root = value?.Trim() ?? string.Empty;
     }
+
+    /// <summary>How many item rows the cache holds. Stored (column <c>item_count</c>), and maintained by every write of the items inside its transaction.</summary>
+    public int ItemCount { get; set; }
 
     /// <summary>The dictionary's entries, one row per key. See the class remarks.</summary>
     public List<CacheItem> Items { get; set; } = [];

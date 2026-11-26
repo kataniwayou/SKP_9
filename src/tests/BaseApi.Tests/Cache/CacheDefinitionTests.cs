@@ -26,14 +26,22 @@ public sealed class CacheDefinitionTests
         foreach (var cache in caches)
         {
             snapshot.Caches[cache.Id] = cache;
+            snapshot.CacheItemRows[cache.Id] = Rows[cache.Id];
         }
 
         return snapshot;
     }
 
-    private static CacheReadDto Cache(string root, params (string Key, string Value)[] items) => new(
-        Guid.NewGuid(), $"cache-{root}", "1.0.0", null, root, items.Select(i => new CacheItemDto(i.Key, i.Value)).ToList(),
-        DateTime.UtcNow, DateTime.UtcNow, null, null);
+    // The item rows travel beside the read DTO, which carries only their count.
+    private static readonly Dictionary<Guid, List<CacheItemDto>> Rows = new();
+
+    private static CacheReadDto Cache(string root, params (string Key, string Value)[] items)
+    {
+        var dto = new CacheReadDto(
+            Guid.NewGuid(), $"cache-{root}", "1.0.0", null, root, items.Length, DateTime.UtcNow, DateTime.UtcNow, null, null);
+        Rows[dto.Id] = items.Select(i => new CacheItemDto(i.Key, i.Value)).ToList();
+        return dto;
+    }
 
     [Fact]
     public void EveryCacheOnTheWorkflowReachesTheDefinition()

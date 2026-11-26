@@ -18,14 +18,49 @@ public sealed class CacheDtoValidatorTests
 {
     private static CacheItemDto I(string key, string value) => new(key, value);
 
-    private static CacheCreateDto Dto(string root, List<CacheItemDto> items) =>
-        new("cache-name", "1.0.0", null, root, items);
+    // A cache's root is validated with its create DTO, its items with the items edit (the same rules the
+    // other item-carrying bodies apply); a cache and its items no longer travel in one body.
+    private static List<FluentValidation.Results.ValidationFailure> Errors(string root, List<CacheItemDto> items) =>
+        [.. new CacheCreateDtoValidator().Validate(new CacheCreateDto("cache-name", "1.0.0", null, root)).Errors,
+         .. new CacheItemsUpdateDtoValidator().Validate(new CacheItemsUpdateDto(items)).Errors];
 
-    private static bool IsValid(string root, List<CacheItemDto> items) =>
-        new CacheCreateDtoValidator().Validate(Dto(root, items)).IsValid;
+    private static bool IsValid(string root, List<CacheItemDto> items) => Errors(root, items).Count == 0;
 
-    private static string FirstError(string root, List<CacheItemDto> items) =>
-        new CacheCreateDtoValidator().Validate(Dto(root, items)).Errors[0].ErrorMessage;
+    private static string FirstError(string root, List<CacheItemDto> items) => Errors(root, items)[0].ErrorMessage;
+
+    private static FluentValidation.Results.ValidationResult Append(List<CacheItemDto> items) =>
+        new CacheItemsAppendDtoValidator().Validate(new CacheItemsAppendDto(items));
+
+    private static FluentValidation.Results.ValidationResult Remove(List<string> keys) =>
+        new CacheItemsRemoveDtoValidator().Validate(new CacheItemsRemoveDto(keys));
+
+    [Fact]
+    public void AppendEmptyRefused() => Assert.False(Append([]).IsValid);
+
+    [Fact]
+    public void AppendRepeatedKeyAccepted() => Assert.True(Append([I("a", "1"), I("a", "2")]).IsValid);
+
+    [Fact]
+    public void AppendValueAtBoundAccepted_OneMoreRefused()
+    {
+        // 524,288 emoji are 1,048,576 UTF-16 chars: exactly the bound.
+        var atBound = string.Concat(Enumerable.Repeat("😀", CacheRules.MaxValueChars / 2));
+
+        Assert.True(Append([I("emoji", atBound)]).IsValid);
+
+        var over = Append([I("emoji", atBound + "x")]);
+        Assert.False(over.IsValid);
+        Assert.Contains("'emoji'", over.Errors[0].ErrorMessage);
+    }
+
+    [Fact]
+    public void RemoveEmptyRefused() => Assert.False(Remove([]).IsValid);
+
+    [Fact]
+    public void RemoveKeyWithColonRefused() => Assert.False(Remove(["a:b"]).IsValid);
+
+    [Fact]
+    public void RemoveKey257CharsRefused() => Assert.False(Remove([new string('k', 257)]).IsValid);
 
     [Fact]
     public void AListOfPairsIsAccepted()
@@ -144,8 +179,8 @@ public sealed class CacheDtoValidatorTests
         // that they cannot drift.
         var validator = new CacheUpdateDtoValidator();
 
-        Assert.False(validator.Validate(new CacheUpdateDto("cache-name", "1.0.0", null, "sk:whitelist", [])).IsValid);
-        Assert.False(validator.Validate(new CacheUpdateDto("cache-name", "1.0.0", null, "sk", [I("a", "1"), I("a", "2")])).IsValid);
+        Assert.False(validator.Validate(new CacheUpdateDto("cache-name", "1.0.0", null, "sk:whitelist")).IsValid);
+        Assert.True(validator.Validate(new CacheUpdateDto("cache-name", "1.0.0", null, "sk")).IsValid);
     }
 
     [Fact]
@@ -162,9 +197,9 @@ public sealed class CacheDtoValidatorTests
     [Fact]
     public void TheErrorIsReportedOnTheItemsField()
     {
-        var error = new CacheCreateDtoValidator().Validate(Dto("sk-whitelist", [I("a:b", "1")])).Errors[0];
+        var error = new CacheItemsUpdateDtoValidator().Validate(new CacheItemsUpdateDto([I("a:b", "1")])).Errors[0];
 
-        Assert.Equal(nameof(CacheCreateDto.Items), error.PropertyName);
+        Assert.Equal(nameof(CacheItemsUpdateDto.Items), error.PropertyName);
     }
 
     [Fact]

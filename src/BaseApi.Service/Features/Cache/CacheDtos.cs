@@ -12,7 +12,6 @@ public sealed record CacheCreateDto(
     string Version,
     string? Description,
     string Root,
-    List<CacheItemDto> Items,
     double? BoardX = null,
     double? BoardY = null) : IBaseDto;
 
@@ -25,7 +24,6 @@ public sealed record CacheUpdateDto(
     string Version,
     string? Description,
     string Root,
-    List<CacheItemDto> Items,
     double? BoardX = null,
     double? BoardY = null) : IBaseDto;
 
@@ -54,10 +52,37 @@ public sealed record CacheReadDto(
     string Version,
     string? Description,
     string Root,
-    List<CacheItemDto> Items,
+    int ItemCount,
     DateTime CreatedAt,
     DateTime UpdatedAt,
     string? CreatedBy,
     string? UpdatedBy,
     double? BoardX = null,
     double? BoardY = null) : IBaseDto, IHasId;
+
+/// <summary>Body of <c>POST /caches/{id}/items</c>: pairs to add; a key already stored is overwritten, and a key twice in the batch keeps its last value.</summary>
+public sealed record CacheItemsAppendDto(List<CacheItemDto> Items);
+
+/// <summary>Body of <c>POST /caches/{id}/items/remove</c>: the keys to drop.</summary>
+public sealed record CacheItemsRemoveDto(List<string> Keys);
+
+/// <summary>What an append did. The key lists are capped (<c>CacheRules.ReportKeyCap</c>); <c>KeysTruncated</c> says so.</summary>
+public sealed record CacheAppendReport(
+    int Added,
+    int Overwritten,
+    int RepeatedInBatch,
+    List<string> OverwrittenKeys,
+    List<string> RepeatedKeys,
+    bool KeysTruncated);
+
+/// <summary>What a remove did. The key lists are capped (<c>CacheRules.ReportKeyCap</c>); <c>KeysTruncated</c> says so.</summary>
+public sealed record CacheRemoveReport(
+    int Removed,
+    int NotFound,
+    int RepeatedInBatch,
+    List<string> NotFoundKeys,
+    List<string> RepeatedKeys,
+    bool KeysTruncated);
+
+/// <summary>One page of a cache's items, ordered by key; <c>Next</c> is the cursor for the following page, or null at the end.</summary>
+public sealed record CacheItemsPage(List<CacheItemDto> Items, string? Next);

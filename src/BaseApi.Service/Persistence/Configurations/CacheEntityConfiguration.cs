@@ -6,7 +6,7 @@ namespace BaseApi.Service.Persistence.Configurations;
 
 /// <summary>
 /// Configuration for <see cref="CacheEntity"/>: its items (rows of <c>cache_items</c>, see
-/// <c>CacheItemConfiguration</c>) always load with it, and the root carries a named unique index.
+/// <c>CacheItemConfiguration</c>) load only when asked for, and the root carries a named unique index.
 /// <para>
 /// <b>The index name is <c>uq_cache_root</c>, not <c>uq_cache_entity_root</c>.</b> The exception
 /// mapper resolves the offending column by stripping a <c>{kind}_{owner}_</c> prefix, where the
@@ -19,10 +19,14 @@ internal sealed class CacheEntityConfiguration : IEntityTypeConfiguration<CacheE
 {
     public void Configure(EntityTypeBuilder<CacheEntity> entity)
     {
-        // Every reader (the generic repository, the graph loader, the refresh handler, the design save)
-        // queries the cache without naming its items; auto-include keeps each of them from seeing an
-        // empty dictionary.
-        entity.Navigation(e => e.Items).AutoInclude();
+        // The items are not auto-included: a cache can hold millions of rows. A reader that needs them
+        // says so; the count is stored so a listing does not.
+        entity.Navigation(e => e.Items).AutoInclude(false);
+
+        entity.Property(e => e.ItemCount)
+            .HasColumnName("item_count")
+            .HasDefaultValue(0)
+            .IsRequired();
 
         // A generous upper bound for a key prefix, and documentation that this is not an unbounded
         // text column.
