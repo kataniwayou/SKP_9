@@ -15,13 +15,12 @@ pair); only the sidecar's `artist` differs. That is the one field AcmeHandler ga
 workflow's `chain-artists` cache, so five distinct artists exercise five distinct whitelist items.
 
 THE CACHE ROW IS UPDATED FIRST, IN PLACE. The whitelist the normalizer reads is the L2 copy of the
-cache row. `PUT /caches/{id}/items` replaces the row's items and refreshes that copy in every
-running workflow that projected the cache, with no start (the full `PUT /caches/{id}` still waits
-for the next start). So at startup this tool merges the five artists into the row through that
-endpoint (keeping every existing item, including the `SKP Live Suite` key the live tests and
-simulate-endless-feed.py rely on), and then waits until Redis holds every artist before it produces
-anything. A cache whose row and L2 already hold all five is left alone. --skip-cache-setup skips the
-whole step.
+cache row. `POST /caches/{id}/items` appends pairs to the row (adding or overwriting only the sent
+keys) and refreshes those keys in every running workflow that projected the cache, with no start.
+So at startup this tool appends the five artists through that endpoint (every other item, including
+the `SKP Live Suite` key the live tests and simulate-endless-feed.py rely on, is untouched), and then
+waits until Redis holds every artist before it produces anything. The append is idempotent, so it is
+sent on every run. --skip-cache-setup skips the whole step.
 
 EVERYTHING ELSE IS simulate-endless-feed.py's: the files land on the kind node before their paths
 are seeded, the folders are wiped only after the importer's lag drains, and the same rate limit
@@ -121,31 +120,29 @@ def redis_has_all(namespace, pod, workflow_id, root, keys):
 
 
 def ensure_cache(args, wanted):
-    """Merges `wanted` into the cache row through the items endpoint and waits for L2 to hold every
-    key. The running chain is refreshed in place; nothing is stopped or started."""
+    """Appends `wanted` to the cache row through the items endpoint and waits for L2 to hold every
+    key. The running chain is refreshed in place; nothing is stopped or started.
+
+    Append (POST /caches/{id}/items) adds or overwrites only the sent keys and leaves every other
+    item alone; it is idempotent, so sending the same pairs again re-aligns L2 with the row for a
+    chain started before the row had them. (GET /caches no longer carries items, so nothing is
+    read back first; a replace (PUT .../items) here would drop the cache's other items.)"""
     cache = find_workflow_cache(args.baseapi, args.workflow_id, args.cache_root)
-    # BaseApi sends a cache's items as [{key, value}] (rows since 2026-11-24)
-    items = {i["key"]: i["value"] for i in cache.get("items") or []}
 
-    missing = {k: v for k, v in wanted.items() if items.get(k) != v}
-    if missing or not redis_has_all(args.namespace, args.redis_pod, args.workflow_id,
-                                    args.cache_root, wanted):
-        # Sent even when the row already holds every artist: the same items again re-align L2 with
-        # the row, for a chain started before the row had them.
-        items.update(missing)
-        http_json("PUT", f"{args.baseapi}/api/v1/caches/{cache['id']}/items",
-                  {"items": [{"key": k, "value": v} for k, v in items.items()]})
-        say(f"cache '{cache['name']}': added {len(missing)} item(s); now {len(items)}")
+    # Sent on every run: idempotent, and it re-aligns L2 values too (redis_has_all checks keys only).
+    _, report = http_json("POST", f"{args.baseapi}/api/v1/caches/{cache['id']}/items",
+                          {"items": [{"key": k, "value": v} for k, v in wanted.items()]})
+    report = report or {}
+    say(f"cache '{cache['name']}': appended {len(wanted)} item(s) "
+        f"(added {report.get('added', '?')}, overwritten {report.get('overwritten', '?')})")
 
-        deadline = time.time() + 60
-        while not redis_has_all(args.namespace, args.redis_pod, args.workflow_id,
-                                args.cache_root, wanted):
-            if time.time() > deadline:
-                raise SystemExit("L2 does not hold every artist 60s after the items edit -- is the "
-                                 "chain running, and was the cache bound to it when it was started?")
-            time.sleep(1)
-    else:
-        say(f"cache '{cache['name']}' already holds all {len(wanted)} artists")
+    deadline = time.time() + 60
+    while not redis_has_all(args.namespace, args.redis_pod, args.workflow_id,
+                            args.cache_root, wanted):
+        if time.time() > deadline:
+            raise SystemExit("L2 does not hold every artist 60s after the append -- is the "
+                             "chain running, and was the cache bound to it when it was started?")
+        time.sleep(1)
 
     say(f"L2 holds all {len(wanted)} artists under {args.cache_root}")
 
