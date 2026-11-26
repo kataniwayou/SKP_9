@@ -102,7 +102,14 @@ public sealed class CacheItemsScaleLiveTests
 
             var over = BodyOfExactly(30_000_100, "o");
             sw.Restart();
-            var refused = await PostItemsAsync(http, id, over, ct);
+            // Expect: 100-continue, so the refusal comes back before the body is sent; otherwise the server
+            // closes the connection mid-upload and the client (through a port-forward) sees a broken pipe.
+            using var overRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/caches/{id}/items")
+            {
+                Content = new StringContent(over, Encoding.UTF8, "application/json"),
+            };
+            overRequest.Headers.ExpectContinue = true;
+            var refused = await http.SendAsync(overRequest, ct);
             var overMs = sw.ElapsedMilliseconds;
             var afterRefused = await ItemCountAsync(http, id, ct);
             ScaleGate.Log($"S2 30,000,100-byte body: {(int)refused.StatusCode} in {overMs} ms, itemCount before {after} after {afterRefused}");
