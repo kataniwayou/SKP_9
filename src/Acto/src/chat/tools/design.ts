@@ -8,7 +8,7 @@ import { restoreGhosts, withTheirWires, type GhostItem } from '../../design/ghos
 import type { Rect } from '../../model/geometry';
 import type { Id } from '../../model/graph';
 import { cronText } from '../../model/cronText';
-import { copyClip, copyMessage, countWords, pasteClip, pasteMessage, readClip, writeClip } from '../../operate/clipboard';
+import { copyClip, copyMessage, countWords, pasteClip, pasteMessage, readClip, writeClip, type PastedRef } from '../../operate/clipboard';
 import { freeOffset } from '../../operate/freeOffset';
 import type { ToolContext, ToolDef, ToolOutcome } from '../toolTypes';
 import { applyEdit, applyState, CACHE_ID, done, fail, linesSince, NO_ARGS, onBoard, STEP_ID, text, WORKFLOW_ID } from './common';
@@ -297,7 +297,7 @@ const paste: ToolDef = {
   async run(ctx) {
     const clip = readClip(ctx.session);
     if (!clip) return fail('nothing copied yet', 'paste');
-    let pasted: ItemRef[] = [];
+    let pasted: PastedRef[] = [];
     const out = applyState(ctx, (b) => { const r = pasteClip(b, clip, ctx.newId); pasted = r.pasted; return r.state; }, 'paste', '');
     if (!out.ok) return out;
     writeClip(ctx.session, { ...clip, pasted: clip.pasted + 1 });

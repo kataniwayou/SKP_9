@@ -36,7 +36,7 @@ export interface BoardState {
 }
 
 export type Edit = { state: BoardState } | { refused: string };
-export type ItemRef = { kind: 'step' | 'cache' | 'workflow'; id: Id };
+export type ItemRef = { kind: 'step' | 'cache' | 'workflow' | 'schema' | 'processor'; id: Id };
 
 /** Steps reachable from the workflow's entry steps over the wires. */
 export function reachOf(b: BoardState, workflowId: Id): Set<Id> {

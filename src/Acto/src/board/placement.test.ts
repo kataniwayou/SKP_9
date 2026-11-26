@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { board as fixture } from '../design/boardFixtures';
 import type { BoardState } from '../design/board';
 import { STEP_H, STEP_W } from './geometry';
-import { placeMissing } from './placement';
+import { overlaps } from './overlap';
+import { placeMissing, placeSchemas, settleSchemas } from './placement';
 
 /** The fixture with its cards moved well apart, so only the rule under test decides a position. */
 const board = (): BoardState => {
@@ -74,5 +75,45 @@ describe('placeMissing', () => {
         expect(apart).toBe(true);
       }
     }
+  });
+});
+
+describe('placeSchemas / settleSchemas', () => {
+  const sch = (id: string, b: BoardState) => ({ id, name: id, version: '1', description: null, definition: '{}', audit: b.processors.p1!.audit, at: null, updatedAt: null });
+  it('an unplaced wired schema lands 140px below its first step; an unplaced orphan lands in the column right of everything; a stepless processor lands below everything', () => {
+    const b0 = board();
+    const b: BoardState = {
+      ...b0,
+      schemas: { s1: sch('s1', b0), o1: sch('o1', b0), o2: sch('o2', b0), s2: sch('s2', b0) },
+      processors: {
+        p1: { ...b0.processors.p1!, inputSchemaId: 's1' },
+        p2: { ...b0.processors.p1!, id: 'p2', inputSchemaId: 's2' },
+        p3: { ...b0.processors.p1!, id: 'p3', inputSchemaId: 's2' },
+      },
+    };
+    const r = placeSchemas(b);
+    // the first holder by id is step 'expand' (x 400, y 200)
+    expect(r.schemas.s1!.at).toEqual({ x: 400, y: 340 });
+    // right edge is lonely (600 + 210); the column is 320 beyond it, from the topmost placed top
+    const top = Math.min(b0.workflows.daily!.at!.y, b0.workflows.hourly!.at!.y, b0.caches.c1!.at!.y);
+    expect(r.schemas.o1!.at).toEqual({ x: 810 + 320, y: top });
+    expect(r.schemas.o2!.at).toEqual({ x: 810 + 320, y: top + 52 + 40 });
+    // stepless processors: 140 below everything placed (bottom 1092, the lonely step), stacked 40 apart
+    expect(r.processors.p2!.at).toEqual({ x: 0, y: 1092 + 140 });
+    expect(r.processors.p3!.at).toEqual({ x: 0, y: 1092 + 140 + 64 + 40 });
+    expect(placeSchemas(r)).toBe(r);
+  });
+  it('settleSchemas pushes a schema that overlaps a step aside and leaves steps where they are', () => {
+    const b0 = board();
+    const b: BoardState = {
+      ...b0,
+      schemas: { s1: { ...sch('s1', b0), at: { x: 210, y: 210 } } },
+      processors: { p1: { ...b0.processors.p1!, inputSchemaId: 's1' } },
+    };
+    const r = settleSchemas(b, []);
+    const at = r.schemas.s1!.at!;
+    expect(at).not.toEqual({ x: 210, y: 210 });
+    for (const s of Object.values(r.steps)) expect(overlaps({ ...at, w: 190, h: 52 }, { ...s.at!, w: STEP_W, h: STEP_H })).toBe(false);
+    expect(r.steps).toEqual(b.steps);
   });
 });

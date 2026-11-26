@@ -1,12 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { deepEqual, reachOf } from './board';
+import { deepEqual, reachOf, type BoardState } from './board';
 import { board } from './boardFixtures';
 import {
   addCache, addEntry, addStep, addWire, addWorkflow, deleteCaches, deleteSteps, linkCache, moveItems,
-  removeEntries, removeWires, setCacheField, setEntryCron, setStepField, setWorkflowField, unlinkCaches,
+  removeEntries, removeWires, setCacheField, setSlotSchema, setEntryCron, setStepField, setWorkflowField, unlinkCaches,
 } from './edits';
 
 describe('edits', () => {
+  it('moveItems moves a schema and a processor', () => {
+    const b = board();
+    const withS: BoardState = { ...b, schemas: { s1: { id: 's1', name: 's', version: '1', description: null, definition: '{}', audit: b.processors.p1!.audit, at: null, updatedAt: null } } };
+    const r = moveItems(withS, [{ ref: { kind: 'schema', id: 's1' }, at: { x: 5, y: 6 } }, { ref: { kind: 'processor', id: 'p1' }, at: { x: 7, y: 8 } }]);
+    expect(r.schemas.s1!.at).toEqual({ x: 5, y: 6 });
+    expect(r.processors.p1!.at).toEqual({ x: 7, y: 8 });
+    expect(withS.schemas.s1!.at).toBeNull();
+  });
+  it('a re-edited unsaved schema copy keeps its place', () => {
+    const copy = { id: 'x', name: 'in', version: '1.0.0', description: null, definition: '{}' };
+    const s = setSlotSchema(board(), 'p1', 'input', copy, () => 's1');
+    const placed = moveItems(s, [{ ref: { kind: 'schema', id: 's1' }, at: { x: 10, y: 20 } }]);
+    const t = setSlotSchema(placed, 'p1', 'input', { ...copy, name: 'in2' }, () => 's2');
+    expect(t.schemas.s1!.name).toBe('in2');
+    expect(t.schemas.s1!.at).toEqual({ x: 10, y: 20 });
+  });
   it('adds a wire once; the same wire again is refused', () => {
     const r = addWire(board(), 'fetch', 'lonely');
     expect('state' in r && r.state.steps.fetch.nextStepIds).toEqual(['expand', 'lonely']);

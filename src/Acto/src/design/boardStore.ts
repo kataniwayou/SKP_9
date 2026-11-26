@@ -34,6 +34,11 @@ export interface BoardStore {
   edit(fn: (b: BoardState) => BoardState, merge?: string): void;
   /** A refusal goes to Output as a warning. */
   editOrRefuse(fn: (b: BoardState) => Edit): void;
+  /**
+   * A layout change that is not an undo step [user, 2026-11-26]: `fn` is applied to the present and to every past and future
+   * state (so no undo brings the old places back), never to the base. It is unsaved and goes out with the next Save.
+   */
+  place(fn: (b: BoardState) => BoardState): void;
   undo(): void;
   redo(): void;
   canUndo(): boolean;
@@ -228,6 +233,11 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
       const res = fn(history.present);
       if ('refused' in res) output.log(res.refused, 'warn');
       else setHistory(commit(history, res.state), 'edit');
+    },
+    place(fn) {
+      const next: History<BoardState> = { past: history.past.map(fn), present: fn(history.present), future: history.future.map(fn), merge: history.merge };
+      if (deepEqual(next.present, history.present) && next.past.every((s, i) => s === history.past[i] || deepEqual(s, history.past[i]))) return;
+      setHistory(next, 'other');
     },
     undo() { if (!refuseWhileSaving()) setHistory(undo(history), 'undo'); },
     redo() { if (!refuseWhileSaving()) setHistory(redo(history), 'redo'); },

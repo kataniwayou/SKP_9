@@ -20,6 +20,29 @@ const nameA = (n: string) => (b: ReturnType<typeof board>) => setWorkflowField(b
 const nameB = (n: string) => (b: ReturnType<typeof board>) => setWorkflowField(b, 'hourly', 'name', n);
 
 describe('board store', () => {
+  it('place changes present and past alike: Undo after place does not bring the old schema position back; canUndo is unchanged', () => {
+    const { store, session } = make();
+    const sch = (b: ReturnType<typeof board>) => ({
+      ...b, schemas: { s1: { id: 's1', name: 's', version: '1', description: null, definition: '{}', audit: b.processors.p1!.audit, at: null, updatedAt: null } },
+    });
+    store.edit(sch);
+    store.edit(nameA('A'));
+    const baseBefore = store.base();
+    let n = 0;
+    store.subscribe(() => { n++; });
+    store.place((b) => ({ ...b, schemas: Object.fromEntries(Object.entries(b.schemas).map(([id, s]) => [id, { ...s, at: { x: 1, y: 2 } }])) }));
+    expect(n).toBe(1);
+    expect(store.base()).toBe(baseBefore);
+    expect(store.canUndo()).toBe(true);
+    expect(store.canRedo()).toBe(false);
+    expect(store.state().schemas.s1!.at).toEqual({ x: 1, y: 2 });
+    store.undo();
+    expect(store.state().workflows.daily!.name).toBe('daily');
+    expect(store.state().schemas.s1!.at).toEqual({ x: 1, y: 2 });
+    store.redo();
+    expect(store.state().schemas.s1!.at).toEqual({ x: 1, y: 2 });
+    expect(session!.getItem('acto.board')).toContain('"x":1');
+  });
   it('aDraftWithALegacyCronExpressionLoadsAndSavesWithoutIt', () => {
     const session = memoryStorage();
     const legacy = (b: ReturnType<typeof board>) => ({

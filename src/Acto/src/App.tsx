@@ -34,7 +34,7 @@ import { statusOf } from './live/liveState';
 import { signalRHub } from './live/signalrHub';
 import type { Point } from './model/geometry';
 import type { Id } from './model/graph';
-import { copyClip, copyMessage, pasteClip, pasteMessage, readClip, writeClip } from './operate/clipboard';
+import { copyClip, copyMessage, pasteClip, pasteMessage, readClip, writeClip, type PastedRef } from './operate/clipboard';
 import { runWorkflow } from './operate/runWorkflow';
 import { watchTransitions } from './operate/transitions';
 import { OutputPanel } from './output/OutputPanel';
@@ -199,7 +199,7 @@ export function App(props: AppProps) {
       e.preventDefault();
       const clip = readClip(session);
       if (!clip) { output.log('Nothing copied yet', 'warn'); return; }
-      let pasted: ItemRef[] = [];
+      let pasted: PastedRef[] = [];
       store.edit((b) => { const r = pasteClip(b, clip, newId); pasted = r.pasted; return r.state; });
       if (pasted.length === 0) return;
       writeClip(session, { ...clip, pasted: clip.pasted + 1 });

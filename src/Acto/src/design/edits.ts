@@ -38,9 +38,12 @@ export function addWorkflow(b: BoardState, at: Point, id: Id): BoardState {
 }
 
 export function moveItems(b: BoardState, moved: { ref: ItemRef; at: Point }[]): BoardState {
-  const next: BoardState = { ...b, steps: { ...b.steps }, caches: { ...b.caches }, workflows: { ...b.workflows } };
+  const next: BoardState = {
+    ...b, steps: { ...b.steps }, caches: { ...b.caches }, workflows: { ...b.workflows }, schemas: { ...b.schemas }, processors: { ...b.processors },
+  };
   for (const { ref, at } of moved) {
-    const table = ref.kind === 'step' ? next.steps : ref.kind === 'cache' ? next.caches : next.workflows;
+    const table = ref.kind === 'step' ? next.steps : ref.kind === 'cache' ? next.caches : ref.kind === 'workflow' ? next.workflows
+      : ref.kind === 'schema' ? next.schemas : next.processors;
     const row = table[ref.id];
     if (row) (table as Record<Id, unknown>)[ref.id] = { ...row, at: { ...at } };
   }
@@ -189,7 +192,7 @@ export function setSlotSchema(b: BoardState, processorId: Id, slot: Slot, copy: 
   const id = cur && cur.updatedAt === null ? cur.id : newId();
   const row: SchemaRow = {
     id, name: copy.name, version: copy.version, description: copy.description, definition: copy.definition,
-    audit: cur?.audit ?? { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, at: null, updatedAt: null,
+    audit: cur?.audit ?? { createdAt: '', createdBy: null, updatedAt: '', updatedBy: null }, at: cur?.at ?? null, updatedAt: null,
   };
   return {
     ...b,

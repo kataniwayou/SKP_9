@@ -55,6 +55,9 @@ const at0 = (p: Point | null): Point => ({ ...(p ?? { x: 0, y: 0 }) });
  * The triangles, steps and caches given (in the order given, each once) and the wires among the steps; null when none
  * of them is on the board.
  */
+/** What a paste puts on the board: schemas and processors are never copied. */
+export type PastedRef = { kind: 'step' | 'cache' | 'workflow'; id: Id };
+
 export function copyClip(b: BoardState, items: readonly ItemRef[]): Clip | null {
   const seen = new Set<string>();
   const clip: Clip = { steps: [], wires: [], caches: [], workflows: [], pasted: 0 };
@@ -123,7 +126,7 @@ function namer(names: Iterable<string>) {
  * copied items joins the copies (wires, a workflow's entry arrows and cache lines); a workflow's link to anything not copied stays on the original (dropped if that is gone from the board); its
  * assignments are the same rows. Steps get no payloads.
  */
-export function pasteClip(b: BoardState, clip: Clip, newId: () => Id): { state: BoardState; pasted: ItemRef[] } {
+export function pasteClip(b: BoardState, clip: Clip, newId: () => Id): { state: BoardState; pasted: PastedRef[] } {
   if (clip.steps.length + clip.caches.length + clip.workflows.length === 0) return { state: b, pasted: [] };
   const cell = (clip.pasted + 1) * PASTE_CELL;
   const group: Rect[] = [
@@ -133,7 +136,7 @@ export function pasteClip(b: BoardState, clip: Clip, newId: () => Id): { state: 
   ];
   const d = freeOffset(group, boxes(b), { x: cell, y: cell }, PASTE_MARGIN);
   const moved = (p: Point) => ({ x: p.x + d.x, y: p.y + d.y });
-  const pasted: ItemRef[] = [];
+  const pasted: PastedRef[] = [];
 
   const stepName = namer(Object.values(b.steps).map((s) => s.name));
   const madeStep = new Map<Id, Id>();
@@ -193,8 +196,8 @@ export function pasteClip(b: BoardState, clip: Clip, newId: () => Id): { state: 
 }
 
 /** "Pasted 1 workflow and 2 steps". */
-export function pasteMessage(pasted: readonly ItemRef[]): string {
-  const n = (k: ItemRef['kind']) => pasted.filter((p) => p.kind === k).length;
+export function pasteMessage(pasted: readonly PastedRef[]): string {
+  const n = (k: PastedRef['kind']) => pasted.filter((p) => p.kind === k).length;
   return `Pasted ${countWords({ workflows: n('workflow'), steps: n('step'), caches: n('cache') })}`;
 }
 

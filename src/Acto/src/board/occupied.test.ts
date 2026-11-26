@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { board } from '../design/boardFixtures';
 import type { GhostItem } from '../design/ghosts';
 import { STEP_H, STEP_W } from './geometry';
+import type { BoardState } from '../design/board';
 import { nudgeBlocked, occupied, rectAt } from './occupied';
 
 describe('occupied [user, 2026-11-25]', () => {
@@ -20,6 +21,22 @@ describe('occupied [user, 2026-11-25]', () => {
     expect(boxes).toContainEqual(rectAt('step', { x: 5000, y: 5000 }));
     expect(boxes).not.toContainEqual(rectAt('step', { x: 7000, y: 7000 }));
     expect(boxes).not.toContainEqual(rectAt('step', b.steps.lonely!.at!));
+  });
+
+  it('withSchemas adds placed schemas and stepless processors; without it nothing changes', () => {
+    const b = board();
+    const sch = (id: string, at: { x: number; y: number } | null) => ({ id, name: id, version: '1', description: null, definition: '{}', audit: b.processors.p1!.audit, at, updatedAt: null });
+    const withS: BoardState = {
+      ...b,
+      schemas: { s1: sch('s1', { x: 3000, y: 3000 }), s2: sch('s2', null) },
+      processors: { ...b.processors, p9: { ...b.processors.p1!, id: 'p9', outputSchemaId: 's1', at: { x: 4000, y: 4000 } } },
+    };
+    expect(occupied(withS, [])).toEqual(occupied(b, []));
+    const boxes = occupied(withS, [], new Set(), true);
+    expect(boxes).toHaveLength(occupied(b, []).length + 2);
+    expect(boxes).toContainEqual(rectAt('schema', { x: 3000, y: 3000 }));
+    expect(boxes).toContainEqual(rectAt('processor', { x: 4000, y: 4000 }));
+    expect(occupied(withS, [], new Set(['schema:s1', 'processor:p9']), true)).toEqual(occupied(b, []));
   });
 
   it('blocks a nudge onto another item, not one that only comes near it', () => {
