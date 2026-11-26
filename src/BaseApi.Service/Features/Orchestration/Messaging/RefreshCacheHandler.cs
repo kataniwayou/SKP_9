@@ -29,16 +29,18 @@ namespace BaseApi.Service.Features.Orchestration.Messaging;
 internal sealed class RefreshCacheHandler : IQueueMessageHandler
 {
     private readonly BaseDbContext _db;
+    private readonly CacheItemsStore _items;
     private readonly L2LiveSet _live;
     private readonly L2ProjectionWriter _writer;
     private readonly IWorkflowRunGuard _runGuard;
     private readonly ILogger<RefreshCacheHandler> _logger;
 
     public RefreshCacheHandler(
-        BaseDbContext db, L2LiveSet live, L2ProjectionWriter writer, IWorkflowRunGuard runGuard,
+        BaseDbContext db, CacheItemsStore items, L2LiveSet live, L2ProjectionWriter writer, IWorkflowRunGuard runGuard,
         ILogger<RefreshCacheHandler> logger)
     {
         _db       = db ?? throw new ArgumentNullException(nameof(db));
+        _items    = items ?? throw new ArgumentNullException(nameof(items));
         _live     = live ?? throw new ArgumentNullException(nameof(live));
         _writer   = writer ?? throw new ArgumentNullException(nameof(writer));
         _runGuard = runGuard ?? throw new ArgumentNullException(nameof(runGuard));
@@ -58,7 +60,7 @@ internal sealed class RefreshCacheHandler : IQueueMessageHandler
             throw new JsonException("refresh message carries an empty cache id");
         }
 
-        var cache = await _db.Set<CacheEntity>().AsNoTracking().Include(c => c.Items)
+        var cache = await _db.Set<CacheEntity>().AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == message.CacheId, ct).ConfigureAwait(false);
 
         // Deleted since the edit. A cache any workflow is bound to cannot be deleted, so nothing ran on it.
@@ -74,8 +76,8 @@ internal sealed class RefreshCacheHandler : IQueueMessageHandler
 
         var live = (await _live.ListAsync(ct).ConfigureAwait(false)).ToHashSet();
 
-        // The item rows came with the cache (explicit Include; Task 6 chunks this).
-        var items = new CacheL1(cache.Root, CacheItems.ToDictionary(cache.Items));
+        // The whole cache, read once for every workflow (the full refresh needs all of it).
+        var items = new CacheL1(cache.Root, await _items.ReadAllAsync(message.CacheId, ct).ConfigureAwait(false));
 
         foreach (var workflowId in bound.Where(live.Contains))
         {

@@ -85,6 +85,7 @@ internal static class AppMessaging
         services.AddScoped<IQueueMessageHandler, StartOrchestrationHandler>();
         services.AddScoped<IQueueMessageHandler, StopOrchestrationHandler>();
         services.AddScoped<IQueueMessageHandler, RefreshCacheHandler>();
+        services.AddScoped<IQueueMessageHandler, RefreshCacheItemsHandler>();
 
         // The ungated query consumers. One per queue, each constructed with the queue it serves —
         // there is no shared options object to collide over.
