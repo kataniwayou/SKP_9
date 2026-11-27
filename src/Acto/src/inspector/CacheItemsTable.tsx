@@ -76,6 +76,8 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
   const [tries, setTries] = useState(0);
   const [status, setStatus] = useState<Status>({ state: 'loading' });
   const [page, setPage] = useState<Loaded | null>(null);
+  // where the last page with stored rows was read from: Prev from a page with none (past the last stored key) goes back there
+  const [back, setBack] = useState<ItemsAt>(null);
   const [jumpText, setJumpText] = useState('');
   const [note, setNote] = useState<string | null>(null);
   const [newKey, setNewKey] = useState('');
@@ -105,7 +107,9 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
     api.cacheItemsPage(id, at, at && 'before' in at ? limit + 1 : limit).then((r) => {
       if (drop()) return;
       if (!r.ok) { setStatus({ state: 'error', message: describeError(r.error) }); return; }
-      setPage(loadedOf(at, limit, r.value));
+      const loaded = loadedOf(at, limit, r.value);
+      setPage(loaded);
+      if (loaded.stored.length) setBack(at);
       setStatus({ state: 'ok' });
       if (req.jump !== undefined) setNote(noteOf(req.jump, r.value.fromMatch));
     }, (e: unknown) => {
@@ -125,8 +129,12 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
     const after = view.cut ? rows[rows.length - 1]?.key : cursors(rows).after ?? page?.next;
     if (after) go({ after });
   };
-  // an empty page (Next past the last stored key) goes back from its lower anchor
-  const prev = () => { const before = rows.find((r) => r.stored !== null)?.key ?? page?.lower?.key; if (before) go({ before }); };
+  // one page back: before the first visible stored key; a page without stored rows (Next past the last stored key) re-reads
+  // the page shown before it at the current size, so that page's last stored key is not lost
+  const prev = () => {
+    const first = rows.find((r) => r.stored !== null)?.key;
+    go(first !== undefined ? { before: first } : back);
+  };
 
   const setItem = (key: string, value: string): boolean => {
     let why: string | null = null;

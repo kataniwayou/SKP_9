@@ -163,7 +163,7 @@ describe('CacheItemsTable', () => {
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 
-  it('prevFromAnEmptyPageReadsBeforeTheAnchor', async () => {
+  it('prevFromAnEmptyPageReturnsToThePreviousPage', async () => {
     const { api, cacheItemsPage } = over(TEN.slice(0, 8));
     setup(api, { cache: { itemCount: 8, itemEdits: { set: { zzz: 'z' }, removed: [] } } });
     await screen.findByLabelText('Value a');
@@ -172,10 +172,11 @@ describe('CacheItemsTable', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     await screen.findByLabelText('Value zzz');
     fireEvent.click(screen.getByRole('button', { name: 'Prev' }));
-    expect(await screen.findByLabelText('Value d')).toBeInTheDocument();
-    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { before: 'h' }, 5);
-    expect(keysShown()).toEqual(['d', 'e', 'f', 'g']);
-    expect(screen.getByText('rows 4–7 · page 1 of 2')).toBeInTheDocument();
+    // the page shown before it, read again the same way: its last stored key (h) is back on screen
+    await waitFor(() => expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { after: 'd' }, 4));
+    expect(await screen.findByLabelText('Value h')).toBeInTheDocument();
+    expect(keysShown()).toEqual(['e', 'f', 'g', 'h']);
+    expect(screen.getByText('rows 5–8 · page 2 of 2')).toBeInTheDocument();
   });
 
   it('anAddedKeyBetweenPagesShowsOnTheEarlierPage', async () => {
