@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures';
-import { addItem, inspector, openAt, pickCache, save, saveButton, storedKey, storedValue, waitLoaded } from '../helpers';
+import { addItem, inspector, itemsSummary, openAt, pickCache, save, saveButton, storedKey, storedValue, waitLoaded } from '../helpers';
 import { seed } from '../seed';
 import { API, appendItems, getJson, itemsPage, removeItems, storedItems, type Row } from '../stack';
 
@@ -48,13 +48,14 @@ test('Cache tab edits cross as append/remove and are stored after Save; a key ov
   const id = await seed({ caches: [{ key: 'c', name: 'e2e-pairs', at: { x: 0, y: 0 }, root: 'e2e-pairs', items: { old: '1', keep: '2' } }] });
   await openAt(page);
   await pickCache(page, id.c!);
-  await expect(inspector(page).getByText('2 stored')).toBeVisible();
+  await expect(inspector(page).getByText('Items · 2 stored')).toBeVisible();
   await expect(storedValue(page, 'keep')).toHaveValue('2');
 
   await addItem(page, 'usd', '3.7');
   await addItem(page, 'eur', '4.1');
   await inspector(page).getByRole('button', { name: 'Remove old', exact: true }).click();
-  await expect(inspector(page).getByText('2 stored · 3 unsaved')).toBeVisible();
+  // the page holds every key here, so its summary is the whole cache's: two added, one deleted
+  await expect(itemsSummary(page)).toHaveText('on this page: 2 added 1 deleted');
   const sent: { changes?: { op: string; table: string; row?: unknown }[] }[] = [];
   page.on('request', (r) => { if (r.method() === 'POST' && r.url().endsWith('/api/v1/model/apply')) sent.push(r.postDataJSON()); });
   expect((await save(page)).applied).toBe(true);
@@ -71,7 +72,7 @@ test('Cache tab edits cross as append/remove and are stored after Save; a key ov
   // the reload restores the selection: clear it, so the click picks rather than un-picks
   await page.locator('.react-flow__pane').click({ position: { x: 20, y: 20 } });
   await pickCache(page, id.c!);
-  await expect(inspector(page).getByText('3 stored')).toBeVisible();
+  await expect(inspector(page).getByText('Items · 3 stored')).toBeVisible();
   await expect(storedValue(page, 'eur')).toHaveValue('4.1');
   await expect(storedValue(page, 'usd')).toHaveValue('3.7');
   await expect(storedKey(page, 'old')).toHaveCount(0);
@@ -83,7 +84,7 @@ test('Cache tab edits cross as append/remove and are stored after Save; a key ov
   // and at exactly 256 it is fine
   await addItem(page, 'k'.repeat(256), 'v');
   await expect(inspector(page).getByText(/Key must be at most 256 characters/)).toHaveCount(0);
-  await expect(inspector(page).getByText('3 stored · 1 unsaved')).toBeVisible();
+  await expect(itemsSummary(page)).toHaveText('on this page: 1 added');
   await expect(saveButton(page)).toHaveText('Save · 1');
 });
 

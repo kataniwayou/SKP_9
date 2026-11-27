@@ -60,4 +60,30 @@ Run date: 2026-11-27. Spec: `docs/superpowers/specs/2026-11-26-cache-items-appen
 - DB and HTTP (S1-S10): `src/tests/BaseApi.Tests/Scale/CacheItemsScaleTests.cs` and `Live/CacheItemsScaleLiveTests.cs`, in the SDK container with `SKP_SCALE=1` (plus `SKP_TEST_PG`, `SKP_REALSTACK=1`).
 - Redis (R1-R5): `Live/CacheItemsRedisScaleLiveTests.cs`, same variables plus `SKP_REDIS_HOST/PORT`, `SKP_RABBIT_HOST/PORT`, `SKP_SCALE_PROCESSOR` (a live processor with no config schema, e.g. outcome-recorder)
   and `SKP_SCALE_HANDSHAKE_DIR` (the test writes `R5_READY`; restart the Redis statefulset and its port-forward, then create `R5_GO`). Needs the raised limits above.
-- Acto (A1-A5): from `src/Acto`, `SKP_SCALE=1 npx playwright test e2e/regression/15-big-cache.spec.ts` (BaseApi on 18080, `kubectl` on the PATH for the Redis reads).
+- Acto (A1-A5, B1-B3): from `src/Acto`, `SKP_SCALE=1 npx playwright test e2e/regression/15-big-cache.spec.ts` (BaseApi on 18080, `kubectl` on the PATH for the Redis reads).
+  A3 also needs `SKP_BIG_START=1` and the raised limits above. At the dev limits, run the A tests one at a time (`-g A1`, `-g A4`): two 1M x 500-character
+  builds back to back OOM-killed BaseApi (512Mi) on 2026-11-27.
+
+## Fit-to-height pages, jump to key, per-page summary - 2026-11-27
+
+Spec `docs/superpowers/specs/2026-11-27-acto-cache-items-fit-page-design.md`, plan `docs/superpowers/plans/2026-11-27-acto-cache-items-fit-page.md`
+(commits `fd2c4470`..`e7bac829`, the e2e in the commit after them). BaseApi and Acto deployed to dev, BaseApi first. Data: a 1M cache shaped like the
+live chain's (keys `SKP Big Artist 0000001`..`1000000`, values `<key> (Approved v1)`), bound to no workflow, at the dev limits (nothing raised).
+H1-H2 ran on a cache `fitpage-1m-test` made over HTTP and deleted afterwards; B1-B3 each build their own `e2e-fitpage-cache` (20-21 s).
+
+| # | Scenario | Measured | Result |
+|---|---|---|---|
+| S11 | `index` at 1M (Task 1; local Postgres in the SDK container) | from key 500,000: p50 71 ms, max 192 ms; from the last key: p50 48 ms, max 50 ms | PASS (page number always shown) |
+| H1 | Load `fitpage-1m-test`, 20 x 50,000, dev BaseApi | 1,096 ms (batch 1) to 1,580 ms (batch 20), 26.4 s in all; item count 1,000,000 | PASS |
+| H2 | Reads on dev BaseApi through the port-forward, 5 runs each after a warm-up, limit 6 (a 5-row page + 1) | first page p50 7 ms, max 20 (limit 31: p50 16, max 19); jump `from=SKP Big Artist 05` p50 43, max 56 (first `…0500000`, index 499,999, `later`); jump past the end p50 38, max 59 (`none`, the last 6 rows); Next `from=…0500005` p50 42, max 47; Prev `before=…0500005` p50 42, max 57; Next near the end p50 47, max 48; Prev near the end p50 35, max 37; Prev at the start p50 6, max 7 (index 0, `prev` null) | PASS |
+| B1 | Window 800 -> 1000 px high, on page 2 | 5 rows -> 8 rows; exactly one read, `?from=SKP Big Artist 0000006&limit=9`; the first row stays; no scrollbar inside the list; back to 800 px cuts to 5 rows with no read. First page 195 ms after picking the cache, Next 123 ms | PASS |
+| B2 | Jump `SKP Big Artist 05` | first row `SKP Big Artist 0500000` 450 ms after Go, one read `?from=SKP Big Artist 05&limit=6`; note `no key "SKP Big Artist 05" — showing from the next key`; position `rows 500,000–500,004 · page 100,000 of 200,000` (the key is the 500,000th, index 499,999: page floor(499,999 / 5) + 1); an exact key has no note; past the end the last page with its note, Next disabled; Clear jump goes back to page 1 | PASS |
+| B3 | Edit a row at 500,000, Next, Prev | `on this page: 1 modified`; after Next `no unsaved changes on this page` (Save · 1 kept); after Prev the edit and its summary are back; Next 357 ms, Prev 183 ms (in the browser); nothing saved | PASS |
+| A1/A2 | The 1M x 500-character cache on the new list | board +12 % (508 / 567 ms), 0 item reads; 5 rows a page at 900 px; first page 128 ms, Next 120 / 68 ms; keys, values and `rows a–b · page n of 200,000` checked, Prev back to page 1 | PASS (run alone) |
+| A3 | Start on the 1M x 500-character cache | not run: needs the raised limits of Findings 1; skipped unless `SKP_BIG_START=1` | NOT RUN |
+| A4 | Stale Save, then Take stored | `Take stored · 1`; the item edit kept (`on this page: 1 modified`), the next Save stores it | PASS (run alone) |
+| A5 | Save over 30 MB | refused before sending, as before; the summary counts the added rows on screen (`on this page: N added`) | PASS |
+
+Run notes: with A1-A5 in one run, BaseApi (512Mi) was OOM-killed while A4 built its 1M x 500-character cache right after A1's (about 500 MB of
+values each; see Findings 1). In that run A1's first page took 2,048 ms (over its 2 s threshold); run alone it took 128 ms. Run one at a time, A1 and A4
+pass. The chain workflow stayed live through that restart.

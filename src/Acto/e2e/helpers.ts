@@ -272,10 +272,26 @@ export async function save(page: Page) {
   return answer;
 }
 
-/** The Items table of a cache's Inspector: the stored page (read-only keys, editable values), the Unsaved section, the add row. */
+/**
+ * The Items list of a cache's Inspector (CacheItemsTable): one page that fits the panel, the stored rows with this session's edits in
+ * place (added and modified rows have the same Key/Value cells, deleted ones are struck), the per-page summary, Prev/Next and the
+ * position, the jump box and the add row.
+ */
 export const storedKey = (page: Page, key: string) => inspector(page).getByRole('textbox', { name: `Key ${key}`, exact: true });
 export const storedValue = (page: Page, key: string) => inspector(page).getByRole('textbox', { name: `Value ${key}`, exact: true });
-export const unsavedValue = (page: Page, key: string) => inspector(page).getByRole('textbox', { name: `Unsaved value ${key}`, exact: true });
+/** The Items table's rows (one per key shown). */
+export const itemRows = (page: Page) => inspector(page).getByRole('table', { name: 'Items', exact: true }).locator('tbody tr');
+/** The per-page summary: `no unsaved changes on this page` or `on this page: N modified N added N deleted` (chips). */
+export const itemsSummary = (page: Page) => inspector(page).locator('.dict-sum[role="status"]');
+/** The position beside Prev/Next: `rows a–b · page n of m`, `no items` or `no stored rows on this page`. */
+export const itemsPosition = (page: Page) => inspector(page).locator('.dict-pos');
+export const itemsNext = (page: Page) => inspector(page).getByRole('button', { name: 'Next', exact: true });
+export const itemsPrev = (page: Page) => inspector(page).getByRole('button', { name: 'Prev', exact: true });
+/** Types a key (or the start of one) into the jump box and presses Go. */
+export async function jumpToKey(page: Page, text: string) {
+  await inspector(page).getByRole('textbox', { name: 'Jump to key', exact: true }).fill(text);
+  await inspector(page).getByRole('button', { name: 'Go', exact: true }).click();
+}
 
 /** Adds an item through the add row (New key, New value, Add item). A refused key shows the table's alert and stays typed. */
 export async function addItem(page: Page, key: string, value: string) {

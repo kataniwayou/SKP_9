@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { addItem, caNode, field, unsavedValue, inspector, openAt, payloadOf, pickCache, pickStep, selectWorkflowAlone, pretty, saveButton, stNode, childTab, tab, wfNode, wireEdge } from './helpers';
+import { addItem, caNode, field, storedKey, storedValue, inspector, openAt, payloadOf, pickCache, pickStep, selectWorkflowAlone, pretty, saveButton, stNode, childTab, tab, wfNode, wireEdge } from './helpers';
 import { seed } from './seed';
 
 // Spec §6–§7: every field of a triangle, a step and a cache edits through the Inspector; the payload check; one undo history for the whole
@@ -117,7 +117,7 @@ test('a cache\'s Inspector: name, version, description, root and items', async (
   await expect(inspector(page).locator('.ph .cnt')).toHaveText('cache');
   await expect(field(page, 'Name')).toHaveValue('e2e-ins-cache');
   await expect(field(page, 'Root')).toHaveValue('e2e');
-  await expect(inspector(page).getByText('0 stored')).toBeVisible();
+  await expect(inspector(page).getByText('Items · 0 stored')).toBeVisible();
   await expect(inspector(page)).toContainText('cache · used by e2e-ins-a');
   await field(page, 'Name').fill('e2e-ins-cache-renamed');
   await expect(caNode(page, id.c1!).locator('.cache-nm')).toHaveText('e2e-ins-cache-renamed');
@@ -127,8 +127,8 @@ test('a cache\'s Inspector: name, version, description, root and items', async (
   await addItem(page, 'k', 'v');
   await expect(caNode(page, id.c1!).locator('.unsaved-mark')).toBeVisible();
   await expect(field(page, 'Root')).toHaveValue('e2e-root');
-  await expect(inspector(page).getByRole('textbox', { name: 'Unsaved key k', exact: true })).toHaveValue('k');
-  await expect(unsavedValue(page, 'k')).toHaveValue('v');
+  await expect(storedKey(page, 'k')).toHaveValue('k');
+  await expect(storedValue(page, 'k')).toHaveValue('v');
 });
 
 test('the payload field checks JSON as it is typed; the triangle lists its assignments read-only, and the step edits and removes them', async ({ page }) => {
