@@ -95,6 +95,41 @@ describe('cache item tools', () => {
     expect(d).toMatchObject({ index: 0, prev: null, next: null, unsaved: { modified: 0, added: 2, deleted: 0 }, rows: 'no stored rows on this page' });
   });
 
+  it('aNeverSavedCacheOverTheCapIsWalkedByNext', async () => {
+    const { ctx, api, store } = setup();
+    api.cacheItemsPage = vi.fn();
+    const keys = Array.from({ length: 10 }, (_, i) => `k${i}`);
+    await call(ctx, 'set_cache_items', { cache_id: 'c1', items: keys.map((k) => ({ key: k, value: 'x'.repeat(30_000) })) });
+    store.edit((b) => ({ ...b, caches: { c1: { ...b.caches.c1!, updatedAt: null } } }));
+    const seen: string[] = [];
+    let args: Record<string, unknown> = {};
+    for (let guard = 0; guard < 20; guard++) {
+      const d = JSON.parse((await read(ctx, args)).result);
+      expect(d.note).toContain('not saved yet: it has no stored items, only the unsaved ones');
+      seen.push(...d.items.map((i: { key: string }) => i.key));
+      if (d.next === null) break;
+      args = d.next;
+    }
+    expect(seen).toEqual(keys);
+    expect(api.cacheItemsPage).not.toHaveBeenCalled();
+  });
+
+  it('aNeverSavedCacheHonoursBefore', async () => {
+    const { ctx, api, store } = setup();
+    api.cacheItemsPage = vi.fn();
+    await call(ctx, 'set_cache_items', { cache_id: 'c1', items: ['a', 'b', 'c', 'd', 'e'].map((k) => ({ key: k, value: k })) });
+    store.edit((b) => ({ ...b, caches: { c1: { ...b.caches.c1!, updatedAt: null } } }));
+    const back = JSON.parse((await read(ctx, { before: 'e', limit: 2 })).result);
+    expect(back.items.map((i: { key: string }) => i.key)).toEqual(['c', 'd']);
+    expect(back.prev).toEqual({ before: 'c' });
+    expect(back.next).toEqual({ from: 'e' });
+    const first = JSON.parse((await read(ctx, { before: 'c', limit: 5 })).result);
+    expect(first.items.map((i: { key: string }) => i.key)).toEqual(['a', 'b']);
+    expect(first.prev).toBeNull();
+    const after = JSON.parse((await read(ctx, { after: 'b', limit: 2 })).result);
+    expect(after.items.map((i: { key: string }) => i.key)).toEqual(['c', 'd']);
+  });
+
   it('the description names from, before, after and this page only', () => {
     const def = CACHE_ITEM_TOOLS.find((t) => t.name === 'read_cache_items')!;
     expect(def.description).toMatch(/from/);

@@ -23,6 +23,7 @@ export type ChatPage = {
   jumpNote: string | null;
 };
 
+const collator = new Intl.Collator('en-US');
 const n = (x: number) => x.toLocaleString('en-US');
 
 /** The ready-to-pass anchors of a page's edges. */
@@ -118,12 +119,30 @@ const readCacheItems: ToolDef = {
     const label = `read items of ${row.name}`;
     const finish = (shown: ShownPage, jumpNote: string | null) =>
       done(true, cappedPage({ itemCount: row.itemCount, index: shown.index, rows: shown.rows, jumpNote, ...anchors(shown.upper, shown.upperAfter, shown.lower) }), label);
-    if (row.updatedAt === null) {
-      const empty: PageWindow = { stored: [], lower: null, lowerAfter: false, upper: null, upperAfter: false, index: 0, limit: Number.MAX_SAFE_INTEGER, cut: 'tail' };
-      return finish(shownPage(empty, row.itemEdits, Number.MAX_SAFE_INTEGER), null);
-    }
     const which = given[0];
     const key = which ? (args[which] as string) : null;
+    if (row.updatedAt === null) {
+      // nothing stored: the unsaved keys are the whole cache; page them in memory by the same [lower, upper) model
+      const empty: PageWindow = { stored: [], lower: null, lowerAfter: false, upper: null, upperAfter: false, index: 0, limit: Number.MAX_SAFE_INTEGER, cut: 'tail' };
+      const all = shownPage(empty, row.itemEdits, Number.MAX_SAFE_INTEGER).rows;
+      const firstAt = (strict: boolean) => { const i = all.findIndex((r) => collator.compare(r.key, key!) >= (strict ? 1 : 0)); return i < 0 ? all.length : i; };
+      let start = 0;
+      let jumpNote: string | null = null;
+      if (which === 'from') {
+        start = firstAt(false);
+        if (start === all.length && all.length > 0) start = Math.max(0, all.length - limit);
+        jumpNote = jumpNoteOf(key!, start === all.length ? (all.length === 0 ? 'exact' : 'none') : all[start]!.key === key ? 'exact' : 'later');
+      } else if (which === 'after') start = firstAt(true);
+      else if (which === 'before') start = Math.max(0, firstAt(false) - limit);
+      const end = which === 'before' ? firstAt(false) : Math.min(all.length, start + limit);
+      const rows = all.slice(start, end);
+      const note = [jumpNote, 'not saved yet: it has no stored items, only the unsaved ones'].filter(Boolean).join('; ');
+      return done(true, cappedPage({
+        itemCount: row.itemCount, index: 0, rows, jumpNote: note,
+        prev: start > 0 ? { before: all[start]!.key } : null,
+        next: end < all.length ? { from: all[end]!.key } : null,
+      }), label);
+    }
     const read: PageRead = which === 'before' ? { dir: 'back', before: key! }
       : which === 'after' ? { dir: 'forward', from: key, after: true }
         : { dir: 'forward', from: key, ...(which === 'from' ? { jump: true } : {}) };
