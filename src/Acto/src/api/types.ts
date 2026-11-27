@@ -12,6 +12,8 @@ export type SchemaReadDto = Schemas['SchemaReadDto'];
 export type CacheReadDto = Schemas['CacheReadDto'];
 export type CacheItemDto = Schemas['CacheItemDto'];
 export type CacheItemsPage = Schemas['CacheItemsPage'];
+/** Where a cache-items page is anchored: after a key, from a key (inclusive), before a key, or the first page. */
+export type ItemsAt = { after: string } | { from: string } | { before: string } | null;
 export type CacheAppendReport = Schemas['CacheAppendReport'];
 export type CacheRemoveReport = Schemas['CacheRemoveReport'];
 export type AssignmentReadDto = Schemas['AssignmentReadDto'];

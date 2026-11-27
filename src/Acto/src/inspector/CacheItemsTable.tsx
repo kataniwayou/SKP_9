@@ -54,7 +54,7 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
     if (!reads) return;
     let live = true;
     setPage({ state: 'loading' });
-    api.cacheItemsPage(id, after, ITEMS_PAGE_LIMIT).then((r) => {
+    api.cacheItemsPage(id, after ? { after } : null, ITEMS_PAGE_LIMIT).then((r) => {
       if (live) setPage(r.ok ? { state: 'ok', page: r.value } : { state: 'error', message: describeError(r.error) });
     }, (e: unknown) => {
       if (live) setPage({ state: 'error', message: e instanceof Error ? e.message : String(e) });

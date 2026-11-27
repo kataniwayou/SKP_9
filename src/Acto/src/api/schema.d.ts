@@ -269,6 +269,8 @@ export interface paths {
             parameters: {
                 query?: {
                     after?: string;
+                    from?: string;
+                    before?: string;
                     limit?: number;
                 };
                 header?: {
@@ -2963,6 +2965,9 @@ export interface components {
         CacheItemsPage: {
             items?: components["schemas"]["CacheItemDto"][] | null;
             next?: string | null;
+            prev?: string | null;
+            index?: number;
+            fromMatch?: string | null;
         };
         CacheItemsUpdateDto: {
             items?: components["schemas"]["CacheItemDto"][] | null;

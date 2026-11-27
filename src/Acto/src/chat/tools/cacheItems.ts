@@ -73,7 +73,7 @@ const readCacheItems: ToolDef = {
     }
     const limit = typeof args.limit === 'number' && Number.isFinite(args.limit) ? Math.min(MAX_LIMIT, Math.max(1, Math.floor(args.limit))) : DEFAULT_LIMIT;
     const after = text(args, 'after') || undefined;
-    const r = await ctx.api.cacheItemsPage(c.id, after, limit);
+    const r = await ctx.api.cacheItemsPage(c.id, after ? { after } : null, limit);
     if (!r.ok) return fail(`could not read the items of cache ${c.id}. ${describeError(r.error)}`, 'read cache items failed');
     // the board may have changed while the page was read: apply the overlay as it is now
     const edits = ctx.store.state().caches[c.id]?.itemEdits ?? row.itemEdits;

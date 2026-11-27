@@ -12,7 +12,7 @@ describe('cache item tools', () => {
     await call(ctx, 'remove_cache_items', { cache_id: 'c1', keys: ['b'] });
     const o = done(await call(ctx, 'read_cache_items', { cache_id: 'c1', limit: 2 }));
     expect(o.ok).toBe(true);
-    expect(api.cacheItemsPage).toHaveBeenCalledWith('c1', undefined, 2);
+    expect(api.cacheItemsPage).toHaveBeenCalledWith('c1', null, 2);
     const d = JSON.parse(o.result);
     expect(d.items).toEqual([{ key: 'a', value: 'X' }]);
     expect(d.next).toBe('b');

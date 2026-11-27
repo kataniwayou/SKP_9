@@ -8,7 +8,7 @@ describe('cacheItemsPage', () => {
 
   it('builds the query (after encoded, limit)', async () => {
     const fetchImpl = respond();
-    const result = await createApi('/api/v1', fetchImpl).cacheItemsPage('c 1', 'a/b&c=d', 50);
+    const result = await createApi('/api/v1', fetchImpl).cacheItemsPage('c 1', { after: 'a/b&c=d' }, 50);
     expect(fetchImpl).toHaveBeenCalledWith('/api/v1/caches/c%201/items?after=a%2Fb%26c%3Dd&limit=50', expect.objectContaining({ method: 'GET' }));
     expect(result).toEqual({ ok: true, value: page });
   });
@@ -17,6 +17,24 @@ describe('cacheItemsPage', () => {
     const fetchImpl = respond();
     await createApi('/api/v1', fetchImpl).cacheItemsPage('c1');
     expect(fetchImpl).toHaveBeenCalledWith('/api/v1/caches/c1/items', expect.anything());
+  });
+
+  it('reads from a key, encoded', async () => {
+    const fetchImpl = respond();
+    await createApi('/api/v1', fetchImpl).cacheItemsPage('c1', { from: 'a b' }, 16);
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/caches/c1/items?from=a%20b&limit=16', expect.anything());
+  });
+
+  it('reads before a key', async () => {
+    const fetchImpl = respond();
+    await createApi('/api/v1', fetchImpl).cacheItemsPage('c1', { before: 'x' });
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/caches/c1/items?before=x', expect.anything());
+  });
+
+  it('reads after a key', async () => {
+    const fetchImpl = respond();
+    await createApi('/api/v1', fetchImpl).cacheItemsPage('c1', { after: 'k' });
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/caches/c1/items?after=k', expect.anything());
   });
 
   it('sends only the parts given', async () => {

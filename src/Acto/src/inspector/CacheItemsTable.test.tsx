@@ -13,7 +13,7 @@ const P1: CacheItemsPage = { items: [{ key: 'a', value: '1' }, { key: 'b', value
 const P2: CacheItemsPage = { items: [{ key: 'c', value: '3' }], next: null };
 
 function apiOf(fn: (after: string | null | undefined) => Promise<unknown>) {
-  const cacheItemsPage = vi.fn((_id: string, after?: string | null) => fn(after));
+  const cacheItemsPage = vi.fn((_id: string, at?: { after: string } | null) => fn(at?.after));
   return { api: { cacheItemsPage } as unknown as StudioApi, cacheItemsPage };
 }
 const pages = (after: string | null | undefined) => Promise.resolve({ ok: true, value: after ? P2 : P1 });
@@ -49,7 +49,7 @@ describe('CacheItemsTable', () => {
     await screen.findByLabelText('Value a');
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     expect(await screen.findByLabelText('Value c')).toHaveValue('3');
-    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', 'b', 500);
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { after: 'b' }, 500);
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Previous' }));
     expect(await screen.findByLabelText('Value a')).toBeInTheDocument();

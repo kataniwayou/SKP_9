@@ -1,6 +1,6 @@
 import { ENTITY_PATH, type EntityKind, type ReadDtoOf, type UpdateDtoOf } from './entities';
 import type { ModelChange } from '../design/changes';
-import type { AssignmentCreateDto, AssignmentReadDto, CacheItemsPage, CacheReadDto, ModelApplyResultDto, ModelValidateResultDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowReadDto, WorkflowValidationDto } from './types';
+import type { AssignmentCreateDto, AssignmentReadDto, CacheItemsPage, CacheReadDto, ItemsAt, ModelApplyResultDto, ModelValidateResultDto, ProcessorReadDto, SchemaReadDto, StepReadDto, WorkflowReadDto, WorkflowValidationDto } from './types';
 
 /**
  * Every way a request can fail, as data. The UI shows these in its status line (Output in plan 5);
@@ -31,8 +31,8 @@ export interface StudioApi {
   listProcessors?(): Promise<ApiResult<ProcessorReadDto[]>>;
   listCaches?(): Promise<ApiResult<CacheReadDto[]>>;
   listSchemas?(): Promise<ApiResult<SchemaReadDto[]>>;
-  /** `GET /caches/{id}/items?after=&limit=`: one page of a cache's items, ordered by key; `next` is the cursor for the following page, or null at the end. */
-  cacheItemsPage(cacheId: string, after?: string | null, limit?: number): Promise<ApiResult<CacheItemsPage>>;
+  /** `GET /caches/{id}/items?after=|from=|before=&limit=`: one page of a cache's items, ordered by key; `next`/`prev` are the cursors for the adjoining pages, or null at the ends. */
+  cacheItemsPage(cacheId: string, at?: ItemsAt, limit?: number): Promise<ApiResult<CacheItemsPage>>;
   /** `GET /{entity}/{id}`: the entity's read DTO, the Inspector's baseline (spec §7.1). */
   getEntity<K extends EntityKind>(kind: K, id: string): Promise<ApiResult<ReadDtoOf[K]>>;
   /** `PUT /{entity}/{id}` with the full update DTO; BaseApi answers 200 with the entity read back. */
@@ -147,8 +147,9 @@ export function createApi(base = '/api/v1', fetchImpl: typeof fetch = globalThis
     listProcessors: () => get<ProcessorReadDto[]>('/processors'),
     listCaches: () => get<CacheReadDto[]>('/caches'),
     listSchemas: () => get<SchemaReadDto[]>('/schemas'),
-    cacheItemsPage: (cacheId, after, limit) => {
-      const query = [after ? `after=${encodeURIComponent(after)}` : '', limit === undefined ? '' : `limit=${limit}`].filter(Boolean).join('&');
+    cacheItemsPage: (cacheId, at, limit) => {
+      const anchor = at ? Object.entries(at).map(([name, key]) => `${name}=${encodeURIComponent(key)}`) : [];
+      const query = [...anchor, limit === undefined ? '' : `limit=${limit}`].filter(Boolean).join('&');
       return get<CacheItemsPage>(`/caches/${id(cacheId)}/items${query ? `?${query}` : ''}`);
     },
     listSteps: () => get<StepReadDto[]>('/steps'),
