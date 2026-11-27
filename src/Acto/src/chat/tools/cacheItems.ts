@@ -1,7 +1,7 @@
 import { removeCacheItem, setCacheItem } from '../../design/edits';
 import type { BoardState } from '../../design/board';
 import { describeError } from '../../api/describeError';
-import { pageSummary, readAt, readLimit, shownPage, windowOf, type PageRead, type PageRow, type PageWindow, type ShownPage } from '../../design/itemsPage';
+import { collator, pageSummary, readAt, readLimit, shownPage, windowOf, type PageRead, type PageRow, type PageWindow, type ShownPage } from '../../design/itemsPage';
 import type { ToolDef } from '../toolTypes';
 import { applyState, CACHE_ID, done, fail, onBoard, text } from './common';
 
@@ -23,7 +23,6 @@ export type ChatPage = {
   jumpNote: string | null;
 };
 
-const collator = new Intl.Collator('en-US');
 const n = (x: number) => x.toLocaleString('en-US');
 
 /** The ready-to-pass anchors of a page's edges. */
@@ -129,9 +128,10 @@ const readCacheItems: ToolDef = {
       let start = 0;
       let jumpNote: string | null = null;
       if (which === 'from') {
-        start = firstAt(false);
-        if (start === all.length && all.length > 0) start = Math.max(0, all.length - limit);
-        jumpNote = jumpNoteOf(key!, start === all.length ? (all.length === 0 ? 'exact' : 'none') : all[start]!.key === key ? 'exact' : 'later');
+        const found = firstAt(false);
+        start = found;
+        if (found === all.length && all.length > 0) start = Math.max(0, all.length - limit);
+        jumpNote = jumpNoteOf(key!, found === all.length ? (all.length === 0 ? 'exact' : 'none') : all[found]!.key === key ? 'exact' : 'later');
       } else if (which === 'after') start = firstAt(true);
       else if (which === 'before') start = Math.max(0, firstAt(false) - limit);
       const end = which === 'before' ? firstAt(false) : Math.min(all.length, start + limit);
@@ -139,7 +139,7 @@ const readCacheItems: ToolDef = {
       const note = [jumpNote, 'not saved yet: it has no stored items, only the unsaved ones'].filter(Boolean).join('; ');
       return done(true, cappedPage({
         itemCount: row.itemCount, index: 0, rows, jumpNote: note,
-        prev: start > 0 ? { before: all[start]!.key } : null,
+        prev: start > 0 ? { before: all[start]?.key ?? key! } : null,
         next: end < all.length ? { from: all[end]!.key } : null,
       }), label);
     }

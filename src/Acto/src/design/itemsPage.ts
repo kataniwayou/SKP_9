@@ -3,7 +3,7 @@ import type { ItemEdits } from './board';
 export type RowState = 'modified' | 'added' | 'deleted';
 export type PageRow = { key: string; value: string; stored: string | null; state?: RowState };
 
-const collator = new Intl.Collator('en-US');
+export const collator = new Intl.Collator('en-US');
 
 /*
  * Paging model (ruling R5, shared by the Inspector's Items list and the chat's read_cache_items).

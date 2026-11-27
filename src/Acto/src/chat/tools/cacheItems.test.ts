@@ -130,6 +130,22 @@ describe('cache item tools', () => {
     expect(after.items.map((i: { key: string }) => i.key)).toEqual(['c', 'd']);
   });
 
+  it('aNeverSavedCacheAfterTheLastKeyIsEmpty, and a from past the end says none', async () => {
+    const { ctx, api, store } = setup();
+    api.cacheItemsPage = vi.fn();
+    await call(ctx, 'set_cache_items', { cache_id: 'c1', items: ['a', 'b', 'c'].map((k) => ({ key: k, value: k })) });
+    store.edit((b) => ({ ...b, caches: { c1: { ...b.caches.c1!, updatedAt: null } } }));
+    for (const k of ['c', 'zz']) {
+      const d = JSON.parse((await read(ctx, { after: k })).result);
+      expect(d.items).toEqual([]);
+      expect(d.prev).toEqual({ before: k });
+      expect(d.next).toBeNull();
+    }
+    const j = JSON.parse((await read(ctx, { from: 'zz', limit: 2 })).result);
+    expect(j.note).toContain('no key at or after "zz" — showing the last page');
+    expect(j.items.map((i: { key: string }) => i.key)).toEqual(['b', 'c']);
+  });
+
   it('the description names from, before, after and this page only', () => {
     const def = CACHE_ITEM_TOOLS.find((t) => t.name === 'read_cache_items')!;
     expect(def.description).toMatch(/from/);
