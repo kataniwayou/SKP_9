@@ -549,4 +549,15 @@ public sealed class CacheItemsStoreTests(PostgresFixture fixture)
         Assert.Equal(1, p.Index);
         Assert.Equal("c", p.Next);
     }
+
+    [Fact]
+    public async Task BeforeTheFirstKeyIsAnEmptyPageAtIndexZero()
+    {
+        var id = await SeedKeysAsync(AtoJ);
+        var p = await ReadAsync(id, CachePageMode.Before, "a", 3);
+        Assert.Empty(p.Items);
+        Assert.Equal(0, p.Index);
+        Assert.Null(p.Prev);
+        Assert.Null(p.Next);
+    }
 }

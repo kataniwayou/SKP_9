@@ -218,7 +218,7 @@ public sealed class CacheItemsStore(BaseDbContext db, TimeProvider clock, IHttpC
             var take = CutByBudget(candidates.Select(c => c.Chars).Take(limit).ToList(), charBudget);
             var chosen = candidates.Take(take).Select(c => c.Key).ToArray();
             if (backwards) Array.Reverse(chosen);
-            if (chosen.Length == 0) return new CacheItemsPage([], null, null, itemCount, fromMatch);
+            if (chosen.Length == 0) return new CacheItemsPage([], null, null, at.Mode == CachePageMode.Before ? 0 : itemCount, fromMatch);
 
             var values = new Dictionary<string, string>(chosen.Length, StringComparer.Ordinal);
             await using (var cmd = Command(conn, tx, "SELECT key, value FROM cache_items WHERE cache_id = @id AND key = ANY(@keys)", cacheId, chosen))

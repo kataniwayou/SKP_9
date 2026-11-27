@@ -61,5 +61,10 @@ public sealed class CachesController :
     public async Task<ActionResult<CacheItemsPage>> PageItems(
         Guid id, [FromQuery] string? after, [FromQuery] string? from, [FromQuery] string? before,
         [FromQuery] int? limit, CancellationToken ct)
-        => Ok(await _service.PageItemsAsync(id, after, from, before, limit, ct));
+    {
+        // Model binding turns an empty "?from=" into null; the service must see the empty string to refuse it.
+        if (Request.Query.TryGetValue("from", out var f)) from = f.ToString();
+        if (Request.Query.TryGetValue("before", out var b)) before = b.ToString();
+        return Ok(await _service.PageItemsAsync(id, after, from, before, limit, ct));
+    }
 }
