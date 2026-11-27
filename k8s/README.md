@@ -60,6 +60,27 @@ copy of every announcement with nothing draining it. Scaling up is safe. Removin
 means deleting its `orchestrator-control.orchestrator-N` queue on the broker in the same change. The
 manifest says the same thing at the top of `k8s/36-orchestrator.yaml`.
 
+### Rolling out the cache items change (append / remove / paged read, 2026-11-26)
+
+This change moves cache items out of the cache body (`items` on `POST`/`PUT /caches` is ignored; items go through
+`POST /caches/{id}/items`, `POST …/items/remove`, `GET …/items`), changes the start message to carry cache refs, adds
+the `refresh-cache-items` control message and the Redis `…::keys` set. Two rules for any environment that still runs the
+old build:
+
+1. **BaseApi must not run old and new pods side by side.** Both consume the control queue. An old pod given a new
+   `start-orchestration` (refs only, no inline caches) projects the workflow with no caches and deletes their L2; an old
+   pod given `refresh-cache-items` parks it as an unknown type. The default `RollingUpdate` overlaps them for a moment, so
+   roll BaseApi out with no overlap: `kubectl -n skp scale deploy/baseapi-service --replicas=0`, wait for the old pod to
+   go, load the new image, then `--replicas=1` (or deploy with `strategy: Recreate`). The manifest is left as it is; on
+   dev (one replica) the scale-to-0 route is the one used.
+2. **BaseApi before Acto.** Old Acto against new BaseApi silently loses item edits (it still sends `items` on the cache
+   body, which is now ignored); new Acto against old BaseApi has no items endpoints to call.
+
+In-flight `start-orchestration` messages published by an old pod (caches carried inline) are still handled by the new
+one: `StartOrchestrationHandler` keeps inline caches as they came and reads rows only for refs. A running workflow's
+cache root that still holds the old JSON key list is read as its key names (union with the new set), so running
+workflows need no restart.
+
 ## Register the processor, which is the part that is easy to misread
 
 **The processor pods will sit `0/1 READY` and stay there, and that is correct.** Readiness reports

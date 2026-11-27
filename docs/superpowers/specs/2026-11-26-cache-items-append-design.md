@@ -101,9 +101,15 @@ Start: considered skipping a cache whose stamp in Redis matches the DB; **the us
 | `POST /caches/{id}/items/remove` | **Remove keys** (§5.3) |
 | `GET /caches/{id}/items?after={key}&limit={n}` | **Page** (§5.4) |
 | `PUT /caches/{id}/items` | Replace all — **unchanged** behaviour; `[]` clears. Still the full-rewrite refresh. |
-| `GET /caches`, `GET /caches/{id}` | **No `items`**; adds `itemCount` |
+| `GET /caches`, `GET /caches/{id}` | **No `items`**; adds `itemCount` (read from the stored `caches.item_count` column, below) |
 | `POST /caches`, `PUT /caches/{id}` | **No `items`** (breaking). A cache is created empty; items go through append. |
 | `DELETE /caches/{id}` | Same contract; deletes the cache row without loading items; the DB cascade (`fk_cache_items_cache_id`) removes them |
+
+**Stored count (as built).** `itemCount` is a stored column `caches.item_count` (integer, not null, default 0), not a
+`count(*)` per read: a listing must never touch the item rows (S8). Migration `20261127120000_CacheItemCount` adds it and
+backfills it from the rows already there (`UPDATE caches c SET item_count = (SELECT count(*) FROM cache_items i WHERE
+i.cache_id = c.id)`). Append and remove move it by exactly what the batch added or removed, under the cache row lock;
+`PUT …/items` and model apply keep it in step the same way, so it cannot drift.
 
 Validation per item is today's (`CacheRules`): key 1–256 chars, no `:`; value a string ≤ 1,048,576 chars.
 An empty `items` / `keys` list → 400 *(my call: an empty batch is most likely a caller bug)*.
@@ -131,6 +137,11 @@ Request: `{ "items": [ { "key": "a", "value": "1" }, … ] }` (≤ 30 MB body).
       Two parameters at any batch size (a `VALUES` list hits Postgres's 65,535-parameter limit at ~32k rows); unchanged
       rows aren't rewritten. Binary `COPY` into a temp table + the same merge is the fallback if this is ever too slow.
    4. Commit, then send the refresh (§5.5).
+
+   **Slicing (as built).** Steps 2 and 3 run per slice of at most **5,000 rows** (`CacheItemsStore.SliceSize`), all slices
+   in the one transaction after the one stamp, so there is still one lock, one stamp, one count update and one report.
+   Why: one statement over a whole 50,000-item batch passes two `text[]` parameters of ~25 MB that Postgres holds in
+   memory at once, and the dev Postgres (256Mi limit) was OOM-killed by it during S2. Slices keep that bounded.
 3. Existing key → **overwritten, last write wins** (the user); resending a failed batch is safe.
 4. No new indexes — the primary key is all the upsert needs.
 
@@ -145,7 +156,8 @@ otherwise echo back as many keys as it sent)*.
 ### 5.3 Remove
 
 Request: `{ "keys": ["a", "b", …] }`. Key rules as for append. Same transaction shape: lock + stamp (404 if missing),
-`DELETE FROM cache_items WHERE cache_id = @id AND key = ANY(@keys) RETURNING key`, commit, refresh. A key not stored is
+`DELETE FROM cache_items WHERE cache_id = @id AND key = ANY(@keys) RETURNING key` (per slice of at most 5,000 keys, in the
+one transaction, as in §5.2), commit, refresh. A key not stored is
 not an error — it is reported; resending is safe. Repeats in the batch are collapsed and reported.
 
 Response 200: `{ "removed": 9800, "notFound": 190, "repeatedInBatch": 10, "notFoundKeys": […], "repeatedKeys": […], "keysTruncated": false }`.
@@ -162,6 +174,12 @@ Response 200: `{ "removed": 9800, "notFound": 190, "repeatedInBatch": 10, "notFo
   ordinal. `after` must compare in the same collation so the index is used. Clients must not assume ordinal order.
   (Today `CacheItems.ToDtos` sorts ordinal in memory; full reads that keep that are unaffected.)
 - `limit`: default 500, maximum 5,000 *(my call)*; out of range → 400. Missing cache → 404.
+- **Character budget (as built, final review I3).** A page also stops at **8,000,000** key + value characters
+  (`CacheRules.PageCharBudget`): rows are taken in key order while the running total stays within it, so a page of large
+  values holds fewer than `limit` rows and carries `next` (the last key returned). The first row is always returned, even
+  one alone over the budget, so paging always advances. The cut is chosen from `key` and `char_length(value)` first and
+  only the chosen rows' values are then read, so neither Postgres nor BaseApi holds `limit` × 1 MiB at once (500 values
+  of 1 MiB would be ~1 GB as UTF-16 in a 512Mi pod). Example: values of 1,048,576 chars with 3-char keys → 7 rows per page.
 
 ### 5.5 Redis refresh for append/remove
 
@@ -202,7 +220,7 @@ The start still writes every bound cache in full (the user). What changes (the u
 *(My call, from the user's 2026-10-17 ruling that Save is all-or-none.)* Item edits join `POST /model/apply` as new
 changes so a Save stays one transaction:
 
-- table `cacheItems`, ops `append` (row `{ cacheId, items: [{key, value}] }`) and `remove` (row `{ cacheId, keys: […] }`).
+- table `cache_items` (as built; the draft said `cacheItems`), ops `append` (row `{ cacheId, items: [{key, value}] }`) and `remove` (row `{ cacheId, keys: […] }`).
   `cacheId` may be a client id of a cache created earlier in the same batch (the existing `made` mapping).
 - Each runs the §5.2/§5.3 SQL inside the batch's transaction and savepoint; its report is returned in the change's result.
 - No `updatedAt` check on item ops (last write wins per key). A cache **row** update in the same Save is still checked,
@@ -220,10 +238,14 @@ changes so a Save stays one transaction:
   because someone else changed the cache's description. Item-only edits never trigger a stale refusal.
 - **Cache tab:** shows a page from `GET …/items` with the overlay applied (edited values shown, removed keys marked,
   new keys listed); next/previous paging; editing a cell, adding a key, deleting a key edit the overlay.
-- **Save:** `boardChanges` emits `cacheItems.append` / `cacheItems.remove` from the overlay (a new cache: `create` of the
+- **Save:** `boardChanges` emits `cache_items` `append` / `remove` from the overlay (a new cache: `create` of the
   row, then its `append`). Item ops follow the cache's own create/update in the batch. The append/remove report is shown
   in the Save output (counts).
 - **Effect:** saved item edits reach running workflows right away — new for Acto's Save.
+- **Local size refusal (as built, A5).** Before sending, Save measures the UTF-8 bytes of exactly the `/model/apply` body;
+  over **30,000,000 bytes** (`MAX_REQUEST_BYTES`, BaseApi's request limit) it refuses locally with an error line ("over
+  BaseApi's 30 MB request limit — save fewer item edits at a time"), sends nothing and keeps the edits. A browser without
+  `Expect: 100-continue` would otherwise see a connection reset rather than the 413.
 - `itemsToText`/`itemsFromText` and whole-dictionary text go away for cache items; `DictEditor` is reworked for paged
   rows or replaced.
 
