@@ -6,10 +6,58 @@ import { applyState, CACHE_ID, done, fail, onBoard, text } from './common';
 
 const DEFAULT_LIMIT = 500;
 const MAX_LIMIT = 5000;
+/** Most characters read_cache_items hands back: a page of large values is cut to this, so one call cannot flood the chat. */
+export const READ_TEXT_CAP = 100_000;
+
+type Item = { key: string; value: string };
+
+/**
+ * The answer's JSON, at most READ_TEXT_CAP characters. When the whole page does not fit, rows are cut from the end: `next`
+ * becomes the last included key (so the following call resumes right after it) and the note says the page was cut. A first
+ * row that alone does not fit is still returned, its value shortened (`value_truncated`); unsaved edits too many to fit are
+ * given as counts.
+ */
+export function cappedPage(itemCount: number, items: Item[], next: string | null, unsaved: { set: Record<string, string>; removed: string[] }): string {
+  const noteOf = (nx: string | null, cut: boolean) =>
+    `one page of ${itemCount} items${cut ? ` (cut to ${READ_TEXT_CAP} characters)` : ''}${nx === null ? ' (the last page)' : `: more follow, pass after=${JSON.stringify(nx)}`}; unsaved edits applied`;
+  const render = (rows: unknown[], nx: string | null, cut: boolean, u: unknown) =>
+    JSON.stringify({ item_count: itemCount, items: rows, next: nx, unsaved: u, note: noteOf(nx, cut) });
+
+  const whole = render(items, next, false, unsaved);
+  if (whole.length <= READ_TEXT_CAP) return whole;
+
+  let u: unknown = unsaved;
+  const emptyLen = (nx: string | null) => render([], nx, true, u).length;
+  if (emptyLen(items.at(-1)?.key ?? next) > READ_TEXT_CAP / 2) {
+    u = { set_count: Object.keys(unsaved.set).length, removed_count: unsaved.removed.length, note: 'too many unsaved edits to list here' };
+  }
+  // cut rows: the overhead is measured with the longest possible next (any included key), then rows are added while they fit
+  let n = 0;
+  let used = 0;
+  for (; n < items.length; n++) {
+    const add = JSON.stringify(items[n]).length + (n > 0 ? 1 : 0);
+    if (emptyLen(items[n]!.key) + used + add > READ_TEXT_CAP) break;
+    used += add;
+  }
+  if (n === 0 && items.length > 0) {
+    const first = items[0]!;
+    const room = READ_TEXT_CAP - render([{ key: first.key, value: '', value_truncated: true }], first.key, true, u).length;
+    // JSON escaping can lengthen the value: shorten until it fits
+    let take = Math.max(0, room);
+    let out = render([{ key: first.key, value: first.value.slice(0, take), value_truncated: true }], first.key, true, u);
+    while (out.length > READ_TEXT_CAP && take > 0) {
+      take = Math.floor(take * 0.9);
+      out = render([{ key: first.key, value: first.value.slice(0, take), value_truncated: true }], first.key, true, u);
+    }
+    return out;
+  }
+  const rows = items.slice(0, n);
+  return render(rows, n < items.length ? rows.at(-1)!.key : next, n < items.length, u);
+}
 
 const readCacheItems: ToolDef = {
   name: 'read_cache_items',
-  description: `Read ONE PAGE of a cache's stored items (BaseApi pages them: \`after\` is the \`next\` of the previous page, \`limit\` default ${DEFAULT_LIMIT}, at most ${MAX_LIMIT}), with this session's unsaved edits applied to it: an unsaved value replaces the stored one, a key marked removed is left out. The answer always says it is one page of item_count; \`unsaved\` lists every unsaved set and removed key of the whole cache (a set key may be on a later page, or new). A cache never saved has no stored items: only \`unsaved\` is given.`,
+  description: `Read ONE PAGE of a cache's stored items (BaseApi pages them: \`after\` is the \`next\` of the previous page, \`limit\` default ${DEFAULT_LIMIT}, at most ${MAX_LIMIT}), with this session's unsaved edits applied to it: an unsaved value replaces the stored one, a key marked removed is left out. The answer always says it is one page of item_count; \`unsaved\` lists every unsaved set and removed key of the whole cache (a set key may be on a later page, or new). A cache never saved has no stored items: only \`unsaved\` is given. The answer is at most ${READ_TEXT_CAP} characters: a page of large values is cut, \`next\` is then the last key given and the note says it was cut.`,
   parameters: {
     type: 'object',
     properties: { cache_id: CACHE_ID, after: { type: 'string', description: "The previous page's `next`; leave out for the first page." }, limit: { type: 'number' } },
@@ -32,8 +80,7 @@ const readCacheItems: ToolDef = {
     const items = (r.value.items ?? [])
       .filter((i): i is { key: string; value?: string | null } => typeof i.key === 'string' && !edits.removed.includes(i.key))
       .map((i) => ({ key: i.key, value: Object.hasOwn(edits.set, i.key) ? edits.set[i.key]! : i.value ?? '' }));
-    const note = `one page of ${row.itemCount} items${r.value.next === null ? ' (the last page)' : `: more follow, pass after=${JSON.stringify(r.value.next)}`}; unsaved edits applied`;
-    return done(true, JSON.stringify({ item_count: row.itemCount, items, next: r.value.next, unsaved: { set: edits.set, removed: edits.removed }, note }), `read items of ${row.name}`);
+    return done(true, cappedPage(row.itemCount, items, r.value.next ?? null, { set: edits.set, removed: edits.removed }), `read items of ${row.name}`);
   },
 };
 

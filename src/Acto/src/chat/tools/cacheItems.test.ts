@@ -21,6 +21,42 @@ describe('cache item tools', () => {
     expect(d.note).toMatch(/one page of 3/);
   });
 
+  it('read_cache_items cuts a page of large values to 100,000 characters, with next at the last key given', async () => {
+    const { ctx, api, store } = setup();
+    store.load({ ...store.state(), caches: { c1: { ...store.state().caches.c1!, itemCount: 40 } } });
+    const rows = Array.from({ length: 10 }, (_, i) => ({ key: `k${i}`, value: 'x'.repeat(30_000) }));
+    api.cacheItemsPage = vi.fn().mockResolvedValue(page(rows, 'k9'));
+    const o = done(await call(ctx, 'read_cache_items', { cache_id: 'c1' }));
+    expect(o.ok).toBe(true);
+    expect(o.result.length).toBeLessThanOrEqual(100_000);
+    const d = JSON.parse(o.result);
+    expect(d.items.map((i: { key: string }) => i.key)).toEqual(['k0', 'k1', 'k2']);
+    expect(d.next).toBe('k2');
+    expect(d.note).toMatch(/cut to 100000 characters/);
+    expect(d.note).toContain('after="k2"');
+  });
+
+  it('read_cache_items returns a single over-large row alone with its value shortened', async () => {
+    const { ctx, api } = setup();
+    api.cacheItemsPage = vi.fn().mockResolvedValue(page([{ key: 'big', value: 'y'.repeat(1_048_576) }, { key: 'small', value: '1' }], null));
+    const o = done(await call(ctx, 'read_cache_items', { cache_id: 'c1' }));
+    expect(o.result.length).toBeLessThanOrEqual(100_000);
+    const d = JSON.parse(o.result);
+    expect(d.items).toHaveLength(1);
+    expect(d.items[0].key).toBe('big');
+    expect(d.items[0].value_truncated).toBe(true);
+    expect(d.items[0].value.length).toBeGreaterThan(90_000);
+    expect(d.next).toBe('big');
+  });
+
+  it('read_cache_items leaves a page that fits untouched', async () => {
+    const { ctx, api } = setup();
+    api.cacheItemsPage = vi.fn().mockResolvedValue(page([{ key: 'a', value: '1' }], null));
+    const d = JSON.parse(done(await call(ctx, 'read_cache_items', { cache_id: 'c1' })).result);
+    expect(d.next).toBeNull();
+    expect(d.note).not.toMatch(/cut/);
+  });
+
   it('read_cache_items fails with the reason on a page error, and makes no call for a new cache', async () => {
     const { ctx, api, store } = setup();
     api.cacheItemsPage = vi.fn().mockResolvedValue({ ok: false, error: { kind: 'network', message: 'down' } });
