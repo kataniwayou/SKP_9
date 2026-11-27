@@ -5,11 +5,24 @@ export type PageRow = { key: string; value: string; stored: string | null; state
 
 const collator = new Intl.Collator('en-US');
 
-/** Stored rows of one page merged with the unsaved edits that fall on it, sorted and cut to size. */
+/**
+ * The key range a page owns: (lower, upper]. `lower` is the key just before the page's first stored row, `null` when the page
+ * starts at the cache's start; `inclusive` when that key may itself be on the page (a `from` read). The upper end is the last
+ * stored row of the page, or open when the read reached the cache's end (`atEnd`, the answer's `next` was null).
+ * Where `lower` comes from, per read: first page → null; `after: k` → { k, exclusive }; `from: t` → { t, inclusive };
+ * `before: k` read with limit+1 → the extra earliest row, exclusive (not shown), or null when fewer than limit+1 came back.
+ */
+export type PageBounds = { lower: { key: string; inclusive: boolean } | null; atEnd: boolean };
+
+/**
+ * Stored rows of one page merged with the unsaved added keys that fall in its range (see `PageBounds`), cut to `size`.
+ * Every added key falls in exactly one page's range, so it is never lost; when a cut hides rows, the next page should be
+ * read after the last visible row (stored or added) so the rest of the range carries over.
+ */
 export function pageView(
   stored: { key: string; value: string }[],
   edits: ItemEdits,
-  edges: { atStart: boolean; atEnd: boolean },
+  bounds: PageBounds,
   size: number,
 ): { rows: PageRow[]; cut: boolean } {
   const removed = new Set(edits.removed);
@@ -21,13 +34,13 @@ export function pageView(
     return { key: s.key, value: s.value, stored: s.value };
   });
   // Stored rows keep the server's order; only unsaved added keys are placed with the collator.
-  const first = stored.length ? stored[0].key : undefined;
   const last = stored.length ? stored[stored.length - 1].key : undefined;
+  const { lower, atEnd } = bounds;
   const added: PageRow[] = [];
   for (const key of Object.keys(edits.set)) {
     if (storedKeys.has(key) || removed.has(key)) continue;
-    const lowOk = first === undefined ? edges.atStart : edges.atStart || collator.compare(key, first) > 0;
-    const highOk = last === undefined ? edges.atEnd : edges.atEnd || collator.compare(key, last) < 0;
+    const lowOk = lower === null || (lower.inclusive ? collator.compare(key, lower.key) >= 0 : collator.compare(key, lower.key) > 0);
+    const highOk = atEnd || (last !== undefined && collator.compare(key, last) <= 0);
     if (lowOk && highOk) added.push({ key, value: edits.set[key], stored: null, state: 'added' });
   }
   added.sort((x, y) => collator.compare(x.key, y.key));

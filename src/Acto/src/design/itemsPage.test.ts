@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { pageView, pageSummary, summaryText, cursors } from './itemsPage';
 
 const st = (...ks: string[]) => ks.map((k, i) => ({ key: k, value: String(i + 1) }));
-const none = { atStart: false, atEnd: false };
+// a middle page: after a key before 'a', not at the end
+const none = { lower: { key: '0', inclusive: false }, atEnd: false };
+const start = { lower: null, atEnd: false };
+const all = { lower: null, atEnd: true };
 
 describe('pageView', () => {
   it('marksModifiedAddedDeleted', () => {
@@ -20,15 +23,15 @@ describe('pageView', () => {
     expect(rows[1].value).toBe('2');
   });
   it('addedOutsideThePageIsNotShown', () => {
-    const { rows } = pageView(st('m', 'n'), { set: { a: '1', z: '2' }, removed: [] }, none, 10);
+    const { rows } = pageView(st('m', 'n'), { set: { a: '1', z: '2' }, removed: [] }, { lower: { key: 'b', inclusive: false }, atEnd: false }, 10);
     expect(rows.map((r) => r.key)).toEqual(['m', 'n']);
   });
   it('addedBeforeTheFirstPageIsShownAtStart', () => {
-    const { rows } = pageView(st('m', 'n'), { set: { a: '1', z: '2' }, removed: [] }, { atStart: true, atEnd: false }, 10);
+    const { rows } = pageView(st('m', 'n'), { set: { a: '1', z: '2' }, removed: [] }, start, 10);
     expect(rows.map((r) => r.key)).toEqual(['a', 'm', 'n']);
   });
   it('addedAfterTheLastPageIsShownAtEnd', () => {
-    const { rows } = pageView(st('m', 'n'), { set: { a: '1', z: '2' }, removed: [] }, { atStart: false, atEnd: true }, 10);
+    const { rows } = pageView(st('m', 'n'), { set: { a: '1', z: '2' }, removed: [] }, { lower: { key: 'b', inclusive: false }, atEnd: true }, 10);
     expect(rows.map((r) => r.key)).toEqual(['m', 'n', 'z']);
   });
   it('cutsToSize', () => {
@@ -37,7 +40,7 @@ describe('pageView', () => {
     expect(cut).toBe(true);
   });
   it('cursorsWhenNoStoredRowIsVisible', () => {
-    const { rows } = pageView([], { set: { a: '1', b: '2' }, removed: [] }, { atStart: true, atEnd: true }, 10);
+    const { rows } = pageView([], { set: { a: '1', b: '2' }, removed: [] }, all, 10);
     expect(rows.map((r) => [r.key, r.state])).toEqual([['a', 'added'], ['b', 'added']]);
     expect(cursors(rows)).toEqual({ after: 'b', before: 'a' });
     expect(cursors([])).toEqual({ after: null, before: null });
@@ -51,7 +54,7 @@ describe('server order', () => {
     expect(cursors(rows)).toEqual({ after: 'a-b', before: 'ab' });
   });
   it('cursorsUseStoredKeysWhenVisible', () => {
-    const { rows } = pageView(st('m', 'n'), { set: { a: '1', z: '2' }, removed: [] }, { atStart: true, atEnd: true }, 10);
+    const { rows } = pageView(st('m', 'n'), { set: { a: '1', z: '2' }, removed: [] }, all, 10);
     expect(rows.map((r) => r.key)).toEqual(['a', 'm', 'n', 'z']);
     expect(cursors(rows)).toEqual({ after: 'n', before: 'm' });
   });
@@ -61,7 +64,7 @@ describe('server order', () => {
     expect(rows[1]).toMatchObject({ key: 'b', state: 'modified', stored: '2', value: 'new' });
   });
   it('cursorsAfterACut', () => {
-    const { rows, cut } = pageView(st('b', 'd', 'f'), { set: { a: '1', c: '2' }, removed: [] }, { atStart: true, atEnd: false }, 3);
+    const { rows, cut } = pageView(st('b', 'd', 'f'), { set: { a: '1', c: '2' }, removed: [] }, start, 3);
     expect(cut).toBe(true);
     expect(rows.map((r) => r.key)).toEqual(['a', 'b', 'c']);
     expect(cursors(rows)).toEqual({ after: 'b', before: 'b' });
@@ -77,5 +80,25 @@ describe('summary', () => {
   it('pageSummary counts', () => {
     const { rows } = pageView(st('a', 'b', 'c'), { set: { b: '9', bb: 'x' }, removed: ['c'] }, none, 10);
     expect(pageSummary(rows)).toEqual({ modified: 1, added: 1, deleted: 1 });
+  });
+});
+
+describe('bounds', () => {
+  it('anAddedKeyIsShownAfterAnExclusiveLowerOnly', () => {
+    const e = { set: { c: '1', cc: '2' }, removed: [] };
+    expect(pageView(st('d', 'e'), e, { lower: { key: 'c', inclusive: false }, atEnd: false }, 10).rows.map((r) => r.key)).toEqual(['cc', 'd', 'e']);
+    expect(pageView(st('d', 'e'), e, { lower: { key: 'c', inclusive: true }, atEnd: false }, 10).rows.map((r) => r.key)).toEqual(['c', 'cc', 'd', 'e']);
+  });
+  it('anAddedKeyBetweenPagesBelongsToTheLaterOne', () => {
+    const e = { set: { dd: '1' }, removed: [] };
+    expect(pageView(st('c', 'd'), e, start, 10).rows.map((r) => r.key)).toEqual(['c', 'd']);
+    expect(pageView(st('e', 'f'), e, { lower: { key: 'd', inclusive: false }, atEnd: false }, 10).rows.map((r) => r.key)).toEqual(['dd', 'e', 'f']);
+  });
+  it('anEmptyPageAtTheEndShowsAddedKeysPastItsLower', () => {
+    const { rows } = pageView([], { set: { a: '1', l: '2' }, removed: [] }, { lower: { key: 'j', inclusive: false }, atEnd: true }, 10);
+    expect(rows.map((r) => [r.key, r.state])).toEqual([['l', 'added']]);
+  });
+  it('anEmptyPageNotAtTheEndShowsNothing', () => {
+    expect(pageView([], { set: { l: '2' }, removed: [] }, { lower: { key: 'j', inclusive: false }, atEnd: false }, 10).rows).toEqual([]);
   });
 });

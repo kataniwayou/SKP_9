@@ -114,7 +114,7 @@ describe('CacheItemsTable', () => {
     await screen.findByLabelText('Value e');
     fireEvent.click(screen.getByRole('button', { name: 'Prev' }));
     expect(await screen.findByLabelText('Value a')).toBeInTheDocument();
-    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { before: 'e' }, 4);
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { before: 'e' }, 5); // one more than shown: the lower bound
     expect(screen.getByRole('button', { name: 'Prev' })).toBeDisabled();
   });
 
@@ -144,6 +144,79 @@ describe('CacheItemsTable', () => {
     expect(screen.queryByRole('table', { name: 'Unsaved items' })).toBeNull();
     // the cut row (d) is still reachable: Next reads after the last visible stored key
     expect(screen.getByText('rows 1–3 · page 1 of 3')).toBeInTheDocument();
+  });
+
+  it('anAddedKeyPastTheLastStoredKeyIsReachedByNext', async () => {
+    const { api, cacheItemsPage } = over(TEN.slice(0, 8));
+    setup(api, { cache: { itemCount: 8, itemEdits: { set: { zzz: 'z' }, removed: [] } } });
+    await screen.findByLabelText('Value a');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByLabelText('Value e');
+    expect(keysShown()).toEqual(['e', 'f', 'g', 'h']); // zzz is cut: Next stays enabled
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByLabelText('Value zzz')).toHaveValue('z');
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { after: 'h' }, 4);
+    expect(keysShown()).toEqual(['zzz']);
+    expect(status()).toHaveTextContent('on this page: 1 added');
+    expect(screen.getByText('page 3 of 3')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Prev' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+  });
+
+  it('prevFromAnEmptyPageReadsBeforeTheAnchor', async () => {
+    const { api, cacheItemsPage } = over(TEN.slice(0, 8));
+    setup(api, { cache: { itemCount: 8, itemEdits: { set: { zzz: 'z' }, removed: [] } } });
+    await screen.findByLabelText('Value a');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByLabelText('Value e');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByLabelText('Value zzz');
+    fireEvent.click(screen.getByRole('button', { name: 'Prev' }));
+    expect(await screen.findByLabelText('Value d')).toBeInTheDocument();
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { before: 'h' }, 5);
+    expect(keysShown()).toEqual(['d', 'e', 'f', 'g']);
+    expect(screen.getByText('rows 4–7 · page 1 of 2')).toBeInTheDocument();
+  });
+
+  it('anAddedKeyBetweenPagesShowsOnTheEarlierPage', async () => {
+    const { api } = over(TEN);
+    setup(api, { cache: { itemEdits: { set: { dd: 'n' }, removed: [] } } });
+    await screen.findByLabelText('Value a');
+    const page1 = keysShown();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByLabelText('Value e');
+    const page2 = keysShown();
+    // on exactly one of the two pages: page 1 is full, so it is the first row of page 2
+    expect([page1.includes('dd'), page2.includes('dd')].filter(Boolean)).toHaveLength(1);
+    expect(page2).toEqual(['dd', 'e', 'f', 'g']);
+    expect(status()).toHaveTextContent('on this page: 1 added');
+  });
+
+  it('aCutAddedRowCarriesToTheNextPage', async () => {
+    const { api, cacheItemsPage } = over(TEN);
+    setup(api, { cache: { itemEdits: { set: { cc: 'n' }, removed: [] } } });
+    await screen.findByLabelText('Value a');
+    expect(keysShown()).toEqual(['a', 'b', 'c', 'cc']); // d is cut
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByLabelText('Value d')).toBeInTheDocument();
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { after: 'cc' }, 4);
+    expect(keysShown()).toEqual(['d', 'e', 'f', 'g']);
+  });
+
+  it('beforeReadsUseTheExtraRowAsLowerBound', async () => {
+    const { api, cacheItemsPage } = over(TEN);
+    setup(api);
+    await screen.findByLabelText('Value a');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByLabelText('Value e');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByLabelText('Value i');
+    fireEvent.click(screen.getByRole('button', { name: 'Prev' }));
+    expect(await screen.findByLabelText('Value e')).toBeInTheDocument();
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { before: 'i' }, 5);
+    expect(keysShown()).toEqual(['e', 'f', 'g', 'h']); // d came back as the bound and is not shown
+    expect(screen.getByText('rows 5–8 · page 2 of 3')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Prev' })).toBeEnabled();
   });
 
   it('jumpReadsFromTheTypedText', async () => {

@@ -4,13 +4,36 @@ import { describeError } from '../api/describeError';
 import type { CacheItemsPage, ItemsAt } from '../api/types';
 import type { CacheRow } from '../design/board';
 import { removeCacheItem, revertCacheItem, setCacheItem } from '../design/edits';
-import { cursors, pageSummary, pageView, summaryText, type PageRow } from '../design/itemsPage';
+import { cursors, pageSummary, pageView, summaryText, type PageBounds, type PageRow } from '../design/itemsPage';
 import type { Edit } from './tabs/shared';
 import { useFitRows } from './useFitRows';
 
 /** One read: where the page starts, how many rows, and the typed text when it is a jump (the note comes from its answer). */
 type Req = { at: ItemsAt; limit: number; jump?: string };
 type Status = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ok' };
+/** A page as shown: its stored rows, how many keys sort before them, whether more follow, and the key range it owns. */
+type Loaded = { stored: { key: string; value: string }[]; index: number; next: string | null; lower: PageBounds['lower'] };
+
+/**
+ * The answer to `at` as a page that owns (lower, last stored row]. A `before` read asks for one row more than it shows: that
+ * earliest row is the exclusive lower bound (fewer came back: the page starts at the cache's start).
+ */
+function loadedOf(at: ItemsAt, limit: number, p: CacheItemsPage): Loaded {
+  let stored = (p.items ?? []).map((it) => ({ key: it.key ?? '', value: it.value ?? '' }));
+  let index = p.index ?? 0;
+  let lower: PageBounds['lower'] = null;
+  if (at && 'after' in at) lower = { key: at.after, inclusive: false };
+  else if (at && 'from' in at) {
+    // nothing at or after the text: the answer is the last page, which owns from its first row on
+    if (p.fromMatch === 'none') lower = stored.length ? { key: stored[0]!.key, inclusive: true } : null;
+    else lower = { key: at.from, inclusive: true };
+  } else if (at && 'before' in at && stored.length > limit) {
+    lower = { key: stored[0]!.key, inclusive: false };
+    stored = stored.slice(1);
+    index += 1;
+  }
+  return { stored, index, next: p.next ?? null, lower };
+}
 
 const STRUCK = { textDecoration: 'line-through', opacity: 0.6 } as const;
 const n = (x: number) => x.toLocaleString('en-US');
@@ -52,7 +75,7 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
   const [stamp, setStamp] = useState(updatedAt);
   const [tries, setTries] = useState(0);
   const [status, setStatus] = useState<Status>({ state: 'loading' });
-  const [page, setPage] = useState<CacheItemsPage | null>(null);
+  const [page, setPage] = useState<Loaded | null>(null);
   const [jumpText, setJumpText] = useState('');
   const [note, setNote] = useState<string | null>(null);
   const [newKey, setNewKey] = useState('');
@@ -62,27 +85,27 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
   const reads = !isNew && api !== undefined;
 
   // what is on screen: the stored page with the unsaved edits that fall on it, cut to the fitted size
-  const stored = (page?.items ?? []).map((it) => ({ key: it.key ?? '', value: it.value ?? '' }));
   const view = reads
-    ? pageView(stored, itemEdits, { atStart: (page?.index ?? 0) === 0, atEnd: page ? page.next == null : true }, size)
-    : pageView([], itemEdits, { atStart: true, atEnd: true }, Number.MAX_SAFE_INTEGER);
+    ? pageView(page?.stored ?? [], itemEdits, { lower: page?.lower ?? null, atEnd: page ? page.next === null : true }, size)
+    : pageView([], itemEdits, { lower: null, atEnd: true }, Number.MAX_SAFE_INTEGER);
   const rows: PageRow[] = view.rows;
-  const edges = cursors(rows);
 
   // a Save that read the board again: the stored items may have changed under the cursors, so start from the first page
   if (stamp !== updatedAt) { setStamp(updatedAt); setReq({ at: null, limit: size }); setNote(null); }
   // taller: one read from the first visible row with the new size (shorter: rows drop off the bottom, no read)
-  else if (reads && size > req.limit) setReq({ at: edges.before !== null && page ? { from: edges.before } : req.at, limit: size });
+  else if (reads && size > req.limit) setReq({ at: page && rows.length ? { from: rows[0]!.key } : req.at, limit: size });
 
   useEffect(() => {
     if (!reads) return;
     const mine = ++seq.current;
     setStatus({ state: 'loading' });
     const drop = () => mine !== seq.current;
-    api.cacheItemsPage(id, req.at, req.limit).then((r) => {
+    const { at, limit } = req;
+    // a before read takes one row more: the earliest is the page's lower bound, not shown
+    api.cacheItemsPage(id, at, at && 'before' in at ? limit + 1 : limit).then((r) => {
       if (drop()) return;
       if (!r.ok) { setStatus({ state: 'error', message: describeError(r.error) }); return; }
-      setPage(r.value);
+      setPage(loadedOf(at, limit, r.value));
       setStatus({ state: 'ok' });
       if (req.jump !== undefined) setNote(noteOf(req.jump, r.value.fromMatch));
     }, (e: unknown) => {
@@ -97,8 +120,13 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
   const jump = () => { if (jumpText !== '') go({ from: jumpText }, jumpText); };
   const jumpKeys = (e: KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { e.preventDefault(); jump(); } };
   const clearJump = () => { setJumpText(''); go(null); };
-  const next = () => { const after = edges.after ?? page?.next; if (after) go({ after }); };
-  const prev = () => { const before = edges.before ?? page?.prev; if (before) go({ before }); };
+  // after a cut, the next page starts after the last visible row (stored or added), so the rest of this range carries over
+  const next = () => {
+    const after = view.cut ? rows[rows.length - 1]?.key : cursors(rows).after ?? page?.next;
+    if (after) go({ after });
+  };
+  // an empty page (Next past the last stored key) goes back from its lower anchor
+  const prev = () => { const before = rows.find((r) => r.stored !== null)?.key ?? page?.lower?.key; if (before) go({ before }); };
 
   const setItem = (key: string, value: string): boolean => {
     let why: string | null = null;
@@ -121,8 +149,11 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
   const anyChange = summary.modified + summary.added + summary.deleted > 0;
   const index = page?.index ?? 0;
   const storedShown = rows.filter((r) => r.stored !== null).length;
-  const position = storedShown === 0 ? 'no items'
-    : `rows ${n(index + 1)}–${n(index + storedShown)} · page ${n(Math.floor(index / size) + 1)} of ${n(Math.max(1, Math.ceil(itemCount / size)))}`;
+  const pageNo = Math.floor(index / size) + 1;
+  const pages = `page ${n(pageNo)} of ${n(Math.max(1, Math.ceil(itemCount / size), pageNo))}`;
+  const position = rows.length === 0 ? 'no items'
+    : storedShown === 0 ? pages
+      : `rows ${n(index + 1)}–${n(index + storedShown)} · ${pages}`;
   const showTable = !reads || status.state === 'ok' || (status.state === 'loading' && page !== null);
 
   return (
@@ -179,7 +210,7 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
       </div>
       {reads && (
         <div className="dict-nav">
-          <button type="button" className="pbtn" aria-label="Prev" disabled={!page || page.prev == null} onClick={prev}>‹ Prev</button>
+          <button type="button" className="pbtn" aria-label="Prev" disabled={!page || page.index === 0} onClick={prev}>‹ Prev</button>
           <button type="button" className="pbtn" aria-label="Next" disabled={!page || (page.next == null && !view.cut)} onClick={next}>Next ›</button>
           <span className="dict-pos">{page ? position : ''}</span>
         </div>
