@@ -20,8 +20,10 @@ export const collator = new Intl.Collator('en-US');
  *   with `upperAfter`, so Next reads `after` it and that page's lower is that key with `lowerAfter`. The one known edge:
  *   Prev back across that boundary (`before` the key) misses that single row. Only reachable with >8M characters a page.
  * - a `from` past every stored key (`fromMatch: 'none'`): BaseApi answers the last page instead. For a jump the page is
- *   the last `limit` rows, lower = its first row, upper null; for Next (from an added key past the last stored key) it
+ *   the last `limit` rows, lower = its first row (null when that is the cache's first key), upper null; for Next (from an added key past the last stored key) it
  *   has no stored rows, only the added keys >= from.
+ * - a jump (`from K` typed) that lands at index 0 owns the cache's start: lower null, so Prev never opens an empty page.
+ * - a read never asks for more than READ_MAX (5000) rows: a 5000-row page has no extra row and ends like a budget cut.
  * - back (`before L`, Prev): the extra earliest row is not shown (index + 1). lower = the first shown row, or null when
  *   BaseApi's index says it is the cache's first key; upper = L.
  *
@@ -85,8 +87,15 @@ export function readAt(r: PageRead): { after: string } | { from: string } | { be
   return r.after ? { after: r.from } : { from: r.from };
 }
 
-/** How many rows to ask for: one more than the page shows (the forward page's upper, or the back page's start check). */
-export const readLimit = (size: number) => size + 1;
+/** The most rows BaseApi gives one read (its PageMax; a larger limit is a 400). */
+export const READ_MAX = 5000;
+
+/**
+ * How many rows to ask for: one more than the page shows (the forward page's upper, or the back page's start check), at
+ * most READ_MAX. A 5000-row page gets no extra row: a forward read of exactly `limit` rows with `next` set takes the
+ * budget-short path (upper = its last key, `upperAfter`), and a back read decides its start by BaseApi's index alone.
+ */
+export const readLimit = (size: number) => Math.min(size + 1, READ_MAX);
 
 /** What a read answered, before the unsaved edits: the stored rows to show and the range they own (see the model above). */
 export type PageWindow = {
@@ -122,13 +131,15 @@ export function windowOf(
   if (answer.fromMatch === 'none') {
     // past every key: BaseApi answered the last rows; show the last `limit` of them, which own from their first row on
     if (items.length > limit) { index += items.length - limit; items = items.slice(items.length - limit); }
-    return { stored: items, lower: items.length ? items[0].key : null, lowerAfter: false, upper: null, upperAfter: false, index, limit, cut: 'tail' };
+    return { stored: items, lower: items.length && index > 0 ? items[0].key : null, lowerAfter: false, upper: null, upperAfter: false, index, limit, cut: 'tail' };
   }
   let upper: string | null = null;
   let upperAfter = false;
   if (items.length > limit) { upper = items[limit].key; items = items.slice(0, limit); }
   else if (answer.next != null && items.length) { upper = items[items.length - 1].key; upperAfter = true; }
-  return { stored: items, lower: r.from, lowerAfter: r.after === true, upper, upperAfter, index, limit, cut: 'tail' };
+  // a jump that lands on the cache's first key is the first page: nothing before it for Prev
+  const lower = r.jump && index === 0 ? null : r.from;
+  return { stored: items, lower, lowerAfter: lower !== null && r.after === true, upper, upperAfter, index, limit, cut: 'tail' };
 }
 
 /** A page as shown: its rows at the fitted size and the range they own (Next reads from `upper`, Prev before `lower`). */

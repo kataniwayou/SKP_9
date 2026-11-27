@@ -151,6 +151,49 @@ describe('windows and tiling', () => {
     expect(backward).toEqual(forward);
   });
 
+  it('aReadNeverAsksBaseApiForMoreThan5000Rows', () => {
+    expect(readLimit(4999)).toBe(5000);
+    expect(readLimit(5000)).toBe(5000);
+    // exactly `limit` rows with next set: the page ends after its last row (as a budget cut does), Next reads after it
+    const items = Array.from({ length: 5000 }, (_, i) => ({ key: `k${String(i).padStart(5, '0')}`, value: '' }));
+    const w = windowOf({ dir: 'forward', from: null }, 5000, { items, index: 0, next: items[4999].key });
+    expect(w).toMatchObject({ upper: 'k04999', upperAfter: true });
+    expect(w.stored).toHaveLength(5000);
+  });
+
+  it('aWalkAtThe5000PageSizeShowsEveryKeyOnceBothWays', () => {
+    const all = Array.from({ length: 12_003 }, (_, i) => `k${String(i).padStart(5, '0')}`);
+    const edits = { set: { k00000a: 'x', k09999a: 'y', zz: 'z' }, removed: [] };
+    const size = 5000;
+    const visit = (read: PageRead) => {
+      const limit = readLimit(size);
+      expect(limit).toBeLessThanOrEqual(5000);
+      return shownPage(windowOf(read, size, serve(all, readAt(read), limit)), edits, size);
+    };
+    let p = visit({ dir: 'forward', from: null });
+    const forward: string[][] = [keys(p.rows)];
+    while (p.upper !== null && forward.length < 20) { p = visit({ dir: 'forward', from: p.upper, after: p.upperAfter }); forward.push(keys(p.rows)); }
+    const expected = [...all, ...Object.keys(edits.set)].sort();
+    expect(forward.flat()).toEqual(expected);
+    const backward: string[][] = [keys(p.rows)];
+    while (p.lower !== null && backward.length < 20) { p = visit({ dir: 'back', before: p.lower }); backward.unshift(keys(p.rows)); }
+    expect(new Set(backward.flat()).size).toBe(backward.flat().length);
+  });
+
+  it('aJumpThatLandsOnTheFirstKeyHasNoPrev', () => {
+    const all = ['a', 'b', 'c', 'd', 'e'];
+    const exact = windowOf({ dir: 'forward', from: 'a', jump: true }, 3, serve(all, { from: 'a' }, 4));
+    expect(exact).toMatchObject({ lower: null, index: 0, upper: 'd' });
+    const later = windowOf({ dir: 'forward', from: '0', jump: true }, 3, serve(all, { from: '0' }, 4));
+    expect(later).toMatchObject({ lower: null, index: 0 });
+    // past every key of a cache smaller than one page: the last page is the whole cache
+    const none = windowOf({ dir: 'forward', from: 'z', jump: true }, 10, serve(all, { from: 'z' }, 11));
+    expect(none).toMatchObject({ lower: null, index: 0, upper: null });
+    // not a jump (Next from an added key before every stored key): lower stays the key, Prev reaches the rows before it
+    const next = windowOf({ dir: 'forward', from: '0' }, 3, serve(all, { from: '0' }, 4));
+    expect(next).toMatchObject({ lower: '0', index: 0 });
+  });
+
   it('aBudgetCutWalkStillShowsEveryKeyOnceForward', () => {
     const all = 'bdfhjlnprt'.split('');
     const edits = { set: { a: '1', e: '2', ee: '3', u: '4' }, removed: [] };
