@@ -268,8 +268,9 @@ test('A5: a Save over 30 MB is refused before anything is sent: a clear error li
   // 31 items of 1,000,000 characters (the value limit is 1,048,576): a request body of about 31 MB
   const big = 'x'.repeat(1_000_000);
   for (let i = 0; i < 31; i++) await addItem(page, `big-${String(i).padStart(2, '0')}`, big);
-  // the page shows as many as fit, and its summary counts those only (the Save count is the board's)
-  await expect(itemsSummary(page)).toHaveText(/^on this page: \d+ added$/);
+  // the page shows as many as fit, and its summary counts those only (the Save count is the board's: the one cache)
+  await addedOnScreen(page);
+  await expect(saveButton(page)).toHaveText('Save · 1');
   await expect(inspector(page).getByText('Items · 1 stored')).toBeVisible();
 
   const applies: string[] = [];
@@ -287,8 +288,9 @@ test('A5: a Save over 30 MB is refused before anything is sent: a clear error li
   // nothing applied; the edits are on the board and Save is still usable
   expect((await getJson<Row>(`/caches/${cache}`)).itemCount).toBe(1);
   expect((await itemsPage(cache, undefined, 5)).items.map((i) => i.key)).toEqual(['a']);
-  await expect(itemsSummary(page)).toHaveText(/^on this page: \d+ added$/);
+  await addedOnScreen(page);
   await expect(storedValue(page, 'big-00')).toBeVisible();
+  await expect(saveButton(page)).toHaveText('Save · 1');
   await expect(saveButton(page)).toBeEnabled();
   expect(await unsavedCount(page)).toBeGreaterThanOrEqual(1);
 
@@ -299,6 +301,13 @@ test('A5: a Save over 30 MB is refused before anything is sent: a clear error li
   note('A5 after a reload the Save button says', await saveButton(page).innerText());
 });
 
+/** The summary's added count equals the added (green) rows on screen, and more than one of the 31 adds is on screen. */
+async function addedOnScreen(page: Page) {
+  await expect(itemsSummary(page)).toHaveText(/^on this page: \d+ added$/);
+  const said = Number(/(\d+) added/.exec(await itemsSummary(page).innerText())![1]);
+  expect(said, 'the summary counts more than one add').toBeGreaterThan(1);
+  expect(await itemRows(page).and(page.locator('tr.add')).count(), 'added rows on screen = the summary').toBe(said);
+}
 const clearOut = (page: Page) => out(page).getByRole('button', { name: 'Clear all' }).click();
 
 // ---- B: fit-to-height pages, jump to key, per-page summary (2026-11-27) ---------------------------------------------------------

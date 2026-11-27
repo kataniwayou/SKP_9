@@ -80,10 +80,16 @@ H1-H2 ran on a cache `fitpage-1m-test` made over HTTP and deleted afterwards; B1
 | B2 | Jump `SKP Big Artist 05` | first row `SKP Big Artist 0500000` 450 ms after Go, one read `?from=SKP Big Artist 05&limit=6`; note `no key "SKP Big Artist 05" — showing from the next key`; position `rows 500,000–500,004 · page 100,000 of 200,000` (the key is the 500,000th, index 499,999: page floor(499,999 / 5) + 1); an exact key has no note; past the end the last page with its note, Next disabled; Clear jump goes back to page 1 | PASS |
 | B3 | Edit a row at 500,000, Next, Prev | `on this page: 1 modified`; after Next `no unsaved changes on this page` (Save · 1 kept); after Prev the edit and its summary are back; Next 357 ms, Prev 183 ms (in the browser); nothing saved | PASS |
 | A1/A2 | The 1M x 500-character cache on the new list | board +12 % (508 / 567 ms), 0 item reads; 5 rows a page at 900 px; first page 128 ms, Next 120 / 68 ms; keys, values and `rows a–b · page n of 200,000` checked, Prev back to page 1 | PASS (run alone) |
-| A3 | Start on the 1M x 500-character cache | not run: needs the raised limits of Findings 1; skipped unless `SKP_BIG_START=1` | NOT RUN |
+| A3 | Edits across 3 pages, Undo, Save, on a running workflow | Rewritten for the new list (measured page size, per-page summaries on each page, an added `…-new` key that sorts into page 3, Undo of the add, Prev/Prev back to the earlier edits) but NOT run: its Start needs the raised limits of Findings 1, so it is skipped unless `SKP_BIG_START=1`. Its new assertions are untested | NOT RUN |
 | A4 | Stale Save, then Take stored | `Take stored · 1`; the item edit kept (`on this page: 1 modified`), the next Save stores it | PASS (run alone) |
-| A5 | Save over 30 MB | refused before sending, as before; the summary counts the added rows on screen (`on this page: N added`) | PASS |
+| A5 | Save over 30 MB | refused before sending, as before; the summary's `on this page: N added` equals the added rows on screen and N > 1, and the board's Save count is `Save · 1` (the one cache) with 31 items added, before and after the refusal | PASS |
 
-Run notes: with A1-A5 in one run, BaseApi (512Mi) was OOM-killed while A4 built its 1M x 500-character cache right after A1's (about 500 MB of
-values each; see Findings 1). In that run A1's first page took 2,048 ms (over its 2 s threshold); run alone it took 128 ms. Run one at a time, A1 and A4
-pass. The chain workflow stayed live through that restart.
+Run notes:
+
+- **BaseApi OOM.** Dev BaseApi (512Mi) was OOM-killed (exit 137, 11:27:12Z) when A1 and A4 ran back to back in one run: A4 builds 1,000,000 items of
+  500 characters right after A1's (about 500 MB of values each). A4 then failed with `fetch failed`. Whether this is pre-existing or the new read path
+  (`from`/`before`/`index`) adds memory pressure is **UNDETERMINED**: no run of the previous BaseApi image was made. In that same run A1's first page took
+  2,048 ms (over its 2 s limit); A1 run alone passes (first page 128 ms), and so does A4 alone. The chain workflow stayed live through the restart.
+- **Known pre-existing failure:** `13-schemas.spec.ts` "9 · a dragged card stays lifted" fails in the slowed, headed `npm run e2e:regression`
+  ("the step lifted": 0 frames). It fails identically with `src/Acto/src` checked out at `a2872bc0` (before this change's UI) and passes headless
+  (`npx playwright test e2e/regression/13-schemas.spec.ts -g "dragged card stays lifted"`). Regression run 2026-11-27: 46 passed, 11 skipped, that 1 failed.
