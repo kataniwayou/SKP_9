@@ -424,14 +424,106 @@ describe('CacheItemsTable', () => {
     expect(cacheItemsPage).toHaveBeenCalledTimes(2);
   });
 
-  it('a new stored stamp reads the first page again', async () => {
+  it('a new stored stamp reads the page on screen again', async () => {
     const { api, cacheItemsPage } = over(TEN);
     const { store } = setup(api);
     await screen.findByLabelText('Value a');
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByLabelText('Value e');
+    await press('Next');
+    await press('Next');
+    expect(keysShown()).toEqual(['i', 'j']);
     act(() => store.load({ ...store.state(), caches: { c1: { ...store.state().caches.c1!, updatedAt: '2026-12-01T00:00:00Z' } } }));
-    await waitFor(() => expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', null, 5));
-    expect(await screen.findByLabelText('Value a')).toBeInTheDocument();
+    await waitFor(() => expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { from: 'i' }, 5));
+    await act(async () => {});
+    expect(keysShown()).toEqual(['i', 'j']);
+    expect(screen.getByText('rows 9–10 · page 3 of 3')).toBeInTheDocument();
+  });
+
+  it('a new stored stamp on the first page reads the first page', async () => {
+    const { api, cacheItemsPage } = over(TEN);
+    const { store } = setup(api);
+    await screen.findByLabelText('Value a');
+    act(() => store.load({ ...store.state(), caches: { c1: { ...store.state().caches.c1!, updatedAt: '2026-12-01T00:00:00Z' } } }));
+    await waitFor(() => expect(cacheItemsPage).toHaveBeenCalledTimes(2));
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', null, 5);
+  });
+
+  it('growing while Next is in flight grows the Next read, not the old page', async () => {
+    const waits: ((v?: unknown) => void)[] = [];
+    const { api, cacheItemsPage } = apiOf((at, limit) => new Promise((res) => { waits.push(() => res({ ok: true, value: serve(TEN, at, limit) })); }));
+    const { rerender } = setup(api);
+    await waitFor(() => expect(cacheItemsPage).toHaveBeenCalledTimes(1));
+    await act(async () => { waits.shift()!(); });
+    expect(keysShown()).toEqual(['a', 'b', 'c', 'd']);
+    fireEvent.click(button('Next'));
+    await waitFor(() => expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { from: 'e' }, 5));
+    fit.rows = 6;
+    rerender();
+    await waitFor(() => expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { from: 'e' }, 7));
+    expect(cacheItemsPage).not.toHaveBeenCalledWith('c1', null, 7);
+    await act(async () => { while (waits.length) waits.shift()!(); });
+    expect(keysShown()).toEqual(['e', 'f', 'g', 'h', 'i', 'j']);
+  });
+
+  it('growing while a jump is in flight keeps the jump and its note', async () => {
+    const waits: ((v?: unknown) => void)[] = [];
+    const all = TEN.filter((x) => x.key !== 'f');
+    const { api, cacheItemsPage } = apiOf((at, limit) => new Promise((res) => { waits.push(() => res({ ok: true, value: serve(all, at, limit) })); }));
+    const { rerender } = setup(api, { cache: { itemCount: 9 } });
+    await waitFor(() => expect(cacheItemsPage).toHaveBeenCalledTimes(1));
+    await act(async () => { waits.shift()!(); });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Jump to key' }), { target: { value: 'f' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Go' }));
+    fit.rows = 5;
+    rerender();
+    await waitFor(() => expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { from: 'f' }, 6));
+    await act(async () => { while (waits.length) waits.shift()!(); });
+    expect(keysShown()).toEqual(['g', 'h', 'i', 'j']);
+    expect(screen.getByText('no key "f" — showing from the next key')).toBeInTheDocument();
+  });
+
+  it('the jump note keeps its line when there is none', async () => {
+    const { api } = over(TEN);
+    setup(api);
+    await screen.findByLabelText('Value a');
+    expect(document.querySelector('.dict-note')).not.toBeNull();
+  });
+
+  it('adding a key that sorts off this page goes to it', async () => {
+    const { api, cacheItemsPage } = over(TEN);
+    const { store } = setup(api);
+    await screen.findByLabelText('Value a');
+    fireEvent.change(screen.getByLabelText('New key'), { target: { value: 'zzz' } });
+    fireEvent.change(screen.getByLabelText('New value'), { target: { value: 'v' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    expect(overlay(store).set).toEqual({ zzz: 'v' });
+    await waitFor(() => expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { from: 'zzz' }, 5));
+    expect(await screen.findByLabelText('Value zzz')).toHaveValue('v');
+    expect(screen.getByRole('row', { name: /zzz/ })).toHaveClass('add');
+    expect(status()).toHaveTextContent('on this page: 1 added');
+    expect(screen.queryByText(/^no key/)).toBeNull();
+    expect(button('Prev')).toBeEnabled();
+  });
+
+  it('adding a key that shows on this page stays here', async () => {
+    const { api, cacheItemsPage } = over(TEN);
+    setup(api);
+    await screen.findByLabelText('Value a');
+    fireEvent.change(screen.getByLabelText('New key'), { target: { value: 'bb' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    expect(screen.getByLabelText('Value bb')).toBeInTheDocument();
+    await act(async () => {});
+    expect(cacheItemsPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('modifying a stored key on another page goes to it', async () => {
+    const { api, cacheItemsPage } = over(TEN);
+    setup(api);
+    await screen.findByLabelText('Value a');
+    fireEvent.change(screen.getByLabelText('New key'), { target: { value: 'g' } });
+    fireEvent.change(screen.getByLabelText('New value'), { target: { value: 'G' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    await waitFor(() => expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { from: 'g' }, 5));
+    expect(await screen.findByLabelText('Value g')).toHaveValue('G');
+    expect(status()).toHaveTextContent('on this page: 1 modified');
   });
 });

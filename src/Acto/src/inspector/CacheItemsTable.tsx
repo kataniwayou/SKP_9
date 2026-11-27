@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { StudioApi } from '../api/client';
 import { describeError } from '../api/describeError';
-import type { CacheRow } from '../design/board';
+import type { CacheRow, ItemEdits } from '../design/board';
 import { removeCacheItem, revertCacheItem, setCacheItem } from '../design/edits';
 import { pageSummary, pageView, readAt, readLimit, shownPage, summaryText, windowOf, type PageRead, type PageRow, type PageWindow } from '../design/itemsPage';
 import type { Edit } from './tabs/shared';
@@ -53,6 +53,8 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
   const [tries, setTries] = useState(0);
   const [status, setStatus] = useState<Status>({ state: 'loading' });
   const [win, setWin] = useState<PageWindow | null>(null);
+  // the request whose answer (or error) came last: while it is not `req`, a read is in flight
+  const [landed, setLanded] = useState<Req | null>(null);
   const [jumpText, setJumpText] = useState('');
   const [note, setNote] = useState<string | null>(null);
   const [newKey, setNewKey] = useState('');
@@ -68,11 +70,17 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
     ? page?.rows ?? []
     : pageView([], itemEdits, { lower: null, upper: null }, Number.MAX_SAFE_INTEGER).rows;
 
-  // a Save that read the board again: the stored items may have changed under the page, so start from the first page
-  if (stamp !== updatedAt) { setStamp(updatedAt); setReq({ read: START, limit: size }); setNote(null); }
-  // taller: one read forward from the page's lower key with the new size (shorter: the tail is cut, no read)
+  const pending = landed !== req;
+  // a Save that read the board again: the stored items may have changed under the page, so read it again from its lower key
+  if (stamp !== updatedAt) {
+    setStamp(updatedAt);
+    setReq({ read: page ? { dir: 'forward', from: page.lower, after: page.lowerAfter } : START, limit: size });
+    setNote(null);
+  }
+  // taller: a read in flight (Next, Prev, a jump) grows in place, same anchor; else one read forward from the page's lower
+  // key with the new size (shorter: the tail is cut, no read)
   else if (reads && size > req.limit) {
-    setReq({ read: page ? { dir: 'forward', from: page.lower, after: page.lowerAfter } : req.read, limit: size });
+    setReq(pending || !page ? { ...req, limit: size } : { read: { dir: 'forward', from: page.lower, after: page.lowerAfter }, limit: size });
   }
 
   useEffect(() => {
@@ -83,12 +91,15 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
     const { read, limit, jump } = req;
     api.cacheItemsPage(id, readAt(read), readLimit(limit)).then((r) => {
       if (drop()) return;
+      setLanded(req);
       if (!r.ok) { setStatus({ state: 'error', message: describeError(r.error) }); return; }
       setWin(windowOf(read, limit, r.value));
       setStatus({ state: 'ok' });
       if (jump !== undefined) setNote(noteOf(jump, r.value.fromMatch));
     }, (e: unknown) => {
-      if (!drop()) setStatus({ state: 'error', message: e instanceof Error ? e.message : String(e) });
+      if (drop()) return;
+      setLanded(req);
+      setStatus({ state: 'error', message: e instanceof Error ? e.message : String(e) });
     });
   }, [reads, api, id, req, tries]);
 
@@ -102,20 +113,30 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
   const next = () => { if (page?.upper != null) go({ dir: 'forward', from: page.upper, after: page.upperAfter }); };
   const prev = () => { if (page?.lower != null) go({ dir: 'back', before: page.lower }); };
 
-  const setItem = (key: string, value: string): boolean => {
+  /** Sets one item; the board's edits after it, or null when refused (the reason is shown). */
+  const setItem = (key: string, value: string): ItemEdits | null => {
     let why: string | null = null;
+    let after: ItemEdits | null = null;
     edit((b) => {
       const r = setCacheItem(b, id, key, value);
       if ('refused' in r) { why = r.refused; return b; }
+      after = r.state.caches[id]?.itemEdits ?? null;
       return r.state;
     });
     setRefused(why);
-    return why === null;
+    return why === null ? after ?? itemEdits : null;
   };
   const remove = (key: string) => edit((b) => removeCacheItem(b, id, key, true));
   const revert = (key: string) => edit((b) => revertCacheItem(b, id, key));
+  // an added key that sorts off this page: go to the page starting at it (a continuation read, not a jump: past the last
+  // stored key it shows the added keys from it on), so the new row and its summary are on screen
   const add = () => {
-    if (setItem(newKey, newValue)) { setNewKey(''); setNewValue(''); }
+    const key = newKey;
+    const after = setItem(key, newValue);
+    if (after === null) return;
+    setNewKey('');
+    setNewValue('');
+    if (reads && win && !shownPage(win, after, size).rows.some((r) => r.key === key)) go({ dir: 'forward', from: key });
   };
   const addKeys = (e: KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { e.preventDefault(); add(); } };
 
@@ -139,7 +160,8 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
             <button type="button" className="pbtn" onClick={jump}>Go</button>
             <button type="button" className="pbtn" aria-label="Clear jump" onClick={clearJump}>×</button>
           </div>
-          {note !== null && <div className="dict-note" role="note">{note}</div>}
+          {/* the note's line is kept when there is none, so showing or clearing it does not move the list */}
+          <div className="dict-note" role={note !== null ? 'note' : undefined}>{note}</div>
         </>
       )}
       <div className="dict-sum" role="status">
