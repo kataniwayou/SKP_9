@@ -150,6 +150,35 @@ public sealed class ModelChangesCacheItemsTests(PostgresFixture fixture) : IAsyn
         Assert.Equal(1, (await _db.Set<CacheEntity>().AsNoTracking().SingleAsync(c => c.Id == made, Ct)).ItemCount);
     }
 
+    /// <summary>
+    /// An API client's create + append + delete of one cache in one Save: the store's stamp moved the row's xmin, so no
+    /// entity tracked from the create (or the append) may carry the old one into the delete, or it 409s.
+    /// </summary>
+    [Fact]
+    public async Task CreateAppendThenDeleteOfOneCacheInOneBatchSucceeds()
+    {
+        var client = Guid.NewGuid();
+        var create = new ModelChangeDto("create", "caches", client, Json(new { name = "brief", version = "1.0.0", description = "d", root = $"brief-{Guid.NewGuid():N}" }));
+
+        var result = await ApplyAsync(create, Append(client, null, ("k", "v"), ("l", "w")), new ModelChangeDto("delete", "caches", client, null));
+
+        Assert.True(result.Ok, string.Join("; ", result.Results.Select(r => $"{r.Index}:{r.Status}:{r.Problem}")));
+        Assert.True(result.Applied);
+        var made = result.Made[client];
+        Assert.False(await _db.Set<CacheEntity>().AsNoTracking().AnyAsync(c => c.Id == made, Ct));
+        Assert.False(await _db.Set<CacheItem>().AsNoTracking().AnyAsync(i => i.CacheId == made, Ct));
+    }
+
+    /// <summary>The same with an existing cache: append then delete in one Save.</summary>
+    [Fact]
+    public async Task AppendThenDeleteOfAnExistingCacheInOneBatchSucceeds()
+    {
+        var result = await ApplyAsync(Append(_cache, null, ("k", "v")), new ModelChangeDto("delete", "caches", _cache, null));
+
+        Assert.True(result.Ok, string.Join("; ", result.Results.Select(r => $"{r.Index}:{r.Status}:{r.Problem}")));
+        Assert.False(await _db.Set<CacheEntity>().AsNoTracking().AnyAsync(c => c.Id == _cache, Ct));
+    }
+
     [Fact]
     public async Task AppendToCacheDeletedEarlierInBatch404sAndNothingApplied()
     {

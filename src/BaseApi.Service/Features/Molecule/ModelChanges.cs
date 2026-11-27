@@ -133,7 +133,7 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
                     }
                     finally
                     {
-                        _db.ChangeTracker.Clear(); // the next change reads its row afresh, as a separate request would
+                        _db.ChangeTracker.Clear(); // the next change reads its row afresh, as a separate request would (and no entity keeps an xmin a cache_items stamp moved)
                     }
                 }
             }
@@ -266,6 +266,11 @@ internal sealed class ModelChangeRunner : IModelChangesValidator
             report = await _services.GetRequiredService<CacheItemsStore>().RemoveAsync(cacheId, dto.Keys, ct);
             keys = dto.Keys;
         }
+
+        // the store's stamp moved the cache row's xmin: no tracked CacheEntity (e.g. from a create earlier in this run) may
+        // carry the old one into a later update or delete of it, or that change 409s. The per-change ChangeTracker.Clear()
+        // does this too; this keeps it true right where the stamp happens.
+        foreach (var e in _db.ChangeTracker.Entries<CacheEntity>().ToList()) e.State = EntityState.Detached;
 
         // only an edit that passed is noted (a failed one is rolled back to its savepoint; the run is then not committed anyway)
         if (!touched.TryGetValue(cacheId, out var seen)) touched[cacheId] = seen = new HashSet<string>(StringComparer.Ordinal);
