@@ -120,7 +120,7 @@ public sealed class CacheItemsEndpointsTests(PostgresFixture fixture)
         var service = CacheServiceFactory.Create(db, new RecordingSender());
         await service.AppendItemsAsync(id, new CacheItemsAppendDto(Many(600)), Ct);
 
-        var page = await service.PageItemsAsync(id, null, null, Ct);
+        var page = await service.PageItemsAsync(id, null, null, null, null, Ct);
 
         Assert.Equal(500, page.Items.Count);
         Assert.Equal(page.Items[^1].Key, page.Next);
@@ -136,7 +136,7 @@ public sealed class CacheItemsEndpointsTests(PostgresFixture fixture)
         await using var db = fixture.NewContext();
 
         await Assert.ThrowsAsync<ValidationException>(() =>
-            CacheServiceFactory.Create(db, new RecordingSender()).PageItemsAsync(id, null, limit, Ct));
+            CacheServiceFactory.Create(db, new RecordingSender()).PageItemsAsync(id, null, null, null, limit, Ct));
     }
 
     [Fact]
@@ -145,10 +145,56 @@ public sealed class CacheItemsEndpointsTests(PostgresFixture fixture)
         var id = await NewCacheAsync();
         await using var db = fixture.NewContext();
 
-        var page = await CacheServiceFactory.Create(db, new RecordingSender()).PageItemsAsync(id, null, 5000, Ct);
+        var page = await CacheServiceFactory.Create(db, new RecordingSender()).PageItemsAsync(id, null, null, null, 5000, Ct);
 
         Assert.Empty(page.Items);
         Assert.Null(page.Next);
+    }
+
+    [Fact]
+    public async Task PageFromAKeyReportsIndexPrevAndMatch()
+    {
+        var id = await NewCacheAsync();
+        await using var db = fixture.NewContext();
+        var service = CacheServiceFactory.Create(db, new RecordingSender());
+        await service.AppendItemsAsync(id, new CacheItemsAppendDto(Many(10)), Ct);
+
+        var page = await service.PageItemsAsync(id, null, "k000003", null, 3, Ct);
+
+        Assert.Equal(["k000003", "k000004", "k000005"], page.Items.Select(i => i.Key));
+        Assert.Equal(3, page.Index);
+        Assert.Equal("k000003", page.Prev);
+        Assert.Equal("exact", page.FromMatch);
+    }
+
+    [Theory]
+    [InlineData("a", "b", null)]
+    [InlineData("a", null, "b")]
+    [InlineData(null, "a", "b")]
+    public async Task MoreThanOneAnchorIsAValidationError(string? after, string? from, string? before)
+    {
+        var id = await NewCacheAsync();
+        await using var db = fixture.NewContext();
+
+        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
+            CacheServiceFactory.Create(db, new RecordingSender()).PageItemsAsync(id, after, from, before, null, Ct));
+
+        Assert.Contains("give at most one of after, from, before", ex.Errors.Select(e => e.ErrorMessage));
+    }
+
+    [Theory]
+    [InlineData("from")]
+    [InlineData("before")]
+    public async Task AnEmptyAnchorIsAValidationError(string which)
+    {
+        var id = await NewCacheAsync();
+        await using var db = fixture.NewContext();
+        var service = CacheServiceFactory.Create(db, new RecordingSender());
+
+        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
+            service.PageItemsAsync(id, null, which == "from" ? "" : null, which == "before" ? "" : null, null, Ct));
+
+        Assert.Contains($"{which} must not be empty", ex.Errors.Select(e => e.ErrorMessage));
     }
 
     [Fact]

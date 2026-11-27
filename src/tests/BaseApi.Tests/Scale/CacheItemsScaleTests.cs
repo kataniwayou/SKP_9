@@ -98,6 +98,28 @@ public sealed class CacheItemsScaleTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task S11_IndexAtAMillion()
+    {
+        ScaleGate.SkipUnlessDb();
+        var l = await LoadReferenceAsync();
+        foreach (var (label, key) in new[] { ("key 500,000", ScaleData.Key(500_000)), ("last key", ScaleData.Key(999_999)) })
+        {
+            var ms = new List<long>();
+            for (var run = 0; run < 5; run++)
+            {
+                await using var db = fixture.NewContext();
+                var sw = Stopwatch.StartNew();
+                var page = await CacheServiceFactory.Create(db, new NullSender()).PageItemsAsync(l.CacheId, null, key, null, 500, Ct);
+                ms.Add(sw.ElapsedMilliseconds);
+                Assert.Equal("exact", page.FromMatch);
+                Assert.Equal(label == "last key" ? 999_999 : 500_000, page.Index);
+            }
+            ms.Sort();
+            ScaleGate.Log($"S11 index count, From {label}: p50={ms[2]} ms max={ms[^1]} ms (runs: {string.Join(", ", ms)})");
+        }
+    }
+
+    [Fact]
     public async Task S3_EightParallelAppends()
     {
         ScaleGate.SkipUnlessDb();
@@ -154,7 +176,7 @@ public sealed class CacheItemsScaleTests(PostgresFixture fixture)
         Assert.Equal(2, report.RepeatedInBatch);
         Assert.Contains("a", report.RepeatedKeys);
         await using var db = fixture.NewContext();
-        var page = await CacheServiceFactory.Create(db, new NullSender()).PageItemsAsync(id, null, null, Ct);
+        var page = await CacheServiceFactory.Create(db, new NullSender()).PageItemsAsync(id, null, null, null, null, Ct);
         Assert.Equal("last", page.Items.Single(i => i.Key == "a").Value);
         ScaleGate.Log($"S5 repeats: added={report.Added} repeatedInBatch={report.RepeatedInBatch} repeatedKeys=[{string.Join(",", report.RepeatedKeys)}]");
     }
@@ -213,7 +235,7 @@ public sealed class CacheItemsScaleTests(PostgresFixture fixture)
             {
                 await using var db = fixture.NewContext();
                 var sw = Stopwatch.StartNew();
-                var page = await CacheServiceFactory.Create(db, new NullSender()).PageItemsAsync(l.CacheId, after, 5_000, Ct);
+                var page = await CacheServiceFactory.Create(db, new NullSender()).PageItemsAsync(l.CacheId, after, null, null, 5_000, Ct);
                 pageMs.Add(sw.ElapsedMilliseconds);
                 foreach (var i in page.Items) seen[i.Key] = seen.GetValueOrDefault(i.Key) + 1;
                 after = page.Next;

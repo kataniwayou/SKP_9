@@ -119,11 +119,19 @@ public sealed class CacheService :
     /// <see cref="CacheRules.PageCharBudget"/> key + value characters (8,000,000), so it can hold fewer rows than
     /// <paramref name="limit"/> with <c>next</c> set; its first row is always returned, even one alone over the budget.
     /// </summary>
-    public Task<CacheItemsPage> PageItemsAsync(Guid id, string? after, int? limit, CancellationToken ct)
+    public Task<CacheItemsPage> PageItemsAsync(Guid id, string? after, string? from, string? before, int? limit, CancellationToken ct)
     {
         var n = limit ?? CacheRules.PageDefault;
         if (n < 1 || n > CacheRules.PageMax)
             throw new ValidationException([new ValidationFailure("limit", $"limit must be between 1 and {CacheRules.PageMax}.")]);
-        return _store.PageAsync(id, after, n, ct);
+        if ((after is not null ? 1 : 0) + (from is not null ? 1 : 0) + (before is not null ? 1 : 0) > 1)
+            throw new ValidationException([new ValidationFailure("after", "give at most one of after, from, before")]);
+        if (from is "") throw new ValidationException([new ValidationFailure("from", "from must not be empty")]);
+        if (before is "") throw new ValidationException([new ValidationFailure("before", "before must not be empty")]);
+        var at = from is not null ? new CachePageAt(CachePageMode.From, from)
+            : before is not null ? new CachePageAt(CachePageMode.Before, before)
+            : after is not null ? new CachePageAt(CachePageMode.After, after)
+            : CachePageAt.First;
+        return _store.PageAsync(id, at, n, ct);
     }
 }

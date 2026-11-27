@@ -30,6 +30,7 @@ Run date: 2026-11-27. Spec: `docs/superpowers/specs/2026-11-26-cache-items-appen
 | S8 | `GET /caches/{id}` on the 1M cache | < 4 KB | 334 bytes, 3-12 ms; list of caches 797 bytes | PASS |
 | S9 | Delete a 1M cache | < 30 s, cascades | 1,362 ms in the DB, 1.8 s over HTTP; 0 rows left | PASS |
 | S10 | BaseApi memory over 20 batches | growth batch 2 to 20 < 2 x one batch payload (47.7 MB) | -4.1 MB (73.8 to 69.7 MB); peak 73.8 MB | PASS |
+| S11 | `index` count: read `from` a key at 500,000 and at the last key of the 1M cache (5 runs each) | max <= 500 ms | from key 500,000: p50 71 ms, max 192 ms; from the last key: p50 48 ms, max 50 ms (local Postgres, SDK container) | PASS |
 | R1 | Start a workflow bound to the 1M cache | start message a few KB; Redis holds 1M entries + key set; time recorded | message 587 bytes; `SCARD` 1,000,000 after 2.8 s, workflow live (write finished) after 5.6 s; full compare of all 1,000,000 entries OK | PASS (with raised dev limits) |
 | R2 | Append 50,000 while running (40,000 new, 10,000 overwritten) | Redis equals the DB for every touched key; time grows with the batch | converged 1,651 ms after the POST began (258 ms after it returned); 0 of 50,000 wrong | PASS |
 | R3 | Remove 50,000 keys while running | entries and set members gone | 392 ms after the POST began; 0 entries or members left | PASS |

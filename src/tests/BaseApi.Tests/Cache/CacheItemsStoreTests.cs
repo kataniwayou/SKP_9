@@ -436,4 +436,117 @@ public sealed class CacheItemsStoreTests(PostgresFixture fixture)
         Assert.Equal(["x", "y"], keys);
         Assert.Equal(["x"], rep2);
     }
+
+    private async Task<Guid> SeedKeysAsync(params string[] keys)
+    {
+        var id = await NewCacheAsync();
+        await using var db = fixture.NewContext();
+        await Store(db).AppendAsync(id, keys.Select(k => new CacheItemDto(k, "v")).ToList(), Ct);
+        return id;
+    }
+
+    private async Task<CacheItemsPage> ReadAsync(Guid id, CachePageMode mode, string? key, int limit, long? budget = null)
+    {
+        await using var db = fixture.NewContext();
+        return budget is null
+            ? await Store(db).PageAsync(id, new CachePageAt(mode, key), limit, Ct)
+            : await Store(db).PageAsync(id, new CachePageAt(mode, key), limit, Ct, budget.Value);
+    }
+
+    private static string[] AtoJ => "abcdefghij".Select(c => c.ToString()).ToArray();
+
+    [Fact]
+    public async Task FromReturnsTheKeyItselfAsExact()
+    {
+        var id = await SeedKeysAsync(AtoJ);
+        var p = await ReadAsync(id, CachePageMode.From, "d", 3);
+        Assert.Equal(["d", "e", "f"], p.Items.Select(i => i.Key));
+        Assert.Equal(3, p.Index);
+        Assert.Equal("exact", p.FromMatch);
+        Assert.Equal("d", p.Prev);
+        Assert.Equal("f", p.Next);
+    }
+
+    [Fact]
+    public async Task FromBetweenKeysStartsAtTheNextKey()
+    {
+        var id = await SeedKeysAsync("a", "c", "e");
+        var p = await ReadAsync(id, CachePageMode.From, "b", 3);
+        Assert.Equal("c", p.Items[0].Key);
+        Assert.Equal("later", p.FromMatch);
+        Assert.Equal(1, p.Index);
+    }
+
+    [Fact]
+    public async Task FromPastTheEndReturnsTheLastPage()
+    {
+        var id = await SeedKeysAsync(AtoJ);
+        var p = await ReadAsync(id, CachePageMode.From, "z", 3);
+        Assert.Equal(["h", "i", "j"], p.Items.Select(i => i.Key));
+        Assert.Equal("none", p.FromMatch);
+        Assert.Equal(7, p.Index);
+        Assert.Null(p.Next);
+    }
+
+    [Fact]
+    public async Task BeforeReturnsThePreviousRowsAscending()
+    {
+        var id = await SeedKeysAsync(AtoJ);
+        var p = await ReadAsync(id, CachePageMode.Before, "g", 3);
+        Assert.Equal(["d", "e", "f"], p.Items.Select(i => i.Key));
+        Assert.Equal(3, p.Index);
+        Assert.Equal("d", p.Prev);
+        Assert.Equal("f", p.Next);
+        Assert.Null(p.FromMatch);
+    }
+
+    [Fact]
+    public async Task BeforeNearTheStartReturnsFewerRows()
+    {
+        var id = await SeedKeysAsync(AtoJ);
+        var p = await ReadAsync(id, CachePageMode.Before, "b", 3);
+        Assert.Equal(["a"], p.Items.Select(i => i.Key));
+        Assert.Equal(0, p.Index);
+        Assert.Null(p.Prev);
+    }
+
+    [Fact]
+    public async Task BeforeAKeyThatNoLongerExistsReturnsTheRowsBeforeIt()
+    {
+        var id = await SeedKeysAsync("a", "b", "d");
+        var p = await ReadAsync(id, CachePageMode.Before, "c", 5);
+        Assert.Equal(["a", "b"], p.Items.Select(i => i.Key));
+    }
+
+    [Fact]
+    public async Task FromIsCaseAndCollationAware()
+    {
+        var id = await SeedKeysAsync("SKP Big Artist 0500000", "skp live suite");
+        await using var db = fixture.NewContext();
+        var dbOrder = await db.Database.SqlQuery<string>($"SELECT key AS \"Value\" FROM cache_items WHERE cache_id = {id} ORDER BY key").ToListAsync(Ct);
+        var p = await ReadAsync(id, CachePageMode.From, "SKP Live Suite", 5);
+        Assert.Equal("skp live suite", p.Items[0].Key);
+        Assert.Equal("later", p.FromMatch);
+        Assert.Equal(dbOrder.Skip((int)p.Index).ToList(), p.Items.Select(i => i.Key).ToList());
+    }
+
+    [Fact]
+    public async Task IndexCountsKeysBeforeTheFirstRow()
+    {
+        var id = await SeedKeysAsync(Enumerable.Range(0, 1200).Select(i => $"key{i:D5}").ToArray());
+        var p = await ReadAsync(id, CachePageMode.After, "key00499", 100);
+        Assert.Equal("key00500", p.Items[0].Key);
+        Assert.Equal(500, p.Index);
+    }
+
+    [Fact]
+    public async Task TheCharacterBudgetCutsBeforePagesFromTheFarEnd()
+    {
+        var id = await SeedKeysAsync("a", "b", "c", "z");
+        // each row is key(1) + value(1) = 2 chars; a budget of 4 fits 2 of 3
+        var p = await ReadAsync(id, CachePageMode.Before, "z", 3, budget: 4);
+        Assert.Equal(["b", "c"], p.Items.Select(i => i.Key));
+        Assert.Equal(1, p.Index);
+        Assert.Equal("c", p.Next);
+    }
 }

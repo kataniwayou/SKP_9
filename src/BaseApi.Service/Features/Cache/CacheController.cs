@@ -48,7 +48,9 @@ public sealed class CachesController :
 
     /// <summary>
     /// One page of the cache's items ordered by key: <c>after</c> is the previous page's <c>next</c>,
-    /// <c>limit</c> defaults to 500 and is at most 5000. A page also stops once its key + value characters
+    /// <c>from</c> starts at that key or the next one after it and <c>before</c> returns the rows just before it
+    /// (give at most one of the three); the page reports <c>index</c> (keys before its first row), <c>prev</c>
+    /// and, for <c>from</c>, <c>fromMatch</c>. <c>limit</c> defaults to 500 and is at most 5000. A page also stops once its key + value characters
     /// would pass 8,000,000, so a page of large values holds fewer than <c>limit</c> rows and carries
     /// <c>next</c>; keep paging until <c>next</c> is null. A single row over that budget is returned alone.
     /// </summary>
@@ -57,6 +59,7 @@ public sealed class CachesController :
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<CacheItemsPage>> PageItems(
-        Guid id, [FromQuery] string? after, [FromQuery] int? limit, CancellationToken ct)
-        => Ok(await _service.PageItemsAsync(id, after, limit, ct));
+        Guid id, [FromQuery] string? after, [FromQuery] string? from, [FromQuery] string? before,
+        [FromQuery] int? limit, CancellationToken ct)
+        => Ok(await _service.PageItemsAsync(id, after, from, before, limit, ct));
 }

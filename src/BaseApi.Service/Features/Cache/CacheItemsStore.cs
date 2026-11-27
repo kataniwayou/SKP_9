@@ -150,30 +150,75 @@ public sealed class CacheItemsStore(BaseDbContext db, TimeProvider clock, IHttpC
     /// </summary>
     public Task<CacheItemsPage> PageAsync(Guid cacheId, string? after, int limit, CancellationToken ct,
         long charBudget = CacheRules.PageCharBudget) =>
+        PageAsync(cacheId, after is null ? CachePageAt.First : new CachePageAt(CachePageMode.After, after), limit, ct, charBudget);
+
+    /// <summary>
+    /// The same page read from <paramref name="at"/>: the start, after a key, from a key (the first key
+    /// &gt;= it; when none is, the last page, <c>FromMatch</c> "none"), or the rows before a key (ascending,
+    /// the <paramref name="limit"/> rows nearest it). <c>Index</c> counts the keys before the first row
+    /// returned. The character budget cuts from the end nearest the anchor, so a <see cref="CachePageMode.Before"/>
+    /// page keeps its rows next to the anchor.
+    /// </summary>
+    public Task<CacheItemsPage> PageAsync(Guid cacheId, CachePageAt at, int limit, CancellationToken ct,
+        long charBudget = CacheRules.PageCharBudget) =>
         ReadingAsync(async (conn, tx) =>
         {
-            await using (var exists = Command(conn, tx, "SELECT 1 FROM caches WHERE id = @id"))
+            long itemCount;
+            await using (var exists = Command(conn, tx, "SELECT item_count FROM caches WHERE id = @id"))
             {
                 exists.Parameters.AddWithValue("id", cacheId);
-                if (await exists.ExecuteScalarAsync(ct) is null) throw new NotFoundException(nameof(CacheEntity), cacheId);
+                if (await exists.ExecuteScalarAsync(ct) is not { } c) throw new NotFoundException(nameof(CacheEntity), cacheId);
+                itemCount = Convert.ToInt64(c);
             }
 
-            var sizesSql = after is null
-                ? "SELECT key, char_length(key) + char_length(value) FROM cache_items WHERE cache_id = @id ORDER BY key LIMIT @n"
-                : "SELECT key, char_length(key) + char_length(value) FROM cache_items WHERE cache_id = @id AND key > @after ORDER BY key LIMIT @n";
-            var candidates = new List<(string Key, long Chars)>();
-            await using (var cmd = Command(conn, tx, sizesSql))
+            const string cols = "SELECT key, char_length(key) + char_length(value) FROM cache_items WHERE cache_id = @id";
+            var backwards = at.Mode == CachePageMode.Before;
+            var sizesSql = at.Mode switch
             {
+                CachePageMode.After => $"{cols} AND key > @k ORDER BY key LIMIT @n",
+                CachePageMode.From => $"{cols} AND key >= @k ORDER BY key LIMIT @n",
+                CachePageMode.Before => $"{cols} AND key < @k ORDER BY key DESC LIMIT @n",
+                _ => $"{cols} ORDER BY key LIMIT @n",
+            };
+
+            async Task<List<(string Key, long Chars)>> CandidatesAsync(string sql, bool withKey, int n)
+            {
+                var list = new List<(string Key, long Chars)>();
+                await using var cmd = Command(conn, tx, sql);
                 cmd.Parameters.AddWithValue("id", cacheId);
-                if (after is not null) cmd.Parameters.AddWithValue("after", NpgsqlDbType.Varchar, after);
-                cmd.Parameters.AddWithValue("n", limit + 1); // one extra says whether another page follows
+                if (withKey) cmd.Parameters.AddWithValue("k", NpgsqlDbType.Varchar, at.Key!);
+                cmd.Parameters.AddWithValue("n", n);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct)) candidates.Add((reader.GetString(0), Convert.ToInt64(reader.GetValue(1))));
+                while (await reader.ReadAsync(ct)) list.Add((reader.GetString(0), Convert.ToInt64(reader.GetValue(1))));
+                return list;
+            }
+
+            // Forward modes read one extra row to know whether another page follows; Before reads just the page.
+            var candidates = await CandidatesAsync(sizesSql, at.Mode != CachePageMode.Start, backwards ? limit : limit + 1);
+            string? fromMatch = null;
+            if (at.Mode == CachePageMode.From)
+            {
+                if (candidates.Count == 0)
+                {
+                    // No key at or after it: the last page, read from the far end.
+                    backwards = true;
+                    fromMatch = "none";
+                    candidates = await CandidatesAsync($"{cols} ORDER BY key DESC LIMIT @n", false, limit);
+                }
+                else
+                {
+                    // Decided by the database: the column's collation says what "equal" is.
+                    await using var eq = Command(conn, tx, "SELECT EXISTS (SELECT 1 FROM cache_items WHERE cache_id = @id AND key = @k)");
+                    eq.Parameters.AddWithValue("id", cacheId);
+                    eq.Parameters.AddWithValue("k", NpgsqlDbType.Varchar, at.Key!);
+                    fromMatch = (bool)(await eq.ExecuteScalarAsync(ct))! ? "exact" : "later";
+                }
             }
 
             var take = CutByBudget(candidates.Select(c => c.Chars).Take(limit).ToList(), charBudget);
             var chosen = candidates.Take(take).Select(c => c.Key).ToArray();
-            if (chosen.Length == 0) return new CacheItemsPage([], null);
+            if (backwards) Array.Reverse(chosen);
+            if (chosen.Length == 0) return new CacheItemsPage([], null, null, itemCount, fromMatch);
 
             var values = new Dictionary<string, string>(chosen.Length, StringComparer.Ordinal);
             await using (var cmd = Command(conn, tx, "SELECT key, value FROM cache_items WHERE cache_id = @id AND key = ANY(@keys)", cacheId, chosen))
@@ -181,8 +226,26 @@ public sealed class CacheItemsStore(BaseDbContext db, TimeProvider clock, IHttpC
                 while (await reader.ReadAsync(ct)) values[reader.GetString(0)] = reader.GetString(1);
 
             var page = chosen.Where(values.ContainsKey).Select(k => new CacheItemDto(k, values[k])).ToList();
-            var more = candidates.Count > take;
-            return new CacheItemsPage(page, more ? chosen[^1] : null);
+
+            bool more;
+            if (backwards)
+            {
+                await using var follow = Command(conn, tx, "SELECT EXISTS (SELECT 1 FROM cache_items WHERE cache_id = @id AND key > @k)");
+                follow.Parameters.AddWithValue("id", cacheId);
+                follow.Parameters.AddWithValue("k", NpgsqlDbType.Varchar, chosen[^1]);
+                more = (bool)(await follow.ExecuteScalarAsync(ct))!;
+            }
+            else more = candidates.Count > take;
+
+            long index;
+            await using (var before = Command(conn, tx, "SELECT count(*) FROM cache_items WHERE cache_id = @id AND key < @k"))
+            {
+                before.Parameters.AddWithValue("id", cacheId);
+                before.Parameters.AddWithValue("k", NpgsqlDbType.Varchar, chosen[0]);
+                index = Convert.ToInt64(await before.ExecuteScalarAsync(ct));
+            }
+
+            return new CacheItemsPage(page, more ? chosen[^1] : null, index > 0 ? chosen[0] : null, index, fromMatch);
         }, ct);
 
     /// <summary>
