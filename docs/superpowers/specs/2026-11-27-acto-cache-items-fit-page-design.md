@@ -92,6 +92,17 @@ Today's separate "Unsaved" table above the stored rows goes away. An unsaved add
 
 Unchanged. Each item edit (value, add, ×, ↺) is one step in the board's history. Inspector Undo and Redo, the top bar's Discard and `Save · N`, and the 30 MB local refusal all behave as today. An undo of a change on another page takes effect there, and this page's summary changes only if the row is on screen.
 
+### Chat (aligned with the Inspector, user's requirement)
+
+The chat's cache-item tools follow the same rules as the Items list.
+
+- **`read_cache_items`** takes exactly one of `from` (jump to key: the first key equal or later), `before` (the page before a key) or `after` (the page after a key), plus `limit`. The chat has no panel height, so `limit` stays: default 500, at most 5,000, and the answer is still capped at 100,000 characters.
+- Its answer gives `item_count`, `index` (keys before the first row), `rows` as `a–b of item_count`, `prev` (pass as `before`; null on the first page) and `next` (pass as `after`; null on the last page). A cut page sets `next` to the last key given, as today. A jump that isn't an exact match carries the same note as the Inspector: `no key "<text>" — showing from the next key`, or `no key at or after "<text>"`.
+- **Unsaved changes for this page only.** Each row carries `state`: `modified`, `added` or `deleted`, and no `state` when unchanged. A deleted row stays in the page, marked. Today it's left out. An unsaved added key is placed where it sorts, as in the Inspector. The answer's `unsaved` becomes this page's counts `{modified, added, deleted}`. The whole-cache list of unsaved edits leaves this tool.
+- **`read_board` keeps the whole-cache view.** Its per-cache `unsaved_items {set, removed}` stays as it is. That's the chat's equivalent of the board's `Save · N` (my call).
+- **`set_cache_items` and `remove_cache_items` are unchanged.** Each call is one undoable edit on the board, saved by the board's Save, the same as an edit in the Inspector.
+- Tool descriptions change to match. A never-saved cache still answers with its unsaved items only: they're all `added`, on one page.
+
 ## Constraints
 
 - Acto talks only to BaseApi (`src/Acto/src/api/client.ts`). The openapi file and `schema.d.ts` change with the new parameters. `schema.d.ts` is hand-edited, since `npm run gen:api` can't restore its tool here.
@@ -102,7 +113,7 @@ Unchanged. Each item edit (value, add, ×, ↺) is one step in the board's histo
 
 - Component split inside `CacheItemsTable.tsx` (fit hook, jump box, summary, table).
 - Exact empty, loading and error states. Keep today's Retry.
-- Tests: Vitest for page size from height, anchor on resize, summary counts per page, jump notes, Prev via `before`. BaseApi tests for `from`, `before`, `index` and the one-of rule. An e2e run against the 1M cache on dev is optional.
+- Tests: Vitest for page size from height, anchor on resize, summary counts per page, jump notes, Prev via `before`, and the chat tool's new answer (states, page counts, cursors, cap). BaseApi tests for `from`, `before`, `index` and the one-of rule. An e2e run against the 1M cache on dev is optional.
 
 ## Open (your call)
 
