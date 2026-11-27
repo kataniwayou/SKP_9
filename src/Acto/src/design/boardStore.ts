@@ -112,13 +112,32 @@ function withItemEdits(b: BoardState): BoardState {
   };
 }
 
-function readDraft(session: Storage | null): Draft | null {
+/**
+ * The caches whose old-draft `items` text (removed 2026-11-26) differs between the draft's base and present: unsaved item
+ * edits from before the update, which withItemEdits drops. Named by the cache's name (its id when it has none).
+ */
+export function lostItemEdits(base: BoardState, present: BoardState): string[] {
+  const lost: string[] = [];
+  for (const [id, c] of Object.entries(present.caches)) {
+    const now = (c as { items?: unknown }).items;
+    const was = (base.caches[id] as { items?: unknown } | undefined)?.items;
+    if (now === undefined && was === undefined) continue;
+    if (!deepEqual(now, was)) lost.push((c as { name?: string }).name || id);
+  }
+  return lost;
+}
+
+function readDraft(session: Storage | null): (Draft & { lostItems: string[] }) | null {
   try {
     const raw = session?.getItem(KEY);
     if (!raw) return null;
     const d: unknown = JSON.parse(raw);
     if (!isObj(d) || !isBoard(d.base) || !isBoard(d.present)) return null;
-    return { base: withItemEdits(withEntryCrons(d.base)), present: withItemEdits(withEntryCrons(d.present)) };
+    return {
+      base: withItemEdits(withEntryCrons(d.base)),
+      present: withItemEdits(withEntryCrons(d.present)),
+      lostItems: lostItemEdits(d.base, d.present),
+    };
   } catch {
     return null;
   }
@@ -225,6 +244,9 @@ export function createBoardStore(output: OutputStore, session: Storage | null): 
   const store: BoardStore = {
     load(b, present = b) {
       const draft = readDraft(session);
+      if (draft?.lostItems.length) {
+        output.log(`${draft.lostItems.join(', ')}: unsaved item edits from before the update could not be kept`, 'warn');
+      }
       const start = draft ? rebaseDraft(draft, b, present) : { base: b, present };
       base = start.base;
       history = historyOf(start.present);

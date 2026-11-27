@@ -167,6 +167,30 @@ describe('board store', () => {
     expect(store.base().caches.c1!.itemEdits).toEqual({ set: {}, removed: [] });
     expect([...store.unsaved()]).toEqual(['workflow:daily']);
   });
+  it('warns once, naming the cache, when an old draft carried unsaved items text', () => {
+    const old = (b: ReturnType<typeof board>, items: string) => ({
+      ...b,
+      caches: Object.fromEntries(Object.entries(b.caches).map(([id, c]) => { const { itemCount: _c, itemEdits: _e, ...rest } = c; return [id, { ...rest, items }]; })),
+    });
+    const session = memoryStorage({ 'acto.board': JSON.stringify({ base: old(board(), '{"a":"1"}'), present: old(board(), '{"a":"2"}') }) });
+    const out = createOutputStore(null, () => '00:00:00');
+    const store = createBoardStore(out, session);
+    store.load(board());
+    const warns = out.lines().filter((l) => l.level === 'warn');
+    expect(warns).toHaveLength(1);
+    expect(warns[0]!.text).toBe('c1: unsaved item edits from before the update could not be kept');
+    expect(store.state().caches.c1!.itemEdits).toEqual({ set: {}, removed: [] });
+  });
+  it('does not warn when an old draft\'s items text is unchanged', () => {
+    const old = (b: ReturnType<typeof board>) => ({
+      ...b,
+      caches: Object.fromEntries(Object.entries(b.caches).map(([id, c]) => { const { itemCount: _c, itemEdits: _e, ...rest } = c; return [id, { ...rest, items: '{"a":"1"}' }]; })),
+    });
+    const session = memoryStorage({ 'acto.board': JSON.stringify({ base: old(board()), present: old(nameA('A')(board())) }) });
+    const out = createOutputStore(null, () => '00:00:00');
+    createBoardStore(out, session).load(board());
+    expect(out.lines().filter((l) => l.level === 'warn')).toHaveLength(0);
+  });
   it('saved clears history and draft', () => {
     const session = memoryStorage();
     const { store } = make(session);
