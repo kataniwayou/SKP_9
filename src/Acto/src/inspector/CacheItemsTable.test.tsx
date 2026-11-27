@@ -16,8 +16,11 @@ vi.mock('./useFitRows', () => ({ useFitRows: () => fit.rows, fitRows: () => fit.
 type Item = { key: string; value: string };
 const TEN: Item[] = 'abcdefghij'.split('').map((k, i) => ({ key: k, value: String(i + 1) }));
 
-/** BaseApi's paging over `all` (sorted): after / from / before, index, prev, next, fromMatch. */
-function serve(all: Item[], at: ItemsAt | undefined, limit: number): CacheItemsPage {
+/**
+ * BaseApi's paging over `all` (sorted): after / from / before, index, prev, next, fromMatch. `cap` plays the character
+ * budget: only that many rows go through, dropping the far end (a forward read's tail, a before read's head).
+ */
+function serve(all: Item[], at: ItemsAt | undefined, limit: number, cap = Infinity): CacheItemsPage {
   let start = 0;
   let end: number;
   let fromMatch: string | null = null;
@@ -32,10 +35,11 @@ function serve(all: Item[], at: ItemsAt | undefined, limit: number): CacheItemsP
   } else if (at && 'before' in at) {
     const i = all.findIndex((x) => x.key >= at.before);
     end = i < 0 ? all.length : i;
-    start = Math.max(0, end - limit);
+    start = Math.max(0, end - limit, end - cap);
   } else {
     end = Math.min(all.length, limit);
   }
+  if (!(at && 'before' in at)) end = Math.min(end, start + cap);
   const items = all.slice(start, end);
   return {
     items,
@@ -50,7 +54,7 @@ function apiOf(fn: (at: ItemsAt | undefined, limit: number) => Promise<unknown>)
   const cacheItemsPage = vi.fn((_id: string, at?: ItemsAt, limit?: number) => fn(at, limit ?? 500));
   return { api: { cacheItemsPage } as unknown as StudioApi, cacheItemsPage };
 }
-const over = (all: Item[]) => apiOf((at, limit) => Promise.resolve({ ok: true, value: serve(all, at, limit) }));
+const over = (all: Item[], cap = Infinity) => apiOf((at, limit) => Promise.resolve({ ok: true, value: serve(all, at, limit, cap) }));
 
 function setup(api: StudioApi, opts: { isNew?: boolean; cache?: Partial<CacheRow> } = {}) {
   const store = createBoardStore(createOutputStore(null, () => '00:00:00'), null);
@@ -67,6 +71,20 @@ function setup(api: StudioApi, opts: { isNew?: boolean; cache?: Partial<CacheRow
 const overlay = (s: ReturnType<typeof setup>['store']) => s.state().caches.c1!.itemEdits;
 const keysShown = () => screen.queryAllByLabelText(/^Key /).map((e) => (e as HTMLInputElement).value);
 const status = () => screen.getByRole('status');
+const button = (name: 'Prev' | 'Next') => screen.getByRole('button', { name }) as HTMLButtonElement;
+/** Clicks Prev or Next and lets the (immediately resolving) read land. */
+async function press(name: 'Prev' | 'Next') {
+  await act(async () => { fireEvent.click(button(name)); });
+  await act(async () => {});
+}
+/** The pages from here: Next until it is disabled, then Prev back until it is disabled (each list in reading order). */
+async function walk(): Promise<{ forward: string[][]; backward: string[][] }> {
+  const forward = [keysShown()];
+  while (!button('Next').disabled && forward.length < 40) { await press('Next'); forward.push(keysShown()); }
+  const backward = [keysShown()];
+  while (!button('Prev').disabled && backward.length < 40) { await press('Prev'); backward.unshift(keysShown()); }
+  return { forward, backward };
+}
 
 beforeEach(() => { fit.rows = 4; });
 
@@ -75,12 +93,12 @@ describe('CacheItemsTable', () => {
     const { api, cacheItemsPage } = over(TEN);
     setup(api);
     expect(await screen.findByLabelText('Value a')).toHaveValue('1');
-    expect(cacheItemsPage).toHaveBeenNthCalledWith(1, 'c1', null, 4);
+    expect(cacheItemsPage).toHaveBeenNthCalledWith(1, 'c1', null, 5); // one row more: the next page's first key
     expect(keysShown()).toEqual(['a', 'b', 'c', 'd']);
     expect(screen.getByText('rows 1–4 · page 1 of 3')).toBeInTheDocument();
     expect(screen.getByText('Items · 10 stored')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Prev' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
+    expect(button('Prev')).toBeDisabled();
+    expect(button('Next')).toBeEnabled();
   });
 
   it('shows the count with thousands separators', async () => {
@@ -91,31 +109,42 @@ describe('CacheItemsTable', () => {
     expect(screen.getByText('rows 1–4 · page 1 of 250,001')).toBeInTheDocument();
   });
 
-  it('nextReadsAfterTheLastVisibleKey', async () => {
+  it('nextReadsFromTheUpperKey', async () => {
     const { api, cacheItemsPage } = over(TEN);
     setup(api);
     await screen.findByLabelText('Value a');
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByLabelText('Value e')).toBeInTheDocument();
-    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { after: 'd' }, 4);
+    await press('Next');
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { from: 'e' }, 5);
     expect(keysShown()).toEqual(['e', 'f', 'g', 'h']);
     expect(screen.getByText('rows 5–8 · page 2 of 3')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByLabelText('Value i')).toBeInTheDocument();
+    await press('Next');
+    expect(keysShown()).toEqual(['i', 'j']);
     expect(screen.getByText('rows 9–10 · page 3 of 3')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    expect(button('Next')).toBeDisabled();
   });
 
-  it('prevReadsBeforeTheFirstVisibleKey', async () => {
+  it('prevReadsBeforeTheLowerKey', async () => {
     const { api, cacheItemsPage } = over(TEN);
     setup(api);
     await screen.findByLabelText('Value a');
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByLabelText('Value e');
-    fireEvent.click(screen.getByRole('button', { name: 'Prev' }));
-    expect(await screen.findByLabelText('Value a')).toBeInTheDocument();
-    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { before: 'e' }, 5); // one more than shown: the lower bound
-    expect(screen.getByRole('button', { name: 'Prev' })).toBeDisabled();
+    await press('Next');
+    await press('Prev');
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { before: 'e' }, 5);
+    expect(keysShown()).toEqual(['a', 'b', 'c', 'd']);
+    expect(button('Prev')).toBeDisabled();
+  });
+
+  it('beforeReadsUseTheExtraRowAsLowerBound', async () => {
+    const { api, cacheItemsPage } = over(TEN);
+    setup(api);
+    await screen.findByLabelText('Value a');
+    await press('Next');
+    await press('Next');
+    await press('Prev');
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { before: 'i' }, 5);
+    expect(keysShown()).toEqual(['e', 'f', 'g', 'h']); // d came back as the extra row and is not shown
+    expect(screen.getByText('rows 5–8 · page 2 of 3')).toBeInTheDocument();
+    expect(button('Prev')).toBeEnabled();
   });
 
   it('summaryFollowsTheVisibleRows', async () => {
@@ -124,11 +153,9 @@ describe('CacheItemsTable', () => {
     await screen.findByLabelText('Value a');
     expect(status()).toHaveTextContent('on this page: 1 deleted');
     expect(screen.getByLabelText('Key b')).toHaveStyle({ textDecoration: 'line-through' });
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByLabelText('Value e');
+    await press('Next');
     expect(status()).toHaveTextContent('no unsaved changes on this page');
-    fireEvent.click(screen.getByRole('button', { name: 'Prev' }));
-    await screen.findByLabelText('Value a');
+    await press('Prev');
     expect(status()).toHaveTextContent('on this page: 1 deleted');
   });
 
@@ -142,52 +169,59 @@ describe('CacheItemsTable', () => {
     expect(screen.getByRole('button', { name: 'Revert a' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Revert bb' })).toBeInTheDocument();
     expect(screen.queryByRole('table', { name: 'Unsaved items' })).toBeNull();
-    // the cut row (d) is still reachable: Next reads after the last visible stored key
     expect(screen.getByText('rows 1–3 · page 1 of 3')).toBeInTheDocument();
+  });
+
+  it('everyAddedKeyShowsExactlyOnceWalkingBothWays', async () => {
+    const { api } = over(TEN);
+    // added at the start, between every page boundary, at a cut and past the end
+    const added = { '0': 's', cc: 'z', dd: 'x', hh: 'y', zz: 'e' };
+    setup(api, { cache: { itemEdits: { set: added, removed: [] } } });
+    await screen.findByLabelText('Value 0');
+    const { forward, backward } = await walk();
+    const every = [...TEN.map((x) => x.key), ...Object.keys(added)].sort();
+    expect(forward.flat()).toEqual(every);
+    expect(backward.flat()).toEqual(every);
+    expect(backward).toEqual(forward);
   });
 
   it('anAddedKeyPastTheLastStoredKeyIsReachedByNext', async () => {
     const { api, cacheItemsPage } = over(TEN.slice(0, 8));
     setup(api, { cache: { itemCount: 8, itemEdits: { set: { zzz: 'z' }, removed: [] } } });
     await screen.findByLabelText('Value a');
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByLabelText('Value e');
+    await press('Next');
     expect(keysShown()).toEqual(['e', 'f', 'g', 'h']); // zzz is cut: Next stays enabled
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByLabelText('Value zzz')).toHaveValue('z');
-    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { after: 'h' }, 4);
+    await press('Next');
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { from: 'zzz' }, 5);
     expect(keysShown()).toEqual(['zzz']);
+    expect(screen.getByLabelText('Value zzz')).toHaveValue('z');
     expect(status()).toHaveTextContent('on this page: 1 added');
-    expect(screen.getByText('page 3 of 3')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Prev' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    expect(screen.getByText('no stored rows on this page')).toBeInTheDocument();
+    expect(button('Prev')).toBeEnabled();
+    expect(button('Next')).toBeDisabled();
   });
 
   it('prevFromAnEmptyPageReturnsToThePreviousPage', async () => {
     const { api, cacheItemsPage } = over(TEN.slice(0, 8));
     setup(api, { cache: { itemCount: 8, itemEdits: { set: { zzz: 'z' }, removed: [] } } });
     await screen.findByLabelText('Value a');
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByLabelText('Value e');
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByLabelText('Value zzz');
-    fireEvent.click(screen.getByRole('button', { name: 'Prev' }));
-    // the page shown before it, read again the same way: its last stored key (h) is back on screen
-    await waitFor(() => expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { after: 'd' }, 4));
-    expect(await screen.findByLabelText('Value h')).toBeInTheDocument();
-    expect(keysShown()).toEqual(['e', 'f', 'g', 'h']);
+    await press('Next');
+    await press('Next');
+    expect(keysShown()).toEqual(['zzz']);
+    await press('Prev');
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { before: 'zzz' }, 5);
+    expect(keysShown()).toEqual(['e', 'f', 'g', 'h']); // h, the last stored key, is back
     expect(screen.getByText('rows 5–8 · page 2 of 2')).toBeInTheDocument();
   });
 
-  it('anAddedKeyBetweenPagesShowsOnTheEarlierPage', async () => {
+  it('anAddedKeyBetweenPagesShowsOnExactlyOnePage', async () => {
     const { api } = over(TEN);
     setup(api, { cache: { itemEdits: { set: { dd: 'n' }, removed: [] } } });
     await screen.findByLabelText('Value a');
     const page1 = keysShown();
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByLabelText('Value e');
+    await press('Next');
     const page2 = keysShown();
-    // on exactly one of the two pages: page 1 is full, so it is the first row of page 2
+    // page 1 is full, so dd is cut from it and opens page 2
     expect([page1.includes('dd'), page2.includes('dd')].filter(Boolean)).toHaveLength(1);
     expect(page2).toEqual(['dd', 'e', 'f', 'g']);
     expect(status()).toHaveTextContent('on this page: 1 added');
@@ -198,26 +232,47 @@ describe('CacheItemsTable', () => {
     setup(api, { cache: { itemEdits: { set: { cc: 'n' }, removed: [] } } });
     await screen.findByLabelText('Value a');
     expect(keysShown()).toEqual(['a', 'b', 'c', 'cc']); // d is cut
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByLabelText('Value d')).toBeInTheDocument();
-    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { after: 'cc' }, 4);
+    await press('Next');
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { from: 'd' }, 5);
     expect(keysShown()).toEqual(['d', 'e', 'f', 'g']);
   });
 
-  it('beforeReadsUseTheExtraRowAsLowerBound', async () => {
-    const { api, cacheItemsPage } = over(TEN);
-    setup(api);
+  it('prevAfterNextShowsTheSameRows', async () => {
+    const { api } = over(TEN);
+    setup(api, { cache: { itemEdits: { set: { cc: 'n' }, removed: [] } } });
     await screen.findByLabelText('Value a');
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByLabelText('Value e');
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByLabelText('Value i');
-    fireEvent.click(screen.getByRole('button', { name: 'Prev' }));
-    expect(await screen.findByLabelText('Value e')).toBeInTheDocument();
-    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { before: 'i' }, 5);
-    expect(keysShown()).toEqual(['e', 'f', 'g', 'h']); // d came back as the bound and is not shown
-    expect(screen.getByText('rows 5–8 · page 2 of 3')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Prev' })).toBeEnabled();
+    await press('Next');
+    await press('Prev');
+    expect(keysShown()).toEqual(['a', 'b', 'c', 'cc']);
+    expect(button('Prev')).toBeDisabled();
+  });
+
+  it('aCacheOfOnlyAddedKeysPagesBothWays', async () => {
+    const { api } = over([]);
+    setup(api, { cache: { itemCount: 0, itemEdits: { set: { a: '1', b: '2', c: '3', d: '4', e: '5', f: '6' }, removed: [] } } });
+    await screen.findByLabelText('Value a');
+    expect(keysShown()).toEqual(['a', 'b', 'c', 'd']);
+    expect(button('Prev')).toBeDisabled();
+    await press('Next');
+    expect(keysShown()).toEqual(['e', 'f']);
+    expect(button('Prev')).toBeEnabled();
+    expect(button('Next')).toBeDisabled();
+    await press('Prev');
+    expect(keysShown()).toEqual(['a', 'b', 'c', 'd']);
+    expect(button('Prev')).toBeDisabled();
+  });
+
+  it('budgetCutPageStillTiles', async () => {
+    // the character budget lets only 3 rows through a read, with next set while more follow
+    const { api, cacheItemsPage } = over(TEN, 3);
+    setup(api, { cache: { itemEdits: { set: { cc: 'x', hh: 'y' }, removed: [] } } });
+    await screen.findByLabelText('Value a');
+    const first = keysShown();
+    expect(first).toEqual(['a', 'b', 'c']);
+    await press('Next');
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { after: 'c' }, 5);
+    const { forward } = await walk();
+    expect([first, ...forward].flat()).toEqual([...TEN.map((x) => x.key), 'cc', 'hh'].sort());
   });
 
   it('jumpReadsFromTheTypedText', async () => {
@@ -230,7 +285,7 @@ describe('CacheItemsTable', () => {
     fireEvent.change(box, { target: { value: 'f' } });
     fireEvent.keyDown(box, { key: 'Enter' });
     expect(await screen.findByLabelText('Value f')).toBeInTheDocument();
-    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { from: 'f' }, 4);
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { from: 'f' }, 5);
     expect(screen.getByText('rows 6–9 · page 2 of 3')).toBeInTheDocument();
   });
 
@@ -247,6 +302,7 @@ describe('CacheItemsTable', () => {
     go('z');
     expect(await screen.findByText('no key at or after "z" — showing the last page')).toBeInTheDocument();
     expect(keysShown()).toEqual(['g', 'h', 'i', 'j']);
+    expect(button('Next')).toBeDisabled();
     go('c');
     await screen.findByLabelText('Value c');
     await waitFor(() => expect(screen.queryByText(/^no key/)).toBeNull());
@@ -256,18 +312,31 @@ describe('CacheItemsTable', () => {
     expect(screen.queryByText(/^no key/)).toBeNull();
     expect(box).toHaveValue('');
     expect(await screen.findByLabelText('Value a')).toBeInTheDocument();
-    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', null, 4);
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', null, 5);
   });
 
-  it('growingReadsFromTheFirstVisibleKey', async () => {
+  it('aJumpPastEveryKeyKeepsAddedKeysJustBelowItReachable', async () => {
+    const { api } = over(TEN);
+    setup(api, { cache: { itemEdits: { set: { jj: 'n' }, removed: [] } } });
+    await screen.findByLabelText('Value a');
+    const box = screen.getByRole('textbox', { name: 'Jump to key' });
+    fireEvent.change(box, { target: { value: 'z' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Go' }));
+    await screen.findByText('no key at or after "z" — showing the last page');
+    // the page owns [g, end): jj sorts in it, is cut at this size, and Next reaches it
+    expect(keysShown()).toEqual(['g', 'h', 'i', 'j']);
+    await press('Next');
+    expect(keysShown()).toEqual(['jj']);
+  });
+
+  it('growingReadsFromTheLowerKey', async () => {
     const { api, cacheItemsPage } = over(TEN);
     const { rerender } = setup(api);
     await screen.findByLabelText('Value a');
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByLabelText('Value e');
+    await press('Next');
     fit.rows = 6;
     rerender();
-    await waitFor(() => expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { from: 'e' }, 6));
+    await waitFor(() => expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { from: 'e' }, 7));
     await screen.findByLabelText('Value j');
     expect(keysShown()).toEqual(['e', 'f', 'g', 'h', 'i', 'j']);
     const calls = cacheItemsPage.mock.calls.length;
@@ -276,21 +345,21 @@ describe('CacheItemsTable', () => {
     expect(keysShown()).toEqual(['e', 'f', 'g']);
     expect(cacheItemsPage).toHaveBeenCalledTimes(calls);
     expect(screen.getByText('rows 5–7 · page 2 of 4')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await waitFor(() => expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { after: 'g' }, 3));
+    expect(button('Next')).toBeEnabled();
+    await press('Next');
+    expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', { from: 'h' }, 4);
   });
 
   it('aStaleReadIsIgnored', async () => {
     const waits: Record<number, (v: unknown) => void> = {};
     const { api, cacheItemsPage } = apiOf((at, limit) => new Promise((res) => { waits[limit] = () => res({ ok: true, value: serve(TEN, at, limit) }); }));
     const { rerender } = setup(api);
-    await waitFor(() => expect(cacheItemsPage).toHaveBeenCalledWith('c1', null, 4));
+    await waitFor(() => expect(cacheItemsPage).toHaveBeenCalledWith('c1', null, 5));
     fit.rows = 6;
     rerender();
-    await waitFor(() => expect(cacheItemsPage).toHaveBeenCalledWith('c1', null, 6));
-    await act(async () => { waits[6]!(undefined); });
-    await act(async () => { waits[4]!(undefined); });
+    await waitFor(() => expect(cacheItemsPage).toHaveBeenCalledWith('c1', null, 7));
+    await act(async () => { waits[7]!(undefined); });
+    await act(async () => { waits[5]!(undefined); });
     expect(keysShown()).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
   });
 
@@ -362,7 +431,7 @@ describe('CacheItemsTable', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     await screen.findByLabelText('Value e');
     act(() => store.load({ ...store.state(), caches: { c1: { ...store.state().caches.c1!, updatedAt: '2026-12-01T00:00:00Z' } } }));
-    await waitFor(() => expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', null, 4));
+    await waitFor(() => expect(cacheItemsPage).toHaveBeenLastCalledWith('c1', null, 5));
     expect(await screen.findByLabelText('Value a')).toBeInTheDocument();
   });
 });
