@@ -20,16 +20,22 @@ export function pageView(
     if (next !== undefined && next !== s.value) return { key: s.key, value: next, stored: s.value, state: 'modified' as const };
     return { key: s.key, value: s.value, stored: s.value };
   });
-  const sortedStored = stored.map((s) => s.key).sort(collator.compare);
-  const first = sortedStored[0];
-  const last = sortedStored[sortedStored.length - 1];
+  // Stored rows keep the server's order; only unsaved added keys are placed with the collator.
+  const first = stored.length ? stored[0].key : undefined;
+  const last = stored.length ? stored[stored.length - 1].key : undefined;
+  const added: PageRow[] = [];
   for (const key of Object.keys(edits.set)) {
     if (storedKeys.has(key) || removed.has(key)) continue;
     const lowOk = first === undefined ? edges.atStart : edges.atStart || collator.compare(key, first) > 0;
     const highOk = last === undefined ? edges.atEnd : edges.atEnd || collator.compare(key, last) < 0;
-    if (lowOk && highOk) rows.push({ key, value: edits.set[key], stored: null, state: 'added' });
+    if (lowOk && highOk) added.push({ key, value: edits.set[key], stored: null, state: 'added' });
   }
-  rows.sort((a, b) => collator.compare(a.key, b.key));
+  added.sort((x, y) => collator.compare(x.key, y.key));
+  for (const add of added) {
+    let i = rows.findIndex((r) => collator.compare(add.key, r.key) < 0);
+    if (i < 0) i = rows.length;
+    rows.splice(i, 0, add);
+  }
   const cut = rows.length > size;
   return { rows: cut ? rows.slice(0, size) : rows, cut };
 }
@@ -45,8 +51,11 @@ export function summaryText(s: { modified: number; added: number; deleted: numbe
   return parts.length ? `on this page: ${parts.join(' · ')}` : 'no unsaved changes on this page';
 }
 
+/** Cursors prefer the visible stored keys (they came from the server); added keys only when no stored row is visible. */
 export function cursors(rows: PageRow[]): { after: string | null; before: string | null } {
-  return rows.length
-    ? { after: rows[rows.length - 1].key, before: rows[0].key }
+  const stored = rows.filter((r) => r.stored !== null);
+  const src = stored.length ? stored : rows;
+  return src.length
+    ? { after: src[src.length - 1].key, before: src[0].key }
     : { after: null, before: null };
 }

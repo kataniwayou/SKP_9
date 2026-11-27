@@ -44,6 +44,30 @@ describe('pageView', () => {
   });
 });
 
+describe('server order', () => {
+  it('storedOrderIsKeptAsReceived', () => {
+    const { rows } = pageView(st('ab', 'a-b'), { set: {}, removed: [] }, none, 10);
+    expect(rows.map((r) => r.key)).toEqual(['ab', 'a-b']);
+    expect(cursors(rows)).toEqual({ after: 'a-b', before: 'ab' });
+  });
+  it('cursorsUseStoredKeysWhenVisible', () => {
+    const { rows } = pageView(st('m', 'n'), { set: { a: '1', z: '2' }, removed: [] }, { atStart: true, atEnd: true }, 10);
+    expect(rows.map((r) => r.key)).toEqual(['a', 'm', 'n', 'z']);
+    expect(cursors(rows)).toEqual({ after: 'n', before: 'm' });
+  });
+  it('aKeyEqualToAStoredKeyIsModifiedNotAdded', () => {
+    const { rows } = pageView(st('a', 'b'), { set: { b: 'new' }, removed: [] }, none, 10);
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({ key: 'b', state: 'modified', stored: '2', value: 'new' });
+  });
+  it('cursorsAfterACut', () => {
+    const { rows, cut } = pageView(st('b', 'd', 'f'), { set: { a: '1', c: '2' }, removed: [] }, { atStart: true, atEnd: false }, 3);
+    expect(cut).toBe(true);
+    expect(rows.map((r) => r.key)).toEqual(['a', 'b', 'c']);
+    expect(cursors(rows)).toEqual({ after: 'b', before: 'b' });
+  });
+});
+
 describe('summary', () => {
   it('summaryTextWording', () => {
     expect(summaryText({ modified: 0, added: 0, deleted: 0 })).toBe('no unsaved changes on this page');
