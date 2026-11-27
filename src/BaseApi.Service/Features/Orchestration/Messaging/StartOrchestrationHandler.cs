@@ -111,6 +111,16 @@ internal sealed class StartOrchestrationHandler : IQueueMessageHandler
     /// them as they are now. A cache deleted since the start was queued is skipped: a cache a workflow
     /// is bound to cannot be deleted, so this is a race the next start settles. Caches carried inline
     /// (a message from before refs existed) are kept as they came.
+    /// <para>
+    /// <b>The start-vs-refresh race is closed only by serial consumption.</b> Reading the rows at write
+    /// time means a refresh queued after an item edit can never be overtaken by an older start's write —
+    /// but only because the control queue is consumed one message at a time: BaseApi runs one replica
+    /// (<c>k8s/30-baseapi-service.yaml</c> <c>replicas: 1</c>), with prefetch 1 and
+    /// <c>ConsumerDispatchConcurrency</c> 1 (<c>RabbitMqConnection</c>). Scaling BaseApi out (or raising
+    /// either) lets a start and a refresh for the same workflow run concurrently, and a start that read
+    /// the rows before an edit can then write after that edit's refresh, leaving L2 stale until the next
+    /// start. That reopens the race; it would need a per-workflow lock or ordering first.
+    /// </para>
     /// </summary>
     private async Task<WorkflowL1> ResolveCachesAsync(WorkflowL1 workflow, CancellationToken ct)
     {
