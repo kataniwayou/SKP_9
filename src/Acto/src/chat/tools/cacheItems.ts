@@ -1,6 +1,7 @@
 import { removeCacheItem, setCacheItem } from '../../design/edits';
 import type { BoardState } from '../../design/board';
 import { describeError } from '../../api/describeError';
+import { pageSummary, readAt, readLimit, shownPage, windowOf, type PageRead, type PageRow, type PageWindow, type ShownPage } from '../../design/itemsPage';
 import type { ToolDef } from '../toolTypes';
 import { applyState, CACHE_ID, done, fail, onBoard, text } from './common';
 
@@ -9,78 +10,129 @@ const MAX_LIMIT = 5000;
 /** Most characters read_cache_items hands back: a page of large values is cut to this, so one call cannot flood the chat. */
 export const READ_TEXT_CAP = 100_000;
 
-type Item = { key: string; value: string };
+type Anchor = { from: string } | { after: string } | { before: string };
+
+/** One page as the answer shows it (the Inspector's page: see design/itemsPage.ts). */
+export type ChatPage = {
+  itemCount: number;
+  index: number;
+  rows: PageRow[];
+  prev: Anchor | null;
+  next: Anchor | null;
+  /** the jump note of the Inspector ("no key ..."), when the read was a jump that did not match exactly */
+  jumpNote: string | null;
+};
+
+const n = (x: number) => x.toLocaleString('en-US');
+
+/** The ready-to-pass anchors of a page's edges. */
+function anchors(upper: string | null, upperAfter: boolean, lower: string | null): { prev: Anchor | null; next: Anchor | null } {
+  return {
+    prev: lower === null ? null : { before: lower },
+    next: upper === null ? null : upperAfter ? { after: upper } : { from: upper },
+  };
+}
+
+function jumpNoteOf(text: string, match: string | null | undefined): string | null {
+  if (match === 'later') return `no key "${text}" — showing from the next key`;
+  if (match === 'none') return `no key at or after "${text}" — showing the last page`;
+  return null;
+}
 
 /**
  * The answer's JSON, at most READ_TEXT_CAP characters. When the whole page does not fit, rows are cut from the end: `next`
- * becomes the last included key (so the following call resumes right after it) and the note says the page was cut. A first
- * row that alone does not fit is still returned, its value shortened (`value_truncated`); unsaved edits too many to fit are
- * given as counts.
+ * becomes `{from: <first cut row's key>}` (so the following call resumes exactly there), the per-page `unsaved` counts the
+ * rows actually returned, and the note says the page was cut. A first row that alone does not fit is still returned, its
+ * value shortened (`value_truncated`).
  */
-export function cappedPage(itemCount: number, items: Item[], next: string | null, unsaved: { set: Record<string, string>; removed: string[] }): string {
-  const noteOf = (nx: string | null, cut: boolean) =>
-    `one page of ${itemCount} items${cut ? ` (cut to ${READ_TEXT_CAP} characters)` : ''}${nx === null ? ' (the last page)' : `: more follow, pass after=${JSON.stringify(nx)}`}; unsaved edits applied`;
-  const render = (rows: unknown[], nx: string | null, cut: boolean, u: unknown) =>
-    JSON.stringify({ item_count: itemCount, items: rows, next: nx, unsaved: u, note: noteOf(nx, cut) });
-
-  const whole = render(items, next, false, unsaved);
+export function cappedPage(page: ChatPage): string {
+  const { itemCount, index, prev, jumpNote } = page;
+  const all = page.rows;
+  const render = (rows: unknown[], shown: PageRow[], nx: Anchor | null, cut: boolean) => {
+    const storedShown = shown.filter((r) => r.stored !== null).length;
+    const note = `one page of ${n(itemCount)} items${cut ? ` (cut to ${READ_TEXT_CAP} characters)` : ''}${nx === null ? ' (the last page)' : ': more follow, pass next as given'}; unsaved edits applied${jumpNote ? `; ${jumpNote}` : ''}`;
+    return JSON.stringify({
+      item_count: itemCount, index,
+      rows: storedShown === 0 ? 'no stored rows on this page' : `${n(index + 1)}–${n(index + storedShown)} of ${n(itemCount)}`,
+      items: rows, prev, next: nx, unsaved: pageSummary(shown), note,
+    });
+  };
+  const view = (r: PageRow) => (r.state ? { key: r.key, value: r.value, state: r.state } : { key: r.key, value: r.value });
+  const whole = render(all.map(view), all, page.next, false);
   if (whole.length <= READ_TEXT_CAP) return whole;
 
-  let u: unknown = unsaved;
-  const emptyLen = (nx: string | null) => render([], nx, true, u).length;
-  if (emptyLen(items.at(-1)?.key ?? next) > READ_TEXT_CAP / 2) {
-    u = { set_count: Object.keys(unsaved.set).length, removed_count: unsaved.removed.length, note: 'too many unsaved edits to list here' };
-  }
-  // cut rows: the overhead is measured with the longest possible next (any included key), then rows are added while they fit
-  let n = 0;
+  const nextAt = (i: number): Anchor => ({ from: all[i]!.key });
+  const SLACK = 64; // the counts and row range grow a few digits as rows are added
+  let k = 0;
   let used = 0;
-  for (; n < items.length; n++) {
-    const add = JSON.stringify(items[n]).length + (n > 0 ? 1 : 0);
-    if (emptyLen(items[n]!.key) + used + add > READ_TEXT_CAP) break;
+  for (; k < all.length; k++) {
+    const add = JSON.stringify(view(all[k]!)).length + (k > 0 ? 1 : 0);
+    if (render([], [], nextAt(k), true).length + SLACK + used + add > READ_TEXT_CAP) break;
     used += add;
   }
-  if (n === 0 && items.length > 0) {
-    const first = items[0]!;
-    const room = READ_TEXT_CAP - render([{ key: first.key, value: '', value_truncated: true }], first.key, true, u).length;
+  if (k === 0 && all.length > 0) {
+    const first = all[0]!;
+    const nx = all.length > 1 ? nextAt(1) : page.next;
+    const one = (take: number) => render([{ key: first.key, value: first.value.slice(0, take), ...(first.state ? { state: first.state } : {}), value_truncated: true }], [first], nx, true);
+    let take = Math.max(0, READ_TEXT_CAP - one(0).length);
+    let out = one(take);
     // JSON escaping can lengthen the value: shorten until it fits
-    let take = Math.max(0, room);
-    let out = render([{ key: first.key, value: first.value.slice(0, take), value_truncated: true }], first.key, true, u);
-    while (out.length > READ_TEXT_CAP && take > 0) {
-      take = Math.floor(take * 0.9);
-      out = render([{ key: first.key, value: first.value.slice(0, take), value_truncated: true }], first.key, true, u);
-    }
+    while (out.length > READ_TEXT_CAP && take > 0) { take = Math.floor(take * 0.9); out = one(take); }
     return out;
   }
-  const rows = items.slice(0, n);
-  return render(rows, n < items.length ? rows.at(-1)!.key : next, n < items.length, u);
+  for (;;) {
+    const shown = all.slice(0, k);
+    const out = render(shown.map(view), shown, k < all.length ? nextAt(k) : page.next, k < all.length);
+    if (out.length <= READ_TEXT_CAP || k <= 1) return out;
+    k--;
+  }
 }
+
+const ANCHOR_NAMES = ['from', 'before', 'after'] as const;
 
 const readCacheItems: ToolDef = {
   name: 'read_cache_items',
-  description: `Read ONE PAGE of a cache's stored items (BaseApi pages them: \`after\` is the \`next\` of the previous page, \`limit\` default ${DEFAULT_LIMIT}, at most ${MAX_LIMIT}), with this session's unsaved edits applied to it: an unsaved value replaces the stored one, a key marked removed is left out. The answer always says it is one page of item_count; \`unsaved\` lists every unsaved set and removed key of the whole cache (a set key may be on a later page, or new). A cache never saved has no stored items: only \`unsaved\` is given. The answer is at most ${READ_TEXT_CAP} characters: a page of large values is cut, \`next\` is then the last key given and the note says it was cut.`,
+  description: `Read ONE PAGE of a cache's stored items, as the Inspector's Items list shows it, with this session's unsaved edits applied to it: an unsaved value replaces the stored one (state "modified"), a key marked removed stays with state "deleted", and an unsaved new key that falls in the page's key range is a row with state "added". Pages tile the key space in key order. Give at most one of \`from\` (jump: the page starting at that key, or at the next key when there is none; the note says so), \`before\` (the page before that key) or \`after\` (the page after that key); with none you get the first page. Never send an empty text. \`limit\` is the page size (default ${DEFAULT_LIMIT}, at most ${MAX_LIMIT}). The answer gives item_count, index (stored rows before this page), rows ("a–b of N"), items [{key, value, state?}], and ready-to-pass \`prev\` and \`next\` anchors (pass one as given in the next call; null at the ends), and \`unsaved\` {modified, added, deleted}: counts for this page only, not the whole cache (read_board lists the whole cache's unsaved items). A cache never saved has no stored items: its unsaved items are the rows, all "added". The answer is at most ${READ_TEXT_CAP} characters: a page of large values is cut from the end, \`next\` then starts at the first row left out, and the note says it was cut.`,
   parameters: {
     type: 'object',
-    properties: { cache_id: CACHE_ID, after: { type: 'string', description: "The previous page's `next`; leave out for the first page." }, limit: { type: 'number' } },
+    properties: {
+      cache_id: CACHE_ID,
+      from: { type: 'string', description: 'Jump to the page starting at this key (or the next key after it). Not empty.' },
+      before: { type: 'string', description: "The previous page's `prev.before`: the page before this key. Not empty." },
+      after: { type: 'string', description: "A page's `next.after`: the page after this key. Not empty." },
+      limit: { type: 'number' },
+    },
     required: ['cache_id'], additionalProperties: false,
   },
   async run(ctx, args) {
     const c = onBoard(ctx, 'cache', text(args, 'cache_id'), 'read cache items');
     if ('out' in c) return c.out;
-    const row = ctx.store.state().caches[c.id]!;
-    const unsaved = { set: row.itemEdits.set, removed: row.itemEdits.removed };
-    if (row.updatedAt === null) {
-      return done(true, JSON.stringify({ item_count: 0, items: [], next: null, unsaved, note: 'not saved yet: it has no stored items, only the unsaved ones' }), `read items of ${row.name}`);
+    const given = ANCHOR_NAMES.filter((k) => args[k] !== undefined && args[k] !== null);
+    if (given.length > 1) return fail('give at most one of from, before, after', 'read cache items refused');
+    for (const k of given) {
+      if (typeof args[k] !== 'string') return fail(`${k} must be a key text`, 'read cache items refused');
+      if (args[k] === '') return fail(`${k} must not be empty`, 'read cache items refused');
     }
+    const row = ctx.store.state().caches[c.id]!;
     const limit = typeof args.limit === 'number' && Number.isFinite(args.limit) ? Math.min(MAX_LIMIT, Math.max(1, Math.floor(args.limit))) : DEFAULT_LIMIT;
-    const after = text(args, 'after') || undefined;
-    const r = await ctx.api.cacheItemsPage(c.id, after ? { after } : null, limit);
+    const label = `read items of ${row.name}`;
+    const finish = (shown: ShownPage, jumpNote: string | null) =>
+      done(true, cappedPage({ itemCount: row.itemCount, index: shown.index, rows: shown.rows, jumpNote, ...anchors(shown.upper, shown.upperAfter, shown.lower) }), label);
+    if (row.updatedAt === null) {
+      const empty: PageWindow = { stored: [], lower: null, lowerAfter: false, upper: null, upperAfter: false, index: 0, limit: Number.MAX_SAFE_INTEGER, cut: 'tail' };
+      return finish(shownPage(empty, row.itemEdits, Number.MAX_SAFE_INTEGER), null);
+    }
+    const which = given[0];
+    const key = which ? (args[which] as string) : null;
+    const read: PageRead = which === 'before' ? { dir: 'back', before: key! }
+      : which === 'after' ? { dir: 'forward', from: key, after: true }
+        : { dir: 'forward', from: key, ...(which === 'from' ? { jump: true } : {}) };
+    const r = await ctx.api.cacheItemsPage(c.id, readAt(read), readLimit(limit));
     if (!r.ok) return fail(`could not read the items of cache ${c.id}. ${describeError(r.error)}`, 'read cache items failed');
     // the board may have changed while the page was read: apply the overlay as it is now
     const edits = ctx.store.state().caches[c.id]?.itemEdits ?? row.itemEdits;
-    const items = (r.value.items ?? [])
-      .filter((i): i is { key: string; value?: string | null } => typeof i.key === 'string' && !edits.removed.includes(i.key))
-      .map((i) => ({ key: i.key, value: Object.hasOwn(edits.set, i.key) ? edits.set[i.key]! : i.value ?? '' }));
-    return done(true, cappedPage(row.itemCount, items, r.value.next ?? null, { set: edits.set, removed: edits.removed }), `read items of ${row.name}`);
+    const shown = shownPage(windowOf(read, limit, r.value), edits, limit);
+    return finish(shown, which === 'from' ? jumpNoteOf(key!, r.value.fromMatch) : null);
   },
 };
 

@@ -41,7 +41,7 @@ const collator = new Intl.Collator('en-US');
 export function pageView(
   stored: { key: string; value: string }[],
   edits: ItemEdits,
-  bounds: { lower: string | null; upper: string | null },
+  bounds: { lower: string | null; upper: string | null; lowerAfter?: boolean },
   size: number,
   cut: 'tail' | 'head' = 'tail',
 ): { rows: PageRow[]; cut: boolean; cutAt: string | null } {
@@ -53,11 +53,11 @@ export function pageView(
     if (next !== undefined && next !== s.value) return { key: s.key, value: next, stored: s.value, state: 'modified' as const };
     return { key: s.key, value: s.value, stored: s.value };
   });
-  const { lower, upper } = bounds;
+  const { lower, upper, lowerAfter } = bounds;
   const added: PageRow[] = [];
   for (const key of Object.keys(edits.set)) {
     if (storedKeys.has(key) || removed.has(key)) continue;
-    if (lower !== null && collator.compare(key, lower) < 0) continue;
+    if (lower !== null && collator.compare(key, lower) < (lowerAfter ? 1 : 0)) continue;
     if (upper !== null && collator.compare(key, upper) >= 0) continue;
     added.push({ key, value: edits.set[key], stored: null, state: 'added' });
   }
@@ -136,7 +136,7 @@ export type ShownPage = { rows: PageRow[]; lower: string | null; lowerAfter: boo
 
 /** The window merged with the unsaved edits at its read size, then cut from the tail to `size` when the panel is smaller. */
 export function shownPage(w: PageWindow, edits: ItemEdits, size: number): ShownPage {
-  const v = pageView(w.stored, edits, { lower: w.lower, upper: w.upper }, w.limit, w.cut);
+  const v = pageView(w.stored, edits, { lower: w.lower, upper: w.upper, lowerAfter: w.lowerAfter }, w.limit, w.cut);
   let { lower, lowerAfter, upper, upperAfter, index } = w;
   let rows = v.rows;
   if (v.cut && w.cut === 'tail') { upper = v.cutAt; upperAfter = false; }

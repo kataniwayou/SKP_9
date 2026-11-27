@@ -92,6 +92,18 @@ describe('windows and tiling', () => {
     expect(w).toMatchObject({ lower: 'b', upper: 'b', upperAfter: true });
     expect(readAt({ dir: 'forward', from: w.upper, after: w.upperAfter })).toEqual({ after: 'b' });
   });
+  it('aBudgetEdgeKeyWithAPendingEditShowsOnce', () => {
+    // page 1 ends at 'b' (budget cut, upperAfter); 'b' has a pending modify and is shown there as modified
+    const edits = { set: { b: 'B2' }, removed: [] };
+    const w1 = windowOf({ dir: 'forward', from: null }, 3, { items: [{ key: 'a', value: '1' }, { key: 'b', value: '2' }], index: 0, next: 'b' });
+    const p1 = shownPage(w1, edits, 3);
+    expect(p1.rows.map((r) => [r.key, r.state])).toEqual([['a', undefined], ['b', 'modified']]);
+    expect(p1).toMatchObject({ upper: 'b', upperAfter: true });
+    // the next page reads after 'b': its lower is 'b' exclusive, so 'b' is not shown again as added
+    const w2 = windowOf({ dir: 'forward', from: p1.upper, after: p1.upperAfter }, 3, { items: [{ key: 'c', value: '3' }], index: 2, next: null });
+    const p2 = shownPage(w2, edits, 3);
+    expect(keys(p2.rows)).toEqual(['c']);
+  });
   it('aBackReadDropsTheExtraEarliestRow', () => {
     const w = windowOf({ dir: 'back', before: 'f' }, 3, serve(['a', 'b', 'c', 'd', 'e', 'f'], { before: 'f' }, 4));
     expect(w).toMatchObject({ lower: 'c', upper: 'f', index: 2, cut: 'head' });
