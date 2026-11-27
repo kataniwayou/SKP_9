@@ -11,8 +11,9 @@ export function CacheTab({ state, edit, id, api }: Ctx & { id: Id }) {
   const set = (key: 'name' | 'version' | 'description' | 'root', v: string | null) =>
     edit((b) => setCacheField(b, id, key, v as never), `field:${id}:${key}`);
   const users = Object.values(state.workflows).filter((w) => w.cacheIds.includes(id)).map((w) => w.name);
+  // a flex column that fills the Inspector's body: the Items field takes the height left, so its list never scrolls inside
   return (
-    <>
+    <div className="cache-tab">
       <EntityBase head={`${cache.name} ${cache.version}`} kind={users.length ? `cache · used by ${users.join(', ')}` : 'cache'}
         k={id} row={cache} meta={metaOfRow(cache)} set={set} />
       <TextField key={`${id}:root`} label="Root" value={cache.root} onChange={(v) => set('root', v)} />
@@ -22,6 +23,6 @@ export function CacheTab({ state, edit, id, api }: Ctx & { id: Id }) {
         <Row k="Used by">{users.length ? users.join(', ') : 'no workflow'}</Row>
         <Row k="Location">{locationText(cache.at)}</Row>
       </Ro>
-    </>
+    </div>
   );
 }

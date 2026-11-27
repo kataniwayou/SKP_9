@@ -1,17 +1,20 @@
-import { useEffect, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { StudioApi } from '../api/client';
 import { describeError } from '../api/describeError';
-import type { CacheItemsPage } from '../api/types';
+import type { CacheItemsPage, ItemsAt } from '../api/types';
 import type { CacheRow } from '../design/board';
 import { removeCacheItem, revertCacheItem, setCacheItem } from '../design/edits';
+import { cursors, pageSummary, pageView, summaryText, type PageRow } from '../design/itemsPage';
 import type { Edit } from './tabs/shared';
+import { useFitRows } from './useFitRows';
 
-/** How many stored items one request reads. */
-export const ITEMS_PAGE_LIMIT = 500;
-
-type Page = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ok'; page: CacheItemsPage };
+/** One read: where the page starts, how many rows, and the typed text when it is a jump (the note comes from its answer). */
+type Req = { at: ItemsAt; limit: number; jump?: string };
+type Status = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ok' };
 
 const STRUCK = { textDecoration: 'line-through', opacity: 0.6 } as const;
+const n = (x: number) => x.toLocaleString('en-US');
+const ROW_CLASS = { modified: 'mod', added: 'add', deleted: 'del' } as const;
 
 /** A value cell: a click edits it, Enter or leaving commits (only a change), Escape puts it back. */
 function Cell({ label, value, onCommit, struck }: { label: string; value: string; onCommit: (v: string) => void; struck?: boolean }) {
@@ -29,38 +32,73 @@ function Cell({ label, value, onCommit, struck }: { label: string; value: string
   );
 }
 
+function noteOf(text: string, match: string | null | undefined): string | null {
+  if (match === 'later') return `no key "${text}" — showing from the next key`;
+  if (match === 'none') return `no key at or after "${text}" — showing the last page`;
+  return null;
+}
+
 /**
- * A cache's items, one page at a time: the stored page (read from the server, `ITEMS_PAGE_LIMIT` a request) with this
- * session's unsaved edits laid over it, an "Unsaved" section listing every change with its revert, and an add-key row. Each
- * commit is its own undo step. A new cache (not saved yet) has nothing stored to read: only the Unsaved section. Without an
- * `api` there is nothing to read either.
+ * A cache's items as one page that fits the Inspector's height (no scrolling inside the list): the stored page read from the
+ * server with this session's unsaved edits shown in place (amber modified, green added, struck deleted), a jump-to-key box,
+ * a summary of the unsaved changes on screen only, Prev / Next and the position, and an add-key row. Each commit is its own
+ * board undo step; Save is the board's. A new cache (not saved yet), or no `api`, has nothing stored to read: only its added rows.
  */
 export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; isNew: boolean; api?: StudioApi | undefined; edit: Edit }) {
   const { id, updatedAt, itemCount, itemEdits } = cache;
-  // cursors of the pages visited: the last is this page's `after` (null: the first page)
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const fitRef = useRef<HTMLDivElement>(null);
+  const size = useFitRows(fitRef);
+  const [req, setReq] = useState<Req>({ at: null, limit: size });
   const [stamp, setStamp] = useState(updatedAt);
   const [tries, setTries] = useState(0);
-  const [page, setPage] = useState<Page>({ state: 'loading' });
+  const [status, setStatus] = useState<Status>({ state: 'loading' });
+  const [page, setPage] = useState<CacheItemsPage | null>(null);
+  const [jumpText, setJumpText] = useState('');
+  const [note, setNote] = useState<string | null>(null);
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
   const [refused, setRefused] = useState<string | null>(null);
-  // a Save that read the board again: the stored items may have changed under the cursors, so start from the first page
-  if (stamp !== updatedAt) { setStamp(updatedAt); setCursors([null]); }
-  const after = cursors[cursors.length - 1] ?? null;
-
+  const seq = useRef(0);
   const reads = !isNew && api !== undefined;
+
+  // what is on screen: the stored page with the unsaved edits that fall on it, cut to the fitted size
+  const stored = (page?.items ?? []).map((it) => ({ key: it.key ?? '', value: it.value ?? '' }));
+  const view = reads
+    ? pageView(stored, itemEdits, { atStart: (page?.index ?? 0) === 0, atEnd: page ? page.next == null : true }, size)
+    : pageView([], itemEdits, { atStart: true, atEnd: true }, Number.MAX_SAFE_INTEGER);
+  const rows: PageRow[] = view.rows;
+  const edges = cursors(rows);
+
+  // a Save that read the board again: the stored items may have changed under the cursors, so start from the first page
+  if (stamp !== updatedAt) { setStamp(updatedAt); setReq({ at: null, limit: size }); setNote(null); }
+  // taller: one read from the first visible row with the new size (shorter: rows drop off the bottom, no read)
+  else if (reads && size > req.limit) setReq({ at: edges.before !== null && page ? { from: edges.before } : req.at, limit: size });
+
   useEffect(() => {
     if (!reads) return;
-    let live = true;
-    setPage({ state: 'loading' });
-    api.cacheItemsPage(id, after ? { after } : null, ITEMS_PAGE_LIMIT).then((r) => {
-      if (live) setPage(r.ok ? { state: 'ok', page: r.value } : { state: 'error', message: describeError(r.error) });
+    const mine = ++seq.current;
+    setStatus({ state: 'loading' });
+    const drop = () => mine !== seq.current;
+    api.cacheItemsPage(id, req.at, req.limit).then((r) => {
+      if (drop()) return;
+      if (!r.ok) { setStatus({ state: 'error', message: describeError(r.error) }); return; }
+      setPage(r.value);
+      setStatus({ state: 'ok' });
+      if (req.jump !== undefined) setNote(noteOf(req.jump, r.value.fromMatch));
     }, (e: unknown) => {
-      if (live) setPage({ state: 'error', message: e instanceof Error ? e.message : String(e) });
+      if (!drop()) setStatus({ state: 'error', message: e instanceof Error ? e.message : String(e) });
     });
-    return () => { live = false; };
-  }, [reads, api, id, after, updatedAt, tries]);
+  }, [reads, api, id, req, tries]);
+
+  const go = (at: ItemsAt, jump?: string) => {
+    setNote(null);
+    setReq(jump === undefined ? { at, limit: size } : { at, limit: size, jump });
+  };
+  const jump = () => { if (jumpText !== '') go({ from: jumpText }, jumpText); };
+  const jumpKeys = (e: KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { e.preventDefault(); jump(); } };
+  const clearJump = () => { setJumpText(''); go(null); };
+  const next = () => { const after = edges.after ?? page?.next; if (after) go({ after }); };
+  const prev = () => { const before = edges.before ?? page?.prev; if (before) go({ before }); };
 
   const setItem = (key: string, value: string): boolean => {
     let why: string | null = null;
@@ -79,83 +117,81 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
   };
   const addKeys = (e: KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { e.preventDefault(); add(); } };
 
-  const setKeys = Object.keys(itemEdits.set);
-  const unsaved = setKeys.length + itemEdits.removed.length;
-  const removed = new Set(itemEdits.removed);
-  const head = isNew ? `${unsaved} unsaved` : `${itemCount} stored${unsaved ? ` · ${unsaved} unsaved` : ''}`;
+  const summary = pageSummary(rows);
+  const anyChange = summary.modified + summary.added + summary.deleted > 0;
+  const index = page?.index ?? 0;
+  const storedShown = rows.filter((r) => r.stored !== null).length;
+  const position = storedShown === 0 ? 'no items'
+    : `rows ${n(index + 1)}–${n(index + storedShown)} · page ${n(Math.floor(index / size) + 1)} of ${n(Math.max(1, Math.ceil(itemCount / size)))}`;
+  const showTable = !reads || status.state === 'ok' || (status.state === 'loading' && page !== null);
 
   return (
-    <div className="fld tall dict-row">
-      <span>Items</span>
-      <div className="dict">
-        <div className="dict-head"><span className="dict-count">{head}</span></div>
-        <div className="dict-val">
-          {unsaved > 0 && (
-            <table className="dict-table" aria-label="Unsaved items">
-              <thead><tr><th>Unsaved</th><th>Value</th><th aria-label="Revert" /></tr></thead>
-              <tbody>
-                {setKeys.map((k) => (
-                  <tr key={`set:${k}`}>
-                    <td><input className="dict-cell" readOnly aria-label={`Unsaved key ${k}`} value={k} /></td>
-                    <td><Cell label={`Unsaved value ${k}`} value={itemEdits.set[k]!} onCommit={(v) => setItem(k, v)} /></td>
-                    <td className="dict-x"><button type="button" className="dict-del" aria-label={`Revert ${k}`} onClick={() => revert(k)}>↺</button></td>
-                  </tr>
-                ))}
-                {itemEdits.removed.map((k) => (
-                  <tr key={`rm:${k}`}>
-                    <td><input className="dict-cell" readOnly aria-label={`Removed key ${k}`} value={k} style={STRUCK} /></td>
-                    <td className="dict-count">removed at Save</td>
-                    <td className="dict-x"><button type="button" className="dict-del" aria-label={`Restore ${k}`} onClick={() => revert(k)}>↺</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {reads && page.state === 'loading' && <div className="dict-count">Loading items…</div>}
-          {reads && page.state === 'error' && (
-            <div className="dict-err" role="alert">{`Items could not be read: ${page.message} `}
-              <button type="button" className="dict-add" onClick={() => setTries((n) => n + 1)}>Retry</button></div>
-          )}
-          {reads && page.state === 'ok' && (
-            <>
-              <table className="dict-table" aria-label="Stored items">
-                <thead><tr><th>Key</th><th>Value</th><th aria-label="Delete" /></tr></thead>
-                <tbody>
-                  {page.page.items?.map((it) => {
-                    const key = it.key ?? '';
-                    const gone = removed.has(key);
-                    const edited = Object.hasOwn(itemEdits.set, key);
-                    return (
-                      <tr key={key}>
-                        <td><input className="dict-cell" readOnly aria-label={`Key ${key}`} value={key} style={gone ? STRUCK : undefined} /></td>
-                        <td><Cell label={`Value ${key}`} value={edited ? itemEdits.set[key]! : it.value ?? ''} struck={gone}
-                          onCommit={(v) => setItem(key, v)} /></td>
-                        <td className="dict-x">
-                          {gone || edited
-                            ? <button type="button" className="dict-del" aria-label={`${gone ? 'Restore' : 'Revert'} ${key}`} onClick={() => revert(key)}>↺</button>
-                            : <button type="button" className="dict-del" aria-label={`Remove ${key}`} onClick={() => remove(key)}>×</button>}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              <div className="dict-head">
-                <button type="button" className="dict-add" disabled={cursors.length === 1} onClick={() => setCursors((c) => c.slice(0, -1))}>Previous</button>
-                <button type="button" className="dict-add" disabled={page.page.next == null} onClick={() => setCursors((c) => [...c, page.page.next ?? null])}>Next</button>
-              </div>
-            </>
-          )}
-          <div className="dict-head">
-            <input className="dict-cell" aria-label="New key" spellCheck={false} placeholder="key" value={newKey}
-              onChange={(e) => setNewKey(e.target.value)} onKeyDown={addKeys} />
-            <input className="dict-cell" aria-label="New value" spellCheck={false} placeholder="value" value={newValue}
-              onChange={(e) => setNewValue(e.target.value)} onKeyDown={addKeys} />
-            <button type="button" className="dict-add" onClick={add}>Add item</button>
+    <div className="fld dict-row dict-fill">
+      <span>{`Items · ${n(itemCount)} stored`}</span>
+      {reads && (
+        <>
+          <div className="dict-jump">
+            <input className="dict-cell" aria-label="Jump to key" spellCheck={false} placeholder="jump to key…" value={jumpText}
+              onChange={(e) => setJumpText(e.target.value)} onKeyDown={jumpKeys} />
+            <button type="button" className="pbtn" onClick={jump}>Go</button>
+            <button type="button" className="pbtn" aria-label="Clear jump" onClick={clearJump}>×</button>
           </div>
-          {refused !== null && <div className="dict-err" role="alert">{refused}</div>}
-        </div>
+          {note !== null && <div className="dict-note" role="note">{note}</div>}
+        </>
+      )}
+      <div className="dict-sum" role="status">
+        {anyChange ? (
+          <>
+            <span>on this page:</span>
+            {(['modified', 'added', 'deleted'] as const).filter((k) => summary[k] > 0).map((k) => (
+              <span key={k}>{' '}<span className={`dict-chip ${ROW_CLASS[k]}`}>{`${summary[k]} ${k}`}</span></span>
+            ))}
+          </>
+        ) : summaryText(summary)}
       </div>
+      <div className={reads ? 'dict-fit' : 'dict-fit loose'} ref={fitRef}>
+        {reads && status.state === 'loading' && page === null && <div className="dict-count">Loading items…</div>}
+        {reads && status.state === 'error' && (
+          <div className="dict-err" role="alert">{`Items could not be read: ${status.message} `}
+            <button type="button" className="dict-add" onClick={() => setTries((t) => t + 1)}>Retry</button></div>
+        )}
+        {showTable && (
+          <table className="dict-table" aria-label="Items">
+            <thead><tr><th>Key</th><th>Value</th><th aria-label="Delete" /></tr></thead>
+            <tbody>
+              {rows.map((r) => {
+                const gone = r.state === 'deleted';
+                return (
+                  <tr key={r.key} className={r.state ? ROW_CLASS[r.state] : undefined}>
+                    <td><input className="dict-cell" readOnly aria-label={`Key ${r.key}`} value={r.key} style={gone ? STRUCK : undefined} /></td>
+                    <td><Cell label={`Value ${r.key}`} value={r.value} struck={gone} onCommit={(v) => setItem(r.key, v)} /></td>
+                    <td className="dict-x">
+                      {r.state
+                        ? <button type="button" className="dict-del" aria-label={`${gone ? 'Restore' : 'Revert'} ${r.key}`} onClick={() => revert(r.key)}>↺</button>
+                        : <button type="button" className="dict-del" aria-label={`Remove ${r.key}`} onClick={() => remove(r.key)}>×</button>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {reads && (
+        <div className="dict-nav">
+          <button type="button" className="pbtn" aria-label="Prev" disabled={!page || page.prev == null} onClick={prev}>‹ Prev</button>
+          <button type="button" className="pbtn" aria-label="Next" disabled={!page || (page.next == null && !view.cut)} onClick={next}>Next ›</button>
+          <span className="dict-pos">{page ? position : ''}</span>
+        </div>
+      )}
+      <div className="dict-addrow">
+        <input className="dict-cell" aria-label="New key" spellCheck={false} placeholder="key" value={newKey}
+          onChange={(e) => setNewKey(e.target.value)} onKeyDown={addKeys} />
+        <input className="dict-cell" aria-label="New value" spellCheck={false} placeholder="value" value={newValue}
+          onChange={(e) => setNewValue(e.target.value)} onKeyDown={addKeys} />
+        <button type="button" className="pbtn" onClick={add}>Add item</button>
+      </div>
+      {refused !== null && <div className="dict-err" role="alert">{refused}</div>}
     </div>
   );
 }
