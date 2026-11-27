@@ -115,7 +115,9 @@ public sealed class CacheService :
 
     /// <summary>
     /// One page of items ordered by key. <paramref name="limit"/> defaults to <see cref="CacheRules.PageDefault"/>;
-    /// outside 1..<see cref="CacheRules.PageMax"/> it is a validation error (400).
+    /// outside 1..<see cref="CacheRules.PageMax"/> it is a validation error (400). A page also stops at
+    /// <see cref="CacheRules.PageCharBudget"/> key + value characters (8,000,000), so it can hold fewer rows than
+    /// <paramref name="limit"/> with <c>next</c> set; its first row is always returned, even one alone over the budget.
     /// </summary>
     public Task<CacheItemsPage> PageItemsAsync(Guid id, string? after, int? limit, CancellationToken ct)
     {

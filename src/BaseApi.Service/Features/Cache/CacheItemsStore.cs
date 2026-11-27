@@ -138,8 +138,18 @@ public sealed class CacheItemsStore(BaseDbContext db, TimeProvider clock, IHttpC
     /// One page ordered by the database's order of <c>key</c> (the column's collation, which the primary-key
     /// index serves), after the cursor <paramref name="after"/>. <c>Next</c> is the last key returned when
     /// more follow, else null. The caller bounds <paramref name="limit"/>.
+    /// <para>
+    /// A page is also bounded by <paramref name="charBudget"/> (default <see cref="CacheRules.PageCharBudget"/>):
+    /// rows are taken in order while the running key + value character count stays within it, so it may hold
+    /// fewer than <paramref name="limit"/> rows with <c>Next</c> set. The first row is always taken, even when
+    /// it alone passes the budget, so paging always advances. To keep the database and BaseApi from holding
+    /// <paramref name="limit"/> large values at once, the cut is chosen from keys and <c>char_length(value)</c>
+    /// first, and only the chosen rows' values are then read. Outside a transaction the two reads are separate
+    /// snapshots: a row removed between them is simply missing from the page, which the keyset cursor tolerates.
+    /// </para>
     /// </summary>
-    public Task<CacheItemsPage> PageAsync(Guid cacheId, string? after, int limit, CancellationToken ct) =>
+    public Task<CacheItemsPage> PageAsync(Guid cacheId, string? after, int limit, CancellationToken ct,
+        long charBudget = CacheRules.PageCharBudget) =>
         ReadingAsync(async (conn, tx) =>
         {
             await using (var exists = Command(conn, tx, "SELECT 1 FROM caches WHERE id = @id"))
@@ -148,21 +158,48 @@ public sealed class CacheItemsStore(BaseDbContext db, TimeProvider clock, IHttpC
                 if (await exists.ExecuteScalarAsync(ct) is null) throw new NotFoundException(nameof(CacheEntity), cacheId);
             }
 
-            var sql = after is null
-                ? "SELECT key, value FROM cache_items WHERE cache_id = @id ORDER BY key LIMIT @n"
-                : "SELECT key, value FROM cache_items WHERE cache_id = @id AND key > @after ORDER BY key LIMIT @n";
-            var page = new List<CacheItemDto>();
-            await using var cmd = Command(conn, tx, sql);
-            cmd.Parameters.AddWithValue("id", cacheId);
-            if (after is not null) cmd.Parameters.AddWithValue("after", NpgsqlDbType.Varchar, after);
-            cmd.Parameters.AddWithValue("n", limit + 1); // one extra says whether another page follows
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct)) page.Add(new CacheItemDto(reader.GetString(0), reader.GetString(1)));
+            var sizesSql = after is null
+                ? "SELECT key, char_length(key) + char_length(value) FROM cache_items WHERE cache_id = @id ORDER BY key LIMIT @n"
+                : "SELECT key, char_length(key) + char_length(value) FROM cache_items WHERE cache_id = @id AND key > @after ORDER BY key LIMIT @n";
+            var candidates = new List<(string Key, long Chars)>();
+            await using (var cmd = Command(conn, tx, sizesSql))
+            {
+                cmd.Parameters.AddWithValue("id", cacheId);
+                if (after is not null) cmd.Parameters.AddWithValue("after", NpgsqlDbType.Varchar, after);
+                cmd.Parameters.AddWithValue("n", limit + 1); // one extra says whether another page follows
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct)) candidates.Add((reader.GetString(0), Convert.ToInt64(reader.GetValue(1))));
+            }
 
-            if (page.Count <= limit) return new CacheItemsPage(page, null);
-            page.RemoveAt(page.Count - 1);
-            return new CacheItemsPage(page, page[^1].Key);
+            var take = CutByBudget(candidates.Select(c => c.Chars).Take(limit).ToList(), charBudget);
+            var chosen = candidates.Take(take).Select(c => c.Key).ToArray();
+            if (chosen.Length == 0) return new CacheItemsPage([], null);
+
+            var values = new Dictionary<string, string>(chosen.Length, StringComparer.Ordinal);
+            await using (var cmd = Command(conn, tx, "SELECT key, value FROM cache_items WHERE cache_id = @id AND key = ANY(@keys)", cacheId, chosen))
+            await using (var reader = await cmd.ExecuteReaderAsync(ct))
+                while (await reader.ReadAsync(ct)) values[reader.GetString(0)] = reader.GetString(1);
+
+            var page = chosen.Where(values.ContainsKey).Select(k => new CacheItemDto(k, values[k])).ToList();
+            var more = candidates.Count > take;
+            return new CacheItemsPage(page, more ? chosen[^1] : null);
         }, ct);
+
+    /// <summary>
+    /// How many of the leading rows (their key + value character counts, in page order) fit in
+    /// <paramref name="budget"/>: rows are counted while the running total stays within it, and the first is
+    /// always counted.
+    /// </summary>
+    public static int CutByBudget(IReadOnlyList<long> chars, long budget)
+    {
+        long total = 0;
+        for (var i = 0; i < chars.Count; i++)
+        {
+            total += chars[i];
+            if (total > budget && i > 0) return i;
+        }
+        return chars.Count;
+    }
 
     /// <summary>Every item of the cache. Memory grows with the cache: for callers that already need all of it.</summary>
     public Task<Dictionary<string, string>> ReadAllAsync(Guid cacheId, CancellationToken ct) =>

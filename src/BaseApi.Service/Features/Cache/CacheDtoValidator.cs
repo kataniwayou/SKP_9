@@ -33,6 +33,14 @@ internal static class CacheRules
     /// <summary>The most items one page may carry.</summary>
     public const int PageMax = 5000;
 
+    /// <summary>
+    /// The most key + value characters one page carries: rows are added in key order until the next one
+    /// would pass it, so a page of large values (up to 1,048,576 characters each) is cut short of
+    /// <c>limit</c> and BaseApi never holds <c>limit</c> × 1 MiB at once. A first row that alone passes it is
+    /// still returned, by itself.
+    /// </summary>
+    public const long PageCharBudget = 8_000_000;
+
     /// <summary>How many rows a refresh reads and writes per chunk.</summary>
     public const int RefreshChunk = 10_000;
 

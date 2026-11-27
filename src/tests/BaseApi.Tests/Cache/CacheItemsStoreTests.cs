@@ -154,6 +154,17 @@ public sealed class CacheItemsStoreTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public void CutByBudgetCountsRowsWhileTheTotalStaysWithinAndAlwaysTheFirst()
+    {
+        Assert.Equal(8_000_000, CacheRules.PageCharBudget);
+        Assert.Equal(7, CacheItemsStore.CutByBudget(Enumerable.Repeat(1_048_579L, 40).ToList(), CacheRules.PageCharBudget));
+        Assert.Equal(2, CacheItemsStore.CutByBudget([4, 6, 1], 10));
+        Assert.Equal(1, CacheItemsStore.CutByBudget([11, 1], 10));
+        Assert.Equal(3, CacheItemsStore.CutByBudget([1, 1, 1], 10));
+        Assert.Equal(0, CacheItemsStore.CutByBudget([], 10));
+    }
+
+    [Fact]
     public async Task AppendAcrossSliceBoundariesReportsAddedThenOverwritten()
     {
         var id = await NewCacheAsync();
@@ -299,6 +310,69 @@ public sealed class CacheItemsStoreTests(PostgresFixture fixture)
         Assert.Equal(5, pages);
         Assert.Equal(2345, seen.Count);
         Assert.Equal(2345, seen.Distinct().Count());
+    }
+
+    /// <summary>
+    /// 40 values at the 1 MiB maximum, limit 500: a row is 3 + 1,048,576 = 1,048,579 characters, so 7 rows are
+    /// 7,340,053 (within 8,000,000) and 8 would be 8,388,632 (past it). The first page holds 7 with next set, and
+    /// the walk returns all 40 once.
+    /// </summary>
+    [Fact]
+    public async Task APageOfMaximumValuesStopsAtTheCharacterBudget()
+    {
+        var id = await NewCacheAsync();
+        var big = new string('v', 1_048_576);
+        await using (var seed = fixture.NewContext())
+        {
+            for (var at = 0; at < 40; at += 5)
+            {
+                await Store(seed).AppendAsync(id, Enumerable.Range(at, 5).Select(i => new CacheItemDto($"k{i:D2}", big)).ToList(), Ct);
+            }
+        }
+
+        const long row = 3 + 1_048_576;
+        Assert.True(7 * row <= CacheRules.PageCharBudget && 8 * row > CacheRules.PageCharBudget);
+
+        await using var db = fixture.NewContext();
+        var first = await Store(db).PageAsync(id, null, 500, Ct);
+        Assert.Equal(7, first.Items.Count);
+        Assert.Equal("k06", first.Next);
+        Assert.All(first.Items, i => Assert.Equal(1_048_576, i.Value.Length));
+
+        var seen = new List<string>();
+        var sizes = new List<int>();
+        string? after = null;
+        do
+        {
+            var page = await Store(db).PageAsync(id, after, 500, Ct);
+            sizes.Add(page.Items.Count);
+            seen.AddRange(page.Items.Select(i => i.Key));
+            after = page.Next;
+        } while (after is not null);
+
+        Assert.Equal([7, 7, 7, 7, 7, 5], sizes);
+        Assert.Equal(Enumerable.Range(0, 40).Select(i => $"k{i:D2}"), seen);
+    }
+
+    [Fact]
+    public async Task ARowAloneOverTheBudgetIsStillReturnedByItself()
+    {
+        var id = await NewCacheAsync();
+        await using var db = fixture.NewContext();
+        await Store(db).AppendAsync(id, Items(("a", new string('x', 100)), ("b", new string('y', 100)), ("c", "1")), Ct);
+
+        var p1 = await Store(db).PageAsync(id, null, 500, Ct, charBudget: 50);
+        Assert.Equal(["a"], p1.Items.Select(i => i.Key));
+        Assert.Equal(100, p1.Items[0].Value.Length);
+        Assert.Equal("a", p1.Next);
+
+        var p2 = await Store(db).PageAsync(id, p1.Next, 500, Ct, charBudget: 50);
+        Assert.Equal(["b"], p2.Items.Select(i => i.Key));
+        Assert.Equal("b", p2.Next);
+
+        var p3 = await Store(db).PageAsync(id, p2.Next, 500, Ct, charBudget: 50);
+        Assert.Equal(["c"], p3.Items.Select(i => i.Key));
+        Assert.Null(p3.Next);
     }
 
     [Fact]

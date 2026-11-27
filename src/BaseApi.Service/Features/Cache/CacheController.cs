@@ -48,7 +48,9 @@ public sealed class CachesController :
 
     /// <summary>
     /// One page of the cache's items ordered by key: <c>after</c> is the previous page's <c>next</c>,
-    /// <c>limit</c> defaults to 500 and is at most 5000.
+    /// <c>limit</c> defaults to 500 and is at most 5000. A page also stops once its key + value characters
+    /// would pass 8,000,000, so a page of large values holds fewer than <c>limit</c> rows and carries
+    /// <c>next</c>; keep paging until <c>next</c> is null. A single row over that budget is returned alone.
     /// </summary>
     [HttpGet("{id:guid}/items")]
     [ProducesResponseType(StatusCodes.Status200OK)]
