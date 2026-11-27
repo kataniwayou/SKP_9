@@ -43,7 +43,7 @@ describe("a cache's items", () => {
   };
   it('add an item then revert it: one undo step each, unsaved while the overlay holds a change', () => {
     const store = openOn('Cache', [{ kind: 'cache', id: 'c1' }]);
-    expect(screen.getByText('Items · 0 stored')).toBeInTheDocument();
+    expect(screen.getByText('0 stored')).toBeInTheDocument();
     addItem('usd', '3.7');
     expect(overlay(store).set).toEqual({ usd: '3.7' });
     expect(store.unsaved().size).toBe(1);

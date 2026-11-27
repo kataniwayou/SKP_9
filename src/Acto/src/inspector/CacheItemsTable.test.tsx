@@ -96,7 +96,7 @@ describe('CacheItemsTable', () => {
     expect(cacheItemsPage).toHaveBeenNthCalledWith(1, 'c1', null, 5); // one row more: the next page's first key
     expect(keysShown()).toEqual(['a', 'b', 'c', 'd']);
     expect(screen.getByText('rows 1–4 · page 1 of 3')).toBeInTheDocument();
-    expect(screen.getByText('Items · 10 stored')).toBeInTheDocument();
+    expect(screen.getByText('10 stored')).toBeInTheDocument();
     expect(button('Prev')).toBeDisabled();
     expect(button('Next')).toBeEnabled();
   });
@@ -105,7 +105,7 @@ describe('CacheItemsTable', () => {
     const { api } = over(TEN);
     setup(api, { cache: { itemCount: 1000001 } });
     await screen.findByLabelText('Value a');
-    expect(screen.getByText('Items · 1,000,001 stored')).toBeInTheDocument();
+    expect(screen.getByText('1,000,001 stored')).toBeInTheDocument();
     expect(screen.getByText('rows 1–4 · page 1 of 250,001')).toBeInTheDocument();
   });
 

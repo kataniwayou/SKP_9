@@ -48,7 +48,7 @@ test('Cache tab edits cross as append/remove and are stored after Save; a key ov
   const id = await seed({ caches: [{ key: 'c', name: 'e2e-pairs', at: { x: 0, y: 0 }, root: 'e2e-pairs', items: { old: '1', keep: '2' } }] });
   await openAt(page);
   await pickCache(page, id.c!);
-  await expect(inspector(page).getByText('Items · 2 stored')).toBeVisible();
+  await expect(inspector(page).getByText('2 stored', { exact: true })).toBeVisible();
   await expect(storedValue(page, 'keep')).toHaveValue('2');
 
   await addItem(page, 'usd', '3.7');
@@ -72,7 +72,7 @@ test('Cache tab edits cross as append/remove and are stored after Save; a key ov
   // the reload restores the selection: clear it, so the click picks rather than un-picks
   await page.locator('.react-flow__pane').click({ position: { x: 20, y: 20 } });
   await pickCache(page, id.c!);
-  await expect(inspector(page).getByText('Items · 3 stored')).toBeVisible();
+  await expect(inspector(page).getByText('3 stored', { exact: true })).toBeVisible();
   await expect(storedValue(page, 'eur')).toHaveValue('4.1');
   await expect(storedValue(page, 'usd')).toHaveValue('3.7');
   await expect(storedKey(page, 'old')).toHaveCount(0);

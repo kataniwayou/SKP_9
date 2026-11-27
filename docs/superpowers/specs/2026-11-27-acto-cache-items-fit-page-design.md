@@ -32,18 +32,22 @@ A cache can now hold a million items (proved on the live chain, 2026-11-27). Act
 
 ## Layout (top to bottom, in the Cache tab's Items field)
 
+Layout A "framed list", chosen by the user 2026-11-27 after the build (mock https://claude.ai/artifact/S1Dvni1MCiumEjER3b8QRG):
+
 ```
-Items · 1,000,001 stored
+Items                                   1,000,001 stored
 [ jump to key…            ] [Go] [×]       ← cache-wide, not page-scoped
-on this page:  1 modified  1 added  1 deleted   (or: no unsaved changes on this page)
 ┌ KEY ───────────────┬ VALUE ─────────────────────┬ ┐
 │ …as many rows as fit the height, 27 px each…     │
+├──────────────────────────────────────────────────┤
+│ [ key ] [ value ] [Add item]                     │   ← the add row shares the list's frame
 └──────────────────────────────────────────────────┘
 ‹ Prev   Next ›                rows 1–16 · page 1 of 62,501
-[ key ] [ value ] [Add]
+- - - - - - - - - - - - - - - - - - - - - - - - - - -
+on this page:  1 modified  1 added  1 deleted   (or: no unsaved changes on this page)
 ```
 
-The jump box sits above the summary because it belongs to the cache, not to the page. The count uses thousands separators.
+The jump box sits above the list because it belongs to the cache, not to the page. Prev / Next and the summary sit under the frame. The count uses thousands separators.
 
 ## Approaches considered (search)
 

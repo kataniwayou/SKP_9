@@ -10,7 +10,7 @@ test("a cache's items: add two, save, remove one, save, reload: BaseAPI and the 
   const id = await seed({ caches: [{ key: 'c', name: 'e2e-items-cache', at: { x: 0, y: 0 }, root: 'e2e-items' }] });
   await openAt(page);
   await pickCache(page, id.c!);
-  await expect(inspector(page).getByText('Items · 0 stored')).toBeVisible();
+  await expect(inspector(page).getByText('0 stored', { exact: true })).toBeVisible();
   await expect(itemsSummary(page)).toHaveText('no unsaved changes on this page');
   await expect(itemsPosition(page)).toHaveText('no items');
   await expect(saveButton(page)).toBeDisabled();
@@ -25,7 +25,7 @@ test("a cache's items: add two, save, remove one, save, reload: BaseAPI and the 
   expect(await storedItems(id.c!)).toEqual({ usd: '3.7', eur: '4.1' });
 
   // the stored page now lists them, ordered by key (eur, usd), and nothing is unsaved
-  await expect(inspector(page).getByText('Items · 2 stored')).toBeVisible();
+  await expect(inspector(page).getByText('2 stored', { exact: true })).toBeVisible();
   await expect(storedValue(page, 'eur')).toHaveValue('4.1');
   await expect(itemsSummary(page)).toHaveText('no unsaved changes on this page');
   await expect(itemsPosition(page)).toHaveText('rows 1–2 · page 1 of 1');
@@ -47,7 +47,7 @@ test("a cache's items: add two, save, remove one, save, reload: BaseAPI and the 
   await page.reload();
   await waitLoaded(page);
   await showCache(page, id.c!); // the reload may restore it as picked: a plain click would unpick it
-  await expect(inspector(page).getByText('Items · 1 stored')).toBeVisible();
+  await expect(inspector(page).getByText('1 stored', { exact: true })).toBeVisible();
   await expect(storedKey(page, 'usd')).toBeVisible();
   await expect(storedValue(page, 'usd')).toHaveValue('3.7');
   await expect(saveButton(page)).toBeDisabled();

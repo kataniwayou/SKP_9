@@ -445,7 +445,7 @@ describe('InspectorPanel', () => {
     expect(screen.getByRole('tab', { name: 'Cache' })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Root'), { target: { value: 'new-root' } });
     expect(store.state().caches.c1!.root).toBe('new-root');
-    expect(screen.getByText('Items · 2 stored')).toBeInTheDocument();
+    expect(screen.getByText('2 stored')).toBeInTheDocument();
     // no api: nothing stored is read, so only the added key shows (the removed one sits on a stored page)
     expect(screen.getByLabelText('Value k')).toHaveValue('v');
     expect(screen.getByRole('status')).toHaveTextContent('on this page: 1 added');

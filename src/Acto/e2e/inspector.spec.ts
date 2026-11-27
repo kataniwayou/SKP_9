@@ -117,7 +117,7 @@ test('a cache\'s Inspector: name, version, description, root and items', async (
   await expect(inspector(page).locator('.ph .cnt')).toHaveText('cache');
   await expect(field(page, 'Name')).toHaveValue('e2e-ins-cache');
   await expect(field(page, 'Root')).toHaveValue('e2e');
-  await expect(inspector(page).getByText('Items · 0 stored')).toBeVisible();
+  await expect(inspector(page).getByText('0 stored', { exact: true })).toBeVisible();
   await expect(inspector(page)).toContainText('cache · used by e2e-ins-a');
   await field(page, 'Name').fill('e2e-ins-cache-renamed');
   await expect(caNode(page, id.c1!).locator('.cache-nm')).toHaveText('e2e-ins-cache-renamed');

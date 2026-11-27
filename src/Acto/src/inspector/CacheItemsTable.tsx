@@ -41,7 +41,7 @@ function noteOf(text: string, match: string | null | undefined): string | null {
 /**
  * A cache's items as one page that fits the Inspector's height (no scrolling inside the list): the stored page read from the
  * server with this session's unsaved edits shown in place (amber modified, green added, struck deleted), a jump-to-key box,
- * a summary of the unsaved changes on screen only, Prev / Next and the position, and an add-key row. Each commit is its own
+ * the list and an add-key row in one frame, then Prev / Next with the position and a summary of the unsaved changes on screen only. Each commit is its own
  * board undo step; Save is the board's. A new cache (not saved yet), or no `api`, has nothing stored to read: only its added rows.
  */
 export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; isNew: boolean; api?: StudioApi | undefined; edit: Edit }) {
@@ -151,7 +151,7 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
 
   return (
     <div className="fld dict-row dict-fill">
-      <span>{`Items · ${n(itemCount)} stored`}</span>
+      <div className="dict-head"><b>Items</b><span>{`${n(itemCount)} stored`}</span></div>
       {reads && (
         <>
           <div className="dict-jump">
@@ -164,6 +164,51 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
           <div className="dict-note" role={note !== null ? 'note' : undefined}>{note}</div>
         </>
       )}
+      <div className="dict-box">
+        <div className={reads ? 'dict-fit' : 'dict-fit loose'} ref={fitRef}>
+          {reads && status.state === 'loading' && win === null && <div className="dict-count">Loading items…</div>}
+          {reads && status.state === 'error' && (
+            <div className="dict-err" role="alert">{`Items could not be read: ${status.message} `}
+              <button type="button" className="dict-add" onClick={() => setTries((t) => t + 1)}>Retry</button></div>
+          )}
+          {showTable && (
+            <table className="dict-table" aria-label="Items">
+              <thead><tr><th>Key</th><th>Value</th><th aria-label="Delete" /></tr></thead>
+              <tbody>
+                {rows.map((r) => {
+                  const gone = r.state === 'deleted';
+                  return (
+                    <tr key={r.key} className={r.state ? ROW_CLASS[r.state] : undefined}>
+                      <td><input className="dict-cell" readOnly aria-label={`Key ${r.key}`} value={r.key} style={gone ? STRUCK : undefined} /></td>
+                      <td><Cell label={`Value ${r.key}`} value={r.value} struck={gone} onCommit={(v) => setItem(r.key, v)} /></td>
+                      <td className="dict-x">
+                        {r.state
+                          ? <button type="button" className="dict-del" aria-label={`${gone ? 'Restore' : 'Revert'} ${r.key}`} onClick={() => revert(r.key)}>↺</button>
+                          : <button type="button" className="dict-del" aria-label={`Remove ${r.key}`} onClick={() => remove(r.key)}>×</button>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="dict-addrow">
+          <input className="dict-cell" aria-label="New key" spellCheck={false} placeholder="key" value={newKey}
+            onChange={(e) => setNewKey(e.target.value)} onKeyDown={addKeys} />
+          <input className="dict-cell" aria-label="New value" spellCheck={false} placeholder="value" value={newValue}
+            onChange={(e) => setNewValue(e.target.value)} onKeyDown={addKeys} />
+          <button type="button" className="pbtn" onClick={add}>Add item</button>
+        </div>
+      </div>
+      {refused !== null && <div className="dict-err" role="alert">{refused}</div>}
+      {reads && (
+        <div className="dict-nav">
+          <button type="button" className="pbtn" aria-label="Prev" disabled={page?.lower == null} onClick={prev}>‹ Prev</button>
+          <button type="button" className="pbtn" aria-label="Next" disabled={page?.upper == null} onClick={next}>Next ›</button>
+          <span className="dict-pos">{page ? position : ''}</span>
+        </div>
+      )}
       <div className="dict-sum" role="status">
         {anyChange ? (
           <>
@@ -174,49 +219,6 @@ export function CacheItemsTable({ cache, isNew, api, edit }: { cache: CacheRow; 
           </>
         ) : summaryText(summary)}
       </div>
-      <div className={reads ? 'dict-fit' : 'dict-fit loose'} ref={fitRef}>
-        {reads && status.state === 'loading' && win === null && <div className="dict-count">Loading items…</div>}
-        {reads && status.state === 'error' && (
-          <div className="dict-err" role="alert">{`Items could not be read: ${status.message} `}
-            <button type="button" className="dict-add" onClick={() => setTries((t) => t + 1)}>Retry</button></div>
-        )}
-        {showTable && (
-          <table className="dict-table" aria-label="Items">
-            <thead><tr><th>Key</th><th>Value</th><th aria-label="Delete" /></tr></thead>
-            <tbody>
-              {rows.map((r) => {
-                const gone = r.state === 'deleted';
-                return (
-                  <tr key={r.key} className={r.state ? ROW_CLASS[r.state] : undefined}>
-                    <td><input className="dict-cell" readOnly aria-label={`Key ${r.key}`} value={r.key} style={gone ? STRUCK : undefined} /></td>
-                    <td><Cell label={`Value ${r.key}`} value={r.value} struck={gone} onCommit={(v) => setItem(r.key, v)} /></td>
-                    <td className="dict-x">
-                      {r.state
-                        ? <button type="button" className="dict-del" aria-label={`${gone ? 'Restore' : 'Revert'} ${r.key}`} onClick={() => revert(r.key)}>↺</button>
-                        : <button type="button" className="dict-del" aria-label={`Remove ${r.key}`} onClick={() => remove(r.key)}>×</button>}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
-      {reads && (
-        <div className="dict-nav">
-          <button type="button" className="pbtn" aria-label="Prev" disabled={page?.lower == null} onClick={prev}>‹ Prev</button>
-          <button type="button" className="pbtn" aria-label="Next" disabled={page?.upper == null} onClick={next}>Next ›</button>
-          <span className="dict-pos">{page ? position : ''}</span>
-        </div>
-      )}
-      <div className="dict-addrow">
-        <input className="dict-cell" aria-label="New key" spellCheck={false} placeholder="key" value={newKey}
-          onChange={(e) => setNewKey(e.target.value)} onKeyDown={addKeys} />
-        <input className="dict-cell" aria-label="New value" spellCheck={false} placeholder="value" value={newValue}
-          onChange={(e) => setNewValue(e.target.value)} onKeyDown={addKeys} />
-        <button type="button" className="pbtn" onClick={add}>Add item</button>
-      </div>
-      {refused !== null && <div className="dict-err" role="alert">{refused}</div>}
     </div>
   );
 }

@@ -126,7 +126,7 @@ test('A1 + A2: the board opens with the 1M cache as fast as without it and fetch
   const firstMs = Date.now() - t;
   note('A2 first page of the 1M cache visible after picking it, ms', firstMs);
   expect(firstMs).toBeLessThan(2000);
-  await expect(inspector(page).getByText('Items · 1,000,000 stored')).toBeVisible();
+  await expect(inspector(page).getByText('1,000,000 stored', { exact: true })).toBeVisible();
   const size = await pageSize(page, key(0));
   note('A2 rows per page at the 900 px viewport', size);
   expect(size).toBeGreaterThanOrEqual(5);
@@ -271,7 +271,7 @@ test('A5: a Save over 30 MB is refused before anything is sent: a clear error li
   // the page shows as many as fit, and its summary counts those only (the Save count is the board's: the one cache)
   await addedOnScreen(page);
   await expect(saveButton(page)).toHaveText('Save · 1');
-  await expect(inspector(page).getByText('Items · 1 stored')).toBeVisible();
+  await expect(inspector(page).getByText('1 stored', { exact: true })).toBeVisible();
 
   const applies: string[] = [];
   page.on('request', (r) => { if (r.url().includes('/model/apply')) applies.push(r.method()); });
