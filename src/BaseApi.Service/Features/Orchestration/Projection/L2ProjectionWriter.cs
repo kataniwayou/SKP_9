@@ -288,18 +288,17 @@ internal sealed class L2ProjectionWriter
     }
 
     /// <summary>
-    /// The key names of one projected dictionary: the set's members; when there is no set, the root's
-    /// JSON list, which is how a start before the key set existed recorded them.
+    /// The key names of one projected dictionary: the union of the set's members and the root's JSON list
+    /// (how a start before the key set existed recorded them). Both are read, not "set, else list": during a
+    /// rolling overlap an old pod can rewrite the root as a list while the set exists, and a name only in
+    /// the list would otherwise leak its entry. A new root holds the <c>[]</c> marker, so the list adds
+    /// nothing then. <c>WorkflowRunGuard</c> reads the same union.
     /// </summary>
     private static async Task<List<string>> ReadKeyNamesAsync(IDatabase db, Guid workflowId, string root)
     {
         var members = await db.SetMembersAsync(L2ProjectionKeys.CacheKeySet(workflowId, root)).ConfigureAwait(false);
-        if (members.Length > 0)
-        {
-            return members.Select(m => m.ToString()).ToList();
-        }
-
-        return ReadList(await db.StringGetAsync(L2ProjectionKeys.Cache(workflowId, root)).ConfigureAwait(false));
+        var legacy = ReadList(await db.StringGetAsync(L2ProjectionKeys.Cache(workflowId, root)).ConfigureAwait(false));
+        return members.Select(m => m.ToString()).Concat(legacy).Distinct(StringComparer.Ordinal).ToList();
     }
 
     /// <summary>

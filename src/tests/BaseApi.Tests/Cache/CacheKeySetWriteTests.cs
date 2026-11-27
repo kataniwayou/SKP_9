@@ -135,6 +135,42 @@ public sealed class CacheKeySetWriteTests
         Assert.False(l2.Has(L2ProjectionKeys.CacheEntry(W, "artists", "b")));
     }
 
+    /// <summary>
+    /// A rolling overlap: an old pod rewrote the root as a JSON list naming "b" while the set (naming "a")
+    /// survives. The start's leftovers are read from the union, so "b" does not leak.
+    /// </summary>
+    [Fact]
+    public async Task StartLeftoversReadTheUnionOfSetAndLegacyList()
+    {
+        var l2 = await StartedAsync(new CacheL1("artists", new() { ["a"] = "1", ["b"] = "2" }));
+        await l2.Db.SetRemoveAsync(KeySet, "b");
+        await l2.Db.StringSetAsync(Root, "[\"b\"]");
+        Assert.Equal(new[] { "a" }, l2.Members(KeySet));
+
+        await Writer(l2).WriteAsync(Definition(new CacheL1("artists", new() { ["c"] = "3" })),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(l2.Has(L2ProjectionKeys.CacheEntry(W, "artists", "a")));
+        Assert.False(l2.Has(L2ProjectionKeys.CacheEntry(W, "artists", "b")));
+        Assert.Equal(new[] { "c" }, l2.Members(KeySet));
+        Assert.Equal("[]", l2.Value(Root));
+    }
+
+    [Fact]
+    public async Task FullRefreshReadsTheUnionOfSetAndLegacyList()
+    {
+        var l2 = await StartedAsync(new CacheL1("artists", new() { ["a"] = "1", ["b"] = "2" }));
+        await l2.Db.SetRemoveAsync(KeySet, "b");
+        await l2.Db.StringSetAsync(Root, "[\"b\"]");
+
+        await Writer(l2).WriteCacheAsync(W, new CacheL1("artists", new() { ["c"] = "3" }),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(l2.Has(L2ProjectionKeys.CacheEntry(W, "artists", "a")));
+        Assert.False(l2.Has(L2ProjectionKeys.CacheEntry(W, "artists", "b")));
+        Assert.Equal(new[] { "c" }, l2.Members(KeySet));
+    }
+
     [Fact]
     public async Task ADroppedRootLosesItsRootSetAndEntries()
     {
