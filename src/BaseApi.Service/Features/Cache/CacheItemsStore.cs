@@ -237,9 +237,11 @@ public sealed class CacheItemsStore(BaseDbContext db, TimeProvider clock, IHttpC
             }
             else more = candidates.Count > take;
 
-            long index;
-            await using (var before = Command(conn, tx, "SELECT count(*) FROM cache_items WHERE cache_id = @id AND key < @k"))
+            // the start page begins at the first key: nothing sorts before it, so no count
+            long index = 0;
+            if (at.Mode != CachePageMode.Start)
             {
+                await using var before = Command(conn, tx, "SELECT count(*) FROM cache_items WHERE cache_id = @id AND key < @k");
                 before.Parameters.AddWithValue("id", cacheId);
                 before.Parameters.AddWithValue("k", NpgsqlDbType.Varchar, chosen[0]);
                 index = Convert.ToInt64(await before.ExecuteScalarAsync(ct));

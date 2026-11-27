@@ -179,7 +179,8 @@ public sealed class CacheItemsEndpointsTests(PostgresFixture fixture)
         var ex = await Assert.ThrowsAsync<ValidationException>(() =>
             CacheServiceFactory.Create(db, new RecordingSender()).PageItemsAsync(id, after, from, before, null, Ct));
 
-        Assert.Contains("give at most one of after, from, before", ex.Errors.Select(e => e.ErrorMessage));
+        var error = Assert.Single(ex.Errors, e => e.ErrorMessage == "give at most one of after, from, before");
+        Assert.Equal("anchor", error.PropertyName);
     }
 
     [Theory]

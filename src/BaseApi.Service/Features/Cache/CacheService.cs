@@ -125,7 +125,7 @@ public sealed class CacheService :
         if (n < 1 || n > CacheRules.PageMax)
             throw new ValidationException([new ValidationFailure("limit", $"limit must be between 1 and {CacheRules.PageMax}.")]);
         if ((after is not null ? 1 : 0) + (from is not null ? 1 : 0) + (before is not null ? 1 : 0) > 1)
-            throw new ValidationException([new ValidationFailure("after", "give at most one of after, from, before")]);
+            throw new ValidationException([new ValidationFailure("anchor", "give at most one of after, from, before")]);
         if (from is "") throw new ValidationException([new ValidationFailure("from", "from must not be empty")]);
         if (before is "") throw new ValidationException([new ValidationFailure("before", "before must not be empty")]);
         var at = from is not null ? new CachePageAt(CachePageMode.From, from)

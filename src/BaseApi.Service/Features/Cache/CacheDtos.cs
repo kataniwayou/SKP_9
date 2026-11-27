@@ -96,7 +96,8 @@ public readonly record struct CachePageAt(CachePageMode Mode, string? Key)
 /// <summary>
 /// One page of a cache's items, ordered by key. <c>Next</c>: the last returned key when more keys follow, else
 /// null. <c>Prev</c>: the first returned key when <c>Index</c> &gt; 0, else null. <c>Index</c>: the number of keys
-/// sorting before the first returned row (an empty page: the cache's row count). <c>FromMatch</c>, for a read
+/// sorting before the first returned row (an empty page: 0 for a read before a key, which has no rows before it;
+/// otherwise the cache's row count). <c>FromMatch</c>, for a read
 /// from a key only: "exact" (the first row is that key), "later" (the next key after it), "none" (no key at or
 /// after it, so the page is the last one); null otherwise.
 /// </summary>

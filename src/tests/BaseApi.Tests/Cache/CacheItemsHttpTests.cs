@@ -106,6 +106,8 @@ public sealed class CacheItemsHttpTests(PostgresFixture fixture)
         var r = await client.GetAsync($"/api/v1/caches/{id}/items?after=a&before=b", Ct);
 
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
-        Assert.Contains("give at most one of after, from, before", await ErrorsAsync(r));
+        using var doc = JsonDocument.Parse(await ErrorsAsync(r));
+        var anchor = doc.RootElement.EnumerateObject().Single(p => p.Name.Equals("anchor", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("give at most one of after, from, before", anchor.Value.GetRawText());
     }
 }

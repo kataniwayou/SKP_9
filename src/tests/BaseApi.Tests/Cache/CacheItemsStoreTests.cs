@@ -531,6 +531,17 @@ public sealed class CacheItemsStoreTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task TheFirstPageIsAtIndexZeroWithNoPrev()
+    {
+        var id = await SeedKeysAsync(AtoJ);
+        var p = await ReadAsync(id, CachePageMode.Start, null, 3);
+        Assert.Equal(["a", "b", "c"], p.Items.Select(i => i.Key));
+        Assert.Equal(0, p.Index);
+        Assert.Null(p.Prev);
+        Assert.Equal("c", p.Next);
+    }
+
+    [Fact]
     public async Task IndexCountsKeysBeforeTheFirstRow()
     {
         var id = await SeedKeysAsync(Enumerable.Range(0, 1200).Select(i => $"key{i:D5}").ToArray());
