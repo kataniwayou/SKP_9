@@ -146,12 +146,72 @@ describe('cache item tools', () => {
     expect(j.items.map((i: { key: string }) => i.key)).toEqual(['b', 'c']);
   });
 
+  /** BaseApi's paging over sorted stored keys: start / after / from / before, the limit+1 look-ahead, index, fromMatch. */
+  const serveKeys = (all: string[]) => vi.fn((_id: string, at: Record<string, string> | null, limit: number) => {
+    if (limit > 5000) return Promise.resolve({ ok: false, error: { kind: 'http', status: 400, detail: 'limit must be between 1 and 5000.' } });
+    let start = 0;
+    let end: number;
+    let fromMatch: string | null = null;
+    if (at && 'before' in at) {
+      const i = all.findIndex((k) => k >= at.before!);
+      end = i < 0 ? all.length : i;
+      start = Math.max(0, end - limit);
+    } else {
+      if (at && 'after' in at) { const i = all.findIndex((k) => k > at.after!); start = i < 0 ? all.length : i; }
+      if (at && 'from' in at) {
+        const i = all.findIndex((k) => k >= at.from!);
+        if (i < 0) { fromMatch = 'none'; start = Math.max(0, all.length - limit); } else { start = i; fromMatch = all[i] === at.from ? 'exact' : 'later'; }
+      }
+      end = Math.min(all.length, start + limit);
+    }
+    const items = all.slice(start, end).map((k) => ({ key: k, value: '' }));
+    return Promise.resolve({ ok: true, value: { items, index: start, next: end < all.length && items.length ? items[items.length - 1]!.key : null, fromMatch } });
+  });
+  /** Follows `next` from the first page until it is null, passing each anchor as the argument of the same name. */
+  const walkNext = async (ctx: ReturnType<typeof setup>['ctx'], limit: number) => {
+    const seen: string[] = [];
+    const notes: string[] = [];
+    let args: Record<string, unknown> = {};
+    for (let guard = 0; guard < 40; guard++) {
+      const o = await read(ctx, { ...args, limit });
+      expect(o.ok).toBe(true);
+      const d = JSON.parse(o.result);
+      seen.push(...d.items.map((i: { key: string }) => i.key));
+      notes.push(d.note);
+      if (d.next === null) break;
+      args = d.next;
+    }
+    return { seen, notes };
+  };
+
+  it('a limit of 5000 reads 5000 rows (the most BaseApi gives) and next continues without skipping or repeating', async () => {
+    const { ctx, api, store } = setup();
+    const all = Array.from({ length: 12_000 }, (_, i) => `k${String(i).padStart(5, '0')}`);
+    withCount(store, all.length);
+    api.cacheItemsPage = serveKeys(all);
+    const { seen } = await walkNext(ctx, 5000);
+    for (const c of api.cacheItemsPage.mock.calls) expect(c[2]).toBe(5000);
+    expect(seen).toEqual(all);
+  });
+
+  it('next from an unsaved key past the last stored key continues: every key once, no jump note', async () => {
+    const { ctx, api, store } = setup();
+    const stored = 'abcdefgh'.split('');
+    withCount(store, stored.length);
+    api.cacheItemsPage = serveKeys(stored);
+    await call(ctx, 'set_cache_items', { cache_id: 'c1', items: ['x', 'y', 'z', 'zz'].map((k) => ({ key: k, value: 'n' })) });
+    const { seen, notes } = await walkNext(ctx, 3);
+    expect(seen).toEqual([...stored, 'x', 'y', 'z', 'zz']);
+    for (const n of notes) expect(n).not.toMatch(/no key/);
+  });
+
   it('the description names from, before, after and this page only', () => {
     const def = CACHE_ITEM_TOOLS.find((t) => t.name === 'read_cache_items')!;
     expect(def.description).toMatch(/from/);
     expect(def.description).toMatch(/before/);
     expect(def.description).toMatch(/after/);
     expect(def.description).toMatch(/this page only/);
+    expect(def.description).toContain('pass the key inside `next` / `prev` as the argument of the same name, e.g. next {from:"k"} → from:"k"');
   });
 
   it('read_cache_items cuts a page of large values to 100,000 characters, with next at the first row left out', async () => {

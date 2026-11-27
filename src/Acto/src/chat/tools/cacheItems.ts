@@ -92,12 +92,12 @@ const ANCHOR_NAMES = ['from', 'before', 'after'] as const;
 
 const readCacheItems: ToolDef = {
   name: 'read_cache_items',
-  description: `Read ONE PAGE of a cache's stored items, as the Inspector's Items list shows it, with this session's unsaved edits applied to it: an unsaved value replaces the stored one (state "modified"), a key marked removed stays with state "deleted", and an unsaved new key that falls in the page's key range is a row with state "added". Pages tile the key space in key order. Give at most one of \`from\` (jump: the page starting at that key, or at the next key when there is none; the note says so), \`before\` (the page before that key) or \`after\` (the page after that key); with none you get the first page. Never send an empty text. \`limit\` is the page size (default ${DEFAULT_LIMIT}, at most ${MAX_LIMIT}). The answer gives item_count, index (stored rows before this page), rows ("a–b of N"), items [{key, value, state?}], and ready-to-pass \`prev\` and \`next\` anchors (pass one as given in the next call; null at the ends), and \`unsaved\` {modified, added, deleted}: counts for this page only, not the whole cache (read_board lists the whole cache's unsaved items). A cache never saved has no stored items: its unsaved items are the rows, all "added". The answer is at most ${READ_TEXT_CAP} characters: a page of large values is cut from the end, \`next\` then starts at the first row left out, and the note says it was cut.`,
+  description: `Read ONE PAGE of a cache's stored items, as the Inspector's Items list shows it, with this session's unsaved edits applied to it: an unsaved value replaces the stored one (state "modified"), a key marked removed stays with state "deleted", and an unsaved new key that falls in the page's key range is a row with state "added". Pages tile the key space in key order. Give at most one of \`from\` (the page starting at that key; a key you type is a jump: at the next key when there is none, the note says so), \`before\` (the page before that key) or \`after\` (the page after that key); with none you get the first page. Never send an empty text. \`limit\` is the page size (default ${DEFAULT_LIMIT}, at most ${MAX_LIMIT}). The answer gives item_count, index (stored rows before this page), rows ("a–b of N"), items [{key, value, state?}], ready-to-pass \`prev\` and \`next\` anchors (null at the ends), and \`unsaved\` {modified, added, deleted}: counts for this page only, not the whole cache (read_board lists the whole cache's unsaved items). To move a page, pass the key inside \`next\` / \`prev\` as the argument of the same name, e.g. next {from:"k"} → from:"k". A cache never saved has no stored items: its unsaved items are the rows, all "added". The answer is at most ${READ_TEXT_CAP} characters: a page of large values is cut from the end, \`next\` then starts at the first row left out, and the note says it was cut.`,
   parameters: {
     type: 'object',
     properties: {
       cache_id: CACHE_ID,
-      from: { type: 'string', description: 'Jump to the page starting at this key (or the next key after it). Not empty.' },
+      from: { type: 'string', description: "The page starting at this key: a page's `next.from`, or a key to jump to (or the next key after it). Not empty." },
       before: { type: 'string', description: "The previous page's `prev.before`: the page before this key. Not empty." },
       after: { type: 'string', description: "A page's `next.after`: the page after this key. Not empty." },
       limit: { type: 'number' },
@@ -143,15 +143,18 @@ const readCacheItems: ToolDef = {
         next: end < all.length ? { from: all[end]!.key } : null,
       }), label);
     }
+    // a `from` at an unsaved added key is a page's `next` continuing (the first row cut by the page size or the character
+    // cap): past the last stored key BaseApi answers 'none', and only a continuation then shows the added keys >= it
+    const continues = which === 'from' && Object.prototype.hasOwnProperty.call(row.itemEdits.set, key!) && !row.itemEdits.removed.includes(key!);
     const read: PageRead = which === 'before' ? { dir: 'back', before: key! }
       : which === 'after' ? { dir: 'forward', from: key, after: true }
-        : { dir: 'forward', from: key, ...(which === 'from' ? { jump: true } : {}) };
+        : { dir: 'forward', from: key, ...(which === 'from' && !continues ? { jump: true } : {}) };
     const r = await ctx.api.cacheItemsPage(c.id, readAt(read), readLimit(limit));
     if (!r.ok) return fail(`could not read the items of cache ${c.id}. ${describeError(r.error)}`, 'read cache items failed');
     // the board may have changed while the page was read: apply the overlay as it is now
     const edits = ctx.store.state().caches[c.id]?.itemEdits ?? row.itemEdits;
     const shown = shownPage(windowOf(read, limit, r.value), edits, limit);
-    return finish(shown, which === 'from' ? jumpNoteOf(key!, r.value.fromMatch) : null);
+    return finish(shown, which === 'from' && !continues ? jumpNoteOf(key!, r.value.fromMatch) : null);
   },
 };
 
