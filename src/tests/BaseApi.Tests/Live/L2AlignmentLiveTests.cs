@@ -47,7 +47,7 @@ public sealed class L2AlignmentLiveTests
         using var redis = await ConnectionMultiplexer.ConnectAsync($"{RealStack.RedisHost}:{RealStack.RedisPort}");
         var db = redis.GetDatabase();
 
-        var processorId = await FindLiveProcessorAsync(redis, db);
+        var processorId = await FindLiveProcessorAsync(http, redis, db, ct);
         var run = Guid.NewGuid().ToString("N")[..12];
         var root = $"l2align-{run}";
 
@@ -217,14 +217,21 @@ public sealed class L2AlignmentLiveTests
 
     /// <summary>
     /// A processor with at least one replica whose liveness key is present, so the start's liveness
-    /// gate admits it. Read from Redis rather than hard-coded: processor ids change with every rebuild.
+    /// gate admits it, and with no config schema, so the start's payload gate does not ask these
+    /// payload-less steps for one. Read from Redis rather than hard-coded: processor ids change with
+    /// every rebuild.
     /// </summary>
-    private static async Task<Guid> FindLiveProcessorAsync(IConnectionMultiplexer redis, IDatabase db)
+    private static async Task<Guid> FindLiveProcessorAsync(HttpClient http, IConnectionMultiplexer redis, IDatabase db, CancellationToken ct)
     {
         var server = redis.GetServer(redis.GetEndPoints()[0]);
         await foreach (var key in server.KeysAsync(pattern: $"{L2ProjectionKeys.Prefix}proc:*:instances"))
         {
             if (!L2ProjectionKeys.TryParseProcessorInstances(key!, out var id))
+            {
+                continue;
+            }
+
+            if (!await HasNoConfigSchemaAsync(http, id, ct))
             {
                 continue;
             }
@@ -238,8 +245,20 @@ public sealed class L2AlignmentLiveTests
             }
         }
 
-        Assert.Fail("no live processor in L2 — the start's liveness gate would refuse every workflow");
+        Assert.Fail("no live processor without a config schema in L2 — the start's gates would refuse these steps");
         return Guid.Empty;
+    }
+
+    private static async Task<bool> HasNoConfigSchemaAsync(HttpClient http, Guid processorId, CancellationToken ct)
+    {
+        using var response = await http.GetAsync($"/api/v1/processors/{processorId}", ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            return false;
+        }
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+        return !doc.RootElement.TryGetProperty("configSchemaId", out var schema) || schema.ValueKind == JsonValueKind.Null;
     }
 
     private static async Task<Guid> CreateAsync(HttpClient http, string resource, object body, CancellationToken ct)
