@@ -24,6 +24,13 @@ namespace BaseApi.Tests.Live;
 /// <b>"Processed", not "accepted".</b> A start answers 202 before the consumer runs (spec §3.2), so
 /// every check polls Redis until the expected state appears or the budget runs out.
 /// </para>
+/// <para>
+/// <b>Cache items (2026-11-26).</b> A cache is created empty and its items go through
+/// <c>POST /caches/{id}/items</c> (append) and <c>PUT /caches/{id}/items</c> (replace): <c>items</c> on the cache
+/// body is no longer read. The root holds the <c>[]</c> marker and the key names are the members of
+/// <see cref="L2ProjectionKeys.CacheKeySet"/>. An items edit refreshes a running workflow's copy in place
+/// (no start), unlike a step or workflow edit.
+/// </para>
 /// </summary>
 [Trait("Category", RealStack.Category)]
 public sealed class L2AlignmentLiveTests
@@ -54,10 +61,12 @@ public sealed class L2AlignmentLiveTests
             ownKeys.Add(L2ProjectionKeys.StepEntity(b));
             c = await CreateAsync(http, "steps", Step($"l2align-c-{run}", processorId), ct);
             ownKeys.Add(L2ProjectionKeys.StepEntity(c));
-            cache = await CreateAsync(http, "caches", Cache(root, run, ("x", "1"), ("y", "2")), ct);
+            cache = await CreateAsync(http, "caches", Cache(root, run), ct);
+            await ItemsAsync(http, HttpMethod.Post, cache, ct, ("x", "1"), ("y", "2"));
             workflow = await CreateAsync(http, "workflows", Workflow(run, [a, b, c], [cache]), ct);
             ownKeys.Add(L2ProjectionKeys.Workflow(workflow));
             ownKeys.Add(L2ProjectionKeys.Cache(workflow, root));
+            ownKeys.Add(L2ProjectionKeys.CacheKeySet(workflow, root));
             ownKeys.Add(L2ProjectionKeys.CacheEntry(workflow, root, "x"));
             ownKeys.Add(L2ProjectionKeys.CacheEntry(workflow, root, "y"));
 
@@ -78,18 +87,28 @@ public sealed class L2AlignmentLiveTests
 
             Assert.Equal("1", (string?)await db.StringGetAsync(L2ProjectionKeys.CacheEntry(workflow, root, "x")));
             Assert.Equal("2", (string?)await db.StringGetAsync(L2ProjectionKeys.CacheEntry(workflow, root, "y")));
+            Assert.Equal("[]", (string?)await db.StringGetAsync(L2ProjectionKeys.Cache(workflow, root)));
+            Assert.Equal(["x", "y"], await KeyNamesAsync(db, workflow, root));
 
-            // ── Database edits: rename a (kept), drop b and c, delete b's row (c's stays), change
-            //    x and drop y from the cache. None of this reaches L2 until the next start. ─────────
+            // ── Database edits: rename a (kept), drop b and c, delete b's row (c's stays). None of
+            //    this reaches L2 until the next start. ─────────────────────────────────────────────
             await UpdateAsync(http, "steps", a, Step($"l2align-a2-{run}", processorId), ct);
             await UpdateAsync(http, "workflows", workflow, Workflow(run, [a], [cache]), ct);
             var bKey = L2ProjectionKeys.StepEntity(b);
             await DeleteAsync(http, "steps", b, ct);
             b = Guid.Empty;
-            await UpdateAsync(http, "caches", cache, Cache(root, run, ("x", "1-new")), ct);
 
-            Assert.True(await db.KeyExistsAsync(L2ProjectionKeys.CacheEntry(workflow, root, "y")),
-                "a database edit reached L2 without a start");
+            Assert.Equal(EntityNames.Format($"l2align-a-{run}", "1.0.0", a),
+                (string?)await db.HashGetAsync(L2ProjectionKeys.StepEntity(a), L2ProjectionKeys.NameField));
+
+            // ── Replace the cache's items (x changed, y dropped): an items edit refreshes the running
+            //    workflow's copy in place, without a start. ─────────────────────────────────────────
+            await ItemsAsync(http, HttpMethod.Put, cache, ct, ("x", "1-new"));
+            await EventuallyAsync("replace: the running copy holds only x = 1-new", async () =>
+                (string?)await db.StringGetAsync(L2ProjectionKeys.CacheEntry(workflow, root, "x")) == "1-new"
+                && !await db.KeyExistsAsync(L2ProjectionKeys.CacheEntry(workflow, root, "y")));
+            Assert.Equal(["x"], await KeyNamesAsync(db, workflow, root));
+            Assert.Equal("[]", (string?)await db.StringGetAsync(L2ProjectionKeys.Cache(workflow, root)));
 
             // ── Start 2: kept overwritten, removed deleted — except a dropped step whose row exists. ─
             await StartAsync(http, workflow, ct);
@@ -106,7 +125,8 @@ public sealed class L2AlignmentLiveTests
             Assert.Equal("1-new", (string?)await db.StringGetAsync(L2ProjectionKeys.CacheEntry(workflow, root, "x")));
             Assert.False(await db.KeyExistsAsync(L2ProjectionKeys.CacheEntry(workflow, root, "y")),
                 "a cache item removed from the database is still in L2");
-            Assert.Equal(["x"], ReadList(await db.StringGetAsync(L2ProjectionKeys.Cache(workflow, root))));
+            Assert.Equal("[]", (string?)await db.StringGetAsync(L2ProjectionKeys.Cache(workflow, root)));
+            Assert.Equal(["x"], await KeyNamesAsync(db, workflow, root));
 
             // ── Start 3: the cache is unbound, so its root and every entry go. ─────────────────────
             await UpdateAsync(http, "workflows", workflow, Workflow(run, [a], []), ct);
@@ -116,6 +136,8 @@ public sealed class L2AlignmentLiveTests
 
             Assert.False(await db.KeyExistsAsync(L2ProjectionKeys.CacheEntry(workflow, root, "x")),
                 "an unbound cache root left an entry behind");
+            Assert.False(await db.KeyExistsAsync(L2ProjectionKeys.CacheKeySet(workflow, root)),
+                "an unbound cache root left its key set behind");
             Assert.Empty(ReadList(await db.HashGetAsync(L2ProjectionKeys.Workflow(workflow), L2ProjectionKeys.RootsField)));
         }
         finally
@@ -163,11 +185,28 @@ public sealed class L2AlignmentLiveTests
         nextStepIds = Array.Empty<Guid>(), entryCondition = 4,
     };
 
-    private static object Cache(string root, string run, params (string Key, string Value)[] items) => new
+    // Created empty: items go through the items endpoints (ItemsAsync).
+    private static object Cache(string root, string run) => new
     {
         name = $"l2align-cache-{run}", version = "1.0.0", description = (string?)null, root,
-        items = items.Select(i => new { key = i.Key, value = i.Value }).ToArray(),
     };
+
+    /// <summary><c>POST /caches/{id}/items</c> (append) or <c>PUT /caches/{id}/items</c> (replace) with the pairs.</summary>
+    private static async Task ItemsAsync(HttpClient http, HttpMethod method, Guid cache, CancellationToken ct, params (string Key, string Value)[] items)
+    {
+        using var request = new HttpRequestMessage(method, $"/api/v1/caches/{cache}/items")
+        {
+            Content = JsonContent.Create(new { items = items.Select(i => new { key = i.Key, value = i.Value }).ToArray() }),
+        };
+        using var response = await http.SendAsync(request, ct);
+        Assert.True(response.IsSuccessStatusCode,
+            $"{method} /api/v1/caches/{cache}/items returned {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync(ct)}");
+    }
+
+    /// <summary>The projected dictionary's key names: SMEMBERS of its key set, sorted.</summary>
+    private static async Task<List<string>> KeyNamesAsync(IDatabase db, Guid workflow, string root) =>
+        (await db.SetMembersAsync(L2ProjectionKeys.CacheKeySet(workflow, root)))
+            .Select(m => m.ToString()).Order(StringComparer.Ordinal).ToList();
 
     // No cron: a started workflow activates but never dispatches.
     private static object Workflow(string run, Guid[] entrySteps, Guid[] caches) => new
