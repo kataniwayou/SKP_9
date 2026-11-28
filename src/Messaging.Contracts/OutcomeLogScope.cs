@@ -40,4 +40,39 @@ public static class OutcomeLogScope
     /// </summary>
     public static IReadOnlyDictionary<string, object> BuildScope(StepResult result)
         => new Dictionary<string, object> { [Result] = result.ToString() };
+
+    /// <summary>The author's reason for the outcome: the name of its enum value, e.g. <c>Unlisted</c>.</summary>
+    public const string Verdict = "Verdict";
+
+    /// <summary>The author's enum type that <see cref="Verdict"/> belongs to, e.g. <c>ArtistVerdict</c>.</summary>
+    public const string VerdictKind = "VerdictKind";
+
+    /// <summary>
+    /// Builds the scope dictionary carrying the outcome and, when the author gave one, its verdict.
+    /// <para>
+    /// <b>One builder for all three fields.</b> A record cannot get a verdict without a <c>Result</c>,
+    /// nor a <c>Verdict</c> without its <c>VerdictKind</c>: the boards count outcome records and stack
+    /// them by <c>Result</c> + <c>Verdict</c>, so a verdict on any other record would be counted as an
+    /// extra part. See <c>docs/superpowers/specs/2026-11-28-step-outcome-verdict-design.md</c>.
+    /// </para>
+    /// <para>
+    /// <b>Both come from the author's one enum value, by name.</b> <c>Verdict</c> is the value's name
+    /// and <c>VerdictKind</c> its type's simple name — never a number (a reorder would silently
+    /// re-label history) and never a namespace (a move would split it). The framework does not know
+    /// what any value means; it only writes it.
+    /// </para>
+    /// <para>
+    /// <b>Not on the wire.</b> The verdict never reaches <see cref="StepOutcome"/>: successors are
+    /// entered by <see cref="StepResult"/> alone, and a verdict must never move an edge.
+    /// </para>
+    /// </summary>
+    public static IReadOnlyDictionary<string, object> BuildScope(StepResult result, Enum? verdict)
+        => verdict is null
+            ? BuildScope(result)
+            : new Dictionary<string, object>
+            {
+                [Result] = result.ToString(),
+                [Verdict] = verdict.ToString(),
+                [VerdictKind] = verdict.GetType().Name,
+            };
 }

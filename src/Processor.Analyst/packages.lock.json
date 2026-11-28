@@ -6,7 +6,7 @@
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "2xEChjCxF8UmXGlQjBQ5ULBzKmzGn/cLB4ILF7bwqALyd6vn8gR3WN9hP8gL0MjdnEurYCZbBOPweb0hla3JvQ==",
+        "contentHash": "JZkX2uBvijwigNu8jNy6RjINreDi1tftckl4vHWlEWw4Uqf74EwBTTKCrAcBOyAC/hNpmIkK7lZ345848cVgCw==",
         "dependencies": {
           "BaseConsole.Core": "[1.0.0]",
           "JsonSchema.Net": "9.2.1",
@@ -343,7 +343,7 @@
         "type": "CentralTransitive",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "A5Evx7Q2X1gVAaGECDStEXIE9ULCRJq3V1CC7Aif/IvG3WWIyLtG+es0YvwMETyL+jalzZgqFLTK4cD4gz+G7g=="
+        "contentHash": "6Y/DoyfrMLOQjU52r/yKf7TunPL+FAi+8UCrgFz3/klbaMWnN+gASVqeOky9nukFHyc/4bxKUZP+gxkGD70Jyg=="
       },
       "Messaging.Transport": {
         "type": "CentralTransitive",

@@ -10,5 +10,9 @@ namespace BaseProcessor.Core.Processing;
 /// </summary>
 internal interface IBranchSink
 {
-    Task FinishAsync(ProcessedData branch, CancellationToken ct);
+    /// <param name="branch">The branch to validate, persist and report.</param>
+    /// <param name="verdict">The author's reason for this branch's completion, or null. Written on the
+    /// branch's Completed record only; a branch that fails its output schema drops it.</param>
+    /// <param name="ct">Cancellation.</param>
+    Task FinishAsync(ProcessedData branch, Enum? verdict, CancellationToken ct);
 }

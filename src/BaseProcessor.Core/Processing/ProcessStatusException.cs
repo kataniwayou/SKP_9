@@ -25,16 +25,48 @@ namespace BaseProcessor.Core.Processing;
 /// Elasticsearch as exception.type, exception.message and exception.stacktrace. It never reaches the
 /// wire: a StepOutcome still carries no text.
 /// </para>
+/// <para>
+/// <b>An optional verdict: the author's reason for this outcome.</b> A value of the author's own enum
+/// (<c>ArtistVerdict.Unlisted</c>), written by name onto this outcome's record as
+/// <c>attributes.Verdict</c> with its type as <c>attributes.VerdictKind</c>, so a board can stack the
+/// step's outcomes by why they happened. The framework never reads its meaning, and it never reaches
+/// the wire or the routing. A value the enum does not define keeps the outcome and drops the verdict.
+/// </para>
 /// </summary>
-public abstract class ProcessStatusException(string message, Exception? innerException = null)
-    : Exception(message, innerException);
+public abstract class ProcessStatusException : Exception
+{
+    protected ProcessStatusException(string message, Exception? innerException)
+        : base(message, innerException)
+    {
+    }
+
+    protected ProcessStatusException(string message, Enum verdict, Exception? innerException)
+        : base(message, innerException)
+    {
+        Verdict = verdict ?? throw new ArgumentNullException(nameof(verdict));
+    }
+
+    /// <summary>The author's reason for the outcome, or null when it gave none.</summary>
+    public Enum? Verdict { get; }
+}
 
 /// <summary>
 /// The step failed for a business reason. Reported as a <c>StepOutcome</c> of
 /// <c>StepResult.Failed</c>, whose entry id names the input this step did not consume.
 /// </summary>
-public sealed class FailedException(string message, Exception? innerException = null)
-    : ProcessStatusException(message, innerException);
+public sealed class FailedException : ProcessStatusException
+{
+    public FailedException(string message, Exception? innerException = null)
+        : base(message, innerException)
+    {
+    }
+
+    /// <summary>The same outcome, with the author's reason for it. See <see cref="ProcessStatusException.Verdict"/>.</summary>
+    public FailedException(string message, Enum verdict, Exception? innerException = null)
+        : base(message, verdict, innerException)
+    {
+    }
+}
 
 /// <summary>
 /// The step ended its branch and wants the orchestrator told. Reported as a <c>StepOutcome</c> of
@@ -45,5 +77,16 @@ public sealed class FailedException(string message, Exception? innerException = 
 /// predecessor needs to know it happened.
 /// </para>
 /// </summary>
-public sealed class CancelledException(string message, Exception? innerException = null)
-    : ProcessStatusException(message, innerException);
+public sealed class CancelledException : ProcessStatusException
+{
+    public CancelledException(string message, Exception? innerException = null)
+        : base(message, innerException)
+    {
+    }
+
+    /// <summary>The same outcome, with the author's reason for it. See <see cref="ProcessStatusException.Verdict"/>.</summary>
+    public CancelledException(string message, Enum verdict, Exception? innerException = null)
+        : base(message, verdict, innerException)
+    {
+    }
+}

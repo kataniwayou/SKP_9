@@ -143,7 +143,41 @@ public abstract class BaseProcessor
     /// duplicate.
     /// </para>
     /// </summary>
-    protected async Task SendToPostAsync(byte[]? processedData, Guid executionId, CancellationToken ct)
+    protected Task SendToPostAsync(byte[]? processedData, Guid executionId, CancellationToken ct)
+        => SendBranchAsync(processedData, executionId, null, ct);
+
+    /// <summary>
+    /// <see cref="SendToPostAsync(byte[], Guid, CancellationToken)"/>, with the author's reason for this
+    /// branch's completion.
+    /// <para>
+    /// <b>The verdict is a value of the author's own enum</b> (<c>ArtistVerdict.Listed</c>). The
+    /// framework writes it by name on this branch's Completed record, as <c>attributes.Verdict</c> with
+    /// <c>attributes.VerdictKind</c>, so a board can stack the step's outcomes by why they happened.
+    /// It never reaches the wire or the routing. Each branch of a fan-out carries the verdict given on
+    /// its own call. If the branch then fails its output schema, the Failed record has no verdict: the
+    /// reason was for a completion that did not happen.
+    /// </para>
+    /// <para>
+    /// A value the enum does not define (a cast number, a <c>[Flags]</c> combination) is refused like a
+    /// <see cref="Guid.Empty"/> execution id: the step reports Failed and the log names the value.
+    /// </para>
+    /// </summary>
+    protected Task SendToPostAsync(byte[]? processedData, Guid executionId, Enum verdict, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(verdict);
+
+        if (!VerdictValues.IsDefined(verdict))
+        {
+            throw new ArgumentException(
+                $"verdict '{verdict}' is not a defined member of {verdict.GetType().Name}; "
+                + "pass one of the enum's own values.",
+                nameof(verdict));
+        }
+
+        return SendBranchAsync(processedData, executionId, verdict, ct);
+    }
+
+    private async Task SendBranchAsync(byte[]? processedData, Guid executionId, Enum? verdict, CancellationToken ct)
     {
         // Every output under Guid.Empty would derive one shared key. An author error, raised inside
         // the dispatch so the framework reports the step Failed and the log names the cause.
@@ -171,7 +205,7 @@ public abstract class BaseProcessor
             // organisation's message-size cap no longer allows. The dispatch reclaims its input and
             // acks only after the author returns, so this call returning — branch in L2, outcome
             // confirmed — replaces the durable copy the queue used to hold.
-            await state.Sink.FinishAsync(branch, ct).ConfigureAwait(false);
+            await state.Sink.FinishAsync(branch, verdict, ct).ConfigureAwait(false);
 
             // AFTER the call returns, never before it. The flag means "this branch's outcome is on its
             // way", which is the only thing that makes the orchestrator advance — a call that threw

@@ -246,7 +246,7 @@ public sealed class BaseProcessorSeamTests
     /// <summary>IBranchSink is internal, so NSubstitute cannot proxy it from this assembly.</summary>
     private sealed class PendingSchemaSink : IBranchSink
     {
-        public Task FinishAsync(ProcessedData branch, CancellationToken ct)
+        public Task FinishAsync(ProcessedData branch, Enum? verdict, CancellationToken ct)
             => Task.FromException(new OutputSchemaPendingException(Guid.NewGuid()));
     }
 

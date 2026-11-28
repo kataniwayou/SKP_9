@@ -220,7 +220,7 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
             // The author's own text, and this line is now the only place it survives — StepOutcome
             // carries no message. Author-authored, so verbatim is safe here exactly as it once was on
             // the wire. Scoped, not templated — see the input-schema rejection above for why.
-            using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Failed)))
+            using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Failed, AuthorVerdict(ex))))
             {
                 // The exception object, not just its message: an author that passed the cause as an
                 // inner exception gets exception.type/message/stacktrace onto the record, which is
@@ -233,7 +233,7 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
         }
         catch (CancelledException ex)
         {
-            using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Cancelled)))
+            using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Cancelled, AuthorVerdict(ex))))
             {
                 _logger.LogInformation("the author cancelled the branch: {Reason}", ex.Message);
             }
@@ -344,6 +344,33 @@ internal sealed class ProcessDispatchHandler : IQueueMessageHandler
 
             await SendAsync(Failure(d, StepResult.Failed), ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// The verdict the author put on its exception, or null.
+    /// <para>
+    /// <b>An undefined value keeps the outcome and drops the verdict.</b> The author decided Failed or
+    /// Cancelled and that decision stands; only its label is unusable — a cast number or a
+    /// <c>[Flags]</c> combination would be written as <c>7</c> or <c>Listed, Unlisted</c> and become
+    /// a part of its own on every board. One Warning names it.
+    /// </para>
+    /// <para>
+    /// Framework-detected failures (schemas, a faulted transform, no branch sent) never reach this:
+    /// the author did not decide them, so they carry no verdict.
+    /// </para>
+    /// </summary>
+    private Enum? AuthorVerdict(ProcessStatusException ex)
+    {
+        if (ex.Verdict is not { } verdict || VerdictValues.IsDefined(verdict))
+        {
+            return ex.Verdict;
+        }
+
+        _logger.LogWarning(
+            "the author's verdict {UndefinedVerdict} is not a defined member of {VerdictType} — "
+            + "the outcome is reported without it",
+            verdict.ToString(), verdict.GetType().Name);
+        return null;
     }
 
     /// <summary>

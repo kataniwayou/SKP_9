@@ -16,6 +16,12 @@ namespace BaseApi.Tests.Support;
 /// </summary>
 internal sealed class SenderBranchSink(IQueueSender sender) : IBranchSink
 {
-    public Task FinishAsync(ProcessedData branch, CancellationToken ct)
-        => sender.SendTransientAsync("test-branch-sink", "processed-data", branch, ct);
+    /// <summary>The verdict each branch was sent with, in send order (null = none).</summary>
+    public List<Enum?> Verdicts { get; } = [];
+
+    public Task FinishAsync(ProcessedData branch, Enum? verdict, CancellationToken ct)
+    {
+        Verdicts.Add(verdict);
+        return sender.SendTransientAsync("test-branch-sink", "processed-data", branch, ct);
+    }
 }

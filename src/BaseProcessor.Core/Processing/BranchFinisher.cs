@@ -51,7 +51,10 @@ internal sealed class BranchFinisher : IBranchSink
         _logger  = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task FinishAsync(ProcessedData branch, CancellationToken ct)
+    /// <summary>A branch with no verdict.</summary>
+    public Task FinishAsync(ProcessedData branch, CancellationToken ct) => FinishAsync(branch, null, ct);
+
+    public async Task FinishAsync(ProcessedData branch, Enum? verdict, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(branch);
 
@@ -59,11 +62,11 @@ internal sealed class BranchFinisher : IBranchSink
         // not the dispatch's, and these lines are about the branch.
         using (_logger.BeginScope(ExecutionLogScope.BuildScope(branch)))
         {
-            await RunAsync(branch, ct).ConfigureAwait(false);
+            await RunAsync(branch, verdict, ct).ConfigureAwait(false);
         }
     }
 
-    private async Task RunAsync(ProcessedData b, CancellationToken ct)
+    private async Task RunAsync(ProcessedData b, Enum? verdict, CancellationToken ct)
     {
         _logger.LogDebug("validating and persisting a branch");
         var started = Stopwatch.GetTimestamp();
@@ -88,6 +91,7 @@ internal sealed class BranchFinisher : IBranchSink
                 // The template is unchanged from the queue hop — Kibana and the live tests match it —
                 // and the schema id stays on the line: the edge is a shared row that gets re-pointed,
                 // so the errors alone cannot say whether the document or the contract moved.
+                // No verdict: the author's reason was for a completion that did not happen.
                 using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Failed)))
                 {
                     _logger.LogWarning(
@@ -108,7 +112,9 @@ internal sealed class BranchFinisher : IBranchSink
             .ConfigureAwait(false);
         await SendAsync(Outcome(b, StepResult.Completed), ct).ConfigureAwait(false);
 
-        using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Completed)))
+        // The author's verdict, if any, rides on this record and no other: it is the one Completed
+        // record per branch, so counting these counts outcomes and the verdict stack adds up.
+        using (_logger.BeginScope(OutcomeLogScope.BuildScope(StepResult.Completed, verdict)))
         {
             _logger.LogInformation(
                 "branch completed in {ElapsedMs}ms", (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
