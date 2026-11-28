@@ -6,7 +6,7 @@
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "6hn9psJXovaCgZoS2Tk2im+srqC+bXvkn0LcO4dr1Bg2Z19crh56+c3ycMuT/n/YI3lNURZ4sAk7F2Jd+VMPfw==",
+        "contentHash": "5to2gzGHBzDnC04rcSoYke/saemJ5juvqe+eOyJGTp3yIuJz++JLwM+pGFqgJzZDyVGN1FEtYWZzT2FfJxxFXQ==",
         "dependencies": {
           "Asp.Versioning.Mvc": "8.1.0",
           "Asp.Versioning.Mvc.ApiExplorer": "8.1.0",

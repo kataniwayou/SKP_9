@@ -765,18 +765,19 @@ Four tiers on the worker boards, in the order the questions actually get asked:
 
 The now-deleted `skp-flow` had the same tense split (Verdict / Since / Flow) from the
 start; the worker boards had one row doing both jobs until the operator review below.
-`skp-baseapi` has three tiers (Verdict / Ingress / Runtime) and no Since row -- it
+`skp-baseapi` has four tiers (Verdict / Ingress / Memory / Runtime) and no Since row -- it
 carries `DNS failures (range)` and `Process restarts` instead.
 
 Live panel counts, all `provisioned=true` in folder `SKP`:
 
 | board | panels | rows |
 |---|---|---|
-| `skp-baseapi` | 22 | Verdict / Ingress / Runtime |
+| `skp-baseapi` | 26 | Verdict / Ingress / Memory / Runtime |
 | `skp-orchestrator` | 40 | Verdict / Since / Pipeline / Memory / Runtime |
 | `skp-processor` | 38 | Verdict / Since / Pipeline / Memory / Runtime |
 
-(The two worker rows each gained three panels and the Memory row on 2026-11-28.)
+(On 2026-11-28 each board gained the Memory row and three panels; `skp-baseapi` also gained
+the threads panel.)
 
 `skp-flow` (28 panels) and `skp-runtime` (17) were deleted. The two worker boards now
 mirror each other panel-for-panel, differing only where `pipeline.leader` stands in for
@@ -801,8 +802,9 @@ Added 2026-11-28, after the kafka-importer ran out of memory at its 384Mi limit 
 panel here showed only the managed heap. Prometheus scrapes nothing but the collector (no
 cAdvisor, no kube-state-metrics, and in production it is org-owned), so the container's own
 figures come from the processes: `ContainerMemoryMetrics` in Messaging.Transport reads the
-cgroup files (v2, then v1) and `AddBaseConsoleObservability` registers it, so the orchestrator
-and every processor emit:
+cgroup files (v2, then v1), and both host setups register it -- `AddBaseConsoleObservability`
+for the orchestrator and every processor, `AddBaseApiObservability` for the API -- so all three
+roles emit:
 
 | instrument | exported as | what it is |
 |---|---|---|
@@ -812,21 +814,23 @@ and every processor emit:
 | `pipeline.process.working_set` | `pipeline_process_working_set_bytes` | resident memory, for comparison only |
 | `pipeline.process.threads` | `pipeline_process_threads` | OS threads, not only the pool's |
 
-Where they are drawn, identically on both worker boards:
+Where they are drawn, identically on all three boards (built from one definition, differing
+only in selector):
 
 - **Verdict, `Memory vs limit`** — the worst replica's charge over its limit; amber at 75%, red
-  at 90%. On the processor board it opens a second stat line; the orchestrator's already had one.
+  at 90%. On the processor board it opens a second stat line; the orchestrator's already had one;
+  on `skp-baseapi` it fills the Verdict row's last free slot.
 - **Memory, `Container memory vs limit`** — charge (solid) and limit (dashed) per replica.
 - **Memory, `Where the memory is`** — charge, anon, working set, GC committed and GC heap objects
   on one axis. A managed leak climbs the heap line with the rest; a flat heap under a rising anon
   line is native memory or the runtime keeping freed space.
 - **Runtime, `Threads: thread pool and OS`** — the old thread-pool panel with the OS count added.
+  `skp-baseapi` had no thread-pool threads panel; it gains this one whole.
 
 **The charge, not the working set, is what the limit is enforced against.** On 2026-11-28 a
 file-fetcher showed 139 MiB resident against an 83 MiB charge. `GC committed memory` used to say
 it was "the number the container limit is compared against"; it is not, and its description now
-says so. `skp-baseapi` does not carry these yet: BaseApi has its own metrics setup in
-`BaseApi.Core` and does not register the meter.
+says so. (`skp-baseapi` has no GC committed panel; "Where the memory is" draws that line there.)
 
 ### Why fault panels end in `or vector(0)` — and the three that must not
 

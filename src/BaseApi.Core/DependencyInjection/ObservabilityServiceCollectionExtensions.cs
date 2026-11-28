@@ -161,6 +161,9 @@ public static class ObservabilityServiceCollectionExtensions
                 // because InstanceId resolves to POD_NAME -- a restart moves the value on an
                 // EXISTING series rather than creating a new one.
                 .AddMeter(ProcessStartMetrics.MeterName)
+                // Container memory charge vs limit, working set, OS threads (2026-11-28) -- the same
+                // meter the worker hosts register in AddBaseConsoleObservability; see ContainerMemoryMetrics.
+                .AddMeter(ContainerMemoryMetrics.MeterName)
                 // Loop iterations. This host runs two watched loops -- the gate probe and the
                 // queue-depth probe -- and reported neither until now.
                 .AddMeter(LoopMetrics.MeterName)
@@ -178,6 +181,9 @@ public static class ObservabilityServiceCollectionExtensions
         // Stamped once, as early as the provider is built. Idempotent: the first call wins, so a
         // value that moved twice can never inflate a restart count.
         ProcessStartMetrics.Stamp(TimeProvider.System);
+
+        // The instruments exist only once the type is touched; AddMeter above only subscribes.
+        ContainerMemoryMetrics.EnsureRegistered();
 
         return builder;
     }
