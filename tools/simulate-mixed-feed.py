@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
 simulate-approved-feed.py with a MIXED cycle: --listed archives whose artist is on the workflow's
-whitelist and --unlisted archives whose artist is not (default 20 + 10 = 30 per cycle, the approved
-feed's rate). It exercises both Acme outcome verdicts on every cycle:
+whitelist and --unlisted archives whose artist is not (default 60 + 30 = 90 per cycle, three times the
+approved feed's rate). It exercises both Acme outcome verdicts on every cycle:
 
     file                         artist (sidecar)          outcome / verdict
     ---------------------------------------------------------------------------------
     ok-NNNNNN-01.zip             SKP Feed Artist 1         Completed / Listed   -> out/
     ...                          (round-robin over 5)      ...
-    ok-NNNNNN-20.zip             SKP Feed Artist 5         Completed / Listed   -> out/
+    ok-NNNNNN-60.zip             SKP Feed Artist 5         Completed / Listed   -> out/
     no-NNNNNN-01.zip             Unapproved Sim Artist     Cancelled / Unlisted
     ...                          ...                       ...
-    no-NNNNNN-10.zip             Unapproved Sim Artist     Cancelled / Unlisted
+    no-NNNNNN-30.zip             Unapproved Sim Artist     Cancelled / Unlisted
 
 The listed artists are appended to the `chain-artists` cache first, exactly as the approved feed
 does; the unlisted artist is never added. Everything else -- landing the files, seeding the
@@ -56,7 +56,7 @@ DEFAULT_REDIS_POD = "redis-0"
 DEFAULT_NAMESPACE = "skp"
 
 ARTIST_COUNT = 5
-FILES_PER_CYCLE = 30
+FILES_PER_CYCLE = 90
 
 
 def artists(count):
@@ -65,8 +65,10 @@ def artists(count):
     return {f"SKP Feed Artist {i}": f"SKP Feed Artist {i} (Approved)" for i in range(1, count + 1)}
 
 
-LISTED = 20
-UNLISTED = 10
+# Three times the approved feed's 30 a cycle (2026-11-28), so a per-message leak shows on the heap
+# panels within minutes rather than hours. Pass --listed 20 --unlisted 10 for the old rate.
+LISTED = 60
+UNLISTED = 30
 
 
 def build_cycle(serial, artist_names):
@@ -173,9 +175,9 @@ def main():
     parser.add_argument("--node-in-dir", default=base.DEFAULT_IN_DIR)
     parser.add_argument("--node-out-dir", default=base.DEFAULT_OUT_DIR)
     parser.add_argument("--interval", type=float, default=20.0,
-                        help="seconds between cycles (default 20; 30 files a cycle = 90/min)")
+                        help="seconds between cycles (default 20; 90 files a cycle = 270/min)")
     parser.add_argument("--cycles", type=int, default=0, help="0 means endless")
-    parser.add_argument("--max-files", type=int, default=180,
+    parser.add_argument("--max-files", type=int, default=540,
                         help="wipe both folders once the in folder holds this many")
     parser.add_argument("--settle", type=float, default=10.0,
                         help="seconds to wait after lag hits 0 before wiping")
