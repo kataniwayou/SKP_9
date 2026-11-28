@@ -759,7 +759,9 @@ Four tiers on the worker boards, in the order the questions actually get asked:
 2. **Since** — stat row. What has already **happened** in the visible range? The same
    instruments, `$__range` instead of 5m, plus dead-letter depth and process restarts.
 3. **Pipeline** — timeseries and state timelines. What is broken?
-4. **Runtime** — collapsed, eight panels. Is the process why?
+4. **Memory** — open, two panels (2026-11-28). How close is each replica to its memory limit,
+   and where is that memory? See [Container memory](#container-memory-and-the-limit-it-is-held-to).
+5. **Runtime** — collapsed, eight panels. Is the process why?
 
 The now-deleted `skp-flow` had the same tense split (Verdict / Since / Flow) from the
 start; the worker boards had one row doing both jobs until the operator review below.
@@ -771,8 +773,10 @@ Live panel counts, all `provisioned=true` in folder `SKP`:
 | board | panels | rows |
 |---|---|---|
 | `skp-baseapi` | 22 | Verdict / Ingress / Runtime |
-| `skp-orchestrator` | 37 | Verdict / Since / Pipeline / Runtime |
-| `skp-processor` | 35 | Verdict / Since / Pipeline / Runtime |
+| `skp-orchestrator` | 40 | Verdict / Since / Pipeline / Memory / Runtime |
+| `skp-processor` | 38 | Verdict / Since / Pipeline / Memory / Runtime |
+
+(The two worker rows each gained three panels and the Memory row on 2026-11-28.)
 
 `skp-flow` (28 panels) and `skp-runtime` (17) were deleted. The two worker boards now
 mirror each other panel-for-panel, differing only where `pipeline.leader` stands in for
@@ -785,10 +789,44 @@ lock contention -- paired so each question's two halves sit together. It carried
 `skp-runtime` was deleted; the six absorbed are the ones an operator would otherwise have
 left the board to find. `skp-baseapi` still carries only the original pair.
 
-Seven of the fifteen runtime metrics are now on no board at all: heap fragmentation, live
-object bytes, thread-pool completion rate, loaded assemblies, active timers, JIT methods per
-second, and the JIT-reset restart count. The first six are profiler-session diagnostics; the
-last cannot see a restart on this deployment at all. Recorded as a known gap.
+Six of the fifteen runtime metrics are now on no board at all: heap fragmentation,
+thread-pool completion rate, loaded assemblies, active timers, JIT methods per second, and the
+JIT-reset restart count. The first five are profiler-session diagnostics; the last cannot see a
+restart on this deployment at all. Recorded as a known gap. (Live object bytes was a seventh until
+2026-11-28, when "Where the memory is" took it as its heap line.)
+
+### Container memory, and the limit it is held to
+
+Added 2026-11-28, after the kafka-importer ran out of memory at its 384Mi limit while every
+panel here showed only the managed heap. Prometheus scrapes nothing but the collector (no
+cAdvisor, no kube-state-metrics, and in production it is org-owned), so the container's own
+figures come from the processes: `ContainerMemoryMetrics` in Messaging.Transport reads the
+cgroup files (v2, then v1) and `AddBaseConsoleObservability` registers it, so the orchestrator
+and every processor emit:
+
+| instrument | exported as | what it is |
+|---|---|---|
+| `pipeline.container.memory` | `pipeline_container_memory_bytes` | the cgroup charge: what the OOM decision compares to the limit |
+| `pipeline.container.memory.limit` | `pipeline_container_memory_limit_bytes` | the limit; absent when unlimited |
+| `pipeline.container.memory.anon` | `pipeline_container_memory_anon_bytes` | the charge's anonymous part (allocations, not file cache) |
+| `pipeline.process.working_set` | `pipeline_process_working_set_bytes` | resident memory, for comparison only |
+| `pipeline.process.threads` | `pipeline_process_threads` | OS threads, not only the pool's |
+
+Where they are drawn, identically on both worker boards:
+
+- **Verdict, `Memory vs limit`** — the worst replica's charge over its limit; amber at 75%, red
+  at 90%. On the processor board it opens a second stat line; the orchestrator's already had one.
+- **Memory, `Container memory vs limit`** — charge (solid) and limit (dashed) per replica.
+- **Memory, `Where the memory is`** — charge, anon, working set, GC committed and GC heap objects
+  on one axis. A managed leak climbs the heap line with the rest; a flat heap under a rising anon
+  line is native memory or the runtime keeping freed space.
+- **Runtime, `Threads: thread pool and OS`** — the old thread-pool panel with the OS count added.
+
+**The charge, not the working set, is what the limit is enforced against.** On 2026-11-28 a
+file-fetcher showed 139 MiB resident against an 83 MiB charge. `GC committed memory` used to say
+it was "the number the container limit is compared against"; it is not, and its description now
+says so. `skp-baseapi` does not carry these yet: BaseApi has its own metrics setup in
+`BaseApi.Core` and does not register the meter.
 
 ### Why fault panels end in `or vector(0)` — and the three that must not
 

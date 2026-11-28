@@ -558,7 +558,7 @@
         "type": "CentralTransitive",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "WFM8/bY0cFJpr2TD5yD8TzXLTAFnepjvhCQRmTjfP4gObSf6R31B+SQogeFxprt6fdU33yUEayOUQG34W6AnJQ==",
+        "contentHash": "OK/iJmVQI7IUfPhRdKA6ZP/Ywyq9pNLxn3ooBNgu7JcW4Wf3D9nEf0i7xXdYI5GN3FL3itIJzKY7VhVkmKY+bw==",
         "dependencies": {
           "Messaging.Contracts": "[1.0.0]",
           "Microsoft.Extensions.Hosting.Abstractions": "8.0.1",

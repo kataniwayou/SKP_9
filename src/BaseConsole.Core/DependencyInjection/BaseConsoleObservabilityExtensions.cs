@@ -107,6 +107,10 @@ public static class BaseConsoleObservabilityExtensions
         // and a hosted service runs after everything else the host builds.
         ProcessStartMetrics.Stamp(TimeProvider.System);
 
+        // The container's memory charge and limit, working set and OS threads (2026-11-28): the
+        // instruments exist only once the type is touched, and AddMeter below only subscribes.
+        ContainerMemoryMetrics.EnsureRegistered();
+
         // Resolved identity, then configuration, then this service's declared default. A caller that
         // resolved a real identity knows something configuration cannot — a processor's name is a
         // database column — so it wins outright and the rest is never consulted. Nothing about that
@@ -186,6 +190,8 @@ public static class BaseConsoleObservabilityExtensions
                 .AddMeter(QueueDepthMetrics.MeterName)
                 .AddMeter(CountingLoopHeartbeat.MeterName)
                 .AddMeter(ProcessStartMetrics.MeterName)
+                // Container memory charge vs limit, working set, OS threads -- see ContainerMemoryMetrics.
+                .AddMeter(ContainerMemoryMetrics.MeterName)
                 // Bucket boundaries for the send-latency histogram, on the shared call so both roles
                 // inherit them. Without a view the SDK applies a default ladder built for
                 // milliseconds while the instrument records seconds, and every observation collapses
