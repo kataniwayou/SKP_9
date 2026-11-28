@@ -60,8 +60,15 @@ never resolved in L2 logs the suffix alone, e.g. `9aff-a7f22ee09224`). The name 
 record by the orchestrator or the processor that emits it**, resolved at build time from
 the name field of `skp:wf:{id}` / `skp:step:{id}` / `skp:proc:{id}` in L2 — BaseApi writes the
 workflow and step names on every start; each processor instance writes its own. Kibana holds
-nothing: the `skp-logs` data view has an empty `fieldFormatMap` and an empty `runtimeFieldMap`, and
-nothing pushes to it or triggers it.
+nothing: the `skp-logs` data view has an empty `fieldFormatMap`, and nothing pushes to it or triggers
+it. Its one runtime field, `StepShort`, is display only: `attributes.StepName` cut at the first `_`
+(the version suffix), computed at query time. *Step outcomes over time* splits by it so the legend
+reads `split-importer - outcomes`. The chart has two layers: every step ordered by first seen, and
+the step that gives an outcome verdict (today `sk-normalizer-sample`: excluded by name from the
+first layer, included by name in its own) stacked by `attributes.Verdict`. Another verdict step needs
+its own stacked layer, because one stacked layer piles every series into one bar, e.g. `sk-normalizer-sample › Unlisted -
+verdicts`. The ` - outcomes` / ` - verdicts` suffix is Lens's: it names the metric whenever two
+layers have a breakdown. See `docs/superpowers/specs/2026-11-28-step-outcome-verdict-design.md`.
 
 **The Elasticsearch plumbing that used to do this is retired.** A `skp-entity-lookup` index, its
 enrich policy, and a `logs@custom` ingest pipeline used to stamp the name onto each record at
