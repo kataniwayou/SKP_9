@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 """
 simulate-approved-feed.py with a MIXED cycle: --listed archives whose artist is on the workflow's
-whitelist and --unlisted archives whose artist is not (default 60 + 30 = 90 per cycle, three times the
-approved feed's rate). It exercises both Acme outcome verdicts on every cycle:
+whitelist and --unlisted archives whose artist is not (default 28 + 14 = 42 per cycle, 126 a minute:
+above the approved feed's 90, under the importer's ceiling of 150). It exercises both Acme outcome verdicts on every cycle:
 
     file                         artist (sidecar)          outcome / verdict
     ---------------------------------------------------------------------------------
     ok-NNNNNN-01.zip             SKP Feed Artist 1         Completed / Listed   -> out/
     ...                          (round-robin over 5)      ...
-    ok-NNNNNN-60.zip             SKP Feed Artist 5         Completed / Listed   -> out/
+    ok-NNNNNN-28.zip             SKP Feed Artist 5         Completed / Listed   -> out/
     no-NNNNNN-01.zip             Unapproved Sim Artist     Cancelled / Unlisted
     ...                          ...                       ...
-    no-NNNNNN-30.zip             Unapproved Sim Artist     Cancelled / Unlisted
+    no-NNNNNN-14.zip             Unapproved Sim Artist     Cancelled / Unlisted
 
 The listed artists are appended to the `chain-artists` cache first, exactly as the approved feed
 does; the unlisted artist is never added. Everything else -- landing the files, seeding the
-records, the drain-then-wipe at --max-files -- is simulate-approved-feed.py's, imported from it.
+records -- is simulate-approved-feed.py's, imported from it. Cleanup is NOT: by default the stream
+never pauses and files older than --keep-minutes are pruned each cycle (--keep-minutes 0 brings back
+the approved feed's drain-then-wipe at --max-files).
 
 RUN THIS FROM POWERSHELL, NOT GIT BASH: MSYS rewrites unix-looking absolute paths.
 
@@ -56,7 +58,7 @@ DEFAULT_REDIS_POD = "redis-0"
 DEFAULT_NAMESPACE = "skp"
 
 ARTIST_COUNT = 5
-FILES_PER_CYCLE = 90
+FILES_PER_CYCLE = 42
 
 
 def artists(count):
@@ -65,10 +67,14 @@ def artists(count):
     return {f"SKP Feed Artist {i}": f"SKP Feed Artist {i} (Approved)" for i in range(1, count + 1)}
 
 
-# Three times the approved feed's 30 a cycle (2026-11-28), so a per-message leak shows on the heap
-# panels within minutes rather than hours. Pass --listed 20 --unlisted 10 for the old rate.
-LISTED = 60
-UNLISTED = 30
+# 42 a cycle = 126 a minute (2026-11-28): more than the approved feed's 90 a minute, so a per-message
+# leak shows on the heap panels sooner, and under the chain's IMPORT CEILING of 150 a minute (the
+# split-importer runs 6 dispatches a minute and reads 25 records each). Above the ceiling the
+# continuous stream cannot be continuous: 90 a cycle grew the lag by 120 records a minute, and a
+# backlog older than --keep-minutes would be pruned before it is fetched. Raise the ceiling (the
+# importer step's batch or schedule) before raising these. --listed 20 --unlisted 10 is the old rate.
+LISTED = 28
+UNLISTED = 14
 
 
 def build_cycle(serial, artist_names):
@@ -148,6 +154,20 @@ def ensure_cache(args, wanted):
     say(f"L2 holds all {len(wanted)} artists under {args.cache_root}")
 
 
+def prune(node, in_dir, out_dir, keep_minutes):
+    """Deletes files older than `keep_minutes` from both folders and returns how many went.
+
+    THE ROLLING ALTERNATIVE TO THE WIPE (2026-11-28). The wipe pauses the stream: it waits for the
+    importer's lag to reach 0, settles, then empties both folders, so the heap and outcome panels see
+    a gap every --max-files. Pruning by age keeps every cycle on time. It is safe as long as a file is
+    imported and finished within `keep_minutes`; the cycle line prints the importer's lag so a backlog
+    that would outrun it is visible. -mmin is whole minutes, by the node's clock."""
+    result = base.node_exec(node, ["sh", "-c",
+        f"find {in_dir} {out_dir} -maxdepth 1 -type f -mmin +{keep_minutes} -print -delete 2>/dev/null | wc -l"],
+        check=False)
+    return int(result.stdout.decode().strip() or "0")
+
+
 # ── main ────────────────────────────────────────────────────────────────────────────────────────
 
 def run_dry(args, artist_names):
@@ -175,10 +195,14 @@ def main():
     parser.add_argument("--node-in-dir", default=base.DEFAULT_IN_DIR)
     parser.add_argument("--node-out-dir", default=base.DEFAULT_OUT_DIR)
     parser.add_argument("--interval", type=float, default=20.0,
-                        help="seconds between cycles (default 20; 90 files a cycle = 270/min)")
+                        help="seconds between cycles (default 20; 42 files a cycle = 126/min)")
     parser.add_argument("--cycles", type=int, default=0, help="0 means endless")
+    parser.add_argument("--keep-minutes", type=int, default=15,
+                        help="the continuous stream (default): every cycle, delete files older than "
+                             "this from both folders, never pausing. 0 = the old drain-then-wipe at "
+                             "--max-files instead")
     parser.add_argument("--max-files", type=int, default=540,
-                        help="wipe both folders once the in folder holds this many")
+                        help="with --keep-minutes 0 only: wipe both folders once the in folder holds this many")
     parser.add_argument("--settle", type=float, default=10.0,
                         help="seconds to wait after lag hits 0 before wiping")
     parser.add_argument("--drain-timeout", type=float, default=120.0,
@@ -211,7 +235,9 @@ def main():
 
     if args.interval <= 0:
         raise SystemExit("--interval must be positive")
-    if args.max_files < FILES_PER_CYCLE:
+    if args.keep_minutes < 0:
+        raise SystemExit("--keep-minutes must be >= 0")
+    if args.keep_minutes == 0 and args.max_files < FILES_PER_CYCLE:
         raise SystemExit(f"--max-files must be at least one cycle's worth of files ({FILES_PER_CYCLE})")
 
     wanted = artists(ARTIST_COUNT)
@@ -228,9 +254,16 @@ def main():
     serial = args.start_serial
     produced = 0
     wipes = 0
+    pruned = 0
+    if args.no_wipe:
+        cleanup = "never cleaned"
+    elif args.keep_minutes:
+        cleanup = f"continuous: files older than {args.keep_minutes} min pruned every cycle"
+    else:
+        cleanup = f"drain-then-wipe at {args.max_files}"
     say(
         f"seeding {args.topic} at {args.brokers}; files to {args.node}:{args.node_in_dir}; "
-        f"{LISTED} listed + {UNLISTED} unlisted files every {args.interval}s; wipe at {args.max_files}"
+        f"{LISTED} listed + {UNLISTED} unlisted files every {args.interval}s; {cleanup}"
     )
 
     try:
@@ -247,9 +280,19 @@ def main():
 
             seeded = len(paths) - len(failures)
             produced += seeded
-            say(f"cycle {serial:06d}: {len(files)} files on the node, {seeded} records seeded")
+            if args.keep_minutes and not args.no_wipe:
+                gone = prune(args.node, args.node_in_dir, args.node_out_dir, args.keep_minutes)
+                pruned += gone
+                try:
+                    lag = base.consumer_lag(args.brokers, args.topic, args.group)
+                except Exception as exc:   # a probe failure must not stop the stream
+                    lag = f"? ({type(exc).__name__})"
+                say(f"cycle {serial:06d}: {len(files)} files on the node, {seeded} records seeded; "
+                    f"importer lag {lag}; pruned {gone}")
+            else:
+                say(f"cycle {serial:06d}: {len(files)} files on the node, {seeded} records seeded")
 
-            if not args.no_wipe:
+            if not args.no_wipe and not args.keep_minutes:
                 held = base.count_files(args.node, args.node_in_dir)
                 if held >= args.max_files:
                     say(f"in folder holds {held} (>= {args.max_files}); waiting for the importer")
@@ -268,7 +311,7 @@ def main():
     finally:
         producer.flush(timeout=10)
         cycles_run = serial - args.start_serial
-        say(f"produced {produced} record(s) over {cycles_run} cycle(s), {wipes} wipe(s)")
+        say(f"produced {produced} record(s) over {cycles_run} cycle(s), {wipes} wipe(s), {pruned} file(s) pruned")
         say(f"next run: --start-serial {serial}")
 
     return 0
