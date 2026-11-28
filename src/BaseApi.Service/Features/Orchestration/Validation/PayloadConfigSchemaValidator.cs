@@ -55,7 +55,7 @@ internal sealed class PayloadConfigSchemaValidator
                 if (!snapshot.Schemas.TryGetValue(cfgId.Value, out var schemaDto)) continue; // defensive
                 try
                 {
-                    schema = JsonSchema.FromText(schemaDto.Definition);
+                    schema = JsonSchemaConfig.Parse(schemaDto.Definition);
                 }
                 catch (Exception ex) when (ex is JsonException or JsonSchemaException)
                 {
@@ -134,7 +134,7 @@ internal sealed class PayloadConfigSchemaValidator
             {
                 try
                 {
-                    var schema = JsonSchema.FromText(dto.Definition);
+                    var schema = JsonSchemaConfig.Parse(dto.Definition);
                     using var empty = JsonDocument.Parse("{}");
                     if (!schema.Evaluate(empty.RootElement, JsonSchemaConfig.DefaultOptions).IsValid)
                     {

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Json.Schema;
 
 namespace BaseApi.Service.Features.Schema;
@@ -42,4 +43,50 @@ public static class JsonSchemaConfig
     /// therefore applies the dialect and fetch lockdown.
     /// </summary>
     public static EvaluationOptions DefaultOptions { get; } = new() { OutputFormat = OutputFormat.List };
+
+    /// <summary>
+    /// The most distinct definitions <see cref="Parse"/> holds before it starts over. The API sees
+    /// one per schema row a validation touches; this bound is what makes a static cache safe however
+    /// many rows exist or are edited.
+    /// </summary>
+    internal const int MaxCachedDefinitions = 256;
+
+    // Each parsed schema, keyed by its definition text (ordinal: one changed byte is another schema).
+    private static readonly ConcurrentDictionary<string, JsonSchema> Schemas = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The schema for <paramref name="definition"/>, parsed once per process and reused. Throws what
+    /// <c>JsonSchema.FromText</c> throws for a definition that is not a schema; a failure is not
+    /// cached.
+    /// <para>
+    /// <b>Why not <c>JsonSchema.FromText(definition)</c> (2026-11-28).</b> The library gives a schema
+    /// without an absolute <c>$id</c> a random base URI and registers it in
+    /// <c>SchemaRegistry.Global</c>, which never lets go, so every parse kept about 2 KB for the
+    /// life of the process. On the processor side that ran the kafka-importer out of memory; here
+    /// each start and validation kept one per config schema it read. Parsing once stops the growth,
+    /// and parsing into a registry of the schema's own (same no-op <c>Fetch</c>, dialect passed
+    /// explicitly) means a schema dropped at <see cref="MaxCachedDefinitions"/> is collected.
+    /// Mirrors <c>ProcessorJsonSchemaValidator.Parsed</c>; <b>keep the two in sync</b>, as above.
+    /// </para>
+    /// </summary>
+    public static JsonSchema Parse(string definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        if (Schemas.TryGetValue(definition, out var cached))
+        {
+            return cached;
+        }
+
+        var own = new SchemaRegistry { Fetch = (_, _) => null };   // no outbound $ref fetch, as globally
+        var schema = JsonSchema.FromText(definition, new BuildOptions { SchemaRegistry = own, Dialect = Dialect.Default });
+        if (Schemas.Count >= MaxCachedDefinitions)
+        {
+            Schemas.Clear();
+        }
+
+        return Schemas.GetOrAdd(definition, schema);
+    }
+
+    /// <summary>How many definitions are cached. Test seam.</summary>
+    internal static int CachedDefinitionCount => Schemas.Count;
 }
