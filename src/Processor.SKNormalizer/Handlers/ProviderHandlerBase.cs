@@ -8,6 +8,9 @@ public abstract class ProviderHandlerBase : IProviderHandler
 {
     public abstract string Name { get; }
 
+    /// <summary>No verdict by default: a handler without a gate has no reason to give.</summary>
+    public virtual Enum? CompletedVerdict => null;
+
     public abstract IReadOnlyList<SourceItem> Locate(FileNode root);
 
     public virtual void ValidateContent(SourceItem item)

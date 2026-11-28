@@ -30,6 +30,10 @@ public sealed class NormalizationPipelineTests
 
         public AudioProfile? Profile { get; init; }
 
+        public Enum? Verdict { get; init; }
+
+        public override Enum? CompletedVerdict => Verdict;
+
         /// <summary>
         /// Which of the three states <see cref="Map"/> leaves the metadata in. The default is
         /// COMPLETE, which is why the incomplete arm of the pipeline's tri-state was unreachable
@@ -183,6 +187,26 @@ public sealed class NormalizationPipelineTests
         Assert.Equal(TimeSpan.FromSeconds(184), audio.Duration);
         Assert.Equal(Encoding.UTF8.GetBytes("converted"), audio.Content);
         Assert.Equal(".mp3", audio.Extension);
+    }
+
+    [Fact]
+    public void TheResultCarriesTheHandlersCompletedVerdict()
+    {
+        var result = Pipeline(new FakeTranscoder()).Run(
+            Archive("in.zip", Leaf("a.wav", "x")), new RecordingHandler { Verdict = ArtistVerdict.Listed },
+            FieldWhitelists.AdmitAll, CancellationToken.None);
+
+        Assert.Equal(ArtistVerdict.Listed, result.Verdict);
+    }
+
+    [Fact]
+    public void AHandlerWithoutAVerdictLeavesTheResultWithout()
+    {
+        var result = Pipeline(new FakeTranscoder()).Run(
+            Archive("in.zip", Leaf("a.wav", "x")), new RecordingHandler(),
+            FieldWhitelists.AdmitAll, CancellationToken.None);
+
+        Assert.Null(result.Verdict);
     }
 
     [Fact]

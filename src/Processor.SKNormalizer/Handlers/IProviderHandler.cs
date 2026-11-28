@@ -28,6 +28,17 @@ public interface IProviderHandler
     /// </summary>
     string Name { get; }
 
+    /// <summary>
+    /// The verdict a completed document carries, or null for a handler that gives none.
+    /// <para>
+    /// <b>A constant of the handler, because completion means every gate passed.</b> A handler whose
+    /// gate refuses a document says why on the exception it throws; reaching the send means nothing
+    /// refused, so the reason for a completion is the same for every document this handler completes.
+    /// The framework writes it on the Completed record. See <see cref="ArtistVerdict"/>.
+    /// </para>
+    /// </summary>
+    Enum? CompletedVerdict { get; }
+
     /// <summary>Stage 1. Finds the units of work in the incoming tree.</summary>
     IReadOnlyList<SourceItem> Locate(FileNode root);
 

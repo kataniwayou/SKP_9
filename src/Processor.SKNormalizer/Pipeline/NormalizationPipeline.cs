@@ -1,7 +1,11 @@
 namespace Processor.SKNormalizer;
 
-/// <summary>What one dispatch produced. Counts are for the log line; the document is the payload.</summary>
-internal sealed record NormalizationResult(FileNode Document, int ItemCount, int ConvertedCount);
+/// <summary>
+/// What one dispatch produced. Counts are for the log line; the document is the payload; the verdict,
+/// when the handler gives one, is the reason the framework writes on the Completed record.
+/// </summary>
+internal sealed record NormalizationResult(
+    FileNode Document, int ItemCount, int ConvertedCount, Enum? Verdict = null);
 
 /// <summary>
 /// The eight stages, in order. <b>The handler decides; this executes.</b> Stages 6 and 8 are the
@@ -35,7 +39,8 @@ internal sealed class NormalizationPipeline(
         // ArchiveCollapser would enforce one hop later.
         var layout = handler.LayoutFor(root, normalized);
 
-        return new NormalizationResult(assembler.Assemble(layout), items.Count, converted);
+        return new NormalizationResult(
+            assembler.Assemble(layout), items.Count, converted, handler.CompletedVerdict);
     }
 
     private NormalizedItem Normalize(

@@ -461,6 +461,9 @@ public sealed class AcmeHandlerTests
         // document this workflow is not meant to carry, not one it could not read.
         Assert.Contains("Unknown", ex.Message, StringComparison.Ordinal);
         Assert.Contains("whitelist", ex.Message, StringComparison.Ordinal);
+
+        // The outcome's reason, which the board stacks the step by.
+        Assert.Equal(ArtistVerdict.Unlisted, ex.Verdict);
     }
 
     [Fact]
@@ -506,6 +509,16 @@ public sealed class AcmeHandlerTests
             () => handler.Augment(metadata, item, FieldWhitelists.Empty));
 
         Assert.Contains("no artist", ex.Message, StringComparison.Ordinal);
+
+        // Nothing was looked up, so there is no verdict (the user, 2026-11-28).
+        Assert.Null(ex.Verdict);
+    }
+
+    [Fact]
+    public void ACompletedAcmeDocumentIsListed()
+    {
+        // Completion means every artist passed the gate, so the reason is the same for every one.
+        Assert.Equal(ArtistVerdict.Listed, Handler().CompletedVerdict);
     }
 
     [Fact]

@@ -65,7 +65,16 @@ internal sealed class SKNormalizerProcessor(
 
         // ONE branch, on the execution id this dispatch arrived with. Not NewExecutionId(): this is
         // a transform, not a source, so the lineage it was handed is the lineage it continues.
-        await SendToPostAsync(document, executionId, ct).ConfigureAwait(false);
+        //
+        // WITH THE HANDLER'S VERDICT when it gives one: the reason the board stacks this outcome by.
+        if (result.Verdict is { } verdict)
+        {
+            await SendToPostAsync(document, executionId, verdict, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            await SendToPostAsync(document, executionId, ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>

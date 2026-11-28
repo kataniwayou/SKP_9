@@ -37,6 +37,10 @@ public sealed class ProviderHandlerBaseTests
     private static OutputLayout Layout(FileNode root) => new Bare().LayoutFor(root, []);
 
     [Fact]
+    public void TheBaseGivesNoCompletedVerdict()
+        => Assert.Null(new Bare().CompletedVerdict);
+
+    [Fact]
     public void TheMirrorPreservesEveryFieldOfATwoLevelDocument()
     {
         // TOPOLOGY IS NOT JUST SHAPE. Nesting, entry counts, names, extensions, sizes and BOTH

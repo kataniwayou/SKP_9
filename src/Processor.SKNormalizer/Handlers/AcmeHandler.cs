@@ -59,6 +59,12 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
     public override string Name => "Acme";
 
     /// <summary>
+    /// A completed Acme document passed the artist gate for every item (<see cref="Augment"/> cancels
+    /// otherwise), so its reason is always <see cref="ArtistVerdict.Listed"/>.
+    /// </summary>
+    public override Enum? CompletedVerdict => ArtistVerdict.Listed;
+
+    /// <summary>
     /// Stage 1. Groups the root's entries by BASENAME, so <c>track01.wav</c> and <c>track01.json</c>
     /// become one item keyed <c>track01</c>.
     /// <para>
@@ -275,8 +281,10 @@ public sealed class AcmeHandler(TimeProvider clock) : ProviderHandlerBase
 
         if (!whitelist.TryGet(metadata.Artist, out var approved) || string.IsNullOrWhiteSpace(approved))
         {
+            // The verdict is the board's reason for this outcome. The absent-artist cancel above
+            // carries none, deliberately: nothing was looked up (the user, 2026-11-28).
             throw new CancelledException(
-                $"artist '{metadata.Artist}' is not on this workflow's whitelist");
+                $"artist '{metadata.Artist}' is not on this workflow's whitelist", ArtistVerdict.Unlisted);
         }
 
         metadata.Artist = approved;
