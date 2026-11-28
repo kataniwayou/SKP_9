@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Json.Schema;
 
@@ -47,6 +48,64 @@ public static class ProcessorJsonSchemaValidator
     public static EvaluationOptions DefaultOptions { get; } = new() { OutputFormat = OutputFormat.List };
 
     /// <summary>
+    /// The most distinct definitions <see cref="Parsed"/> holds before it starts over. A processor
+    /// sees a handful (its config, input and output schemas, and the next version of each after a
+    /// re-registration), so this is only reached by churn no deployment produces. It is the bound
+    /// that makes the cache safe to be static.
+    /// </summary>
+    internal const int MaxCachedDefinitions = 64;
+
+    // Each parsed schema, keyed by its definition text (ordinal: one changed byte is another schema).
+    private static readonly ConcurrentDictionary<string, JsonSchema> Schemas = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The schema for <paramref name="definition"/>, parsed once per process and reused.
+    /// <para>
+    /// <b>Parsing per call leaked (found live 2026-11-28).</b> <c>JsonSchema.FromText</c> gives a
+    /// schema without an absolute <c>$id</c> a random base URI (<c>https://json-everything.lib/{guid}</c>)
+    /// and registers it in <c>SchemaRegistry.Global</c>, which never lets go. Called on every
+    /// dispatch's input and every branch's output, that kept about 2 KB a message: a collapser heap
+    /// held 17,385 registrations after 8,656 dispatches, and the kafka-importer ran out of memory at
+    /// 384Mi and failed its steps.
+    /// </para>
+    /// <para>
+    /// <b>Two halves, each needed.</b> Parsing once per definition stops the per-message growth.
+    /// Parsing into a registry of the schema's own, not the global one, means nothing outside the
+    /// cache holds a schema, so one dropped at <see cref="MaxCachedDefinitions"/> is collected: a
+    /// bound on the cache is then a bound on memory. That registry gets the same no-op
+    /// <c>Fetch</c> as the global one, set explicitly: a new registry's default is a non-null
+    /// delegate (it made no request when tried on 9.2.1, but that is the library's choice to change),
+    /// and the lockdown must not rest on it. The dialect is passed explicitly for the same reason. Outcomes are unchanged: local and remote <c>$ref</c>, an absolute <c>$id</c> and
+    /// 2020-12 keywords evaluate the same either way (checked 2026-11-28 on 9.2.1).
+    /// </para>
+    /// <para>
+    /// <b>Sharing a parsed schema is safe.</b> JsonSchema.Net 8+ builds a schema once and evaluates it
+    /// without mutating it; 200,000 evaluations of one schema on 16 threads gave the same results as
+    /// a fresh parse each time. A definition that fails to parse throws here, is not cached and
+    /// registers nothing, so the caller's error path is unchanged and re-parsing it cannot leak.
+    /// </para>
+    /// </summary>
+    private static JsonSchema Parsed(string definition)
+    {
+        if (Schemas.TryGetValue(definition, out var cached))
+        {
+            return cached;
+        }
+
+        var own = new SchemaRegistry { Fetch = (_, _) => null };   // no outbound $ref fetch, as globally
+        var schema = JsonSchema.FromText(definition, new BuildOptions { SchemaRegistry = own, Dialect = Dialect.Default });
+        if (Schemas.Count >= MaxCachedDefinitions)
+        {
+            Schemas.Clear();
+        }
+
+        return Schemas.GetOrAdd(definition, schema);
+    }
+
+    /// <summary>How many definitions are cached. Test seam.</summary>
+    internal static int CachedDefinitionCount => Schemas.Count;
+
+    /// <summary>
     /// True when <paramref name="data"/> satisfies <paramref name="definition"/>. A null or
     /// whitespace definition skips validation and returns true — bytes are never decoded without a
     /// schema asking for it. Every failure path fills <paramref name="errors"/> and returns false;
@@ -74,7 +133,7 @@ public static class ProcessorJsonSchemaValidator
             JsonSchema schema;
             try
             {
-                schema = JsonSchema.FromText(definition);
+                schema = Parsed(definition);
             }
             catch (Exception ex) when (ex is JsonException or JsonSchemaException)
             {

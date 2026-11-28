@@ -24,7 +24,7 @@
         "type": "Direct",
         "requested": "[1.0.0, 1.0.0]",
         "resolved": "1.0.0",
-        "contentHash": "JZkX2uBvijwigNu8jNy6RjINreDi1tftckl4vHWlEWw4Uqf74EwBTTKCrAcBOyAC/hNpmIkK7lZ345848cVgCw==",
+        "contentHash": "4J/9W332926jSs4BHDMuVOc4SAQsRyS8u9D+gFheuXca21eOyrXRCpMuEDiHpjQpht17V2atZrQ9oiMMAo3pJA==",
         "dependencies": {
           "BaseConsole.Core": "[1.0.0]",
           "JsonSchema.Net": "9.2.1",
